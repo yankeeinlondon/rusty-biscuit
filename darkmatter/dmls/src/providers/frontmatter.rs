@@ -10,12 +10,13 @@
 //! the [`FrontmatterAst`] supplies every range. Completion items carry an eager
 //! `textEdit` and no snippets (Zed-safe).
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::schemas::{
     Constraint, DecodedScalar, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
     SimplifiedType, TypeExpr, darkmatter_base_schema, decode_scalar,
-    select_literal_discriminant_arm, suggestions_for_path,
+    select_literal_discriminant_arm, suggestions_for_def,
 };
 use serde_json::Value;
 use darkmatter::markdown::span::SourceSpan;
@@ -96,7 +97,7 @@ fn nested_key_completions(
     let shape = known_shape(ctx);
     if let Some(nested) = nested_shape_for_completion(ctx, &shape, &ancestor_refs) {
         let present = present_child_keys(ast, &ancestors);
-        return shape_key_completions(ctx, offset, nested, &present, partial);
+        return shape_key_completions(ctx, offset, &nested, &present, partial);
     }
     if ancestor_refs.last() == Some(&"style") {
         return style_key_completions(ctx, offset, partial);
@@ -178,15 +179,12 @@ fn value_completions(
     let Some(def) = def_at_path_ctx(ctx, &shape, &path) else {
         return Vec::new();
     };
+    let def: &PropertyDef = &def;
 
     let mut items = Vec::new();
 
-    // Literal values: offer exactly each authored `literal(x)` value, preselected,
-    // with YAML insertion text matching the value's scalar type. In a property
-    // union these combine with the expression candidates and non-literal
-    // scaffolds below (a `[literal(auto), number]` offers `auto`; a
-    // `[literal(a), literal(b)]` offers both; a `[literal(auto), expression]`
-    // offers `auto` plus every expression candidate).
+    // Each authored `literal(x)` value, preselected, with YAML insertion text
+    // matching the value's scalar type.
     for atom in atoms_of(def) {
         if let Some(value) = atom.literal_value() {
             let insert = yaml_scalar_literal(value);
@@ -198,28 +196,17 @@ fn value_completions(
         }
     }
 
-    // Expression-typed arm: the shared `ctx.*`, expression-function, and
-    // same-document frontmatter-key catalog (scoped to the value text and the
-    // `.`/`(` triggers), reusing the exact catalog completion the
-    // body-interpolation surface uses. Accumulated — never early-returned — so a
-    // union pairing `expression` with `literal` arms still offers each literal
-    // value alongside the expression candidates.
+    // Expression-typed arm: the shared catalog completion (see
+    // `expression_value_completions`).
     if expression_atom(def).is_some() {
         items.extend(expression_value_completions(ctx, offset, partial, start));
     }
 
-    // Non-literal value scaffolds from EVERY non-Literal arm (each enum arm's
-    // members, each boolish arm's `true`/`false`, each file arm's paths),
-    // combined with the literals/expression items above. Accumulating across all
-    // arms — not just the first completable one — is what lets a union like
-    // `[literal(auto), enum(fit, fill), boolean]` offer every arm's candidates
-    // (`auto`, `fit`, `fill`, `true`, `false`) instead of silently dropping the
-    // later arms. Literal and expression atoms fall through all three branches,
-    // so they are handled only by the blocks above. `dedup_completions` below is
-    // the single dedup authority: it collapses a candidate two arms both produce,
-    // preserving declaration order (`atoms_of` is already in declaration order)
-    // so a preselected literal offered ahead of a colliding candidate keeps its
-    // preselection.
+    // Scaffolds from EVERY non-Literal arm (enum members, boolish `true`/`false`,
+    // file paths), accumulated with the items above rather than stopping at the
+    // first completable arm — otherwise a mixed union would silently drop its
+    // later arms. `atoms_of` is in declaration order, so a preselected literal
+    // precedes any colliding scaffold and survives `dedup_completions` below.
     for atom in atoms_of(def) {
         if let Some(members) = enum_members(atom) {
             items.extend(
@@ -425,7 +412,10 @@ pub(crate) fn expression_values<'a>(
             continue;
         }
         let path: Vec<&str> = entry.dotted.split('.').collect();
-        if def_at_path_ctx(ctx, &shape, &path).and_then(expression_atom).is_none() {
+        let Some(def) = def_at_path_ctx(ctx, &shape, &path) else {
+            continue;
+        };
+        if expression_atom(&def).is_none() {
             continue;
         }
         let Some(raw) = ctx.text.get(entry.value_span.clone()) else {
@@ -481,23 +471,21 @@ fn frontmatter_scalar(ctx: &DocumentContext, name: &str) -> Option<String> {
 fn schema_property_details(ctx: &DocumentContext, name: &str) -> Option<String> {
     let shape = known_shape(ctx);
     let def = def_at_path_ctx(ctx, &shape, &[name])?;
-    schema_hover_details(def)
+    schema_hover_details(&def)
 }
 
 // ── Suggestion completion ──────────────────────────────────────────────────
 
-/// The document's own SimplifiedSchema (when available from the effective
-/// schema). Raw JSON Schema documents yield `None`, so suggestion completion
-/// never activates for them.
-fn document_simplified_schema<'a>(ctx: &'a DocumentContext<'a>) -> Option<&'a SimplifiedSchema> {
-    ctx.overlay
-        .and_then(|overlay| overlay.bundle())
-        .and_then(|bundle| bundle.effective.simplified.as_ref())
-}
-
 /// Builds suggestion completion items for a property path, filtered by `prefix`.
-/// Returns `None` when the property has no `suggest(...)` constraint or no
-/// SimplifiedSchema is available.
+/// Returns `None` when the property has no `suggest(...)` constraint or the path
+/// does not resolve.
+///
+/// The property definition is resolved through the same selected-arm-aware
+/// [`def_at_path_ctx`] every other value capability uses, then handed to the
+/// library's context-aware [`suggestions_for_def`]. This keeps `suggest(...)`
+/// candidates on the arm the discriminant selects (and, when narrowing is
+/// unavailable, on the merged view of every arm) instead of the context-free
+/// first-arm choice a raw path query would make.
 fn suggestion_completions(
     ctx: &DocumentContext,
     property_path: &[&str],
@@ -505,8 +493,10 @@ fn suggestion_completions(
     offset: usize,
     prefix: &str,
 ) -> Option<Vec<CompletionItem>> {
-    let schema = document_simplified_schema(ctx)?;
-    let query = suggestions_for_path(schema, property_path)?;
+    let (leaf, _) = property_path.split_last()?;
+    let shape = known_shape(ctx);
+    let def = def_at_path_ctx(ctx, &shape, property_path)?;
+    let query = suggestions_for_def(leaf, &def)?;
     let items: Vec<CompletionItem> = query
         .items
         .iter()
@@ -616,7 +606,7 @@ fn schema_hover(ctx: &DocumentContext, entry: &FmEntry) -> Option<Hover> {
     let shape = known_shape(ctx);
     let path: Vec<&str> = entry.dotted.split('.').collect();
     let def = def_at_path_ctx(ctx, &shape, &path)?;
-    let body = schema_hover_body(&entry.key, def)?;
+    let body = schema_hover_body(&entry.key, &def)?;
     markup_hover(ctx, entry.key_span.clone(), body)
 }
 
@@ -758,7 +748,7 @@ fn nav_targets(ctx: &DocumentContext, ast: &FrontmatterAst) -> Vec<(SourceSpan, 
             continue;
         }
         let path: Vec<&str> = entry.dotted.split('.').collect();
-        if def_at_path_ctx(ctx, &shape, &path).and_then(file_atom).is_some()
+        if def_at_path_ctx(ctx, &shape, &path).is_some_and(|def| file_atom(&def).is_some())
             && let Some(value) = &entry.scalar
             && is_schema_file_value(value)
         {
@@ -878,16 +868,21 @@ pub(crate) fn known_shape(ctx: &DocumentContext) -> SchemaShape {
 /// — never a second, DMLS-only algorithm), only that arm's properties overlay,
 /// so top-level key completion offers just the matched arm's remaining keys.
 /// Before a discriminant is present, or for an unknown, duplicate, or
-/// conflicting discriminant, every inline arm's properties merge instead
-/// (union behavior). A file-reference arm contributes no directly-known
-/// properties here.
+/// conflicting discriminant, every inline arm's properties merge instead via
+/// [`merged_root_arm_shape`]: a key present in more than one arm resolves to the
+/// union of those arms' atoms (via [`merge_defs`]), so a shared property whose
+/// type diverges across arms stays a property union rather than collapsing to
+/// the last arm. A file-reference arm contributes no directly-known properties
+/// here.
 fn overlay_root_union(shape: &mut SchemaShape, arms: &[SchemaArm], frontmatter_json: &Value) {
     let arm_json: Vec<Value> = arms.iter().map(root_arm_discriminant_json).collect();
     match select_literal_discriminant_arm(&arm_json, frontmatter_json) {
         Some(index) => overlay_arm(shape, &arms[index]),
+        // The merge is across arms only; the merged document shape still takes
+        // precedence over the base/extension baseline it overlays.
         None => {
-            for arm in arms {
-                overlay_arm(shape, arm);
+            for (name, def) in merged_root_arm_shape(arms).properties {
+                shape.properties.insert(name, def);
             }
         }
     }
@@ -901,6 +896,30 @@ fn overlay_arm(shape: &mut SchemaShape, arm: &SchemaArm) {
             shape.properties.insert(name.clone(), def.clone());
         }
     }
+}
+
+/// A merged view of every inline root-union arm's properties, for a root
+/// `$schema` union whose discriminant does not select a single arm. Keys appear
+/// in arm-declaration then property-declaration order; a key contributed by more
+/// than one arm resolves to the union of those arms' atoms (via [`merge_defs`]),
+/// so a same-named property whose type diverges across arms stays a union rather
+/// than collapsing to the last arm. File-reference arms contribute no
+/// properties. The root-`SchemaArm` companion to [`merged_inline_object_shape`].
+fn merged_root_arm_shape(arms: &[SchemaArm]) -> SchemaShape {
+    let mut merged = SchemaShape::default();
+    for arm in arms {
+        let SchemaArm::Inline(arm_shape) = arm else {
+            continue;
+        };
+        for (name, child) in &arm_shape.properties {
+            let combined = match merged.properties.get(name) {
+                Some(existing) => merge_defs(existing, child),
+                None => child.clone(),
+            };
+            merged.properties.insert(name.clone(), combined);
+        }
+    }
+    merged
 }
 
 /// The minimal discriminant JSON for one root-union arm, aligned by index with
@@ -926,27 +945,77 @@ pub(crate) fn nested_shape<'a>(root: &'a SchemaShape, ancestors: &[&str]) -> Opt
 }
 
 /// The nested completion shape for `ancestors`, like [`nested_shape`] but
-/// arm-selecting a discriminated inline-object union at each level.
+/// context-aware at each level.
 ///
 /// When an ancestor property is a union of inline-object arms tagged by a shared
 /// `literal(...)` discriminant, and the authored sibling values in the current
 /// mapping select exactly one arm (via the Phase-4
 /// [`select_literal_discriminant_arm`] — never a second, DMLS-only algorithm),
-/// completion descends into that arm's shape so only its keys are offered. Every
-/// other case falls back to [`inline_object_shape`] (the first inline-object
-/// arm), so non-discriminated nesting keeps its existing behavior.
-fn nested_shape_for_completion<'a>(
+/// the walk descends into that arm's shape so only its keys are offered. When
+/// narrowing is unavailable (absent/unknown/duplicate/conflicting discriminant,
+/// or an ordinary non-discriminated union), it descends into a MERGED view of
+/// every inline-object arm instead — the [`overlay_root_union`] policy applied
+/// to nested unions — so sibling completion/hover/navigation retain union
+/// behavior rather than guessing the first arm (spec D3 / AC-10). The merged
+/// shape is owned, so this returns a [`SchemaShape`] by value.
+fn nested_shape_for_completion(
     ctx: &DocumentContext,
-    root: &'a SchemaShape,
+    root: &SchemaShape,
     ancestors: &[&str],
-) -> Option<&'a SchemaShape> {
-    let mut shape = root;
+) -> Option<SchemaShape> {
+    let mut shape = root.clone();
     for depth in 0..ancestors.len() {
         let def = shape.properties.get(ancestors[depth])?;
         let path = &ancestors[..=depth];
-        shape = discriminated_arm_shape(ctx, def, path).or_else(|| inline_object_shape(def))?;
+        let next = match discriminated_arm_shape(ctx, def, path) {
+            Some(selected) => selected.clone(),
+            None => merged_inline_object_shape(def)?,
+        };
+        shape = next;
     }
     Some(shape)
+}
+
+/// A merged view of every inline-object arm's properties, for an ancestor union
+/// whose discriminant does not select a single arm. Keys appear in
+/// arm-declaration then property-declaration order; a key contributed by more
+/// than one arm resolves to the union of those arms' atoms (via [`merge_defs`]),
+/// so a same-named property whose type diverges across arms stays a union rather
+/// than collapsing to the first arm. `None` when the property has no
+/// inline-object arm.
+fn merged_inline_object_shape(def: &PropertyDef) -> Option<SchemaShape> {
+    let mut merged: Option<SchemaShape> = None;
+    for atom in atoms_of(def) {
+        let TypeExpr::InlineObject(inner) = &atom.ty else {
+            continue;
+        };
+        let shape = merged.get_or_insert_with(SchemaShape::default);
+        for (name, child) in &inner.properties {
+            let combined = match shape.properties.get(name) {
+                Some(existing) => merge_defs(existing, child),
+                None => child.clone(),
+            };
+            shape.properties.insert(name.clone(), combined);
+        }
+    }
+    merged
+}
+
+/// Merges two property definitions: `existing`'s atoms followed by any of
+/// `incoming`'s atoms not already present, deduped by value and kept in
+/// declaration order. Collapses to [`PropertyDef::Single`] when exactly one atom
+/// survives.
+fn merge_defs(existing: &PropertyDef, incoming: &PropertyDef) -> PropertyDef {
+    let mut atoms: Vec<PropertyAtom> = atoms_of(existing).to_vec();
+    for atom in atoms_of(incoming) {
+        if !atoms.contains(atom) {
+            atoms.push(atom.clone());
+        }
+    }
+    match atoms.len() {
+        1 => PropertyDef::Single(atoms.into_iter().next().expect("one atom")),
+        _ => PropertyDef::Union(atoms),
+    }
 }
 
 /// The inline-object shape of the union arm a shared literal discriminant selects
@@ -1030,26 +1099,29 @@ pub(crate) fn def_at_path<'a>(root: &'a SchemaShape, path: &[&str]) -> Option<&'
 }
 
 /// The [`PropertyDef`] at a full key `path`, like [`def_at_path`] but
-/// arm-selecting each ancestor's discriminated inline-object union from the
-/// authored mapping (via [`nested_shape_for_completion`] → the Phase-4
-/// [`select_literal_discriminant_arm`]).
+/// context-aware at each ancestor (via [`nested_shape_for_completion`] → the
+/// Phase-4 [`select_literal_discriminant_arm`]).
 ///
 /// This is the single context-aware schema-path resolver shared by every
 /// value-oriented capability (value completion, hover, expression
 /// gating/diagnostics, file navigation) so they resolve against the same
-/// selected arm that key completion already narrows to. When no ancestor is a
-/// discriminated union, or its discriminant is absent/unknown/ambiguous, it
-/// falls back to the first inline-object arm — byte-identical to [`def_at_path`]
-/// for those cases. An empty ancestor path (a top-level leaf) is likewise
-/// equivalent.
+/// selected arm key completion narrows to. A discriminated ancestor a selected
+/// arm resolves descends into exactly that arm; when narrowing is unavailable
+/// the ancestor's inline-object arms merge, so a leaf key present in more than
+/// one arm with divergent types resolves to the union of every arm's atoms (spec
+/// D3 / AC-10). The result is [`Cow`] because a merged leaf must be owned; a
+/// top-level leaf (empty ancestor path) borrows from `root`.
 fn def_at_path_ctx<'a>(
     ctx: &DocumentContext,
     root: &'a SchemaShape,
     path: &[&str],
-) -> Option<&'a PropertyDef> {
+) -> Option<Cow<'a, PropertyDef>> {
     let (leaf, ancestors) = path.split_last()?;
+    if ancestors.is_empty() {
+        return root.properties.get(*leaf).map(Cow::Borrowed);
+    }
     let shape = nested_shape_for_completion(ctx, root, ancestors)?;
-    shape.properties.get(*leaf)
+    shape.properties.get(*leaf).cloned().map(Cow::Owned)
 }
 
 /// A property definition's arms as a slice (one element for a single atom).
@@ -1549,10 +1621,9 @@ mod tests {
 
     #[test]
     fn literal_expression_union_offers_literal_and_expression_candidates() {
-        // `[literal(auto), expression]` in either arm order must offer the
-        // preselected literal `auto` AND the catalog-backed expression candidates
-        // (an Expression arm must not suppress the Literal value completions), and
-        // the merged list must be duplicate-free.
+        // `[literal(auto), expression]` in either arm order: an Expression arm
+        // must not suppress the Literal value completions, and the merged list
+        // must be duplicate-free.
         for arms in [
             "    - literal(auto)\n    - expression\n",
             "    - expression\n    - literal(auto)\n",
@@ -1596,10 +1667,9 @@ mod tests {
 
     #[test]
     fn literal_enum_boolean_union_offers_every_arm_candidate() {
-        // `[literal(auto), enum(fit, fill), boolean]` must offer the preselected
-        // literal `auto` PLUS the enum members `fit`/`fill` AND the boolean
-        // `true`/`false` — every non-Literal arm contributes, not just the first
-        // completable one — and the merged list is duplicate-free.
+        // `[literal(auto), enum(fit, fill), boolean]`: every non-Literal arm
+        // contributes its candidates, not just the first completable one, and the
+        // merged list is duplicate-free.
         let text = concat!(
             "---\n$schema:\n  width:\n",
             "    - literal(auto)\n    - enum(fit, fill)\n    - boolean\n",
@@ -1627,8 +1697,7 @@ mod tests {
     fn reversed_literal_enum_boolean_union_offers_every_arm_candidate() {
         // Reversing the arm order — `[boolean, enum(fit, fill), literal(auto)]` —
         // offers the same set (order may differ), and the literal is still
-        // preselected. Before the fix, the first completable arm (`boolean`) won
-        // and the enum members were dropped.
+        // preselected.
         let text = concat!(
             "---\n$schema:\n  width:\n",
             "    - boolean\n    - enum(fit, fill)\n    - literal(auto)\n",
@@ -1648,9 +1717,8 @@ mod tests {
 
     #[test]
     fn file_enum_union_offers_file_paths_and_enum_members() {
-        // A union mixing `file` with an enum arm, in either order, offers BOTH
-        // the workspace file paths AND the enum members — the file arm no longer
-        // suppresses the enum arm (nor the reverse).
+        // A union mixing `file` with an enum arm, in either order: the file arm
+        // does not suppress the enum arm (nor the reverse).
         for arms in ["    - file\n    - enum(fit, fill)\n", "    - enum(fit, fill)\n    - file\n"] {
             let text = format!("---\n$schema:\n  asset:\n{arms}asset: \n---\n\nbody\n");
             with_ctx_docs(&text, &[("/w/target.md", "# target\n")], |ctx| {
@@ -1748,26 +1816,106 @@ mod tests {
         });
     }
 
+    /// A `change` union of two inline-object arms `{ kind: literal(created),
+    /// path: string }` and `{ kind: literal(deleted), reason: string }`, whose
+    /// only shared key is the `kind` discriminant. `deleted_first` swaps arm
+    /// order. `mapping` is the authored `change:` sub-mapping (each line already
+    /// indented two spaces, with a trailing newline); it must end with a bare
+    /// two-space cursor line for [`nested_sibling_labels`].
+    fn path_reason_union_doc(deleted_first: bool, mapping: &str) -> String {
+        let created = r#"    - "{ kind: literal(created), path: string }""#;
+        let deleted = r#"    - "{ kind: literal(deleted), reason: string }""#;
+        let (first, second) = if deleted_first { (deleted, created) } else { (created, deleted) };
+        format!("---\n$schema:\n  change:\n{first}\n{second}\nchange:\n{mapping}---\n\nbody\n")
+    }
+
+    /// Sibling key-completion labels with the cursor on the trailing bare
+    /// two-space line of a `change:` mapping.
+    fn nested_sibling_labels(text: &str) -> Vec<String> {
+        with_ctx(text, |ctx| {
+            let offset = text.rfind("  \n").expect("trailing cursor line") + "  ".len();
+            completion(ctx, offset).into_iter().map(|item| item.label).collect()
+        })
+    }
+
     #[test]
     fn sibling_completion_without_discriminant_keeps_union_behavior() {
-        // No discriminant authored: the first inline-object arm's keys (which
-        // include the discriminant `kind`) are offered — existing behavior.
+        // Narrowing unavailable (no discriminant authored): every arm's keys
+        // merge — the created arm's `path` AND the deleted arm's `reason`, plus
+        // the shared discriminant `kind` — in either arm order (D3 / AC-10).
+        for deleted_first in [false, true] {
+            let text = path_reason_union_doc(deleted_first, "  \n");
+            let labels = nested_sibling_labels(&text);
+            assert!(labels.iter().any(|l| l == "kind"), "discriminant offered ({deleted_first}): {labels:?}");
+            assert!(labels.iter().any(|l| l == "path"), "created arm key offered ({deleted_first}): {labels:?}");
+            assert!(labels.iter().any(|l| l == "reason"), "deleted arm key offered ({deleted_first}): {labels:?}");
+        }
+    }
+
+    #[test]
+    fn sibling_completion_unknown_discriminant_keeps_union_behavior() {
+        // `kind: renamed` matches no arm → union: both `path` and `reason` offered.
+        for deleted_first in [false, true] {
+            let text = path_reason_union_doc(deleted_first, "  kind: renamed\n  \n");
+            let labels = nested_sibling_labels(&text);
+            assert!(labels.iter().any(|l| l == "path"), "created arm key ({deleted_first}): {labels:?}");
+            assert!(labels.iter().any(|l| l == "reason"), "deleted arm key ({deleted_first}): {labels:?}");
+        }
+    }
+
+    #[test]
+    fn sibling_completion_duplicate_discriminant_keeps_union_behavior() {
+        // Both arms tag `kind: created`, so `kind: created` is ambiguous → union.
         let text = concat!(
-            "---\n",
-            "$schema:\n",
-            "  change:\n",
+            "---\n$schema:\n  change:\n",
             "    - \"{ kind: literal(created), path: string }\"\n",
-            "    - \"{ kind: literal(deleted), reason: string }\"\n",
-            "change:\n",
-            "  \n",
-            "---\n\nbody\n",
+            "    - \"{ kind: literal(created), reason: string }\"\n",
+            "change:\n  kind: created\n  \n---\n\nbody\n",
         );
-        with_ctx(text, |ctx| {
-            let offset = text.find("change:\n  \n").unwrap() + "change:\n  ".len();
-            let items = completion(ctx, offset);
-            let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
-            assert!(labels.contains(&"kind"), "the discriminant key is offered: {labels:?}");
-        });
+        let labels = nested_sibling_labels(text);
+        assert!(labels.iter().any(|l| l == "path"), "first arm key offered: {labels:?}");
+        assert!(labels.iter().any(|l| l == "reason"), "second arm key offered: {labels:?}");
+    }
+
+    #[test]
+    fn sibling_completion_type_mismatched_discriminant_keeps_union_behavior() {
+        // Numeric `literal(2)`/`literal(3)` discriminants; a string `'2'` matches
+        // neither const → union.
+        let text = concat!(
+            "---\n$schema:\n  change:\n",
+            "    - \"{ kind: literal(2), path: string }\"\n",
+            "    - \"{ kind: literal(3), reason: string }\"\n",
+            "change:\n  kind: '2'\n  \n---\n\nbody\n",
+        );
+        let labels = nested_sibling_labels(text);
+        assert!(labels.iter().any(|l| l == "path"), "arm-0 key offered under union: {labels:?}");
+        assert!(labels.iter().any(|l| l == "reason"), "arm-1 key offered under union: {labels:?}");
+    }
+
+    #[test]
+    fn sibling_completion_conflicting_discriminants_keeps_union_behavior() {
+        // `kind` selects arm 0, `mode` selects arm 1 → conflict → union.
+        let text = concat!(
+            "---\n$schema:\n  change:\n",
+            "    - \"{ kind: literal(created), mode: literal(fast), path: string }\"\n",
+            "    - \"{ kind: literal(deleted), mode: literal(slow), reason: string }\"\n",
+            "change:\n  kind: created\n  mode: slow\n  \n---\n\nbody\n",
+        );
+        let labels = nested_sibling_labels(text);
+        assert!(labels.iter().any(|l| l == "path"), "arm-0 key offered under union: {labels:?}");
+        assert!(labels.iter().any(|l| l == "reason"), "arm-1 key offered under union: {labels:?}");
+    }
+
+    #[test]
+    fn sibling_completion_narrows_to_selected_arm_in_both_orders() {
+        // Regression: an unambiguous `kind: deleted` still descends into exactly
+        // the deleted arm — only `reason`, never `path` — regardless of arm order.
+        for deleted_first in [false, true] {
+            let text = path_reason_union_doc(deleted_first, "  kind: deleted\n  \n");
+            let labels = nested_sibling_labels(&text);
+            assert!(labels.iter().any(|l| l == "reason"), "deleted arm key offered ({deleted_first}): {labels:?}");
+            assert!(!labels.iter().any(|l| l == "path"), "created arm key suppressed ({deleted_first}): {labels:?}");
+        }
     }
 
     // ── Nested discriminated-arm value intelligence (selected-arm resolver) ──
@@ -1925,6 +2073,159 @@ mod tests {
         }
     }
 
+    #[test]
+    fn unresolved_union_offers_expression_completion_from_divergent_arm() {
+        // No `kind` authored: `when` merges to `string | expression`, so its
+        // value offers the expression catalog in BOTH arm orders (the expression
+        // arm is not dropped).
+        for deleted_first in [false, true] {
+            let text = change_union_doc(deleted_first, "  when: ctx.\n");
+            with_ctx(&text, |ctx| {
+                let offset = text.find("when: ctx.").unwrap() + "when: ctx.".len();
+                let items = completion(ctx, offset);
+                assert!(
+                    items.iter().any(|item| item.label == "ctx.packages"),
+                    "unresolved union keeps the expression arm (deleted_first={deleted_first}): {items:#?}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn unresolved_union_expression_value_gets_expression_hover() {
+        // The merged `when: string | expression` value still hovers the shared
+        // expression catalog in BOTH arm orders.
+        for deleted_first in [false, true] {
+            let text = change_union_doc(deleted_first, "  when: ctx.today\n");
+            with_ctx(&text, |ctx| {
+                let offset = text.find("ctx.today").unwrap() + 2; // on `x` in `ctx`
+                let value = hover_markup(ctx, offset);
+                let today = expressions::ctx_descriptor("today").unwrap();
+                assert!(
+                    value.contains(&expressions::format_ctx_hover_block(today)),
+                    "unresolved union hovers the expression catalog (deleted_first={deleted_first}): {value}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn unresolved_union_offers_both_arms_literal_values() {
+        // `state: literal(open) | literal(done)` — the unresolved union offers
+        // BOTH literal values in either arm order.
+        for deleted_first in [false, true] {
+            let text = change_union_doc(deleted_first, "  state: \n");
+            with_ctx(&text, |ctx| {
+                let offset = text.find("state: \n").unwrap() + "state: ".len();
+                let items = completion(ctx, offset);
+                let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+                assert!(labels.contains(&"open"), "created arm literal ({deleted_first}): {labels:?}");
+                assert!(labels.contains(&"done"), "deleted arm literal ({deleted_first}): {labels:?}");
+            });
+        }
+    }
+
+    #[test]
+    fn unresolved_union_file_arm_makes_value_navigable() {
+        // `asset: string | file` — the unresolved union treats the value as a
+        // file reference (the file arm survives) in either arm order.
+        for deleted_first in [false, true] {
+            let text = change_union_doc(deleted_first, "  asset: ./target.md\n");
+            with_ctx(&text, |ctx| {
+                let ast = overlay_ast(ctx).expect("frontmatter ast");
+                let targets = nav_targets(ctx, ast);
+                assert!(
+                    targets.iter().any(|(_, path)| path.ends_with("target.md")),
+                    "unresolved union file arm navigates (deleted_first={deleted_first}): {targets:#?}"
+                );
+            });
+        }
+    }
+
+    // ── Nested discriminated-arm `suggest(...)` completion ──
+
+    /// A `change` union of two inline-object arms that both declare a `palette`
+    /// property with divergent `suggest(...)` candidates, tagged by a shared
+    /// literal `kind` discriminant. `deleted_first` swaps arm order so a test can
+    /// assert suggestion completion follows the selected arm from either position.
+    fn palette_union_doc(deleted_first: bool, mapping: &str) -> String {
+        let created = r#"    - "{ kind: literal(created), palette: string(suggest(red, green)) }""#;
+        let deleted = r#"    - "{ kind: literal(deleted), palette: string(suggest(cyan, magenta)) }""#;
+        let (first, second) = if deleted_first { (deleted, created) } else { (created, deleted) };
+        format!("---\n$schema:\n  change:\n{first}\n{second}\nchange:\n{mapping}---\n\nbody\n")
+    }
+
+    /// Value-completion labels for the `palette` value of a `change:` mapping.
+    fn palette_value_labels(text: &str) -> Vec<String> {
+        with_ctx(text, |ctx| {
+            let offset = text.find("palette: \n").expect("palette value line") + "palette: ".len();
+            completion(ctx, offset).into_iter().map(|item| item.label).collect()
+        })
+    }
+
+    #[test]
+    fn selected_arm_suggest_follows_discriminant_in_both_orders() {
+        // The selected arm's `suggest(...)` candidates are offered and the
+        // non-selected arm's never leak — for either discriminant and either arm
+        // order, so the selected arm is the SECOND arm in half the cases.
+        for deleted_first in [false, true] {
+            let deleted = palette_union_doc(deleted_first, "  kind: deleted\n  palette: \n");
+            let labels = palette_value_labels(&deleted);
+            assert!(
+                labels.iter().any(|l| l == "cyan") && labels.iter().any(|l| l == "magenta"),
+                "deleted arm suggestions offered (deleted_first={deleted_first}): {labels:?}"
+            );
+            assert!(
+                labels.iter().all(|l| l != "red" && l != "green"),
+                "created arm suggestions must not leak (deleted_first={deleted_first}): {labels:?}"
+            );
+
+            let created = palette_union_doc(deleted_first, "  kind: created\n  palette: \n");
+            let labels = palette_value_labels(&created);
+            assert!(
+                labels.iter().any(|l| l == "red") && labels.iter().any(|l| l == "green"),
+                "created arm suggestions offered (deleted_first={deleted_first}): {labels:?}"
+            );
+            assert!(
+                labels.iter().all(|l| l != "cyan" && l != "magenta"),
+                "deleted arm suggestions must not leak (deleted_first={deleted_first}): {labels:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unresolved_union_suggest_merges_every_arm_candidate() {
+        // No `kind` authored: `palette` merges to a union carrying both arms'
+        // `suggest(...)` atoms, so its value completion offers every arm's
+        // candidates in BOTH arm orders (spec D3 / AC-10 merged behavior).
+        for deleted_first in [false, true] {
+            let text = palette_union_doc(deleted_first, "  palette: \n");
+            let labels = palette_value_labels(&text);
+            for expected in ["red", "green", "cyan", "magenta"] {
+                assert!(
+                    labels.iter().any(|l| l == expected),
+                    "merged union offers `{expected}` (deleted_first={deleted_first}): {labels:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_discriminant_suggest_merges_every_arm_candidate() {
+        // `kind: renamed` matches no arm → union: every arm's `palette`
+        // suggestions merge, in BOTH arm orders.
+        for deleted_first in [false, true] {
+            let text = palette_union_doc(deleted_first, "  kind: renamed\n  palette: \n");
+            let labels = palette_value_labels(&text);
+            for expected in ["red", "green", "cyan", "magenta"] {
+                assert!(
+                    labels.iter().any(|l| l == expected),
+                    "unknown discriminant merges `{expected}` (deleted_first={deleted_first}): {labels:?}"
+                );
+            }
+        }
+    }
+
     // ── Root `$schema` union key completion (Phase 6, D3) ──
 
     /// Top-level completion labels with the cursor on the empty line that
@@ -2025,9 +2326,8 @@ mod tests {
     fn root_union_key_completion_sparse_unknown_discriminant_keeps_union() {
         // Sparse arms: `kind` tags arms 0/1, `mode` tags arms 2/3. `kind: created`
         // alone selects arm 0, but `mode: unknown` is a qualifying discriminant
-        // matching no arm. Because arm 0 does not declare `mode`, the pre-fix
-        // selector wrongly narrowed to arm 0 and hid the other arms' keys; the
-        // unknown second discriminant must instead preserve union behavior.
+        // matching no arm, so narrowing is abandoned (union behavior) rather than
+        // narrowing to arm 0 on `kind` alone.
         let text = concat!(
             "---\n$schema:\n  ",
             "- kind: literal(created)\n    one: string\n  ",
@@ -2039,6 +2339,132 @@ mod tests {
         let labels = top_level_labels_after(text, "mode: unknown\n");
         assert!(labels.iter().any(|l| l == "one"), "arm-0 key offered under union: {labels:?}");
         assert!(labels.iter().any(|l| l == "three"), "arm-2 key offered under union: {labels:?}");
+    }
+
+    // ── Root `$schema` union shared-property merge (D3 / AC-10) ──
+
+    /// The effective top-level `PropertyDef` for `key` in the document's known
+    /// shape (with the root-`$schema`-union overlay applied).
+    fn root_shape_def(text: &str, key: &str) -> PropertyDef {
+        with_ctx(text, |ctx| {
+            known_shape(ctx)
+                .properties
+                .get(key)
+                .cloned()
+                .unwrap_or_else(|| panic!("root shape has `{key}`"))
+        })
+    }
+
+    /// A root `$schema` union of two inline arms tagged by a shared literal
+    /// `kind` discriminant, each declaring the shared property `shared` with a
+    /// (possibly divergent) definition. `deleted_first` swaps arm declaration
+    /// order; `body` is the authored top-level frontmatter that sets the
+    /// discriminant state (empty, or `kind:`/`mode:` lines with trailing
+    /// newlines).
+    fn shared_root_union_doc(
+        created_def: &str,
+        deleted_def: &str,
+        deleted_first: bool,
+        body: &str,
+    ) -> String {
+        let created = format!("  - kind: literal(created)\n    shared: {created_def}");
+        let deleted = format!("  - kind: literal(deleted)\n    shared: {deleted_def}");
+        let (first, second) =
+            if deleted_first { (&deleted, &created) } else { (&created, &deleted) };
+        format!("---\n$schema:\n{first}\n{second}\n{body}---\n\nbody\n")
+    }
+
+    #[test]
+    fn root_union_shared_property_merges_divergent_defs_when_unresolved() {
+        // No discriminant authored: a property declared in BOTH root-union arms
+        // merges to the union of both arms' atoms (never last-wins) — proven for
+        // Literal, Expression, File, and suggest() divergences, in either arm
+        // order.
+        for deleted_first in [false, true] {
+            let literals = shared_root_union_doc("literal(created)", "literal(deleted)", deleted_first, "");
+            let def = root_shape_def(&literals, "shared");
+            let values: Vec<&Value> =
+                atoms_of(&def).iter().filter_map(PropertyAtom::literal_value).collect();
+            assert!(
+                values.contains(&&Value::from("created")) && values.contains(&&Value::from("deleted")),
+                "both literal arms survive (deleted_first={deleted_first}): {def:?}"
+            );
+
+            let expr = shared_root_union_doc("string", "expression", deleted_first, "");
+            let def = root_shape_def(&expr, "shared");
+            assert_eq!(atoms_of(&def).len(), 2, "string|expression keeps both (deleted_first={deleted_first}): {def:?}");
+            assert!(expression_atom(&def).is_some(), "the expression arm survives (deleted_first={deleted_first}): {def:?}");
+
+            let file = shared_root_union_doc("string", "file", deleted_first, "");
+            let def = root_shape_def(&file, "shared");
+            assert_eq!(atoms_of(&def).len(), 2, "string|file keeps both (deleted_first={deleted_first}): {def:?}");
+            assert!(file_atom(&def).is_some(), "the file arm survives (deleted_first={deleted_first}): {def:?}");
+
+            let suggest = shared_root_union_doc(
+                "string(suggest(red, green))",
+                "string(suggest(cyan, magenta))",
+                deleted_first,
+                "",
+            );
+            let def = root_shape_def(&suggest, "shared");
+            assert_eq!(atoms_of(&def).len(), 2, "both suggest arms survive (deleted_first={deleted_first}): {def:?}");
+        }
+    }
+
+    #[test]
+    fn root_union_shared_property_merges_for_every_unresolved_state() {
+        // Every discriminant state that fails to select one arm merges the
+        // shared property to the union of both arms' atoms (string | number).
+        for deleted_first in [false, true] {
+            let absent = shared_root_union_doc("string", "number", deleted_first, "");
+            assert_eq!(atoms_of(&root_shape_def(&absent, "shared")).len(), 2, "absent (deleted_first={deleted_first})");
+            let unknown = shared_root_union_doc("string", "number", deleted_first, "kind: renamed\n");
+            assert_eq!(atoms_of(&root_shape_def(&unknown, "shared")).len(), 2, "unknown (deleted_first={deleted_first})");
+        }
+
+        // Both arms tag `kind: created`, so the discriminant is ambiguous.
+        let duplicate = concat!(
+            "---\n$schema:\n",
+            "  - kind: literal(created)\n    shared: string\n",
+            "  - kind: literal(created)\n    shared: number\n",
+            "kind: created\n---\n\nbody\n",
+        );
+        assert_eq!(atoms_of(&root_shape_def(duplicate, "shared")).len(), 2, "duplicate discriminant merges");
+
+        // String `'2'` matches neither numeric const.
+        let mismatch = concat!(
+            "---\n$schema:\n",
+            "  - kind: literal(2)\n    shared: string\n",
+            "  - kind: literal(3)\n    shared: number\n",
+            "kind: '2'\n---\n\nbody\n",
+        );
+        assert_eq!(atoms_of(&root_shape_def(mismatch, "shared")).len(), 2, "type-mismatched discriminant merges");
+
+        // `kind` selects arm 0, `mode` selects arm 1 — the discriminants disagree.
+        let conflicting = concat!(
+            "---\n$schema:\n",
+            "  - kind: literal(created)\n    mode: literal(fast)\n    shared: string\n",
+            "  - kind: literal(deleted)\n    mode: literal(slow)\n    shared: number\n",
+            "kind: created\nmode: slow\n---\n\nbody\n",
+        );
+        assert_eq!(atoms_of(&root_shape_def(conflicting, "shared")).len(), 2, "conflicting discriminants merge");
+    }
+
+    #[test]
+    fn root_union_matched_arm_exposes_only_selected_shape() {
+        // Regression: an unambiguous `kind: created` still narrows the root to
+        // arm 0, so only its `shared` atom (string) survives — the deleted arm's
+        // `number` atom is never merged in — regardless of arm order.
+        for deleted_first in [false, true] {
+            let text = shared_root_union_doc("string", "number", deleted_first, "kind: created\n");
+            let def = root_shape_def(&text, "shared");
+            assert_eq!(atoms_of(&def).len(), 1, "matched root exposes one arm (deleted_first={deleted_first}): {def:?}");
+            assert_eq!(
+                primary_atom(&def).unwrap().ty,
+                TypeExpr::Primitive(SimplifiedType::String),
+                "matched arm keeps the created arm's string type (deleted_first={deleted_first})"
+            );
+        }
     }
 
     #[test]

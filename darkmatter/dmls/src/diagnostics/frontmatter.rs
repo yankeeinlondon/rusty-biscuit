@@ -12,7 +12,7 @@
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::schemas::{
     PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason,
-    ValidationOptions, ValidationProblem, ValidationProblemCode,
+    ValidationOptions, ValidationProblem, ValidationProblemCode, ValidationReport,
 };
 use darkmatter::style::{self, StyleWarningKind};
 use lsp_types::{
@@ -54,9 +54,17 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
         }
         SchemaOutcome::Ready(Some(bundle)) => {
             if let Some(ast) = overlay.ast.as_deref() {
-                schema_problem_diagnostics(ctx, ast, bundle, &mut out);
+                // One effective-schema validation drives both the generic schema
+                // problems and the expression pass, which reads it to decide
+                // whether a union as a whole rejects a malformed-expression value.
+                let report = bundle.effective.validate_with_options(
+                    &bundle.frontmatter_json,
+                    &PositionMap::new(),
+                    &ValidationOptions::default(),
+                );
+                schema_problem_diagnostics(ctx, ast, bundle, &report, &mut out);
                 style_diagnostics(ctx, ast, &mut out);
-                expression_diagnostics(ctx, ast, &mut out);
+                expression_diagnostics(ctx, ast, &report, &mut out);
             }
         }
         SchemaOutcome::Ready(None) => {}
@@ -115,14 +123,9 @@ fn schema_problem_diagnostics(
     ctx: &DocumentContext,
     ast: &FrontmatterAst,
     bundle: &SchemaBundle,
+    report: &ValidationReport,
     out: &mut Vec<Diagnostic>,
 ) {
-    let report = bundle.effective.validate_with_options(
-        &bundle.frontmatter_json,
-        &PositionMap::new(),
-        &ValidationOptions::default(),
-    );
-
     // Expression-typed scalar values are owned by the expression pass:
     // `dm.expression.malformed` replaces the generic format-constraint problem,
     // and a native boolean/number is coerced at compose time, so its type
@@ -192,11 +195,32 @@ fn problem_range(ast: &FrontmatterAst, sm: &SourceMap, problem: &ValidationProbl
 /// `dm.expression.unknown_identifier` for a bare root that names nothing DMLS
 /// can resolve. Both carry source `darkmatter.frontmatter`; ranges are projected
 /// through the shared YAML-scalar mapper so YAML quotes are excluded.
-fn expression_diagnostics(ctx: &DocumentContext, ast: &FrontmatterAst, out: &mut Vec<Diagnostic>) {
+///
+/// `expression_values` includes any property with *any* Expression union arm, so
+/// a value the Expression arm rejects but a sibling Enum/String arm accepts must
+/// not be flagged malformed. The effective-schema `report` is the arbiter: a
+/// value whose pointer carries a real validation problem is rejected by every
+/// arm (the union fails), so the dedicated `malformed` diagnostic is emitted;
+/// otherwise an alternate arm accepts it and the diagnostic is suppressed.
+fn expression_diagnostics(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    report: &ValidationReport,
+    out: &mut Vec<Diagnostic>,
+) {
+    let union_rejected: std::collections::HashSet<&str> =
+        report.problems.iter().map(|problem| problem.path.as_str()).collect();
+
     for value in crate::providers::frontmatter::expression_values(ctx, ast) {
         let expression = value.expression();
         match crate::overlay::expressions::parse_condition(expression) {
             Err(error) => {
+                if !union_rejected.contains(value.entry.pointer.as_str()) {
+                    // A non-Expression arm validly accepts this value, so the
+                    // union validates — a malformed-expression warning would be a
+                    // false positive.
+                    continue;
+                }
                 let at = error.position.min(expression.len());
                 let span = value
                     .project(at..expression.len())
@@ -761,6 +785,96 @@ mod tests {
                         .iter()
                         .all(|diagnostic| code_of(diagnostic) != Some(code::EXPRESSION_MALFORMED)),
                     "no expression diagnostic for a string-typed selected arm (deleted_first={deleted_first}): {diagnostics:#?}"
+                );
+            });
+        }
+    }
+
+    /// A top-level `when` property typed as a **mixed union** of an `expression`
+    /// arm and one other `arm`, in both arm orders (`expression_first`).
+    fn mixed_expression_union_doc(expression_first: bool, arm: &str, value_line: &str) -> String {
+        let expr = "    - expression".to_string();
+        let other = format!("    - \"{arm}\"");
+        let (first, second) = if expression_first { (expr, other) } else { (other, expr) };
+        format!("---\n$schema:\n  when:\n{first}\n{second}\n{value_line}\n---\n\nbody\n")
+    }
+
+    #[test]
+    fn alternate_valid_enum_arm_suppresses_malformed_expression() {
+        // `'1 +'` is malformed as an expression but is a valid member of the enum
+        // arm, so the union validates and no `dm.expression.malformed` fires.
+        for expression_first in [false, true] {
+            let text =
+                mixed_expression_union_doc(expression_first, "enum('1 +', foo)", "when: '1 +'");
+            diagnostics_for(&text, |diagnostics| {
+                assert!(
+                    diagnostics
+                        .iter()
+                        .all(|diagnostic| code_of(diagnostic) != Some(code::EXPRESSION_MALFORMED)),
+                    "enum arm accepts the value; no malformed warning (expression_first={expression_first}): {diagnostics:#?}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn alternate_valid_string_arm_suppresses_malformed_expression() {
+        // A `string` arm accepts any scalar, so a value the expression arm rejects
+        // is still union-valid — no malformed diagnostic.
+        for expression_first in [false, true] {
+            let text = mixed_expression_union_doc(expression_first, "string", "when: '1 +'");
+            diagnostics_for(&text, |diagnostics| {
+                assert!(
+                    diagnostics
+                        .iter()
+                        .all(|diagnostic| code_of(diagnostic) != Some(code::EXPRESSION_MALFORMED)),
+                    "string arm accepts the value; no malformed warning (expression_first={expression_first}): {diagnostics:#?}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn value_invalid_under_every_arm_emits_one_malformed_and_no_duplicate() {
+        // `'1 +'` is rejected by both the expression arm and the enum arm, so the
+        // union fails: exactly one dedicated `dm.expression.malformed`, with the
+        // generic format constraint suppressed (no duplicate).
+        for expression_first in [false, true] {
+            let text =
+                mixed_expression_union_doc(expression_first, "enum(foo, bar)", "when: '1 +'");
+            diagnostics_for(&text, |diagnostics| {
+                let malformed = diagnostics
+                    .iter()
+                    .filter(|diagnostic| code_of(diagnostic) == Some(code::EXPRESSION_MALFORMED))
+                    .count();
+                assert_eq!(
+                    malformed, 1,
+                    "exactly one malformed diagnostic (expression_first={expression_first}): {diagnostics:#?}"
+                );
+                assert!(
+                    diagnostics
+                        .iter()
+                        .all(|diagnostic| code_of(diagnostic) != Some(code::SCHEMA_CONSTRAINT)),
+                    "the generic format constraint must be suppressed (expression_first={expression_first}): {diagnostics:#?}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn valid_expression_under_mixed_union_is_clean() {
+        // A value that parses cleanly is valid under the expression arm; no
+        // expression diagnostic fires regardless of the sibling arm.
+        for expression_first in [false, true] {
+            let text = mixed_expression_union_doc(expression_first, "string", "when: ctx.today");
+            diagnostics_for(&text, |diagnostics| {
+                assert!(
+                    diagnostics.iter().all(|diagnostic| {
+                        let code = code_of(diagnostic);
+                        code != Some(code::EXPRESSION_MALFORMED)
+                            && code != Some(code::EXPRESSION_UNKNOWN_IDENTIFIER)
+                    }),
+                    "a valid expression under a mixed union is clean (expression_first={expression_first}): {diagnostics:#?}"
                 );
             });
         }
