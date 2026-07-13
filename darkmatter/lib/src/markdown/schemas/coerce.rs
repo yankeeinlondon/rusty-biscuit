@@ -26,7 +26,10 @@ use super::simplified::convert::{BOOLISH_VALUES, NUMBERLIKE_PATTERN};
 use super::validate::{self, build_validator, error_top_level_key};
 
 /// The conversion a recognized property schema asks for.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Not `Eq`: [`CoercionTarget::LiteralConst`] carries a `serde_json::Value`,
+/// which is only `PartialEq` (floats break total equality).
+#[derive(Debug, Clone, PartialEq)]
 pub enum CoercionTarget {
     /// A string in the boolish set → a real boolean.
     ToBoolean,
@@ -54,6 +57,13 @@ pub enum CoercionTarget {
     /// emits. The opaque `object` keyword (no `properties`) is outside the
     /// matrix and yields `None` from `coercion_target`.
     Object(Vec<(String, CoercionTarget)>),
+    /// A `literal(x)` const fragment (`{"const": <value>}`) carrying its typed
+    /// value. A non-string const reuses the boolish/numberlike conversion but
+    /// only commits the coerced value when it equals the const — so an equality
+    /// failure (`'3'` against `literal(2)`) never writes back an invalid value.
+    /// String consts never coerce, so they never reach a `LiteralConst` target
+    /// ([`literal_const_target`] yields `None` for them).
+    LiteralConst(Value),
 }
 
 /// Result of coercing a whole instance against a schema.
@@ -123,6 +133,13 @@ pub fn coercion_target(property_schema: &Value) -> Option<CoercionTarget> {
     }
 
     let obj = property_schema.as_object()?;
+
+    // A `literal(x)` fragment is a bare `{"const": <value>}` with no `type`
+    // key. A non-string const reuses the scalar conversions with an equality
+    // guard; a string const never coerces (yields `None`).
+    if let Some(constant) = obj.get("const") {
+        return literal_const_target(constant);
+    }
 
     // `anyOf` shapes (boolish / numberlike) are checked before single `type`
     // because the boolish/numberlike fragments have no top-level `type` key.
@@ -211,6 +228,19 @@ fn target_from_any_of(arms: &[Value]) -> Option<CoercionTarget> {
         Some(CoercionTarget::ToNumber)
     } else {
         None
+    }
+}
+
+/// Maps a `literal(x)` const value to its coercion target.
+///
+/// A numeric or boolean const reuses the numberlike/boolish scalar conversion
+/// (with the equality guard applied in [`coerce_to_literal`]); a string const
+/// (or any other JSON type) never coerces and yields `None`, so a value already
+/// holding the exact string is left for the strict `const` validator.
+fn literal_const_target(constant: &Value) -> Option<CoercionTarget> {
+    match constant {
+        Value::Number(_) | Value::Bool(_) => Some(CoercionTarget::LiteralConst(constant.clone())),
+        _ => None,
     }
 }
 
@@ -449,7 +479,23 @@ fn coerce_value(target: &CoercionTarget, value: &Value) -> Option<Value> {
         CoercionTarget::ToJsonString => coerce_to_json_string(value),
         CoercionTarget::Array(inner) => coerce_array(inner, value),
         CoercionTarget::Object(props) => coerce_inline_object(props, value),
+        CoercionTarget::LiteralConst(constant) => coerce_to_literal(constant, value),
     }
+}
+
+/// Coerces a value toward a `literal(x)` const, committing the coerced value
+/// **only** when it equals the const. Reuses the boolish/numberlike scalar
+/// conversion selected by the const's JSON type; a value that coerces to a
+/// different scalar (an equality failure, e.g. `'3'` against `literal(2)`) is
+/// left untouched so no invalid value is written back. String consts never
+/// reach here ([`literal_const_target`] rejects them).
+fn coerce_to_literal(constant: &Value, value: &Value) -> Option<Value> {
+    let coerced = match constant {
+        Value::Number(_) => coerce_to_number(value)?,
+        Value::Bool(_) => coerce_to_boolean(value)?,
+        _ => return None,
+    };
+    (&coerced == constant).then_some(coerced)
 }
 
 fn coerce_to_boolean(value: &Value) -> Option<Value> {
@@ -729,6 +775,81 @@ mod tests {
             "anyOf": [{"type": "number"}, {"type": "string", "pattern": "^[A-Z]+$"}]
         });
         assert_eq!(coercion_target(&frag), None);
+    }
+
+    // ── literal const recognizer & coercion (Phase 4) ───────────────────
+
+    #[test]
+    fn recognizes_number_and_boolean_const() {
+        match coercion_target(&json!({"const": 2})) {
+            Some(CoercionTarget::LiteralConst(v)) => assert_eq!(v, json!(2)),
+            other => panic!("expected LiteralConst(2), got {other:?}"),
+        }
+        match coercion_target(&json!({"const": false})) {
+            Some(CoercionTarget::LiteralConst(v)) => assert_eq!(v, json!(false)),
+            other => panic!("expected LiteralConst(false), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn string_const_is_not_a_coercion_target() {
+        // A string literal never coerces, so its const yields no target.
+        assert_eq!(coercion_target(&json!({"const": "spec"})), None);
+    }
+
+    #[test]
+    fn number_const_coerces_matching_string_only() {
+        // `'2'` matches literal(2) → coerces to number 2.
+        assert_eq!(
+            coerce_value(&CoercionTarget::LiteralConst(json!(2)), &json!("2")),
+            Some(json!(2))
+        );
+        // `'3'` coerces to number 3 which does not equal const 2 → untouched
+        // (write-back only on a validating value).
+        assert_eq!(
+            coerce_value(&CoercionTarget::LiteralConst(json!(2)), &json!("3")),
+            None
+        );
+        // Non-numberlike string → untouched.
+        assert_eq!(
+            coerce_value(&CoercionTarget::LiteralConst(json!(2)), &json!("two")),
+            None
+        );
+    }
+
+    #[test]
+    fn boolean_const_coerces_matching_spelling_only() {
+        assert_eq!(
+            coerce_value(&CoercionTarget::LiteralConst(json!(false)), &json!("false")),
+            Some(json!(false))
+        );
+        // `'true'` coerces to `true` which is not the const `false` → untouched.
+        assert_eq!(
+            coerce_value(&CoercionTarget::LiteralConst(json!(false)), &json!("true")),
+            None
+        );
+    }
+
+    #[test]
+    fn literal_const_object_pass_and_array_form() {
+        // Optional literal wraps the const in a nullable `anyOf`; the object
+        // pass looks through the wrapper and coerces the string form.
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "version": {"anyOf": [{"type": "null"}, {"const": 2}]},
+                "modes": {"anyOf": [
+                    {"type": "null"},
+                    {"type": "array", "items": {"const": 3}}
+                ]}
+            }
+        });
+        let instance = json!({ "version": "2", "modes": ["3", "4"] });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(outcome.changed);
+        assert_eq!(outcome.value["version"], json!(2));
+        // `'3'` equals the item const → number 3; `'4'` does not → left as-is.
+        assert_eq!(outcome.value["modes"], json!([3, "4"]));
     }
 
     // ── scalar coercion: boolean ────────────────────────────────────────
