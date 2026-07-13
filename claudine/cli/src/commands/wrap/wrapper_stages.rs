@@ -10,8 +10,8 @@ use color_eyre::eyre::{Result, eyre};
 use super::flags::WrapperArgs;
 use super::profile::{self, WrapperProfile};
 use super::{
-    McpRuntimeInfo, StructuredCodexOutput, env, exec, flags, harness_orch, structured_verbosity,
-    system_prompt, wrapper_exec,
+    McpRuntimeInfo, StructuredCodexOutput, env, exec, flags, harness_orch, session_report,
+    structured_verbosity, system_prompt, wrapper_exec,
 };
 use crate::log;
 
@@ -523,6 +523,16 @@ pub(crate) fn run_execution_stage(
         }
         Ok((harness_code, None))
     } else if use_structured {
+        // Presence bracket for the direct structured-stream path (the
+        // harness path above reports per attempt inside
+        // `execute_harness_attempt`).
+        let _session_presence = session_report::SessionPresence::started(
+            provider,
+            args.model.as_deref(),
+            !effective_non_interactive,
+            env_context,
+            &env_plan.env,
+        );
         wrapper_exec::run_structured_stream_session(
             args,
             provider,
@@ -545,6 +555,13 @@ pub(crate) fn run_execution_stage(
             perf_collector,
         )
     } else {
+        let _session_presence = session_report::SessionPresence::started(
+            provider,
+            args.model.as_deref(),
+            !effective_non_interactive,
+            env_context,
+            &env_plan.env,
+        );
         let mut _spawned = false;
         let result = exec::run_child(
             binary_path,

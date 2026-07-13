@@ -7,6 +7,7 @@ pub(crate) mod profile;
 pub(crate) mod repo_home;
 pub(crate) mod runaway_guard;
 pub(crate) mod section;
+pub(crate) mod session_report;
 pub(crate) mod stream_io;
 pub(crate) mod subagent_watchdog;
 pub(crate) mod system_prompt;

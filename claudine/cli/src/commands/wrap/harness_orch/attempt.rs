@@ -123,6 +123,16 @@ pub(crate) fn execute_harness_attempt(
     );
     let runaway_guards = guard_inputs.compile_for_model(run_model.as_deref())?;
 
+    // Presence bracket: STARTED now, ENDED when this guard drops on any
+    // exit path of the attempt (best-effort; no-op without a daemon).
+    let _session_presence = crate::commands::wrap::session_report::SessionPresence::started(
+        provider,
+        run_model.as_deref(),
+        !effective_non_interactive,
+        env_context,
+        &launch.env,
+    );
+
     let (
         exit_code,
         termination,
