@@ -50,7 +50,8 @@ pub fn for_provider(
             sink,
             config.model,
             Provider::OpenCode,
-        )),
+        )
+        .expect("OpenCode parser accepts the OpenCode identity")),
         Provider::QwenCode => Box::new(qwen::QwenSemanticStreamParser::new(sink)),
         // Kilo Code is an OpenCode fork; its `--format json` stream is
         // OpenCode-shaped NDJSON, parsed by the OpenCode parser unchanged —
@@ -60,7 +61,8 @@ pub fn for_provider(
             sink,
             config.model,
             Provider::Kilo,
-        )),
+        )
+        .expect("OpenCode parser accepts the Kilo identity")),
         // Pi is a bespoke provider with its own `--mode json` NDJSON format.
         Provider::Pi => Box::new(pi::PiSemanticStreamParser::new(sink, config.model)),
         // Antigravity's `--output-format json` print mode emits ONE buffered

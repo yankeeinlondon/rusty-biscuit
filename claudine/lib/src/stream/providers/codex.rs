@@ -1017,6 +1017,62 @@ mod tests {
     }
 
     #[test]
+    fn classify_error_overloaded_message_maps_to_api_remote() {
+        assert_eq!(
+            classify_error(None, Some("the selected model is overloaded, retry")),
+            SemanticErrorKind::ApiRemote,
+        );
+    }
+
+    #[test]
+    fn classify_error_overloaded_does_not_disturb_seed_precedence() {
+        assert_eq!(
+            classify_error(Some("auth_error"), Some("the service is overloaded")),
+            SemanticErrorKind::Configuration,
+        );
+        assert_eq!(
+            classify_error(None, Some("the selected model is available")),
+            SemanticErrorKind::AgentNative,
+        );
+    }
+
+    #[test]
+    fn turn_failed_capacity_message_maps_to_api_remote() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"turn.failed","error":{"message":"Selected model is at capacity. Please try a different model."}}"#,
+            )
+            .unwrap();
+
+        let collected = events.lock().unwrap().clone();
+        match &collected[0] {
+            SemanticEvent::Error { kind, .. } => {
+                assert_eq!(*kind, SemanticErrorKind::ApiRemote);
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn capacity_related_prose_does_not_match_narrow_codex_needle() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"turn.failed","error":{"message":"Capacity planning completed for the selected model."}}"#,
+            )
+            .unwrap();
+
+        let collected = events.lock().unwrap().clone();
+        match &collected[0] {
+            SemanticEvent::Error { kind, .. } => {
+                assert_eq!(*kind, SemanticErrorKind::AgentNative);
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn classify_error_defaults_to_agent_native() {
         assert_eq!(
             classify_error(Some("weird_kind"), Some("something broke")),

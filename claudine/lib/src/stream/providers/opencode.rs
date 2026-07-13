@@ -38,6 +38,15 @@ use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
 use crate::provider_id::Provider;
+
+/// An unsupported runtime identity was supplied to the shared OpenCode parser.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[error("OpenCode stream parser supports only OpenCode and Kilo identities, got {provider:?}")]
+pub struct InvalidOpenCodeParserProvider {
+    /// The identity rejected at the parser construction boundary.
+    pub provider: Provider,
+}
+
 pub struct OpenCodeSemanticStreamParser<S: SemanticEventSink> {
     sink: S,
     /// Runtime identity: `OpenCode` or its `Kilo` fork. Kilo reuses this exact
@@ -45,6 +54,7 @@ pub struct OpenCodeSemanticStreamParser<S: SemanticEventSink> {
     /// provider on every emitted event, so parser reuse never collapses the
     /// two identities.
     provider: Provider,
+    error_vocabulary: &'static super::common::ErrorKeywords,
     line_num: usize,
     session_id: Option<String>,
     model: Option<String>,
@@ -62,10 +72,30 @@ pub struct OpenCodeSemanticStreamParser<S: SemanticEventSink> {
 }
 
 impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
-    pub fn new(sink: S, model: Option<String>, provider: Provider) -> Self {
-        Self {
+    pub fn new(
+        sink: S,
+        model: Option<String>,
+        provider: Provider,
+    ) -> Result<Self, InvalidOpenCodeParserProvider> {
+        Self::new_with_vocabulary_resolver(
             sink,
-            provider: opencode_parser_identity(provider),
+            model,
+            provider,
+            super::vocabulary::error_keywords,
+        )
+    }
+
+    fn new_with_vocabulary_resolver(
+        sink: S,
+        model: Option<String>,
+        provider: Provider,
+        vocabulary_for: fn(Provider) -> &'static super::common::ErrorKeywords,
+    ) -> Result<Self, InvalidOpenCodeParserProvider> {
+        let provider = opencode_parser_identity(provider)?;
+        Ok(Self {
+            sink,
+            provider,
+            error_vocabulary: vocabulary_for(provider),
             line_num: 0,
             session_id: None,
             model,
@@ -80,7 +110,7 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
             error_kind: None,
             error_message: None,
             tool_uses: HashMap::new(),
-        }
+        })
     }
 
     fn base_extra(&self, raw_kind: &str) -> Map<String, Value> {
@@ -275,7 +305,11 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
             .error_message
             .clone()
             .unwrap_or_else(|| "Step failure".to_string());
-        let semantic_kind = classify_error(self.provider, self.error_kind.as_deref(), Some(&message));
+        let semantic_kind = classify_error(
+            self.error_vocabulary,
+            self.error_kind.as_deref(),
+            Some(&message),
+        );
         self.sink.on_semantic_event(SemanticEvent::Error {
             message,
             terminal: true,
@@ -570,34 +604,26 @@ fn strip_orphan_think_delimiters(text: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
-/// Coerce a construction identity to one this parser is allowed to speak for.
-///
-/// The OpenCode NDJSON parser backs both OpenCode and its Kilo fork and no
-/// other provider. `OpenCode` and `Kilo` pass through unchanged; any other
-/// identity is a construction bug and is coerced to `OpenCode` (with an error
-/// trace) so a misuse can never silently borrow a third provider's vocabulary.
-fn opencode_parser_identity(provider: Provider) -> Provider {
+/// Validate that the shared parser's runtime identity belongs to its wire
+/// protocol family.
+fn opencode_parser_identity(
+    provider: Provider,
+) -> Result<Provider, InvalidOpenCodeParserProvider> {
     match provider {
-        Provider::OpenCode | Provider::Kilo => provider,
-        other => {
-            tracing::error!(
-                provider = other.as_slug(),
-                "OpenCode stream parser constructed with an invalid identity; coercing to OpenCode"
-            );
-            Provider::OpenCode
-        }
+        Provider::OpenCode | Provider::Kilo => Ok(provider),
+        provider => Err(InvalidOpenCodeParserProvider { provider }),
     }
 }
 
 /// Map an OpenCode error envelope onto a typed [`SemanticErrorKind`] using the
 /// runtime provider's generated vocabulary (`OpenCode` or `Kilo`).
 fn classify_error(
-    provider: Provider,
+    vocabulary: &super::common::ErrorKeywords,
     error_kind: Option<&str>,
     message: Option<&str>,
 ) -> SemanticErrorKind {
     super::common::classify_error_by_keywords(
-        super::vocabulary::error_keywords(provider),
+        vocabulary,
         None,
         error_kind,
         message,
@@ -636,7 +662,8 @@ mod tests {
                 sink,
                 Some("gpt-4o".into()),
                 Provider::OpenCode,
-            )),
+            )
+            .unwrap()),
         )
     }
 
@@ -863,7 +890,8 @@ mod tests {
         let events = Arc::new(Mutex::new(Vec::new()));
         let sink = Capture(events.clone());
         let mut parser =
-            OpenCodeSemanticStreamParser::new(sink, Some("gpt-4o".into()), Provider::OpenCode);
+            OpenCodeSemanticStreamParser::new(sink, Some("gpt-4o".into()), Provider::OpenCode)
+                .unwrap();
 
         parser
             .feed_line(
@@ -1317,12 +1345,21 @@ mod tests {
     /// Feed a single error line through an OpenCode-shaped parser stamped with
     /// `provider`, returning the emitted `Error` event's semantic kind and the
     /// `provider` slug stamped on its `extra`.
-    fn classify_error_line(provider: Provider, line: &str) -> (SemanticErrorKind, String) {
+    fn classify_error_line_with_vocabulary(
+        provider: Provider,
+        line: &str,
+        vocabulary_for: fn(Provider) -> &'static super::super::common::ErrorKeywords,
+    ) -> Result<(SemanticErrorKind, String), InvalidOpenCodeParserProvider> {
         let events = Arc::new(Mutex::new(Vec::new()));
         let sink = Recording {
             events: events.clone(),
         };
-        let mut parser = OpenCodeSemanticStreamParser::new(sink, None, provider);
+        let mut parser = OpenCodeSemanticStreamParser::new_with_vocabulary_resolver(
+            sink,
+            None,
+            provider,
+            vocabulary_for,
+        )?;
         parser.feed_line(line).unwrap();
         let collected = events.lock().unwrap().clone();
         let SemanticEvent::Error { kind, extra, .. } = collected
@@ -1337,15 +1374,29 @@ mod tests {
             .and_then(Value::as_str)
             .expect("provider slug in extra")
             .to_string();
-        (kind, slug)
+        Ok((kind, slug))
+    }
+
+    fn classify_error_line(
+        provider: Provider,
+        line: &str,
+    ) -> Result<(SemanticErrorKind, String), InvalidOpenCodeParserProvider> {
+        classify_error_line_with_vocabulary(
+            provider,
+            line,
+            super::super::vocabulary::error_keywords,
+        )
     }
 
     #[test]
     fn kilo_identity_stamps_kilo_and_classifies_via_kilo_vocabulary() {
         // A Kilo-configured OpenCode parser stamps Kilo identity on every event
         // and classifies through Kilo's own generated vocabulary.
-        let (kind, slug) =
-            classify_error_line(Provider::Kilo, r#"{"type":"error","error_message":"rate limit exceeded"}"#);
+        let (kind, slug) = classify_error_line(
+            Provider::Kilo,
+            r#"{"type":"error","error_message":"rate limit exceeded"}"#,
+        )
+        .unwrap();
         assert_eq!(kind, SemanticErrorKind::ApiRemote);
         assert_eq!(slug, "kilo", "Kilo runs must not be stamped as OpenCode");
 
@@ -1354,7 +1405,8 @@ mod tests {
         let sink = Recording {
             events: events.clone(),
         };
-        let mut parser = OpenCodeSemanticStreamParser::new(sink, None, Provider::Kilo);
+        let mut parser =
+            OpenCodeSemanticStreamParser::new(sink, None, Provider::Kilo).unwrap();
         parser
             .feed_line(r#"{"type":"error","error_message":"rate limit exceeded"}"#)
             .unwrap();
@@ -1363,42 +1415,53 @@ mod tests {
     }
 
     #[test]
-    fn kilo_and_opencode_reuse_the_parser_without_reusing_identity() {
-        // The same wire parser and the same error line, run under the two
-        // identities the parser is allowed to speak for, resolve to distinct
-        // provider stamps — proving parser reuse never collapses Kilo into
-        // OpenCode. Their vocabularies are independent statics, so a future
-        // research delta can diverge their classifications without touching the
-        // shared parser.
-        let line = r#"{"type":"error","error_message":"rate limit exceeded"}"#;
-        let (opencode_kind, opencode_slug) = classify_error_line(Provider::OpenCode, line);
-        let (kilo_kind, kilo_slug) = classify_error_line(Provider::Kilo, line);
+    fn shared_parser_selects_vocabulary_by_runtime_identity() {
+        static OPENCODE_TEST_VOCABULARY: super::super::common::ErrorKeywords =
+            super::super::common::ErrorKeywords {
+                kind_buckets: &[],
+                msg_buckets: &[(SemanticErrorKind::Configuration, &["identity seam"])],
+                code_buckets: &[],
+            };
+        static KILO_TEST_VOCABULARY: super::super::common::ErrorKeywords =
+            super::super::common::ErrorKeywords {
+                kind_buckets: &[],
+                msg_buckets: &[(SemanticErrorKind::Interrupted, &["identity seam"])],
+                code_buckets: &[],
+            };
+        fn vocabulary_for(
+            provider: Provider,
+        ) -> &'static super::super::common::ErrorKeywords {
+            match provider {
+                Provider::OpenCode => &OPENCODE_TEST_VOCABULARY,
+                Provider::Kilo => &KILO_TEST_VOCABULARY,
+                _ => unreachable!("constructor rejects unsupported identities first"),
+            }
+        }
+
+        let line = r#"{"type":"error","error_message":"identity seam"}"#;
+        let (opencode_kind, opencode_slug) =
+            classify_error_line_with_vocabulary(Provider::OpenCode, line, vocabulary_for).unwrap();
+        let (kilo_kind, kilo_slug) =
+            classify_error_line_with_vocabulary(Provider::Kilo, line, vocabulary_for).unwrap();
 
         assert_eq!(opencode_slug, "opencode");
         assert_eq!(kilo_slug, "kilo");
-        assert_ne!(opencode_slug, kilo_slug);
-        // Both classify correctly today; the seeds are still identical.
-        assert_eq!(opencode_kind, SemanticErrorKind::ApiRemote);
-        assert_eq!(kilo_kind, SemanticErrorKind::ApiRemote);
-
-        // Independently addressable tables: the accessor returns different
-        // statics for the two providers even while their contents match.
-        assert!(
-            !std::ptr::eq(
-                super::super::vocabulary::error_keywords(Provider::OpenCode),
-                super::super::vocabulary::error_keywords(Provider::Kilo),
-            ),
-            "Kilo and OpenCode must select distinct vocabulary statics"
-        );
+        assert_eq!(opencode_kind, SemanticErrorKind::Configuration);
+        assert_eq!(kilo_kind, SemanticErrorKind::Interrupted);
     }
 
     #[test]
-    fn invalid_parser_identity_is_coerced_to_opencode() {
-        // The OpenCode parser backs only OpenCode and Kilo; any other identity
-        // is a construction bug that must never borrow a third provider's
-        // vocabulary. It is coerced to OpenCode rather than trusted.
-        let (_, slug) =
-            classify_error_line(Provider::Claude, r#"{"type":"error","error_message":"boom"}"#);
-        assert_eq!(slug, "opencode", "invalid identity must coerce to OpenCode");
+    fn invalid_parser_identity_returns_typed_error() {
+        let error = classify_error_line(
+            Provider::Claude,
+            r#"{"type":"error","error_message":"boom"}"#,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            InvalidOpenCodeParserProvider {
+                provider: Provider::Claude,
+            }
+        );
     }
 }
