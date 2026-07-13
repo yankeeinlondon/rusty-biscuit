@@ -251,18 +251,13 @@ fn parse_envelope(raw: &str) -> Option<AntigravityEnvelope> {
 /// no structured error category (print mode returns free text / a `status`
 /// state), so classification is text-based — mirroring the Pi/OpenCode path,
 /// with an auth branch for the keyring/OAuth failure modes agy surfaces.
-const ERROR_KEYWORDS: super::common::ErrorKeywords = super::common::ErrorKeywords {
-    kind_buckets: &[
-    ],
-    msg_buckets: &[
-        (SemanticErrorKind::Configuration, &["sign in", "sign-in", "not logged in", "authentication failed", "authentication", "unauthorized", "401", "403"]),
-        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "exhausted", "out of credits", "overloaded", "503", "resource_exhausted"]),
-        (SemanticErrorKind::Interrupted, &["abort", "cancel", "interrupt"]),
-    ],
-};
-
 fn classify_error(message: &str) -> SemanticErrorKind {
-    super::common::classify_error_by_keywords(&ERROR_KEYWORDS, None, Some(message))
+    super::common::classify_error_by_keywords(
+        super::vocabulary::error_keywords(Provider::Antigravity),
+        None,
+        None,
+        Some(message),
+    )
 }
 
 #[cfg(test)]

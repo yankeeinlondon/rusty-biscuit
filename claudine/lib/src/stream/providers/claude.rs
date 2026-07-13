@@ -930,21 +930,13 @@ impl<S: SemanticEventSink> SemanticStreamParser for ClaudeSemanticStreamParser<S
 /// `rate_limit_error`, `authentication_error`) plus a human message. This
 /// helper inspects both fields so the live error renderer and the
 /// end-of-run report can pick a consistent label and color.
-const ERROR_KEYWORDS: super::common::ErrorKeywords = super::common::ErrorKeywords {
-    kind_buckets: &[
-        (SemanticErrorKind::ApiRemote, &["billing", "rate_limit", "ratelimit", "quota", "overload", "api_error", "upstream", "server"]),
-        (SemanticErrorKind::Configuration, &["auth", "permission", "config"]),
-        (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "abort"]),
-    ],
-    msg_buckets: &[
-        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "credit", "api error", "overloaded"]),
-        (SemanticErrorKind::Configuration, &["api key", "authentication", "not authorized", "permission denied"]),
-        (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "aborted"]),
-    ],
-};
-
 fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticErrorKind {
-    super::common::classify_error_by_keywords(&ERROR_KEYWORDS, error_kind, message)
+    super::common::classify_error_by_keywords(
+        super::vocabulary::error_keywords(Provider::Claude),
+        None,
+        error_kind,
+        message,
+    )
 }
 
 fn format_reset_hint(reset_at: chrono::DateTime<chrono::Utc>) -> String {

@@ -40,6 +40,11 @@ use super::token_usage::NormalizedTokenUsage;
 use crate::provider_id::Provider;
 pub struct OpenCodeSemanticStreamParser<S: SemanticEventSink> {
     sink: S,
+    /// Runtime identity: `OpenCode` or its `Kilo` fork. Kilo reuses this exact
+    /// wire parser but keeps its own error vocabulary and stamps its own
+    /// provider on every emitted event, so parser reuse never collapses the
+    /// two identities.
+    provider: Provider,
     line_num: usize,
     session_id: Option<String>,
     model: Option<String>,
@@ -57,9 +62,10 @@ pub struct OpenCodeSemanticStreamParser<S: SemanticEventSink> {
 }
 
 impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
-    pub fn new(sink: S, model: Option<String>) -> Self {
+    pub fn new(sink: S, model: Option<String>, provider: Provider) -> Self {
         Self {
             sink,
+            provider: opencode_parser_identity(provider),
             line_num: 0,
             session_id: None,
             model,
@@ -78,7 +84,7 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
     }
 
     fn base_extra(&self, raw_kind: &str) -> Map<String, Value> {
-        super::common::base_extra(Provider::OpenCode, self.line_num, raw_kind)
+        super::common::base_extra(self.provider, self.line_num, raw_kind)
     }
 
     fn emit_session_start(&mut self, raw_kind: &str) {
@@ -95,7 +101,7 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
             self.model = Some(model);
         }
         super::trace_session_metadata(
-            Provider::OpenCode,
+            self.provider,
             self.session_id.as_deref(),
             self.model.as_deref(),
         );
@@ -106,7 +112,7 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
         if self.session_id.is_none() {
             self.session_id = step.resolved_session_id();
             super::trace_session_metadata(
-                Provider::OpenCode,
+                self.provider,
                 self.session_id.as_deref(),
                 self.model.as_deref(),
             );
@@ -140,7 +146,7 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
             }
         }
         super::trace_summary_update(
-            Provider::OpenCode,
+            self.provider,
             self.provider_status.as_deref(),
             self.duration_ms,
             Some(self.cost_usd),
@@ -176,7 +182,7 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
             self.duration_ms = Some(duration);
         }
         super::trace_summary_update(
-            Provider::OpenCode,
+            self.provider,
             self.provider_status.as_deref(),
             self.duration_ms,
             Some(self.cost_usd),
@@ -269,7 +275,7 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
             .error_message
             .clone()
             .unwrap_or_else(|| "Step failure".to_string());
-        let semantic_kind = classify_error(self.error_kind.as_deref(), Some(&message));
+        let semantic_kind = classify_error(self.provider, self.error_kind.as_deref(), Some(&message));
         self.sink.on_semantic_event(SemanticEvent::Error {
             message,
             terminal: true,
@@ -282,7 +288,7 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
         self.tool_calls += 1;
         let resolved = tool.resolve();
         super::trace_tool_event(
-            Provider::OpenCode,
+            self.provider,
             self.tool_calls,
             resolved.name.as_deref(),
         );
@@ -329,7 +335,7 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
         self.tool_calls += 1;
         let resolved = tool.resolve();
         super::trace_tool_event(
-            Provider::OpenCode,
+            self.provider,
             self.tool_calls,
             resolved.name.as_deref(),
         );
@@ -403,11 +409,11 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
     }
 
     fn emit_provider_extension(&mut self, kind: &str, payload: Value) {
-        super::common::emit_provider_extension(&mut self.sink, Provider::OpenCode, kind, payload);
+        super::common::emit_provider_extension(&mut self.sink, self.provider, kind, payload);
     }
 
     fn emit_malformed_warning(&mut self, err: &str) {
-        super::common::emit_malformed_warning(&mut self.sink, Provider::OpenCode, self.line_num, err);
+        super::common::emit_malformed_warning(&mut self.sink, self.provider, self.line_num, err);
     }
 }
 
@@ -425,7 +431,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
         match serde_json::from_str::<OpenCodeEvent>(line) {
             Ok(event) => {
                 let raw_kind = event.type_str().to_string();
-                super::trace_parser_event(Provider::OpenCode, &raw_kind, self.line_num);
+                super::trace_parser_event(self.provider, &raw_kind, self.line_num);
                 match event {
                     OpenCodeEvent::Init(init) | OpenCodeEvent::SessionStart(init) => {
                         self.handle_init(init, &raw_kind);
@@ -475,7 +481,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
                     Ok(v) => v,
                     Err(e) => {
                         super::trace_malformed_line(
-                            Provider::OpenCode,
+                            self.provider,
                             self.line_num,
                             &e.to_string(),
                         );
@@ -488,7 +494,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();
-                super::trace_parser_event(Provider::OpenCode, &raw_kind, self.line_num);
+                super::trace_parser_event(self.provider, &raw_kind, self.line_num);
                 self.emit_provider_extension(&raw_kind, Value::Object(raw));
             }
         }
@@ -497,7 +503,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
 
     fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
         super::trace_parser_finish(
-            Provider::OpenCode,
+            self.provider,
             exit_code,
             self.tool_calls,
             self.num_turns,
@@ -505,7 +511,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
         );
         let has_usage = self.token_usage.input.is_some() || self.token_usage.output.is_some();
         super::common::finish_summary(
-            Provider::OpenCode,
+            self.provider,
             StreamExecutionSummary {
                 session_id: self.session_id,
                 model: self.model,
@@ -564,23 +570,38 @@ fn strip_orphan_think_delimiters(text: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
-/// Map an OpenCode error envelope onto a typed [`SemanticErrorKind`].
-const ERROR_KEYWORDS: super::common::ErrorKeywords = super::common::ErrorKeywords {
-    kind_buckets: &[
-        (SemanticErrorKind::ApiRemote, &["rate", "quota", "billing"]),
-        (SemanticErrorKind::Configuration, &["auth", "config", "permission", "provider", "model"]),
-        (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "abort"]),
-        (SemanticErrorKind::ApiRemote, &["api", "upstream", "server"]),
-    ],
-    msg_buckets: &[
-        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "api error", "api timeout"]),
-        (SemanticErrorKind::Configuration, &["api key", "authentication", "not authorized", "permission denied", "model not found", "invalid model", "providermodelnotfound"]),
-        (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "aborted"]),
-    ],
-};
+/// Coerce a construction identity to one this parser is allowed to speak for.
+///
+/// The OpenCode NDJSON parser backs both OpenCode and its Kilo fork and no
+/// other provider. `OpenCode` and `Kilo` pass through unchanged; any other
+/// identity is a construction bug and is coerced to `OpenCode` (with an error
+/// trace) so a misuse can never silently borrow a third provider's vocabulary.
+fn opencode_parser_identity(provider: Provider) -> Provider {
+    match provider {
+        Provider::OpenCode | Provider::Kilo => provider,
+        other => {
+            tracing::error!(
+                provider = other.as_slug(),
+                "OpenCode stream parser constructed with an invalid identity; coercing to OpenCode"
+            );
+            Provider::OpenCode
+        }
+    }
+}
 
-fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticErrorKind {
-    super::common::classify_error_by_keywords(&ERROR_KEYWORDS, error_kind, message)
+/// Map an OpenCode error envelope onto a typed [`SemanticErrorKind`] using the
+/// runtime provider's generated vocabulary (`OpenCode` or `Kilo`).
+fn classify_error(
+    provider: Provider,
+    error_kind: Option<&str>,
+    message: Option<&str>,
+) -> SemanticErrorKind {
+    super::common::classify_error_by_keywords(
+        super::vocabulary::error_keywords(provider),
+        None,
+        error_kind,
+        message,
+    )
 }
 
 #[cfg(test)]
@@ -614,6 +635,7 @@ mod tests {
             Box::new(OpenCodeSemanticStreamParser::new(
                 sink,
                 Some("gpt-4o".into()),
+                Provider::OpenCode,
             )),
         )
     }
@@ -840,7 +862,8 @@ mod tests {
 
         let events = Arc::new(Mutex::new(Vec::new()));
         let sink = Capture(events.clone());
-        let mut parser = OpenCodeSemanticStreamParser::new(sink, Some("gpt-4o".into()));
+        let mut parser =
+            OpenCodeSemanticStreamParser::new(sink, Some("gpt-4o".into()), Provider::OpenCode);
 
         parser
             .feed_line(
@@ -1289,5 +1312,93 @@ mod tests {
             vec!["session_start", "info", "tool_result"],
             "bash tool must emit only Info + ToolResult"
         );
+    }
+
+    /// Feed a single error line through an OpenCode-shaped parser stamped with
+    /// `provider`, returning the emitted `Error` event's semantic kind and the
+    /// `provider` slug stamped on its `extra`.
+    fn classify_error_line(provider: Provider, line: &str) -> (SemanticErrorKind, String) {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let sink = Recording {
+            events: events.clone(),
+        };
+        let mut parser = OpenCodeSemanticStreamParser::new(sink, None, provider);
+        parser.feed_line(line).unwrap();
+        let collected = events.lock().unwrap().clone();
+        let SemanticEvent::Error { kind, extra, .. } = collected
+            .into_iter()
+            .find(|e| matches!(e, SemanticEvent::Error { .. }))
+            .expect("an Error event")
+        else {
+            unreachable!()
+        };
+        let slug = extra
+            .get("provider")
+            .and_then(Value::as_str)
+            .expect("provider slug in extra")
+            .to_string();
+        (kind, slug)
+    }
+
+    #[test]
+    fn kilo_identity_stamps_kilo_and_classifies_via_kilo_vocabulary() {
+        // A Kilo-configured OpenCode parser stamps Kilo identity on every event
+        // and classifies through Kilo's own generated vocabulary.
+        let (kind, slug) =
+            classify_error_line(Provider::Kilo, r#"{"type":"error","error_message":"rate limit exceeded"}"#);
+        assert_eq!(kind, SemanticErrorKind::ApiRemote);
+        assert_eq!(slug, "kilo", "Kilo runs must not be stamped as OpenCode");
+
+        // The summary carries Kilo identity too, not the parser's OpenCode origin.
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let sink = Recording {
+            events: events.clone(),
+        };
+        let mut parser = OpenCodeSemanticStreamParser::new(sink, None, Provider::Kilo);
+        parser
+            .feed_line(r#"{"type":"error","error_message":"rate limit exceeded"}"#)
+            .unwrap();
+        let summary = Box::new(parser).finish(1);
+        assert_eq!(summary.provider, Provider::Kilo);
+    }
+
+    #[test]
+    fn kilo_and_opencode_reuse_the_parser_without_reusing_identity() {
+        // The same wire parser and the same error line, run under the two
+        // identities the parser is allowed to speak for, resolve to distinct
+        // provider stamps — proving parser reuse never collapses Kilo into
+        // OpenCode. Their vocabularies are independent statics, so a future
+        // research delta can diverge their classifications without touching the
+        // shared parser.
+        let line = r#"{"type":"error","error_message":"rate limit exceeded"}"#;
+        let (opencode_kind, opencode_slug) = classify_error_line(Provider::OpenCode, line);
+        let (kilo_kind, kilo_slug) = classify_error_line(Provider::Kilo, line);
+
+        assert_eq!(opencode_slug, "opencode");
+        assert_eq!(kilo_slug, "kilo");
+        assert_ne!(opencode_slug, kilo_slug);
+        // Both classify correctly today; the seeds are still identical.
+        assert_eq!(opencode_kind, SemanticErrorKind::ApiRemote);
+        assert_eq!(kilo_kind, SemanticErrorKind::ApiRemote);
+
+        // Independently addressable tables: the accessor returns different
+        // statics for the two providers even while their contents match.
+        assert!(
+            !std::ptr::eq(
+                super::super::vocabulary::error_keywords(Provider::OpenCode),
+                super::super::vocabulary::error_keywords(Provider::Kilo),
+            ),
+            "Kilo and OpenCode must select distinct vocabulary statics"
+        );
+    }
+
+    #[test]
+    fn invalid_parser_identity_is_coerced_to_opencode() {
+        // The OpenCode parser backs only OpenCode and Kilo; any other identity
+        // is a construction bug that must never borrow a third provider's
+        // vocabulary. It is coerced to OpenCode rather than trusted.
+        let (_, slug) =
+            classify_error_line(Provider::Claude, r#"{"type":"error","error_message":"boom"}"#);
+        assert_eq!(slug, "opencode", "invalid identity must coerce to OpenCode");
     }
 }

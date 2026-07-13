@@ -322,22 +322,13 @@ impl<S: SemanticEventSink> SemanticStreamParser for QwenSemanticStreamParser<S> 
 }
 
 /// Map a Qwen Code error envelope onto a typed [`SemanticErrorKind`].
-const ERROR_KEYWORDS: super::common::ErrorKeywords = super::common::ErrorKeywords {
-    kind_buckets: &[
-        (SemanticErrorKind::ApiRemote, &["rate", "quota", "billing"]),
-        (SemanticErrorKind::Configuration, &["auth", "config", "permission"]),
-        (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "abort"]),
-        (SemanticErrorKind::ApiRemote, &["api", "upstream", "server"]),
-    ],
-    msg_buckets: &[
-        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "api error"]),
-        (SemanticErrorKind::Configuration, &["api key", "authentication", "not authorized", "permission denied"]),
-        (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "aborted"]),
-    ],
-};
-
 fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticErrorKind {
-    super::common::classify_error_by_keywords(&ERROR_KEYWORDS, error_kind, message)
+    super::common::classify_error_by_keywords(
+        super::vocabulary::error_keywords(Provider::QwenCode),
+        None,
+        error_kind,
+        message,
+    )
 }
 
 #[cfg(test)]

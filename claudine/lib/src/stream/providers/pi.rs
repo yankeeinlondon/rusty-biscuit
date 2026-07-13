@@ -386,18 +386,13 @@ impl<S: SemanticEventSink> SemanticStreamParser for PiSemanticStreamParser<S> {
 /// Pi normalizes provider failures into free-text `errorMessage` strings with no
 /// structured category, so classification is text-based (mirroring OpenCode's
 /// message-fallback path).
-const ERROR_KEYWORDS: super::common::ErrorKeywords = super::common::ErrorKeywords {
-    kind_buckets: &[
-    ],
-    msg_buckets: &[
-        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "out of credits", "overloaded", "503", "api error", "api timeout"]),
-        (SemanticErrorKind::Configuration, &["api key", "authentication", "no api key", "not authorized", "no models available", "model not found", "invalid model"]),
-        (SemanticErrorKind::Interrupted, &["abort", "cancel", "interrupt"]),
-    ],
-};
-
 fn classify_error(message: &str) -> SemanticErrorKind {
-    super::common::classify_error_by_keywords(&ERROR_KEYWORDS, None, Some(message))
+    super::common::classify_error_by_keywords(
+        super::vocabulary::error_keywords(Provider::Pi),
+        None,
+        None,
+        Some(message),
+    )
 }
 
 /// Stable snake_case label for a [`SemanticErrorKind`], carried in the summary's

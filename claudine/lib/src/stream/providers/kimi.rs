@@ -1088,28 +1088,17 @@ impl<S: SemanticEventSink> SemanticStreamParser for KimiSemanticStreamParser<S> 
 }
 
 /// Map a JSON-RPC error code or message to a typed [`SemanticErrorKind`].
-const ERROR_KEYWORDS: super::common::ErrorKeywords = super::common::ErrorKeywords {
-    kind_buckets: &[
-    ],
-    msg_buckets: &[
-        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "api error", "upstream"]),
-        (SemanticErrorKind::Configuration, &["api key", "authentication", "not authorized", "permission denied", "auth", "config"]),
-        (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "aborted"]),
-    ],
-};
-
+///
+/// The generated Kimi `code_buckets` (the wire codes defined on
+/// [`KimiJsonRpcError`]) are matched first; an unknown code falls through to
+/// the message vocabulary, preserving the historic message-keyword fallback.
 fn classify_jsonrpc_error(code: i32, message: &str) -> SemanticErrorKind {
-    match code {
-        KimiJsonRpcError::AUTH_EXPIRED => return SemanticErrorKind::Configuration,
-        KimiJsonRpcError::CHAT_PROVIDER_ERROR => return SemanticErrorKind::ApiRemote,
-        KimiJsonRpcError::PARSE_ERROR
-        | KimiJsonRpcError::INVALID_REQUEST
-        | KimiJsonRpcError::METHOD_NOT_FOUND
-        | KimiJsonRpcError::INVALID_PARAMS
-        | KimiJsonRpcError::INTERNAL_ERROR => return SemanticErrorKind::AgentNative,
-        _ => {}
-    }
-    super::common::classify_error_by_keywords(&ERROR_KEYWORDS, None, Some(message))
+    super::common::classify_error_by_keywords(
+        super::vocabulary::error_keywords(Provider::KimiCode),
+        Some(code),
+        None,
+        Some(message),
+    )
 }
 
 #[cfg(test)]
@@ -1844,6 +1833,34 @@ mod tests {
         assert_eq!(
             classify_jsonrpc_error(0, "invalid api key"),
             SemanticErrorKind::Configuration
+        );
+    }
+
+    #[test]
+    fn classify_jsonrpc_error_code_wins_over_message() {
+        // A known numeric code is matched before the message vocabulary: the
+        // AUTH_EXPIRED code classifies as Configuration even though the message
+        // text alone ("rate limit") would otherwise resolve to ApiRemote.
+        assert_eq!(
+            classify_jsonrpc_error(KimiJsonRpcError::AUTH_EXPIRED, "rate limit exceeded"),
+            SemanticErrorKind::Configuration,
+            "numeric code_buckets must take precedence over the message branch"
+        );
+    }
+
+    #[test]
+    fn classify_jsonrpc_error_unknown_code_falls_through_to_message() {
+        // An unrecognized numeric code carries no bucket, so classification
+        // falls through to the message vocabulary rather than defaulting early.
+        assert_eq!(
+            classify_jsonrpc_error(12345, "billing quota exceeded"),
+            SemanticErrorKind::ApiRemote
+        );
+        // With neither a known code nor a matching needle, the fallthrough is
+        // the AgentNative default.
+        assert_eq!(
+            classify_jsonrpc_error(12345, "something inscrutable"),
+            SemanticErrorKind::AgentNative
         );
     }
 

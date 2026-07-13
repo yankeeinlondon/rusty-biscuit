@@ -459,22 +459,13 @@ fn is_numbered_list_start(s: &str) -> bool {
 /// Gemini errors carry a free-form `severity` field plus a message. This
 /// helper inspects both so the live error renderer and the end-of-run
 /// report can pick a consistent label and color.
-const ERROR_KEYWORDS: super::common::ErrorKeywords = super::common::ErrorKeywords {
-    kind_buckets: &[
-        (SemanticErrorKind::Configuration, &["auth", "permission", "config", "denied"]),
-        (SemanticErrorKind::ApiRemote, &["rate", "quota", "billing"]),
-        (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "abort"]),
-        (SemanticErrorKind::ApiRemote, &["api", "upstream", "server"]),
-    ],
-    msg_buckets: &[
-        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "api error"]),
-        (SemanticErrorKind::Configuration, &["api key", "authentication", "not authorized", "permission denied"]),
-        (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "aborted"]),
-    ],
-};
-
 fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticErrorKind {
-    super::common::classify_error_by_keywords(&ERROR_KEYWORDS, error_kind, message)
+    super::common::classify_error_by_keywords(
+        super::vocabulary::error_keywords(Provider::Gemini),
+        None,
+        error_kind,
+        message,
+    )
 }
 
 #[cfg(test)]
