@@ -26,6 +26,18 @@ pub const SESSION_DOMAIN: &str = "session";
 /// registers, one per host).
 pub const CAPABILITY_DOMAIN: &str = "capability";
 
+/// Domain prefix for checked-out-repos registers (Kind-2, one per
+/// host): canonical repo id → HEAD commit hash. Kept separate from the
+/// capability register because its cadence (every commit) is far
+/// hotter than the cold hardware fields.
+pub const REPOS_DOMAIN: &str = "repos";
+
+/// Domain prefix for active-session registers (Kind-2, one per host):
+/// session id → JSON entry describing a live session. Written on
+/// session *transitions* (start / status change / end — never
+/// heartbeats), read mesh-wide by the dashboard's NOW view.
+pub const SESSIONS_ACTIVE_DOMAIN: &str = "sessions-active";
+
 /// Typed identity of one synced document.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum DocumentId {
@@ -34,6 +46,18 @@ pub enum DocumentId {
     /// A host-capability register: `capability/{node_id}`.
     Capability {
         /// Node whose capabilities the register describes; also the
+        /// document's single writer.
+        owner_node_id: String,
+    },
+    /// A checked-out-repos register: `repos/{node_id}`.
+    Repos {
+        /// Node whose checkouts the register describes; also the
+        /// document's single writer.
+        owner_node_id: String,
+    },
+    /// An active-sessions register: `sessions-active/{node_id}`.
+    SessionsActive {
+        /// Node whose live sessions the register describes; also the
         /// document's single writer.
         owner_node_id: String,
     },
@@ -48,12 +72,30 @@ impl DocumentId {
         }
     }
 
+    /// Repos register id for `owner_node_id`.
+    #[must_use]
+    pub fn repos(owner_node_id: impl Into<String>) -> Self {
+        Self::Repos {
+            owner_node_id: owner_node_id.into(),
+        }
+    }
+
+    /// Active-sessions register id for `owner_node_id`.
+    #[must_use]
+    pub fn sessions_active(owner_node_id: impl Into<String>) -> Self {
+        Self::SessionsActive {
+            owner_node_id: owner_node_id.into(),
+        }
+    }
+
     /// The node allowed to write this document.
     #[must_use]
     pub fn owner_node_id(&self) -> &str {
         match self {
             Self::SessionChunk(chunk) => &chunk.owner_node_id,
-            Self::Capability { owner_node_id } => owner_node_id,
+            Self::Capability { owner_node_id }
+            | Self::Repos { owner_node_id }
+            | Self::SessionsActive { owner_node_id } => owner_node_id,
         }
     }
 
@@ -65,6 +107,10 @@ impl DocumentId {
             Self::SessionChunk(chunk) => chunk.as_path(),
             Self::Capability { owner_node_id } => {
                 format!("{CAPABILITY_DOMAIN}/{owner_node_id}")
+            }
+            Self::Repos { owner_node_id } => format!("{REPOS_DOMAIN}/{owner_node_id}"),
+            Self::SessionsActive { owner_node_id } => {
+                format!("{SESSIONS_ACTIVE_DOMAIN}/{owner_node_id}")
             }
         }
     }
@@ -96,29 +142,41 @@ pub enum DocumentIdParseError {
     #[error(transparent)]
     Chunk(#[from] ChunkIdParseError),
 
-    /// A capability path did not have exactly `capability/{node_id}`.
-    #[error("malformed capability id `{input}`: expected `capability/<node_id>`")]
-    CapabilityShape { input: String },
+    /// A register path did not have exactly `{domain}/{node_id}`.
+    #[error("malformed register id `{input}`: expected `{domain}/<node_id>`")]
+    RegisterShape { domain: &'static str, input: String },
 }
 
 impl FromStr for DocumentId {
     type Err = DocumentIdParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        fn register_owner(
+            s: &str,
+            domain: &'static str,
+        ) -> Result<String, DocumentIdParseError> {
+            let segments: Vec<&str> = s.split('/').collect();
+            if segments.len() != 2 || segments[1].is_empty() {
+                return Err(DocumentIdParseError::RegisterShape {
+                    domain,
+                    input: s.to_string(),
+                });
+            }
+            Ok(segments[1].to_string())
+        }
+
         let domain = s.split('/').next().unwrap_or_default();
         match domain {
             SESSION_DOMAIN => Ok(Self::SessionChunk(s.parse::<ChunkId>()?)),
-            CAPABILITY_DOMAIN => {
-                let segments: Vec<&str> = s.split('/').collect();
-                if segments.len() != 2 || segments[1].is_empty() {
-                    return Err(DocumentIdParseError::CapabilityShape {
-                        input: s.to_string(),
-                    });
-                }
-                Ok(Self::Capability {
-                    owner_node_id: segments[1].to_string(),
-                })
-            }
+            CAPABILITY_DOMAIN => Ok(Self::Capability {
+                owner_node_id: register_owner(s, CAPABILITY_DOMAIN)?,
+            }),
+            REPOS_DOMAIN => Ok(Self::Repos {
+                owner_node_id: register_owner(s, REPOS_DOMAIN)?,
+            }),
+            SESSIONS_ACTIVE_DOMAIN => Ok(Self::SessionsActive {
+                owner_node_id: register_owner(s, SESSIONS_ACTIVE_DOMAIN)?,
+            }),
             other => Err(DocumentIdParseError::UnknownDomain {
                 domain: other.to_string(),
                 input: s.to_string(),
@@ -160,14 +218,34 @@ mod tests {
     }
 
     #[test]
+    fn repos_round_trips() {
+        let id: DocumentId = "repos/node-d".parse().expect("parse");
+        assert_eq!(id, DocumentId::repos("node-d"));
+        assert_eq!(id.as_path(), "repos/node-d");
+        assert_eq!(id.owner_node_id(), "node-d");
+    }
+
+    #[test]
+    fn sessions_active_round_trips() {
+        let id: DocumentId = "sessions-active/node-e".parse().expect("parse");
+        assert_eq!(id, DocumentId::sessions_active("node-e"));
+        assert_eq!(id.as_path(), "sessions-active/node-e");
+        assert_eq!(id.owner_node_id(), "node-e");
+    }
+
+    #[test]
     fn malformed_known_domains_are_errors() {
         assert!(matches!(
             "capability/".parse::<DocumentId>(),
-            Err(DocumentIdParseError::CapabilityShape { .. })
+            Err(DocumentIdParseError::RegisterShape { .. })
         ));
         assert!(matches!(
             "capability/node/extra".parse::<DocumentId>(),
-            Err(DocumentIdParseError::CapabilityShape { .. })
+            Err(DocumentIdParseError::RegisterShape { .. })
+        ));
+        assert!(matches!(
+            "repos/node/extra".parse::<DocumentId>(),
+            Err(DocumentIdParseError::RegisterShape { .. })
         ));
         assert!(matches!(
             "session/only-two/segments".parse::<DocumentId>(),

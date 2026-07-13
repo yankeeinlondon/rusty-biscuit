@@ -66,6 +66,24 @@ service Rendezvous {
     // Enumerate host-capability registers known to this daemon: its
     // own plus the synced replica of every mesh peer's.
     rpc ListHostCapabilities(ListHostCapabilitiesRequest) returns (ListHostCapabilitiesResponse);
+
+    // Enumerate checked-out-repos registers known to this daemon: its
+    // own plus the synced replica of every mesh peer's. This is the
+    // scheduler's "which hosts already have this repo, and how fresh"
+    // read path.
+    rpc ListHostRepos(ListHostReposRequest) returns (ListHostReposResponse);
+
+    // Report a session lifecycle transition on THIS host. Producers
+    // (the Claudine wrapper today, the process monitor later) call this
+    // on start / meaningful status change / end — transitions, never
+    // heartbeats: every call writes this host's sessions-active
+    // register, which replicates to every mesh peer.
+    rpc ReportSessionEvent(ReportSessionEventRequest) returns (ReportSessionEventResponse);
+
+    // Enumerate the active-session registers known to this daemon: its
+    // own plus the synced replica of every mesh peer's. This is the
+    // dashboard's NOW-view read path.
+    rpc ListActiveSessions(ListActiveSessionsRequest) returns (ListActiveSessionsResponse);
 }
 
 message PingRequest {
@@ -347,6 +365,78 @@ message HostCapability {
 
 message ListHostCapabilitiesResponse {
     repeated HostCapability hosts = 1;
+}
+
+message ListHostReposRequest {}
+
+// One host's checked-out-repos register as currently known to this
+// daemon.
+message HostRepos {
+    // Document path (`repos/{node_id}`).
+    string document_id = 1;
+    // Hex-encoded node the register describes (also its single writer).
+    string owner_node_id = 2;
+    // Current map of canonical repo id → HEAD commit hash, as a JSON
+    // object string.
+    string repos_json = 3;
+}
+
+message ListHostReposResponse {
+    repeated HostRepos hosts = 1;
+}
+
+// Kind of session lifecycle transition being reported.
+enum SessionEventKind {
+    SESSION_EVENT_KIND_UNSPECIFIED = 0;
+    // A session started: creates the register entry (stamping
+    // started_at) and merges `details_json` into it.
+    SESSION_EVENT_KIND_STARTED = 1;
+    // A session's attributes changed (e.g. status flipped to
+    // waiting-on-user): merges `details_json` over the existing entry.
+    // Reported for transitions the dashboard should see, not as a
+    // heartbeat.
+    SESSION_EVENT_KIND_UPDATED = 2;
+    // A session ended: removes the register entry (the register holds
+    // only LIVE sessions; history belongs to the session log).
+    SESSION_EVENT_KIND_ENDED = 3;
+}
+
+message ReportSessionEventRequest {
+    // Producer-scoped session identifier (whatever identifier the
+    // producer natively has; correlation across producers happens
+    // downstream, per the logging-refactor rulings).
+    string session_id = 1;
+    SessionEventKind kind = 2;
+    // Session attributes as a JSON object string (agent, model, repo,
+    // status, interactive, pid, ...). Merged over the existing entry;
+    // ignored for ENDED. The daemon stamps started_at_unix_ms /
+    // updated_at_unix_ms itself.
+    string details_json = 3;
+}
+
+message ReportSessionEventResponse {
+    // Number of sessions active on this host after applying the event.
+    uint64 active_count = 1;
+}
+
+message ListActiveSessionsRequest {}
+
+// One host's active-session register as currently known to this daemon.
+message HostActiveSessions {
+    // Document path (`sessions-active/{node_id}`).
+    string document_id = 1;
+    // Hex-encoded node the register describes (also its single writer).
+    string owner_node_id = 2;
+    // session_id → entry-object map as a JSON object string. Entries
+    // carry the reported attributes plus daemon-stamped
+    // started_at_unix_ms / updated_at_unix_ms (consumers judge
+    // staleness from the latter; a crashed producer never reports its
+    // end).
+    string sessions_json = 3;
+}
+
+message ListActiveSessionsResponse {
+    repeated HostActiveSessions hosts = 1;
 }
 
 // ---------------------------------------------------------------------
