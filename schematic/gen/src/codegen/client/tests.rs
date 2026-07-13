@@ -168,6 +168,7 @@ fn generate_request_method_api_key_uses_self_env_auth() {
         "ApiKey",
         AuthStrategy::ApiKey {
             header: "X-API-Key".to_string(),
+            value_prefix: None,
         },
         vec!["X_API_KEY".to_string()],
     );
@@ -175,7 +176,7 @@ fn generate_request_method_api_key_uses_self_env_auth() {
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     assert!(code.contains("EnvAuthStrategy::ApiKey"));
-    assert!(code.contains("headers.header(header.clone(), key)"));
+    assert!(code.contains("headers.header(header.clone(), value)"));
     assert!(code.contains("let env_mapping = self.headers.env_mapping().clone();"));
     assert!(code.contains(".api_key"));
     assert!(code.contains("AuthenticationRequired"));
@@ -230,6 +231,7 @@ fn generate_request_method_all_auth_strategies_validate() {
         "Test",
         AuthStrategy::ApiKey {
             header: "X-Key".to_string(),
+            value_prefix: None,
         },
         vec!["KEY".to_string()],
     );

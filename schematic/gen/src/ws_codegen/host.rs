@@ -413,7 +413,7 @@ fn generate_accept_and_auth_helpers(
     };
 
     match strategy {
-        schematic_define::AuthStrategy::ApiKey { header } => {
+        schematic_define::AuthStrategy::ApiKey { header, .. } => {
             let header_name = header.clone();
             let env_names = env_auth.to_vec();
             let common_helpers = super::shared::generate_host_common_auth_helpers(&env_names);
@@ -536,6 +536,7 @@ mod tests {
         plan.auth = WsAuthStrategy::HeaderBased {
             strategy: schematic_define::AuthStrategy::ApiKey {
                 header: "auth-token".to_string(),
+                value_prefix: None,
             },
             env_auth: vec!["UCR_INTEGRATION_TOKEN".to_string()],
         };

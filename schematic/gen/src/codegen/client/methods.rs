@@ -141,6 +141,35 @@ pub(crate) fn generate_json_request_method(
             &self,
             request: impl Into<#request_enum>,
         ) -> Result<T, SchematicError> {
+            let request = request.into();
+
+            // Steer non-JSON endpoints to their dedicated decoder instead of
+            // decoding text/binary/empty bodies as JSON.
+            match request.response_kind() {
+                crate::shared::ResponseKind::Json => {}
+                crate::shared::ResponseKind::Text => {
+                    return Err(SchematicError::WrongResponseDecoder {
+                        endpoint_id: request.endpoint_id(),
+                        kind: "text",
+                        expected_method: "request_text",
+                    });
+                }
+                crate::shared::ResponseKind::Binary => {
+                    return Err(SchematicError::WrongResponseDecoder {
+                        endpoint_id: request.endpoint_id(),
+                        kind: "binary",
+                        expected_method: "request_bytes",
+                    });
+                }
+                crate::shared::ResponseKind::Empty => {
+                    return Err(SchematicError::WrongResponseDecoder {
+                        endpoint_id: request.endpoint_id(),
+                        kind: "empty",
+                        expected_method: "request_empty",
+                    });
+                }
+            }
+
             let (response, ctx) = self.build_and_send_request(request).await?;
 
             // Check if hooks are configured

@@ -7,7 +7,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::{ApiRequest, Endpoint};
 
-use crate::codegen::request_structs::shared::{QueryParamInfo, to_snake_case};
+use crate::codegen::request_structs::shared::{QueryParamInfo, param_field_name};
 
 /// Generates the body field if the endpoint has a request schema.
 pub fn generate_body_field(endpoint: &Endpoint) -> TokenStream {
@@ -70,7 +70,7 @@ pub fn generate_from_body_impl(
         let query_field_inits: Vec<_> = query_params
             .iter()
             .map(|qp| {
-                let name = format_ident!("{}", to_snake_case(&qp.name));
+                let name = format_ident!("{}", param_field_name(&qp.name));
                 quote! { #name: None }
             })
             .collect();

@@ -5,7 +5,7 @@ use quote::quote;
 
 use crate::codegen::{
     generate_error_type, generate_paginated_trait, generate_request_parts_type,
-    generate_variant_types,
+    generate_response_kind_type, generate_variant_types,
 };
 
 /// Assembles the shared module code (shared.rs).
@@ -22,6 +22,7 @@ use crate::codegen::{
 /// A TokenStream containing the shared module code.
 pub fn assemble_shared_module() -> TokenStream {
     let request_parts_type = generate_request_parts_type();
+    let response_kind_type = generate_response_kind_type();
     let error_type = generate_error_type();
     let variant_types = generate_variant_types();
     let paginated_trait = generate_paginated_trait();
@@ -48,6 +49,8 @@ pub fn assemble_shared_module() -> TokenStream {
         pub use schematic_define::{AuthPolicy, AuthStrategy, EnvAuthStrategy, Headers, OAuth2Config, UpdateStrategy};
 
         #request_parts_type
+
+        #response_kind_type
 
         #error_type
 

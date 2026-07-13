@@ -36,12 +36,59 @@
 //! assert!(validate_api(&api).is_ok());
 //! ```
 
+use schematic_define::openapi::import::naming::sanitize_rust_field_ident;
 use schematic_define::{ApiRequest, RestApi};
 
 use crate::errors::GeneratorError;
 
 /// Default suffix appended to endpoint IDs to form request struct names.
 const DEFAULT_REQUEST_SUFFIX: &str = "Request";
+
+/// Checks that `name` can be used directly as a Rust type/variant identifier.
+///
+/// Emitters feed the API name and endpoint IDs straight into `format_ident!`,
+/// which panics on an empty string, a leading digit, punctuation, or a Rust
+/// keyword. Parsing as a [`syn::Ident`] reproduces exactly that acceptance test
+/// without the panic.
+fn ensure_valid_type_ident(context: &str, name: &str) -> Result<(), GeneratorError> {
+    if syn::parse_str::<syn::Ident>(name).is_ok() {
+        return Ok(());
+    }
+
+    let reason = if name.is_empty() {
+        "name is empty".to_string()
+    } else if name.starts_with(|c: char| c.is_ascii_digit()) {
+        "a Rust identifier cannot start with a digit".to_string()
+    } else {
+        "name is a Rust keyword or contains characters that are not valid in an identifier"
+            .to_string()
+    };
+
+    Err(GeneratorError::InvalidIdentifier {
+        context: context.to_string(),
+        name: name.to_string(),
+        reason,
+    })
+}
+
+/// Checks that a path or query parameter name yields a usable, distinct field
+/// identifier after sanitization.
+///
+/// Parameter names are routed through [`sanitize_rust_field_ident`] before
+/// becoming struct fields, so unlike type identifiers they cannot panic. The
+/// only failure worth flagging is a name that sanitizes to nothing meaningful
+/// (the sanitizer's `field` fallback), which would silently rename the
+/// parameter to an opaque `field`.
+fn ensure_valid_param_ident(context: &str, name: &str) -> Result<(), GeneratorError> {
+    if sanitize_rust_field_ident(name) == "field" && name != "field" {
+        return Err(GeneratorError::InvalidIdentifier {
+            context: context.to_string(),
+            name: name.to_string(),
+            reason: "name has no representable identifier characters".to_string(),
+        });
+    }
+    Ok(())
+}
 
 /// Validates an API definition before code generation.
 ///
@@ -126,9 +173,27 @@ pub fn validate_api(api: &RestApi) -> Result<(), GeneratorError> {
         }
     }
 
-    // Check 2: Validate body type names don't conflict with wrapper struct names
+    // Check 2: The API name becomes a type identifier (e.g. `{name}Request`).
+    ensure_valid_type_ident("API name", &api.name)?;
+
     for endpoint in &api.endpoints {
-        // Only JSON requests have typed body fields that could conflict
+        // Check 3: Endpoint IDs become type and variant identifiers.
+        ensure_valid_type_ident("endpoint ID", &endpoint.id)?;
+
+        // Check 4: Path and query parameter names must sanitize to a usable
+        // field identifier rather than the opaque `field` fallback.
+        let path_params = crate::parser::extract_path_params(&endpoint.path);
+        for param in path_params {
+            ensure_valid_param_ident("path parameter", param)?;
+        }
+        if let Some(params) = &endpoint.params {
+            for query in &params.query {
+                ensure_valid_param_ident("query parameter", &query.name)?;
+            }
+        }
+
+        // Check 5: Validate body type names don't conflict with wrapper struct
+        // names. Only JSON requests have typed body fields that could conflict.
         if let Some(ApiRequest::Json(schema)) = &endpoint.request {
             let wrapper_name = format!("{}{}", endpoint.id, suffix);
 
@@ -386,6 +451,120 @@ mod tests {
         assert!(msg.contains("CreateUserRequest"));
         assert!(msg.contains("CreateUserBody"));
         assert!(msg.contains("Suggestion") || msg.contains("rename"));
+    }
+
+    #[test]
+    fn endpoint_id_with_leading_digit_is_rejected() {
+        let mut api = make_test_api();
+        api.endpoints = vec![make_endpoint_no_body("2fa")];
+
+        match validate_api(&api).unwrap_err() {
+            GeneratorError::InvalidIdentifier {
+                context,
+                name,
+                reason,
+            } => {
+                assert_eq!(context, "endpoint ID");
+                assert_eq!(name, "2fa");
+                assert!(reason.contains("digit"));
+            }
+            other => panic!("Expected InvalidIdentifier, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn endpoint_id_with_punctuation_is_rejected() {
+        let mut api = make_test_api();
+        // A raw operationId like "list-models" would panic in `format_ident!`.
+        api.endpoints = vec![make_endpoint_no_body("list-models")];
+
+        assert!(matches!(
+            validate_api(&api),
+            Err(GeneratorError::InvalidIdentifier { .. })
+        ));
+    }
+
+    #[test]
+    fn keyword_endpoint_id_is_rejected() {
+        let mut api = make_test_api();
+        api.endpoints = vec![make_endpoint_no_body("struct")];
+
+        assert!(matches!(
+            validate_api(&api),
+            Err(GeneratorError::InvalidIdentifier { .. })
+        ));
+    }
+
+    #[test]
+    fn invalid_api_name_is_rejected() {
+        let mut api = make_test_api();
+        api.name = "9Lives".to_string();
+
+        match validate_api(&api).unwrap_err() {
+            GeneratorError::InvalidIdentifier { context, .. } => {
+                assert_eq!(context, "API name");
+            }
+            other => panic!("Expected InvalidIdentifier, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unrepresentable_query_param_name_is_rejected() {
+        use schematic_define::params::{EndpointParams, ParamStyle, QueryParamType};
+        use schematic_define::ParamDef;
+
+        let mut api = make_test_api();
+        let mut endpoint = make_endpoint_no_body("ListItems");
+        endpoint.params = Some(EndpointParams {
+            query: vec![ParamDef {
+                // An empty name sanitizes to the opaque `field` fallback.
+                name: String::new(),
+                required: false,
+                description: None,
+                param_type: QueryParamType::String,
+                explode: false,
+                style: ParamStyle::Form,
+            }],
+            header: vec![],
+            cookie: vec![],
+            pagination: None,
+            response_pagination: None,
+        });
+        api.endpoints = vec![endpoint];
+
+        match validate_api(&api).unwrap_err() {
+            GeneratorError::InvalidIdentifier { context, .. } => {
+                assert_eq!(context, "query parameter");
+            }
+            other => panic!("Expected InvalidIdentifier, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn special_char_param_names_that_sanitize_cleanly_pass() {
+        use schematic_define::params::{EndpointParams, ParamStyle, QueryParamType};
+        use schematic_define::ParamDef;
+
+        let mut api = make_test_api();
+        let mut endpoint = make_endpoint_no_body("ListItems");
+        // `$top` sanitizes to `_top` — representable, so validation passes.
+        endpoint.params = Some(EndpointParams {
+            query: vec![ParamDef {
+                name: "$top".to_string(),
+                required: false,
+                description: None,
+                param_type: QueryParamType::Integer,
+                explode: false,
+                style: ParamStyle::Form,
+            }],
+            header: vec![],
+            cookie: vec![],
+            pagination: None,
+            response_pagination: None,
+        });
+        api.endpoints = vec![endpoint];
+
+        assert!(validate_api(&api).is_ok());
     }
 
     #[test]

@@ -112,16 +112,19 @@ fn make_dual_auth_api() -> RestApi {
         docs_url: None,
         auth: AuthStrategy::ApiKey {
             header: "X-API-Key".to_string(),
+            value_prefix: None,
         },
         auth_policy: Some(AuthPolicy {
             explicit: vec![
                 AuthMethod::ApiKey {
                     header: "X-API-Key".to_string(),
+                    value_prefix: None,
                 },
                 AuthMethod::OAuth2(oauth),
             ],
             env_fallback: Some(EnvAuthStrategy::ApiKey {
                 header: "X-API-Key".to_string(),
+                value_prefix: None,
             }),
         }),
         env_auth: vec!["DUAL_AUTH_API_KEY".to_string()],
@@ -341,6 +344,7 @@ fn api_key_uses_runtime_auth_matching() {
         "ApiKeyApi",
         AuthStrategy::ApiKey {
             header: "X-API-Key".to_string(),
+            value_prefix: None,
         },
         vec!["API_SECRET".to_string()],
     );
@@ -368,7 +372,7 @@ fn api_key_uses_runtime_auth_matching() {
     );
 
     assert!(
-        code.contains("headers.header(header.clone(), key)"),
+        code.contains("headers.header(header.clone(), value)"),
         "Should write the API key header through Headers\nGenerated code:\n{}",
         code
     );
@@ -622,5 +626,76 @@ fn request_enum_has_into_parts_method() {
         code.contains("impl TestApiRequest") && code.contains("fn into_parts"),
         "Request enum should have into_parts method\nGenerated code:\n{}",
         code
+    );
+}
+
+/// Builds an API with a JSON endpoint (so the generic `request<T>` is emitted)
+/// and a plain-text endpoint (which must be rejected through that path).
+fn make_text_response_api() -> RestApi {
+    RestApi {
+        name: "TextApi".to_string(),
+        description: "Text API".to_string(),
+        base_url: "https://api.example.com/v1".to_string(),
+        docs_url: None,
+        auth: AuthStrategy::None,
+        auth_policy: None,
+        env_auth: vec![],
+        env_username: None,
+        env_mapping: None,
+        headers: vec![],
+        endpoints: vec![
+            Endpoint {
+                id: "GetJson".to_string(),
+                method: RestMethod::Get,
+                path: "/json".to_string(),
+                description: "Get JSON".to_string(),
+                request: None,
+                response: ApiResponse::json_type("JsonResponse"),
+                headers: vec![],
+                params: None,
+                oauth_scopes: None,
+            },
+            Endpoint {
+                id: "GetPlainText".to_string(),
+                method: RestMethod::Get,
+                path: "/text".to_string(),
+                description: "Get plain text".to_string(),
+                request: None,
+                response: ApiResponse::Text,
+                headers: vec![],
+                params: None,
+                oauth_scopes: None,
+            },
+        ],
+        module_path: None,
+        request_suffix: None,
+        version: None,
+    }
+}
+
+#[test]
+fn text_endpoint_is_rejected_through_generic_request() {
+    let api = make_text_response_api();
+    let code = format_tokens(&assemble_api_code(&api));
+
+    // The request enum reports the endpoint's response kind...
+    assert!(
+        code.contains("fn response_kind(&self)"),
+        "request enum should expose response_kind()\nGenerated code:\n{code}"
+    );
+    assert!(
+        code.contains("ResponseKind::Text"),
+        "text endpoint should map to ResponseKind::Text\nGenerated code:\n{code}"
+    );
+
+    // ...and the generic JSON request() guards against non-JSON endpoints,
+    // steering callers to `request_text` instead of a spurious JSON error.
+    assert!(
+        code.contains("WrongResponseDecoder"),
+        "generic request() should reject non-JSON endpoints\nGenerated code:\n{code}"
+    );
+    assert!(
+        code.contains(r#""request_text""#),
+        "the guard should name the request_text convenience method\nGenerated code:\n{code}"
     );
 }

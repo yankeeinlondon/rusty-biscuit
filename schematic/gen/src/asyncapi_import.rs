@@ -288,7 +288,10 @@ fn infer_auth_strategy(doc: &Value, diagnostics: &mut Vec<OpenApiDiagnostic>) ->
                     .and_then(Value::as_str)
                     .unwrap_or("X-API-Key")
                     .to_string();
-                return AuthStrategy::ApiKey { header };
+                return AuthStrategy::ApiKey {
+                    header,
+                    value_prefix: None,
+                };
             }
             "http" => {
                 let inner_scheme = scheme
@@ -850,7 +853,7 @@ components:
         let result = run_import_asyncapi(&options).unwrap();
         assert!(matches!(
             result.ws_api.auth,
-            AuthStrategy::ApiKey { ref header } if header == "API-KEY"
+            AuthStrategy::ApiKey { ref header, .. } if header == "API-KEY"
         ));
     }
 }

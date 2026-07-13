@@ -93,6 +93,18 @@ fn generate_ws_error() -> TokenStream {
             /// Correlation error (unmatched response).
             #[error("Correlation error: {0}")]
             Correlation(String),
+
+            /// A connection header could not be represented as an HTTP header.
+            ///
+            /// Returned instead of silently dropping the header, so a malformed
+            /// auth header surfaces here rather than as an opaque auth rejection.
+            #[error("Invalid connection header `{name}`: {reason}")]
+            InvalidHeader {
+                /// The offending header name.
+                name: String,
+                /// Why the name or value was rejected.
+                reason: String,
+            },
         }
     }
 }

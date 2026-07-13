@@ -41,12 +41,14 @@ pub(super) fn generate_accessors(_struct_name: &Ident) -> TokenStream {
         /// Returns `None` if the authentication strategy is not `ApiKey`
         /// or if the API key environment variable is not set.
         pub fn api_key_header(&self) -> Option<(String, String)> {
-            let header = self
+            let (header, value_prefix) = self
                 .auth_policy
                 .explicit
                 .iter()
                 .find_map(|method| match method {
-                    schematic_define::AuthMethod::ApiKey { header } => Some(header.clone()),
+                    schematic_define::AuthMethod::ApiKey { header, value_prefix } => {
+                        Some((header.clone(), value_prefix.clone()))
+                    }
                     _ => None,
                 })
                 .or_else(|| {
@@ -54,23 +56,24 @@ pub(super) fn generate_accessors(_struct_name: &Ident) -> TokenStream {
                         .env_mapping()
                         .api_key
                         .as_ref()
-                        .map(|api_key| api_key.header.clone())
-                });
+                        .map(|api_key| (api_key.header.clone(), None))
+                })?;
 
-            header.and_then(|header| {
-                self.headers
-                    .env_mapping()
-                    .api_key
-                    .as_ref()
-                    .and_then(|api_key| {
-                        api_key
-                            .names
-                            .names()
-                            .iter()
-                            .find_map(|env_name| std::env::var(env_name).ok())
-                    })
-                    .map(|value| (header, value))
-            })
+            self.headers
+                .env_mapping()
+                .api_key
+                .as_ref()
+                .and_then(|api_key| {
+                    api_key
+                        .names
+                        .names()
+                        .iter()
+                        .find_map(|env_name| std::env::var(env_name).ok())
+                })
+                .map(|value| {
+                    let value = format!("{}{}", value_prefix.clone().unwrap_or_default(), value);
+                    (header, value)
+                })
         }
     }
 }
