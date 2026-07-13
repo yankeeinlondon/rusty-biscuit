@@ -96,6 +96,22 @@ do not belong here.
   repository path, and do not push commits.
 - In zsh wrappers, avoid special variable names such as `status` and `path`.
 
+## Sub-Agent Message Delivery
+
+- When the orchestrator delegates a commit to a sub-agent via heredoc, the
+  body sometimes truncates mid-line: the file set, tree, and subject land
+  correctly, but the trailing bullets of a long message are lost. The cause
+  appears to be sub-agent shell-tool delivery, not shell expansion (single-
+  quoted `<<'COMMIT_MSG'` still drops content). Observed twice in a single
+  concurrent batch, so it is a reproducible pattern, not a one-off.
+- Mitigation: keep sub-agent message bodies short (3–5 bullets, ≤20 lines).
+  Verify the committed body with `git log -1 --format=%B <hash>` after each
+  sub-agent commit; do not trust the sub-agent's textual report alone, since
+  the truncation often shows up only on the actual commit.
+- A truncated body is not corruption. Per the Concurrency rule, do not amend
+  mid-batch — accept the loss, note it in the orchestrator's summary, and let
+  the developer decide whether to rewrite the message after the batch settles.
+
 ## Verification
 
 - A successful `git commit` exit status is authoritative for that invocation.
