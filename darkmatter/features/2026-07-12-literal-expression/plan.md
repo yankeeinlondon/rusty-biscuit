@@ -4,6 +4,17 @@ total_phases: 7
 created: 2026-07-12
 phase: 1
 yolo: "true"
+source_files_during_phase_1:
+  - darkmatter/lib/tests/schemas_literal_expression.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1:
+  - darkmatter/features/2026-07-12-literal-expression/phase1-impact.md
+  - darkmatter/features/2026-07-12-literal-expression/phase1-test-matrix.md
+  - darkmatter/features/2026-07-12-literal-expression/phase1-baseline.txt
+  - darkmatter/features/2026-07-12-literal-expression/phase1-baseline-about.txt
+skills_files_updated_during_phase_1: []
+packages:
+  - darkmatter
 ---
 
 # Execution Plan: SimplifiedSchema `literal` and `expression` Types
@@ -34,55 +45,55 @@ schema semantics.
 
 ## Phase 1: Baseline, Impact Analysis, and Test Matrix
 
-- [ ] Refresh the GitNexus index with `node .gitnexus/run.cjs analyze` because
+- [x] Refresh the GitNexus index with `node .gitnexus/run.cjs analyze` because
   the planning-time index reported no indexed repositories; confirm
   `gitnexus://repo/rusty-biscuit/context` is current before code edits.
-- [ ] Run upstream GitNexus impact analysis before editing each existing symbol
+- [x] Run upstream GitNexus impact analysis before editing each existing symbol
   selected during implementation, including the grammar entry point, schema
   conversion/type-fragment logic, constraint linting, coercion target
   selection/write-back, format registration, trigger primitive matching,
   union validation/reporting, and DMLS frontmatter completion/hover/diagnostic
   entry points; record direct callers, affected processes, and risk. Stop and
   warn before proceeding on any HIGH or CRITICAL result.
-- [ ] Capture the pre-change output for representative existing schema fixtures
+- [x] Capture the pre-change output for representative existing schema fixtures
   and `md schema validate` union failures so byte-identical behavior can be
   checked for schemas without literal discriminants.
-- [ ] Map each acceptance criterion to a focused test location: grammar and
+- [x] Map each acceptance criterion to a focused test location: grammar and
   serialization unit/proptest coverage, conversion snapshots, validation table
   fixtures, coercion tests, trigger matcher tests, schema-about parity tests,
   DMLS provider tests, and `dmls/tests/no_side_effects.rs`.
-- [ ] Add failing tests for the complete scalar matrix and boundary cases:
+- [x] Add failing tests for the complete scalar matrix and boundary cases:
   quoted versus bare strings/booleans/numbers, numberlike boundaries, rejected
   bare `null`, protected punctuation, missing/multiple literal values, arrays,
   defaults, optional nullability, pending values, expression dialect superset,
   and mappings/sequences that must not coerce.
-- [ ] Validation checkpoint: verify the baseline suites are green before new
+- [x] Validation checkpoint: verify the baseline suites are green before new
   failing tests, and verify each new test fails for the intended missing
   behavior rather than fixture or harness errors.
 
 ## Phase 2: Schema Vocabulary, Grammar, and Canonical Serialization
 
-- [ ] Add `SimplifiedType::Literal` and `SimplifiedType::Expression` with stable
+- [x] Add `SimplifiedType::Literal` and `SimplifiedType::Expression` with stable
   keyword mappings, plus `Constraint::LiteralValue(serde_json::Value)` whose
   keyword placeholder mirrors `Members`; update exhaustive matches and parity
   tests without making either type inferable in `detect.rs`.
-- [ ] Extract or reuse the enum member lexer so literal parsing accepts exactly
+- [x] Extract or reuse the enum member lexer so literal parsing accepts exactly
   one bare or quoted positional scalar, preserves quoted values as strings,
   types bare bool/numberlike values, and rejects bare `null` with actionable
   errors; keep `SimplifiedType: Copy` by storing the value in the constraint.
-- [ ] Extend grammar parsing so `literal(value; constraints)` follows the enum
+- [x] Extend grammar parsing so `literal(value; constraints)` follows the enum
   delimiter rules, reports `literal requires a value`, directs multiple values
   to `enum(...)`, rejects a bare Literal atom without `LiteralValue`, and allows
   the uniform `[]` suffix.
-- [ ] Parse bare `expression` through the ordinary keyword path and reserve
+- [x] Parse bare `expression` through the ordinary keyword path and reserve
   parameterized `expression(...)` by rejecting it in v1.
-- [ ] Extend canonical serialization and proptest generators/shrinkers so all
+- [x] Extend canonical serialization and proptest generators/shrinkers so all
   literal scalar forms, quoting-sensitive values, arrays, unions, and
   `expression` parse-serialize-reparse to equivalent ASTs.
-- [ ] Add/update schema type descriptors and parity coverage so
+- [x] Add/update schema type descriptors and parity coverage so
   `md schema about` lists both types in deterministic order with their allowed
   constraints and coercion semantics.
-- [ ] Validation checkpoint: run focused grammar, serialization, proptest, and
+- [x] Validation checkpoint: run focused grammar, serialization, proptest, and
   descriptor parity tests; confirm malformed forms produce the specified
   `SchemaError` class and messages.
 

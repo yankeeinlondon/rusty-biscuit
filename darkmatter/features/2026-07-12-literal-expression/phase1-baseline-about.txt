@@ -1,0 +1,207 @@
+# Phase 1 Baseline — pre-change 'md schema about' (descriptor parity; spec AC #8)
+# Generated 2026-07-13T04:13:09Z, commit 958dd0dac
+
+ [1m[33mSimplifiedSchema Language Reference[0m[0m
+
+ A SimplifiedSchema describes the frontmatter a Markdown file expects. Put it
+ under [38;2;152;195;121m[48;2;40;44;52m$schema[0m to name required fields, allowed types, defaults, and simple
+ constraints. Darkmatter uses that schema when you run [38;2;152;195;121m[48;2;40;44;52mmd schema validate[0m and
+ during compose, so invalid frontmatter fails early and common string values
+ can be coerced before the page is rendered.
+
+ Use this as a quick authoring reference: what shapes are allowed, which type
+ keywords exist, which constraints can be attached, and what Darkmatter does
+ with values during compose.
+
+ [1mSchema Shapes[0m
+
+ A [38;2;152;195;121m[48;2;40;44;52m$schema[0m value can use any of these forms. Choose the simplest shape that
+ describes the frontmatter you expect.
+
+ - [1mSingle object.[0m Use this for the common case: property names mapped to type
+   expressions.
+   - Example: [38;2;152;195;121m[48;2;40;44;52mtitle: string(required)[0m
+ - [1mRoot-level union.[0m Use this when a document may follow one of several
+   schema alternatives.
+   - Example: [38;2;152;195;121m[48;2;40;44;52m- title: string\n- ./schemas/post.yaml[0m
+ - [1mProperty-level union.[0m Use this when one property may have one of several
+   allowed types.
+   - Example: [38;2;152;195;121m[48;2;40;44;52mdata: [string, "{ foo: string }"][0m
+ - [1mInline object literal.[0m Use this to validate a nested object without
+   creating a separate schema file.
+   - Example: [38;2;152;195;121m[48;2;40;44;52m{ foo: string(required), bar: number }[0m
+ - [1mNested mapping object.[0m Use a YAML mapping as a property value to declare a
+   nested object shape. Equivalent to the inline object literal for the
+   cases both forms can express; the mapping form additionally permits
+   sequence union arms without quoting.
+   - Example: [38;2;152;195;121m[48;2;40;44;52maddr:\n  street: string\n  zip: number[0m
+
+ [1mType System[0m
+
+ ┌────────────┬───────────────────────────────────┬──────────────────────────┐
+ │ Type       │ Meaning                           │ Constraints              │
+ ├────────────┼───────────────────────────────────┼──────────────────────────┤
+ │ [1mstring[0m     │ Text.                             │ min, max, not-empty,     │
+ │            │                                   │ pattern, suggest,        │
+ │            │                                   │ default, required        │
+ │[48;2;36;40;59m [1mdate[0m[48;2;36;40;59m[48;2;36;40;59m       │ ISO-8601 date ([2mYYYY-MM-DD[0m[48;2;36;40;59m).[48;2;36;40;59m       │ default, required[48;2;36;40;59m        [49m│
+ │ [1mdatetime[0m   │ ISO-8601 datetime.                │ default, required        │
+ │[48;2;36;40;59m [1mtime[0m[48;2;36;40;59m[48;2;36;40;59m       │ Time of day with optional[48;2;36;40;59m         │ default, required[48;2;36;40;59m        [49m│
+ │[48;2;36;40;59m           [48;2;36;40;59m │ timezone.[48;2;36;40;59m                         │                         [48;2;36;40;59m [49m│
+ │ [1mnumber[0m     │ A numeric value.                  │ min, max, integer,       │
+ │            │                                   │ suggest, default,        │
+ │            │                                   │ required                 │
+ │[48;2;36;40;59m [1mnumberlike[0m[48;2;36;40;59m[48;2;36;40;59m │ A number, or a string that can[48;2;36;40;59m    │ default, required[48;2;36;40;59m        [49m│
+ │[48;2;36;40;59m           [48;2;36;40;59m │ be coerced to a number during[48;2;36;40;59m     │                         [48;2;36;40;59m [49m│
+ │[48;2;36;40;59m           [48;2;36;40;59m │ compose.[48;2;36;40;59m                          │                         [48;2;36;40;59m [49m│
+ │ [1mboolean[0m    │ A true or false value.            │ default, required        │
+ │[48;2;36;40;59m [1mboolish[0m[48;2;36;40;59m[48;2;36;40;59m    │ A boolean, or a [2mtrue[0m[48;2;36;40;59m / [2mfalse[0m[48;2;36;40;59m[48;2;36;40;59m      │ default, required[48;2;36;40;59m        [49m│
+ │[48;2;36;40;59m           [48;2;36;40;59m │ string that can be coerced[48;2;36;40;59m        │                         [48;2;36;40;59m [49m│
+ │[48;2;36;40;59m           [48;2;36;40;59m │ during compose.[48;2;36;40;59m                   │                         [48;2;36;40;59m [49m│
+ │ [1mobject[0m     │ Any object shape. Use an inline   │ default, required        │
+ │            │ object literal when you want to   │                          │
+ │            │ validate nested fields.           │                          │
+ │[48;2;36;40;59m [1mfile[0m[48;2;36;40;59m[48;2;36;40;59m       │ A path-like file reference. Lazy[48;2;36;40;59m  │ eager, match, default,[48;2;36;40;59m   [49m│
+ │[48;2;36;40;59m           [48;2;36;40;59m │ by default (syntax-only); add[48;2;36;40;59m     │ required[48;2;36;40;59m                 [49m│
+ │[48;2;36;40;59m           [48;2;36;40;59m │ [2meager[0m[48;2;36;40;59m to require the file to[48;2;36;40;59m      │                         [48;2;36;40;59m [49m│
+ │[48;2;36;40;59m           [48;2;36;40;59m │ exist. Use [2mmatch(...)[0m[48;2;36;40;59m to suggest[48;2;36;40;59m  │                         [48;2;36;40;59m [49m│
+ │[48;2;36;40;59m           [48;2;36;40;59m │ accepted paths.[48;2;36;40;59m                   │                         [48;2;36;40;59m [49m│
+ │ [1menum[0m       │ Value must be one of the          │ <members>, default,      │
+ │            │ constraint-supplied members.      │ required                 │
+ │[48;2;36;40;59m [1murl[0m[48;2;36;40;59m[48;2;36;40;59m        │ Absolute URL.[48;2;36;40;59m                     │ scheme, default,[48;2;36;40;59m         [49m│
+ │[48;2;36;40;59m           [48;2;36;40;59m │                                  [48;2;36;40;59m │ required[48;2;36;40;59m                 [49m│
+ │ [1memail[0m      │ RFC 5322 addr-spec.               │ default, required        │
+ │[48;2;36;40;59m [1many[0m[48;2;36;40;59m[48;2;36;40;59m        │ Anything. Useful when you only[48;2;36;40;59m    │ required[48;2;36;40;59m                 [49m│
+ │[48;2;36;40;59m           [48;2;36;40;59m │ care that a property exists.[48;2;36;40;59m      │                         [48;2;36;40;59m [49m│
+ └────────────┴───────────────────────────────────┴──────────────────────────┘
+
+ Any of the above types can be made into an array by adding [38;2;152;195;121m[48;2;40;44;52m[][0m to the end of
+ the type:
+
+                                                                        [0m[48;2;250;250;250m[38;2;0;0;0m yaml [0m
+ [0m[48;2;250;250;250m                                                                             [0m
+ [0m[48;2;250;250;250m [38;2;228;86;73m$schema[38;2;56;58;66m:                                                                    [0m
+ [0m[48;2;250;250;250m [38;2;56;58;66m    [38;2;160;161;167m#[38;2;160;161;167m a string type                                                         [0m
+ [0m[48;2;250;250;250m [38;2;56;58;66m    [38;2;228;86;73mfoo[38;2;56;58;66m:[38;2;56;58;66m [38;2;80;161;79mstring                                                             [0m
+ [0m[48;2;250;250;250m [38;2;56;58;66m    [38;2;160;161;167m#[38;2;160;161;167m can be made into a string array                                       [0m
+ [0m[48;2;250;250;250m [38;2;56;58;66m    [38;2;228;86;73mbar[38;2;56;58;66m:[38;2;56;58;66m [38;2;80;161;79mstring[]                                                           [0m
+ [0m[48;2;250;250;250m                                                                             [0m
+
+ All types listed here, including those with the [38;2;152;195;121m[48;2;40;44;52m[][0m array modifier, can add
+ constraints to the type by putting parentheses after the type. Multiple
+ constraints are always delimited by the [38;2;152;195;121m[48;2;40;44;52m;[0m character. As an example:
+
+                                                                        [0m[48;2;250;250;250m[38;2;0;0;0m yaml [0m
+ [0m[48;2;250;250;250m                                                                             [0m
+ [0m[48;2;250;250;250m [38;2;228;86;73m$schema[38;2;56;58;66m:                                                                    [0m
+ [0m[48;2;250;250;250m [38;2;56;58;66m  [38;2;228;86;73mfoo[38;2;56;58;66m:[38;2;56;58;66m [38;2;80;161;79mstring(required)                                                     [0m
+ [0m[48;2;250;250;250m [38;2;56;58;66m  [38;2;228;86;73mbar[38;2;56;58;66m:[38;2;56;58;66m [38;2;80;161;79m"[38;2;80;161;79mnumber(required; min(0); max(10))[38;2;80;161;79m"                                  [0m
+ [0m[48;2;250;250;250m [38;2;56;58;66m  [38;2;228;86;73mbaz[38;2;56;58;66m:[38;2;56;58;66m [38;2;80;161;79m"[38;2;80;161;79mstring[](min(1))[38;2;80;161;79m"                                                   [0m
+ [0m[48;2;250;250;250m                                                                             [0m
+
+ In this example, constraints are added to a string, a number, and an array
+ of strings. The next section lists the available constraints.
+
+ [38;2;100;100;100m▐   [39m[1mNote:[0m the [3mvalues[0m in schemas must be valid YAML strings. In some cases
+ [38;2;100;100;100m▐   [39myou won't need to put single or double quotes around them, but you can
+ [38;2;100;100;100m▐   [39malways quote the string and then you don't need to think about it.
+
+ [1mConstraint Vocabulary[0m
+
+ Constraints go inside [38;2;152;195;121m[48;2;40;44;52m(...)[0m after a type, separated by commas or semicolons.
+ They narrow what a value may contain or provide metadata such as defaults.
+
+ ┌──────────────────────────┬──────────────────┬─────────────────────────────┐
+ │ Write                    │ Applies To       │ Meaning                     │
+ ├──────────────────────────┼──────────────────┼─────────────────────────────┤
+ │ required                 │ all types        │ The property must be        │
+ │                          │                  │ present.                    │
+ │[48;2;36;40;59m default([2mvalue[0m[48;2;36;40;59m)[48;2;36;40;59m           │ all types[48;2;36;40;59m        │ Provides the value to use[48;2;36;40;59m   [49m│
+ │[48;2;36;40;59m                         [48;2;36;40;59m │                 [48;2;36;40;59m │ when the property is[48;2;36;40;59m        [49m│
+ │[48;2;36;40;59m                         [48;2;36;40;59m │                 [48;2;36;40;59m │ absent.[48;2;36;40;59m                     [49m│
+ │ generated                │ all types        │ The value is supplied by    │
+ │                          │                  │ the host runtime (e.g.      │
+ │                          │                  │ Darkmatter context          │
+ │                          │                  │ capture), not authored in   │
+ │                          │                  │ static frontmatter.         │
+ │                          │                  │ Orthogonal to [2mrequired[0m,     │
+ │                          │                  │ which controls              │
+ │                          │                  │ type/nullability.           │
+ │[48;2;36;40;59m min([2mnumber[0m[48;2;36;40;59m)[48;2;36;40;59m              │ string, number,[48;2;36;40;59m  │ Sets a lower bound.[48;2;36;40;59m         [49m│
+ │[48;2;36;40;59m                         [48;2;36;40;59m │ array[48;2;36;40;59m            │ - [1mstring[0m[48;2;36;40;59m: minimum length[48;2;36;40;59m    [49m│
+ │[48;2;36;40;59m                         [48;2;36;40;59m │                 [48;2;36;40;59m │ - [1mnumber[0m[48;2;36;40;59m: minimum value[48;2;36;40;59m     [49m│
+ │[48;2;36;40;59m                         [48;2;36;40;59m │                 [48;2;36;40;59m │ - [1marray[0m[48;2;36;40;59m: minimum item count[48;2;36;40;59m [49m│
+ │ max([2mnumber[0m)              │ string, number,  │ Sets an upper bound.        │
+ │                          │ array            │ - [1mstring[0m: maximum length    │
+ │                          │                  │ - [1mnumber[0m: maximum value     │
+ │                          │                  │ - [1marray[0m: maximum item count │
+ │[48;2;36;40;59m integer[48;2;36;40;59m                  │ number[48;2;36;40;59m           │ Restrict to integer values.[48;2;36;40;59m [49m│
+ │ not-empty                │ string           │ Disallow empty /            │
+ │                          │                  │ whitespace-only strings.    │
+ │[48;2;36;40;59m pattern([2mregex[0m[48;2;36;40;59m)[48;2;36;40;59m           │ string[48;2;36;40;59m           │ ECMA-262 regex the value[48;2;36;40;59m    [49m│
+ │[48;2;36;40;59m                         [48;2;36;40;59m │                 [48;2;36;40;59m │ must match.[48;2;36;40;59m                 [49m│
+ │ enum([2mmember, ...[0m)        │ enum             │ Lists the allowed values.   │
+ │                          │                  │ At least one member is      │
+ │                          │                  │ required.                   │
+ │[48;2;36;40;59m eager[48;2;36;40;59m                    │ file[48;2;36;40;59m             │ Require the referenced[48;2;36;40;59m      [49m│
+ │[48;2;36;40;59m                         [48;2;36;40;59m │                 [48;2;36;40;59m │ file to exist at[48;2;36;40;59m            [49m│
+ │[48;2;36;40;59m                         [48;2;36;40;59m │                 [48;2;36;40;59m │ validation time. Without[48;2;36;40;59m    [49m│
+ │[48;2;36;40;59m                         [48;2;36;40;59m │                 [48;2;36;40;59m │ it, [2mfile[0m[48;2;36;40;59m is lazy (syntax-[48;2;36;40;59m   [49m│
+ │[48;2;36;40;59m                         [48;2;36;40;59m │                 [48;2;36;40;59m │ only).[48;2;36;40;59m                      [49m│
+ │ match([2mglob, ...[0m)         │ file             │ Glob patterns that shape    │
+ │                          │                  │ file path suggestions       │
+ │                          │                  │ (completion). Patterns      │
+ │                          │                  │ starting with [2m![0m exclude.    │
+ │                          │                  │ Suggestion metadata only —  │
+ │                          │                  │ not validated.              │
+ │[48;2;36;40;59m scheme([2mhttp, https, ...[0m[48;2;36;40;59m)[48;2;36;40;59m │ url[48;2;36;40;59m              │ Allowed URL schemes[48;2;36;40;59m         [49m│
+ │[48;2;36;40;59m                         [48;2;36;40;59m │                 [48;2;36;40;59m │ (lowercased).[48;2;36;40;59m               [49m│
+ │ suggest(value, ...)      │ string, number   │ Advisory completion         │
+ │                          │                  │ candidates for DMLS. Non-   │
+ │                          │                  │ validating: a document      │
+ │                          │                  │ value is valid when it      │
+ │                          │                  │ satisfies the underlying    │
+ │                          │                  │ type and constraints,       │
+ │                          │                  │ whether or not it appears   │
+ │                          │                  │ in the list. At most one    │
+ │                          │                  │ [2msuggest(...)[0m per complete   │
+ │                          │                  │ property definition         │
+ │                          │                  │ (including across property- │
+ │                          │                  │ union atoms). Array forms   │
+ │                          │                  │ ([2mstring[][0m, [2mnumber[][0m)        │
+ │                          │                  │ describe individual         │
+ │                          │                  │ elements, not whole arrays. │
+ │[48;2;36;40;59m unique[48;2;36;40;59m                   │ array[48;2;36;40;59m            │ Array items must be[48;2;36;40;59m         [49m│
+ │[48;2;36;40;59m                         [48;2;36;40;59m │                 [48;2;36;40;59m │ distinct.[48;2;36;40;59m                   [49m│
+ └──────────────────────────┴──────────────────┴─────────────────────────────┘
+
+ [1mTrigger Schemas[0m
+
+ Trigger schemas activate an object-schema payload for matching documents.
+ Their match language is pure and side-effect-free.
+ - [1mEnvelope.[0m [38;2;152;195;121m[48;2;40;44;52mkind: trigger-schema[0m — Claims a discovered YAML file as a
+   trigger envelope; [38;2;152;195;121m[48;2;40;44;52m$schema[0m is its merge-compatible object-schema payload.
+ - [1mProperty condition.[0m [38;2;152;195;121m[48;2;40;44;52mproperty: type-expr[0m — A bare expression is an optional
+   guard; [38;2;152;195;121m[48;2;40;44;52mrequired[0m makes it a presence gate. Present values must satisfy
+   the type and match-safe constraints.
+ - [1m$path.[0m [38;2;152;195;121m[48;2;40;44;52m$path: glob | \[glob, ...\][0m — Matches the case-sensitive, boundary-
+   relative path with [38;2;152;195;121m[48;2;40;44;52m/[0m separators. Basename globs match in any directory
+   and [38;2;152;195;121m[48;2;40;44;52m![0m patterns exclude.
+ - [1mall.[0m [38;2;152;195;121m[48;2;40;44;52mall: \[condition, ...\][0m — Matches when every child condition matches.
+ - [1many.[0m [38;2;152;195;121m[48;2;40;44;52many: \[condition, ...\][0m — Matches when at least one child condition
+   matches.
+ - [1mnone.[0m [38;2;152;195;121m[48;2;40;44;52mnone: \[condition, ...\][0m — Matches when no child condition matches.
+ - [1mmin-match.[0m [38;2;152;195;121m[48;2;40;44;52mmin-match: { count: N, of: \[condition, ...\] }[0m — Matches when
+   at least N of the child conditions match.
+ - [1mOuter OR arms.[0m [38;2;152;195;121m[48;2;40;44;52mmatch: \[arm, ...\][0m — A mapping is one arm; a sequence of
+   arm mappings is OR'd. Mixing property and structural keys in one mapping
+   is invalid.
+ - [1mVacuous-arm lint.[0m [38;2;152;195;121m[48;2;40;44;52meach arm requires a positive gate[0m — Every satisfiable
+   arm must require presence through [38;2;152;195;121m[48;2;40;44;52mrequired[0m or [38;2;152;195;121m[48;2;40;44;52m$path[0m, outside [38;2;152;195;121m[48;2;40;44;52mnone[0m; an
+   arm that could match every document is rejected.
+ [1mMatch-safe constraints only:[0m [38;2;152;195;121m[48;2;40;44;52mrequired[0m, [38;2;152;195;121m[48;2;40;44;52m<members>[0m, [38;2;152;195;121m[48;2;40;44;52mpattern[0m, [38;2;152;195;121m[48;2;40;44;52mmin[0m, [38;2;152;195;121m[48;2;40;44;52mmax[0m,
+ [38;2;152;195;121m[48;2;40;44;52minteger[0m, [38;2;152;195;121m[48;2;40;44;52mnot-empty[0m, [38;2;152;195;121m[48;2;40;44;52munique[0m, [38;2;152;195;121m[48;2;40;44;52mmin-keys[0m, [38;2;152;195;121m[48;2;40;44;52mmax-keys[0m. Constraints such as [38;2;152;195;121m[48;2;40;44;52mdefault[0m,
+ [38;2;152;195;121m[48;2;40;44;52mgenerated[0m, [38;2;152;195;121m[48;2;40;44;52msuggest[0m, [38;2;152;195;121m[48;2;40;44;52meager[0m, [38;2;152;195;121m[48;2;40;44;52mmatch[0m, and [38;2;152;195;121m[48;2;40;44;52mscheme[0m are rejected because trigger
+ evaluation cannot transform values or consult external state.
+
+ [38;2;43;127;255m[0m use [34m--verbose[0m to see additional details
