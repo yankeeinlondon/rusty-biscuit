@@ -1,6 +1,8 @@
 ---
-area: "{{ctx.area}}"
-review_file: "{{ctx.area}}"
+$schema:
+    review_file: file
+area: {{ctx.area}}
+review_file: {{ctx.area}}/reviews/{{ctx.today}}-comprehensive/review.md
 start: 
     message: "👓 starting a comprehensive review of the **{{ctx.area}}** package area"
 success:
@@ -10,9 +12,9 @@ failure:
     message: "💥 the comprehensive review in {{ctx.area}} did not finish successfully!"
 ---
 
-You are performing a **senior-level Rust code review** on the **{{area}}** package area which has the following package in it:
+You are performing a **senior-level Rust code review** on the **{{ctx.area}}** package area which has the following package in it:
 
-::shell sniff repo packages --package-area {{area}}
+::shell sniff repo packages --package-area {{ctx.area}}
 
 
 Your job is to produce a review that is:
@@ -183,8 +185,8 @@ Use these severity levels consistently:
 - Do not flood the review with style-only comments.
 - Optimize for signal density.
 
-Now perform the review and save the results to {{area}}/reviews/{{ctx.today}}-comprehensive/review.md 
+Now perform the review and save the results to {{ctx.area}}/reviews/{{ctx.today}}-comprehensive/review.md 
 
-- now set the `created` frontmatter property of {{area}}/reviews/{{ctx.today}}-comprehensive/review.md to "{{ctx.now}}"
-- now set the `agent` frontmatter property of {{area}}/reviews/{{ctx.today}}-comprehensive/review.md  to "{{env.AGENT}}"
-- now set the `yolo` frontmatter property of {{area}}/reviews/{{ctx.today}}-comprehensive/review.md to "{{env.YOLO}}"
+- now set the `created` frontmatter property of {{ctx.area}}/reviews/{{ctx.today}}-comprehensive/review.md to "{{ctx.now}}"
+- now set the `agent` frontmatter property of {{ctx.area}}/reviews/{{ctx.today}}-comprehensive/review.md  to "{{env.AGENT}}"
+- now set the `yolo` frontmatter property of {{ctx.area}}/reviews/{{ctx.today}}-comprehensive/review.md to "{{env.YOLO}}"

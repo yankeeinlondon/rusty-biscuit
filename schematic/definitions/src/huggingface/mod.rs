@@ -162,7 +162,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
             Endpoint {
                 id: "GetModel".to_string(),
                 method: RestMethod::Get,
-                path: "/models/{repo_id}".to_string(),
+                path: "/models/{+repo_id}".to_string(),
                 description: "Gets detailed information about a specific model".to_string(),
                 request: None,
                 response: ApiResponse::json_type("ModelInfo"),
@@ -173,7 +173,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
             Endpoint {
                 id: "ListModelFiles".to_string(),
                 method: RestMethod::Get,
-                path: "/models/{repo_id}/tree/{revision}".to_string(),
+                path: "/models/{+repo_id}/tree/{revision}".to_string(),
                 description: "Lists files in a model repository at a specific revision".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("RepoFile"),
@@ -184,7 +184,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
             Endpoint {
                 id: "GetModelFile".to_string(),
                 method: RestMethod::Get,
-                path: "/models/{repo_id}/blob/{revision}/{path}".to_string(),
+                path: "/models/{+repo_id}/blob/{revision}/{+path}".to_string(),
                 description: "Gets file metadata for a specific file in a model repository".to_string(),
                 request: None,
                 response: ApiResponse::json_type("FileMetadata"),
@@ -195,7 +195,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
             Endpoint {
                 id: "ListModelCommits".to_string(),
                 method: RestMethod::Get,
-                path: "/models/{repo_id}/commits/{revision}".to_string(),
+                path: "/models/{+repo_id}/commits/{revision}".to_string(),
                 description: "Lists commits for a model repository".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("Commit"),
@@ -206,7 +206,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
             Endpoint {
                 id: "GetModelReadme".to_string(),
                 method: RestMethod::Get,
-                path: "/models/{repo_id}/resolve/{revision}/README.md".to_string(),
+                path: "/models/{+repo_id}/resolve/{revision}/README.md".to_string(),
                 description: "Gets the README file content for a model".to_string(),
                 request: None,
                 response: ApiResponse::Text,
@@ -217,7 +217,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
             Endpoint {
                 id: "ListModelDiscussions".to_string(),
                 method: RestMethod::Get,
-                path: "/models/{repo_id}/discussions".to_string(),
+                path: "/models/{+repo_id}/discussions".to_string(),
                 description: "Lists discussions for a model repository".to_string(),
                 request: None,
                 response: ApiResponse::json_type("DiscussionList"),
@@ -228,7 +228,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
             Endpoint {
                 id: "GetModelCard".to_string(),
                 method: RestMethod::Get,
-                path: "/models/{repo_id}/resolve/{revision}/model_card.md".to_string(),
+                path: "/models/{+repo_id}/resolve/{revision}/model_card.md".to_string(),
                 description: "Gets the model card file content".to_string(),
                 request: None,
                 response: ApiResponse::Text,
@@ -254,7 +254,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
             Endpoint {
                 id: "GetDataset".to_string(),
                 method: RestMethod::Get,
-                path: "/datasets/{repo_id}".to_string(),
+                path: "/datasets/{+repo_id}".to_string(),
                 description: "Gets detailed information about a specific dataset".to_string(),
                 request: None,
                 response: ApiResponse::json_type("DatasetInfo"),
@@ -265,7 +265,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
             Endpoint {
                 id: "ListDatasetFiles".to_string(),
                 method: RestMethod::Get,
-                path: "/datasets/{repo_id}/tree/{revision}".to_string(),
+                path: "/datasets/{+repo_id}/tree/{revision}".to_string(),
                 description: "Lists files in a dataset repository at a specific revision".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("RepoFile"),
@@ -276,7 +276,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
             Endpoint {
                 id: "GetDatasetFile".to_string(),
                 method: RestMethod::Get,
-                path: "/datasets/{repo_id}/blob/{revision}/{path}".to_string(),
+                path: "/datasets/{+repo_id}/blob/{revision}/{+path}".to_string(),
                 description: "Gets file metadata for a specific file in a dataset repository".to_string(),
                 request: None,
                 response: ApiResponse::json_type("FileMetadata"),
@@ -287,7 +287,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
             Endpoint {
                 id: "ListDatasetCommits".to_string(),
                 method: RestMethod::Get,
-                path: "/datasets/{repo_id}/commits/{revision}".to_string(),
+                path: "/datasets/{+repo_id}/commits/{revision}".to_string(),
                 description: "Lists commits for a dataset repository".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("Commit"),
@@ -298,7 +298,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
             Endpoint {
                 id: "GetDatasetReadme".to_string(),
                 method: RestMethod::Get,
-                path: "/datasets/{repo_id}/resolve/{revision}/README.md".to_string(),
+                path: "/datasets/{+repo_id}/resolve/{revision}/README.md".to_string(),
                 description: "Gets the README file content for a dataset".to_string(),
                 request: None,
                 response: ApiResponse::Text,
@@ -324,7 +324,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
             Endpoint {
                 id: "GetSpace".to_string(),
                 method: RestMethod::Get,
-                path: "/spaces/{repo_id}".to_string(),
+                path: "/spaces/{+repo_id}".to_string(),
                 description: "Gets detailed information about a specific space".to_string(),
                 request: None,
                 response: ApiResponse::json_type("SpaceInfo"),
@@ -335,7 +335,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
             Endpoint {
                 id: "ListSpaceFiles".to_string(),
                 method: RestMethod::Get,
-                path: "/spaces/{repo_id}/tree/{revision}".to_string(),
+                path: "/spaces/{+repo_id}/tree/{revision}".to_string(),
                 description: "Lists files in a space repository at a specific revision".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("RepoFile"),
@@ -346,7 +346,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
             Endpoint {
                 id: "GetSpaceFile".to_string(),
                 method: RestMethod::Get,
-                path: "/spaces/{repo_id}/blob/{revision}/{path}".to_string(),
+                path: "/spaces/{+repo_id}/blob/{revision}/{+path}".to_string(),
                 description: "Gets file metadata for a specific file in a space repository".to_string(),
                 request: None,
                 response: ApiResponse::json_type("FileMetadata"),
@@ -383,7 +383,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
             Endpoint {
                 id: "UpdateRepoSettings".to_string(),
                 method: RestMethod::Put,
-                path: "/repos/{repo_type}/{repo_id}/settings".to_string(),
+                path: "/repos/{repo_type}/{+repo_id}/settings".to_string(),
                 description: "Updates repository settings (visibility, gated access, etc.)".to_string(),
                 request: Some(ApiRequest::json_type("UpdateRepoSettingsBody")),
                 response: ApiResponse::json_type("StatusResponse"),
@@ -663,20 +663,22 @@ mod tests {
     fn path_parameters_use_correct_syntax() {
         let api = define_huggingface_hub_api();
 
-        // Check that path parameters use {param} syntax
+        // Check that path parameters use {param} syntax. `repo_id` is a
+        // slash-bearing identifier, so it carries the `{+repo_id}`
+        // reserved-expansion marker to opt out of percent-encoding.
         let get_model = api
             .endpoints
             .iter()
             .find(|e| e.id == "GetModel")
             .expect("GetModel endpoint missing");
-        assert!(get_model.path.contains("{repo_id}"));
+        assert!(get_model.path.contains("{+repo_id}"));
 
         let list_model_files = api
             .endpoints
             .iter()
             .find(|e| e.id == "ListModelFiles")
             .expect("ListModelFiles endpoint missing");
-        assert!(list_model_files.path.contains("{repo_id}"));
+        assert!(list_model_files.path.contains("{+repo_id}"));
         assert!(list_model_files.path.contains("{revision}"));
 
         let get_user = api

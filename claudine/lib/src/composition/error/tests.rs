@@ -1,0 +1,1399 @@
+//! Tests for composition errors.
+
+use super::*;
+
+fn source_from(text: &str) -> ResolvedCompositionSource {
+    ResolvedCompositionSource {
+        original_ref: "review.md".to_string(),
+        resolved_path: PathBuf::from("review.md"),
+        original_text: text.to_string(),
+        markdown: text.to_string().into(),
+    }
+}
+
+#[test]
+fn enrich_wraps_lifecycle_leak_with_excerpt() {
+    let source = source_from(
+        "---\nreview_file: x\nsuccess:\n    message: \"at {{review-file}}\"\n---\nbody\n",
+    );
+    let err = CompositionError::LifecycleInterpolationLeak {
+        source_path: PathBuf::from("review.md"),
+        property: "success.message".to_string(),
+        expression: "review-file".to_string(),
+        reason: String::new(),
+    }
+    .enrich_frontmatter(&source, true);
+
+    assert!(matches!(err, CompositionError::WithFrontmatter { .. }));
+    assert!(err.frontmatter_excerpt().is_some());
+    // Display still delegates to the inner leak diagnostic.
+    assert!(err.to_string().contains("interpolation leaked"), "got: {err}");
+}
+
+#[test]
+fn enrich_is_noop_for_unrelated_error() {
+    let source = source_from("---\ntitle: x\n---\nbody\n");
+    let err = CompositionError::NoRunnableProviders.enrich_frontmatter(&source, true);
+    assert!(matches!(err, CompositionError::NoRunnableProviders));
+}
+
+#[test]
+fn already_emitted_wraps_once_and_delegates_display() {
+    let err = CompositionError::LifecycleEvaluationError {
+        source_path: PathBuf::from("review.md"),
+        event: "success".to_string(),
+        surface: "when".to_string(),
+        message: "boom".to_string(),
+    };
+    let display = err.to_string();
+    let marked = err.already_emitted();
+    assert!(marked.is_already_emitted());
+    // Display still delegates to the inner evaluation error.
+    assert_eq!(marked.to_string(), display);
+    // Idempotent: re-marking does not double-wrap.
+    let again = marked.already_emitted();
+    match &again {
+        CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => {
+            assert!(
+                !inner.is_already_emitted(),
+                "must not nest the already-emitted wrapper"
+            );
+        }
+        other => panic!("expected LifecycleEvaluationAlreadyEmitted, got {other:?}"),
+    }
+}
+
+#[test]
+fn enrich_is_idempotent() {
+    let source = source_from("---\ntitle: x\n---\nbody\n");
+    let err = CompositionError::PromptPropertyMissing
+        .enrich_frontmatter(&source, true)
+        .enrich_frontmatter(&source, true);
+    // Wrapped exactly once — the inner is the bare missing-prompt error.
+    match err {
+        CompositionError::WithFrontmatter { inner, .. } => {
+            assert!(matches!(*inner, CompositionError::PromptPropertyMissing));
+        }
+        other => panic!("expected WithFrontmatter, got: {other:?}"),
+    }
+}
+
+#[test]
+fn enrich_frontmatter_fence_mismatch_attaches_excerpt() {
+    let source = source_from(
+        "----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n",
+    );
+    let ctx = biscuit_terminal::errors::SourceContext::new(
+        PathBuf::from("review.md"),
+        PathBuf::from("review.md"),
+        source.original_text.clone(),
+    );
+    let md_err = MarkdownError::FrontmatterFenceMismatch {
+        ctx,
+        found: "----".to_string(),
+        line: 1,
+    };
+    let err = CompositionError::FrontmatterParse(md_err).enrich_frontmatter(&source, true);
+
+    assert!(
+        matches!(err, CompositionError::WithFrontmatter { .. }),
+        "expected WithFrontmatter wrapper, got: {err:?}"
+    );
+    assert!(err.frontmatter_excerpt().is_some(), "expected excerpt attached");
+}
+
+#[test]
+fn enrich_frontmatter_fence_mismatch_highlights_line_one() {
+    let source = source_from(
+        "----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n",
+    );
+    let ctx = biscuit_terminal::errors::SourceContext::new(
+        PathBuf::from("review.md"),
+        PathBuf::from("review.md"),
+        source.original_text.clone(),
+    );
+    let md_err = MarkdownError::FrontmatterFenceMismatch {
+        ctx,
+        found: "----".to_string(),
+        line: 1,
+    };
+    let err = CompositionError::FrontmatterParse(md_err).enrich_frontmatter(&source, true);
+    let excerpt = err.frontmatter_excerpt().expect("excerpt attached");
+    assert_eq!(
+        excerpt.highlight_line(),
+        Some(1),
+        "line 1 should be highlighted"
+    );
+}
+
+#[test]
+fn enrich_frontmatter_parse_regular_error_gets_block_only_excerpt() {
+    let source = source_from("---\nprompt: |-\n    four spaces\n   three spaces\n---\nbody\n");
+    let yaml_err: biscuit_file::YamlParseError =
+        biscuit_file::serde_yaml_ng::from_str::<biscuit_file::serde_yaml_ng::Value>(
+            "prompt: |-\n    four spaces\n   three spaces\n",
+        )
+        .expect_err("malformed YAML should fail to parse");
+    let ctx = biscuit_terminal::errors::SourceContext::new(
+        PathBuf::from("review.md"),
+        PathBuf::from("review.md"),
+        source.original_text.clone(),
+    );
+    let md_err = MarkdownError::FrontmatterParse {
+        ctx,
+        source: yaml_err,
+    };
+    let err = CompositionError::FrontmatterParse(md_err).enrich_frontmatter(&source, true);
+
+    assert!(
+        matches!(err, CompositionError::WithFrontmatter { .. }),
+        "expected WithFrontmatter wrapper, got: {err:?}"
+    );
+    assert!(err.frontmatter_excerpt().is_some(), "expected excerpt attached");
+}
+
+#[test]
+fn enrich_frontmatter_interpolation_focuses_on_receiving_key() {
+    use darkmatter::markdown::SourceRef;
+    use darkmatter::markdown::compose::expression::ExpressionError;
+
+    // A whole-value interpolation failure naming a receiving key must focus
+    // the excerpt on that key's line, not dump the whole frontmatter block.
+    let source = source_from(
+        "---\n$schema:\n    spec: file(match(**/*spec*.md))\niteration: \"{{ frontmatter(spec, 'x') }}\"\n---\nbody\n",
+    );
+    let md_err = MarkdownError::Interpolation {
+        key: Some("iteration".to_string()),
+        expression: "frontmatter(spec, 'x')".to_string(),
+        source: Box::new(SourceRef::Effective {
+            rendered: "frontmatter(spec, 'x')".to_string(),
+            origin_key: Some("iteration".to_string()),
+        }),
+        cause: Box::new(ExpressionError::Parse("boom".to_string())),
+    };
+    let err = CompositionError::ComposeFailed(md_err);
+    assert!(
+        matches!(
+            err.frontmatter_block_spec(),
+            Some(FrontmatterHighlight::Property(ref p)) if p == "iteration"
+        ),
+        "interpolation error must focus the excerpt on its receiving key"
+    );
+
+    let enriched = err.enrich_frontmatter(&source, true);
+    assert!(
+        enriched.frontmatter_excerpt().is_some(),
+        "a focused excerpt must be attached"
+    );
+}
+
+#[test]
+fn enrich_schema_parse_highlights_offending_property_line() {
+    // A grammar failure attributed to `spec` (bad `,` separator) must focus
+    // the excerpt on the `$schema.spec` type-string line (line 3), not the
+    // top-level `spec` value on line 4 and not the whole block.
+    let source = source_from(
+        "---\n$schema:\n    spec: file(required, match(**/*spec*.md))\nspec: \"x\"\n---\nbody\n",
+    );
+    let err = CompositionError::SchemaParse {
+        source_path: PathBuf::from("review.md"),
+        property: Some("spec".to_string()),
+        message: "expected `;` between constraints".to_string(),
+        span: Some(14..15),
+    }
+    .enrich_frontmatter(&source, true);
+
+    let excerpt = err.frontmatter_excerpt().expect("excerpt must attach");
+    assert_eq!(
+        excerpt.highlight_line(),
+        Some(3),
+        "must highlight the `$schema.spec` type-string line"
+    );
+    assert_ne!(
+        excerpt.highlight_line(),
+        Some(4),
+        "must not highlight the unrelated top-level `spec` value line"
+    );
+}
+
+#[test]
+fn enrich_schema_parse_shape_falls_back_to_schema_parent_line() {
+    // A whole-shape failure (no property, no span) highlights the `$schema`
+    // parent line (line 2).
+    let source = source_from("---\n$schema: 42\n---\nbody\n");
+    let err = CompositionError::SchemaParse {
+        source_path: PathBuf::from("review.md"),
+        property: None,
+        message: "expected mapping, got integer".to_string(),
+        span: None,
+    }
+    .enrich_frontmatter(&source, true);
+
+    let excerpt = err.frontmatter_excerpt().expect("excerpt must attach");
+    assert_eq!(excerpt.highlight_line(), Some(2));
+}
+
+#[test]
+fn schema_parse_block_links_prompt_file_and_strips_when_no_color() {
+    // The rendered body OSC8-links the prompt file when color is available,
+    // and strips all escapes (no raw OSC8) at `ColorDepth::None`.
+    let err = CompositionError::SchemaParse {
+        source_path: PathBuf::from("review.md"),
+        property: Some("spec".to_string()),
+        message: "expected `;` between constraints".to_string(),
+        span: Some(14..15),
+    };
+
+    let color_term = Terminal::new_optimistic(80);
+    let linked = err.report_block_error(&color_term);
+    assert!(
+        linked.contains("\x1b]8;;"),
+        "color render must carry an OSC8 link; got: {linked:?}"
+    );
+
+    let plain_term = Terminal::builder()
+        .width(80)
+        .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+        .build();
+    let plain = err.report_block_error(&plain_term);
+    assert!(
+        !plain.contains('\x1b'),
+        "no-color render must strip escapes; got: {plain:?}"
+    );
+    assert!(
+        plain.contains("review.md"),
+        "plain render must still name the prompt file; got: {plain}"
+    );
+}
+
+#[test]
+fn loop_iteration_failed_display_surfaces_reason_and_iteration() {
+    let err = CompositionError::LoopIterationFailed {
+        iteration: 2,
+        prompt_path: PathBuf::from("fixes/plan.md"),
+        exit_code: 1,
+        reason: "step_timeout after 30m of stream silence".to_string(),
+        exit_reason: Some("step_timeout".to_string()),
+    };
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("loop iteration 2 of fixes/plan.md"),
+        "got: {rendered}"
+    );
+    assert!(
+        rendered.contains("step_timeout after 30m of stream silence"),
+        "got: {rendered}"
+    );
+    assert!(
+        !rendered.contains("invalid loop definition"),
+        "got: {rendered}"
+    );
+}
+
+#[test]
+fn loop_rate_limited_display_includes_reset_time_when_present() {
+    let reset = DateTime::parse_from_rfc3339("2026-05-12T18:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let err = CompositionError::LoopRateLimited {
+        iteration: 1,
+        prompt_path: PathBuf::from("plan.md"),
+        provider: Some("k2p6".to_string()),
+        model: Some("kimi-for-coding".to_string()),
+        reset_at: Some(reset),
+        message: Some("Usage limit reached for k2p6".to_string()),
+    };
+    let rendered = err.to_string();
+    assert!(rendered.contains("k2p6"), "got: {rendered}");
+    assert!(rendered.contains("resets at"), "got: {rendered}");
+    assert!(rendered.contains("Usage limit reached"), "got: {rendered}");
+}
+
+#[test]
+fn loop_rate_limited_display_omits_optional_fields_when_absent() {
+    let err = CompositionError::LoopRateLimited {
+        iteration: 3,
+        prompt_path: PathBuf::from("plan.md"),
+        provider: None,
+        model: None,
+        reset_at: None,
+        message: None,
+    };
+    let rendered = err.to_string();
+    assert!(
+        rendered.starts_with("loop halted at iteration 3 of plan.md"),
+        "got: {rendered}"
+    );
+    assert!(
+        rendered.contains("provider rate limited"),
+        "got: {rendered}"
+    );
+    // No reset clause when reset_at is absent
+    assert!(!rendered.contains("resets at"), "got: {rendered}");
+}
+
+#[test]
+fn loop_iteration_failed_falls_back_when_no_exit_reason() {
+    let err = CompositionError::LoopIterationFailed {
+        iteration: 4,
+        prompt_path: PathBuf::from("plan.md"),
+        exit_code: 1,
+        reason: "provider exited non-zero".to_string(),
+        exit_reason: None,
+    };
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("provider exited non-zero"),
+        "got: {rendered}"
+    );
+}
+
+#[test]
+fn loop_invalid_still_reserved_for_frontmatter_problems() {
+    // Sanity: LoopInvalid is still the right variant for malformed
+    // frontmatter and renders distinctly from the runtime-fault
+    // variants above.
+    let err = CompositionError::LoopInvalid("`loop.max` must be greater than zero".to_string());
+    let rendered = err.to_string();
+    assert!(
+        rendered.starts_with("invalid loop definition:"),
+        "got: {rendered}"
+    );
+}
+
+// -------------------------------------------------------------------------
+// Schema errors
+// -------------------------------------------------------------------------
+
+#[test]
+fn schema_load_display_includes_path_and_message() {
+    let err = CompositionError::SchemaLoad {
+        source_path: PathBuf::from("prompts/plan.md"),
+        message: "unsupported `http://` schema reference".to_string(),
+    };
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("prompts/plan.md"),
+        "expected path in display: {rendered}"
+    );
+    assert!(
+        rendered.contains("unsupported `http://`"),
+        "expected message in display: {rendered}"
+    );
+}
+
+#[test]
+fn schema_validation_display_includes_message() {
+    let err = CompositionError::SchemaValidation {
+        source_path: PathBuf::from("prompts/plan.md"),
+        message: "expected number, got string".to_string(),
+        problems: vec!["/properties/count".to_string()],
+    };
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("expected number, got string"),
+        "got: {rendered}"
+    );
+}
+
+#[test]
+fn missing_properties_display_lists_names_in_order() {
+    let err = CompositionError::MissingProperties {
+        source_path: PathBuf::from("prompts/plan.md"),
+        missing: vec![
+            MissingProperty {
+                name: "target".to_string(),
+                type_label: Some("string".to_string()),
+                description: None,
+                interactive_shape: None,
+            },
+            MissingProperty {
+                name: "count".to_string(),
+                type_label: Some("number".to_string()),
+                description: None,
+                interactive_shape: None,
+            },
+        ],
+        frontmatter_description: None,
+        pointer_paths: Vec::new(),
+    };
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("target, count"),
+        "expected declaration-order names: {rendered}"
+    );
+    assert!(
+        rendered.contains("properties"),
+        "expected plural form for >1 missing: {rendered}"
+    );
+}
+
+#[test]
+fn missing_properties_display_uses_singular_for_one() {
+    let err = CompositionError::MissingProperties {
+        source_path: PathBuf::from("prompts/plan.md"),
+        missing: vec![MissingProperty {
+            name: "target".to_string(),
+            type_label: Some("string".to_string()),
+            description: None,
+            interactive_shape: None,
+        }],
+        frontmatter_description: None,
+        pointer_paths: Vec::new(),
+    };
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("property") && !rendered.contains("properties"),
+        "expected singular form: {rendered}"
+    );
+}
+
+#[test]
+fn unsupported_interactive_schema_display_mentions_shape() {
+    let err = CompositionError::UnsupportedInteractiveSchema {
+        source_path: PathBuf::from("prompts/plan.md"),
+        property: "config".to_string(),
+        shape: "object".to_string(),
+    };
+    let rendered = err.to_string();
+    assert!(rendered.contains("`config`"), "got: {rendered}");
+    assert!(rendered.contains("object"), "got: {rendered}");
+}
+
+#[test]
+fn missing_properties_status_block_includes_remediation_hint() {
+    use biscuit_terminal::prelude::TerminalRenderable;
+    use biscuit_terminal::terminal::Terminal;
+    let err = CompositionError::MissingProperties {
+        source_path: PathBuf::from("prompts/plan.md"),
+        missing: vec![MissingProperty {
+            name: "target".to_string(),
+            type_label: Some("string".to_string()),
+            description: Some("the target to act on".to_string()),
+            interactive_shape: None,
+        }],
+        frontmatter_description: Some("Plan a feature".to_string()),
+        pointer_paths: Vec::new(),
+    };
+    let block = err.status_block(&Terminal::default());
+    let rendered = block.render(&Terminal::default());
+    assert!(
+        rendered.contains("Pass key=value")
+            || rendered.contains("prompt_for_missing"),
+        "expected remediation hint in rendered output: {rendered}"
+    );
+}
+
+#[test]
+fn sequence_missing_properties_status_block_lists_each_step() {
+    use biscuit_terminal::prelude::TerminalRenderable;
+    use biscuit_terminal::terminal::Terminal;
+    let err = CompositionError::SequenceMissingProperties {
+        failure_count: 2,
+        failures: vec![
+            SequenceMissingPropertiesStep {
+                step: 1,
+                step_name: "research".to_string(),
+                source_path: PathBuf::from("prompts/seq.md"),
+                missing: vec![MissingProperty {
+                    name: "topic".to_string(),
+                    type_label: Some("string".to_string()),
+                    description: None,
+                    interactive_shape: None,
+                }],
+                frontmatter_description: None,
+                pointer_paths: Vec::new(),
+            },
+            SequenceMissingPropertiesStep {
+                step: 2,
+                step_name: "summarize".to_string(),
+                source_path: PathBuf::from("prompts/seq.md"),
+                missing: vec![MissingProperty {
+                    name: "tone".to_string(),
+                    type_label: Some("enum(formal|casual)".to_string()),
+                    description: Some("the desired tone".to_string()),
+                    interactive_shape: None,
+                }],
+                frontmatter_description: None,
+                pointer_paths: Vec::new(),
+            },
+        ],
+    };
+    let block = err.status_block(&Terminal::default());
+    let rendered = block.render(&Terminal::default());
+    assert!(rendered.contains("Step 1"), "got: {rendered}");
+    assert!(rendered.contains("Step 2"), "got: {rendered}");
+    assert!(rendered.contains("topic"), "got: {rendered}");
+    assert!(rendered.contains("tone"), "got: {rendered}");
+    assert!(
+        rendered.contains("research") && rendered.contains("summarize"),
+        "got: {rendered}"
+    );
+}
+
+#[test]
+fn sequence_missing_properties_display_includes_failure_count() {
+    let err = CompositionError::SequenceMissingProperties {
+        failure_count: 3,
+        failures: Vec::new(),
+    };
+    let rendered = err.to_string();
+    assert!(rendered.contains("3 step(s)"), "got: {rendered}");
+}
+
+// -------------------------------------------------------------------------
+// Agent-resolution no-TTY abort body parity with the dry-run / TTY message
+// -------------------------------------------------------------------------
+
+use super::super::agent_message::{agent_state_breakdown, invalid_agent_message};
+use super::super::types::AgentResolutionState;
+
+const FILE_LINK: &str = "<a href=\"file:///doc.md\">doc.md</a>";
+
+#[test]
+fn no_tty_no_agent_body_matches_canonical_breakdown() {
+    let state = AgentResolutionState::NoAgent;
+    let body = render_agent_resolution_failed_body(&state, &[], FILE_LINK);
+    assert_eq!(body, agent_state_breakdown(&state));
+}
+
+#[test]
+fn no_tty_not_installed_body_matches_canonical_breakdown() {
+    let state = AgentResolutionState::SingleNotInstalled {
+        provider: Provider::Gemini,
+    };
+    let body = render_agent_resolution_failed_body(&state, &[Provider::Claude], FILE_LINK);
+    assert_eq!(body, agent_state_breakdown(&state));
+}
+
+#[test]
+fn no_tty_list_multiple_body_matches_canonical_breakdown() {
+    // Regression: the old body used "the interactive picker would ask …",
+    // which drifted from the dry-run cell wording.
+    let state = AgentResolutionState::ListMultipleInstalled {
+        installed: vec![Provider::Claude, Provider::Codex],
+        not_installed: vec![Provider::Gemini],
+        invalid: vec!["bad".into()],
+    };
+    let body = render_agent_resolution_failed_body(&state, &[Provider::Claude], FILE_LINK);
+    assert_eq!(body, agent_state_breakdown(&state));
+    assert!(
+        body.contains("choose interactively between suggested Agents"),
+        "got: {body}"
+    );
+    assert!(!body.contains("the interactive picker would ask"), "got: {body}");
+}
+
+#[test]
+fn no_tty_zero_installed_body_matches_canonical_breakdown() {
+    // Regression: the old body appended "the current session is not
+    // interactive", which the TTY/dry-run message never showed.
+    let state = AgentResolutionState::ZeroInstalledList {
+        not_installed: vec![Provider::Gemini],
+        invalid: vec!["bad".into()],
+    };
+    let body = render_agent_resolution_failed_body(&state, &[Provider::Claude], FILE_LINK);
+    assert_eq!(body, agent_state_breakdown(&state));
+    assert!(!body.contains("not interactive"), "got: {body}");
+}
+
+#[test]
+fn no_tty_single_invalid_body_is_imperative_message_plus_installed_list() {
+    let state = AgentResolutionState::SingleInvalid {
+        hint: "nope".into(),
+    };
+    let body = render_agent_resolution_failed_body(&state, &[Provider::Claude], FILE_LINK);
+    assert!(body.starts_with(&invalid_agent_message("nope", FILE_LINK)), "got: {body}");
+    assert!(body.contains(&format!("- {}", Provider::Claude)), "got: {body}");
+}
+
+#[test]
+fn no_tty_single_invalid_body_notes_no_agents_when_none_installed() {
+    let state = AgentResolutionState::SingleInvalid {
+        hint: "nope".into(),
+    };
+    let body = render_agent_resolution_failed_body(&state, &[], FILE_LINK);
+    assert!(body.contains("no agents are installed"), "got: {body}");
+}
+
+#[test]
+fn missing_properties_status_block_lists_pointer_paths_when_no_typed_metadata() {
+    use biscuit_terminal::prelude::TerminalRenderable;
+    use biscuit_terminal::terminal::Terminal;
+    let err = CompositionError::MissingProperties {
+        source_path: PathBuf::from("prompts/plan.md"),
+        missing: Vec::new(),
+        frontmatter_description: None,
+        pointer_paths: vec!["/properties/target".to_string()],
+    };
+    let block = err.status_block(&Terminal::default());
+    let rendered = block.render(&Terminal::default());
+    assert!(
+        rendered.contains("/properties/target"),
+        "expected JSON pointer in rendered output: {rendered}"
+    );
+}
+
+// -------------------------------------------------------------------------
+// Inline-compose / sequence mismatch diagnostic (spec criteria 11-16)
+// -------------------------------------------------------------------------
+
+use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+fn mismatch_err() -> CompositionError {
+    CompositionError::InlineComposeSequenceMismatch {
+        source_path: PathBuf::from("prompts/greeting.md"),
+    }
+}
+
+#[test]
+fn mismatch_render_includes_diagnostic() {
+    // The diagnostic names the document, both properties, the `claudine
+    // sequence` directive, and the `sections` note. The authored YAML
+    // block is appended separately by the CLI walker (tested there).
+    let err = mismatch_err();
+    let rendered = strip_escape_codes(err.report_block_error_optimistic(Some(80)));
+    assert!(rendered.contains("greeting.md"), "document name: {rendered}");
+    assert!(rendered.contains("prompt"), "names prompt: {rendered}");
+    assert!(rendered.contains("sequence"), "names sequence: {rendered}");
+    assert!(
+        rendered.contains("claudine sequence"),
+        "sequence directive: {rendered}"
+    );
+    assert!(rendered.contains("sections"), "sections note: {rendered}");
+}
+
+#[test]
+fn mismatch_plain_terminal_render_has_no_escape_bytes() {
+    // A terminal with no color depth cannot display SGR styling or OSC 8
+    // hyperlinks, so the rendered diagnostic must contain no escape byte at
+    // all — otherwise redirected / `NO_COLOR` output is polluted.
+    let mut term = Terminal::builder()
+        .width(80)
+        .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+        .build();
+    term.is_nerd_font = Some(false);
+    let err = mismatch_err();
+    let rendered = err.report_block_error(&term);
+    assert!(
+        !rendered.contains('\x1b'),
+        "plain render must contain no escape byte; got: {rendered:?}"
+    );
+    assert!(rendered.contains("greeting.md"), "got: {rendered}");
+    assert!(rendered.contains("claudine sequence"), "got: {rendered}");
+}
+
+#[test]
+fn mismatch_display_message_is_plain() {
+    // The `#[error(...)]` summary is plain text with no rendering markup.
+    let err = mismatch_err();
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("cannot run a document configured as a sequence"),
+        "got: {rendered}"
+    );
+    assert!(!rendered.contains('<'), "no markup in Display: {rendered}");
+}
+
+// -------------------------------------------------------------------------
+// Phase 4: regression — hint inside block quote for composition errors
+// -------------------------------------------------------------------------
+
+#[test]
+fn unsupported_interactive_schema_hint_appears_inside_block_quote_border() {
+    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+    let err = CompositionError::UnsupportedInteractiveSchema {
+        source_path: PathBuf::from("prompts/review.md"),
+        property: "spec".to_string(),
+        shape: "(unknown)".to_string(),
+    };
+    let term = Terminal::new_optimistic(80);
+    let rendered = strip_escape_codes(err.report_block_error(&term));
+
+    let hint_token = "Pass the value with key=value";
+    let hint_lines: Vec<&str> = rendered
+        .lines()
+        .filter(|l| l.contains(hint_token))
+        .collect();
+    assert!(
+        !hint_lines.is_empty(),
+        "hint text must appear in rendered output: {rendered}"
+    );
+    for hint_line in &hint_lines {
+        assert!(
+            hint_line.contains('┃'),
+            "regression: hint must appear inside block quote border, got: {hint_line:?}\nfull output:\n{rendered}"
+        );
+    }
+
+    let body_token = "cannot be collected interactively";
+    assert!(
+        rendered.contains(body_token),
+        "body text must appear: {rendered}"
+    );
+}
+
+#[test]
+fn missing_properties_hint_appears_inside_block_quote_border() {
+    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+    let err = CompositionError::MissingProperties {
+        source_path: PathBuf::from("prompts/plan.md"),
+        missing: vec![MissingProperty {
+            name: "target".to_string(),
+            type_label: Some("string".to_string()),
+            description: None,
+            interactive_shape: None,
+        }],
+        frontmatter_description: None,
+        pointer_paths: Vec::new(),
+    };
+    let term = Terminal::new_optimistic(80);
+    let rendered = strip_escape_codes(err.report_block_error(&term));
+
+    let hint_token = "Pass key=value";
+    let hint_lines: Vec<&str> = rendered
+        .lines()
+        .filter(|l| l.contains(hint_token))
+        .collect();
+    assert!(
+        !hint_lines.is_empty(),
+        "hint text must appear in rendered output: {rendered}"
+    );
+    for hint_line in &hint_lines {
+        assert!(
+            hint_line.contains('┃'),
+            "regression: hint must appear inside block quote border, got: {hint_line:?}\nfull output:\n{rendered}"
+        );
+    }
+}
+
+#[test]
+fn schema_load_hint_appears_inside_block_quote_border() {
+    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+    let err = CompositionError::SchemaLoad {
+        source_path: PathBuf::from("prompts/deploy.md"),
+        message: "unsupported protocol".to_string(),
+    };
+    let term = Terminal::new_optimistic(80);
+    let rendered = strip_escape_codes(err.report_block_error(&term));
+
+    let hint_token = "Verify the `$schema` path";
+    let hint_lines: Vec<&str> = rendered
+        .lines()
+        .filter(|l| l.contains(hint_token))
+        .collect();
+    assert!(
+        !hint_lines.is_empty(),
+        "hint text must appear in rendered output: {rendered}"
+    );
+    for hint_line in &hint_lines {
+        assert!(
+            hint_line.contains('┃'),
+            "regression: hint must appear inside block quote border, got: {hint_line:?}\nfull output:\n{rendered}"
+        );
+    }
+}
+
+// -------------------------------------------------------------------------
+// Phase 4: shell-expansion failure boundary fidelity
+// -------------------------------------------------------------------------
+
+fn shell_expansion_failed_err() -> CompositionError {
+    use darkmatter::markdown::compose::ShellCommandOrigin;
+
+    let content = "---\ntitle: Test\n---\n# Body\n\n::shell \"cmd-that-fails\"\n";
+    let ctx = biscuit_terminal::errors::SourceContext::new(
+        PathBuf::from("/repo/prompts/test.md"),
+        PathBuf::from("prompts/test.md"),
+        content,
+    );
+    let shell = ShellExpansionError::ExecutionFailed {
+        ctx: Box::new(ctx),
+        command: "cmd-that-fails".to_string(),
+        code: 2,
+        stdout: "".to_string(),
+        stderr: "this command failed\nunknown flag --whatever".to_string(),
+        origin: ShellCommandOrigin::Body { line: 6 },
+    };
+    CompositionError::ShellExpansionFailed {
+        source_path: PathBuf::from("prompts/test.md"),
+        error: Box::new(shell),
+    }
+}
+
+#[test]
+fn shell_expansion_failed_status_block_delegates_to_shell_error() {
+    use biscuit_terminal::prelude::TerminalRenderable;
+
+    let err = shell_expansion_failed_err();
+    let term = Terminal::new_optimistic(80);
+    let rendered = err.status_block(&term).render(&term);
+    assert!(
+        rendered.contains("ShellExpansionError"),
+        "expected delegated shell-expansion header: {rendered}"
+    );
+    assert!(
+        !rendered.contains("CompositionError"),
+        "must not use the generic composition header: {rendered}"
+    );
+}
+
+#[test]
+fn shell_expansion_failed_preserves_rich_diagnostic() {
+    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+    let err = shell_expansion_failed_err();
+    let term = Terminal::new_optimistic(80);
+    let rendered = strip_escape_codes(err.report_block_error(&term));
+
+    assert!(
+        rendered.contains("line 6"),
+        "expected file-relative line in diagnostic: {rendered}"
+    );
+    assert!(
+        rendered.contains("this command failed"),
+        "expected stderr text in diagnostic: {rendered}"
+    );
+    assert!(
+        rendered.contains("::shell"),
+        "expected source excerpt in diagnostic: {rendered}"
+    );
+    assert!(
+        rendered.contains("cmd-that-fails"),
+        "expected command name in diagnostic: {rendered}"
+    );
+}
+
+#[test]
+fn shell_expansion_failed_plain_terminal_has_no_escape_bytes() {
+    let mut term = Terminal::builder()
+        .width(80)
+        .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+        .build();
+    term.is_nerd_font = Some(false);
+
+    let err = shell_expansion_failed_err();
+    let rendered = err.report_block_error(&term);
+
+    assert!(
+        !rendered.contains('\x1b'),
+        "plain render must contain no escape byte; got: {rendered:?}"
+    );
+    assert!(rendered.contains("line 6"), "got: {rendered}");
+    assert!(rendered.contains("this command failed"), "got: {rendered}");
+    assert!(rendered.contains("::shell"), "got: {rendered}");
+}
+
+/// Exercise the full Markdown → `map_compose_error` → `report_block_error`
+/// path with a real failing `::shell` directive.
+///
+/// This complements the hand-built `shell_expansion_failed_err` tests by
+/// proving that a captured `ExecutionFailed` from an actual subprocess
+/// survives through `prepare_direct` and renders with file-relative line
+/// numbers, the command's stderr, a source excerpt, and the composed
+/// frontmatter block.
+#[test]
+fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
+    use std::collections::{BTreeMap, HashSet};
+
+    use biscuit_terminal::terminal::Terminal;
+    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+    use super::super::prepare::{PrepareOptions, prepare_direct};
+    use super::super::resolve::resolve_composition_source;
+
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let file_path = temp_dir.path().join("test.md");
+    let content = "---\ntitle: Shell demo\n---\n\nPre.\n\n::shell rustc --edition=invalid\n\nPost.\n";
+    std::fs::write(&file_path, content).unwrap();
+
+    let source = resolve_composition_source(file_path.to_str().unwrap()).unwrap();
+
+    let mut approved = HashSet::new();
+    approved.insert("rustc --edition=invalid".to_string());
+    let options = PrepareOptions {
+        set_overrides: None,
+        pre_approved_commands: Some(approved),
+        env_overrides: BTreeMap::new(),
+        perf_enabled: false,
+        source_repo_root: None,
+        shell_working_directory: None,
+        prepared_context: None,
+        file_ref_fallback_dir: None,
+    };
+
+    let err = prepare_direct(&source, options).unwrap_err();
+    let term = Terminal::new_optimistic(80);
+    let rendered = strip_escape_codes(err.report_block_error(&term));
+
+    assert!(
+        rendered.contains("line 7"),
+        "expected file-relative line in diagnostic: {rendered}"
+    );
+    assert!(
+        rendered.contains("error:"),
+        "expected captured rustc stderr text in diagnostic: {rendered}"
+    );
+    assert!(
+        rendered.contains("::shell"),
+        "expected source excerpt in diagnostic: {rendered}"
+    );
+    assert!(
+        rendered.contains("title:") || rendered.contains("---"),
+        "expected frontmatter block in diagnostic: {rendered}"
+    );
+}
+
+#[test]
+fn shell_expansion_detail_command_is_the_failed_command_not_source_path() {
+    // `composition.shell_expansion` declares `command`. A handler reading
+    // `detail["command"]` must get the authored shell command, never the
+    // Markdown source path. `shell_expansion_failed_err` carries
+    // `command: "cmd-that-fails"` and `source_path: "prompts/test.md"`.
+    let detail = shell_expansion_failed_err().detail();
+    assert_eq!(
+        detail["command"],
+        json!("cmd-that-fails"),
+        "command must project the failed command, got: {detail}"
+    );
+}
+
+#[test]
+fn shell_expansion_detail_command_is_null_for_command_less_variant() {
+    // `ParseDirective` carries no command, so `command` stays the seeded
+    // JSON null rather than falling back to the source path.
+    use darkmatter::markdown::compose::ShellCommandOrigin;
+
+    let ctx = biscuit_terminal::errors::SourceContext::new(
+        PathBuf::from("/repo/prompts/test.md"),
+        PathBuf::from("prompts/test.md"),
+        "---\ntitle: Test\n---\n",
+    );
+    let err = CompositionError::ShellExpansionFailed {
+        source_path: PathBuf::from("prompts/test.md"),
+        error: Box::new(ShellExpansionError::ParseDirective {
+            ctx: Box::new(ctx),
+            origin: ShellCommandOrigin::Body { line: 1 },
+            message: "bad directive".to_string(),
+        }),
+    };
+    let detail = err.detail();
+    assert_eq!(
+        detail["command"],
+        Value::Null,
+        "command-less variant must leave `command` as JSON null, got: {detail}"
+    );
+}
+
+// -------------------------------------------------------------------------
+// New lifecycle action form errors (Phase 2)
+// -------------------------------------------------------------------------
+
+#[test]
+fn lifecycle_short_form_removed_display_includes_rewrite() {
+    let err = CompositionError::LifecycleShortFormRemoved {
+        source_path: PathBuf::from("prompts/plan.md"),
+        property: "success".to_string(),
+        raw: "success(\"x\")".to_string(),
+        rewrite: "success: \"x\"".to_string(),
+    };
+    let rendered = err.to_string();
+    assert!(rendered.contains("short-form lifecycle action"), "got: {rendered}");
+    assert!(rendered.contains("success(\"x\")"), "got: {rendered}");
+    assert!(rendered.contains("success: \"x\""), "got: {rendered}");
+    assert!(rendered.contains("prompts/plan.md"), "got: {rendered}");
+}
+
+#[test]
+fn lifecycle_short_form_removed_status_block_is_escape_free_at_none() {
+    use biscuit_terminal::discovery::detection::ColorDepth;
+    use biscuit_terminal::terminal::Terminal;
+    let err = CompositionError::LifecycleShortFormRemoved {
+        source_path: PathBuf::from("prompts/plan.md"),
+        property: "success".to_string(),
+        raw: "success(\"x\")".to_string(),
+        rewrite: "success: \"x\"".to_string(),
+    };
+    let term = Terminal {
+        color_depth: ColorDepth::None,
+        ..Terminal::new_optimistic(80)
+    };
+    let rendered = err.report_block_error(&term);
+    assert!(
+        !rendered.contains('\x1b'),
+        "expected no escape codes at ColorDepth::None: {rendered}"
+    );
+    assert!(rendered.contains("short-form action removed"), "got: {rendered}");
+    assert!(
+        rendered.contains("Rewrite to positional form:"),
+        "got: {rendered}"
+    );
+    assert!(rendered.contains("success:"), "got: {rendered}");
+    assert!(rendered.contains("\\\"x\\\""), "got: {rendered}");
+}
+
+#[test]
+fn lifecycle_unknown_verb_display_includes_rewrite() {
+    let err = CompositionError::LifecycleUnknownVerb {
+        source_path: PathBuf::from("prompts/plan.md"),
+        property: "success".to_string(),
+        verb: "sucess".to_string(),
+        rewrite: "did you mean `success`?".to_string(),
+    };
+    let rendered = err.to_string();
+    assert!(rendered.contains("unknown lifecycle action"), "got: {rendered}");
+    assert!(rendered.contains("sucess"), "got: {rendered}");
+    assert!(rendered.contains("did you mean `success`?"), "got: {rendered}");
+}
+
+#[test]
+fn lifecycle_wrong_arity_display_includes_message() {
+    let err = CompositionError::LifecycleWrongArity {
+        source_path: PathBuf::from("prompts/plan.md"),
+        property: "success".to_string(),
+        verb: "set_frontmatter".to_string(),
+        message: "expected 3 arguments [file, prop, value], got 1".to_string(),
+    };
+    let rendered = err.to_string();
+    assert!(rendered.contains("set_frontmatter"), "got: {rendered}");
+    assert!(rendered.contains("expected 3 arguments"), "got: {rendered}");
+}
+
+#[test]
+fn lifecycle_multiple_actions_code_is_lifecycle_invalid() {
+    // Regression: this cardinality variant used to fall through code()'s
+    // catch-all to `composition.failed`, diverging from its sibling
+    // `LifecycleActionOrder` which already mapped to the lifecycle family.
+    let err = CompositionError::LifecycleMultipleLifecycleActions {
+        source_path: PathBuf::from("prompts/plan.md"),
+        property: "start".to_string(),
+    };
+    assert_eq!(err.code(), "composition.lifecycle_invalid");
+}
+
+#[test]
+fn lifecycle_multiple_actions_detail_projects_property_and_message() {
+    let err = CompositionError::LifecycleMultipleLifecycleActions {
+        source_path: PathBuf::from("prompts/plan.md"),
+        property: "start".to_string(),
+    };
+    let detail = err.detail();
+    assert_eq!(
+        detail["property"],
+        json!("start"),
+        "property must project the offending event name, got: {detail}"
+    );
+    // No dedicated `message` field on this variant, so the synthesized
+    // value must be a present, non-null string.
+    assert!(
+        detail["message"].is_string(),
+        "message must be a present non-null string, got: {detail}"
+    );
+}
+
+#[test]
+fn lifecycle_action_order_detail_projects_property_and_message() {
+    // The named counterpart in the review: it too lacked an explicit
+    // detail() arm and only got `property: null`. Guard it per-variant.
+    let err = CompositionError::LifecycleActionOrder {
+        source_path: PathBuf::from("prompts/plan.md"),
+        property: "start".to_string(),
+    };
+    assert_eq!(err.code(), "composition.lifecycle_invalid");
+    let detail = err.detail();
+    assert_eq!(detail["property"], json!("start"), "got: {detail}");
+    assert!(detail["message"].is_string(), "got: {detail}");
+}
+
+#[test]
+fn lifecycle_object_data_positional_display_mentions_interpolation() {
+    let err = CompositionError::LifecycleObjectDataThroughInterpolationPositional {
+        source_path: PathBuf::from("prompts/plan.md"),
+        property: "success".to_string(),
+        verb: "merge_frontmatter".to_string(),
+    };
+    let rendered = err.to_string();
+    assert!(rendered.contains("merge_frontmatter"), "got: {rendered}");
+    assert!(rendered.contains("whole-value"), "got: {rendered}");
+    assert!(rendered.contains("{{ ... }}"), "got: {rendered}");
+}
+
+#[test]
+fn lifecycle_object_data_parameter_display_mentions_param() {
+    let err = CompositionError::LifecycleObjectDataThroughInterpolationParameter {
+        source_path: PathBuf::from("prompts/plan.md"),
+        property: "success".to_string(),
+        verb: "set_frontmatter".to_string(),
+        param: "value".to_string(),
+    };
+    let rendered = err.to_string();
+    assert!(rendered.contains("set_frontmatter"), "got: {rendered}");
+    assert!(rendered.contains("parameter `value`"), "got: {rendered}");
+}
+
+#[test]
+fn lifecycle_stack_ambiguous_display_includes_message() {
+    let err = CompositionError::LifecycleStackAmbiguous {
+        source_path: PathBuf::from("prompts/plan.md"),
+        property: "success".to_string(),
+        message: "did you mean `success: ...` or `{ action: success, ... }`?".to_string(),
+    };
+    let rendered = err.to_string();
+    assert!(rendered.contains("ambiguous lifecycle stack item"), "got: {rendered}");
+    assert!(rendered.contains("did you mean"), "got: {rendered}");
+}
+
+#[test]
+fn new_lifecycle_errors_get_frontmatter_excerpt() {
+    let source = source_from(
+        "---\nsuccess:\n    sucess: \"x\"\n---\nbody\n",
+    );
+    let err = CompositionError::LifecycleUnknownVerb {
+        source_path: PathBuf::from("review.md"),
+        property: "success".to_string(),
+        verb: "sucess".to_string(),
+        rewrite: "did you mean `success`?".to_string(),
+    }
+    .enrich_frontmatter(&source, true);
+
+    assert!(matches!(err, CompositionError::WithFrontmatter { .. }));
+    assert!(err.frontmatter_excerpt().is_some());
+}
+
+// -------------------------------------------------------------------------
+// Phase 1 autocomplete error variants
+// -------------------------------------------------------------------------
+
+#[test]
+fn autocomplete_no_matches_display_includes_query() {
+    let err = CompositionError::AutocompleteNoMatches {
+        query: "foo".to_string(),
+    };
+    let rendered = err.to_string();
+    assert!(rendered.contains("foo"), "got: {rendered}");
+    assert!(rendered.contains("no files matched"), "got: {rendered}");
+}
+
+#[test]
+fn autocomplete_over_cap_display_includes_query_and_cap() {
+    let err = CompositionError::AutocompleteOverCap {
+        query: "bar".to_string(),
+        cap: 500,
+    };
+    let rendered = err.to_string();
+    assert!(rendered.contains("bar"), "got: {rendered}");
+    assert!(rendered.contains("500"), "got: {rendered}");
+    assert!(rendered.contains("narrow your query"), "got: {rendered}");
+}
+
+#[test]
+fn autocomplete_not_interactive_display_is_actionable() {
+    let err = CompositionError::AutocompleteNotInteractive;
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("interactive terminal"),
+        "got: {rendered}"
+    );
+}
+
+#[test]
+fn autocomplete_errors_do_not_get_frontmatter_excerpt() {
+    let source = source_from("---\ntitle: x\n---\nbody\n");
+    let err = CompositionError::AutocompleteNoMatches {
+        query: "q".to_string(),
+    }
+    .enrich_frontmatter(&source, true);
+    assert!(
+        matches!(err, CompositionError::AutocompleteNoMatches { .. }),
+        "expected no wrapping, got: {err:?}"
+    );
+}
+
+#[test]
+fn autocomplete_over_cap_status_block_names_query() {
+    use biscuit_terminal::prelude::TerminalRenderable;
+    use biscuit_terminal::terminal::Terminal;
+
+    let err = CompositionError::AutocompleteOverCap {
+        query: "plan".to_string(),
+        cap: 500,
+    };
+    let rendered = err.status_block(&Terminal::default()).render(&Terminal::default());
+    assert!(rendered.contains("plan"), "got: {rendered}");
+    assert!(rendered.contains("500"), "got: {rendered}");
+    assert!(rendered.contains("narrow"), "got: {rendered}");
+}
+
+/// Wrap a [`FileReferenceDiagnostic`] in the same `ComposeFailed` /
+/// `Interpolation` shape the live compose path produces, so `detail()`
+/// exercises the real projection.
+fn file_ref_compose_error(diagnostic: FileReferenceDiagnostic) -> CompositionError {
+    use darkmatter::markdown::SourceRef;
+    CompositionError::ComposeFailed(MarkdownError::Interpolation {
+        key: Some("spec".to_string()),
+        expression: "frontmatter('features/spec.md')".to_string(),
+        source: Box::new(SourceRef::Effective {
+            rendered: "frontmatter('features/spec.md')".to_string(),
+            origin_key: Some("spec".to_string()),
+        }),
+        cause: Box::new(ExpressionError::FileReference(diagnostic)),
+    })
+}
+
+#[test]
+fn file_reference_detail_serializes_kind_as_snake_case() {
+    // `kind` must be the catalog snake_case slug, never the Debug form.
+    for (kind, expected) in [
+        (FileRefFailure::NotFound, "not_found"),
+        (FileRefFailure::Malformed, "malformed"),
+        (FileRefFailure::FoundElsewhere, "found_elsewhere"),
+        (FileRefFailure::RemoteNotEnabled, "remote_not_enabled"),
+    ] {
+        let err = file_ref_compose_error(FileReferenceDiagnostic {
+            function: "frontmatter",
+            reference: "features/spec.md".to_string(),
+            kind,
+            base_dir: PathBuf::from("/repo"),
+            fallback_dir: None,
+            source: None,
+        });
+        let detail = err.detail();
+        assert_eq!(
+            detail["kind"],
+            json!(expected),
+            "kind must serialize snake_case, not Debug: {detail}"
+        );
+        assert_ne!(detail["kind"], json!(format!("{kind:?}")));
+    }
+}
+
+#[test]
+fn file_reference_detail_emits_full_registry_field_set() {
+    let err = file_ref_compose_error(FileReferenceDiagnostic {
+        function: "frontmatter",
+        reference: "features/spec.md".to_string(),
+        kind: FileRefFailure::Malformed,
+        base_dir: PathBuf::from("/repo/area"),
+        fallback_dir: None,
+        source: None,
+    });
+    let detail = err.detail();
+    // Every field the registry declares for the code is present.
+    for field in ["reference", "kind", "base_dir", "suggestions", "fallback_dir"] {
+        assert!(
+            detail.get(field).is_some(),
+            "detail missing registry field `{field}`: {detail}"
+        );
+    }
+    assert_eq!(detail["reference"], json!("features/spec.md"));
+    assert_eq!(detail["base_dir"], json!("/repo/area"));
+    // No fallback_dir set → projects to null (the optional sentinel).
+    assert_eq!(detail["fallback_dir"], Value::Null);
+    // Malformed reference offers no sibling suggestions.
+    assert_eq!(detail["suggestions"], json!([]));
+}
+
+#[test]
+fn file_reference_detail_carries_fallback_dir_when_set() {
+    let err = file_ref_compose_error(FileReferenceDiagnostic {
+        function: "frontmatter",
+        reference: "features/spec.md".to_string(),
+        kind: FileRefFailure::NotFound,
+        base_dir: PathBuf::from("/repo/area"),
+        fallback_dir: Some(PathBuf::from("/launch/area")),
+        source: None,
+    });
+    let detail = err.detail();
+    assert_eq!(detail["fallback_dir"], json!("/launch/area"));
+}
+
+#[test]
+fn file_reference_detail_suggestions_match_rendered_did_you_mean() {
+    // A missing `specs.md` next to a real `spec.md`: the detail
+    // `suggestions` must equal the exact render-time computation.
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("spec.md"), b"x").unwrap();
+
+    let diagnostic = FileReferenceDiagnostic {
+        function: "frontmatter",
+        reference: "specs.md".to_string(),
+        kind: FileRefFailure::NotFound,
+        base_dir: dir.path().to_path_buf(),
+        fallback_dir: None,
+        source: None,
+    };
+    let err = file_ref_compose_error(diagnostic.clone());
+    let detail = err.detail();
+
+    // The same computation the renderer runs (errors/blocks.rs).
+    let expected_path = diagnostic.base_dir.join(&diagnostic.reference);
+    let rendered = suggest_sibling_files(&expected_path, DEFAULT_MAX_SUGGESTIONS);
+
+    assert_eq!(rendered, vec!["spec.md".to_string()], "fixture sanity");
+    assert_eq!(
+        detail["suggestions"],
+        json!(rendered),
+        "err.detail.suggestions must equal the rendered did-you-mean set"
+    );
+}
+
+#[test]
+fn file_reference_detail_suggestions_match_rendered_for_stale_directory() {
+    // Stale-directory case (the motivating real-errors failure): the
+    // reference's parent directory does not exist, so the suggestion logic
+    // walks up to the nearest existing ancestor and ranks sibling
+    // directories that contain the leaf file. The detail `suggestions`
+    // must be NON-empty and carry the suggested relative path
+    // (sibling_dir/leaf), matching the render-time computation byte-for-byte.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let features = dir.path().join("features");
+    std::fs::create_dir_all(features.join("2026-06-28-real-errors")).unwrap();
+    std::fs::write(
+        features.join("2026-06-28-real-errors").join("spec.md"),
+        b"x",
+    )
+    .unwrap();
+
+    let diagnostic = FileReferenceDiagnostic {
+        function: "frontmatter",
+        reference: "features/2026-06-21-opencode-log-fix/spec.md".to_string(),
+        kind: FileRefFailure::NotFound,
+        base_dir: dir.path().to_path_buf(),
+        fallback_dir: None,
+        source: None,
+    };
+    let err = file_ref_compose_error(diagnostic.clone());
+    let detail = err.detail();
+
+    // The same computation the renderer runs (errors/blocks.rs).
+    let expected_path = diagnostic.base_dir.join(&diagnostic.reference);
+    let rendered = suggest_sibling_files(&expected_path, DEFAULT_MAX_SUGGESTIONS);
+
+    assert_eq!(
+        rendered,
+        vec!["2026-06-28-real-errors/spec.md".to_string()],
+        "fixture sanity: stale-directory arm must surface the real sibling path"
+    );
+    assert_eq!(
+        detail["suggestions"],
+        json!(rendered),
+        "err.detail.suggestions must equal the rendered did-you-mean set for the stale-directory case"
+    );
+    // Non-empty + carries the suggested relative path explicitly.
+    let suggestions = detail["suggestions"]
+        .as_array()
+        .expect("suggestions is an array");
+    assert!(
+        !suggestions.is_empty(),
+        "stale-directory case must surface at least one suggestion"
+    );
+    assert!(
+        suggestions.iter().any(|v| v
+            .as_str()
+            .is_some_and(|s| s.contains("2026-06-28-real-errors/spec.md"))),
+        "stale-directory suggestion must carry the sibling/leaf relative path: {suggestions:?}"
+    );
+}

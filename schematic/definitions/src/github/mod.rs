@@ -205,7 +205,7 @@ pub fn define_github_api() -> RestApi {
             Endpoint {
                 id: "GetRepositoryContentRaw".to_string(),
                 method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/contents/{path}".to_string(),
+                path: "/repos/{owner}/{repo}/contents/{+path}".to_string(),
                 description: "Get raw file content from repository".to_string(),
                 request: None,
                 response: ApiResponse::Text,

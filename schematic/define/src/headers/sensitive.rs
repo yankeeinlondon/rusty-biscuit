@@ -2,9 +2,17 @@ use std::fmt;
 
 /// A string value that should be treated as sensitive (passwords, tokens, etc.).
 ///
-/// This type provides secure handling of sensitive strings by:
-/// - Redacting Debug output to prevent accidental logging
-/// - NOT implementing PartialEq/Eq to prevent timing attacks in comparisons
+/// This wrapper provides exactly two guarantees:
+/// - [`Debug`] output is redacted to `SensitiveString("***")`, so the value
+///   does not leak through logs or formatted diagnostics.
+/// - No [`Display`] impl, so it cannot be printed by accident.
+///
+/// It offers nothing more. There is no comparison protection: `Eq`/`PartialEq`
+/// are simply not derived, which only means values cannot be compared at all —
+/// this is not a constant-time comparison and does not address timing attacks.
+/// There is no zeroize-on-drop; the plaintext lives in the heap `String` until
+/// dropped. Both [`SensitiveString::as_str`] and
+/// [`SensitiveString::into_inner`] expose the underlying value in the clear.
 ///
 /// ## Examples
 ///

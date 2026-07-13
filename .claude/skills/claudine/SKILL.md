@@ -2,7 +2,7 @@
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Kilo, Pi, Antigravity), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
 last_updated: 2026-07-10
-hash: 65dc854540ca152c-c49d5b636b77ef04
+hash: 65dc854540ca152c-3416bfaf8a4f9208
 ---
 
 ## Overview
@@ -27,13 +27,13 @@ Nineteen modules plus the shared error type and the flat `provider_id` leaf (the
 | Module | Responsibility |
 |--------|----------------|
 | `actions` | Hook action types and responses |
-| `adapters` | Provider-specific event parsers |
 | `badges` | Styled terminal badge constants |
 | `composition` | Markdown frontmatter composition (direct/inline/sequence) plus the loop engine |
 | `config` | Agent detection, hook registration, atomic writes, backups |
 | `dispatch` | Event processing pipeline, templates, matchers, expression bridge |
 | `events` | The normalized 16-event lifecycle model |
 | `harness` | Shell audit, timeouts, runtime attempt classification, speech helpers, and kept lifecycle recovery infrastructure (no validation/handler DSL — see [Validations and Handlers → Lifecycle Stacks](validations-and-handlers.md)) |
+| `hook_adapters` | Native hook request/response adapters (parse provider hook payloads; distinct from `stream/providers` stdout NDJSON parsers) |
 | `linking` | Cross-provider resource sync with portability classification |
 | `mcp` | Catalog, defaults, provider-state, import/export, runtime injectors |
 | `messaging` | Outbound routes (Discord/Slack/Signal/WhatsApp); desktop notifications are separate and zero-config |

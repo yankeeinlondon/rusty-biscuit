@@ -76,6 +76,15 @@ impl TokenStore for MemoryTokenStore {
 ///
 /// Tokens are stored as JSON at the specified path. Parent directories
 /// are created automatically on save.
+///
+/// ## Notes
+///
+/// Because the file holds plaintext bearer credentials, saves are hardened:
+/// the write is atomic (temp file + rename) so readers never observe a partial
+/// file, and on Unix the token file is created `0o600` and its parent directory
+/// `0o700` so other local users cannot read it. On Windows there are no POSIX
+/// mode bits; confidentiality relies on the ACLs of the per-user profile
+/// directory the path lives under.
 pub struct FileTokenStore {
     path: std::path::PathBuf,
 }
@@ -85,6 +94,76 @@ impl FileTokenStore {
     pub fn new(path: impl Into<std::path::PathBuf>) -> Self {
         Self { path: path.into() }
     }
+
+    /// Builds a unique sibling temp path for the atomic write.
+    ///
+    /// The suffix combines pid, a monotonically increasing counter, and a
+    /// nanosecond timestamp so concurrent writers in this or another process
+    /// never share a temp file.
+    fn temp_path(&self) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+        let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let pid = std::process::id();
+
+        let mut file_name = self
+            .path
+            .file_name()
+            .map(std::ffi::OsStr::to_os_string)
+            .unwrap_or_default();
+        file_name.push(format!(".tmp.{pid}.{nanos}.{counter}"));
+
+        match self.path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            Some(dir) => dir.join(file_name),
+            None => std::path::PathBuf::from(file_name),
+        }
+    }
+}
+
+/// Creates `dir` (and missing parents) with owner-only permissions on Unix.
+#[cfg(unix)]
+fn create_dir_secure(dir: &std::path::Path) -> Result<(), OAuthError> {
+    use std::os::unix::fs::DirBuilderExt;
+
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+        .map_err(|e| OAuthError::TokenStore(format!("Failed to create directory: {e}")))
+}
+
+#[cfg(not(unix))]
+fn create_dir_secure(dir: &std::path::Path) -> Result<(), OAuthError> {
+    std::fs::create_dir_all(dir)
+        .map_err(|e| OAuthError::TokenStore(format!("Failed to create directory: {e}")))
+}
+
+/// Writes `bytes` to `path`, creating the file `0o600` on Unix.
+#[cfg(unix)]
+fn write_secure(path: &std::path::Path, bytes: &[u8]) -> Result<(), OAuthError> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|e| OAuthError::TokenStore(format!("Failed to create token file: {e}")))?;
+    file.write_all(bytes)
+        .map_err(|e| OAuthError::TokenStore(format!("Failed to write token file: {e}")))
+}
+
+#[cfg(not(unix))]
+fn write_secure(path: &std::path::Path, bytes: &[u8]) -> Result<(), OAuthError> {
+    std::fs::write(path, bytes)
+        .map_err(|e| OAuthError::TokenStore(format!("Failed to write token file: {e}")))
 }
 
 impl TokenStore for FileTokenStore {
@@ -106,12 +185,23 @@ impl TokenStore for FileTokenStore {
     fn save(&self, tokens: &StoredTokens) -> Result<(), OAuthError> {
         let json = serde_json::to_string_pretty(tokens)
             .map_err(|e| OAuthError::TokenStore(format!("Failed to serialize tokens: {e}")))?;
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| OAuthError::TokenStore(format!("Failed to create directory: {e}")))?;
+
+        if let Some(parent) = self.path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            create_dir_secure(parent)?;
         }
-        std::fs::write(&self.path, json)
-            .map_err(|e| OAuthError::TokenStore(format!("Failed to write token file: {e}")))?;
+
+        // Write to a uniquely-named temp file in the same directory, then rename
+        // over the target. Rename is atomic on the same filesystem, so a reader
+        // sees either the old or the new file, and the unique suffix keeps
+        // concurrent writers from clobbering a shared temp file.
+        let temp_path = self.temp_path();
+        write_secure(&temp_path, json.as_bytes())?;
+
+        std::fs::rename(&temp_path, &self.path).map_err(|e| {
+            let _ = std::fs::remove_file(&temp_path);
+            OAuthError::TokenStore(format!("Failed to persist token file: {e}"))
+        })?;
+
         Ok(())
     }
 
@@ -208,6 +298,36 @@ mod tests {
 
         let loaded = store.load().unwrap().unwrap();
         assert_eq!(loaded.access_token, "nested_token");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_store_uses_owner_only_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let token_dir = dir.path().join("secrets");
+        let path = token_dir.join("tokens.json");
+        let store = FileTokenStore::new(&path);
+
+        store
+            .save(&StoredTokens {
+                access_token: "perm_token".into(),
+                refresh_token: None,
+                expires_at: None,
+                scopes: vec![],
+            })
+            .unwrap();
+
+        let file_mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(file_mode, 0o600, "token file should be owner read/write only");
+
+        let dir_mode = std::fs::metadata(&token_dir)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(dir_mode, 0o700, "token directory should be owner-only");
     }
 
     #[test]

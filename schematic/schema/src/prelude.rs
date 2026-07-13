@@ -68,15 +68,17 @@
 //!     Ok(())
 //! }
 //! ```
+pub use crate::shared::{RequestParts, SchematicError};
 pub use crate::anthropic::{Anthropic, AnthropicRequest};
-pub use crate::artificial_analysis::{ArtificialAnalysisCritPt, ArtificialAnalysisCritPtRequest};
-pub use crate::artificial_analysis::{ArtificialAnalysisData, ArtificialAnalysisDataRequest};
+pub use crate::artificial_analysis::{
+    ArtificialAnalysisData, ArtificialAnalysisDataRequest,
+};
+pub use crate::artificial_analysis::{
+    ArtificialAnalysisCritPt, ArtificialAnalysisCritPtRequest,
+};
 pub use crate::bitbucket::{Bitbucket, BitbucketRequest};
+pub use crate::openai::{OpenAI, OpenAIRequest};
 pub use crate::elevenlabs::{ElevenLabs, ElevenLabsRequest};
-pub use crate::elevenlabs_ws::define_api as define_elevenlabs_ws_api_definition;
-pub use crate::emqx::{EmqxBasic, EmqxBasicRequest};
-pub use crate::emqx::{EmqxBearer, EmqxBearerRequest};
-pub use crate::eversolo::{Eversolo, EversoloRequest};
 pub use crate::gitea::{Gitea, GiteaRequest};
 pub use crate::github::{GitHub, GitHubRequest};
 pub use crate::gitlab::{GitLab, GitLabRequest};
@@ -84,11 +86,15 @@ pub use crate::huggingface::{HuggingFaceHub, HuggingFaceHubRequest};
 pub use crate::lmstudio::{LmStudio, LmStudioRequest};
 pub use crate::ollama::{OllamaNative, OllamaNativeRequest};
 pub use crate::ollama::{OllamaOpenAI, OllamaOpenAIRequest};
-pub use crate::openai::{OpenAI, OpenAIRequest};
+pub use crate::emqx::{EmqxBasic, EmqxBasicRequest};
+pub use crate::emqx::{EmqxBearer, EmqxBearerRequest};
+pub use crate::eversolo::{Eversolo, EversoloRequest};
 pub use crate::samsung_smart_tv::{SamsungSmartTv, SamsungSmartTvRequest};
-pub use crate::samsung_smart_tv_remote_ws::define_api as define_samsung_smart_tv_remote_ws_api_definition;
-pub use crate::shared::{RequestParts, SchematicError};
-pub use crate::unfolded_circle_core_rest::{UnfoldedCircleCoreRest, UnfoldedCircleCoreRestRequest};
+pub use crate::unfolded_circle_core_rest::{
+    UnfoldedCircleCoreRest, UnfoldedCircleCoreRestRequest,
+};
+pub use crate::elevenlabs_ws::define_api as define_elevenlabs_ws_api_definition;
 pub use crate::unfolded_circle_core_ws::define_api as define_unfolded_circle_core_ws_api_definition;
 pub use crate::unfolded_circle_dock_ws::define_api as define_unfolded_circle_dock_ws_api_definition;
 pub use crate::unfolded_circle_integration_ws::define_api as define_unfolded_circle_integration_ws_api_definition;
+pub use crate::samsung_smart_tv_remote_ws::define_api as define_samsung_smart_tv_remote_ws_api_definition;

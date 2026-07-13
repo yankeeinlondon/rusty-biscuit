@@ -58,7 +58,7 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
             let auth_desc = match &api.auth {
                 AuthStrategy::None => "None".to_string(),
                 AuthStrategy::BearerToken { .. } => "Bearer".to_string(),
-                AuthStrategy::ApiKey { header } => format!("API Key (`{}`)", header),
+                AuthStrategy::ApiKey { header, .. } => format!("API Key (`{}`)", header),
                 AuthStrategy::Basic => "Basic".to_string(),
                 _ => "Custom".to_string(),
             };
@@ -187,7 +187,7 @@ pub fn assemble_lib_rs_with_options(apis: &[&RestApi], options: &OutputOptions) 
             let auth_desc = match &api.auth {
                 AuthStrategy::None => "None".to_string(),
                 AuthStrategy::BearerToken { .. } => "Bearer".to_string(),
-                AuthStrategy::ApiKey { header } => format!("API Key (`{}`)", header),
+                AuthStrategy::ApiKey { header, .. } => format!("API Key (`{}`)", header),
                 AuthStrategy::Basic => "Basic".to_string(),
                 _ => "Custom".to_string(),
             };
