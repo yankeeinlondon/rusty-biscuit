@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-7a4665dac765b3c8
-last_updated: 2026-07-06
+hash: ef46db3751d8e999-4385628bd216bb7f
+last_updated: 2026-07-13
 ---
 # Claudine CLI Reference
 
@@ -363,6 +363,23 @@ Shared filters: `--provider`, `--repo`, `--package-area`, `--package`. Read comm
 | `trends` | Usage trends over time |
 | `drift` | Model-catalog drift signals and family-latest alias resolutions |
 | `sync` | Force re-sync of JSONL logs into SQLite |
+
+---
+
+## `claudine dashboard`
+
+The mesh NOW view — a one-shot, read-only render over the rendezvous daemon's live registers (rendezvous dashboard feature, D1). The historical complement is `claudine logs`; this command answers "what is running right now, where, and does anything need me?"
+
+```bash
+claudine dashboard [--local]
+```
+
+- **Mesh-wide by default** — renders every host the local daemon holds a register replica for. `--local` restricts to this host only.
+- **Data path** — folds five daemon read RPCs into one view: `ListActiveSessions` (live sessions), `ListHostCapabilities` (hostname/OS/arch/CPU/RAM/GPU), `ListHostRepos` (checked-out repo count), `ListPeers` (per-peer `last_synced_unix_ms`, the freshness clock), and `Status` (the local node id, to mark the always-fresh local host).
+- **Staleness (D4)** — every remote host row shows its last-sync age. Past **60 seconds** of sync silence a host is rendered *stale* and its sessions as *unknown* rather than as last-known status; a host never synced renders *never synced*. The clock is the daemon's `last_synced_unix_ms` (stamped only on a successful direct-sync round — not mDNS chatter), kept advancing by the daemon's periodic re-sync worker.
+- **Needs human intervention (D5, trigger 1)** — a session whose register `status` is `waiting_on_user`/`blocked` (and whose host is fresh) is flagged in the `Needs?` column. The Claudine wrapper produces this signal by reporting an `UPDATED` status transition when a `PermissionRequest` surfaces mid-stream, clearing it back to `active` on the next progress event.
+- **v1 scope** — wrapped sessions only; unwrapped sessions appear once the process monitor lands. An absent daemon degrades to a friendly note (exit 0), never an error.
+- **Dual-target** — rendered through `DashboardReport` (`TerminalRenderable` + `BrowserRenderable`, the `MetricsReport` precedent); the component lives CLI-local (`cli/src/commands/dashboard/`) so the `claudine` library stays free of any `rendezvous-*` dependency.
 
 ---
 

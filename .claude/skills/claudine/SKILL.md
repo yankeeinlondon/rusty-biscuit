@@ -1,8 +1,8 @@
 ---
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Kilo, Pi, Antigravity), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
-last_updated: 2026-07-10
-hash: 65dc854540ca152c-3416bfaf8a4f9208
+last_updated: 2026-07-13
+hash: 65dc854540ca152c-643ca246ac704d99
 ---
 
 ## Overview
@@ -96,6 +96,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | `claudine uninstall [--keep-config]` | Remove hooks from all agents |
 | `claudine providers` | Provider capability matrix (skill/slash/agent/hooks) |
 | `claudine logs [today\|week\|month\|sessions\|tools\|errors\|repos\|trends\|drift\|sync]` | Reporting and sync for Claudine JSONL logs |
+| `claudine dashboard [--local]` | Mesh NOW view: live sessions across rendezvous hosts, with per-host staleness and the needs-human-intervention signal (reads the rendezvous daemon) |
 | `claudine completions <shell>` | Generate shell completions |
 | `claudine context [--values\|--expressions\|--side-effects]` | Show Darkmatter context variables, expression engine, and side-effect capabilities |
 | `claudine` *(no subcommand)* | Render rich grouped help |
