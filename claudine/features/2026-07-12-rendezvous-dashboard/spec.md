@@ -16,7 +16,7 @@ The [rendezvous data-model doc](../../rendezvous/docs/crdt.md) splits the system
 
 Answers "what is running, where, and does anything need me?" — served from **live state, never DuckDB**:
 
-- each host's daemon maintains a `sessions-active/{node_id}` register (a small CRDT document listing that host's live sessions and their status); mesh sync means *every* daemon holds a replica of *every* host's register, so any single daemon can render the whole mesh
+- each host's daemon maintains a `sessions-active/{node_id}` register (a small CRDT document listing that host's live sessions and their status); mesh sync means *every* daemon holds a replica of *every* host's register, so any single daemon can render the whole mesh. ✅ **Daemon side IMPLEMENTED (2026-07-12):** the register domain, a `ReportSessionEvent` RPC (STARTED/UPDATED/ENDED transitions with daemon-stamped `started_at`/`updated_at`; ENDED removes the entry — the register holds only live sessions), and the mesh-wide `ListActiveSessions` read RPC. Pending: Claudine's wrapper calling `ReportSessionEvent` at its lifecycle points (the producer side), and stuck-entry hygiene for crashed producers (the process monitor's reconciliation job; until then consumers judge staleness from `updated_at_unix_ms`)
 - sub-second freshness for the local host comes from gRPC streaming (a live subscription to the daemon rather than polling)
 - host liveness comes from the ephemeral presence layer (derived from last successful peer sync — see the data-model doc's presence section)
 
