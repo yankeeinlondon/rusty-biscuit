@@ -719,6 +719,53 @@ mod tests {
         });
     }
 
+    /// A `change` union whose two arms type `when` divergently (string vs
+    /// expression) under a shared literal `kind` discriminant. `deleted_first`
+    /// swaps arm order so a test can select the expression arm from either
+    /// position; `change_body` is the authored `change:` mapping.
+    fn expression_arm_union_doc(deleted_first: bool, change_body: &str) -> String {
+        let created = r#"    - "{ kind: literal(created), when: string }""#;
+        let deleted = r#"    - "{ kind: literal(deleted), when: expression }""#;
+        let (first, second) = if deleted_first { (deleted, created) } else { (created, deleted) };
+        format!("---\n$schema:\n  change:\n{first}\n{second}\nchange:\n{change_body}---\n\nbody\n")
+    }
+
+    #[test]
+    fn malformed_selected_arm_expression_value_emits_malformed_diagnostic() {
+        // With `kind: deleted`, the deleted arm's `when: expression` governs, so a
+        // malformed value there emits `dm.expression.malformed`. The value
+        // resolver must select the nested arm from either position.
+        for deleted_first in [false, true] {
+            let text = expression_arm_union_doc(deleted_first, "  kind: deleted\n  when: '1 +'\n");
+            diagnostics_for(&text, |diagnostics| {
+                assert!(
+                    diagnostics
+                        .iter()
+                        .any(|diagnostic| code_of(diagnostic) == Some(code::EXPRESSION_MALFORMED)),
+                    "malformed selected-arm expression emits dm.expression.malformed (deleted_first={deleted_first}): {diagnostics:#?}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn malformed_value_under_non_selected_arm_type_emits_no_expression_diagnostic() {
+        // With `kind: created`, `when` is a string, so `'1 +'` is a valid value
+        // and no expression diagnostic fires — the sibling deleted arm's
+        // `expression` type must not leak into the selected created arm.
+        for deleted_first in [false, true] {
+            let text = expression_arm_union_doc(deleted_first, "  kind: created\n  when: '1 +'\n");
+            diagnostics_for(&text, |diagnostics| {
+                assert!(
+                    diagnostics
+                        .iter()
+                        .all(|diagnostic| code_of(diagnostic) != Some(code::EXPRESSION_MALFORMED)),
+                    "no expression diagnostic for a string-typed selected arm (deleted_first={deleted_first}): {diagnostics:#?}"
+                );
+            });
+        }
+    }
+
     #[test]
     fn missing_required_is_off_by_default_and_error_in_strict() {
         // `required` is a compose-time contract: no edit-time diagnostic unless

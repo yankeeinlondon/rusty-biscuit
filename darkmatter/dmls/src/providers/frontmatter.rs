@@ -175,7 +175,7 @@ fn value_completions(
     }
 
     let shape = known_shape(ctx);
-    let Some(def) = def_at_path(&shape, &path) else {
+    let Some(def) = def_at_path_ctx(ctx, &shape, &path) else {
         return Vec::new();
     };
 
@@ -208,9 +208,19 @@ fn value_completions(
         items.extend(expression_value_completions(ctx, offset, partial, start));
     }
 
-    // Non-literal value scaffolds from the first completable arm (enum members,
-    // boolish, or file paths), combined with any literals/expression items above.
-    if let Some(atom) = completable_atom(def) {
+    // Non-literal value scaffolds from EVERY non-Literal arm (each enum arm's
+    // members, each boolish arm's `true`/`false`, each file arm's paths),
+    // combined with the literals/expression items above. Accumulating across all
+    // arms — not just the first completable one — is what lets a union like
+    // `[literal(auto), enum(fit, fill), boolean]` offer every arm's candidates
+    // (`auto`, `fit`, `fill`, `true`, `false`) instead of silently dropping the
+    // later arms. Literal and expression atoms fall through all three branches,
+    // so they are handled only by the blocks above. `dedup_completions` below is
+    // the single dedup authority: it collapses a candidate two arms both produce,
+    // preserving declaration order (`atoms_of` is already in declaration order)
+    // so a preselected literal offered ahead of a colliding candidate keeps its
+    // preselection.
+    for atom in atoms_of(def) {
         if let Some(members) = enum_members(atom) {
             items.extend(
                 members
@@ -415,7 +425,7 @@ pub(crate) fn expression_values<'a>(
             continue;
         }
         let path: Vec<&str> = entry.dotted.split('.').collect();
-        if def_at_path(&shape, &path).and_then(expression_atom).is_none() {
+        if def_at_path_ctx(ctx, &shape, &path).and_then(expression_atom).is_none() {
             continue;
         }
         let Some(raw) = ctx.text.get(entry.value_span.clone()) else {
@@ -470,7 +480,7 @@ fn frontmatter_scalar(ctx: &DocumentContext, name: &str) -> Option<String> {
 /// a bare expression identifier that names a caller-supplied parameter.
 fn schema_property_details(ctx: &DocumentContext, name: &str) -> Option<String> {
     let shape = known_shape(ctx);
-    let def = def_at_path(&shape, &[name])?;
+    let def = def_at_path_ctx(ctx, &shape, &[name])?;
     schema_hover_details(def)
 }
 
@@ -605,7 +615,7 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
 fn schema_hover(ctx: &DocumentContext, entry: &FmEntry) -> Option<Hover> {
     let shape = known_shape(ctx);
     let path: Vec<&str> = entry.dotted.split('.').collect();
-    let def = def_at_path(&shape, &path)?;
+    let def = def_at_path_ctx(ctx, &shape, &path)?;
     let body = schema_hover_body(&entry.key, def)?;
     markup_hover(ctx, entry.key_span.clone(), body)
 }
@@ -748,7 +758,7 @@ fn nav_targets(ctx: &DocumentContext, ast: &FrontmatterAst) -> Vec<(SourceSpan, 
             continue;
         }
         let path: Vec<&str> = entry.dotted.split('.').collect();
-        if def_at_path(&shape, &path).and_then(file_atom).is_some()
+        if def_at_path_ctx(ctx, &shape, &path).and_then(file_atom).is_some()
             && let Some(value) = &entry.scalar
             && is_schema_file_value(value)
         {
@@ -1003,15 +1013,42 @@ fn navigate_json<'a>(root: &'a Value, path: &[&str]) -> Option<&'a Value> {
 }
 
 /// The [`PropertyDef`] at a full key `path` (ancestor segments followed by the
-/// leaf key), descending inline objects for the ancestors. `None` when any
-/// ancestor is missing/not an inline object, or the leaf key is absent.
+/// leaf key), descending the **first** inline-object arm of each ancestor. This
+/// is the context-free resolver: it never consults the authored mapping, so a
+/// discriminated ancestor union always resolves against its first arm.
 ///
-/// This is the reusable nested schema-path resolver: split a `FrontmatterAst`
-/// entry's `dotted` path on `.` and pass it here to reach the schema definition
-/// governing that value at any nesting depth.
+/// `None` when any ancestor is missing/not an inline object, or the leaf key is
+/// absent.
+///
+/// Callers that have a [`DocumentContext`] and must honor a selected
+/// discriminated arm use [`def_at_path_ctx`] instead; this pure variant survives
+/// for the context-free code-action/DSL callers and the unit tests.
 pub(crate) fn def_at_path<'a>(root: &'a SchemaShape, path: &[&str]) -> Option<&'a PropertyDef> {
     let (leaf, ancestors) = path.split_last()?;
     let shape = nested_shape(root, ancestors)?;
+    shape.properties.get(*leaf)
+}
+
+/// The [`PropertyDef`] at a full key `path`, like [`def_at_path`] but
+/// arm-selecting each ancestor's discriminated inline-object union from the
+/// authored mapping (via [`nested_shape_for_completion`] → the Phase-4
+/// [`select_literal_discriminant_arm`]).
+///
+/// This is the single context-aware schema-path resolver shared by every
+/// value-oriented capability (value completion, hover, expression
+/// gating/diagnostics, file navigation) so they resolve against the same
+/// selected arm that key completion already narrows to. When no ancestor is a
+/// discriminated union, or its discriminant is absent/unknown/ambiguous, it
+/// falls back to the first inline-object arm — byte-identical to [`def_at_path`]
+/// for those cases. An empty ancestor path (a top-level leaf) is likewise
+/// equivalent.
+fn def_at_path_ctx<'a>(
+    ctx: &DocumentContext,
+    root: &'a SchemaShape,
+    path: &[&str],
+) -> Option<&'a PropertyDef> {
+    let (leaf, ancestors) = path.split_last()?;
+    let shape = nested_shape_for_completion(ctx, root, ancestors)?;
     shape.properties.get(*leaf)
 }
 
@@ -1027,16 +1064,6 @@ fn atoms_of(def: &PropertyDef) -> &[PropertyAtom] {
 /// Hover only needs one coherent shape to describe, so first-arm is fine.
 pub(crate) fn primary_atom(def: &PropertyDef) -> Option<&PropertyAtom> {
     atoms_of(def).first()
-}
-
-/// The first arm whose type drives a value completion (enum members, boolish
-/// scaffold, or `file(...)` paths). Mirrors the schema library's
-/// `first_completable_atom` arm search so a union whose completable arm is not
-/// first still offers value completion.
-fn completable_atom(def: &PropertyDef) -> Option<&PropertyAtom> {
-    atoms_of(def)
-        .iter()
-        .find(|atom| enum_members(atom).is_some() || is_boolish(atom) || is_file(atom))
 }
 
 /// The first `file(...)`-typed arm, if any — so navigation and document links
@@ -1263,6 +1290,17 @@ mod tests {
     /// Used by the Expression-typed frontmatter tests, which need the effective
     /// schema and the [`FrontmatterAst`], not just a pure helper.
     fn with_ctx<R>(text: &str, f: impl FnOnce(&DocumentContext) -> R) -> R {
+        with_ctx_docs(text, &[], f)
+    }
+
+    /// Like [`with_ctx`] but seeds additional workspace documents (`path`,
+    /// `source` pairs) into the graph so `file(...)` value completion has
+    /// candidate paths to offer.
+    fn with_ctx_docs<R>(
+        text: &str,
+        docs: &[(&str, &str)],
+        f: impl FnOnce(&DocumentContext) -> R,
+    ) -> R {
         let path = Path::new("/w/doc.md");
         let uri: Uri = "file:///w/doc.md".parse().unwrap();
         let config = DmlsConfig::default();
@@ -1270,7 +1308,14 @@ mod tests {
         let state = OverlayState::default();
         let overlay = state.for_document(&uri, text, path, &config, &roots);
         let source_map = SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text));
-        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1);
+        let mut indices = BTreeMap::new();
+        for (doc_path, source) in docs {
+            indices.insert(
+                PathBuf::from(doc_path),
+                crate::graph::index_document(Path::new(doc_path), source),
+            );
+        }
+        let graph = WorkspaceGraph::build(&indices, 1);
         let profile = ClientProfile::from_initialize(&InitializeParams::default(), PositionEncoding::Utf16);
         let ctx = DocumentContext {
             uri: &uri,
@@ -1550,6 +1595,120 @@ mod tests {
     }
 
     #[test]
+    fn literal_enum_boolean_union_offers_every_arm_candidate() {
+        // `[literal(auto), enum(fit, fill), boolean]` must offer the preselected
+        // literal `auto` PLUS the enum members `fit`/`fill` AND the boolean
+        // `true`/`false` — every non-Literal arm contributes, not just the first
+        // completable one — and the merged list is duplicate-free.
+        let text = concat!(
+            "---\n$schema:\n  width:\n",
+            "    - literal(auto)\n    - enum(fit, fill)\n    - boolean\n",
+            "width: \n---\n\nbody\n",
+        );
+        with_ctx(text, |ctx| {
+            let offset = text.find("width: \n").unwrap() + "width: ".len();
+            let items = completion(ctx, offset);
+            let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+            for expected in ["auto", "fit", "fill", "true", "false"] {
+                assert!(labels.contains(&expected), "`{expected}` offered: {labels:?}");
+            }
+            let auto = items.iter().find(|item| item.label == "auto").expect("literal offered");
+            assert_eq!(auto.preselect, Some(true), "the literal stays preselected");
+
+            let keys = completion_keys(&items);
+            let mut deduped = keys.clone();
+            deduped.sort();
+            deduped.dedup();
+            assert_eq!(keys.len(), deduped.len(), "the merged list has no duplicates: {keys:#?}");
+        });
+    }
+
+    #[test]
+    fn reversed_literal_enum_boolean_union_offers_every_arm_candidate() {
+        // Reversing the arm order — `[boolean, enum(fit, fill), literal(auto)]` —
+        // offers the same set (order may differ), and the literal is still
+        // preselected. Before the fix, the first completable arm (`boolean`) won
+        // and the enum members were dropped.
+        let text = concat!(
+            "---\n$schema:\n  width:\n",
+            "    - boolean\n    - enum(fit, fill)\n    - literal(auto)\n",
+            "width: \n---\n\nbody\n",
+        );
+        with_ctx(text, |ctx| {
+            let offset = text.find("width: \n").unwrap() + "width: ".len();
+            let items = completion(ctx, offset);
+            let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+            for expected in ["auto", "fit", "fill", "true", "false"] {
+                assert!(labels.contains(&expected), "`{expected}` offered: {labels:?}");
+            }
+            let auto = items.iter().find(|item| item.label == "auto").expect("literal offered");
+            assert_eq!(auto.preselect, Some(true), "the literal stays preselected");
+        });
+    }
+
+    #[test]
+    fn file_enum_union_offers_file_paths_and_enum_members() {
+        // A union mixing `file` with an enum arm, in either order, offers BOTH
+        // the workspace file paths AND the enum members — the file arm no longer
+        // suppresses the enum arm (nor the reverse).
+        for arms in ["    - file\n    - enum(fit, fill)\n", "    - enum(fit, fill)\n    - file\n"] {
+            let text = format!("---\n$schema:\n  asset:\n{arms}asset: \n---\n\nbody\n");
+            with_ctx_docs(&text, &[("/w/target.md", "# target\n")], |ctx| {
+                let offset = text.find("asset: \n").unwrap() + "asset: ".len();
+                let items = completion(ctx, offset);
+                let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+                assert!(labels.contains(&"fit"), "enum member offered for arms `{arms}`: {labels:?}");
+                assert!(labels.contains(&"fill"), "enum member offered for arms `{arms}`: {labels:?}");
+                assert!(
+                    items.iter().any(|item| item.kind == Some(CompletionItemKind::FILE)),
+                    "a file path is offered for arms `{arms}`: {items:#?}",
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn duplicate_member_across_two_enum_arms_is_deduplicated() {
+        // Two enum arms share the member `fit`; the merged list offers `fit`
+        // exactly once while every distinct member from both arms survives.
+        let text = concat!(
+            "---\n$schema:\n  width:\n",
+            "    - enum(fit, fill)\n    - enum(fit, snap)\n",
+            "width: \n---\n\nbody\n",
+        );
+        with_ctx(text, |ctx| {
+            let offset = text.find("width: \n").unwrap() + "width: ".len();
+            let items = completion(ctx, offset);
+            let fit_count = items.iter().filter(|item| item.label == "fit").count();
+            assert_eq!(fit_count, 1, "the shared `fit` member appears once: {items:#?}");
+            let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+            for expected in ["fit", "fill", "snap"] {
+                assert!(labels.contains(&expected), "`{expected}` offered: {labels:?}");
+            }
+        });
+    }
+
+    #[test]
+    fn literal_colliding_with_enum_member_keeps_preselected_literal() {
+        // `[literal(fit), enum(fit, fill)]`: the literal `fit` is emitted first
+        // (preselected); the enum's colliding `fit` dedups away, so the single
+        // surviving `fit` keeps its preselection, and `fill` still appears.
+        let text = concat!(
+            "---\n$schema:\n  width:\n",
+            "    - literal(fit)\n    - enum(fit, fill)\n",
+            "width: \n---\n\nbody\n",
+        );
+        with_ctx(text, |ctx| {
+            let offset = text.find("width: \n").unwrap() + "width: ".len();
+            let items = completion(ctx, offset);
+            let fits: Vec<&CompletionItem> = items.iter().filter(|item| item.label == "fit").collect();
+            assert_eq!(fits.len(), 1, "the colliding `fit` appears once: {items:#?}");
+            assert_eq!(fits[0].preselect, Some(true), "the preselected literal wins the collision");
+            assert!(items.iter().any(|item| item.label == "fill"), "enum `fill` still offered: {items:#?}");
+        });
+    }
+
+    #[test]
     fn literal_hover_shows_type_and_exact_value() {
         let text = "---\n$schema:\n  status: literal(published)\nstatus: published\n---\n\nbody\n";
         with_ctx(text, |ctx| {
@@ -1609,6 +1768,161 @@ mod tests {
             let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
             assert!(labels.contains(&"kind"), "the discriminant key is offered: {labels:?}");
         });
+    }
+
+    // ── Nested discriminated-arm value intelligence (selected-arm resolver) ──
+
+    /// The Markdown body of the hover at `offset`.
+    fn hover_markup(ctx: &DocumentContext, offset: usize) -> String {
+        let hover = hover(ctx, offset).expect("hover present");
+        match hover.contents {
+            HoverContents::Markup(MarkupContent { value, .. }) => value,
+            _ => panic!("markdown hover"),
+        }
+    }
+
+    /// A `change` union of two inline-object arms that share property names with
+    /// divergent types (`when`: string vs expression, `asset`: string vs file,
+    /// `state`: literal(open) vs literal(done)), tagged by a shared literal
+    /// `kind` discriminant. `deleted_first` swaps arm order so a test can assert
+    /// the selected arm drives value intelligence from either position.
+    /// `mapping` is the authored `change:` sub-mapping (each line already
+    /// indented two spaces, with a trailing newline).
+    fn change_union_doc(deleted_first: bool, mapping: &str) -> String {
+        let created =
+            r#"    - "{ kind: literal(created), when: string, asset: string, state: literal(open) }""#;
+        let deleted =
+            r#"    - "{ kind: literal(deleted), when: expression, asset: file, state: literal(done) }""#;
+        let (first, second) = if deleted_first { (deleted, created) } else { (created, deleted) };
+        format!("---\n$schema:\n  change:\n{first}\n{second}\nchange:\n{mapping}---\n\nbody\n")
+    }
+
+    #[test]
+    fn selected_arm_expression_value_offers_catalog_completion() {
+        // With `kind: deleted`, the deleted arm's `when: expression` drives value
+        // completion — `ctx.` offers the shared catalog — in BOTH arm orders.
+        for deleted_first in [false, true] {
+            let text = change_union_doc(deleted_first, "  kind: deleted\n  when: ctx.\n");
+            with_ctx(&text, |ctx| {
+                let offset = text.find("when: ctx.").unwrap() + "when: ctx.".len();
+                let items = completion(ctx, offset);
+                assert!(
+                    items.iter().any(|item| item.label == "ctx.packages"),
+                    "selected deleted arm (deleted_first={deleted_first}) offers expression completion: {items:#?}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn non_selected_arm_expression_type_does_not_leak_to_completion() {
+        // With `kind: created`, the created arm's `when: string` governs, so the
+        // value is not an expression and `ctx.` offers no catalog even though the
+        // sibling deleted arm types `when` as expression.
+        for deleted_first in [false, true] {
+            let text = change_union_doc(deleted_first, "  kind: created\n  when: ctx.\n");
+            with_ctx(&text, |ctx| {
+                let offset = text.find("when: ctx.").unwrap() + "when: ctx.".len();
+                let items = completion(ctx, offset);
+                assert!(
+                    items.iter().all(|item| !item.label.starts_with("ctx.")),
+                    "selected created arm (deleted_first={deleted_first}) offers no expression completion: {items:#?}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn selected_arm_expression_value_gets_expression_hover() {
+        // A cursor in the deleted arm's `when` value renders the shared
+        // expression catalog hover, in BOTH arm orders.
+        for deleted_first in [false, true] {
+            let text = change_union_doc(deleted_first, "  kind: deleted\n  when: ctx.today\n");
+            with_ctx(&text, |ctx| {
+                let offset = text.find("ctx.today").unwrap() + 2; // on `x` in `ctx`
+                let value = hover_markup(ctx, offset);
+                let today = expressions::ctx_descriptor("today").unwrap();
+                assert!(
+                    value.contains(&expressions::format_ctx_hover_block(today)),
+                    "selected deleted arm (deleted_first={deleted_first}) hovers the expression catalog: {value}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn schema_hover_on_property_key_resolves_selected_arm() {
+        // Hover on the `when` key resolves the selected arm's type: expression
+        // for the deleted arm, string for the created arm — proving the
+        // non-selected arm's divergent `when` type never leaks.
+        for deleted_first in [false, true] {
+            let deleted = change_union_doc(deleted_first, "  kind: deleted\n  when: x\n");
+            with_ctx(&deleted, |ctx| {
+                let offset = deleted.find("when: x").unwrap() + 1; // on the key
+                let value = hover_markup(ctx, offset);
+                assert!(
+                    value.contains("Type: **expression**"),
+                    "deleted arm `when` is expression (deleted_first={deleted_first}): {value}"
+                );
+            });
+            let created = change_union_doc(deleted_first, "  kind: created\n  when: x\n");
+            with_ctx(&created, |ctx| {
+                let offset = created.find("when: x").unwrap() + 1;
+                let value = hover_markup(ctx, offset);
+                assert!(
+                    value.contains("Type: **string**"),
+                    "created arm `when` is string (deleted_first={deleted_first}): {value}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn selected_arm_literal_value_completion_is_offered_preselected() {
+        // The deleted arm types `state: literal(done)`; completing its value
+        // offers `done` (preselected), never the created arm's `open`.
+        for deleted_first in [false, true] {
+            let text = change_union_doc(deleted_first, "  kind: deleted\n  state: \n");
+            with_ctx(&text, |ctx| {
+                let offset = text.find("state: \n").unwrap() + "state: ".len();
+                let items = completion(ctx, offset);
+                let done = items.iter().find(|item| item.label == "done").unwrap_or_else(|| {
+                    panic!("deleted arm literal `done` offered (deleted_first={deleted_first}): {items:#?}")
+                });
+                assert_eq!(done.preselect, Some(true), "the literal value is preselected");
+                assert!(
+                    items.iter().all(|item| item.label != "open"),
+                    "the created arm's literal `open` must not leak: {items:#?}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn selected_arm_file_value_is_navigable() {
+        // The deleted arm types `asset: file`; its value becomes a navigation
+        // target. The created arm types `asset: string`, so the same value is
+        // inert.
+        for deleted_first in [false, true] {
+            let deleted = change_union_doc(deleted_first, "  kind: deleted\n  asset: ./target.md\n");
+            with_ctx(&deleted, |ctx| {
+                let ast = overlay_ast(ctx).expect("frontmatter ast");
+                let targets = nav_targets(ctx, ast);
+                assert!(
+                    targets.iter().any(|(_, path)| path.ends_with("target.md")),
+                    "deleted arm `asset` navigates (deleted_first={deleted_first}): {targets:#?}"
+                );
+            });
+            let created = change_union_doc(deleted_first, "  kind: created\n  asset: ./target.md\n");
+            with_ctx(&created, |ctx| {
+                let ast = overlay_ast(ctx).expect("frontmatter ast");
+                let targets = nav_targets(ctx, ast);
+                assert!(
+                    targets.iter().all(|(_, path)| !path.ends_with("target.md")),
+                    "created arm `asset` is a plain string, not navigable (deleted_first={deleted_first}): {targets:#?}"
+                );
+            });
+        }
     }
 
     // ── Root `$schema` union key completion (Phase 6, D3) ──
@@ -1866,7 +2180,7 @@ mod tests {
         assert!(emphasis.properties.contains_key("underline"));
 
         let alignment = def_at_path(&root, &["style", "block-quote", "alignment"])
-            .and_then(completable_atom)
+            .and_then(primary_atom)
             .and_then(enum_members)
             .expect("alignment must offer enum values");
         assert_eq!(alignment, ["left", "center", "right"]);
@@ -1929,29 +2243,6 @@ mod tests {
         assert!(!is_schema_file_value("https://example.com/s.yaml"));
         assert!(!is_schema_file_value("{ inline: true }"));
         assert!(!is_schema_file_value("   "));
-    }
-
-    /// An enum atom carrying its members, so [`enum_members`] resolves (a bare
-    /// `PropertyAtom::bare(Enum)` has none and would not drive completion).
-    fn enum_atom(members: &[&str]) -> PropertyAtom {
-        let mut atom = PropertyAtom::bare(SimplifiedType::Enum);
-        atom.constraints
-            .push(Constraint::Members(members.iter().map(|m| m.to_string()).collect()));
-        atom
-    }
-
-    #[test]
-    fn test_completable_atom_selects_non_first_arm() {
-        // `[string, enum(dev, prod)]` — the completable arm is second, but the
-        // first (`string`) is not completable.
-        let def = PropertyDef::Union(vec![
-            PropertyAtom::bare(SimplifiedType::String),
-            enum_atom(&["dev", "prod"]),
-        ]);
-        let atom = completable_atom(&def).expect("the enum arm is completable");
-        assert_eq!(enum_members(atom), Some(["dev".to_string(), "prod".to_string()].as_slice()));
-        // A non-completable single atom yields nothing.
-        assert!(completable_atom(&PropertyDef::Single(PropertyAtom::bare(SimplifiedType::String))).is_none());
     }
 
     #[test]
