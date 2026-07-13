@@ -136,6 +136,22 @@ details do not belong here.
 - A successful `git commit` exit status is authoritative for that invocation.
   After all groups finish, inspect `git status --short` to find staged paths
   left behind and report or commit them as appropriate.
+- **Cross-check every subagent-reported commit hash against `git log --oneline
+  -5` (or `git reflog -20`) after a concurrent batch (2026-07-12 claudine
+  provider-errors batch, lost `c1dbaea1c`).** A subagent may report success
+  with a specific hash that does not actually exist in git — observed when
+  Group 2's reported hash `c1dbaea1c` did not appear in either the log or the
+  reflog and the assigned paths were still staged (no entry in `refs/heads/
+  provider-errors@{1}` either, so the commit truly never landed). The
+  orchestrator's recovery path is to commit the still-staged paths directly
+  with the same single-quoted-heredoc + `-F -` discipline; do not re-dispatch
+  the same subagent, because the original failure mode is unknown and the
+  staged set may have shifted. This is distinct from the per-commit lesson
+  about reading `git commit`'s own stdout: that guards against a subagent
+  misreading its own commit's hash; this guards against the orchestrator
+  accepting a fabricated success report. The single-line check is
+  `git log --oneline -5` — if every reported hash is on the list, the batch
+  is real.
 - Run commands from the inherited worktree root. Do not change to a guessed
   repository path, and do not push commits.
 - **In zsh, never use `status` as a shell variable name in commit wrappers
