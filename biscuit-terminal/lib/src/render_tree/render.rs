@@ -139,6 +139,9 @@ pub fn render_terminal_node(
     Ok(Rendered {
         output,
         diagnostics: writer.diagnostics,
+        // Terminal output never receives browser feature assets, so the
+        // feature side channel stays empty here.
+        features: Vec::new(),
     })
 }
 
