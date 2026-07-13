@@ -1057,13 +1057,23 @@ impl SessionLogManager {
             if accepted.payload_bytes.is_empty() {
                 continue;
             }
-            let Ok(chunk_id) = accepted.document_id.parse::<ChunkId>() else {
-                tracing::warn!(
-                    target: "rendezvous_daemon::session_log",
-                    document_id = %accepted.document_id,
-                    "skipping accepted envelope with malformed document_id during replay",
-                );
-                continue;
+            let chunk_id = match accepted.document_id.parse::<rendezvous_core::DocumentId>() {
+                Ok(rendezvous_core::DocumentId::SessionChunk(chunk)) => chunk,
+                // Register envelopes are persisted for replay
+                // protection only — registers rehydrate from their own
+                // redb table, and a crash-lost register commit heals on
+                // the next sync (the peer re-sends against our
+                // advertised version). Nothing to replay here.
+                Ok(_) => continue,
+                Err(err) => {
+                    tracing::warn!(
+                        target: "rendezvous_daemon::session_log",
+                        document_id = %accepted.document_id,
+                        %err,
+                        "skipping accepted envelope with unrecognized document_id during replay",
+                    );
+                    continue;
+                }
             };
 
             let Some(signed) = reconstruct_signed_envelope(accepted) else {
