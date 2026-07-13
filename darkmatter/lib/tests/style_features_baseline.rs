@@ -52,8 +52,15 @@ fn page(width: u32) -> DarkmatterPage {
 /// by default: the body carries the escaped `<pre class="mermaid">` container and
 /// the forced page wrapper carries one injected CSS block and one module
 /// bootstrap that names both CDN origins with an exact (non-floating) version.
+///
+/// This is a Level-1 *string* assertion on the emitted markup (it never launches
+/// a browser); the live-DOM behavior — module load, SVG replacement, CDN
+/// fallback, theme application — is proven by the Browser-tier `browser_mermaid_*`
+/// tests in `browser_render.rs`. The name deliberately avoids the `browser_`
+/// substring so the nextest `test(/browser_/)` selector routes it to the L1
+/// `just test` suite, not `just test-browser`.
 #[test]
-fn full_page_browser_mermaid_defaults_to_interactive() {
+fn full_page_mermaid_default_markup_is_interactive() {
     let md = Markdown::try_from_content(MERMAID_DOC).expect("parse mermaid doc");
     let html = page(80).render_to_browser(&md).expect("browser render");
 

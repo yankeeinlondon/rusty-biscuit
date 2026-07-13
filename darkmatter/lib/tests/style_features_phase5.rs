@@ -6,6 +6,12 @@
 //! are pinned in `style_features_baseline.rs`; these tests cover dedup, body-only
 //! wrapper injection, popover-in-body, Markdown-family neutrality, and the
 //! explicit Mermaid controls (`Text` → code, `image_mode = Never` → code).
+//!
+//! Browser snapshots cover both output shapes (spec acceptance criterion 12):
+//! the standalone full-page document (`full_page_standalone_document_snapshot`)
+//! and the embeddable body-only wrapper fragment
+//! (`mermaid_body_only_wrapper_snapshot`). The wrapper is a single valid element
+//! — it never nests a `<!DOCTYPE>`/`<html>`/`<head>`/`<body>` inside itself.
 
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::layout::DarkmatterPage;
@@ -20,42 +26,125 @@ const TWO_MERMAID_DOC: &str =
 
 const PROMPTED_LINK_DOC: &str = "[Home](https://example.com \"prompt='go home'\")\n";
 
+/// A code-block document with no feature request and default page layout — the
+/// standalone full-page fixture.
+const CODE_DOC: &str = "# Title\n\n```rust\nfn demo() {}\n```\n";
+
 fn page(width: u32) -> DarkmatterPage {
     let term = Terminal::new_optimistic(width);
     DarkmatterPage::new(&term)
 }
 
-/// The wrapper prefix Darkmatter injects **before** the embedded document body:
-/// the `<div class="darkmatter-page" …>` open tag plus the resolved inline
-/// feature `<style>`/`<script>`. Excludes the large design-token `:root`
-/// preamble (which lives in the embedded document `<head>`), so the snapshot is
-/// exactly the feature-injection surface.
-fn feature_wrapper_prefix(html: &str) -> &str {
-    let end = html.find("<!DOCTYPE html>").expect("embedded document body");
-    &html[..end]
+/// Asserts that `wrapper` is a single embeddable element: it opens with the
+/// `<div class="darkmatter-page"…>` wrapper and contains **no** nested
+/// document-level element (`<!DOCTYPE>`, `<html>`, `<head>`, or `<body>`). This
+/// is the structural guarantee the body-only path must uphold — the wrapper
+/// carries the rendered Markdown and inline assets, not an embedded document.
+fn assert_body_only_wrapper(wrapper: &str) {
+    assert!(
+        wrapper.trim_start().starts_with(r#"<div class="darkmatter-page""#),
+        "a body-only render must open with the page wrapper div, got: {wrapper}"
+    );
+    for forbidden in ["<!DOCTYPE", "<!doctype", "<html", "<head", "<body"] {
+        assert!(
+            !wrapper.contains(forbidden),
+            "the body-only wrapper must not nest a `{forbidden}` element, got: {wrapper}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
-// Snapshot — the exact injected mermaid feature assets (CSP/version contract)
+// Criterion 12 — full-page (standalone) snapshot
 // ---------------------------------------------------------------------------
 
-/// Pins the exact bytes of the injected Mermaid feature assets: the forced
-/// wrapper + `data-darkmatter-features` stamp, the one CSS variable block
-/// (light + dark), and the one module bootstrap naming both CDN origins at the
-/// exact pinned version. Strings only — no remote asset is fetched.
+/// Pins the standalone full-page document form: a default-layout page with no
+/// requested feature returns the complete `<!DOCTYPE html>…` document
+/// (`DarkmatterPage::render_to_browser`'s no-wrapper path), carrying the
+/// design-token `:root` block and the `.code-block` panel stylesheet in
+/// `<head>`. This is the "full-page" half of criterion 12's snapshot coverage
+/// and guards the standalone document path against regressions.
 #[test]
-fn mermaid_feature_assets_snapshot() {
+fn full_page_standalone_document_snapshot() {
+    let md = Markdown::try_from_content(CODE_DOC).expect("parse code doc");
+    let html = page(80).render_to_browser(&md).expect("browser render");
+
+    assert!(
+        html.starts_with("<!DOCTYPE html><html><head>"),
+        "the no-wrapper path emits a standalone document, got: {html}"
+    );
+    assert!(
+        !html.contains(r#"<div class="darkmatter-page""#),
+        "a default-layout feature-free page adds no wrapper, got: {html}"
+    );
+    insta::assert_snapshot!("full_page_standalone_document", html);
+}
+
+// ---------------------------------------------------------------------------
+// Criterion 12 — body-only wrapper (fragment) snapshot
+// ---------------------------------------------------------------------------
+
+/// Pins the exact bytes of the body-only Mermaid wrapper: the forced
+/// `<div class="darkmatter-page" …>` open tag with its `data-darkmatter-features`
+/// stamp, the embedded page-level `<style>` (design tokens + `.code-block`), the
+/// injected Mermaid bootstrap `<script>` (CSP/version contract + `themeVariables`
+/// palette), and the rendered `<pre class="mermaid">` body — all inside one
+/// wrapper with no nested document. Strings only — no remote asset is fetched.
+#[test]
+fn mermaid_body_only_wrapper_snapshot() {
     let md = Markdown::try_from_content(MERMAID_DOC).expect("parse mermaid doc");
     let html = page(80).render_to_browser(&md).expect("browser render");
-    insta::assert_snapshot!("mermaid_feature_assets", feature_wrapper_prefix(&html));
+
+    assert_body_only_wrapper(&html);
+    insta::assert_snapshot!("mermaid_body_only_wrapper", html);
+}
+
+/// The body-only wrapper is a valid single element: it holds the rendered
+/// Markdown plus the inline feature `<style>`/`<script>` assets (emitted before
+/// the body), and never nests an `<html>`/`<head>`/`<body>`/`<!DOCTYPE>`.
+#[test]
+fn body_only_wrapper_has_no_nested_document_and_orders_assets_before_body() {
+    let md = Markdown::try_from_content(MERMAID_DOC).expect("parse mermaid doc");
+    let html = page(80).render_to_browser(&md).expect("browser render");
+
+    assert_body_only_wrapper(&html);
+
+    // The rendered Markdown body survives inside the wrapper.
+    let body_at = html
+        .find(r#"<pre class="mermaid">"#)
+        .expect("the rendered mermaid body must ride the wrapper");
+    assert!(
+        html.contains("graph TD; A --&gt; B"),
+        "the diagram source survives in the body, got: {html}"
+    );
+
+    // The inline feature assets are injected *before* the body content so the
+    // feature's own declarations are present when the body renders.
+    let style_at = html
+        .find("<style>")
+        .expect("an inline feature/page style must be embedded in the wrapper");
+    let script_at = html
+        .find(r#"<script type="module">"#)
+        .expect("the mermaid bootstrap script must be embedded in the wrapper");
+    assert!(
+        style_at < body_at && script_at < body_at,
+        "inline `<style>`/`<script>` assets must precede the body, \
+         style@{style_at} script@{script_at} body@{body_at}: {html}"
+    );
+
+    // The wrapper closes exactly once.
+    assert_eq!(
+        html.matches(r#"<div class="darkmatter-page""#).count(),
+        1,
+        "exactly one wrapper element, got: {html}"
+    );
 }
 
 // ---------------------------------------------------------------------------
-// Criterion 1 — dedup: two mermaid blocks inject exactly one CSS + one script
+// Criterion 1 — dedup: two mermaid blocks inject exactly one bootstrap script
 // ---------------------------------------------------------------------------
 
 #[test]
-fn two_mermaid_blocks_inject_one_css_and_one_module_script() {
+fn two_mermaid_blocks_inject_one_module_script() {
     let md = Markdown::try_from_content(TWO_MERMAID_DOC).expect("parse two-mermaid doc");
     let html = page(80).render_to_browser(&md).expect("browser render");
 
@@ -70,11 +159,16 @@ fn two_mermaid_blocks_inject_one_css_and_one_module_script() {
         "the mermaid bootstrap is injected exactly once, got: {html}"
     );
     assert_eq!(
-        html.matches("--mermaid-primary-color").count(),
-        // The variable appears once in `:root` and once in the dark override —
-        // both inside the single injected CSS block.
-        2,
-        "the mermaid CSS block is injected exactly once (root + dark), got: {html}"
+        // The palette rides Mermaid's `themeVariables`, so the single injected
+        // bootstrap carries exactly one `themeVariables` object — and no dead
+        // `--mermaid-*` custom properties nothing reads.
+        html.matches("themeVariables:{").count(),
+        1,
+        "the mermaid bootstrap (with its themeVariables) is injected once, got: {html}"
+    );
+    assert!(
+        !html.contains("--mermaid-"),
+        "no dead --mermaid-* custom properties are emitted, got: {html}"
     );
     assert_eq!(
         html.matches(r#"data-darkmatter-features="mermaid-diagram""#).count(),
@@ -96,14 +190,19 @@ fn prompted_link_forces_wrapper_with_popover_css_in_body() {
         html.starts_with(r#"<div class="darkmatter-page" data-darkmatter-features="popover""#),
         "a popover feature forces the wrapper stamped with its name, got: {html}"
     );
-    // The popover CSS is injected inline in the wrapper (before the body's
-    // `<!DOCTYPE html>`), not in the embedded document `<head>`.
-    let doctype_at = html.find("<!DOCTYPE html>").expect("document body present");
+    // The wrapper is a single valid element — no nested document.
+    assert_body_only_wrapper(&html);
+
+    // The popover CSS is injected inline in the wrapper, before the body's
+    // accessible markup (which carries the `class="dm-popover-wrapper"` span).
+    let body_markup_at = html
+        .find(r#"class="dm-popover-wrapper""#)
+        .expect("popover markup present in body");
     let css_at = html
         .find(".dm-popover-wrapper{")
         .expect("popover CSS present");
     assert!(
-        css_at < doctype_at,
+        css_at < body_markup_at,
         "popover CSS is injected before the body, got: {html}"
     );
     assert_eq!(
@@ -119,7 +218,8 @@ fn prompted_link_forces_wrapper_with_popover_css_in_body() {
 }
 
 /// A feature-free page keeps its prior bytes: no wrapper, no feature stamp, no
-/// injected assets (spec acceptance criterion 2b for the browser body path).
+/// injected feature assets (spec acceptance criterion 2b for the browser body
+/// path). The default-layout path stands alone as a full document.
 #[test]
 fn feature_free_render_has_no_wrapper_or_assets() {
     let md = Markdown::try_from_content("Just a paragraph.\n").expect("parse plain doc");
@@ -157,7 +257,7 @@ fn markdown_plus_mermaid_output_has_no_feature_assets() {
     assert!(
         !out.contains("<script")
             && !out.contains("data-darkmatter-features")
-            && !out.contains("--mermaid-primary-color"),
+            && !out.contains("themeVariables"),
         "MarkdownPlus output carries no injected feature assets, got: {out}"
     );
 }
