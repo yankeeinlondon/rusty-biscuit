@@ -215,5 +215,5 @@ capacity needle is required and no gap is recorded for this class.
 - `claudine/docs/research/signals/claude.md` — the `usage_cap_approaching`
   **detection** records for the same rate-limit surface (D9 cross-citation;
   detection, not rendering vocabulary).
-- `claudine/docs/providers/facts/claude.yaml` (`error_vocabulary:`) — the
+- `claudine/docs/research/agent-errors/_seeds/claude.yaml` — the immutable
   Phase-A seed transcribed verbatim from `lib/src/stream/providers/claude.rs`.

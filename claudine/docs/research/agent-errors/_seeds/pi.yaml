@@ -1,0 +1,7 @@
+msg_buckets:
+- kind: api_remote
+  needles: [rate limit, quota, billing, out of credits, overloaded, "503", api error, api timeout]
+- kind: configuration
+  needles: [api key, authentication, no api key, not authorized, no models available, model not found, invalid model]
+- kind: interrupted
+  needles: [abort, cancel, interrupt]

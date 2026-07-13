@@ -233,5 +233,5 @@ capacity substring needle is graduated. Recorded as the
   `retries_exhausted` / `provider_overloaded` / `rate_limited`
   `LogClassification::ProviderLimit` **detection** records for the promoted
   stderr channel (D9 cross-citation; detection, not rendering vocabulary).
-- `claudine/docs/providers/facts/opencode.yaml` (`error_vocabulary:`) — the
+- `claudine/docs/research/agent-errors/_seeds/opencode.yaml` — the immutable
   Phase-A seed transcribed verbatim from `lib/src/stream/providers/opencode.rs`.

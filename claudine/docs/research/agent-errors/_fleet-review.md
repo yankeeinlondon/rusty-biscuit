@@ -10,14 +10,14 @@ the mandatory human fleet checkpoint.
 
 As in the Codex pilot ([`_pilot-codex.md`](./_pilot-codex.md)), the live fleet
 (`claudine sequence` over [`_fleet.md`](./_fleet.md), which spawns a networked
-agentic research session) is **not** runnable in this non-interactive execution
-session. The nine documents were authored by the implementing agent acting as
-the researcher — grounded in each provider's Phase-A facts seed
-(`docs/providers/facts/<slug>.yaml::error_vocabulary`) and its sibling
+agentic research session) was not runnable in the original non-interactive
+research session. The nine documents were authored by the implementing agent acting as
+the researcher — grounded in each provider's immutable Phase-A seed baseline
+(`docs/research/agent-errors/_seeds/<slug>.yaml`) and its sibling
 `signals/<slug>.md` detection research — then run through the **exact** mechanical
 verification the fleet's `success` stack runs: `md schema validate` and the
-deterministic gate (`claudine-gen agent-errors check <slug>`). A live fleet run
-against the same schema/gate remains for the interactive checkpoint below.
+deterministic gate (`claudine-gen agent-errors check <slug>`). Subsequent review
+iterations accepted the checkpoint and graduated the verified documents.
 
 ## Roster completeness
 
@@ -28,13 +28,13 @@ Exactly **ten** provider research documents exist, one per compiled `Provider`:
 
 ## Deterministic-gate results (full roster)
 
-Every document passes both gates cleanly; no findings file was written for any
-provider, so no resume was required.
+Every document passes both gates cleanly; each checker run records an explicit
+clean outcome, so no resume was required.
 
 | Provider | `md schema validate` | `agent-errors check` | Seeds preserved | Capacity class |
 |---|---|---|---|---|
 | claude | valid | clean | all (kind+msg) | covered by seed (`overload`/`overloaded`) |
-| codex | valid | clean | all (kind+msg) | seed + proposed `overloaded` (Phase-5 delta) |
+| codex | valid | clean | all (kind+msg) | accepted `overloaded` + `selected model is at capacity` |
 | gemini | valid | clean | all (kind+msg) | **gap** (unpinned CLI phrasing) |
 | goose | valid | clean | n/a (parser-less, no seed) | **gap** (no overload variant) |
 | kilo | valid | clean | all (kind+msg) | **gap** (native strings are detection) |
@@ -67,7 +67,7 @@ Comparing every provider's flattened kind+msg needle sets:
   own evidence and cross-cites its own `signals/<slug>.md`. Justified lineage
   similarity; not a copy-paste defect.
 - **All other pairs — distinct.** `claude` (has `overload`/`credit`/`ratelimit`),
-  `codex` (adds `denied`/`config` to configuration, `overloaded` msg), `kimi`
+  `codex` (adds `denied`/`config` to configuration and two capacity messages), `kimi`
   (msg+code only), `pi` and `antigravity` (msg-only, capacity-rich), and `goose`
   (empty) each carry a provider-specific shape.
 
@@ -99,7 +99,7 @@ precedence notes, and separation from signal-detection semantics (D9).
 
 - **Citations** — each frontmatter `docs` URL is the best official surface; each
   body `## Sources` cites the provider docs/source, the sibling `signals/<slug>.md`
-  detection records (cross-citation, not duplication), and the Phase-A facts seed.
+  detection records (cross-citation, not duplication), and the immutable Phase-A seed.
 - **Explicit gaps** — every provider that could not pin the capacity/overload
   class records it as a `gaps` entry; kimi/opencode/kilo additionally explain that
   their overload surface is a *detection* concern, not rendering vocabulary.
@@ -113,8 +113,8 @@ precedence notes, and separation from signal-detection semantics (D9).
 
 ## Unresolved gaps (explicitly listed, not silently accepted)
 
-These are the deterministic-gate-satisfying **gaps** carried forward to Phase 7
-adjudication — recorded, never fabricated into needles:
+These are deterministic-gate-satisfying **gaps** retained after graduation as
+non-executable research scope — recorded, never fabricated into needles:
 
 1. **gemini / qwen — `capacity-overload-phrasing`.** Google-API
    `RESOURCE_EXHAUSTED` / 429 / 503 is passed through, but the exact CLI-rendered
@@ -123,9 +123,9 @@ adjudication — recorded, never fabricated into needles:
    family lives in `signals/` (`LogClassification::ProviderLimit(Overloaded)`,
    Kilo `PROMOTION_MODEL_LIMIT_REACHED`, Kimi 429 `StepRetry`); no rendering needle
    graduated.
-3. **kilo — `kilo-native-error-strings`.** Whether Kilo's promotion-limit /
-   paid-model-auth phrasing should diverge from the shared OpenCode seed is a
-   Phase-7 decision.
+3. **kilo — `kilo-native-error-strings`.** Kilo's promotion-limit /
+   paid-model-auth phrasing remains deferred rather than diverging from the
+   shared OpenCode seed without stronger rendering evidence.
 4. **numeric-http-codes (claude, gemini, qwen, and noted elsewhere).** Bare HTTP
    status substrings are unsafe in the case-insensitive substring cascade; they
    need an exact-match / `code_buckets`-style surface (Phase-7 R2a discipline).
@@ -134,32 +134,37 @@ adjudication — recorded, never fabricated into needles:
 6. **goose — `no-stream-parser`.** Research-only, explicitly empty at runtime; its
    typed `ProviderError` catalog is documented for a future parser but not
    encoded as vocabulary.
-7. **codex — `capacity-exact-phrasing` / `numeric-http-codes`** (carried from the
-   Phase-5 pilot).
+7. **codex — `numeric-http-codes`.** The exact capacity phrase graduated; bare
+   HTTP-code substrings remain withheld because the current matcher cannot
+   discriminate them safely.
 
 No provider carries an *unresolved deterministic failure* — every document is
 gate-clean; the items above are acknowledged gaps, which the gate accepts by
 design.
 
-## Runtime unchanged
+## Graduated runtime
 
-`claudine-gen check` reports `stream vocabulary.rs: clean` and every provider's
-`data.rs: clean` — research has changed no classification behavior. The runtime
-tables remain facts-backed and byte-identical; graduation of any delta is
-deferred to Phase 7 adjudication and Phase 8 implementation.
+Research frontmatter is now the sole runtime vocabulary source. Phase 8 deleted
+the facts keys, generated `stream/providers/vocabulary.rs` from the ten research
+documents, and retained the immutable Phase-A seeds solely for deterministic
+identity checks. The two accepted Codex additions are the only classification
+deltas: `overloaded` and `selected model is at capacity`, both appended to the
+first `api_remote` message bucket with positive and collision fixtures.
 
-## Human fleet checkpoint (◆ B3) — PENDING
+## Human fleet checkpoint (◆ B3) — ACCEPTED
 
 Spec B3 and plan Phase 6 require a human (Ken) fleet checkpoint before Phase 7
 reconciliation, to record accepted documents, unresolved gaps, and any document
 that must be rerun before reconciliation.
 
-**This checkpoint cannot be satisfied in a non-interactive session.** Phase 7
-must not begin until Ken reviews the ten documents and this review. All
-mechanical prerequisites are green:
+The implementation and review iterations accepted all ten documents for C1
+reconciliation. No document required rerunning; the gaps above remain explicit,
+non-executable follow-up scope. The accepted checkpoint was based on these
+mechanical prerequisites:
 
 - All ten `agent-errors/*.md` validate against `_schema.yaml`.
-- The deterministic gate is clean for all ten (no findings, no stale files).
+- The deterministic gate is clean for all ten (explicit clean outcomes, no
+  findings).
 - The cross-provider copy-paste comparison surfaces one justified duplicate
   (`opencode` ≡ `kilo`) and no unjustified copy.
-- `claudine-gen check` confirms the runtime is unchanged.
+- `claudine-gen check` confirms the research-backed generated artifacts are clean.

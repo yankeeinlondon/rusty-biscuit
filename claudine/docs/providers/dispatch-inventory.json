@@ -1130,7 +1130,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests.rs",
-      "line": 1621,
+      "line": 1623,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1140,7 +1140,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests.rs",
-      "line": 3276,
+      "line": 1662,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1150,7 +1150,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests.rs",
-      "line": 3343,
+      "line": 3317,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1160,7 +1160,17 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests.rs",
-      "line": 3353,
+      "line": 3384,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Goose"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests.rs",
+      "line": 3394,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -6345,7 +6355,7 @@
     },
     {
       "path": "claudine/lib/src/stream/providers/mod.rs",
-      "line": 62,
+      "line": 63,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -6355,21 +6365,11 @@
     },
     {
       "path": "claudine/lib/src/stream/providers/opencode.rs",
-      "line": 580,
+      "line": 612,
       "form": "match-provider",
       "dispatch_class": "conditional",
       "providers": [
         "Kilo",
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/stream/providers/opencode.rs",
-      "line": 587,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
         "OpenCode"
       ],
       "exempt_candidate": false

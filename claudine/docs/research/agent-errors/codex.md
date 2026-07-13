@@ -1,7 +1,7 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-12
-last_updated: 2026-07-12
+last_updated: 2026-07-13
 agent: claude-code
 model: claude-opus-4-8
 docs: https://developers.openai.com/codex/noninteractive
@@ -46,9 +46,9 @@ kind_buckets:
       - text: server
         evidence: seed
 # Ordered buckets checked against the free-form error message. All Phase-A seeds
-# are preserved; the pilot appends one documented capacity needle (`overloaded`)
-# to the end of the first api_remote bucket so it is checked after the existing
-# seeds without reordering them (R3 append-default within the same branch).
+# are preserved; the pilot appends two source-backed capacity needles to the end
+# of the first api_remote bucket so they are checked after the existing seeds
+# without reordering them (R3 append-default within the same branch).
 msg_buckets:
   - kind: api_remote
     needles:
@@ -63,6 +63,9 @@ msg_buckets:
       - text: overloaded
         evidence: documented
         source: https://platform.openai.com/docs/guides/error-codes
+      - text: selected model is at capacity
+        evidence: issue_tracker
+        source: https://github.com/openai/codex/issues/17014
   - kind: configuration
     needles:
       - text: api key
@@ -84,15 +87,6 @@ msg_buckets:
       - text: aborted
         evidence: seed
 gaps:
-  - area: capacity-exact-phrasing
-    notes: >-
-      The motivating incident string, Codex's documented "Selected model is at
-      capacity", could not be commit-pinned to a `openai/codex` source
-      permalink or code path in this pilot session. The documented OpenAI 503
-      `overloaded` message is proposed as a needle (it is the API-level surface
-      Codex passes through), but the exact CLI-rendered capacity/at-capacity
-      phrasing needs a version-pinned source citation from a live research run
-      before an `at capacity` / `capacity` substring needle is graduated.
   - area: numeric-http-codes
     notes: >-
       Bare HTTP status substrings (429, 503, 401, 403) are documented Codex
@@ -112,13 +106,16 @@ gaps:
 changes: []
 requires_claudine_update: true
 reason: >-
-  Pilot proposes one message-branch addition — `overloaded` (documented, OpenAI
-  503 overloaded surface) — to the first api_remote bucket, closing the
-  capacity/overload motivating-class gap that no seeded Codex needle covered.
-  This is a Phase C delta flagged for the C1 delta report and adjudication; it
-  does not change runtime behavior by itself. All Phase-A seeds are preserved
-  unchanged. The exact Codex-CLI "at capacity" phrasing and bare HTTP-code
-  matching remain open gaps (see `gaps`) and are intentionally not graduated.
+  Research adds two message-branch needles to the first api_remote bucket:
+  `overloaded` (documented OpenAI 503 surface) and the narrow production phrase
+  `selected model is at capacity` (Codex issue #17014, observed with CLI
+  0.118.0; the reporter interprets it as a capacity/admission failure, but the
+  issue contains no official provider confirmation of that interpretation).
+  Together they cover both overload wordings without introducing the broad
+  `capacity` substring. C1 accepted both deltas, and this frontmatter is now the
+  sole executable source projected into the generated runtime vocabulary. All
+  Phase-A seeds are preserved unchanged. Bare HTTP-code matching remains an open
+  gap (see `gaps`) and is intentionally not graduated.
 ---
 
 # Error Vocabulary Research on Codex CLI
@@ -146,8 +143,8 @@ thinner, best-effort surface (see the gap entry).
 Because Codex is a thin client over the OpenAI API, a large share of its error
 prose is *pass-through* of API-level errors (rate limits, 429/503 overload,
 auth failures) rather than CLI-native strings. Documented, stable surfaces are
-strongest for the usage-limit / rate-limit family; capacity/overload phrasing
-and the exact numeric-code surface are less firmly pinned (recorded as gaps).
+strongest for the usage-limit / rate-limit family; the exact numeric-code
+surface remains less firmly pinned (recorded as a gap).
 
 ## Error Surfaces
 
@@ -164,7 +161,7 @@ preserved Phase-A seeds; the pilot proposes no kind-branch change.
 The primary error surface. `turn.failed` (`error.message`) and `error`
 (`error_message`) frames carry human-facing prose formatted from Rust error
 types. This is where the classifier does its real work, and where the pilot's
-one proposed addition (`overloaded`) lands.
+two additions (`overloaded` and `selected model is at capacity`) land.
 
 ### Numeric Codes
 
@@ -207,33 +204,41 @@ requires `aborted` — this is an existing precedence quirk, not a delta.
 
 ## Capacity and Overload
 
-The motivating incident: Codex's documented **"Selected model is at capacity"**
+The motivating incident: Codex's observed **"Selected model is at capacity"**
 matched no seeded Codex needle. Closing this class with provenance is the reason
 the topic exists.
 
-Two distinct surfaces:
+Two source-pinned surfaces:
 
 1. **OpenAI 503 `overloaded`** — the OpenAI API documents the 503 overloaded
    response ("the engine is currently overloaded"). Codex passes API errors
    through into its `error`/`turn.failed` message prose, so the `overloaded`
-   substring is a documented, safe, capacity-family classifier. **Proposed** as
-   an `api_remote` message needle (`evidence: documented`), closing the
-   motivating class.
-2. **CLI-native "Selected model is at capacity"** — documented behaviorally
-   (the signal-assurance incident) but **not commit-pinned** to a source
-   permalink in this pilot. Recorded as the `capacity-exact-phrasing` gap. An
-   `at capacity` / `capacity` substring needle is deliberately withheld until a
-   live research run can cite the exact rendered string against a Codex version
-   tag — proposing it now would be guessing.
+   substring is a documented, safe, capacity-family classifier. It is graduated
+   as an `api_remote` message needle (`evidence: documented`) for the sibling
+   overload wording.
+2. **CLI-native "Selected model is at capacity"** — Codex issue #17014 records
+   the exact terminal error from Codex CLI 0.118.0 on 2026-04-07. The reporter
+   interprets the incident as a transient model-capacity/admission problem rather
+   than quota exhaustion; the issue contains no official provider confirmation
+   of that interpretation. The exact observed string remains valid
+   `issue_tracker` evidence, and the complete `selected model is at capacity`
+   substring is graduated as an `api_remote` needle. The generic `capacity` and
+   `at capacity` substrings remain withheld because ordinary operational prose
+   can contain them.
 
 ## Collisions and Precedence
 
-- **`overloaded`** (proposed) — narrow, unambiguous; it does not appear in Codex
+- **`overloaded`** (graduated) — narrow, unambiguous; it does not appear in Codex
   success/progress prose (`turn.completed`, `agent_message`, tool item frames).
   Appended after the existing seeds in the first `api_remote` message bucket, so
   precedence is unchanged: the seeded `rate limit` / `quota` / `billing` /
   `api error` needles still match first, and `overloaded` only catches the
   otherwise-unclassified overload prose. Safe substring.
+- **`selected model is at capacity`** (graduated) — pins the issue's exact clause
+  instead of the broad `capacity` or `at capacity`
+  fragment. Ordinary prose such as "capacity planning completed for the
+  selected model" therefore remains unmatched. Appended after `overloaded` in
+  the first `api_remote` message bucket without changing seed precedence.
 - **`api`** (seed, kind branch) — very broad; it matches `api error`, `api key`,
   and any prose containing "api". This is an *existing* seed and its precedence
   is fixed by Phase A; the pilot does not touch it. Flagged here only so the
@@ -247,9 +252,6 @@ Two distinct surfaces:
 - **No stable error-kind enum on the exec stream** — classification leans on
   message text; the `kind_buckets` branch is best-effort. (`gaps`:
   `structured-error-kind-discriminator`.)
-- **Exact capacity phrasing unpinned** — "Selected model is at capacity" is
-  documented behaviorally but not source-pinned here. (`gaps`:
-  `capacity-exact-phrasing`.)
 - **Numeric HTTP codes are unsafe substrings** — need an exact-match surface,
   not the substring cascade. (`gaps`: `numeric-http-codes`.)
 - **`abort` vs `aborted` seed asymmetry** — preserved from Phase A, not a delta.
@@ -260,12 +262,14 @@ Two distinct surfaces:
   — `codex exec --json` event stream, error frames.
 - [OpenAI API error codes](https://platform.openai.com/docs/guides/error-codes)
   — documented 429 rate-limit and 503 `overloaded` responses (source for the
-  proposed `overloaded` needle).
-- `openai/codex` (Rust CLI, open source) — error-type formatting
-  (`UsageLimitReachedError` et al.). A version-pinned permalink to the capacity
-  string is the outstanding evidence gap.
+  graduated `overloaded` needle).
+- [Codex issue #17014](https://github.com/openai/codex/issues/17014) — exact
+  `Selected model is at capacity. Please try a different model.` terminal error
+  observed by the reporter on Codex CLI 0.118.0, dated 2026-04-07. The reporter
+  interprets it as a transient capacity/admission problem rather than quota
+  exhaustion; the issue does not contain official provider confirmation.
 - `claudine/docs/research/signals/codex.md` — the `usage_capped` /
   `rate_limited` **detection** records for the same Codex surface (D9
   cross-citation; detection, not rendering vocabulary).
-- `claudine/docs/providers/facts/codex.yaml` (`error_vocabulary:`) — the Phase-A
+- `claudine/docs/research/agent-errors/_seeds/codex.yaml` — the immutable Phase-A
   seed transcribed verbatim from `lib/src/stream/providers/codex.rs`.

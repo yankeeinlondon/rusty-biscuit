@@ -221,6 +221,6 @@ defines no `RESOURCE_EXHAUSTED`-style capacity code and no dedicated
   `rate_limited` (429 `StepRetry`), and `generation_retried` (`StepRetry`)
   **detection** records for the same wire stream (D9 cross-citation; detection,
   not rendering vocabulary).
-- `claudine/docs/providers/facts/kimi.yaml` (`error_vocabulary:`) — the Phase-A
+- `claudine/docs/research/agent-errors/_seeds/kimi.yaml` — the immutable Phase-A
   seed transcribed verbatim from `lib/src/stream/providers/kimi.rs`, including
   the numeric code mapping and its `protocol/kimi.rs` constant comments.

@@ -210,5 +210,5 @@ adjudication.
 - `claudine/docs/research/signals/gemini.md` — the `turn_limit_reached` /
   `tokens_consumed` / `model_resolved` **detection** records for the same stream
   (D9 cross-citation; detection, not rendering vocabulary).
-- `claudine/docs/providers/facts/gemini.yaml` (`error_vocabulary:`) — the
+- `claudine/docs/research/agent-errors/_seeds/gemini.yaml` — the immutable
   Phase-A seed transcribed verbatim from `lib/src/stream/providers/gemini.rs`.

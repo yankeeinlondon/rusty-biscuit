@@ -122,6 +122,11 @@ in render code).
 - **Signal detection tables** (`lib/src/signals/generated.rs`) — compiled from
   the `signals` research fleet; walked by one generic engine (see
   `design/signal-detection.md`).
+- **Stream error vocabulary** (`lib/src/stream/providers/vocabulary.rs`) —
+  compiled from the `agent-errors` research fleet. Provenance objects remain in
+  research; generation projects only the ordered semantic kinds, needles, and
+  numeric codes needed at runtime. Retired `error_vocabulary` facts keys are a
+  hard source collision rather than a fallback.
 - **Model catalog** (`unchained-ai/artifacts/models-catalog.json` + the vendored
   `families_generated.rs` slice) — model identity ground truth joined into
   `expected_offerings` (see `design/model-catalog-boundary.md`).

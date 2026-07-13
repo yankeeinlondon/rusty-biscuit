@@ -181,6 +181,6 @@ is recorded for this class.
   **detection** records and the uncompiled app-log gaps for the same surface
   (D9 cross-citation; detection, not rendering vocabulary), reconfirmed against
   installed `agy` 1.1.0.
-- `claudine/docs/providers/facts/antigravity.yaml` (`error_vocabulary:`) — the
+- `claudine/docs/research/agent-errors/_seeds/antigravity.yaml` — the immutable
   Phase-A seed transcribed verbatim from
   `lib/src/stream/providers/antigravity.rs`.

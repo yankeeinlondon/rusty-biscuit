@@ -235,6 +235,6 @@ without a pinned citation; recorded as the `capacity-overload-phrasing` gap.
   balance`), and `auth_invalid` (`PAID_MODEL_AUTH_REQUIRED`) **detection**
   records for Kilo's SSE `session.error` payload (D9 cross-citation; detection,
   not rendering vocabulary).
-- `claudine/docs/providers/facts/kilo.yaml` (`error_vocabulary:`) — the Phase-A
+- `claudine/docs/research/agent-errors/_seeds/kilo.yaml` — the immutable Phase-A
   seed, an ordered copy of OpenCode's table, transcribed verbatim; Kilo flows
   through the shared OpenCode wire parser with a fixed `Kilo` identity.

@@ -162,5 +162,5 @@ required and no gap is recorded for this class.
 - `claudine/docs/research/signals/pi.md` — the `usage_capped` / `no_funds` /
   `auth_invalid` **detection** records for the same `errorMessage` surface
   (D9 cross-citation; detection, not rendering vocabulary).
-- `claudine/docs/providers/facts/pi.yaml` (`error_vocabulary:`) — the Phase-A
+- `claudine/docs/research/agent-errors/_seeds/pi.yaml` — the immutable Phase-A
   seed transcribed verbatim from `lib/src/stream/providers/pi.rs`.

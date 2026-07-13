@@ -153,5 +153,5 @@ specific funding/auth records win over the coarse `Server error:` catch-all.
   and the `ProviderError` typed catalog (source_code confidence) that this
   research-only reference draws from (D9 cross-citation; detection, not rendering
   vocabulary).
-- No `docs/providers/facts/goose.yaml::error_vocabulary` exists — Goose is
-  parser-less and has no Phase-A seed.
+- No `docs/research/agent-errors/_seeds/goose.yaml` exists — Goose is parser-less
+  and has no Phase-A seed baseline.

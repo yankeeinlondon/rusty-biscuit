@@ -318,20 +318,3 @@ unmapped_native_events: []
 # from lib/src/stream/providers/codex.rs::ERROR_KEYWORDS). Sequence order IS
 # the cascade order (first substring hit wins). The repeated api_remote bucket
 # is the "late ApiRemote" second pass after Interrupted.
-error_vocabulary:
-  kind_buckets:
-  - kind: api_remote
-    needles: [rate, quota, billing]
-  - kind: configuration
-    needles: [auth, config, permission, denied]
-  - kind: interrupted
-    needles: [interrupt, cancel, abort]
-  - kind: api_remote
-    needles: [api, upstream, server]
-  msg_buckets:
-  - kind: api_remote
-    needles: [rate limit, quota, billing, api error]
-  - kind: configuration
-    needles: [api key, authentication, not authorized, permission denied, config]
-  - kind: interrupted
-    needles: [interrupt, cancel, aborted]

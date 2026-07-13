@@ -1,0 +1,7 @@
+msg_buckets:
+- kind: configuration
+  needles: [sign in, sign-in, not logged in, authentication failed, authentication, unauthorized, "401", "403"]
+- kind: api_remote
+  needles: [rate limit, quota, exhausted, out of credits, overloaded, "503", resource_exhausted]
+- kind: interrupted
+  needles: [abort, cancel, interrupt]

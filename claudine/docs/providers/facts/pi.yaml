@@ -316,11 +316,3 @@ unmapped_native_events: []
 # from lib/src/stream/providers/pi.rs::ERROR_KEYWORDS). Pi is a message-only
 # classifier (no structured error kind), so `kind_buckets` is omitted. Sequence
 # order IS the cascade order (first substring hit wins).
-error_vocabulary:
-  msg_buckets:
-  - kind: api_remote
-    needles: [rate limit, quota, billing, out of credits, overloaded, "503", api error, api timeout]
-  - kind: configuration
-    needles: [api key, authentication, no api key, not authorized, no models available, model not found, invalid model]
-  - kind: interrupted
-    needles: [abort, cancel, interrupt]

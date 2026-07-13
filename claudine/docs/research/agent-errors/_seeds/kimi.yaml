@@ -1,0 +1,26 @@
+msg_buckets:
+- kind: api_remote
+  needles: [rate limit, quota, billing, api error, upstream]
+- kind: configuration
+  needles: [api key, authentication, not authorized, permission denied, auth, config]
+- kind: interrupted
+  needles: [interrupt, cancel, aborted]
+code_buckets:
+# Kimi-specific extension codes.
+- code: -32004    # KimiJsonRpcError::AUTH_EXPIRED
+  kind: configuration
+- code: -32005    # KimiJsonRpcError::CHAT_PROVIDER_ERROR
+  kind: api_remote
+# Standard JSON-RPC codes — explicitly mapped to agent_native so a standard
+# code carrying auth/rate-limit prose does not fall through to the message
+# branch and get re-classified.
+- code: -32700    # KimiJsonRpcError::PARSE_ERROR
+  kind: agent_native
+- code: -32600    # KimiJsonRpcError::INVALID_REQUEST
+  kind: agent_native
+- code: -32601    # KimiJsonRpcError::METHOD_NOT_FOUND
+  kind: agent_native
+- code: -32602    # KimiJsonRpcError::INVALID_PARAMS
+  kind: agent_native
+- code: -32603    # KimiJsonRpcError::INTERNAL_ERROR
+  kind: agent_native

@@ -1,10 +1,10 @@
 ---
 sequence: "@claudine/docs/providers.yaml"
 file: "{{ctx.repo_root}}/claudine/docs/research/agent-errors/{{state.file}}"
-# Transient findings file written by the deterministic gate (spec D10). It is
-# removed on a clean run and written only when a check fails, so its presence
-# is the resume trigger. Never committed (lives under `.findings/`).
-findings: "{{ctx.repo_root}}/claudine/docs/research/agent-errors/.findings/{{state.slug}}.json"
+# Transient explicit outcome report written by the deterministic gate (spec
+# D10). Its frontmatter status is clean, findings, or gate_error; absence never
+# means clean. Never committed (lives under `.findings/`).
+findings: "{{ctx.repo_root}}/claudine/docs/research/agent-errors/.findings/{{state.slug}}.md"
 # NOTE: `grant:` is not implemented yet. Run with `--yolo` so the provider can
 # inspect local source repositories and error corpora when researching.
 grant:
@@ -31,32 +31,47 @@ success:
               - error: "research file was not updated"
         # 2. Deterministic gate (spec D10): seed preservation, needle hygiene,
         #    provenance coherence, invented-seed, and motivating-class coverage.
-        #    `no_error: true` so a non-zero exit never stops the stack before
-        #    the resume can fire. The gate removes any stale findings first and
-        #    writes the file only when a finding survives.
+        #    A persistence failure stops the stack so stale state cannot be
+        #    consumed. Completed executions atomically replace the report.
         - action:
               - action: shell
                 command: "cargo run --quiet -p claudine-gen -- agent-errors check {{state.slug}} --findings {{findings}}"
-                no_error: true
-        # 3. When the gate wrote findings, resume the SAME research session with
+        # 3. A missing, invalid, or gate-error outcome is a failed gate, never a
+        #    clean research result.
+        - when: "!file_exists(findings)"
+          action:
+              - error: "deterministic gate produced no outcome report"
+        - when: "frontmatter(findings, 'status') == 'gate_error'"
+          action:
+              - error: "deterministic gate could not validate the research document"
+        - when: "frontmatter(findings, 'status') != 'clean' && frontmatter(findings, 'status') != 'findings' && frontmatter(findings, 'status') != 'gate_error'"
+          action:
+              - error: "deterministic gate produced an unknown outcome status"
+        # 4. When the gate reports findings, resume the SAME research session with
         #    them so the model corrects its own output with full context.
-        #    Budgeted to two attempts; on exhaustion the dispatch falls through,
-        #    the findings file survives as a machine-visible failure, and the
-        #    still-failing document surfaces in the Phase C1 delta review.
-        - when: "file_exists(findings)"
+        #    Budgeted to two attempts; on exhaustion the dispatch falls through
+        #    to finalize, where the durable outcome is required to be clean.
+        - when: "frontmatter(findings, 'status') == 'findings'"
           action:
               - warn: "Deterministic checks flagged **{{state.name}}**'s agent-errors research — resuming to correct it."
               - action: resume
-                message: "The **agent-errors** research for **{{state.name}}** failed the deterministic gate. Read the findings JSON at `{{findings}}` — it lists each failed check (missing seed needle, non-lowercase needle, missing `source` citation, invented `seed` provenance, or uncovered capacity/overload class). Fix every listed issue in `{{file}}` (re-add dropped seeds with `evidence: seed`, cite non-seed additions, research or record-as-gap the capacity vocabulary), then re-save and re-run `md schema validate '{{file}}'`."
+                message: "The **agent-errors** research for **{{state.name}}** failed the deterministic gate. Read the outcome report at `{{findings}}` — its frontmatter lists each failed check (missing seed needle, non-lowercase needle, missing `source` citation, invented `seed` provenance, or uncovered capacity/overload class). Fix every listed issue in `{{file}}` (re-add dropped seeds with `evidence: seed`, cite non-seed additions, research or record-as-gap the capacity vocabulary), then re-save and re-run `md schema validate '{{file}}'`."
                 max_attempts: 2
-        # 4. Clean: the document is written and passed the gate.
-        - when: "file_exists(file) && frontmatter(file, 'last_updated') == ctx.today && !file_exists(findings)"
+        # 5. Clean: the document is written and explicitly passed the gate.
+        - when: "frontmatter(findings, 'status') == 'clean'"
           action:
               - info: "The **Agent Errors** research on **{{state.name}}** passed the deterministic gate: {{ link(file) }}"
               - message: "🎉  the **Agent Errors** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Agent Errors research on **{{state.name}}** failed to complete!"
     warn: "The Agent Errors research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+finalize:
+    stack:
+        # Recovery re-enters before finalize, so this guard runs only after the
+        # resume budget falls through or another terminal path completes.
+        - when: "!file_exists(findings) || frontmatter(findings, 'status') != 'clean'"
+          action:
+              - error: "deterministic gate did not reach a clean outcome"
 ---
 # Error Vocabulary Research on {{state.name}}
 
@@ -72,7 +87,7 @@ The consumer is `lib/src/stream/providers/common.rs::classify_error_by_keywords`
 
 **Boundary against `signals/` (spec D9).** This topic owns the *rendering/summary* vocabulary — the `SemanticErrorKind` classification of error kind/message text. It does **not** own *detection*: wire-level records that fire `SignalKind` events (usage caps, rate-limit extraction, exit-code mapping) are the `signals/` topic's territory. If your research surfaces a detection record (a payload shape that should fire a signal), note it in the prose and cite the `signals/` document — do not encode it in this frontmatter. Where the two topics cover the same provider surface, cite each other rather than duplicating.
 
-**Seeds are the starting point, not a ceiling.** Each parser-backed provider already has a seeded vocabulary in `docs/providers/facts/{{state.slug}}.yaml` (`error_vocabulary:`). Read it first. Every seeded needle and code **must** reappear in your output with `evidence: seed` unless you upgrade it to a stronger evidence class with a citation. Seeds are sticky — research proposes additions and orderings, it never silently removes or re-kinds an observed needle.
+**Seeds are the starting point, not a ceiling.** Each parser-backed provider has an immutable Phase-A baseline in `docs/research/agent-errors/_seeds/{{state.slug}}.yaml`. Read it first. Every seeded needle and code **must** reappear in your output with `evidence: seed` unless you upgrade it to a stronger evidence class with a citation. Seeds are sticky — research proposes additions and orderings, it never silently removes, re-kinds, or reorders an observed row.
 
 ## Document Structure
 
@@ -105,7 +120,7 @@ Follow these steps exactly:
     > **Note:** Agentic CLIs change rapidly, so assume the prior research is out of date. Read it to report changes into the `## Changelog` section — never substitute old research for doing your own up-to-date research.
 
 ::end-block
-- Read the seeded vocabulary in `docs/providers/facts/{{state.slug}}.yaml` (the `error_vocabulary:` key). This is your starting point: every seeded needle and code must survive into your output.
+- Read the immutable seeded vocabulary in `docs/research/agent-errors/_seeds/{{state.slug}}.yaml`. This is your starting point: every seeded needle and code must retain its branch, bucket, semantic kind, and item position in your output unless a change is explicitly adjudicated.
 - Perform research on how the provider reports errors
 
     > **Evidence requirement:** for open-source providers, inspect the source code (error enums, stream error frames, message constants, numeric-code definitions) and cite file permalinks pinned to a version tag. For closed providers, inspect SDK type definitions and official docs. Negative probes are evidence too. Unanswered is not omitted: record a `gaps` entry rather than dropping a family.

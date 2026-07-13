@@ -1,6 +1,7 @@
 ---
 created: 2026-07-11
-status: draft — Q1–Q3 ruled; P4 corrected; P1–P3 + P5 proposals awaiting review
+review_iterations: 4
+status: complete
 reviewed: true
 reviewed_by: unknown/default
 reviewed_on: 2026-07-11
@@ -43,6 +44,14 @@ Three phases:
 > workstream ("add the new fleet research and do this right"), structured as
 > Phases B/C so Phase A's migration safety is preserved.
 
+> **IMPLEMENTATION OUTCOME (2026-07-13):** all three phases are complete.
+> Research frontmatter is the sole executable vocabulary source, the Phase-A
+> facts keys have been deleted, and generation is drift-checked. C1 accepted
+> two append-only Codex message additions: `overloaded` and the narrow phrase
+> `selected model is at capacity`; both classify as `ApiRemote` and carry
+> parser-level positive and collision coverage. Other recorded provider gaps
+> remain non-executable research scope and do not block this graduation.
+
 ## Motivation
 
 A standing goal of the fleet-research → metadata-knowledge-base workstream
@@ -67,23 +76,23 @@ const ERROR_KEYWORDS: super::common::ErrorKeywords = super::common::ErrorKeyword
 };
 ```
 
-These eight constants are facts, not behavior — and they are also
-**incomplete facts**: they encode what we have happened to observe live, not
-what each provider documents. Codex's documented *"Selected model is at
-capacity"* (the motivating incident of the signal-assurance spec) matches no
-needle in today's Codex table. The research phase exists to close exactly
-that class of gap, with provenance. The per-provider ground truth of the
-current tables is recorded in
+These eight constants were facts, not behavior — and they were also
+**incomplete facts**: they encoded what had happened to be observed live, not
+what each provider documents. Before this feature, Codex's *"Selected model is
+at capacity"* incident matched no Codex needle. The research phase closed that
+exact gap with a source-pinned, narrow phrase rather than the collision-prone
+`capacity` substring. The per-provider ground truth of those baseline tables is
+recorded in
 [`../2026-07-11-module-structure/phase6-discovery.md`](../2026-07-11-module-structure/phase6-discovery.md)
 (§`classify_error`).
 
-**Provider-ladder payoff:** onboarding a new provider (the Phase H ladder
-pattern) currently requires hand-writing its keyword table inside a new
-parser file. After this workstream, error vocabulary is a research
+**Provider-ladder payoff:** before this workstream, onboarding a new provider
+(the Phase H ladder pattern) required hand-writing its keyword table inside a
+new parser file. Error vocabulary is now a research
 deliverable like every other catalog field — researched, schema-validated,
 generated, and drift-checked.
 
-## Current state
+## Starting state
 
 | Artifact | Location | Nature |
 |---|---|---|
@@ -219,8 +228,12 @@ provider constants… delete-on-graduate when a research topic lands"):
 - **Phase C:** the vocabulary loader's declared source re-points to the
   `agent-errors/` research frontmatter. Its collision check errors while a
   facts file still carries `error_vocabulary`, reproducing the standard
-  delete-on-graduate guarantee. Unit tests cover facts-only, research-only,
-  missing declared input, and facts+research collision cases.
+  delete-on-graduate guarantee. Before deleting those keys, copy each Phase-A
+  value byte-identically into
+  `docs/research/agent-errors/_seeds/<slug>.yaml` as a direct, immutable
+  `ErrorVocabulary` baseline for future deterministic checks. Unit tests cover
+  facts-only, research-only, missing declared input, and facts+research
+  collision cases.
 
 ### D3 — Generated artifact: one lib module (signals precedent)
 
@@ -358,7 +371,8 @@ Search-result URLs and unversioned repository homepages are not evidence.
 capture notes. Research documents retain citations after runtime projection.
 
 **`_fleet.md` prompt document** instructs each research session to:
-1. Read the provider's **seeded vocabulary** (the Phase A facts entry) as
+1. Read the provider's **seeded vocabulary** from the immutable Phase-A
+   baseline at `docs/research/agent-errors/_seeds/<slug>.yaml` as
    the starting point — every seeded needle must reappear in the output
    with `evidence: seed` unless upgraded to a stronger evidence class with
    a citation.
@@ -451,34 +465,38 @@ re-deriving it.
 (`supports_resume` metadata — note: what matters is the CLI running the
 research, not the provider being researched), and the message is
 late-binding interpolated (DM2) so it can carry check findings. On budget
-exhaustion the dispatch falls through (`Exhausted → Fallthrough`): the run
-completes, and the still-failing doc surfaces in the C1 delta report for
-human review — a bounded loop that fails open to human judgment.
+exhaustion the resume dispatch falls through (`Exhausted → Fallthrough`) only
+to `finalize`. The non-clean finalize guard raises `error`; the dispatcher maps
+that `StackControl::Error` to `Abort`, so the fleet/compose command exits
+non-zero while preserving both the machine-visible findings report and the
+authored finalize reason for C1 human review.
 
 **Shape in the fleet doc's `success` stack:** an approved `shell` check
-script (early-binding, reads the output doc from its static path, writes a
-findings file / exits by status), followed by a `when:`-guarded
+script (early-binding, reads the output doc from its static path, atomically
+writes an explicit outcome report), followed by a `when:`-guarded
 `resume: {message: "… {{ findings }} …", max_attempts: 2}` item that fires
-only when findings exist. Exact wiring (findings via file read-side
-functions vs `merge_frontmatter`) is a B1 design detail; all primitives
-exist.
+only for `status: findings`. The same report represents `clean`, `findings`,
+and `gate_error`; fleet conditions branch on the status through Markdown
+frontmatter read-side functions.
 
-The check action must use `no_error: true` (or exit zero after atomically
-writing findings); otherwise a non-zero validation exit stops the stack
-before `resume` can run. B1 chooses one transport and tests it end-to-end:
-the recommended design is an atomically replaced JSON findings file read by
-a read-side expression in both `when` and the resume message. The check first
-removes stale findings; success is absence/empty findings. B2 covers check
-failure → one resume → corrected document → no second resume, plus budget
-exhaustion. Exhaustion must leave a machine-visible failing validation result
-and make B3/C1 fail; it may fall through to **human adjudication**, but must
-not turn a known-bad research document into a successful fleet result.
+Completed checks exit zero after the outcome is durably persisted. Report
+persistence failures exit non-zero and stop the stack, so lifecycle processing
+never consumes stale state. Replacement must not remove the prior failure
+report first: a synced sibling temporary file atomically replaces it only when
+the new report is ready. Clean is never inferred from absence. B2 covers check
+failure → one resume → corrected document → no second resume, schema failure,
+report-write failure, and budget exhaustion. Exhaustion must leave a
+machine-visible failing validation result and make B3/C1 fail; it may fall
+through to **human adjudication**, but must not turn a known-bad research
+document into a successful fleet result.
 
 **Deterministic checks for `agent-errors` (initial set):**
 
 | Check | Catches | On failure |
 |---|---|---|
-| Seed preservation | any seeded needle missing from the research frontmatter (mechanical half of R1) | resume, listing the dropped needles |
+| Seed removal | a seeded needle/code absent from its original branch (mechanical half of R1) | resume, listing the removed rows |
+| Seed re-kind | a seeded needle/code moved to another semantic kind (R4) | resume, listing the old and new kinds for adjudication |
+| Seed reorder | a seeded needle/code changed bucket or item position (R3) | resume, listing the old and new positions for adjudication |
 | Needle hygiene | non-lowercase / leading-trailing-whitespace needles | resume with the offending needles |
 | Provenance coherence | `evidence: documented\|source_code\|issue_tracker` with empty `source`; `evidence: seed` on a needle not in the seed (invented provenance) | resume |
 | Motivating-class coverage | no overload/capacity vocabulary in any bucket **and** no `gaps` entry acknowledging it | resume ("research capacity/overload error surfaces or record the gap") |
@@ -532,7 +550,7 @@ checkpoints marked ◆.
 **Phase C — graduation + reconciliation:**
 
 8. **C1 Delta report** — consolidated diff of researched vocabulary vs
-   seeded facts, classified per D8 (R1 conflicts, R2 additions, R3
+   immutable Phase-A seed baselines, classified per D8 (R1 conflicts, R2 additions, R3
    orderings, R4 re-kinds); ◆ Ken adjudicates.
 9. **C2 Graduation** — mapping registry re-points to research frontmatter;
    facts entries deleted (delete-on-graduate); accepted deltas land with
@@ -583,7 +601,9 @@ Proposals awaiting review (defaults applied unless overruled):
   version current at implementation time.
 - **P5 (D10):** this topic pilots deterministic validate-and-resume in its
   fleet lifecycle (checks in the `success` stack; `resume` the session with
-  findings; `max_attempts: 2`; exhaustion fails open to the C1 human
-  review). The B2 checkpoint decides whether the pattern graduates into the
-  general fleet-research recipe — tracked as
+  findings; `max_attempts: 2`; exhaustion falls through only to `finalize`,
+  whose non-clean `error` guard aborts the fleet/compose command with a
+  non-zero exit while preserving the findings report and authored reason for
+  C1 human review). The B2 checkpoint decides whether the pattern graduates
+  into the general fleet-research recipe — tracked as
   `features/_unscheduled/fleet-validate-and-resume.md`.

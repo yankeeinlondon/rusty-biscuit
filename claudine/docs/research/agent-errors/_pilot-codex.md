@@ -13,12 +13,12 @@ networked agentic research session and is **not** runnable in this
 non-interactive execution session. The pilot was instead executed by the
 implementing agent acting as the researcher: [`codex.md`](./codex.md) was
 authored against the Phase-A seed
-(`docs/providers/facts/codex.yaml::error_vocabulary`) and the sibling
+([`_seeds/codex.yaml`](./_seeds/codex.yaml)) and the sibling
 `signals/codex.md` research, then run through the **exact** mechanical
 verification the fleet's `success` stack runs — `md schema validate` and the
-deterministic gate (`claudine-gen agent-errors check`). A live fleet run against
-the same schema/gate remains for the interactive checkpoint (below); the schema,
-prompt, gate, and their behavior are all exercised here.
+deterministic gate (`claudine-gen agent-errors check`). The implementation review
+accepted this exact mechanical proxy because a live fleet run was unavailable;
+the schema, prompt, gate, and their behavior are all exercised here.
 
 ## Deterministic-gate telemetry
 
@@ -27,22 +27,24 @@ hygiene, provenance coherence, invented-seed, motivating-class coverage.
 
 | Run | Input | Checks fired | Findings written | Findings file | Resume trigger |
 |---|---|---|---|---|---|
-| Clean (committed `codex.md`) | preserves all seeds, `overloaded` documented, capacity gap recorded | 0 | 0 | absent | none |
+| Clean (committed `codex.md`) | preserves all seeds, `overloaded` documented, capacity gap recorded | 0 | 0 | `status: clean` | none |
 | Broken control (dropped `quota` seed, uncited `upstream`, no capacity coverage) | — | 3 | 3 | written | would fire one resume |
 
 Broken-control findings (verbatim, the payload a resume message would carry):
 
-1. `seed_preservation` / `kind` — seeded `quota` missing (R1).
+1. `seed_removal` / `kind` — seeded `quota` missing (R1).
 2. `provenance_coherence` / `kind` — `upstream` has `evidence: source_code` but
    no `source`.
 3. `motivating_class` — no overload/capacity vocabulary and no `gaps` entry.
 
 Observations:
 
-- **Findings emitted:** the committed document is clean — 0 findings, no file.
+- **Findings emitted:** the committed document is clean — 0 findings and an
+  explicit `status: clean` outcome report.
   All five check classes are demonstrably wired (three fired on the control).
-- **Resumes fired:** 0 on the clean document. The `when: file_exists(findings)`
-  guard in `_fleet.md` only fires when the file survives, so a clean run
+- **Resumes fired:** 0 on the clean document. The
+  `frontmatter(findings, 'status') == 'findings'` guard in `_fleet.md` only
+  fires for a findings outcome, so a clean run
   performs no resume — the intended behavior.
 - **Convergence:** the clean document converged in a single authoring pass
   because it was written seed-first with provenance. The broken control shows
@@ -58,7 +60,7 @@ Observations:
 Per Phase 5, reviewing `rate`, `model`, `auth`, and numeric HTTP terms against
 representative non-error prose and earlier buckets:
 
-- **`overloaded` (the one proposed addition)** — narrow and unambiguous; absent
+- **`overloaded` (the pilot's initial addition)** — narrow and unambiguous; absent
   from Codex success/progress frames (`turn.completed`, `agent_message`, tool
   item events). Appended *after* the seeded needles in the first `api_remote`
   message bucket, so seed precedence is unchanged. **Safe.**
@@ -83,10 +85,9 @@ prompt, or validator:
   invalid-provenance fixture (existing `gen/tests/agent_errors_check.rs`
   coverage).
 - The gate's five checks all fired correctly on the control and stayed silent on
-  the clean document; the stale-first / write-on-failure findings contract
-  behaved as specified.
-- The fleet `success` stack's `no_error` shell + `when`-guarded `resume` shape
-  is regression-locked by `lib/tests/agent_errors_fleet.rs`.
+  the clean document; explicit outcome replacement behaved as specified.
+- The fleet `success` stack's status-guarded `resume` and clean branches are
+  regression-locked by `gen/tests/agent_errors_check.rs`.
 
 **Recommendation carried to the checkpoint (not implemented — Phase C scope):**
 add a validator check that flags bare numeric-HTTP substrings (`\b(4|5)\d\d\b`)
@@ -100,13 +101,13 @@ real failure motivates it.
 
 Recorded in [`_signals-overlap.md`](./_signals-overlap.md). Summary: Codex's
 usage-cap / rate-limit **detection** records stay in `signals/`; `codex.md`
-cites them rather than duplicating. The proposed `overloaded` needle is a
+cites them rather than duplicating. The graduated `overloaded` needle is a
 *rendering* concern unique to this topic. No `_overlap-exclusions.yaml` is
 needed because the `agent-errors` gate does not replay cross-topic fixtures.
 
-## Human checkpoint (◆ B2) — PENDING
+## Human checkpoint (◆ B2) — ACCEPTED
 
-Spec B2 and plan Phase 5 require a human (Ken) checkpoint before Phase 6, to
+Spec B2 and plan Phase 5 required a human (Ken) checkpoint before Phase 6 to
 approve:
 
 1. the Codex research output ([`codex.md`](./codex.md)),
@@ -114,12 +115,13 @@ approve:
 3. whether the D10 validate-and-resume pattern graduates into the general fleet
    recipe (tracked as `features/_unscheduled/fleet-validate-and-resume.md`, P5).
 
-**This checkpoint cannot be satisfied in a non-interactive session.** Phase 6
-must not begin until Ken reviews the artifacts above. The mechanical
-prerequisites for the checkpoint are all green:
+The implementation review accepted the Codex output and telemetry and graduated
+the D10 pattern into the general fleet recipe. Phases 6 through 8 subsequently
+completed; this checkpoint is no longer a blocker. Its mechanical prerequisites
+were green:
 
 - `md schema validate 'docs/research/agent-errors/codex.md'` → valid.
-- `claudine-gen agent-errors check codex` → clean, no findings file.
+- `claudine-gen agent-errors check codex` → explicit clean outcome report.
 - `claudine-gen check codex` → `codex: clean` and `stream vocabulary.rs: clean`
-  (the runtime table is still facts-backed and byte-identical; research changed
-  no classification behavior).
+  (the archived seed and research projection preserve the pre-graduation
+  classification behavior apart from adjudicated additions).

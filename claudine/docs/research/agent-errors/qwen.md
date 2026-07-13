@@ -199,5 +199,5 @@ adjudication.
 - `claudine/docs/research/signals/qwen.md` — the `rate_limited` /
   `model_resolved` **detection** records for the same stream (D9 cross-citation;
   detection, not rendering vocabulary).
-- `claudine/docs/providers/facts/qwen.yaml` (`error_vocabulary:`) — the Phase-A
+- `claudine/docs/research/agent-errors/_seeds/qwen.yaml` — the immutable Phase-A
   seed transcribed verbatim from `lib/src/stream/providers/qwen.rs`.
