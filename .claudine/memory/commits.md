@@ -53,6 +53,26 @@ details do not belong here.
   index and retry if the CAS fails. This preserves the caller's working-tree
   edits and avoids staging/unstaging in the real index; use it only when the
   staged snapshot cannot safely be reported as blocked.
+- **`--only --` IS safe on an `MM` path when the working tree is a clean
+  superset of the staged snapshot (2026-07-12 claudine skills batch).** The
+  prior bullet's "do not use it on an MM path unless the working tree and
+  staged content have first become identical" rule is overly conservative: if
+  the unstaged changes are pure additions on top of the staged content (no
+  regressions, no divergent rewrites), `--only --` commits the working tree,
+  which inherently preserves the staged snapshot as a subset. Verify before
+  using: `git show :<path>` (staged content) and the working-tree file must
+  show the working tree containing every staged change plus net additions.
+  Concretely, in the 2026-07-12 claudine skills batch, `.claude/skills/rust/SKILL.md`
+  was `MM` with the staged snapshot adding new section headers + bullet
+  rewrites and the working tree additionally adding an indicatif section +
+  indicatif bullet. `--only -- .claude/skills/rust/SKILL.md` produced a single
+  commit containing both, and `git show --name-status <hash>` confirmed the
+  staged snapshot was preserved. **If the working tree has any regression from
+  staged** (e.g., unstaged edits reverting part of the staged change, or a
+  divergent rewrite), do NOT use `--only --` — fall back to the temp-index
+  plumbing above or split into separate commits. A quick diff side-by-side
+  (`git diff -- <path>` vs `git diff --staged -- <path>`) is enough to
+  classify the working tree as clean-superset vs divergent.
 - For a rename, include both the old and new paths so the deletion and addition
   remain in the same commit.
 - Put all Git options before `--`. For very large explicit path lists, use
