@@ -13,7 +13,7 @@ use darkmatter::markdown::compose::context::{
 };
 use darkmatter::markdown::compose::expression::{
     expression_function_descriptors, ExpressionFinder, ExpressionFunctionDescriptor, ParseError,
-    SpannedExpr, SpannedExprKind, parse_spanned,
+    SpannedExpr, SpannedExprKind, parse_condition_spanned, parse_spanned,
 };
 use darkmatter::markdown::span::SourceSpan;
 
@@ -87,7 +87,9 @@ pub fn interpolation_at(text: &str, body_base: usize, offset: usize) -> Option<I
         .find(|interpolation| interpolation.outer.start <= offset && offset <= interpolation.outer.end)
 }
 
-/// Parses an interpolation's inner expression, span-carrying.
+/// Parses a **value-dialect** expression, span-carrying. This is the body
+/// `{{ }}` interpolation parser: it rejects the `&&`/`||` operators, matching
+/// `md compose`'s interpolation grammar.
 ///
 /// ## Errors
 ///
@@ -95,6 +97,20 @@ pub fn interpolation_at(text: &str, body_base: usize, offset: usize) -> Option<I
 /// expression text) exactly as the compose parser would.
 pub fn parse(expression: &str) -> Result<SpannedExpr, ParseError> {
     parse_spanned(expression)
+}
+
+/// Parses a **condition-dialect** expression, span-carrying. This is the parse
+/// authority for an Expression-typed frontmatter value: it accepts `&&`/`||`
+/// (lowered to synthetic `and`/`or` calls), matching the `expression` schema
+/// format's `parse_condition` validation, so a value the schema accepts is never
+/// diagnosed as malformed here. Body `{{ }}` interpolation stays on [`parse`].
+///
+/// ## Errors
+///
+/// Returns the [`ParseError`] (with a byte-offset `position` into the
+/// expression text) exactly as the compose condition parser would.
+pub fn parse_condition(expression: &str) -> Result<SpannedExpr, ParseError> {
+    parse_condition_spanned(expression)
 }
 
 /// The leading identifier of an expression — a bare `Variable` name, or the
@@ -396,26 +412,68 @@ pub fn completion_candidates(partial: &str, frontmatter_keys: &[String]) -> Vec<
     items
 }
 
-/// The Markdown body of an expression hover. Pure so the D2/D5 classification is
-/// unit-testable; `expr_offset` is the cursor's byte offset into `expression`.
+/// The Markdown body of a **value-dialect** expression hover — the body `{{ }}`
+/// interpolation hover. `expr_offset` is the cursor's byte offset into
+/// `expression`. Pure so the D2/D5 classification is unit-testable.
 ///
-/// The single authority for expression hover markdown so a body `{{ }}`
-/// interpolation and an Expression-typed frontmatter value render byte-identical
-/// hovers. The D2 classification rule: only an explicitly `ctx.`-qualified root
-/// receives context-variable metadata — a bare identifier is a frontmatter
-/// variable even when its name matches a known `ctx.*` tail, and an unknown
-/// `ctx.<name>` keeps the generic hover without borrowing a similarly named bare
-/// key's value. A bare identifier with no static frontmatter value falls back to
-/// `schema_property` — the effective schema's type/constraints/description for a
-/// declared-but-unset property — before the generic function-name description.
-/// Nothing here evaluates the expression or reads `ctx.*`.
+/// The single authority for value-dialect expression hover markdown. See
+/// [`hover_markdown_from`] for the shared classification rule, and
+/// [`hover_markdown_condition`] for the condition-dialect companion used by
+/// Expression-typed frontmatter values.
 pub fn hover_markdown(
     expression: &str,
     expr_offset: usize,
     frontmatter_scalar: impl Fn(&str) -> Option<String>,
     schema_property: impl Fn(&str) -> Option<String>,
 ) -> String {
-    let parsed = parse(expression);
+    hover_markdown_from(
+        parse(expression),
+        expression,
+        expr_offset,
+        frontmatter_scalar,
+        schema_property,
+    )
+}
+
+/// The Markdown body of a **condition-dialect** expression hover — the
+/// Expression-typed frontmatter value hover. Identical formatting to
+/// [`hover_markdown`], but parses with [`parse_condition`] so `&&`/`||`
+/// expressions (which the `expression` schema format accepts) receive the same
+/// intelligence as any other expression instead of an unparsed fallback.
+pub fn hover_markdown_condition(
+    expression: &str,
+    expr_offset: usize,
+    frontmatter_scalar: impl Fn(&str) -> Option<String>,
+    schema_property: impl Fn(&str) -> Option<String>,
+) -> String {
+    hover_markdown_from(
+        parse_condition(expression),
+        expression,
+        expr_offset,
+        frontmatter_scalar,
+        schema_property,
+    )
+}
+
+/// The shared hover-markdown formatter over an already-parsed expression, so the
+/// value- and condition-dialect entry points render identically once parsed.
+/// `expr_offset` is the cursor's byte offset into `expression`.
+///
+/// The D2 classification rule: only an explicitly `ctx.`-qualified root receives
+/// context-variable metadata — a bare identifier is a frontmatter variable even
+/// when its name matches a known `ctx.*` tail, and an unknown `ctx.<name>` keeps
+/// the generic hover without borrowing a similarly named bare key's value. A bare
+/// identifier with no static frontmatter value falls back to `schema_property` —
+/// the effective schema's type/constraints/description for a declared-but-unset
+/// property — before the generic function-name description. Nothing here
+/// evaluates the expression or reads `ctx.*`.
+fn hover_markdown_from(
+    parsed: Result<SpannedExpr, ParseError>,
+    expression: &str,
+    expr_offset: usize,
+    frontmatter_scalar: impl Fn(&str) -> Option<String>,
+    schema_property: impl Fn(&str) -> Option<String>,
+) -> String {
     let mut value = match &parsed {
         Ok(expr) => format!("**Expression**\n\n`{}`", expr.erase()),
         Err(_) => format!("**Expression** (unparsed)\n\n`{expression}`"),
@@ -718,5 +776,41 @@ mod tests {
         // end span would make token output flicker while the user types.
         assert!(interpolations("Hello {{ title", 0).is_empty());
         assert!(interpolations("Hello {{ title }", 0).is_empty());
+    }
+
+    #[test]
+    fn condition_dialect_lowers_logical_or_where_value_dialect_treats_it_as_fallback() {
+        // Both dialects accept the `expression`-format corpus (`&&`/`||`), so
+        // neither the spec example nor a `||` value is malformed. The dialects
+        // differ in meaning: the value dialect (body `{{ }}`) reads `||` as
+        // fallback, while the condition dialect (Expression-typed frontmatter
+        // values, matching the schema format's `parse_condition`) lowers it to a
+        // logical `or(...)`.
+        assert_eq!(parse("a && b").unwrap().erase().to_string(), "and(a, b)");
+        assert_eq!(parse_condition("a && b").unwrap().erase().to_string(), "and(a, b)");
+        assert_eq!(parse("a || b").unwrap().erase().to_string(), "a || b");
+        assert_eq!(parse_condition("a || b").unwrap().erase().to_string(), "or(a, b)");
+        // The spec's own example parses cleanly in both dialects.
+        assert!(parse(r#"is_agent() && os == "macos""#).is_ok());
+        assert!(parse_condition(r#"is_agent() && os == "macos""#).is_ok());
+    }
+
+    #[test]
+    fn condition_hover_uses_condition_grammar_body_hover_stays_value_grammar() {
+        let no_fm = |_: &str| None;
+        let no_schema = |_: &str| None;
+        // Body (value dialect) hover renders `||` as fallback — the behavior this
+        // change must preserve.
+        let body = hover_markdown("a || b", 0, no_fm, no_schema);
+        assert!(body.contains("`a || b`"), "{body}");
+        // Frontmatter (condition dialect) hover lowers `||` to a logical `or(...)`.
+        let cond = hover_markdown_condition("a || b", 0, no_fm, no_schema);
+        assert!(cond.contains("`or(a, b)`"), "{cond}");
+        // A function-call name inside a condition expression still enriches.
+        let source = "is_empty(title) || is_string(title)";
+        let fn_offset = source.find("is_empty").unwrap() + 2;
+        let enriched = hover_markdown_condition(source, fn_offset, no_fm, no_schema);
+        let is_empty = function_descriptor("is_empty").expect("`is_empty` is a known function");
+        assert!(enriched.contains(&format_function_block(is_empty)), "{enriched}");
     }
 }
