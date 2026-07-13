@@ -202,11 +202,10 @@ fn references_ctx_key(content: &str, key: &str) -> bool {
     })
 }
 
-fn detect_summary_os_name() -> Option<String> {
+fn detect_os_name() -> Option<String> {
     use sniff::os::OsType;
 
-    let info = sniff::os::detect_os_with_request(&sniff::request::OsRequest::summary()).ok()?;
-    match info.os_type {
+    match sniff::os::detect_os_type() {
         OsType::Windows => Some("Windows".to_string()),
         OsType::MacOS => Some("macOS".to_string()),
         OsType::Linux => Some("Linux".to_string()),
@@ -224,8 +223,8 @@ fn detect_summary_os_name() -> Option<String> {
 /// reference fields from several groups. At a known monorepo root, the
 /// already-resolved `area` is supplied as external state so Repo capture
 /// is omitted when no other Repo field is referenced. An OS-name-only
-/// reference similarly uses Sniff's summary request instead of the full
-/// OS group, whose package-manager inventory is unnecessary for `ctx.os`.
+/// reference similarly uses Sniff's OS-type probe instead of the full OS
+/// group, whose package-manager inventory is unnecessary for `ctx.os`.
 fn build_shared_compose_context(
     primary: Option<(&SystemPromptSource, &str)>,
     appendix_candidates: Option<&[(&SystemPromptSource, &str)]>,
@@ -271,7 +270,7 @@ fn build_shared_compose_context(
         && !["os_distro", "os_package_manager", "os_version"]
             .iter()
             .any(|key| references_ctx_key(&combined, key)))
-    .then(detect_summary_os_name)
+    .then(detect_os_name)
     .flatten();
 
     let mut capture_content = combined;
