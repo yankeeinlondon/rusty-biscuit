@@ -42,6 +42,19 @@ We have had logging for a long time in Claudine but it was never implemented wel
 
 We keep track of logs so we can report on them to the user in a way that provides utility. The Rendezvous daemon and Log Monitor client are both long running processes who's job it is to capture log information and store it in a way which can be easily queried as well as synchronized across other Rendezvous daemons on other hosts.
 
-One of the key _entities_ which structures logging is the idea of a `Session`:
+Major entities we want to track:
 
-- when interacting with
+- Sessions (this is the primary unit of execution for Agentic CLI and comes in both interactive and non-interactive forms)
+- Sequences (this is a Claudine concept but plays a very important _grouping_ function across otherwise separate non-interactive sessions)
+- Agent (understanding activity by Agent and reflecting it back to the user is helpful in understanding how much a user is using one agent versus another, whether they are favoring interactive or non-interactive sessions on that platform, and much more)
+- Model (understanding which models are being used )
+- Repo (understanding which repos a user is working on is useful in the short term for situational awareness but spanned over time it also tells an interesting story about the user's focus over time)
+- Commit
+- PR 
+- CI/CD
+- Project
+    - i see this one as a more v2 entity but the idea is that we _can_ interact with all of the project management / kanban boards that are out there; then for any given repo we can associate a kanban board
+    - we already have API support for some of the most significant project management platforms (trello, clickup, asana, etc.)
+    - we would want to add support for github, gitlab, gitea(?)
+    - the movement of items on a kanban board can have strong correlations to commits, PRs, etc.
+    - being able to add in this information to Repos, PRs,
