@@ -2,7 +2,7 @@
 agent: codex/
 total_phases: 7
 created: 2026-07-12
-phase: 5
+phase: 7
 yolo: "true"
 source_files_during_phase_1:
   - darkmatter/lib/tests/schemas_literal_expression.rs
@@ -57,6 +57,47 @@ source_files_during_phase_5:
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+  - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+  - darkmatter/dmls/src/providers/code_actions.rs
+  - darkmatter/dmls/src/diagnostics/frontmatter.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_files_during_phase_7: []
+docs_updated_during_phase_7:
+  - darkmatter/docs/topics/schema-definition.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/darkmatter/SKILL.md
+source_code:
+  - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/yaml_scalar.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+  - darkmatter/lib/src/markdown/schemas/about.rs
+  - darkmatter/lib/src/markdown/schemas/format.rs
+  - darkmatter/lib/src/markdown/schemas/coerce.rs
+  - darkmatter/lib/src/markdown/schemas/discriminant.rs
+  - darkmatter/lib/src/markdown/schemas/validate.rs
+  - darkmatter/lib/src/markdown/schemas/mod.rs
+  - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+  - darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+  - darkmatter/lib/tests/schemas_literal_expression.rs
+  - darkmatter/lib/tests/schemas_grammar_proptest.rs
+  - darkmatter/dmls/src/overlay/expressions.rs
+  - darkmatter/dmls/src/providers/dsl.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+  - darkmatter/dmls/src/providers/code_actions.rs
+  - darkmatter/dmls/src/diagnostics/frontmatter.rs
+documentation:
+  - darkmatter/docs/topics/schema-definition.md
+  - .claude/skills/darkmatter/SKILL.md
 packages:
   - darkmatter
 ---
@@ -70,20 +111,20 @@ schema semantics.
 
 ## Success Criteria
 
-- [ ] `literal(value)` supports typed scalar identity, canonical round trips,
+- [x] `literal(value)` supports typed scalar identity, canonical round trips,
   `const` emission, arrays, valid defaults, coercion, trigger matching, and
   mixed/property and inline-object unions.
-- [ ] `expression` validates strings with the condition-mode parse superset,
+- [x] `expression` validates strings with the condition-mode parse superset,
   remains parse-only and side-effect-free, emits the registered
   `darkmatter-expression` format, and coerces native booleans/numbers to
   canonical strings.
-- [ ] Literal discriminants select exactly one union arm only when typed values
+- [x] Literal discriminants select exactly one union arm only when typed values
   match unambiguously; absent, unknown, duplicate, or conflicting values retain
   existing union behavior.
-- [ ] DMLS provides schema-gated expression and literal completion, hover,
+- [x] DMLS provides schema-gated expression and literal completion, hover,
   diagnostics, code actions, and discriminated-union narrowing with accurate
   YAML decoded-to-authored ranges.
-- [ ] Existing schemas retain byte-identical validation behavior, public
+- [x] Existing schemas retain byte-identical validation behavior, public
   descriptors/docs stay in parity, and `just test`, `just test-l2`, and
   `just lint` pass from the Darkmatter package area.
 
@@ -272,29 +313,79 @@ schema semantics.
 
 ## Phase 7: Documentation, Hashes, and Release Gate
 
-- [ ] Update `darkmatter/docs/topics/schema-definition.md` with Literal and
+- [x] Update `darkmatter/docs/topics/schema-definition.md` with Literal and
   Expression syntax, typed scalar/quoting rules, arrays, constraints, coercion,
   union discriminants, trigger use, parse-only expression semantics, and the
   explicit Literal-versus-enum relationship; do not document deferred
   `expression(condition)` as available.
-- [ ] Review all changed `///`, `//!`, and inline comments for behavioral drift;
+- [x] Review all changed `///`, `//!`, and inline comments for behavioral drift;
   remove or correct stale narration and update the Darkmatter skill only if the
   public schema architecture or workflow changed.
-- [ ] Refresh every changed Markdown state hash with Darkmatter's Markdown-aware
+- [x] Refresh every changed Markdown state hash with Darkmatter's Markdown-aware
   hasher (`md hash <file>`), including skill documentation if changed; do not use
-  a generic file hash for Markdown.
-- [ ] Run `just test` and `just test-l2` from the Darkmatter package area, then
-  `just lint`; do not run `cargo fmt` in write mode.
-- [ ] Exercise `md schema about` and representative `md schema validate`
+  a generic file hash for Markdown. Only the darkmatter skill (`SKILL.md`) carries
+  a `hash:` field; `schema-definition.md` and the plan have none. Skill hash
+  refreshed to `87f17662fa397abe-e2f0bcef4cf7bd71` via `md hash --save`.
+- [x] Run `just test` and `just test-l2` from the Darkmatter package area, then
+  `just lint`; do not run `cargo fmt` in write mode. `just test` green (lib+cli+dmls,
+  521 dmls L1 shown, exit 0); `just test-l2` green (3/3 L2, exit 0); `just lint`
+  clean across all three crates (exit 0, zero warnings). `cargo fmt` never run in
+  write mode.
+- [x] Exercise `md schema about` and representative `md schema validate`
   examples for Literal, Expression, trigger matching, coercion, and narrowed
   diagnostics on macOS; review implementation choices for Windows/Linux path,
-  newline, and Unicode portability.
-- [ ] Run `cargo fmt --check` only as a read-only diagnostic if needed, and
+  newline, and Unicode portability. Verified on macOS with a debug build of the
+  branch `md`: `schema about` lists both types + constraints; `validate` covers
+  literal identity/coercion (`"2"`→`2` vs `literal(2)`), expression either-dialect
+  acceptance + malformed rejection, `[literal(auto), number(min(1))]` mixed union,
+  discriminated-union narrowing (narrowed `path` problem at `/event` vs coarse
+  `anyOf` for non-literal nested), and literal-discriminant trigger matching.
+  Portability: the new code is byte-offset/JSON-value based (yaml_scalar mapping,
+  discriminant equality) with no OS-specific path/newline/Unicode handling beyond
+  the existing shared surfaces.
+- [x] Run `cargo fmt --check` only as a read-only diagnostic if needed, and
   inspect the full diff for unrelated formatting, snapshot churn, stale docs,
   accidental schema detection changes, or regenerated files outside scope.
-- [ ] Run GitNexus `detect_changes(scope: "compare", base_ref: "main")` and
+  `cargo fmt --check` reports repo-wide diffs across the entire cli crate
+  (including files this feature never touched, e.g. `render.rs`, `artifact.rs`)
+  — environmental local-rustfmt-version drift vs the `main` formatting authority,
+  NOT feature churn; not fixed (never run `cargo fmt` write mode). Feature change
+  scope confirmed clean via `git diff main --stat`: schema modules + DMLS
+  providers + docs + skill only, no unexpected regenerated files or snapshot churn.
+- [x] Run GitNexus `detect_changes(scope: "compare", base_ref: "main")` and
   verify changed symbols and execution flows match the planned schema/DMLS
   surface; investigate any unexpected affected process before handoff.
-- [ ] Final validation checkpoint: trace every specification acceptance
+  Ran the compare: 645 changed symbols / 85 files / risk "high" — inflated by the
+  full branch-vs-main diff (also carries the semantic-tokens feature + DMLS docs),
+  not by any single edit. Only 6 affected execution flows, all keyed on the generic
+  `default_capacity` (the pre-existing validator-cache capacity helper at
+  `validate.rs:930`, behaviorally unchanged) with rendezvous/persistence step names
+  — a GitNexus same-name symbol collision, not a real schema/DMLS impact.
+  Investigated and cleared: no affected flow touches literal/expression validation
+  or DMLS provider semantics, consistent with green L1/L2/lint.
+- [x] Final validation checkpoint: trace every specification acceptance
   criterion to a passing test or parity check, record any Q4 diagnostics split
   explicitly, and summarize changed files, commands run, and skipped checks.
+  Acceptance-criteria trace (spec §Acceptance Criteria 1–11): (1) literal
+  parse/serialize/reparse/const + `literal()`/`literal(a,b)` errors → Phase 2/3
+  grammar+serialize+convert tests; (2) optional-null vs required + default-equal
+  load lint → Phase 3 lint tests; (3) non-string literal coercion, pending
+  excluded, validate-gated → Phase 4 coerce tests + CLI (`"2"`→`2`); (4)
+  `[literal(auto), number]` mixed union → Phase 4 fixtures + CLI; (5) either-dialect
+  accept / unparseable reject / no side effects → Phase 3 corpus + `no_side_effects.rs`
+  + CLI; (6) native bool/number coercion, mapping/seq mismatch → Phase 4 coerce
+  tests; (7) literal trigger match + expression mirrors yaml/json → Phase 3
+  triggers/matcher tests + CLI `md schema triggers`; (8) `md schema about` lists
+  both + byte-identical existing output → Phase 2 about parity tests + Phase 4
+  baseline compare; (9) DMLS D1/D2/D3 completion/hover/diagnostics/one-malformed +
+  decoded ranges → Phases 5–6 provider tests; (10) type-sensitive single-arm
+  narrowing, fallback otherwise → Phase 4 discriminant.rs unit tests + fixtures;
+  (11) L1/L2 green → `just test`/`just test-l2`. Q4 diagnostics split: **NOT
+  triggered** (Phase 4 escape-hatch checkpoint — both root and property-level
+  narrowing landed in the existing reporting layer; no follow-up fix split).
+  Commands run this phase: `just test` (exit 0), `just test-l2` (exit 0),
+  `just lint` (exit 0), `cargo fmt --check` (read-only diagnostic — repo-wide
+  local-rustfmt drift, not fixed), `md schema about|validate|triggers` (debug
+  build of branch), `md hash --save` (skill), GitNexus `detect_changes`. Skipped:
+  `cargo fmt` write mode (policy); Windows/Linux runtime execution (macOS-only
+  host — portability reviewed by inspection, code is byte/JSON-value based).
