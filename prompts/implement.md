@@ -18,23 +18,20 @@ description: |-
 
 initialize: 
     stack:
-        - when: spec && frontmatter(spec, 'implemented')
+        - when: "spec && frontmatter(spec, 'implemented')"
           action: 
             - info: an _implemented_ spec file was passed into the **implementation** router and will be routed to **implement-suggestions** with the assumption that we are in a _review-to-implement_ looping cycle currently.
             - proxy: prompts/_implement/implement-suggestions.md
-              phase: phase
-              total_phases: total_phases
-              plan: plan
-        - when: spec && !frontmatter(spec, 'implemented')
+        - when: "spec && !frontmatter(spec, 'implemented')"
           action:
               - info: a _specification file_ was pass in that has **not** been implemented yet; it will be routed to **implement-plan** so that the spec get's implemented
               - proxy: prompts/_implement/implement-plan.md
-                spec: spec
         - when: review
           action:
-              - info: a _review_ was passed into the implementation router and will be routed to **implement-review**
+              - info: "a _review_ was passed into the implementation router and will be routed to **implement-review**"
 
-        - error: "Unable to route the implementation to an appropriate prompt"
+        - action:
+            - error: "Unable to route the implementation to an appropriate prompt"
 ---
 
 This prompt should never be reached. This is a router and it's goal is to proxy execution to other prompts.
