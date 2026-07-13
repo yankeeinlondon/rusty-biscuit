@@ -327,6 +327,7 @@ pub enum RepoSubcommand {
         worktree: Option<String>,
     },
     /// Show details for a specific commit hash
+    #[command(alias = "commit")]
     Hash {
         /// Git commit SHA (full or short)
         #[arg(value_name = "SHA")]

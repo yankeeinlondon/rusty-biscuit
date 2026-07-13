@@ -1252,7 +1252,7 @@ Git:
   sniff repo git-status               Show git status and recent commits
   sniff repo git-status --history 20  Show more commits
   sniff repo git-status --compact     Show only the Status section
-  sniff repo hash HEAD                Show latest commit details
+  sniff repo hash HEAD                Show latest commit details (alias: commit)
   sniff repo staged-files             List staged files
   sniff repo unstaged-files           List unstaged files
   sniff repo untracked-files          List untracked files
@@ -2199,6 +2199,20 @@ mod tests {
                 assert_eq!(sha, "HEAD");
             } else {
                 panic!("Expected repo hash");
+            }
+        }
+
+        #[test]
+        fn repo_hash_commit_alias_parses() {
+            let cli = parse_args(&["repo", "commit", "HEAD"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Hash { sha }),
+                ..
+            }) = cli.command
+            {
+                assert_eq!(sha, "HEAD");
+            } else {
+                panic!("Expected repo hash via commit alias");
             }
         }
 
