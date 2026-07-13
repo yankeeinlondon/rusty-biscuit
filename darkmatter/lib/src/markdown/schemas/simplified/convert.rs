@@ -36,8 +36,8 @@ use super::types::{
 };
 use crate::markdown::schemas::errors::SchemaError;
 use crate::markdown::schemas::format::{
-    DARKMATTER_FILE_FORMAT, DARKMATTER_FILE_REFERENCE_FORMAT, DARKMATTER_JSON_FORMAT,
-    DARKMATTER_YAML_FORMAT,
+    DARKMATTER_DATETIME_FORMAT, DARKMATTER_FILE_FORMAT, DARKMATTER_FILE_REFERENCE_FORMAT,
+    DARKMATTER_JSON_FORMAT, DARKMATTER_TIME_FORMAT, DARKMATTER_YAML_FORMAT,
 };
 
 /// Draft 2020-12 schema URI emitted on every generated root schema.
@@ -737,8 +737,14 @@ fn type_fragment(
     match ty {
         SimplifiedType::String => string_fragment(name, constraints),
         SimplifiedType::Date => date_family_fragment(name, "date", constraints),
-        SimplifiedType::DateTime => date_family_fragment(name, "date-time", constraints),
-        SimplifiedType::Time => date_family_fragment(name, "time", constraints),
+        // `datetime` / `time` lower to darkmatter custom formats (offset
+        // optional) rather than the built-in RFC 3339 `date-time` / `time`,
+        // which reject the offset-less local values ISO 8601 allows. `date` has
+        // no offset component, so it keeps the built-in format.
+        SimplifiedType::DateTime => {
+            date_family_fragment(name, DARKMATTER_DATETIME_FORMAT, constraints)
+        }
+        SimplifiedType::Time => date_family_fragment(name, DARKMATTER_TIME_FORMAT, constraints),
         SimplifiedType::Number => number_fragment(name, constraints),
         SimplifiedType::NumberLike => numberlike_fragment(name, constraints),
         SimplifiedType::Boolean => simple_typed_fragment(name, "boolean", constraints),
@@ -1124,8 +1130,8 @@ mod tests {
     #[test]
     fn date_family_emits_format() {
         assert_eq!(atom_value("date")["format"], "date");
-        assert_eq!(atom_value("datetime")["format"], "date-time");
-        assert_eq!(atom_value("time")["format"], "time");
+        assert_eq!(atom_value("datetime")["format"], "darkmatter-datetime");
+        assert_eq!(atom_value("time")["format"], "darkmatter-time");
     }
 
     #[test]

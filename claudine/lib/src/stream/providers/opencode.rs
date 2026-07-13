@@ -27,7 +27,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use serde_json::{Map, Value};
-use tracing::debug;
 
 use super::parser::{SemanticStreamParser, StreamParseError};
 use super::protocol::opencode::{
@@ -79,11 +78,7 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
     }
 
     fn base_extra(&self, raw_kind: &str) -> Map<String, Value> {
-        let mut m = Map::new();
-        m.insert("provider".into(), Value::from("opencode"));
-        m.insert("line_num".into(), Value::from(self.line_num));
-        m.insert("raw_kind".into(), Value::from(raw_kind));
-        m
+        super::common::base_extra(Provider::OpenCode, self.line_num, raw_kind)
     }
 
     fn emit_session_start(&mut self, raw_kind: &str) {
@@ -408,26 +403,11 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
     }
 
     fn emit_provider_extension(&mut self, kind: &str, payload: Value) {
-        debug!(
-            provider = "opencode",
-            event_type = %kind,
-            "opencode parser falling back to provider extension for unknown event type"
-        );
-        self.sink
-            .on_semantic_event(SemanticEvent::ProviderExtension {
-                provider: Provider::OpenCode,
-                kind: kind.to_string(),
-                payload,
-            });
+        super::common::emit_provider_extension(&mut self.sink, Provider::OpenCode, kind, payload);
     }
 
     fn emit_malformed_warning(&mut self, err: &str) {
-        let mut extra = self.base_extra("malformed_json");
-        extra.insert("line_num".into(), Value::from(self.line_num));
-        self.sink.on_semantic_event(SemanticEvent::Warning {
-            message: format!("Malformed JSON on line {}: {err}", self.line_num),
-            extra: Value::Object(extra),
-        });
+        super::common::emit_malformed_warning(&mut self.sink, Provider::OpenCode, self.line_num, err);
     }
 }
 
@@ -524,49 +504,25 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
             self.provider_status.as_deref(),
         );
         let has_usage = self.token_usage.input.is_some() || self.token_usage.output.is_some();
-        let mut summary = StreamExecutionSummary {
-            provider: Provider::OpenCode,
-            session_id: self.session_id,
-            model: self.model,
-            assistant_text: self.assistant_text,
-            provider_status: self.provider_status,
-            exit_code,
-            is_error: self.is_error,
-            error_kind: self.error_kind,
-            error_message: self.error_message,
-            duration_ms: self.duration_ms,
-            duration_api_ms: None,
-            num_turns: if self.num_turns > 0 {
-                Some(self.num_turns)
-            } else {
-                None
+        super::common::finish_summary(
+            Provider::OpenCode,
+            StreamExecutionSummary {
+                session_id: self.session_id,
+                model: self.model,
+                assistant_text: self.assistant_text,
+                provider_status: self.provider_status,
+                exit_code,
+                is_error: self.is_error,
+                error_kind: self.error_kind,
+                error_message: self.error_message,
+                duration_ms: self.duration_ms,
+                num_turns: (self.num_turns > 0).then_some(self.num_turns),
+                token_usage: has_usage.then_some(self.token_usage),
+                cost_usd: (self.cost_usd > 0.0).then_some(self.cost_usd),
+                tool_calls: (self.tool_calls > 0).then_some(self.tool_calls),
+                ..Default::default()
             },
-            token_usage: if has_usage {
-                Some(self.token_usage)
-            } else {
-                None
-            },
-            cost_usd: if self.cost_usd > 0.0 {
-                Some(self.cost_usd)
-            } else {
-                None
-            },
-            tool_calls: if self.tool_calls > 0 {
-                Some(self.tool_calls)
-            } else {
-                None
-            },
-            permission_prompts: None,
-            user_input_prompts: None,
-            rate_limit: None,
-            context_usage: None,
-            badges: Vec::new(),
-            raw_summary: None,
-            stderr_text: None,
-            stderr_diagnostics: None,
-        };
-        summary.badges = crate::stream::badges::derive_badges(&summary, Provider::OpenCode);
-        summary
+        )
     }
 }
 
@@ -609,52 +565,22 @@ fn strip_orphan_think_delimiters(text: &str) -> Cow<'_, str> {
 }
 
 /// Map an OpenCode error envelope onto a typed [`SemanticErrorKind`].
+const ERROR_KEYWORDS: super::common::ErrorKeywords = super::common::ErrorKeywords {
+    kind_buckets: &[
+        (SemanticErrorKind::ApiRemote, &["rate", "quota", "billing"]),
+        (SemanticErrorKind::Configuration, &["auth", "config", "permission", "provider", "model"]),
+        (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "abort"]),
+        (SemanticErrorKind::ApiRemote, &["api", "upstream", "server"]),
+    ],
+    msg_buckets: &[
+        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "api error", "api timeout"]),
+        (SemanticErrorKind::Configuration, &["api key", "authentication", "not authorized", "permission denied", "model not found", "invalid model", "providermodelnotfound"]),
+        (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "aborted"]),
+    ],
+};
+
 fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticErrorKind {
-    if let Some(kind) = error_kind {
-        let lower = kind.to_ascii_lowercase();
-        if lower.contains("rate") || lower.contains("quota") || lower.contains("billing") {
-            return SemanticErrorKind::ApiRemote;
-        }
-        if lower.contains("auth")
-            || lower.contains("config")
-            || lower.contains("permission")
-            || lower.contains("provider")
-            || lower.contains("model")
-        {
-            return SemanticErrorKind::Configuration;
-        }
-        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("abort") {
-            return SemanticErrorKind::Interrupted;
-        }
-        if lower.contains("api") || lower.contains("upstream") || lower.contains("server") {
-            return SemanticErrorKind::ApiRemote;
-        }
-    }
-    if let Some(msg) = message {
-        let lower = msg.to_ascii_lowercase();
-        if lower.contains("rate limit")
-            || lower.contains("quota")
-            || lower.contains("billing")
-            || lower.contains("api error")
-            || lower.contains("api timeout")
-        {
-            return SemanticErrorKind::ApiRemote;
-        }
-        if lower.contains("api key")
-            || lower.contains("authentication")
-            || lower.contains("not authorized")
-            || lower.contains("permission denied")
-            || lower.contains("model not found")
-            || lower.contains("invalid model")
-            || lower.contains("providermodelnotfound")
-        {
-            return SemanticErrorKind::Configuration;
-        }
-        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("aborted") {
-            return SemanticErrorKind::Interrupted;
-        }
-    }
-    SemanticErrorKind::AgentNative
+    super::common::classify_error_by_keywords(&ERROR_KEYWORDS, error_kind, message)
 }
 
 #[cfg(test)]

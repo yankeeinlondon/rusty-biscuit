@@ -1,0 +1,26 @@
+kind: schema
+description: |-
+    Provides the shape of metadata provided by a **Feature Review**. This feature
+    review may have been categorized as a "feature" or a "fix" but is always grounded
+    by _specification_ file that defines the target for the implementation.
+
+    > **Note:** in addition to the specification file, some feature reviews will be given
+    > additional documents that support the specification file in their definition.
+$schema:
+    - description: string -> description of this _feature review_
+      ready: boolean -> whether the reviewer believed that the code is "production ready"
+      spec: string -> the underlying _specification file_ that this review is based on
+      created: datetime -> an ISO8601 representation of the date and time this review was created (using host's timezone)
+      agent: "string -> a string representation of agent and model: `${agent}/${model}`"
+      feature: string -> the **feature** name this review relates to
+      implemented: boolean -> boolean flag indicating whether this review's suggestions has been implemented
+      next: string
+      previous: string
+    - description: string -> description of this _feature review_
+      ready: boolean -> whether the reviewer believed that the code is "production ready"
+      created: datetime -> an ISO8601 representation of the date and time this review was created (using host's timezone)
+      agent: "string -> a string representation of agent and model: `${agent}/${model}`"
+      fix: string -> the **fix** name this review related to
+      implemented: boolean
+      next: string
+      previous: string

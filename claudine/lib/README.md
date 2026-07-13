@@ -9,13 +9,13 @@ The library is organized into eighteen top-level modules plus the shared error t
 ```
 claudine/lib/src/
 ├── actions/        → Hook action types and response model
-├── adapters/       → Provider-specific event parsers
 ├── badges.rs       → Styled terminal badge constants (YOLO, Non-Interactive, Interactive, etc.)
 ├── composition/    → Markdown frontmatter composition (inline, direct, and sequence pipelines)
 ├── config/         → Agent detection and hook registration
 ├── dispatch/       → Event processing pipeline
 ├── events/         → Normalized 16-event lifecycle model (`AgenticEvent`, `EventMeta`, matrices)
 ├── harness/        → Timeouts, shell audit, attempt classification, and lifecycle recovery infrastructure
+├── hook_adapters/  → Native hook request/response adapters (parse provider hook payloads; distinct from stream/providers)
 ├── linking/        → Cross-provider skill and command synchronization
 ├── messaging/      → Outbound messaging routes, resolution, and provider dispatch
 ├── mcp/            → MCP catalog, defaults, import/export, session, and injection
@@ -81,9 +81,11 @@ Key types:
 
 Adding an eighth provider is a matter of: adding the `Provider` variant, creating one `provider/<name>.rs` file with a `<NAME>_INFO: ProviderInfo` constant, registering it in `provider/registry.rs`, and adding a CLI-side `WrapperProfile` entry. See [`docs/topics/building-an-agent-wrapper.md`](../docs/topics/building-an-agent-wrapper.md) for the full checklist.
 
-### Adapters (`adapters`)
+### Hook Adapters (`hook_adapters`)
 
-Each provider has its own adapter implementing the `ProviderAdapter` trait:
+Each provider has its own adapter implementing the `ProviderAdapter` trait. These
+parse native hook request/response payloads — distinct from `stream/providers`,
+which parse stdout NDJSON:
 
 | Adapter | Parses | Status |
 |---------|--------|--------|

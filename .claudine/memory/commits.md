@@ -42,6 +42,60 @@ details do not belong here.
   paths rather than preserving a different staged snapshot. Therefore, do not
   use it on an `MM` or `AM` path unless the working tree and staged content have
   first become identical through changes made by the caller.
+- **For an `MM` path whose staged snapshot must be committed while preserving
+  unstaged edits, use a temporary-index plumbing fallback rather than
+  `git commit --only` (2026-07-11 claudine dispatch-inventory batch).** Capture
+  the original staged entry with `git ls-files -s -- <path>`, create a temp
+  index from the current HEAD with `git read-tree`, overlay that captured entry
+  via `git update-index --index-info`, write the tree, create the commit with
+  `git commit-tree -F -`, and advance `HEAD` with `git update-ref HEAD
+  <new-commit> <old-head>` so the ref update is CAS-protected. Rebuild the temp
+  index and retry if the CAS fails. This preserves the caller's working-tree
+  edits and avoids staging/unstaging in the real index; use it only when the
+  staged snapshot cannot safely be reported as blocked.
+- **`--only --` IS safe on an `MM` path when the working tree is a clean
+  superset of the staged snapshot (2026-07-12 claudine skills batch).** The
+  prior bullet's "do not use it on an MM path unless the working tree and
+  staged content have first become identical" rule is overly conservative: if
+  the unstaged changes are pure additions on top of the staged content (no
+  regressions, no divergent rewrites), `--only --` commits the working tree,
+  which inherently preserves the staged snapshot as a subset. Verify before
+  using: `git show :<path>` (staged content) and the working-tree file must
+  show the working tree containing every staged change plus net additions.
+  Concretely, in the 2026-07-12 claudine skills batch, `.claude/skills/rust/SKILL.md`
+  was `MM` with the staged snapshot adding new section headers + bullet
+  rewrites and the working tree additionally adding an indicatif section +
+  indicatif bullet. `--only -- .claude/skills/rust/SKILL.md` produced a single
+  commit containing both, and `git show --name-status <hash>` confirmed the
+  staged snapshot was preserved. **If the working tree has any regression from
+  staged** (e.g., unstaged edits reverting part of the staged change, or a
+  divergent rewrite), do NOT use `--only --` — fall back to the temp-index
+  plumbing above or split into separate commits. A quick diff side-by-side
+  (`git diff -- <path>` vs `git diff --staged -- <path>`) is enough to
+  classify the working tree as clean-superset vs divergent.
+- **The temp-index plumbing (`TMPIDX=$(mktemp -d) …`) must chain inside a
+  single shell invocation (2026-07-12 claudine logging-refactor batch).**
+  `mktemp -d` followed by `trap 'rm -rf "$TMPIDX"' EXIT` clears the directory
+  when the parent shell exits — so the `read-tree → update-index → write-tree
+  → commit-tree → update-ref` steps must all run inside the same `bash` call.
+  Splitting them across separate tool invocations leaves the temp index gone
+  before the next step reads it. Verified when the first attempt at the
+  logging-refactor plumbing kept losing the index between calls; chaining
+  everything into one shell pipeline (and reusing the captured `HEAD`/`NEW`
+  variables inside that same call) committed cleanly.
+- **Under zsh, plain `git show "$REV:$PATH"` is unreliable for verifying a
+  temp-index plumbing commit (2026-07-12 claudine logging-refactor batch).**
+  zsh treats the `:` after `$REV` as a parameter modifier that strips text
+  from the variable's value, mangling the `rev:path` argument into something
+  like `9be2e74...099fdspec.md` instead of the literal rev:path. The
+  `bash`-style `git show "$NEW:$path"` works under bash but fails under the
+  default zsh shell. Use `git cat-file -p "${NEW}":claudine/...` (literal
+  colon, separated from the variable) or `git cat-file -p ':claudine/...'`
+  (single-quoted colon, resolves the path against the current HEAD). When
+  verifying a temp-index commit, prefer `git cat-file -p` over `git show
+  "<rev>:<path>"` whenever the shell is zsh — `git show` and `git cat-file`
+  are equivalent for blob retrieval, but only `cat-file` survives zsh's
+  parameter-modifier interpretation.
 - For a rename, include both the old and new paths so the deletion and addition
   remain in the same commit.
 - **`git commit --only -- <dest-paths>` only commits the `A` half of a rename
@@ -72,6 +126,17 @@ details do not belong here.
 - Feed commit messages through `-F -` and a single-quoted heredoc. Do not place
   messages containing backticks, dollar signs, or other shell metacharacters in
   a double-quoted `-m` argument.
+- **Always pass `-F -` explicitly — a bare `git commit -- <paths> <<EOF` heredoc
+  is not enough (2026-07-11 claudine strong-plan batch).** When git's
+  configured editor (e.g. `core.editor = nvim`) is set, a heredoc-piped stdin
+  may not suppress the editor invocation depending on git's stdin/TTY
+  detection; git then opens the editor and blocks indefinitely waiting for a
+  TTY in the non-interactive session. The fix is to always pair the heredoc
+  with explicit `-F -` so git reads the message from stdin as the message,
+  not as editor input. Verified by the strong-plan subagent: first attempt
+  used `git commit -- <path> <<EOF ... EOF` with no `-F -`; the run hung past
+  the 90s timeout with nvim waiting on stdin. Re-running with `-F -` and the
+  same heredoc committed cleanly.
 
 ## Commit Messages
 
@@ -118,6 +183,12 @@ details do not belong here.
   subagent with a successful commit on disk but no way to capture its hash
   for verification. Use `commit_status` (or similar) instead. The
   underlying commit is unaffected; the fix is to rename the local variable.
+- **In zsh, never use `path` as a shell variable name in commit wrappers
+  (2026-07-11 claudine dispatch-inventory batch).** `path` is tied to the
+  shell's executable search path; assigning a scalar like
+  `path="claudine/docs/providers/dispatch-inventory.json"` can clobber PATH
+  and make the next command fail with `zsh: command not found: git`. Use
+  `file_path`, `target_path`, or another non-special name instead.
 - **Never proactively disable GPG signing in a subagent (2026-07-10
   darkmatter 2-commit batch, stray `af09e75af`).** The repo has
   `commit.gpgsign=true` and `tag.gpgsign=true` enabled at the global
@@ -178,6 +249,11 @@ details do not belong here.
    --fixup=…` — none of them are safe inside a concurrent batch, because
    every sibling commit narrows the window in which the amendment would be
    unambiguous.
+
+- **The staged set can shrink between your `git status` and your `git commit` (2026-07-11 claudine + prompts 3-commit batch).** In a concurrent batch, a sibling commit can land and remove some of your staged paths in the window between when you inspect the staged set and when you commit. `git commit --only -- <paths>` handles this correctly — pathspecs filter the commit, so paths already committed by a sibling are silently excluded from your commit. Observed in the claudine + prompts 3-commit batch: the chore(prompts) subagent noted that the three claudine-area files it saw in its initial `git status` had been committed by a sibling docs(claudine) commit (`2955a7938`) before its own `git commit` ran; its `--only -- <paths>` commit then correctly contained only the `prompts/*` paths, and `git show --name-status <hash>` confirmed the rename/delete/add shape matched the now-shrunk staged set. No fix needed — `--only -- <paths>` is robust to mid-flight race by design; just confirm in the verification step that the committed shape still matches what you intended, and report any drift back to the orchestrator.
+- **Extra staged paths in a concurrent batch are NORMAL — do not stop and report them as a discrepancy (2026-07-11 claudine 7-commit module-structure batch).** When the orchestrator dispatches one subagent per semantic group, the index usually carries every group's paths at the moment a given subagent first runs `git status --short`. The subagent's assignment is a strict *subset* of that index; the rest are siblings' work. Two subagents in this batch saw ~19 staged paths when their own assignment was 1–2 paths and stopped to report the "discrepancy" instead of committing with `--only -- <paths>`. Both required a re-dispatch with explicit "the presence of extra staged paths is NOT a reason to stop" guidance. Five sibling subagents in the same batch ran `--only -- <paths>` on the same busy index without hesitation and committed cleanly first try. The durable lesson is for the **orchestrator's brief**: it must say, up front, that other staged paths are expected and that `--only -- <paths>` is the mechanism for scoping. Subagents should treat unexpected-staged-paths as "look more carefully", not as "abort".
+- **`--only -- <paths>` accepts a commit whose content references paths not yet in the git history (2026-07-11 claudine 4-commit restructure batch).** For parallel refactors where one subagent commits a `mod.rs` declaring a new subdirectory while sibling subagents commit the file moves/adds into that subdirectory, the `mod.rs` commit is safe: `--only -- <paths>` only commits the specified paths; it does not validate that the declared modules resolve to existing git-history files. Git accepts the commit even though the resulting HEAD references files not yet in history (they land in sibling commits). The working tree already has the files at the declared locations — `git mv` put them there during the original staging — so subsequent sibling commits fill in the missing pieces without further intervention. Verified in the claudine 4-commit restructure batch: the helpers subagent committed `composition/mod.rs` declaring `pub mod looping;` and `pub mod schema;` while those directories' contents were still in sibling commits' staged renames/adds (`627bb3195` schema split, `2012251b5` loop move); the helpers commit landed cleanly and the rest of the batch filled in the files. The trade-off is that the intermediate commits may not compile on their own when checked out in isolation — that is expected for a parallel-commit refactor and not something to report back to the orchestrator.
+- **Commit-message bodies can be silently truncated upstream of the shell, even with single-quoted heredocs (2026-07-11 claudine + claudine-cli 6-commit batch, drifted `d9fc2bf85`).** The `bare-heredoc-vs-quoted-heredoc` lesson above covers the editor-hang case where git's configured `core.editor` re-opens the editor if a heredoc-piped stdin is not paired with `-F -`. It does *not* cover the case where a very long heredoc body is silently truncated by the tool argument layer between the subagent's `bash` invocation and the actual shell that receives the heredoc. Verified in this batch: the `feat(claudine-cli)` subagent passed a 9-bullet commit message via `git commit --only -F - -- <paths> <<'COMMIT_MSG' … COMMIT_MSG`, and the commit landed with only the subject plus the first 4 of 9 bullets intact — the rest were cut off mid-bullet (`Skip the pre-loop agent-prompt preview`) and the `COMMIT_MSG` terminator was never delivered. The shell never saw the terminator, so the heredoc body quietly closed at EOF. Single-quoting the heredoc delimiter is irrelevant here: this is truncation at the tool/channel layer, not shell expansion. Fix: for commit messages that approach or exceed a few hundred lines (or ~4 KB / ~50 bullets), write the message to a temp file with the `write` tool and pass it via `git commit --only -F <tmpfile> -- <paths>`, or chunk the commit into smaller logical units with shorter bodies. Subagents should also `cat <tmpfile> | wc -l` (or read it back with the `read` tool) right before the `git commit` to confirm the body survived intact; if the file is shorter than the intended message, write it again from a smaller input.
 
 ## Verifying a Concurrent Commit
 

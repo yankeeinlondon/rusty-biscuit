@@ -27,6 +27,10 @@ Root `justfile` exposes `just test|lint|build|install|doctest`, iterating a **cu
 - shared recipes are all located in the `/just` folder
 - each package area has it's own `justfile` but the shared recipes are leveraged as much as possible to keep as much uniformity as possible
 
+## Testing
+
+Test placement: see `claudine` skill `architecture.md` → Test Placement.
+
 ## Formatting
 
 `main` branch is the formatting authority.

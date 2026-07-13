@@ -25,7 +25,6 @@
 use std::collections::HashMap;
 
 use serde_json::{Map, Value};
-use tracing::debug;
 
 use super::parser::{SemanticStreamParser, StreamParseError};
 use super::protocol::codex::{
@@ -86,10 +85,7 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
     }
 
     fn base_extra(&self, raw_kind: &str) -> Map<String, Value> {
-        let mut m = Map::new();
-        m.insert("provider".into(), Value::from("codex"));
-        m.insert("line_num".into(), Value::from(self.line_num));
-        m.insert("raw_kind".into(), Value::from(raw_kind));
+        let mut m = super::common::base_extra(Provider::Codex, self.line_num, raw_kind);
         if let Some(sid) = &self.session_id {
             m.insert("session_id".into(), Value::from(sid.as_str()));
         }
@@ -97,17 +93,7 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
     }
 
     fn emit_provider_extension(&mut self, kind: &str, payload: Value) {
-        debug!(
-            provider = "codex",
-            event_type = %kind,
-            "codex parser falling back to provider extension for unknown event type"
-        );
-        self.sink
-            .on_semantic_event(SemanticEvent::ProviderExtension {
-                provider: Provider::Codex,
-                kind: kind.to_string(),
-                payload,
-            });
+        super::common::emit_provider_extension(&mut self.sink, Provider::Codex, kind, payload);
     }
 
     fn handle_thread_started(&mut self, meta: CodexThreadMeta, raw_kind: &str) {
@@ -511,12 +497,7 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
     }
 
     fn emit_malformed_warning(&mut self, err: &str) {
-        let mut extra = self.base_extra("malformed_json");
-        extra.insert("line_num".into(), Value::from(self.line_num));
-        self.sink.on_semantic_event(SemanticEvent::Warning {
-            message: format!("Malformed JSON on line {}: {err}", self.line_num),
-            extra: Value::Object(extra),
-        });
+        super::common::emit_malformed_warning(&mut self.sink, Provider::Codex, self.line_num, err);
     }
 }
 
@@ -592,49 +573,28 @@ impl<S: SemanticEventSink> SemanticStreamParser for CodexSemanticStreamParser<S>
     }
 
     fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
-        let mut summary = StreamExecutionSummary {
-            provider: Provider::Codex,
-            session_id: self.session_id,
-            model: self.model,
-            assistant_text: self.assistant_text,
-            provider_status: self.provider_status,
-            exit_code,
-            is_error: self.is_error,
-            error_kind: self.error_kind,
-            error_message: self.error_message,
-            duration_ms: self.duration_ms,
-            duration_api_ms: None,
-            num_turns: if self.num_turns > 0 {
-                Some(self.num_turns)
-            } else {
-                None
+        super::common::finish_summary(
+            Provider::Codex,
+            StreamExecutionSummary {
+                session_id: self.session_id,
+                model: self.model,
+                assistant_text: self.assistant_text,
+                provider_status: self.provider_status,
+                exit_code,
+                is_error: self.is_error,
+                error_kind: self.error_kind,
+                error_message: self.error_message,
+                duration_ms: self.duration_ms,
+                num_turns: (self.num_turns > 0).then_some(self.num_turns),
+                token_usage: self.token_usage,
+                cost_usd: self.cost_usd,
+                tool_calls: (self.tool_calls > 0).then_some(self.tool_calls),
+                permission_prompts: (self.permission_prompts > 0).then_some(self.permission_prompts),
+                user_input_prompts: (self.user_input_prompts > 0).then_some(self.user_input_prompts),
+                raw_summary: self.raw_summary,
+                ..Default::default()
             },
-            token_usage: self.token_usage,
-            cost_usd: self.cost_usd,
-            tool_calls: if self.tool_calls > 0 {
-                Some(self.tool_calls)
-            } else {
-                None
-            },
-            permission_prompts: if self.permission_prompts > 0 {
-                Some(self.permission_prompts)
-            } else {
-                None
-            },
-            user_input_prompts: if self.user_input_prompts > 0 {
-                Some(self.user_input_prompts)
-            } else {
-                None
-            },
-            rate_limit: None,
-            context_usage: None,
-            badges: Vec::new(),
-            raw_summary: self.raw_summary,
-            stderr_text: None,
-            stderr_diagnostics: None,
-        };
-        summary.badges = crate::stream::badges::derive_badges(&summary, Provider::Codex);
-        summary
+        )
     }
 }
 
@@ -644,48 +604,22 @@ impl<S: SemanticEventSink> SemanticStreamParser for CodexSemanticStreamParser<S>
 /// `rate_limit`, `auth`) or a free-form message. This helper inspects both
 /// so the live error renderer and the end-of-run report can pick a
 /// consistent label and color.
+const ERROR_KEYWORDS: super::common::ErrorKeywords = super::common::ErrorKeywords {
+    kind_buckets: &[
+        (SemanticErrorKind::ApiRemote, &["rate", "quota", "billing"]),
+        (SemanticErrorKind::Configuration, &["auth", "config", "permission", "denied"]),
+        (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "abort"]),
+        (SemanticErrorKind::ApiRemote, &["api", "upstream", "server"]),
+    ],
+    msg_buckets: &[
+        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "api error"]),
+        (SemanticErrorKind::Configuration, &["api key", "authentication", "not authorized", "permission denied", "config"]),
+        (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "aborted"]),
+    ],
+};
+
 fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticErrorKind {
-    if let Some(kind) = error_kind {
-        let lower = kind.to_ascii_lowercase();
-        if lower.contains("rate") || lower.contains("quota") || lower.contains("billing") {
-            return SemanticErrorKind::ApiRemote;
-        }
-        if lower.contains("auth")
-            || lower.contains("config")
-            || lower.contains("permission")
-            || lower.contains("denied")
-        {
-            return SemanticErrorKind::Configuration;
-        }
-        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("abort") {
-            return SemanticErrorKind::Interrupted;
-        }
-        if lower.contains("api") || lower.contains("upstream") || lower.contains("server") {
-            return SemanticErrorKind::ApiRemote;
-        }
-    }
-    if let Some(msg) = message {
-        let lower = msg.to_ascii_lowercase();
-        if lower.contains("rate limit")
-            || lower.contains("quota")
-            || lower.contains("billing")
-            || lower.contains("api error")
-        {
-            return SemanticErrorKind::ApiRemote;
-        }
-        if lower.contains("api key")
-            || lower.contains("authentication")
-            || lower.contains("not authorized")
-            || lower.contains("permission denied")
-            || lower.contains("config")
-        {
-            return SemanticErrorKind::Configuration;
-        }
-        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("aborted") {
-            return SemanticErrorKind::Interrupted;
-        }
-    }
-    SemanticErrorKind::AgentNative
+    super::common::classify_error_by_keywords(&ERROR_KEYWORDS, error_kind, message)
 }
 
 #[cfg(test)]

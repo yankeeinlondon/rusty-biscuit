@@ -26,7 +26,9 @@ use crate::batcher::{BatcherConfig, BatcherWorker, spawn as spawn_batcher};
 use crate::discovery::{self, DiscoveryError, DiscoveryHandle};
 use crate::peers::{PeerRegistry, PeerRegistryWorkers};
 use crate::projection::{Projection, ProjectionError};
+use crate::capability::spawn_capability_refresher;
 use crate::quic::{QuicEndpoint, QuicError};
+use crate::register::{RegisterError, RegisterStore};
 use crate::service::RendezvousService;
 use crate::session_log::{SessionLogError, SessionLogManager};
 use crate::storage::{Storage, StorageError};
@@ -161,6 +163,10 @@ pub enum ServerError {
     #[error(transparent)]
     Projection(#[from] ProjectionError),
 
+    /// The register store could not be rehydrated from storage.
+    #[error(transparent)]
+    Register(#[from] RegisterError),
+
     /// The session-log manager could not be initialised.
     #[error(transparent)]
     SessionLog(#[from] SessionLogError),
@@ -196,6 +202,7 @@ pub struct ServerHandle {
     shutdown_tx: Option<oneshot::Sender<()>>,
     join_handle: Option<JoinHandle<Result<(), tonic::transport::Error>>>,
     batcher: Option<BatcherWorker>,
+    capability_task: Option<JoinHandle<()>>,
     identity: Arc<NodeIdentity>,
     peers: Option<PeerRegistry>,
     peer_workers: Option<PeerRegistryWorkers>,
@@ -261,6 +268,9 @@ impl ServerHandle {
                 .await
                 .map_err(ServerError::Join)?;
         }
+        if let Some(task) = self.capability_task.take() {
+            task.abort();
+        }
         remove_socket(&self.socket_path);
         Ok(())
     }
@@ -276,6 +286,9 @@ impl Drop for ServerHandle {
         }
         if let Some(worker) = self.batcher.take() {
             worker.shutdown();
+        }
+        if let Some(task) = self.capability_task.take() {
+            task.abort();
         }
         remove_socket(&self.socket_path);
     }
@@ -319,11 +332,16 @@ pub fn spawn_uds_server(
         config.chunk_config,
         Arc::clone(&identity),
     )?;
+    let registers = RegisterStore::new(storage.clone(), Arc::clone(&identity))?;
     let sync_service = SyncService::new(
         session_log.clone(),
+        registers.clone(),
         storage.clone(),
         Arc::clone(&identity),
     );
+    // Fill (and hourly refresh) this host's capability register so the
+    // mesh learns what this node can run.
+    let capability_task = spawn_capability_refresher(registers.clone());
 
     let listener = UnixListener::bind(&socket_path).map_err(|source| ServerError::Bind {
         path: socket_path.clone(),
@@ -337,6 +355,7 @@ pub fn spawn_uds_server(
         Arc::clone(&identity),
         storage.clone(),
         sync_service.clone(),
+        registers,
     );
     let (peers, peer_workers, discovery, quic_local_addr) = match config.networking.clone() {
         Some(net_config) => {
@@ -390,6 +409,7 @@ pub fn spawn_uds_server(
         shutdown_tx: Some(shutdown_tx),
         join_handle: Some(join_handle),
         batcher: Some(batcher),
+        capability_task: Some(capability_task),
         identity,
         peers,
         peer_workers,

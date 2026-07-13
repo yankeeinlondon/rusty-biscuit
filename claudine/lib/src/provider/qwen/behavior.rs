@@ -1,6 +1,6 @@
 //! Behavior-trait implementations for the Qwen Code provider.
 
-use crate::adapters::ProviderAdapter;
+use crate::hook_adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
 use crate::provider::behavior::{
     AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
@@ -36,7 +36,7 @@ impl McpBehavior for QwenProvider {
 }
 impl AdapterBehavior for QwenProvider {
     fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
-        &crate::adapters::QWEN_ADAPTER
+        &crate::hook_adapters::QWEN_ADAPTER
     }
 }
 impl ConfiguratorBehavior for QwenProvider {

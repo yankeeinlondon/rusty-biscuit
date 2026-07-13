@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::errors::{ConfigError, McpError};
-use crate::adapters::ProviderAdapter;
+use crate::hook_adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
 use crate::error::Result;
 use crate::events::AgenticEvent;

@@ -1,5 +1,6 @@
 pub mod antigravity;
 pub mod claude;
+mod common;
 pub mod codex;
 pub mod gemini;
 pub mod kimi;

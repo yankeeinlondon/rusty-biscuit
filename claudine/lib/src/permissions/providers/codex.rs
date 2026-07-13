@@ -322,7 +322,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
             pattern: "*".to_owned(),
             effect: PolicyEffect::Allow,
             provenance: CanonicalRuleProvenance::approximate(
-                first_source_id(native),
+                super::common::first_source_id(native, "codex-derived"),
                 "sandbox_mode",
                 "Codex sandboxing constrains writes more strongly than reads.",
             ),
@@ -339,7 +339,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
                 pattern: display.clone(),
                 effect: PolicyEffect::Deny,
                 provenance: CanonicalRuleProvenance::approximate(
-                    first_source_id(native),
+                    super::common::first_source_id(native, "codex-derived"),
                     "sandbox protected paths",
                     "Protected paths remain read-only under Codex sandboxing.",
                 ),
@@ -352,7 +352,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
                     pattern: display,
                     description: "Codex protected path".to_owned(),
                     provenance: CanonicalRuleProvenance::approximate(
-                        first_source_id(native),
+                        super::common::first_source_id(native, "codex-derived"),
                         "sandbox protected paths",
                         "Protected path query surface is broader than native config.",
                     ),
@@ -365,7 +365,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
                     pattern: "*".to_owned(),
                     effect: PolicyEffect::Deny,
                     provenance: CanonicalRuleProvenance::exact(
-                        first_source_id(native),
+                        super::common::first_source_id(native, "codex-derived"),
                         "sandbox_mode",
                     ),
                 });
@@ -375,7 +375,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
                     pattern: repo_root.to_string_lossy().into_owned(),
                     effect: PolicyEffect::Allow,
                     provenance: CanonicalRuleProvenance::exact(
-                        first_source_id(native),
+                        super::common::first_source_id(native, "codex-derived"),
                         "sandbox_mode",
                     ),
                 });
@@ -384,7 +384,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
                         pattern: root,
                         effect: PolicyEffect::Allow,
                         provenance: CanonicalRuleProvenance::exact(
-                            first_source_id(native),
+                            super::common::first_source_id(native, "codex-derived"),
                             "sandbox_workspace_write.writable_roots",
                         ),
                     });
@@ -397,7 +397,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
                         PolicyEffect::Ask
                     },
                     provenance: CanonicalRuleProvenance::approximate(
-                        first_source_id(native),
+                        super::common::first_source_id(native, "codex-derived"),
                         "approval_policy",
                         "Outside-workspace writes map to sandbox escalation prompts or denial.",
                     ),
@@ -408,7 +408,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
                     pattern: "*".to_owned(),
                     effect: PolicyEffect::Allow,
                     provenance: CanonicalRuleProvenance::exact(
-                        first_source_id(native),
+                        super::common::first_source_id(native, "codex-derived"),
                         "sandbox_mode",
                     ),
                 });
@@ -423,7 +423,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
                 PolicyEffect::Ask
             },
             provenance: CanonicalRuleProvenance::approximate(
-                first_source_id(native),
+                super::common::first_source_id(native, "codex-derived"),
                 "approval_policy",
                 "Codex execution rules are not fully parsed in phase 4.",
             ),
@@ -442,7 +442,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
                     pattern: domain.clone(),
                     effect: PolicyEffect::Allow,
                     provenance: CanonicalRuleProvenance::exact(
-                        first_source_id(native),
+                        super::common::first_source_id(native, "codex-derived"),
                         "permissions.<profile>.network.allowed_domains",
                     ),
                 });
@@ -452,7 +452,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
                     pattern: domain.clone(),
                     effect: PolicyEffect::Deny,
                     provenance: CanonicalRuleProvenance::exact(
-                        first_source_id(native),
+                        super::common::first_source_id(native, "codex-derived"),
                         "permissions.<profile>.network.denied_domains",
                     ),
                 });
@@ -651,7 +651,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
             after_preview: doc.to_string(),
         }];
 
-        let one_shot_plan = build_one_shot_plan(change);
+        let one_shot_plan = build_one_shot_plan(change)?;
 
         if !generated_rules.is_empty() {
             let rules_dir = config_path
@@ -889,7 +889,7 @@ fn choose_config_target(
     }
 }
 
-fn build_one_shot_plan(change: &PolicyChange) -> Option<OneShotMutationPlan> {
+fn build_one_shot_plan(change: &PolicyChange) -> Result<Option<OneShotMutationPlan>> {
     let mut argv = Vec::new();
     for operation in &change.operations {
         match operation {
@@ -917,13 +917,12 @@ fn build_one_shot_plan(change: &PolicyChange) -> Option<OneShotMutationPlan> {
         }
     }
     if argv.is_empty() {
-        return None;
+        return Ok(None);
     }
-    Some(OneShotMutationPlan {
+    Ok(Some(super::common::one_shot_plan(
         argv,
-        env: BTreeMap::new(),
-        fidelity: MappingFidelity::Approximate,
-    })
+        MappingFidelity::Approximate,
+    )))
 }
 
 fn map_approval_mode(mode: &CanonicalApprovalMode) -> &'static str {
@@ -1011,14 +1010,6 @@ async fn repo_config_exists(ctx: &PolicyContext) -> bool {
             .unwrap_or(false),
         None => false,
     }
-}
-
-fn first_source_id(native: &NativeEffectivePolicy) -> String {
-    native
-        .sources
-        .first()
-        .map(|source| source.id.clone())
-        .unwrap_or_else(|| "codex-derived".to_owned())
 }
 
 fn has_cli(cli: &CodexCliOverrides) -> bool {
