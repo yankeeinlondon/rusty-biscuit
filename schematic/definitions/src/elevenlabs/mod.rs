@@ -141,6 +141,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
         docs_url: Some("https://elevenlabs.io/docs/api-reference".to_string()),
         auth: AuthStrategy::ApiKey {
             header: "xi-api-key".to_string(),
+            value_prefix: None,
         },
         auth_policy: None,
         env_auth: vec![
@@ -195,6 +196,7 @@ pub fn define_elevenlabs_websocket_api() -> schematic_define::WebSocketApi {
         docs_url: Some("https://elevenlabs.io/docs/api-reference/websockets".to_string()),
         auth: AuthStrategy::ApiKey {
             header: "xi-api-key".to_string(),
+            value_prefix: None,
         },
         env_auth: vec![
             "ELEVEN_LABS_API_KEY".to_string(),
@@ -394,7 +396,7 @@ mod tests {
         let api = define_elevenlabs_rest_api();
 
         match &api.auth {
-            AuthStrategy::ApiKey { header } => {
+            AuthStrategy::ApiKey { header, .. } => {
                 assert_eq!(header, "xi-api-key");
             }
             _ => panic!("Expected ApiKey auth strategy"),

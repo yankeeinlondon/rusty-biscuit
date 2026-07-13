@@ -84,6 +84,7 @@ pub fn define_artificial_analysis_data_api() -> RestApi {
         docs_url: Some("https://artificialanalysis.ai/api-reference".to_string()),
         auth: AuthStrategy::ApiKey {
             header: "x-api-key".to_string(),
+            value_prefix: None,
         },
         auth_policy: None,
         env_auth: vec!["ARTIFICIAL_ANALYSIS_API_KEY".to_string()],
@@ -199,6 +200,7 @@ pub fn define_artificial_analysis_critpt_api() -> RestApi {
         docs_url: Some("https://artificialanalysis.ai/api-reference".to_string()),
         auth: AuthStrategy::ApiKey {
             header: "x-api-key".to_string(),
+            value_prefix: None,
         },
         auth_policy: None,
         env_auth: vec!["ARTIFICIAL_ANALYSIS_API_KEY".to_string()],
@@ -249,7 +251,7 @@ mod tests {
     fn data_api_uses_apikey_header_auth() {
         let api = define_artificial_analysis_data_api();
         match &api.auth {
-            AuthStrategy::ApiKey { header } => assert_eq!(header, "x-api-key"),
+            AuthStrategy::ApiKey { header, .. } => assert_eq!(header, "x-api-key"),
             other => panic!("expected ApiKey, got {other:?}"),
         }
         assert_eq!(api.env_auth, vec!["ARTIFICIAL_ANALYSIS_API_KEY"]);

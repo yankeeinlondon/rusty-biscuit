@@ -155,6 +155,7 @@ pub fn define_gitlab_api() -> RestApi {
         docs_url: Some("https://docs.gitlab.com/api/rest/".to_string()),
         auth: AuthStrategy::ApiKey {
             header: "PRIVATE-TOKEN".to_string(),
+            value_prefix: None,
         },
         auth_policy: None,
         env_auth: vec![
@@ -255,7 +256,7 @@ mod tests {
         let api = define_gitlab_api();
 
         match &api.auth {
-            AuthStrategy::ApiKey { header } => {
+            AuthStrategy::ApiKey { header, .. } => {
                 assert_eq!(header, "PRIVATE-TOKEN");
             }
             _ => panic!("Expected ApiKey auth strategy"),
