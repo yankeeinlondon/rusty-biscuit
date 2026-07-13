@@ -1,6 +1,6 @@
 ---
-status: rulings complete — awaiting review
-reviewed: false
+status: ready for planning and implementation
+reviewed: true
 rulings: Q1–Q5 ruled by Ken 2026-07-12; folded into body
 inputs:
   - ../../lib/src/markdown/schemas/simplified/types.rs
@@ -18,7 +18,7 @@ related:
 
 # SimplifiedSchema: `literal` and `expression` Types
 
-**Status:** Rulings complete, awaiting review. Two new entries in the
+**Status:** Ready for planning and implementation. Two new entries in the
 SimplifiedSchema type vocabulary, plus the DMLS capabilities they unlock.
 The five open design questions were ruled by Ken on 2026-07-12; rulings are
 folded into the body and recorded in the Open Questions section for the
@@ -144,9 +144,14 @@ rules and the existing "coerce only when the result validates" discipline.
 $schema:
   width: [literal(auto), number(min(1))]     # keyword-or-value
   event:                                      # discriminated union
-    - { kind: literal(created), path: file(required) }
-    - { kind: literal(deleted), reason: string }
+    - '{ kind: literal(created), path: file(required) }'
+    - '{ kind: literal(deleted), reason: string }'
 ```
+
+The quotes around each inline-object arm are required. SimplifiedSchema's
+inline-object grammar is a string-layer extension; an authored YAML mapping at
+a property position remains invalid. This feature does not change that
+established contract.
 
 - Property-level unions may mix `literal` arms with any other atom —
   something `enum` cannot express (`enum` members are homogeneous strings).
@@ -154,7 +159,13 @@ $schema:
   tagged unions. Validation-side improvement: when an instance's
   discriminant key matches exactly one arm's `LiteralValue`, error
   reporting selects that arm instead of emitting the full `anyOf` noise
-  (see DMLS section — the same selection powers arm narrowing).
+  (see DMLS section — the same selection powers arm narrowing). An arm is
+  selected only when the same property key is present as a `literal` in at
+  least two arms, the instance contains that key, and exactly one arm's typed
+  literal equals the instance value. Otherwise validation retains the normal
+  union behavior and diagnostics; it never guesses an arm from a partial or
+  ambiguous match. Multiple qualifying discriminant keys must all select the
+  same arm, or narrowing is abandoned.
 
 ### Trigger match expressions
 
@@ -185,7 +196,8 @@ $schema:
 - A plain keyword type — no positional value. Parses exactly like `string`.
 - No parameterized form in v1. `expression(condition)` — "must parse under
   the condition dialect specifically" — is reserved but deferred as a
-  future backward-compatible *tightening* (**Q2, ruled**; see Semantics).
+  future backward-compatible opt-in variant (**Q2, ruled**; see Semantics).
+  Adding that form will not change the meaning of bare `expression`.
 
 ### Semantics
 
@@ -218,7 +230,11 @@ checks **parseability only**:
   `parse_condition(value).is_ok()` check (the either-dialect rule above).
 - Constraint applicability, optional-nullability, and the `$()` / `{{ }}`
   pending-value deferral rules mirror `yaml` / `json` exactly — it is the
-  third member of that family, not a new category.
+  third member of that family, not a new category. Concretely, it permits the
+  universal `required`, `default(...)`, and `generated` constraints plus array
+  constraints when suffixed with `[]`; string constraints and `suggest(...)`
+  are rejected, matching `yaml` / `json`. A `default(...)` value is checked by
+  the existing schema-load validation and must itself parse as an expression.
 
 ### Coercion
 
@@ -267,10 +283,25 @@ the same machinery **inside the YAML value**:
 - **Hover** — reuse `format_ctx_hover_block` and `format_function_block`
   verbatim (same bytes as the interpolation hovers) for identifiers and
   the deepest `FunctionCall` under the cursor (`function_call_at`).
-- **Diagnostics** — `dm.expression.malformed` (parse error, precise range:
-  `FrontmatterAst` value-node span + `ParseError.position` byte offset) and
-  `dm.expression.unknown_identifier` (advisory, function names only — same
-  policy as the body provider). Source `darkmatter.frontmatter`.
+- **Diagnostics** — `dm.expression.malformed` and
+  `dm.expression.unknown_identifier` (advisory, unknown root identifiers only
+  — the same policy as the body provider). Source `darkmatter.frontmatter`.
+  The dedicated malformed diagnostic replaces, rather than duplicates, the
+  generic `dm.schema.constraint` problem for the same
+  `darkmatter-expression` format failure. Other schema problems on the
+  property remain visible.
+
+  Parser positions are byte offsets in the decoded YAML scalar, not the raw
+  document. DMLS must project decoded boundaries back to authored byte
+  boundaries before constructing a range; adding the offset directly to
+  `value_span.start` is incorrect for quoted scalars, escapes, and non-ASCII
+  text. Extract the existing decoded-to-raw scalar mapping behavior from
+  `simplified/source.rs` into a shared Darkmatter helper used by both schema
+  source parsing and DMLS. The diagnostic starts at the projected parse-error
+  boundary and ends at the projected end of the decoded scalar content,
+  excluding YAML quote characters. If projection is unavailable for a valid
+  YAML scalar form, range the complete value node as a safe fallback. Add
+  plain, single-quoted, double-quoted escaped, and multibyte regression cases.
 
 This is the single biggest unlock: `when:` values in Claudine hook
 documents get the full typed-catalog experience with no new provider — one
@@ -301,6 +332,15 @@ whose arms carry `literal`-typed discriminants:
   rides the library-side arm-selection rule from Feature A (matched
   discriminant → single-arm error reporting), so `md schema validate`
   improves identically.
+
+The selection rule is the library rule defined under Feature A: a shared
+discriminant key, an authored instance value, exactly one typed equality
+match, and no conflict between multiple discriminants. Before a discriminant
+is present, for an unknown value, or for duplicate literal values across arms,
+completion and diagnostics retain today's merged/union behavior. Equality is
+type-sensitive (`2` does not select an arm tagged with `'2'`). This makes
+incomplete documents stable while they are being edited and prevents an
+arbitrary first-arm choice.
 
 Scope note — **Ruled (Q4, 2026-07-12): in scope with a pre-approved escape
 hatch.** Both halves (completion narrowing and diagnostics narrowing) are
@@ -337,6 +377,7 @@ Every new type keyword pays this tax; listed so planning can phase it:
 | `detect.rs` | never inferred (non-goal) | never inferred (non-goal) |
 | Docs: `docs/topics/schema-definition.md` | ✓ | ✓ |
 | DMLS `providers/frontmatter.rs` + `overlay/expressions.rs` | D2, D3 | D1 |
+| Shared decoded-YAML-scalar source projection (extract from `simplified/source.rs`) | — | precise D1 ranges |
 | Skill/docs hash refresh (`md hash`) | ✓ | ✓ |
 
 ## Non-Goals
@@ -356,7 +397,8 @@ Every new type keyword pays this tax; listed so planning can phase it:
 ## Acceptance Criteria
 
 1. `literal(spec)`, `literal(2)`, `literal(false)`, and `literal('a, b')`
-   parse, serialize round-trip byte-stable, and compile to typed `const`
+   parse, serialize to a stable canonical spelling, reparse to an equivalent
+   AST, and compile to typed `const`
    fragments; `literal()` and `literal(a, b)` fail with the specified
    errors.
 2. A non-`required` literal property accepts missing/`null`; `required`
@@ -382,8 +424,13 @@ Every new type keyword pays this tax; listed so planning can phase it:
    diagnostics inside frontmatter (D1); literal-typed properties get
    exact-value completion, hover, and required-key insertion with the real
    value (D2); discriminated-union key completion narrows on a matched
-   literal discriminant (D3).
-10. All L1/L2 suites green via the area `just test` / `just test-l2`.
+   literal discriminant (D3). Malformed expression values emit one dedicated
+   diagnostic rather than a duplicate generic format diagnostic; ranges map
+   decoded offsets correctly for plain, quoted/escaped, and multibyte scalars.
+10. Discriminant narrowing is type-sensitive and occurs only for one
+    unambiguous arm; absent, unknown, duplicate, or conflicting discriminants
+    preserve existing union behavior in both the library and DMLS.
+11. All L1/L2 suites green via the area `just test` / `just test-l2`.
 
 ## Open Questions
 
@@ -396,7 +443,7 @@ sections noted below. Recorded here for the review trail.
 - **Q2 — expression dialects.** **RULED (2026-07-12): lenient bare type** —
   bare `expression` accepts either dialect (condition-mode parse; superset
   property regression-tested); `expression(condition)` reserved as a future
-  backward-compatible tightening. Supersedes the draft's value-dialect-only
+  backward-compatible opt-in variant. Supersedes the draft's value-dialect-only
   wording, which would have rejected valid `when:` conditions containing
   `&&`. Folded into the Semantics section.
 - **Q3 — Expression native-scalar coercion.** **RULED (2026-07-12):
