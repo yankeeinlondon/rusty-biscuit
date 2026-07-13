@@ -5,6 +5,12 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::rc::Rc;
+
+use renderable::browser::feature::{
+    FeatureContext, FeatureResolver, PageFeature, resolve_features, serialize_features_body,
+};
+use renderable::target::RenderTarget;
 
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::discovery::detection::ColorMode as TerminalColorMode;
@@ -1023,27 +1029,67 @@ impl DarkmatterPage {
             hr_defaults: hr_defaults_owned.as_ref(),
         };
 
-        let body = if self.is_default_layout() {
-            md.as_html(html_options)
-                .map_err(|e| PageRenderError::Render(e.to_string()))?
-        } else {
-            crate::markdown::render_tree::entrypoints::render_tree_html_with_context(
-                md, &html_options, &build_ctx,
-            )
-            .map(|r| r.output)
-            .map_err(|e| PageRenderError::Render(e.to_string()))?
+        // Darkmatter's full-page browser path is feature-aware: interactive
+        // Mermaid is the default and the page owns feature placement. The
+        // resolver derives Mermaid colors from the page's resolved code theme;
+        // the resolved color mode rides the `FeatureContext`. Every other
+        // feature (e.g. Popover) delegates to the shared `DefaultFeatureResolver`.
+        let resolver: Rc<dyn FeatureResolver> = Rc::new(
+            crate::mermaid::DarkmatterFeatureResolver::new(html_options.code_theme),
+        );
+        let feature_context = FeatureContext {
+            color_mode: render_color_mode_to_renderable(ctx.render_color_mode),
+            semantic_colors: Vec::new(),
         };
+        // `image_mode == Never` caps browser Mermaid to code; every other mode
+        // leaves the interactive/static path enabled (the streaming writer caps
+        // `Vector` → static SVG and `Off` → code itself).
+        let graphics_mode = match self.options.image_mode {
+            TerminalImageMode::Never => renderable::tree::GraphicsMode::Off,
+            _ => renderable::tree::GraphicsMode::Rich,
+        };
+
+        let rendered = crate::markdown::render_tree::entrypoints::render_tree_html_page_body(
+            md,
+            &html_options,
+            &build_ctx,
+            Rc::clone(&resolver),
+            feature_context.clone(),
+            graphics_mode,
+        )
+        .map_err(|e| PageRenderError::Render(e.to_string()))?;
+        let body = rendered.output.body;
+        let features = rendered.output.features;
+
+        // Resolve the collected features into inline `<style>`/`<script>` assets
+        // for the body-only wrapper (spec "Body-only renders"). A feature that
+        // resolves to a `<head>` `<link>` cannot be embedded and fails with
+        // `HeadRequired`.
+        let feature_assets =
+            resolve_feature_body_assets(&features, resolver.as_ref(), &feature_context)?;
+        let has_features = !features.is_empty();
 
         // The page wrapper `<div>` carries page-frame geometry, the page
         // stylesheet, and page `<meta>`. Component policies are lowered to
         // inline CSS on the component elements themselves, never the wrapper, so
         // their presence must not add a wrapper an unmatched policy would not
-        // need (review-1 finding 2).
-        if !ctx.needs_decoration() && self.stylesheet().is_none() && self.page_meta().is_none() {
+        // need (review-1 finding 2). A requested feature also forces the wrapper
+        // into existence so its inline assets have somewhere to live.
+        if !ctx.needs_decoration()
+            && self.stylesheet().is_none()
+            && self.page_meta().is_none()
+            && !has_features
+        {
             return Ok(body);
         }
 
-        Ok(wrap_browser_html(&body, &ctx, self))
+        Ok(wrap_browser_html(
+            &body,
+            &ctx,
+            self,
+            &features,
+            &feature_assets,
+        ))
     }
 
     /// Render the given markdown document to MarkdownPlus through the page
@@ -1513,8 +1559,56 @@ impl TerminalRenderable for DarkmatterPage {
 // through the inherent [`DarkmatterPage::render_to_browser`] method,
 // which takes the `Markdown` explicitly.
 
+/// Maps the layout context's resolved highlighting [`ColorMode`] onto the
+/// renderable [`ColorMode`](renderable::color::ColorMode) the
+/// [`FeatureContext`] carries.
+fn render_color_mode_to_renderable(mode: ColorMode) -> renderable::color::ColorMode {
+    match mode {
+        ColorMode::Light => renderable::color::ColorMode::Light,
+        ColorMode::Dark => renderable::color::ColorMode::Dark,
+        ColorMode::Unknown => renderable::color::ColorMode::Unknown,
+    }
+}
+
+/// Resolves the requested `features` into inline body assets for an embeddable
+/// wrapper.
+///
+/// Returns the serialized `<style>`/`<script>` markup (empty when no feature is
+/// requested). Because the output is a body-only fragment with no controllable
+/// `<head>`, a feature that resolves to a `<link>` dependency is rejected.
+///
+/// ## Errors
+///
+/// Returns [`PageRenderError::FeatureResolution`] when a feature is unresolved
+/// for the Browser target or resolves to a `<head>`-only `<link>` dependency
+/// ([`HeadRequired`](renderable::browser::feature::FeatureResolveError::HeadRequired)).
+pub(crate) fn resolve_feature_body_assets(
+    features: &[PageFeature],
+    resolver: &dyn FeatureResolver,
+    ctx: &FeatureContext,
+) -> Result<String, PageRenderError> {
+    if features.is_empty() {
+        return Ok(String::new());
+    }
+    let resolved = resolve_features(features, resolver, RenderTarget::Browser, ctx)
+        .map_err(|e| PageRenderError::FeatureResolution(e.to_string()))?;
+    serialize_features_body(&resolved).map_err(|e| PageRenderError::FeatureResolution(e.to_string()))
+}
+
 /// Wrap HTML markdown body in a page-level container with layout CSS.
-fn wrap_browser_html(body: &str, ctx: &LayoutContext, page: &DarkmatterPage) -> String {
+///
+/// When `features` is non-empty the wrapper is stamped with a stable
+/// `data-darkmatter-features` attribute (space-separated feature names, for
+/// debugging only) and `feature_assets` — the resolved inline `<style>` /
+/// `<script>` markup — is emitted **before** the body inside the wrapper, so an
+/// embeddable fragment carries its own feature assets.
+fn wrap_browser_html(
+    body: &str,
+    ctx: &LayoutContext,
+    page: &DarkmatterPage,
+    features: &[PageFeature],
+    feature_assets: &str,
+) -> String {
     let mut output = String::new();
 
     // Emit page-level meta tags first.
@@ -1645,10 +1739,25 @@ fn wrap_browser_html(body: &str, ctx: &LayoutContext, page: &DarkmatterPage) -> 
     };
     wrapper_styles.push_str(&format!("max-width: {max_width_css};"));
 
-    // Start the wrapper div.
-    output.push_str("<div class=\"darkmatter-page\" style=\"");
+    // Start the wrapper div. A feature-bearing render stamps a stable
+    // `data-darkmatter-features` attribute (debug-only; not a runtime lookup
+    // surface) listing the requested feature names in first-seen order.
+    output.push_str("<div class=\"darkmatter-page\"");
+    if !features.is_empty() {
+        let names = features
+            .iter()
+            .map(|f| f.name())
+            .collect::<Vec<_>>()
+            .join(" ");
+        output.push_str(&format!(" data-darkmatter-features=\"{names}\""));
+    }
+    output.push_str(" style=\"");
     output.push_str(&wrapper_styles);
     output.push_str("\">\n");
+
+    // Inline feature assets are placed before the body so feature code can rely
+    // on its own declarations being present when the body renders.
+    output.push_str(feature_assets);
 
     output.push_str(body);
     output.push_str("</div>\n");

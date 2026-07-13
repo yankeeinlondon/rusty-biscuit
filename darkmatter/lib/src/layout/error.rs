@@ -42,6 +42,15 @@ pub enum PageRenderError {
     #[error("markdown render failed: {0}")]
     Render(String),
 
+    /// A requested page feature could not be resolved or placed for the
+    /// browser render. Carries the underlying
+    /// [`FeatureResolveError`](renderable::browser::feature::FeatureResolveError)
+    /// message, so it names the feature and target — e.g. a body-only render
+    /// whose feature resolves to `<link>` dependencies fails with
+    /// `HeadRequired`.
+    #[error("feature resolution failed: {0}")]
+    FeatureResolution(String),
+
     /// A list left-margin builder was called with a non-`Ul` component.
     ///
     /// Only [`PageComponent::Ul`](super::PageComponent::Ul) supports the

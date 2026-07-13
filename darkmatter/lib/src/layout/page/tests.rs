@@ -3027,3 +3027,68 @@
             }
         }
     }
+
+    // ---------------------------------------------------------------------
+    // Phase 5 — body-only feature injection: `HeadRequired` rejection
+    // ---------------------------------------------------------------------
+
+    /// A resolver whose feature resolves to a `<head>` `<link>` — the exact case
+    /// a body-only render cannot embed.
+    struct LinkFeatureResolver;
+
+    impl FeatureResolver for LinkFeatureResolver {
+        fn resolve(
+            &self,
+            _feature: PageFeature,
+            _target: RenderTarget,
+            _ctx: &FeatureContext,
+        ) -> Result<
+            Option<renderable::browser::feature::FeatureAssets>,
+            renderable::browser::feature::FeatureResolveError,
+        > {
+            Ok(Some(renderable::browser::feature::FeatureAssets {
+                css: None,
+                js: None,
+                links: vec![renderable::html::tag::link::LinkTag::new(
+                    renderable::html::attribute::rel::LinkRel::Stylesheet,
+                    "mermaid.css",
+                )],
+            }))
+        }
+    }
+
+    /// A body-only render whose requested feature resolves to a `<head>` `<link>`
+    /// dependency fails with `HeadRequired` (spec acceptance criterion 9): the
+    /// error message names the offending feature and cannot silently drop or
+    /// mis-place a document-head dependency inside an embeddable fragment.
+    #[test]
+    fn body_only_feature_requiring_head_link_fails_with_head_required() {
+        let err = resolve_feature_body_assets(
+            &[PageFeature::MermaidDiagram],
+            &LinkFeatureResolver,
+            &FeatureContext::default(),
+        )
+        .expect_err("a head-only <link> cannot be embedded in a body-only render");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("mermaid-diagram"),
+            "the failure names the feature: {msg}"
+        );
+        assert!(
+            msg.contains("document <head>") || msg.contains("head"),
+            "the failure explains the head requirement: {msg}"
+        );
+    }
+
+    /// No requested feature resolves to no injected assets (empty string), so a
+    /// feature-free page keeps its prior bytes with no wrapper feature markup.
+    #[test]
+    fn no_features_resolve_to_empty_body_assets() {
+        let assets = resolve_feature_body_assets(
+            &[],
+            &crate::mermaid::DarkmatterFeatureResolver::default(),
+            &FeatureContext::default(),
+        )
+        .expect("no features resolve cleanly");
+        assert!(assets.is_empty(), "no features → no injected assets");
+    }
