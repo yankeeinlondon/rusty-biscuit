@@ -1,3 +1,9 @@
+---
+reviewed: true
+reviewed_by: codex/default
+reviewed_on: 2026-07-12
+---
+
 # Sequence Plus
 
 We have had sequences for a long time in Claudine but there has been a plan for long time to make them better and this feature is the refactor we'll use to get sequences to the place we want them for the long term.
@@ -25,7 +31,7 @@ In the past we were loose on defining what the "state structure" was for the `st
 ```yaml
 kind: schema
 $schema:
-    sequence_id: string(required;generated) -> a generated string token which is guaranteed to be unique across sequences.
+    sequence_id: string(required;generated) -> a generated, collision-resistant invocation correlation token.
     state: step_state@this(required;generated) -> the current state
     next: step_state@this(generated) -> the next state (absent on the last step)
     previous: step_state@this(generated) -> the previous state (absent on the first step)
@@ -58,8 +64,12 @@ It should be noted that at the root of the frontmatter dictionary, documents in 
 - `next` - the _next_ state (if there is one)
 - `previous` - the _previous_ state (if there is one)
 - `sequence_id`
-    - is assigned as a unique identifier for the sequence at runtime
-    - it is composed of an xx-hash (use biscuit-hash library) on the string `{YYYY}-{MM}-{DD}-{HH}:{MM}:{SS}.{ms}-{first-five-state-ids}-{hostname}`
+    - is assigned once per sequence invocation and copied unchanged into every step
+    - is an opaque lowercase xxHash token produced by `biscuit-hash` from a canonical byte payload containing the source document's resolved path, the ordered state ids, a UTC timestamp with sub-millisecond precision, the process id, and a process-local monotonic invocation counter
+    - is collision-resistant for correlation and logging, but is **not** described as mathematically guaranteed unique or suitable as a security token; xxHash provides neither property
+    - does not include the hostname: host discovery is unnecessary for invocation-local correlation, would introduce a `sniff` dependency into the execution path, and can disclose machine identity in logs
+
+> **Reader's note (review correction):** the draft derived the id from millisecond time, five state ids, and hostname while calling the result “guaranteed unique.” Two simultaneous invocations could produce the same input, and xxHash itself is non-cryptographic. The counter/process/path payload preserves useful stability and cross-platform implementation without overstating the contract.
 
 ### Referencing Sequence States
 
@@ -72,7 +82,7 @@ sequence:
     - John
 ```
 
-While it explicitly doesn't assign the required "name" property we will allow bare scalar values to be used as proxy and then Claudine will known that this actually means:
+Although this does not explicitly assign the required `name` property, a bare string is accepted as shorthand and normalized to:
 
 ```yaml
 sequence:
@@ -89,7 +99,7 @@ The person's name is {{state}}.
 
 This kind of referencing (aka, using `state` instead of `state.name`) would make sense to someone who used the shorthand of defining each state with a scalar. Of course we know that internally Claudine sees the state as a dictionary shape.
 
-**RATIFIED (2026-07-12): `{{state}}` IS a proxy for `{{state.name}}`.** The rule is defined as a string-coercion rule, not an alias: a `step_state` value rendered in *string context* renders its `name` property. A whole-value `{{state}}` span in an expression context still yields the typed object (consistent with Darkmatter's whole-value frontmatter expansion strictness), so `{{state.age}}`, passing `state` to expression functions, etc. all keep working. The same coercion applies to `{{previous}}` and `{{next}}`.
+**RATIFIED (2026-07-12): `{{state}}` IS a proxy for `{{state.name}}`.** The rule is defined as a Claudine sequence-value string-coercion rule, not a generic Darkmatter object coercion or a lookup alias: a `step_state` value rendered in *string context* renders its `name` property. A whole-value `{{state}}` span in an expression context still yields the typed object (consistent with Darkmatter's whole-value frontmatter expansion strictness), so `{{state.age}}`, passing `state` to expression functions, etc. all keep working. The same coercion applies to present `previous` and `next` values. Absent neighbors remain `null`; they do not coerce to an empty-named state.
 
 ### Steps and Tasks: the Unified Execution Model
 
@@ -98,12 +108,12 @@ This kind of referencing (aka, using `state` instead of `state.name`) would make
 A **task** is the atomic executable unit. It declares exactly one executable field:
 
 - `prompt: <file-ref>` — compose and execute the referenced Markdown document (if that document is configured for `inline-compose` that is executed; otherwise a normal `compose`)
-- `shell: <string | string[]>` — run one or more shell commands (every command participates in sequence preflight approval; each command gets a 30-second default timeout, overridable per task via `timeout:`)
+- `shell: <string | string[]>` — run one or more shell commands (every command participates in sequence preflight approval; each command gets a `30s` default timeout, overridable per task via `timeout:`)
 - `side_effect: <action>` — run one of Darkmatter's safe side effects, written as a single action in the standard lifecycle action grammar (e.g. `side_effect: { set: ["ready", "{{ true }}"] }`; the retired `verb(args)` short form does not return here)
 - `group: <group-ref | inline group>` — execute a group (see [Groups](#groups))
 - `task: <file-ref>` — reference to an externalized `kind: task` file
 
-Optional task fields: `name`, `setup:` / `teardown:` (action stacks using the standard lifecycle action grammar), `params:` (values passed to a `prompt` document as user setters), `timeout:` (seconds, per shell command in this task), `operation:`, `flow:`.
+Optional task fields: `name`, `setup:` / `teardown:` (action stacks using the standard lifecycle action grammar), `params:` (values passed to a `prompt` document as user setters), `timeout:` (duration per shell command in this task), `operation:`, `flow:`.
 
 A **step** is an entry in a `sequence:` list: its state (the `name` plus arbitrary state keys) **plus, optionally, the task fields above**:
 
@@ -148,10 +158,9 @@ In the example above we leverage the fact that `ctx.dirty_files` provides a list
 - we should note that the default format for reporting lists for context variables is a CSV list
     - the expression engine has converters like `as_unordered_list(list)`, `as_line_separated(list)`, but these are intended to explicitly convert the list representation into another known form (CSV, TSV, Markdown Ordered list, Markdown Unordered List, Line Separated Content, space separated content) and rather than ask a caller to convert data into a particular list format we must instead accept all list formats. 
     - that means that we must quickly be able to evaluate the string data being passed in and determine what "list" data structure it is
-    - this kind of performant detection of data into a classified set of data types has high reuse potential and as a result we should wrap this functionality around a struct called `DataType` which can take a string or a string stream and classify it'd data type.
-        - eventually this struct will offer type conversions too but unless we benefit from that in this spec, this can be deferred to later
-    - **RATIFIED (2026-07-12):** this struct is defined in `biscuit-file` — it already owns `DataFormat`, `FileType`, and format detection/conversion, so list-shape classification is squarely in its charter
-    - note: where the expression engine already delivers a *typed* list (whole-value `{{ctx.*}}` spans preserve typed results), no classification is needed; `DataType` is chiefly for string inputs — `$(...)` shell expansion output and raw file content (validate during implementation which `ctx.*` variables are list-typed vs CSV strings)
+    - reusable list-shape detection belongs in `biscuit-file`, which already owns `DataFormat`, `FileType`, and format detection/conversion
+    - **RATIFIED during review:** call the new enum `ListFormat` (with variants for Markdown ordered/unordered lists, line-separated, TSV, CSV, space-separated, and scalar) and expose a classifier that accepts `&str`; do not introduce the overly broad `DataType` name or a streaming API before there is a streaming consumer
+    - typed lists from whole-value expression expansion bypass classification; `ListFormat` is only for string inputs such as `$(...)` output or a raw textual source
 
 In addition to creating sequences off the back of context variables, we also allow expression functions and shell expansions. Like everywhere else, a shell expansion requires that the command be whitelisted before it will be allowed.
 
@@ -173,6 +182,8 @@ sequence: <file-ref> [-> <offset.path>] [::<operator>(<args>)]
 - `::` introduces an **operator** applied to the resolved list; **exactly one operator per reference in v1** — the grammar is forward-compatible with chaining (`::a()::b()`), but `map`/`name`/`template` all solve the same produce-a-name problem, so chaining buys nothing today
 - expression sources (`{{ctx.dirty_files}}`) and shell sources (`$(ls)`) do **not** take `->`/`::` suffixes — they produce lists directly; the offset/operator grammar belongs to file references only
 
+The suffix is a Claudine sequence-source grammar, not an extension to the shared `biscuit-file` reference grammar. Claudine parses the suffix, constructs a `biscuit_file::FileReference` from the untouched `<file-ref>`, and resolves it with `resolve_from(source_document_directory)`. The suffix parser must respect quoted operator arguments and reject ambiguous or trailing text with a typed syntax error; it must not split an `@`, `->`, or `::` occurring inside a quoted argument or an interpolated file-reference segment.
+
 **Strictness is split by provenance (RATIFIED):**
 
 - **authored-for-sequences lists** stay strict: inline lists *and* formal `kind: sequence` documents require objects to carry a string `name` and scalars to be strings — an authored omission is a typo worth catching
@@ -180,7 +191,7 @@ sequence: <file-ref> [-> <offset.path>] [::<operator>(<args>)]
 
 **Empty dynamic lists (RATIFIED):** a dynamic source that resolves to zero steps at preflight is a graceful no-op — Claudine prints a styled "resolved to 0 steps" notice to stderr and exits `0` (a clean repo legitimately makes `{{ctx.dirty_files}}` empty). A static empty `sequence: []` remains an authoring error, as today.
 
-**`DataType` classification precedence:** when a string input must be classified, detection runs in this order: Markdown list markers (ordered/unordered) → multiple lines = line-separated → tabs = TSV → commas = CSV (quote-aware) → spaces = space-separated → otherwise a single-item list. Whitespace-only entries are dropped after splitting.
+**`ListFormat` classification precedence:** when a string input must be classified, detection runs in this order: Markdown list markers (ordered/unordered) → multiple lines = line-separated → tabs = TSV → commas = CSV (quote-aware) → spaces = space-separated → otherwise a single-item list. Whitespace-only entries are dropped after splitting. CSV and TSV parsing must use a delimiter-aware parser rather than `split`, so quoted delimiters and escaped quotes survive.
 
 #### Advanced Dynamics
 
@@ -313,6 +324,8 @@ This is probably the most common use of state that we have but one thing we have
 - earlier lifecycle hooks (`initialize`, `start`, ...) see only prior tasks' entries — the current run's output does not exist yet; the `failure` hook likewise has `err` instead of a new entry
 - `outputs` joins the reserved-key list: it cannot be authored as state nor set via `--set`/shorthand setters
 
+**Output capture boundary (RATIFIED during review):** an output entry is the task's captured, undecorated stdout payload, decoded as UTF-8 with the same invalid-byte policy as existing wrapped execution. Terminal status rendering, stderr, lifecycle messages, color bars, and provider protocol records are never included. For a prompt task, this is the provider's final assistant text already identified by the semantic stream pipeline; for a shell task containing multiple commands, it is the commands' stdout concatenated in declaration order; for a side-effect task, it is the action's returned textual value or an empty string when the action has no textual return. Trailing transport newlines are removed once; other whitespace is preserved. Failed and interrupted tasks do **not** append a normal sequence entry, except that each slot of a completed parallel group remains positionally present and contains the partial stdout captured for that task, as specified under [Failure Policy](#failure-policy).
+
 ### Assigning Schemas to Step State
 
 We already defined the _broad_ schema type for a step's state in a sequence (e.g., a dictionary with a string value for "name" ) but if an author wants to add a stricter syntax they are allowed to do that. Here's an example using a _sequence schema_ document:
@@ -320,9 +333,11 @@ We already defined the _broad_ schema type for a step's state in a sequence (e.g
 ```yaml
 kind: sequence
 sequence:
-    - color: blue
+    - name: blue
+      color: blue
       rank: 5
-    - color: red
+    - name: red
+      color: red
       rank: 3
 template:
     desc: "{{ color }}({{ rank }})"
@@ -334,12 +349,14 @@ $schema:
 
 > Note: we added the schema inline in this example but we could have just as easily referenced an external schema file
 
+The schema applies to the normalized **state portion** of every step after scalar normalization, template/operator application, and generated-field insertion, but before task execution. Executable/reserved task keys are excluded from the value validated as state. Generated fields may be declared with `generated`, but authors may not provide or override them. A schema failure identifies the step index/id and the failing property path.
+
 ### Requiring Caller Input
 
 All Darkmatter documents that define a schema with "required" properties but then do NOT define that property on the page are expressing the need for the caller to provide that value. When Claudine encounters this with "compose" or "inline-compose" operations it simply moves into interactive mode and asks the caller for the values (if they weren't provided in the actual call). The idea is similar for sequences but not identical because:
 
 - well designed sequences front-load all human-in-the-loop interactions to the FRONT of the sequence that they can
-    - this design goal is fairly universal but there are real situations where the ideal can not be achieved
+    - this design goal is fairly universal, but there are real situations where the ideal cannot be achieved
 - Claudine tries to help with this design goal in a few ways:
 
     1. Preflight Checks will check _all_ shell expansion across the entire sequence and make sure that _all_ shell expansion commands are approved before allowing the sequence to start
@@ -347,7 +364,7 @@ All Darkmatter documents that define a schema with "required" properties but the
         - this ensures that once the sequence starts, there will never be a situation where a shell command needs to be approved before continuing
     2. If the first step in the sequence has "required" properties that are not defined we will proceed with the same process as we would with "compose" and "inline-compose" and interactively ask for information that wasn't provided 
 
-What Claudine can't do, is prevent later steps in the process from being kicked off without all required properties being met. When that happens the same exact procedure will be followed and will require human-in-the-loop later in the cycle. That's why when a Markdown author is designing a sequence they should take care to make sure that "missing properties" later in the cycle are set by the steps which proceed them. 
+Claudine cannot guarantee that runtime mutations will satisfy every later step. If just-in-time validation still finds a required property missing, the normal interactive-or-typed-error behavior applies. Sequence authors should arrange for earlier tasks to set values required by later tasks.
 
 > Note: if there were some sort of diagnostic that could be shared with the author when a dry run of the sequence was being run that would be welcome but there is no requirement to do that in this feature.
 
@@ -411,6 +428,21 @@ Corollaries:
 
 **Out of scope.** Persisted checkpoint/resume for interrupted sequences remains out of scope for this feature (unchanged from the current implementation). The JIT architecture is deliberately compatible with adding a run journal later.
 
+#### Task Resolution and Lifecycle Semantics
+
+These rules close ambiguities between inline tasks, external `kind: task` files, and task-local action stacks:
+
+- an external `task:` reference is exclusive with `prompt`, `shell`, `side_effect`, and `group` at the referencing site; v1 does not support patching or overriding fields from the referenced task
+- relative references inside an external task/group/prompt resolve from the directory containing the document where that reference was authored, using `FileReference::resolve_from`; they never inherit the process CWD or the top-level sequence directory by accident
+- `params` are evaluated just in time against the caller's effective state and then applied as user setters to the prompt document; precedence is prompt frontmatter < task `params` < sequence user setters < accumulated runtime mutations < reserved overlay. A task parameter may not target a reserved key
+- group `operation`/`flow` provide defaults to tasks; task-level values override group defaults. Sequence/document CLI locks retain the same higher precedence they have in direct compose. A field that is meaningless for a non-prompt task is a typed schema error, not silently ignored
+- task `setup` runs before the primary action. If setup fails, the primary action is skipped. `teardown` runs exactly once after setup has started, including after primary-action failure or interruption, and receives the current `err` value when one exists
+- teardown failure changes an otherwise successful task into failure. If the primary action already failed, its error remains primary and teardown errors are attached as secondary diagnostics. `no_error: true` retains the standard lifecycle dispatch-only meaning
+- output is appended only after teardown completes, so subsequent work never observes an output from a task whose teardown converted it to failure
+- `timeout` on a shell task is a duration using the repository's existing duration parser (for example, `30s`), not a bare integer with an implicit unit. It applies per command as stated above; `0s` is rejected rather than interpreted as unbounded
+
+Recursive loading maintains a canonical-path ancestry stack. A task/group/prompt reference cycle is a typed preflight error that reports the complete reference chain. Loading the same document from independent branches is allowed and may share immutable parsed data, but its effective parameters and runtime state remain invocation-local.
+
 ### Groups
 
 Groups encapsulate one or more tasks under a single name. This grouping function offers several potential benefits:
@@ -420,7 +452,7 @@ Groups encapsulate one or more tasks under a single name. This grouping function
 - concurrency (where configured)
 - looping (where configured)
 
-Unlike Markdown documents setup for inline-compose, compose, or sequence execution, or a YAML file setup for sequence execution, a **group** can not be executed directly! To be executed, a group must be added to a sequence.
+Unlike a Markdown document configured for inline-compose, compose, or sequence execution, a **group cannot be executed directly**. A group executes only as a sequence task.
 
 #### Defining and Referencing Groups
 
@@ -474,7 +506,7 @@ $schema:
     variables: "{ '<string>': any }" -> group-scoped variables, exposed to the group's tasks on the `group.*` global and discarded from scope when the group completes
     tasks: task[](required; min(1))@this -> tasks included in the group
     execution: enum(serial,parallel;default(serial)) -> whether to execute this group serially (the default) or in parallel
-    max_parallel: number(integer) -> optional cap on simultaneously running tasks in a parallel group; absent means all tasks launch at once; tasks are scheduled in declaration order as slots free up
+    max_parallel: number(integer; min(1)) -> optional cap on simultaneously running tasks in a parallel group; absent means all tasks launch at once; tasks are scheduled in declaration order as slots free up; invalid on a serial group
     operation: string -> you can assign all tasks in the group to a single operation (where that makes sense)
     flow: string -> you can assign all tasks in the group to a flow (where that makes sense)
     loop: (same structure as in a document)
@@ -487,7 +519,7 @@ types:
           teardown: (actions stack just like a lifecycle hook)
         - shell: string_or_list(required)
           name: string
-          timeout: number(integer) -> seconds allowed per command in this task (default 30)
+          timeout: string(duration) -> duration allowed per command in this task (default 30s)
           setup: (actions stack just like a lifecycle hook)
           teardown: (actions stack just like a lifecycle hook)
         - side_effect: (a single action in the standard positional/key-value lifecycle action grammar)
@@ -550,7 +582,7 @@ In this example we see that a task can both _setup_ the environment before we ru
 
 > Note: the `set` action used above is the new state-mutation side effect defined in [Execution Architecture](#execution-architecture); it does not exist in Darkmatter yet and is part of this feature's scope.
 
-In this example above we defined the task in it's own file using the `task` kind but tasks can also be defined inline with a `group` definition:
+The example above defines the task in its own `kind: task` file, but tasks can also be defined inline in a group:
 
 ```yaml
 kind: group
@@ -620,8 +652,44 @@ Two tasks in the same parallel group whose `prompt` documents are inline-compose
 In order to address what would otherwise be chaotic to look at, we render parallel streams with **line-interleaved color bars**:
 
 - when a parallel group starts, each task is assigned a color from a fixed palette (cycling if tasks outnumber palette entries) and announces itself with a header line (`▶ <task-name>`) in its color
-- every subsequent status/output line from a task renders wrapped in that task's colored vertical bar on the left — the BlockQuote component is the expected mechanism (but open to alternatives)
+- every subsequent status/output line from a task renders through a `TerminalRenderable` component with that task's colored vertical bar on the left; `BlockQuote` is the expected composition primitive, provided it preserves streaming and wrapping behavior
 - lines interleave in **arrival order**; attribution comes from the color bar, not from ordering
 - task completion emits a footer line in the task's color carrying its outcome (success/failure/interrupted) and duration
 - one visual nicety that we must account for: since concurrency adds a vertical bar, non-concurrent work should render inside the same BlockQuote geometry with an **invisible** bar. That way, when execution switches between serial and parallel work, the stream reporting does not lurch to the right to accommodate the bar.
 - the `outputs` nested array remains **declaration-ordered** regardless of the interleaved display order (see [The `outputs` Array](#the-outputs-array))
+
+The renderer must degrade cleanly when color is unavailable: each stream also carries a stable textual task label, so attribution never depends on color alone. It must preserve the existing stdout/stderr contract: provider/task data remains on stdout where the command contract puts it, while status headers, footers, and warnings remain on stderr. Parallel rendering uses one synchronized render sink so ANSI sequences and wrapped lines cannot be torn by sibling writers.
+
+## Open Questions
+
+### Group Loop Commit Semantics
+
+The draft gives groups a document-shaped `loop` field but does not define when an iteration commits `outputs` and runtime mutations, especially for parallel groups and failed iterations. This is a major execution-model choice and must be ratified before group loops are implemented.
+
+1. **Atomic iteration (recommended):** snapshot state at iteration start and commit all mutation/output changes only if the iteration succeeds.
+   - Pros: failed iterations cannot leak half-applied state; retry reasoning is deterministic; parallel and serial groups share one transaction boundary.
+   - Cons: intentionally useful partial work from tasks before a serial failure is not visible to the next sequence step; implementation needs an iteration-local mutation/output buffer.
+2. **Incremental task commits:** commit each successful task immediately, including tasks before a later failure.
+   - Pros: preserves useful partial progress and matches ordinary serial task chaining most closely.
+   - Cons: retries can duplicate effects; a failed loop iteration leaves a state shape that depends on the failure point; parallel groups still need a separate merge boundary.
+3. **Configurable commit policy:** expose `commit: atomic | incremental` on the group.
+   - Pros: supports both workflows explicitly.
+   - Cons: adds a high-impact semantic knob before either behavior has usage evidence and expands the test matrix substantially.
+
+**Recommendation:** choose atomic iteration. A loop is a repeated logical unit, and deterministic retry/failure behavior is more valuable than exposing partial in-memory state. External filesystem/provider side effects cannot be rolled back; documentation must state that the atomic boundary applies only to Claudine's runtime mutation layer and `outputs`.
+
+Until this question is ratified, group execution without `loop` is in scope, but group-loop implementation is blocked rather than left to implementation judgment.
+
+## Acceptance Criteria
+
+- Existing sequence behavior remains covered where intentionally retained: scalar/object steps, document-level inline-compose mode, fail-fast precedence, missing-property aggregation, dry-run, and Ctrl+C exit `130`.
+- Typed errors cover mutually exclusive executable fields, reserved-key writes, invalid formal states, empty static lists, malformed suffix grammar, unsupported offsets, missing/non-list paths, operator item failures, reference cycles, nested sequences/groups, parallel write-back collisions, and invalid `max_parallel`/timeout values.
+- Source tests cover typed expression lists and every classified string-list form, including quoted CSV/TSV fields, CRLF input, whitespace-only input, Unicode, numeric/boolean foreign values, null rejection, and dynamic empty-list success.
+- File-source tests cover YAML, JSON, JSON5, JSONL, and NDJSON; document-relative plain/`@`/`!`/`vault:` references; quoted suffix arguments; and paths containing spaces or `@`. Resolution must use `biscuit_file::FileReference` rather than duplicating its rules.
+- JIT tests prove that runtime `set` mutations and prior outputs are visible to later serial tasks, reserved overlays retain highest precedence, preflight-approved shell bytes equal executed bytes, and live disk changes are observed only at the boundaries specified here.
+- Group tests cover serial setup/primary/teardown ordering, secondary teardown errors, deterministic parallel state merging, duplicate-key warnings, declaration-ordered nested outputs, concurrency caps, no interactive prompts in parallel tasks, and all-child Ctrl+C fan-out.
+- Rendering tests use the repository's terminal component conventions and verify narrow widths, wrapping, no-color attribution, split stdout/stderr, synchronized concurrent writes, and absence of torn ANSI sequences.
+- Platform-sensitive tests avoid Unix-only assumptions. Process spawning, path parsing, environment handling, interruption, and newline behavior are designed for and compiled on macOS, Windows, and Linux; OS-specific signal assertions are gated while sharing cross-platform outcome tests.
+- Tests follow the Claudine test-placement contract: inline unit tests by default, sibling `tests.rs` modules after the documented size thresholds, CLI integration tests for orchestration/output contracts, and L2 real-terminal coverage only for behavior that requires an actual terminal.
+- `claudine/docs/topics/flow-control/sequences.md`, the Claudine CLI reference, examples, and relevant skill architecture/timeline material are updated with the final grammar and clean-break behavior before completion.
+- Verification runs `just test`, `just test-l2` where terminal/concurrency behavior requires it, and `just lint` from the `claudine` package area. Formatting is checked read-only only; this feature does not authorize `cargo fmt` write mode.
