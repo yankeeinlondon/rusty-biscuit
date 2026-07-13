@@ -62,3 +62,7 @@ biscuit-hash = { path = "../../biscuit-hash/lib" }
 
 [dev-dependencies]
 tempfile = "3"
+# Level-2 editor tests (tests/level2_editor_neovim.rs): tier gating and the
+# tmux terminal harness for real-rendering SGR capture.
+test-toolkit = { path = "../../tools/test-toolkit" }
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
