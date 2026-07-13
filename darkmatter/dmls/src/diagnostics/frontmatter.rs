@@ -195,7 +195,7 @@ fn problem_range(ast: &FrontmatterAst, sm: &SourceMap, problem: &ValidationProbl
 fn expression_diagnostics(ctx: &DocumentContext, ast: &FrontmatterAst, out: &mut Vec<Diagnostic>) {
     for value in crate::providers::frontmatter::expression_values(ctx, ast) {
         let expression = value.expression();
-        match crate::overlay::expressions::parse(expression) {
+        match crate::overlay::expressions::parse_condition(expression) {
             Err(error) => {
                 let at = error.position.min(expression.len());
                 let span = value
@@ -637,6 +637,38 @@ mod tests {
                         && code != Some(code::SCHEMA_TYPE_MISMATCH)
                 }),
                 "a valid expression must be clean: {diagnostics:#?}"
+            );
+        });
+    }
+
+    #[test]
+    fn condition_dialect_and_expression_is_not_malformed() {
+        // The `expression` schema format validates with `parse_condition`, which
+        // accepts `&&`; the spec's own example must not be diagnosed malformed.
+        let text = expression_doc(r#"when: 'is_agent() && os == "macos"'"#);
+        diagnostics_for(&text, |diagnostics| {
+            assert!(
+                diagnostics.iter().all(|diagnostic| {
+                    let code = code_of(diagnostic);
+                    code != Some(code::EXPRESSION_MALFORMED)
+                        && code != Some(code::SCHEMA_CONSTRAINT)
+                }),
+                "a condition-dialect `&&` expression must not be malformed: {diagnostics:#?}"
+            );
+        });
+    }
+
+    #[test]
+    fn condition_dialect_or_expression_is_not_malformed() {
+        let text = expression_doc(r#"when: 'os == "macos" || os == "linux"'"#);
+        diagnostics_for(&text, |diagnostics| {
+            assert!(
+                diagnostics.iter().all(|diagnostic| {
+                    let code = code_of(diagnostic);
+                    code != Some(code::EXPRESSION_MALFORMED)
+                        && code != Some(code::SCHEMA_CONSTRAINT)
+                }),
+                "a condition-dialect `||` expression must not be malformed: {diagnostics:#?}"
             );
         });
     }
