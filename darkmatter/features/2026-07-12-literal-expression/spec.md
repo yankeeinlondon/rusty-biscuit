@@ -203,15 +203,16 @@ $schema:
 ### Semantics
 
 **Ruled (Q2, 2026-07-12): lenient bare type.** The expression language has
-two dialects that disagree on `&&` / `||`: the value dialect (body `{{ }}`
-interpolation; `||` is fallback, `&&` is a syntax error) and the condition
-dialect (`when="..."`; `&&`/`||` are logical AND/OR, lowered to
-`and(...)`/`or(...)`). A bare `expression` property validates when the
+two dialects that differ only on the meaning of `||`: the value dialect (body
+`{{ }}` interpolation) reads `||` as fallback and `&&` as logical AND, while
+the condition dialect (`when="..."`) reads `||`/`&&` as logical OR/AND, lowered
+to `or(...)`/`and(...)`. A bare `expression` property validates when the
 string parses under **either** dialect, so `when: expression` accepts
 `is_agent() && os == "macos"` on day one. In practice the condition-mode
 parser (`parse_condition`, the erased form of `parse_condition_spanned`)
-accepts a parse-superset of the value dialect — same token set, `&&` added,
-`||` re-lowered — so "either" is implemented as a single condition-mode
+accepts a parse-superset of the value dialect — same token set (`&&` is
+accepted in both dialects; only `||` differs, re-lowered from fallback to
+logical OR) — so "either" is implemented as a single condition-mode
 parse, with a regression test asserting the superset property (every
 value-dialect-valid corpus string also condition-parses). Schema validation
 checks **parseability only**:
@@ -445,8 +446,9 @@ sections noted below. Recorded here for the review trail.
   bare `expression` accepts either dialect (condition-mode parse; superset
   property regression-tested); `expression(condition)` reserved as a future
   backward-compatible opt-in variant. Supersedes the draft's value-dialect-only
-  wording, which would have rejected valid `when:` conditions containing
-  `&&`. Folded into the Semantics section.
+  wording, which would have read `||` in `when:` conditions as fallback rather
+  than logical OR (both dialects parse `&&`/`||`; only `||`'s meaning differs).
+  Folded into the Semantics section.
 - **Q3 — Expression native-scalar coercion.** **RULED (2026-07-12):
   coerce** — native boolean/number scalars serialize to their string forms
   (family rule shared with `yaml`/`json`); mappings/sequences remain type
