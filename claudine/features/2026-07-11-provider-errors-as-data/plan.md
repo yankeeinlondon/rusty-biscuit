@@ -5,6 +5,72 @@ created: 2026-07-12
 phase: 1
 yolo: "true"
 spec: ./spec.md
+source_files_during_phase_1:
+  - claudine/gen/src/vocabulary.rs
+  - claudine/gen/tests/vocabulary.rs
+  - claudine/gen/src/errors.rs
+  - claudine/gen/src/generate.rs
+  - claudine/gen/src/lib.rs
+  - claudine/docs/providers/facts/claude.yaml
+  - claudine/docs/providers/facts/codex.yaml
+  - claudine/docs/providers/facts/gemini.yaml
+  - claudine/docs/providers/facts/opencode.yaml
+  - claudine/docs/providers/facts/kilo.yaml
+  - claudine/docs/providers/facts/pi.yaml
+  - claudine/docs/providers/facts/qwen.yaml
+  - claudine/docs/providers/facts/antigravity.yaml
+  - claudine/docs/providers/facts/kimi.yaml
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - claudine/lib/src/stream/providers/common.rs
+  - claudine/lib/src/stream/providers/claude.rs
+  - claudine/lib/src/stream/providers/codex.rs
+  - claudine/lib/src/stream/providers/gemini.rs
+  - claudine/lib/src/stream/providers/opencode.rs
+  - claudine/lib/src/stream/providers/qwen.rs
+  - claudine/lib/src/stream/providers/pi.rs
+  - claudine/lib/src/stream/providers/antigravity.rs
+  - claudine/lib/src/stream/providers/kimi.rs
+  - claudine/lib/src/stream/providers/mod.rs
+  - claudine/lib/src/stream/providers/vocabulary.rs
+  - claudine/lib/src/stream/providers/vocabulary_parity_tests.rs
+  - claudine/gen/src/vocabulary.rs
+  - claudine/gen/src/errors.rs
+  - claudine/gen/src/lib.rs
+  - claudine/gen/src/apply.rs
+  - claudine/gen/src/main.rs
+  - claudine/gen/tests/drift.rs
+  - claudine/gen/tests/vocabulary.rs
+  - claudine/gen/tests/generate_ux.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/lib/src/stream/providers/claude.rs
+  - claudine/lib/src/stream/providers/codex.rs
+  - claudine/lib/src/stream/providers/gemini.rs
+  - claudine/lib/src/stream/providers/qwen.rs
+  - claudine/lib/src/stream/providers/pi.rs
+  - claudine/lib/src/stream/providers/antigravity.rs
+  - claudine/lib/src/stream/providers/kimi.rs
+  - claudine/lib/src/stream/providers/opencode.rs
+  - claudine/lib/src/stream/providers/mod.rs
+  - claudine/lib/src/stream/providers/vocabulary.rs
+  - claudine/lib/src/stream/providers/vocabulary_parity_tests.rs
+  - claudine/gen/src/vocabulary.rs
+  - claudine/cli/tests/dispatch_inventory.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+  - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+docs_updated_during_phase_3:
+  - claudine/docs/providers/dispatch-inventory.json
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages:
+  - claudine
+  - claudine-gen
+  - claudine-cli
 ---
 
 # Provider Error Vocabulary as Data — Execution Plan
@@ -40,32 +106,32 @@ Phase 7 adjudication checkpoint.
 *Goal: the knowledge base contains an order-preserving transcription of every
 currently executable error classifier, with no runtime consumer changed.*
 
-- [ ] Inventory the exact `ERROR_KEYWORDS` values in the eight structured
+- [x] Inventory the exact `ERROR_KEYWORDS` values in the eight structured
   parser modules and the complete explicit numeric mapping in
   `lib/src/stream/providers/kimi.rs`; record bucket order, repeated kinds,
   duplicate needles, and Kimi protocol-constant names before editing.
-- [ ] Run GitNexus impact analysis on the generator input-loading symbols that
+- [x] Run GitNexus impact analysis on the generator input-loading symbols that
   will gain vocabulary support; record blast radius and confirm this work does
   not enter the general serialized `ProviderInfo` mapping registry.
-- [ ] Add the ordered `error_vocabulary` facts shape to the dedicated parser
+- [x] Add the ordered `error_vocabulary` facts shape to the dedicated parser
   providers under `docs/providers/facts/*.yaml`, transcribing existing
   `kind_buckets`, `msg_buckets`, and Kimi `code_buckets` byte-for-behavior.
-- [ ] Add Kilo's explicit seed as an ordered copy of OpenCode's current table,
+- [x] Add Kilo's explicit seed as an ordered copy of OpenCode's current table,
   while keeping it a distinct provider record for later independent research.
-- [ ] Include all standard JSON-RPC codes currently handled by Kimi as
+- [x] Include all standard JSON-RPC codes currently handled by Kimi as
   `agent_native`, plus its named authentication and provider-error codes;
   retain comments linking numeric values to `protocol/kimi.rs` constants.
-- [ ] Add typed generator input models and a vocabulary-specific source
+- [x] Add typed generator input models and a vocabulary-specific source
   declaration/loader with facts-only, research-only, missing-source, and
   facts-plus-research collision states; do not add a `ProviderInfo` field.
-- [ ] Add loader tests that prove YAML sequence order and repeated-kind buckets
+- [x] Add loader tests that prove YAML sequence order and repeated-kind buckets
   survive parsing unchanged.
 
 **Validation checkpoint:**
 
-- [ ] Review a mechanical facts-versus-parser dump for all eight parsers and
+- [x] Review a mechanical facts-versus-parser dump for all eight parsers and
   Kimi codes; every ordered bucket, needle, duplicate, and code must match.
-- [ ] Run `cargo nextest run -p claudine-gen` and `just test`; confirm all
+- [x] Run `cargo nextest run -p claudine-gen` and `just test`; confirm all
   existing parser classification tests remain unchanged and green.
 
 ## Phase 2 — Generate and Validate the Standalone Vocabulary
@@ -73,43 +139,43 @@ currently executable error classifier, with no runtime consumer changed.*
 *Goal: `claudine-gen` deterministically emits the complete standalone stream
 vocabulary while the old constants remain available for exact comparison.*
 
-- [ ] Run GitNexus impact analysis on the generator entry points and
+- [x] Run GitNexus impact analysis on the generator entry points and
   `ErrorKeywords` before changing them; report the affected generation and
   stream-classification flows.
-- [ ] Extend `ErrorKeywords` in `lib/src/stream/providers/common.rs` with an
+- [x] Extend `ErrorKeywords` in `lib/src/stream/providers/common.rs` with an
   ordered `code_buckets` field and prepare the shared classifier API for an
   optional numeric code without changing existing call behavior yet.
-- [ ] Add a generator stage, modeled on `gen/src/signals.rs`, that reads all
+- [x] Add a generator stage, modeled on `gen/src/signals.rs`, that reads all
   ten provider records and emits
   `lib/src/stream/providers/vocabulary.rs` with the standard generated-file
   header, one const per provider, and an exhaustive `Provider` accessor.
-- [ ] Emit explicit empty tables only for providers without structured stream
+- [x] Emit explicit empty tables only for providers without structured stream
   parsers; require a non-empty message vocabulary for each parser-backed
   provider.
-- [ ] Enforce generation errors that name provider, branch, and bucket for:
+- [x] Enforce generation errors that name provider, branch, and bucket for:
   unknown semantic kinds, uppercase needles, empty/whitespace needles, empty
   buckets, duplicate numeric codes, and missing required parser vocabulary.
-- [ ] Add gen-side unit tests for every validation rule, deterministic provider
+- [x] Add gen-side unit tests for every validation rule, deterministic provider
   order, stable bucket/needle order, repeated kinds, and exactly one trailing
   newline in the generated artifact.
-- [ ] Wire the artifact into `claudine providers generate` and its existing
+- [x] Wire the artifact into `claudine providers generate` and its existing
   check/drift path so a stale or missing committed module fails CI.
-- [ ] Add a temporary table-to-table parity test comparing every generated
+- [x] Add a temporary table-to-table parity test comparing every generated
   bucket and Kimi code mapping with the still-present local definitions,
   including order and duplicates.
 
 **Parallelizable work:**
 
-- [ ] Implement validation fixtures/tests in parallel with emitter formatting
+- [x] Implement validation fixtures/tests in parallel with emitter formatting
   once the typed input model is stable.
-- [ ] Prepare the temporary parity test in parallel with drift-check wiring;
+- [x] Prepare the temporary parity test in parallel with drift-check wiring;
   both depend only on the generated public-to-crate shape.
 
 **Validation checkpoint:**
 
-- [ ] Run `claudine providers generate`, then its check mode, and verify a
+- [x] Run `claudine providers generate`, then its check mode, and verify a
   second generation produces no diff.
-- [ ] Run `cargo nextest run -p claudine-gen -p claudine` and confirm the
+- [x] Run `cargo nextest run -p claudine-gen -p claudine` and confirm the
   temporary parity test proves exact migration, not merely example coverage.
 
 ## Phase 3 — Cut Parsers Over with Provider-Aware Identity
@@ -118,42 +184,42 @@ vocabulary while the old constants remain available for exact comparison.*
 Kilo data through the shared OpenCode wire parser, with Phase A behavior
 unchanged.*
 
-- [ ] Run and report GitNexus upstream impact analysis for
+- [x] Run and report GitNexus upstream impact analysis for
   `classify_error_by_keywords`, Kimi's classifier, the OpenCode parser
   constructor, and `stream::providers::for_provider`; stop on HIGH/CRITICAL
   risk before editing.
-- [ ] Make numeric code matching the first exact step in
+- [x] Make numeric code matching the first exact step in
   `classify_error_by_keywords`, followed by the existing ordered kind and
   message branches; preserve unknown-code fallthrough.
-- [ ] Thread a validated runtime `Provider` identity through each parser
+- [x] Thread a validated runtime `Provider` identity through each parser
   classification call. Stamp fixed identity in dedicated parsers, and make
   the shared OpenCode parser accept only `OpenCode` or `Kilo` from
   `for_provider`.
-- [ ] Replace all eight local `ERROR_KEYWORDS` uses with
+- [x] Replace all eight local `ERROR_KEYWORDS` uses with
   `vocabulary::error_keywords(provider)` and remove the constants only after
   the temporary parity test has passed.
-- [ ] Replace Kimi's numeric `match` with generated `code_buckets`, retaining
+- [x] Replace Kimi's numeric `match` with generated `code_buckets`, retaining
   protocol constants as wire definitions and keeping unknown-code message
   fallback intact.
-- [ ] Add an end-to-end Kilo fixture whose winning classification deliberately
+- [x] Add an end-to-end Kilo fixture whose winning classification deliberately
   differs from OpenCode, proving parser reuse does not imply vocabulary reuse.
-- [ ] Keep parser behavior tests in their current modules; add focused tests
+- [x] Keep parser behavior tests in their current modules; add focused tests
   for code-first precedence, unknown-code fallthrough, invalid OpenCode-parser
   identity, and Kilo/OpenCode separation.
-- [ ] Remove the migration-only parity test and old definitions after the
+- [x] Remove the migration-only parity test and old definitions after the
   generated path is the sole runtime source.
-- [ ] Regenerate `docs/providers/dispatch-inventory.json` through the approved
+- [x] Regenerate `docs/providers/dispatch-inventory.json` through the approved
   `CLAUDINE_UPDATE_INVENTORY=1` nextest command and review the moved dispatch
   sites rather than hand-editing the inventory.
 
 **Validation checkpoint:**
 
-- [ ] Run the full unchanged `classify_error_*` suite plus the new Kilo and
+- [x] Run the full unchanged `classify_error_*` suite plus the new Kilo and
   Kimi tests with `cargo nextest run -p claudine`.
-- [ ] Run `claudine providers generate --check` (or the current equivalent),
+- [x] Run `claudine providers generate --check` (or the current equivalent),
   the `claudine-cli` dispatch-inventory integration test, `just test`, and
   `just lint`.
-- [ ] Inspect platform-neutral code paths: generated Rust contains no path or
+- [x] Inspect platform-neutral code paths: generated Rust contains no path or
   shell assumptions, numeric codes use fixed Rust integer types, and parser
   identity behavior is identical on macOS, Windows, and Linux.
 
