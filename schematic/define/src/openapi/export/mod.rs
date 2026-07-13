@@ -410,6 +410,60 @@ mod tests {
     }
 
     #[test]
+    fn export_strips_reserved_marker_from_path_and_params() {
+        let api = RestApi {
+            name: "TestAPI".to_string(),
+            description: "Test".to_string(),
+            base_url: "https://api.test.com".to_string(),
+            docs_url: None,
+            auth: AuthStrategy::None,
+            auth_policy: None,
+            env_auth: vec![],
+            env_username: None,
+            headers: vec![],
+            endpoints: vec![Endpoint {
+                id: "GetModel".to_string(),
+                method: RestMethod::Get,
+                path: "/models/{+repo_id}".to_string(),
+                description: "Get a model".to_string(),
+                request: None,
+                response: ApiResponse::json_type("Model"),
+                headers: vec![],
+                params: None,
+                oauth_scopes: None,
+            }],
+            module_path: None,
+            request_suffix: None,
+            version: None,
+            env_mapping: None,
+        };
+        let registry = TestRegistry::new().with_schema("Model");
+        let options = ExportOptions::new();
+
+        let doc = export(&api, &registry, &options).unwrap();
+
+        // The path key renders as valid `{repo_id}`, never `{+repo_id}`.
+        assert!(doc.paths.paths.contains_key("/models/{repo_id}"));
+        assert!(!doc.paths.paths.contains_key("/models/{+repo_id}"));
+
+        // No `{+` may leak anywhere in the serialized document.
+        let json = serde_json::to_string(&doc).unwrap();
+        assert!(!json.contains("{+"), "reserved marker leaked: {json}");
+
+        if let openapiv3::ReferenceOr::Item(path_item) = &doc.paths.paths["/models/{repo_id}"] {
+            if let openapiv3::Parameter::Path { parameter_data, .. } =
+                path_item.parameters[0].as_item().unwrap()
+            {
+                assert_eq!(parameter_data.name, "repo_id");
+            } else {
+                panic!("expected a path parameter");
+            }
+        } else {
+            panic!("expected an inline path item");
+        }
+    }
+
+    #[test]
     fn export_succeeds_when_all_refs_are_resolved() {
         let api = RestApi {
             name: "TestAPI".to_string(),
