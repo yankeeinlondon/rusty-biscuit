@@ -29,7 +29,7 @@ fn launch_context_for_root(root: &std::path::Path) -> LaunchContext {
         agent: None,
         cwd: root.to_path_buf(),
         repo_root: Some(root.to_path_buf()),
-        package_area_root: None,
+        package_area_root: Some(root.to_path_buf()),
         package_root: None,
     }
 }
