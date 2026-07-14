@@ -300,6 +300,16 @@ pub struct BrowserDocumentBody {
     /// </body></html>`) — byte-identical to [`render_browser_document_html`].
     /// Use this when the output stands alone rather than embedding.
     pub document: String,
+    /// The document's inner `<head>` content only — the charset / viewport /
+    /// title / microdata / links / design-token `:root` block / `.code-block`
+    /// panel stylesheet / scripts [`document`](Self::document) carries between
+    /// its `<head>` … `</head>` tags, with **no** deferred
+    /// [`features`](Rendered::features) appended (those are the caller's to
+    /// place). A caller assembling its own standalone document around
+    /// [`body`](Self::body) reuses this as the real `<head>` payload instead of
+    /// emitting an empty `<head>`. Empty only when the render produced no head
+    /// content at all.
+    pub head: String,
     /// The `<body>` inner HTML only: the root's children streamed in order (a
     /// styled root as its own wrapping `<div>`), carrying **no** `<!DOCTYPE>`,
     /// `<html>`, `<head>`, or `<body>` element, so it can be spliced directly
@@ -353,6 +363,13 @@ pub fn render_browser_document_body(
 
     let document = assemble_full_document(doc, opts, &head_page, &body, &features)?;
 
+    // The document's inner `<head>` content, computed the same way
+    // `assemble_full_document` does (same fallback-title source, same
+    // `render_head` helper) but **without** the deferred feature assets, which
+    // the caller owns. A caller wrapping `body` in its own standalone scaffold
+    // reuses this as the real `<head>` instead of emitting an empty one.
+    let head = head_page.render_head(tree_first_h1_text(&doc.root).as_deref());
+
     // Roll up the page-level CSS/JS the full-document path would place in
     // `<head>` so the caller can embed them inline. `stylesheet()` always
     // carries at least the `:root` design-token block; `inline_code()` is empty
@@ -374,6 +391,7 @@ pub fn render_browser_document_body(
     Ok(Rendered {
         output: BrowserDocumentBody {
             document,
+            head,
             body,
             assets,
         },

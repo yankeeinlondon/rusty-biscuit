@@ -220,6 +220,13 @@ pub(crate) struct BrowserPageRender {
     /// The standalone full document (`<!DOCTYPE html>…`), for the no-wrapper
     /// path where the page frame adds nothing so the output stands alone.
     pub document: String,
+    /// The document's inner `<head>` content (charset / viewport / title /
+    /// design-token `:root` block / `.code-block` panel stylesheet), with no
+    /// deferred feature assets. The decorated standalone-document path reuses
+    /// this as the real `<head>` payload — wrapping [`body`](Self::body) in a
+    /// frame while the head keeps its charset/tokens/panel CSS — rather than
+    /// emitting an empty `<head>`.
+    pub head: String,
     /// The `<body>` inner HTML fragment — no `<!DOCTYPE>`/`<html>`/`<head>`/
     /// `<body>` — for embedding inside the `<div class="darkmatter-page">`
     /// wrapper.
@@ -297,6 +304,7 @@ pub(crate) fn render_tree_html_page_body(
     Ok(PipelineResult::new(
         BrowserPageRender {
             document: rendered.output.document,
+            head: rendered.output.head,
             body: rendered.output.body,
             assets: rendered.output.assets,
             features: rendered.features,
