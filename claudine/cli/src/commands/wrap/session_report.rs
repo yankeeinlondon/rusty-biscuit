@@ -18,7 +18,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use claudine::events::EnvironmentContext;
+use claudine::events::{AgenticEvent, EnvironmentContext};
 use claudine::provider::Provider;
 use serde_json::json;
 
@@ -63,8 +63,17 @@ impl SessionPresence {
 
         let mut details = serde_json::Map::new();
         details.insert("agent".into(), json!(provider.as_slug()));
-        details.insert("status".into(), json!("active"));
         details.insert("interactive".into(), json!(interactive));
+        // Record whether this provider can even surface a permission
+        // signal, so the dashboard can tell "no intervention needed"
+        // apart from "signal unavailable for this agent." Sourced from
+        // the same capability matrix `claudine hooks --support` renders.
+        let permission_signal = if provider.supports_event(&AgenticEvent::PermissionRequest) {
+            "supported"
+        } else {
+            "unsupported"
+        };
+        details.insert("permission_signal".into(), json!(permission_signal));
         if let Some(model) = model {
             details.insert("model".into(), json!(model));
         }
@@ -75,11 +84,22 @@ impl SessionPresence {
             details.insert("claudine_pid".into(), json!(pid));
         }
 
+        // The initial status opinion: the lifecycle boundary asserts the
+        // session is Active. Routed through the typed slot so the daemon
+        // reducer owns the projected `status`.
+        let lifecycle_active = rendezvous_core::proto::StatusContribution {
+            state: rendezvous_core::SessionStatusState::Active as i32,
+            producer: rendezvous_core::StatusProducer::Lifecycle as i32,
+            basis: rendezvous_core::SessionStatusBasis::Lifecycle as i32,
+            revision: revision_now(),
+        };
+
         let sent = block_report(
             &handle,
             session_id.clone(),
             rendezvous_core::SessionEventKind::Started,
             details,
+            Some(lifecycle_active),
         );
         Self {
             session_id: sent.then_some(session_id),
@@ -121,23 +141,25 @@ impl StatusReporter {
         Self { inner: None }
     }
 
-    /// Report a status transition (e.g. `waiting_on_user`, `active`).
-    /// No-op when inert.
+    /// Report a status transition (e.g. `waiting_on_user`, `active`) as
+    /// the fallback SINK producer's slot contribution, stamped with a
+    /// producer-captured unix-ns revision the daemon LWW-guards. No-op
+    /// when inert.
     pub(crate) fn report(&self, status: &'static str) {
         let Some((session_id, handle)) = self.inner.clone() else {
             return;
         };
+        let contribution = sink_contribution(status);
         handle.spawn(async move {
             let send = async {
                 let endpoint = rendezvous_core::socket::default_socket_path();
                 let mut client = rendezvous_client::connect(endpoint).await?;
-                let mut details = serde_json::Map::new();
-                details.insert("status".into(), json!(status));
                 client
                     .report_session_event(rendezvous_core::ReportSessionEventRequest {
                         session_id: session_id.to_string(),
                         kind: rendezvous_core::SessionEventKind::Updated as i32,
-                        details_json: serde_json::Value::Object(details).to_string(),
+                        details_json: String::new(),
+                        status: Some(contribution),
                     })
                     .await?;
                 Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
@@ -173,7 +195,43 @@ impl Drop for SessionPresence {
             session_id,
             rendezvous_core::SessionEventKind::Ended,
             serde_json::Map::new(),
+            None,
         );
+    }
+}
+
+/// Producer-captured unix-ns wall clock used as a status revision. The
+/// daemon rejects a slot contribution whose revision is `<=` the one it
+/// already stored, so a reordered same-producer report cannot win.
+fn revision_now() -> i64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    i64::try_from(nanos).unwrap_or(i64::MAX)
+}
+
+/// Map a legacy status string into the SINK producer's typed
+/// contribution. The sink is the fallback permission signal for
+/// providers whose hooks do not expose the ask; `waiting_on_user`
+/// carries a permission-ask basis, anything else clears to Active.
+fn sink_contribution(status: &str) -> rendezvous_core::proto::StatusContribution {
+    let (state, basis) = if status == "waiting_on_user" {
+        (
+            rendezvous_core::SessionStatusState::WaitingOnUser,
+            rendezvous_core::SessionStatusBasis::PermissionAsk,
+        )
+    } else {
+        (
+            rendezvous_core::SessionStatusState::Active,
+            rendezvous_core::SessionStatusBasis::Lifecycle,
+        )
+    };
+    rendezvous_core::proto::StatusContribution {
+        state: state as i32,
+        producer: rendezvous_core::StatusProducer::Sink as i32,
+        basis: basis as i32,
+        revision: revision_now(),
     }
 }
 
@@ -202,6 +260,7 @@ fn block_report(
     session_id: String,
     kind: rendezvous_core::SessionEventKind,
     details: serde_json::Map<String, serde_json::Value>,
+    status: Option<rendezvous_core::proto::StatusContribution>,
 ) -> bool {
     tokio::task::block_in_place(|| {
         handle.block_on(async {
@@ -217,6 +276,7 @@ fn block_report(
                         } else {
                             serde_json::Value::Object(details).to_string()
                         },
+                        status,
                     })
                     .await?;
                 Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
@@ -414,6 +474,63 @@ mod tests {
         await_status(&mut client, "sess-status", "active").await;
 
         drop(presence);
+        daemon.shutdown().await.expect("daemon shutdown");
+    }
+
+    // Unix-only: spawns the `cfg(unix)`-gated `rendezvous-daemon`.
+    // `permission_signal` is computed at STARTED from the launched
+    // provider's PermissionRequest support, so the dashboard can tell
+    // "no intervention needed" apart from "signal unavailable."
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn started_records_permission_signal_per_provider() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let socket = tmp.path().join("daemon.sock");
+        point_socket_at(&socket);
+
+        let mut config = rendezvous_daemon::server::DaemonConfig::with_data_dir(
+            tmp.path().join("data"),
+        )
+        .with_in_memory_projection();
+        config.networking = None;
+        let daemon = rendezvous_daemon::server::spawn_uds_server(socket.clone(), config)
+            .expect("spawn daemon");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !socket.exists() {
+            assert!(Instant::now() < deadline, "daemon socket never appeared");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        let child_env = |session: &str| {
+            [(
+                std::ffi::OsString::from("CLAUDINE_SESSION_ID"),
+                std::ffi::OsString::from(session),
+            )]
+            .into_iter()
+            .collect::<std::collections::HashMap<_, _>>()
+        };
+
+        // Claude exposes a PermissionRequest hook → supported.
+        let supported =
+            SessionPresence::started(Provider::Claude, None, true, &env_context(), &child_env("sup"));
+        // Codex has no permission-ask surface → unsupported.
+        let unsupported =
+            SessionPresence::started(Provider::Codex, None, true, &env_context(), &child_env("uns"));
+
+        let mut client = rendezvous_client::connect(&socket).await.expect("client");
+        let hosts = client
+            .list_active_sessions(rendezvous_core::ListActiveSessionsRequest {})
+            .await
+            .expect("list")
+            .into_inner()
+            .hosts;
+        let sessions: serde_json::Value =
+            serde_json::from_str(&hosts[0].sessions_json).expect("json");
+        assert_eq!(sessions["sup"]["permission_signal"], json!("supported"));
+        assert_eq!(sessions["uns"]["permission_signal"], json!("unsupported"));
+
+        drop(supported);
+        drop(unsupported);
         daemon.shutdown().await.expect("daemon shutdown");
     }
 
