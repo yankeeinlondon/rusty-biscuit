@@ -19,12 +19,12 @@ success:
     stack:
         - when: "frontmatter(review,'ready') == true"
           action:
-              - success: "{{feature_or_fix}} review {{iteration}} in **{{ctx.area}}** finished and deemed code to be **production ready**"
+              - success: "{{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in **{{ctx.area}}** finished and deemed code to be **production ready**"
               - message: "✅  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed successfully (_**production ready**_)"
               - effect: small-group-cheer
         - when: "frontmatter(review,'ready') != true"
           action:
-              - warn: "{{feature_or_fix}} review {{iteration}} in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready: <blue>{{link(review)}}</blue>"
+              - warn: "{{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready: <blue>{{link(review)}}</blue>"
               - message: "⚠️  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed but was deemed NOT production ready"
               - effect: sad-trombone
 failure:
