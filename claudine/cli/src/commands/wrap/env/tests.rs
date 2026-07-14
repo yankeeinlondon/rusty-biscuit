@@ -627,6 +627,35 @@ fn init_git_repo(path: &Path) -> bool {
 }
 
 #[test]
+fn promptless_interactive_startup_skips_git_status_capture() {
+    let repo = tempfile::tempdir().unwrap();
+    fs::write(
+        repo.path().join("Cargo.toml"),
+        r#"[package]
+name = "startup-probe"
+version = "0.1.0"
+edition = "2024"
+"#,
+    )
+    .unwrap();
+
+    if !init_git_repo(repo.path()) {
+        eprintln!("Skipping integration test: git init unavailable");
+        return;
+    }
+
+    let interactive = detect_wrap_startup(repo.path(), false).unwrap();
+    let prompted = detect_wrap_startup(repo.path(), true).unwrap();
+
+    assert!(!interactive.env_context.git.unwrap().is_dirty);
+    assert_eq!(
+        interactive.launch_workspace.package_context.unwrap().package_area,
+        "root"
+    );
+    assert!(prompted.env_context.git.unwrap().is_dirty);
+}
+
+#[test]
 fn repo_root_hint_sets_metadata_but_not_child_cwd() {
     // The hint describes the composition source's enclosing repo
     // (used for guardrails, MCP, harness path resolution). The

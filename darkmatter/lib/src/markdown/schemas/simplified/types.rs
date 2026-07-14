@@ -217,6 +217,25 @@ impl PropertyAtom {
             description: None,
         }
     }
+
+    /// The scalar const value this atom pins when it is a `literal(x)` type,
+    /// with its lexed JSON type preserved (string / number / boolean).
+    ///
+    /// Returns `None` for every non-Literal type, and for a malformed Literal
+    /// atom that somehow lacks its required [`Constraint::LiteralValue`]. This is
+    /// the Literal analog of reading [`Constraint::Members`] off an `enum` atom:
+    /// it never erases the scalar type (a string `'2'` stays a JSON string, a
+    /// bare `2` stays a JSON number), so consumers can serialize the value back
+    /// to correctly-typed YAML.
+    pub fn literal_value(&self) -> Option<&serde_json::Value> {
+        if !matches!(self.ty, TypeExpr::Primitive(SimplifiedType::Literal)) {
+            return None;
+        }
+        self.constraints.iter().find_map(|constraint| match constraint {
+            Constraint::LiteralValue(value) => Some(value),
+            _ => None,
+        })
+    }
 }
 
 /// The full type vocabulary of the SimplifiedSchema grammar.
@@ -553,5 +572,26 @@ mod tests {
     #[test]
     fn generated_keyword_is_canonical() {
         assert_eq!(Constraint::Generated.keyword(), "generated");
+    }
+
+    #[test]
+    fn literal_value_preserves_scalar_type() {
+        // A string literal stays a JSON string, even a numberlike one.
+        let mut atom = PropertyAtom::bare(SimplifiedType::Literal);
+        atom.constraints
+            .push(Constraint::LiteralValue(serde_json::Value::from("2")));
+        assert_eq!(atom.literal_value(), Some(&serde_json::Value::from("2")));
+
+        // A numeric literal stays a JSON number, a boolean a JSON boolean.
+        let mut number = PropertyAtom::bare(SimplifiedType::Literal);
+        number
+            .constraints
+            .push(Constraint::LiteralValue(serde_json::Value::from(2)));
+        assert_eq!(number.literal_value(), Some(&serde_json::Value::from(2)));
+
+        // A non-Literal atom never reports a literal value.
+        assert!(PropertyAtom::bare(SimplifiedType::String).literal_value().is_none());
+        // A Literal atom missing its required value is defensively `None`.
+        assert!(PropertyAtom::bare(SimplifiedType::Literal).literal_value().is_none());
     }
 }

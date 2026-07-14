@@ -22,7 +22,7 @@ use serde_json::Value;
 
 use super::token_usage::NormalizedTokenUsage;
 use crate::provider_id::Provider;
-use crate::stream::logs::opencode::reasoning::StalledGenerationProgress;
+use crate::stream::logs::opencode::bridge::StalledGenerationProgress;
 
 /// Typed classification of an error surfaced through [`SemanticEvent::Error`].
 ///

@@ -10,7 +10,7 @@ pub(crate) use launch::build_harness_launch;
 pub(crate) use loop_control::run_harness_loop;
 pub(crate) use prompt::{
     find_wrapper_harness_source, materialize_harness_prompt, materialize_passthrough_harness_seed,
-    materialized_harness_prompt_from_prepared,
+    materialized_harness_prompt_from_prepared, preflight_proxy_target,
 };
 pub(crate) use shell_options::{
     CachedHarnessLoopContext, apply_composition_shell_overrides, build_harness_shell_options,

@@ -179,53 +179,27 @@ struct CompletionCandidate {
 
 /// Candidates matching `partial` (prefix-based, case-sensitive): top-level
 /// frontmatter keys, fully qualified `ctx.*` variables, and expression
-/// functions — every field derived from the one catalog descriptor.
+/// functions. Lowers the shared [`expressions::completion_candidates`] neutral
+/// model — the single authority shared with the Expression-typed frontmatter
+/// value surface — onto this provider's LSP candidate shape.
 fn interpolation_candidates(
     partial: &str,
     frontmatter_keys: &[String],
 ) -> Vec<CompletionCandidate> {
-    let mut items = Vec::new();
-
-    for key in frontmatter_keys {
-        if key.starts_with(partial) {
-            items.push(CompletionCandidate {
-                label: key.clone(),
-                new_text: key.clone(),
-                kind: CompletionItemKind::FIELD,
-                detail: Some("frontmatter key".to_string()),
-                documentation: None,
-            });
-        }
-    }
-
-    for descriptor in expressions::context_descriptors() {
-        let label = format!("ctx.{}", descriptor.name);
-        if label.starts_with(partial) {
-            items.push(CompletionCandidate {
-                new_text: label.clone(),
-                label,
-                kind: CompletionItemKind::VARIABLE,
-                detail: Some(descriptor.display_type.to_string()),
-                documentation: Some(descriptor.description.to_string()),
-            });
-        }
-    }
-
-    for descriptor in expressions::function_descriptors() {
-        let signature = descriptor.signature;
-        let name = signature.split('(').next().unwrap_or(signature);
-        if name.starts_with(partial) {
-            items.push(CompletionCandidate {
-                label: signature.to_string(),
-                new_text: name.to_string(),
-                kind: CompletionItemKind::FUNCTION,
-                detail: Some(descriptor.typed_signature()),
-                documentation: Some(descriptor.description.to_string()),
-            });
-        }
-    }
-
-    items
+    expressions::completion_candidates(partial, frontmatter_keys)
+        .into_iter()
+        .map(|candidate| CompletionCandidate {
+            label: candidate.label,
+            new_text: candidate.insert_text,
+            kind: match candidate.kind {
+                expressions::ExprCompletionKind::FrontmatterKey => CompletionItemKind::FIELD,
+                expressions::ExprCompletionKind::ContextVariable => CompletionItemKind::VARIABLE,
+                expressions::ExprCompletionKind::Function => CompletionItemKind::FUNCTION,
+            },
+            detail: candidate.detail,
+            documentation: candidate.documentation,
+        })
+        .collect()
 }
 
 // ── Hover ─────────────────────────────────────────────────────────────────
@@ -332,68 +306,16 @@ fn literal_hover_markdown(content: &str) -> String {
     )
 }
 
-/// The Markdown body of an interpolation hover. Pure (no [`DocumentContext`])
-/// so the D2/D5 classification is unit-testable; `expr_offset` is the cursor's
-/// byte offset into `expression`.
-///
-/// The D2 classification rule: only an explicitly `ctx.`-qualified root
-/// receives context-variable metadata — a bare identifier is a frontmatter
-/// variable even when its name matches a known `ctx.*` tail, and an unknown
-/// `ctx.<name>` keeps the generic hover without borrowing a similarly named
-/// bare key's value. Nothing here evaluates the expression or reads `ctx.*`.
-///
-/// A bare identifier with no static frontmatter value falls back to
-/// `schema_property` — the effective schema's type/constraints/description for a
-/// declared-but-unset property (a caller-supplied parameter), before the
-/// generic function-name description.
+/// The Markdown body of an interpolation hover — the shared
+/// [`expressions::hover_markdown`] authority so a body `{{ }}` interpolation and
+/// an Expression-typed frontmatter value render byte-identical hovers.
 fn interpolation_hover_markdown(
     expression: &str,
     expr_offset: usize,
     frontmatter_scalar: impl Fn(&str) -> Option<String>,
     schema_property: impl Fn(&str) -> Option<String>,
 ) -> String {
-    let parsed = expressions::parse(expression);
-    let mut value = match &parsed {
-        Ok(expr) => format!("**Expression**\n\n`{}`", expr.erase()),
-        Err(_) => format!("**Expression** (unparsed)\n\n`{expression}`"),
-    };
-    let Ok(expr) = parsed else {
-        return value;
-    };
-
-    // D5: a cursor on a known function-name identifier wins.
-    if let Some(name) = expressions::function_call_at(&expr, expression, expr_offset)
-        && let Some(descriptor) = expressions::function_descriptor(name)
-    {
-        value.push_str(&format!("\n\n{}", expressions::format_function_block(descriptor)));
-        return value;
-    }
-
-    // Resolve the identifier against the sub-expression under the cursor (e.g.
-    // a `ctx.packages` argument inside a call) rather than the top-level
-    // expression, so an argument's ctx/frontmatter hover is not shadowed by
-    // the enclosing call.
-    let Some(sub_expr) = expressions::expression_at(&expr, expr_offset) else {
-        return value;
-    };
-    let Some(name) = expressions::root_identifier(sub_expr) else {
-        return value;
-    };
-    if let Some(tail) = name.strip_prefix("ctx.") {
-        if let Some(descriptor) = expressions::ctx_descriptor(tail) {
-            value.push_str(&format!(
-                "\n\n{}\n\nThe `ctx` variable is evaluated at _compose_ time (rather than now).",
-                expressions::format_ctx_hover_block(descriptor)
-            ));
-        }
-    } else if let Some(scalar) = frontmatter_scalar(&name) {
-        value.push_str(&format!("\n\nStatic value: `{scalar}` (from frontmatter `{name}`)"));
-    } else if let Some(block) = schema_property(&name) {
-        value.push_str(&format!("\n\n{block}"));
-    } else if let Some(descriptor) = expressions::function_descriptor(&name) {
-        value.push_str(&format!("\n\nFunction: {}", descriptor.description));
-    }
-    value
+    expressions::hover_markdown(expression, expr_offset, frontmatter_scalar, schema_property)
 }
 
 /// The effective-schema hover details for a bare interpolation identifier that
@@ -967,19 +889,17 @@ fn frontmatter_scalar(ctx: &DocumentContext, dotted: &str) -> Option<String> {
 /// ones) are the caller-supplied parameters a document interpolates, validated
 /// against the merged state at compose time — not unknown identifiers.
 fn is_unknown_identifier(ctx: &DocumentContext, name: &str) -> bool {
-    if matches!(name, "ctx" | "env" | "doc") || name.contains('.') {
-        return false;
-    }
-    if expressions::function_description(name).is_some() {
-        return false;
-    }
+    // Only fires when the document has frontmatter (so the intended variable set
+    // is known); on a frontmatter-less document every bare identifier could be a
+    // `--set` value, so none is flagged.
     let Some(ast) = ctx.overlay.and_then(|overlay| overlay.ast.as_ref()) else {
         return false;
     };
-    if ast.entry_by_dotted(name).is_some() {
-        return false;
-    }
-    !frontmatter::known_shape(ctx).properties.contains_key(name)
+    expressions::is_unknown_root(
+        name,
+        |name| ast.entry_by_dotted(name).is_some(),
+        |name| frontmatter::known_shape(ctx).properties.contains_key(name),
+    )
 }
 
 /// The document spans of top-level `prologue`/`epilogue` frontmatter values.

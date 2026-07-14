@@ -26,6 +26,18 @@ pub use schematic_define::{
 /// - `2`: Optional JSON request body
 /// - `3`: Additional headers as (name, value) pairs
 pub type RequestParts = (&'static str, String, Option<String>, Vec<(String, String)>);
+/// How a generated endpoint's response body is decoded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponseKind {
+    /// Decoded as JSON via `request::<T>()`.
+    Json,
+    /// Returned as text via `request_text()`.
+    Text,
+    /// Returned as raw bytes via `request_bytes()`.
+    Binary,
+    /// Discarded via `request_empty()`.
+    Empty,
+}
 /// Errors that can occur when making API requests.
 ///
 /// This enum captures all error conditions that may arise during
@@ -103,6 +115,23 @@ pub enum SchematicError {
     /// required environment variables for header values are not set.
     #[error("Header error: {0}")]
     Header(#[from] schematic_define::HeaderError),
+    /// The generic JSON `request()` was used on a non-JSON endpoint.
+    ///
+    /// Text, binary, and empty endpoints must be called through
+    /// `request_text()`, `request_bytes()`, or `request_empty()`
+    /// respectively. Routing them through `request::<T>()` would decode
+    /// the body as JSON, so it is rejected up front with this error.
+    #[error(
+        "endpoint `{endpoint_id}` returns a {kind} response; call `{expected_method}` instead of the generic `request()`"
+    )]
+    WrongResponseDecoder {
+        /// The endpoint that was called through the wrong decoder.
+        endpoint_id: &'static str,
+        /// The endpoint's declared response kind (e.g. "text").
+        kind: &'static str,
+        /// The convenience method that should be used instead.
+        expected_method: &'static str,
+    },
     /// Internal error in schematic runtime.
     ///
     /// This indicates a bug in the generated code or type system violation.
@@ -219,9 +248,10 @@ pub trait EndpointSpec {
 ///     })
 ///     .build();
 /// ```
-pub type PreResponseJsonHook = dyn Fn(&ResponseContext, serde_json::Value) -> Result<serde_json::Value, SchematicError>
-    + Send
-    + Sync;
+pub type PreResponseJsonHook = dyn Fn(
+    &ResponseContext,
+    serde_json::Value,
+) -> Result<serde_json::Value, SchematicError> + Send + Sync;
 /// Type-erased trait for response mutation hooks.
 ///
 /// This trait allows storing hooks for different response types in
@@ -252,7 +282,8 @@ pub trait AnyResponseMutator: Send + Sync {
 pub struct TypedMutator<T, F>
 where
     T: Send + Sync + 'static,
-    F: Fn(&ResponseContext, &mut T) -> Result<(), SchematicError> + Send + Sync + 'static,
+    F: Fn(&ResponseContext, &mut T) -> Result<(), SchematicError> + Send + Sync
+        + 'static,
 {
     hook: F,
     _marker: std::marker::PhantomData<T>,
@@ -260,7 +291,8 @@ where
 impl<T, F> TypedMutator<T, F>
 where
     T: Send + Sync + 'static,
-    F: Fn(&ResponseContext, &mut T) -> Result<(), SchematicError> + Send + Sync + 'static,
+    F: Fn(&ResponseContext, &mut T) -> Result<(), SchematicError> + Send + Sync
+        + 'static,
 {
     /// Creates a new TypedMutator wrapping the given hook.
     #[must_use]
@@ -274,19 +306,22 @@ where
 impl<T, F> AnyResponseMutator for TypedMutator<T, F>
 where
     T: Send + Sync + 'static,
-    F: Fn(&ResponseContext, &mut T) -> Result<(), SchematicError> + Send + Sync + 'static,
+    F: Fn(&ResponseContext, &mut T) -> Result<(), SchematicError> + Send + Sync
+        + 'static,
 {
     fn mutate(
         &self,
         ctx: &ResponseContext,
         response: &mut dyn std::any::Any,
     ) -> Result<(), SchematicError> {
-        let typed = response.downcast_mut::<T>().ok_or_else(|| {
-            SchematicError::InternalError(format!(
-                "Type mismatch in response mutator for endpoint '{}'",
-                ctx.endpoint_id
-            ))
-        })?;
+        let typed = response
+            .downcast_mut::<T>()
+            .ok_or_else(|| SchematicError::InternalError(
+                format!(
+                    "Type mismatch in response mutator for endpoint '{}'", ctx
+                    .endpoint_id
+                ),
+            ))?;
         (self.hook)(ctx, typed)
     }
 }
@@ -299,8 +334,10 @@ pub struct VariantHooks {
     /// Optional hook for JSON transformation before deserialization.
     pub pre_response_json: Option<std::sync::Arc<PreResponseJsonHook>>,
     /// Per-endpoint response mutators, keyed by endpoint_id.
-    pub response_mutators:
-        std::collections::HashMap<&'static str, std::sync::Arc<dyn AnyResponseMutator>>,
+    pub response_mutators: std::collections::HashMap<
+        &'static str,
+        std::sync::Arc<dyn AnyResponseMutator>,
+    >,
 }
 impl std::fmt::Debug for VariantHooks {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

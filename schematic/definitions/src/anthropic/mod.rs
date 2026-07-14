@@ -116,6 +116,7 @@ pub fn define_anthropic_api() -> RestApi {
         docs_url: Some("https://docs.anthropic.com/en/api/messages".to_string()),
         auth: AuthStrategy::ApiKey {
             header: "X-Api-Key".to_string(),
+            value_prefix: None,
         },
         auth_policy: None,
         env_auth: vec!["ANTHROPIC_API_KEY".to_string()],
@@ -202,7 +203,7 @@ mod tests {
         let api = define_anthropic_api();
 
         match &api.auth {
-            AuthStrategy::ApiKey { header } => {
+            AuthStrategy::ApiKey { header, .. } => {
                 assert_eq!(header, "X-Api-Key");
             }
             _ => panic!("Expected ApiKey auth strategy"),

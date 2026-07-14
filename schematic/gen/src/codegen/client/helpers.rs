@@ -40,7 +40,7 @@ pub(crate) fn generate_auth_helper_methods() -> TokenStream {
                         Some(header) => format!("an explicit bearer token in `{header}`"),
                         None => "an explicit bearer token".to_string(),
                     },
-                    schematic_define::AuthMethod::ApiKey { header } => {
+                    schematic_define::AuthMethod::ApiKey { header, .. } => {
                         format!("an explicit API key in `{header}`")
                     }
                     schematic_define::AuthMethod::Basic => {
@@ -138,7 +138,7 @@ pub(crate) fn generate_auth_helper_methods() -> TokenStream {
                         _ => headers,
                     }
                 }
-                Some(schematic_define::EnvAuthStrategy::ApiKey { header }) => {
+                Some(schematic_define::EnvAuthStrategy::ApiKey { header, value_prefix }) => {
                     let key = env_mapping
                         .api_key
                         .as_ref()
@@ -151,7 +151,14 @@ pub(crate) fn generate_auth_helper_methods() -> TokenStream {
                         });
 
                     match key {
-                        Some(key) => headers.header(header.clone(), key),
+                        Some(key) => {
+                            let value = format!(
+                                "{}{}",
+                                value_prefix.clone().unwrap_or_default(),
+                                key
+                            );
+                            headers.header(header.clone(), value)
+                        }
                         None => headers,
                     }
                 }
@@ -184,7 +191,7 @@ pub(crate) fn generate_auth_helper_methods() -> TokenStream {
                         .as_deref()
                         .map_or_else(|| headers.has_authorization(), |header| headers.has_header(header))
                 }
-                Some(schematic_define::EnvAuthStrategy::ApiKey { header }) => headers.has_header(header),
+                Some(schematic_define::EnvAuthStrategy::ApiKey { header, .. }) => headers.has_header(header),
                 Some(schematic_define::EnvAuthStrategy::Basic) => headers.has_authorization(),
                 None => false,
                 _ => false,

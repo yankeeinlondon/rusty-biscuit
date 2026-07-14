@@ -77,7 +77,7 @@ pub enum ClaudineError {
 
     /// Provider adapter parse/format error.
     #[error("adapter error: {0}")]
-    Adapter(#[from] crate::adapters::AdapterError),
+    Adapter(#[from] crate::hook_adapters::AdapterError),
 
     /// Provider does not support automatic config creation.
     #[error("config creation not supported for provider: {provider}")]

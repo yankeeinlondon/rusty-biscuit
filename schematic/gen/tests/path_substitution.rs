@@ -450,3 +450,67 @@ fn underscore_in_param_name() {
         "Should preserve underscore in field name"
     );
 }
+
+// =============================================================================
+// Non-identifier path parameter names (sanitization + serde rename)
+// =============================================================================
+
+/// Builds a GET endpoint at `path` with no request body.
+fn get_endpoint(id: &str, path: &str) -> Endpoint {
+    Endpoint {
+        id: id.to_string(),
+        method: RestMethod::Get,
+        path: path.to_string(),
+        description: format!("Test endpoint for {id}"),
+        request: None,
+        response: ApiResponse::json_type("TestResponse"),
+        headers: vec![],
+        params: None,
+        oauth_scopes: None,
+    }
+}
+
+#[test]
+fn special_char_path_params_are_sanitized_with_serde_rename() {
+    // `{user-id}` and `{2fa}` are not valid Rust identifiers; generation must
+    // not panic and must produce sanitized fields that carry the wire name.
+    let endpoint = get_endpoint("GetFactor", "/users/{user-id}/factors/{2fa}");
+    let tokens = generate_request_struct(&endpoint);
+    let code = format_tokens(&tokens);
+
+    assert!(
+        code.contains("pub user_id: String"),
+        "hyphenated param should become `user_id`:\n{code}"
+    );
+    assert!(
+        code.contains("pub _2fa: String"),
+        "digit-leading param should become `_2fa`:\n{code}"
+    );
+    assert!(
+        code.contains(r#"#[serde(rename = "user-id")]"#),
+        "must preserve the `user-id` wire name:\n{code}"
+    );
+    assert!(
+        code.contains(r#"#[serde(rename = "2fa")]"#),
+        "must preserve the `2fa` wire name:\n{code}"
+    );
+    // The URL format string keeps both placeholder positions.
+    assert!(
+        code.contains(r#""/users/{}/factors/{}""#),
+        "format string should keep both placeholders:\n{code}"
+    );
+}
+
+#[test]
+fn path_param_values_are_percent_encoded() {
+    // A value such as `release/1.0` must not break out of its path segment, so
+    // the emitter wraps each path argument in `urlencoding::encode`.
+    let endpoint = get_endpoint("GetRelease", "/repos/{tag}");
+    let tokens = generate_request_struct(&endpoint);
+    let code = format_tokens(&tokens);
+
+    assert!(
+        code.contains("urlencoding::encode(& self.tag.to_string())"),
+        "path value must be percent-encoded:\n{code}"
+    );
+}

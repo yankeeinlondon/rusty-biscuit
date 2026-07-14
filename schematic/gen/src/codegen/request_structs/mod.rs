@@ -21,7 +21,7 @@ use schematic_define::Endpoint;
 
 use crate::parser::extract_path_params;
 
-use shared::{QueryParamInfo, extract_query_params, to_snake_case};
+use shared::{QueryParamInfo, extract_query_params, param_field_name};
 
 // Re-export for sibling codegen modules and tests
 pub use shared::{format_generated_code, validate_generated_code};
@@ -257,7 +257,7 @@ fn generate_doc_comment_with_example(
 
         // Add query param builder calls
         for qp in query_params {
-            let snake_name = to_snake_case(&qp.name);
+            let snake_name = param_field_name(&qp.name);
             lines.push(format!("     .with_{}(/* value */)", snake_name));
         }
         lines.push(";".to_string());
@@ -277,7 +277,7 @@ fn generate_doc_comment_with_example(
         for qp in query_params {
             lines.push(format!(
                 "     .with_{}(/* value */)",
-                to_snake_case(&qp.name)
+                param_field_name(&qp.name)
             ));
         }
         lines.push(";".to_string());
@@ -291,7 +291,7 @@ fn generate_doc_comment_with_example(
         for qp in query_params {
             lines.push(format!(
                 "     .with_{}(/* value */)",
-                to_snake_case(&qp.name)
+                param_field_name(&qp.name)
             ));
         }
         lines.push(";".to_string());

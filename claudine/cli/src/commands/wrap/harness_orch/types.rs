@@ -28,6 +28,13 @@ pub(crate) struct HarnessPromptState {
     pub(crate) prompt_tail: Vec<String>,
     pub(crate) next_prompt_override: Option<String>,
     pub(crate) next_resume_session_id: Option<String>,
+    /// Caller-supplied compose inputs re-applied on every re-materialization
+    /// (retry/resume/proxy), so a re-composed document keeps the caller's
+    /// `--set` params, launch-area file-ref anchor, and pre-approved shell
+    /// commands. Sourced from
+    /// [`PreparedComposition::rematerialize`][claudine::composition::PreparedComposition].
+    /// Empty for direct-wrapper passthrough runs, which have no compose params.
+    pub(crate) rematerialize: claudine::composition::RematerializeInputs,
 }
 
 #[derive(Debug, Clone)]

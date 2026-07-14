@@ -11,7 +11,7 @@ pub(crate) fn generate_explicit_auth_helpers(api: &RestApi) -> TokenStream {
         _ => None,
     });
     let api_key_header = policy.explicit.iter().find_map(|method| match method {
-        schematic_define::AuthMethod::ApiKey { header } => Some(header.clone()),
+        schematic_define::AuthMethod::ApiKey { header, .. } => Some(header.clone()),
         _ => None,
     });
     let has_basic = policy

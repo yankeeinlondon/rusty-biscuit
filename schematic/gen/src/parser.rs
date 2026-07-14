@@ -1,8 +1,17 @@
 //! Path parameter extraction from endpoint paths.
 //!
 //! Extracts parameter names from URL path templates that use `{param}` syntax.
+//!
+//! An RFC 6570 reserved-expansion marker (`{+param}`) is accepted as an
+//! encoding hint and stripped here, so the returned name is always the bare
+//! field spelling (`param`) regardless of the marker. Only
+//! [`generate_path_format`](crate::codegen::request_structs::shared::generate_path_format)
+//! inspects the raw path to decide whether a value is percent-encoded.
 
 /// Extracts parameter names from a path template.
+///
+/// A leading `+` (reserved-expansion marker) is stripped, so both `{param}`
+/// and `{+param}` yield `param`.
 ///
 /// ## Examples
 ///
@@ -11,6 +20,7 @@
 ///
 /// assert_eq!(extract_path_params("/models"), vec![] as Vec<&str>);
 /// assert_eq!(extract_path_params("/models/{model}"), vec!["model"]);
+/// assert_eq!(extract_path_params("/models/{+repo_id}"), vec!["repo_id"]);
 /// assert_eq!(
 ///     extract_path_params("/threads/{thread_id}/messages/{message_id}"),
 ///     vec!["thread_id", "message_id"]
@@ -25,6 +35,7 @@ pub fn extract_path_params(path: &str) -> Vec<&str> {
             pos = idx + 1; // Start after '{'
         } else if c == '}' && pos > 0 {
             let param = &path[pos..idx];
+            let param = param.strip_prefix('+').unwrap_or(param);
             if !param.is_empty() {
                 params.push(param);
             }
@@ -93,6 +104,15 @@ mod tests {
     #[test]
     fn extract_consecutive_params() {
         assert_eq!(extract_path_params("/{a}/{b}"), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn extract_strips_reserved_expansion_marker() {
+        assert_eq!(extract_path_params("/models/{+repo_id}"), vec!["repo_id"]);
+        assert_eq!(
+            extract_path_params("/repos/{owner}/{repo}/contents/{+path}"),
+            vec!["owner", "repo", "path"]
+        );
     }
 
     #[test]

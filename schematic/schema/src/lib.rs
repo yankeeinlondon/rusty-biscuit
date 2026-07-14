@@ -98,26 +98,26 @@
 //!
 //! All request methods return `Result<T, SchematicError>`. See
 //! [`shared::SchematicError`] for the full error enum and handling examples.
+pub mod shared;
+pub mod prelude;
 pub mod anthropic;
 pub mod artificial_analysis;
 pub mod bitbucket;
+pub mod openai;
 pub mod elevenlabs;
-pub mod elevenlabs_ws;
-pub mod emqx;
-pub mod eversolo;
 pub mod gitea;
 pub mod github;
 pub mod gitlab;
 pub mod huggingface;
 pub mod lmstudio;
 pub mod ollama;
-pub mod openai;
-pub mod prelude;
+pub mod emqx;
+pub mod eversolo;
 pub mod samsung_smart_tv;
-pub mod samsung_smart_tv_remote_ws;
-pub mod shared;
 pub mod unfolded_circle_core_rest;
+pub mod ws_shared;
+pub mod elevenlabs_ws;
 pub mod unfolded_circle_core_ws;
 pub mod unfolded_circle_dock_ws;
 pub mod unfolded_circle_integration_ws;
-pub mod ws_shared;
+pub mod samsung_smart_tv_remote_ws;

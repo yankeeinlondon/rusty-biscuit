@@ -26,7 +26,10 @@ use std::{
 };
 
 use indexmap::IndexMap;
-use jsonschema::{Draft, PatternOptions, Validator, error::ValidationErrorKind};
+use jsonschema::{
+    Draft, JsonType, PatternOptions, Validator,
+    error::{TypeKind, ValidationErrorKind},
+};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -417,6 +420,34 @@ fn build_problems(
             same_path_file_errors.retain(|p| seen.insert((p.path.clone(), p.message.clone())));
             return same_path_file_errors;
         }
+        // Nullable scalar wrapper: `anyOf: [{ "type": "null" }, <typed atom>]`
+        // (see [`super::simplified::convert::wrap_optional_null`]). A non-null
+        // value that fails the typed arm at the *same* path — a format, pattern,
+        // enum, or type mismatch, none of which drills deeper — otherwise
+        // reports the opaque "is not valid under any of the schemas listed in
+        // the 'anyOf' keyword" wrapper message. Surface the typed arm's precise
+        // error instead, dropping the null sentinel's own "expected null" type
+        // error. Scoped to the two-arm optional wrapper so multi-arm unions
+        // (`numberlike`/`boolish`/root unions) keep their aggregate message.
+        if context.len() == 2
+            && context
+                .iter()
+                .any(|arm| arm.len() == 1 && is_null_type_sentinel(&arm[0]))
+        {
+            let mut typed: Vec<ValidationProblem> = context
+                .iter()
+                .flat_map(|arm| arm.iter())
+                .filter(|nested| {
+                    nested.instance_path().as_str() == parent && !is_null_type_sentinel(nested)
+                })
+                .flat_map(|nested| build_problems(nested, positions, arm_index, anchors))
+                .collect();
+            if !typed.is_empty() {
+                let mut seen: HashSet<(String, String)> = HashSet::new();
+                typed.retain(|p| seen.insert((p.path.clone(), p.message.clone())));
+                return typed;
+            }
+        }
     }
     vec![build_problem(err, positions, arm_index, anchors)]
 }
@@ -427,6 +458,34 @@ fn is_file_format_error(err: &jsonschema::ValidationError<'_>) -> bool {
     };
     format == format::DARKMATTER_FILE_FORMAT
         || format == format::DARKMATTER_FILE_REFERENCE_FORMAT
+}
+
+/// Replaces the generic `"<value>" is not a "darkmatter-datetime"` /
+/// `"darkmatter-time"` format-error text with a reader-facing ISO 8601
+/// diagnostic. `None` for every other error kind (the caller keeps
+/// `err.to_string()`).
+fn datetime_format_message(err: &jsonschema::ValidationError<'_>) -> Option<String> {
+    let ValidationErrorKind::Format { format } = err.kind() else {
+        return None;
+    };
+    let noun = match format.as_str() {
+        format::DARKMATTER_DATETIME_FORMAT => "an ISO-8601 datetime",
+        format::DARKMATTER_TIME_FORMAT => "an ISO-8601 time",
+        _ => return None,
+    };
+    Some(format!("{} is not {noun}", err.instance()))
+}
+
+/// `true` when `err` is the "expected null" type error contributed by the
+/// `{ "type": "null" }` arm of an optional-property wrapper against a non-null
+/// value.
+fn is_null_type_sentinel(err: &jsonschema::ValidationError<'_>) -> bool {
+    matches!(
+        err.kind(),
+        ValidationErrorKind::Type {
+            kind: TypeKind::Single(JsonType::Null)
+        }
+    )
 }
 
 fn build_problem(
@@ -451,7 +510,10 @@ fn build_problem(
         .unwrap_or((None, None));
     let (message, file_reference) = match darkmatter_file_reference_outcome(err, anchors) {
         Some((message, diagnostic)) => (message, Some(diagnostic)),
-        None => (err.to_string(), None),
+        None => (
+            datetime_format_message(err).unwrap_or_else(|| err.to_string()),
+            None,
+        ),
     };
     let instance_path = JsonPointer::parse(&path);
     let schema_path = {
@@ -843,6 +905,90 @@ pub fn wrap_arm_as_root_schema(arm: &Value) -> Value {
     Value::Object(map)
 }
 
+/// Collects problems for a single already-selected root-union arm, tagging each
+/// with `arm_index`. Used to narrow a discriminated **root** union to the arm a
+/// shared literal discriminant selects, so only that arm's problems surface
+/// (instead of the closest-by-count arm the general union report picks).
+pub(super) fn collect_arm_problems_with_anchors(
+    validator: &Validator,
+    instance: &Value,
+    positions: &PositionMap,
+    anchors: FileRefAnchors<'_>,
+    arm_index: usize,
+) -> Vec<ValidationProblem> {
+    validator
+        .iter_errors(instance)
+        .flat_map(|err| build_problems(&err, positions, Some(arm_index), anchors))
+        .collect()
+}
+
+/// Narrows discriminated **property-level** unions to their selected arm.
+///
+/// For each top-level property whose schema is an `anyOf` union that a shared
+/// literal discriminant selects unambiguously
+/// ([`super::discriminant::select_literal_discriminant_arm`]), the problems
+/// under that property are replaced with the result of validating the instance
+/// against a synthetic single-property schema carrying only the chosen arm — so
+/// only the matched arm's missing/unknown/type problems surface. Every property
+/// without such a selection keeps its original `anyOf` diagnostics
+/// byte-for-byte.
+///
+/// Validating the whole instance against `{ "properties": { key: arm } }`
+/// (rather than the sub-value against the bare arm) keeps problem paths in the
+/// `/key/...` form the normal report and the `positions` map already use.
+pub(super) fn narrow_property_union_problems(
+    schema: &Value,
+    instance: &Value,
+    positions: &PositionMap,
+    anchors: FileRefAnchors<'_>,
+    mut problems: Vec<ValidationProblem>,
+) -> Vec<ValidationProblem> {
+    let (Some(props), Some(obj)) = (
+        schema.get("properties").and_then(Value::as_object),
+        instance.as_object(),
+    ) else {
+        return problems;
+    };
+    for (key, prop_schema) in props {
+        let Some(arms) = prop_schema.get("anyOf").and_then(Value::as_array) else {
+            continue;
+        };
+        let Some(value) = obj.get(key).filter(|value| !value.is_null()) else {
+            continue;
+        };
+        let Some(arm_index) = super::discriminant::select_literal_discriminant_arm(arms, value)
+        else {
+            continue;
+        };
+        let synthetic = serde_json::json!({
+            "$schema": super::simplified::DRAFT_2020_12,
+            "type": "object",
+            "properties": { key: arms[arm_index] }
+        });
+        let Ok(validator) = build_validator(&synthetic, anchors.base_dir, anchors.fallback) else {
+            continue;
+        };
+        let narrowed: Vec<ValidationProblem> = validator
+            .iter_errors(instance)
+            .flat_map(|err| build_problems(&err, positions, None, anchors))
+            .collect();
+        let prefix = json_pointer_segment(key);
+        problems.retain(|problem| !path_is_under(&problem.path, &prefix));
+        problems.extend(narrowed);
+    }
+    problems
+}
+
+/// The JSON-pointer prefix (`/<escaped-key>`) for a top-level property.
+fn json_pointer_segment(key: &str) -> String {
+    format!("/{}", key.replace('~', "~0").replace('/', "~1"))
+}
+
+/// Whether `path` names the property at `prefix` or a descendant of it.
+fn path_is_under(path: &str, prefix: &str) -> bool {
+    path == prefix || path.starts_with(&format!("{prefix}/"))
+}
+
 fn default_capacity() -> usize {
     static CAP: OnceLock<usize> = OnceLock::new();
     *CAP.get_or_init(|| {
@@ -1024,7 +1170,9 @@ mod tests {
     fn nullable_any_of_keeps_parent_when_no_arm_drills_deeper() {
         // `[null, string]` against a wrong-typed scalar: every arm fails at the
         // wrapper path itself, so there is no deeper site to point at. The
-        // original `anyOf` problem is preserved rather than dropped.
+        // typed arm's precise error is surfaced at the wrapper path (dropping
+        // the null sentinel's "expected null" type error) — a single problem at
+        // `/name`, not the opaque `anyOf` wrapper message.
         let schema = json!({
             "type": "object",
             "properties": {
@@ -1036,6 +1184,59 @@ mod tests {
         let problems = collect_problems(&v, &instance, &PositionMap::new());
         assert_eq!(problems.len(), 1, "expected the wrapper problem: {problems:?}");
         assert_eq!(problems[0].path, "/name");
+        assert!(
+            !problems[0].message.contains("anyOf"),
+            "generic anyOf message should be replaced: {:?}",
+            problems[0].message
+        );
+    }
+
+    #[test]
+    fn optional_datetime_accepts_offset_less_value() {
+        // Mirrors `convert`'s optional-`datetime` output. The offset-less local
+        // datetime is valid ISO 8601 and must not error (it did under the
+        // built-in RFC 3339 `date-time` format).
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "created": { "anyOf": [
+                    { "type": "null" },
+                    { "type": "string", "format": "darkmatter-datetime" }
+                ] }
+            }
+        });
+        let v = build_validator(&schema, None, None).unwrap();
+        let instance = json!({ "created": "2026-07-10T15:05:34" });
+        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        assert!(problems.is_empty(), "expected no problems, got {problems:?}");
+    }
+
+    #[test]
+    fn optional_datetime_reports_clean_message_for_garbage() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "created": { "anyOf": [
+                    { "type": "null" },
+                    { "type": "string", "format": "darkmatter-datetime" }
+                ] }
+            }
+        });
+        let v = build_validator(&schema, None, None).unwrap();
+        let instance = json!({ "created": "2026-13-99T25:61:61" });
+        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        assert_eq!(problems.len(), 1, "expected one problem: {problems:?}");
+        assert_eq!(problems[0].path, "/created");
+        assert!(
+            problems[0].message.contains("is not an ISO-8601 datetime"),
+            "expected a reader-facing datetime message, got {:?}",
+            problems[0].message
+        );
+        assert!(
+            !problems[0].message.contains("anyOf"),
+            "generic anyOf message should be replaced: {:?}",
+            problems[0].message
+        );
     }
 
     #[test]

@@ -149,7 +149,7 @@ fn generate_env_mapping(
     env_auth: &[String],
 ) -> TokenStream {
     match strategy {
-        schematic_define::AuthStrategy::ApiKey { header } => {
+        schematic_define::AuthStrategy::ApiKey { header, .. } => {
             quote! {
                 schematic_define::EnvMapping {
                     bearer_token: None,
@@ -578,12 +578,19 @@ fn generate_endpoint_client(plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStr
 
                 let mut request = url.to_string().into_client_request()?;
                 for (name, value) in header_pairs {
-                    if let (Ok(hdr_name), Ok(hdr_value)) = (
-                        name.parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>(),
-                        value.parse::<tokio_tungstenite::tungstenite::http::header::HeaderValue>(),
-                    ) {
-                        request.headers_mut().insert(hdr_name, hdr_value);
-                    }
+                    let hdr_name = name
+                        .parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>()
+                        .map_err(|e| super::ws_shared::WsError::InvalidHeader {
+                            name: name.clone(),
+                            reason: e.to_string(),
+                        })?;
+                    let hdr_value = value
+                        .parse::<tokio_tungstenite::tungstenite::http::header::HeaderValue>()
+                        .map_err(|e| super::ws_shared::WsError::InvalidHeader {
+                            name: name.clone(),
+                            reason: e.to_string(),
+                        })?;
+                    request.headers_mut().insert(hdr_name, hdr_value);
                 }
 
                 let connect = tokio_tungstenite::connect_async_with_config(

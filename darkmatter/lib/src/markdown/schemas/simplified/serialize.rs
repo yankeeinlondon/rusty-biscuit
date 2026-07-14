@@ -589,7 +589,9 @@ mod tests {
         round_trip(PropertyAtom {
             ty: TypeExpr::Primitive(SimplifiedType::Number),
             is_array: false,
-            constraints: vec![Constraint::Default(serde_json::json!(3.0))],
+            // An integer default parses back as an integer (exact-lexeme parse),
+            // so the round-trip fixture must itself be an integer.
+            constraints: vec![Constraint::Default(serde_json::json!(3))],
             array_constraints: vec![],
             description: None,
         });

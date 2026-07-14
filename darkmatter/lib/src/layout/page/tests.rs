@@ -416,7 +416,7 @@
         let end = rest.find('m').expect("unterminated SGR");
         let nums: Vec<u8> = rest[..end]
             .split(';')
-            .map(|n| n.parse().expect("rgb component"))
+            .map(|n| n.parse::<u8>().expect("rgb component"))
             .collect();
         (nums[0], nums[1], nums[2])
     }

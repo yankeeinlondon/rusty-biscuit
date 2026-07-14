@@ -93,7 +93,7 @@ impl<'a> ModuleDocBuilder<'a> {
                     header_name
                 )
             }
-            AuthStrategy::ApiKey { header } => {
+            AuthStrategy::ApiKey { header, .. } => {
                 format!("Uses API key authentication via the `{}` header.", header)
             }
             AuthStrategy::Basic => "Uses HTTP Basic authentication.".to_string(),
@@ -371,6 +371,7 @@ mod tests {
         let mut api = make_test_api();
         api.auth = AuthStrategy::ApiKey {
             header: "X-API-Key".to_string(),
+            value_prefix: None,
         };
         let builder = ModuleDocBuilder::new(&api);
         let auth = builder.auth_section();

@@ -19,11 +19,11 @@
 //!
 //! Uses API key authentication via `GITEA_TOKEN` environment variable.
 //!
-//! **Important**: Gitea uses the `Authorization: token <pat>` header format.
-//! When setting `GITEA_TOKEN`, include the `token ` prefix:
+//! Gitea uses the `Authorization: token <pat>` header format. The definition
+//! carries the `token ` scheme prefix, so set `GITEA_TOKEN` to a bare PAT:
 //!
 //! ```bash
-//! export GITEA_TOKEN="token your_personal_access_token"
+//! export GITEA_TOKEN="your_personal_access_token"
 //! ```
 //!
 //! Required headers are automatically included:
@@ -116,10 +116,11 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// ## Authentication
 ///
 /// Gitea uses the `Authorization: token <pat>` header format (not Bearer).
-/// Set the `GITEA_TOKEN` environment variable with the **full auth value**:
+/// The definition supplies the `token ` prefix, so set `GITEA_TOKEN` to a
+/// bare personal access token:
 ///
 /// ```bash
-/// export GITEA_TOKEN="token your_personal_access_token"
+/// export GITEA_TOKEN="your_personal_access_token"
 /// ```
 ///
 /// ## Endpoints
@@ -160,6 +161,7 @@ pub fn define_gitea_api() -> RestApi {
         docs_url: Some("https://docs.gitea.com/api/1.25/".to_string()),
         auth: AuthStrategy::ApiKey {
             header: "Authorization".to_string(),
+            value_prefix: Some("token ".to_string()),
         },
         auth_policy: None,
         env_auth: vec!["GITEA_TOKEN".to_string()],
@@ -212,7 +214,7 @@ pub fn define_gitea_api() -> RestApi {
             Endpoint {
                 id: "GetRepositoryContentRaw".to_string(),
                 method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/raw/{filepath}".to_string(),
+                path: "/repos/{owner}/{repo}/raw/{+filepath}".to_string(),
                 description: "Get raw file content from repository".to_string(),
                 request: None,
                 response: ApiResponse::Text,
@@ -498,8 +500,13 @@ mod tests {
         let api = define_gitea_api();
 
         match &api.auth {
-            AuthStrategy::ApiKey { header } => {
+            AuthStrategy::ApiKey {
+                header,
+                value_prefix,
+            } => {
                 assert_eq!(header, "Authorization");
+                // Gitea prepends the `token ` scheme so a bare PAT works.
+                assert_eq!(value_prefix.as_deref(), Some("token "));
             }
             _ => panic!("Expected ApiKey auth strategy"),
         }

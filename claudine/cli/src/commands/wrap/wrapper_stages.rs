@@ -451,6 +451,8 @@ pub(crate) fn run_execution_stage(
             prompt_tail: Vec::new(),
             next_prompt_override: None,
             next_resume_session_id: None,
+            // Direct-wrapper passthrough runs carry no compose params.
+            rematerialize: Default::default(),
         };
 
         let mut harness_base_args = child_args.to_vec();
@@ -507,6 +509,7 @@ pub(crate) fn run_execution_stage(
             stream_verbosity != Verbosity::Silent,
             stream_verbosity,
             detail_requested,
+            stream_verbosity == Verbosity::Silent,
             env_context,
             dispatch_context,
             Some(initial_materialized),

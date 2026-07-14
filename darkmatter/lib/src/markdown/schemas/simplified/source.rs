@@ -4,6 +4,7 @@ use serde_yaml_ng::Value as YamlValue;
 
 use crate::markdown::schemas::errors::SchemaError;
 
+use super::yaml_scalar::{self, DecodedScalar};
 use super::{
     Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, TypeExpr,
     parse_yaml_schema,
@@ -123,7 +124,7 @@ fn property_has_suggestions(def: &PropertyDef) -> bool {
 }
 
 fn scalar_matches_atom(scalar: &DecodedScalar, expected: &PropertyAtom) -> bool {
-    super::grammar::parse_type_expr("<source>", &scalar.decoded)
+    super::grammar::parse_type_expr("<source>", scalar.decoded())
         .is_ok_and(|actual| actual == *expected)
 }
 
@@ -148,14 +149,8 @@ fn project_atom_suggestions(
         }
     }) {
         for candidate in candidates {
-            let start = *scalar
-                .decoded_to_raw
-                .get(candidate.span.start)
-                .ok_or_else(projection_error)?;
-            let end = *scalar
-                .decoded_to_raw
-                .get(candidate.span.end)
-                .ok_or_else(projection_error)?;
+            let start = scalar.raw_offset(candidate.span.start).ok_or_else(projection_error)?;
+            let end = scalar.raw_offset(candidate.span.end).ok_or_else(projection_error)?;
             candidate.span = source_offset + start..source_offset + end;
         }
     }
@@ -184,13 +179,6 @@ fn projection_error() -> SchemaError {
         message: "could not project SimplifiedSchema expression spans through YAML source".into(),
         span: 0..0,
     }
-}
-
-#[derive(Debug)]
-struct DecodedScalar {
-    decoded: String,
-    /// One raw byte offset per decoded byte boundary.
-    decoded_to_raw: Vec<usize>,
 }
 
 fn scan_value_scalars(source: &str) -> Vec<DecodedScalar> {
@@ -264,7 +252,7 @@ fn scan_value(raw: &str, base: usize, out: &mut Vec<DecodedScalar>) {
             if raw[offset..].starts_with(']') {
                 break;
             }
-            if let Some((scalar, consumed)) = decode_scalar(&raw[offset..], base + offset) {
+            if let Some((scalar, consumed)) = yaml_scalar::decode_scalar_at(&raw[offset..], base + offset) {
                 out.push(scalar);
                 offset += consumed;
             } else {
@@ -276,110 +264,8 @@ fn scan_value(raw: &str, base: usize, out: &mut Vec<DecodedScalar>) {
                 break;
             }
         }
-    } else if let Some((scalar, _)) = decode_scalar(raw, base) {
+    } else if let Some((scalar, _)) = yaml_scalar::decode_scalar_at(raw, base) {
         out.push(scalar);
-    }
-}
-
-fn decode_scalar(raw: &str, base: usize) -> Option<(DecodedScalar, usize)> {
-    match raw.as_bytes().first().copied()? {
-        b'\'' => decode_single_quoted(raw, base),
-        b'"' => decode_double_quoted(raw, base),
-        _ => {
-            let content = raw.trim_end();
-            let mut map = Vec::with_capacity(content.len() + 1);
-            map.extend(base..=base + content.len());
-            Some((DecodedScalar {
-                decoded: content.to_string(),
-                decoded_to_raw: map,
-            }, content.len()))
-        }
-    }
-}
-
-fn decode_single_quoted(raw: &str, base: usize) -> Option<(DecodedScalar, usize)> {
-    let mut decoded = String::new();
-    let mut map = vec![base + 1];
-    let mut cursor = 1;
-    while cursor < raw.len() {
-        if raw[cursor..].starts_with("''") {
-            push_mapped(&mut decoded, &mut map, "'", base + cursor + 2);
-            cursor += 2;
-        } else if raw.as_bytes()[cursor] == b'\'' {
-            return Some((DecodedScalar { decoded, decoded_to_raw: map }, cursor + 1));
-        } else {
-            let ch = raw[cursor..].chars().next()?;
-            cursor += ch.len_utf8();
-            push_mapped(&mut decoded, &mut map, &ch.to_string(), base + cursor);
-        }
-    }
-    None
-}
-
-fn decode_double_quoted(raw: &str, base: usize) -> Option<(DecodedScalar, usize)> {
-    let mut decoded = String::new();
-    let mut map = vec![base + 1];
-    let mut cursor = 1;
-    while cursor < raw.len() {
-        match raw.as_bytes()[cursor] {
-            b'"' => {
-                return Some((DecodedScalar { decoded, decoded_to_raw: map }, cursor + 1));
-            }
-            b'\\' => {
-                let (value, consumed) = decode_yaml_escape(&raw[cursor..])?;
-                cursor += consumed;
-                push_mapped(&mut decoded, &mut map, &value, base + cursor);
-            }
-            _ => {
-                let ch = raw[cursor..].chars().next()?;
-                cursor += ch.len_utf8();
-                push_mapped(&mut decoded, &mut map, &ch.to_string(), base + cursor);
-            }
-        }
-    }
-    None
-}
-
-fn decode_yaml_escape(raw: &str) -> Option<(String, usize)> {
-    let escape = *raw.as_bytes().get(1)?;
-    let simple = match escape {
-        b'0' => Some('\0'),
-        b'a' => Some('\u{7}'),
-        b'b' => Some('\u{8}'),
-        b't' | b'\t' => Some('\t'),
-        b'n' => Some('\n'),
-        b'v' => Some('\u{b}'),
-        b'f' => Some('\u{c}'),
-        b'r' => Some('\r'),
-        b'e' => Some('\u{1b}'),
-        b' ' => Some(' '),
-        b'"' => Some('"'),
-        b'/' => Some('/'),
-        b'\\' => Some('\\'),
-        b'N' => Some('\u{85}'),
-        b'_' => Some('\u{a0}'),
-        b'L' => Some('\u{2028}'),
-        b'P' => Some('\u{2029}'),
-        _ => None,
-    };
-    if let Some(ch) = simple {
-        return Some((ch.to_string(), 2));
-    }
-    let digits = match escape {
-        b'x' => 2,
-        b'u' => 4,
-        b'U' => 8,
-        _ => return None,
-    };
-    let end = 2 + digits;
-    let value = u32::from_str_radix(raw.get(2..end)?, 16).ok()?;
-    Some((char::from_u32(value)?.to_string(), end))
-}
-
-fn push_mapped(decoded: &mut String, map: &mut Vec<usize>, value: &str, raw_end: usize) {
-    decoded.push_str(value);
-    while map.len() <= decoded.len() {
-        map.push(raw_end);
     }
 }
 

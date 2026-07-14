@@ -35,15 +35,15 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
     },
     SchemaTypeDescriptor {
         keyword: "datetime",
-        description: "ISO-8601 datetime.",
+        description: "ISO-8601 datetime; the timezone offset is optional.",
         accepted_constraints: "default, required",
-        json_schema_effect: "{ \"type\": \"string\", \"format\": \"date-time\" }",
+        json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-datetime\" }",
     },
     SchemaTypeDescriptor {
         keyword: "time",
         description: "Time of day with optional timezone.",
         accepted_constraints: "default, required",
-        json_schema_effect: "{ \"type\": \"string\", \"format\": \"time\" }",
+        json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-time\" }",
     },
     SchemaTypeDescriptor {
         keyword: "number",

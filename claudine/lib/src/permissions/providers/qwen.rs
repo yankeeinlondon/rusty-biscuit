@@ -1050,11 +1050,10 @@ fn build_one_shot_plan(change: &PolicyChange) -> Result<Option<OneShotMutationPl
         argv.push(allowed_servers.into_iter().collect::<Vec<_>>().join(","));
     }
 
-    Ok(Some(OneShotMutationPlan {
+    Ok(Some(super::common::one_shot_plan(
         argv,
-        env: BTreeMap::new(),
-        fidelity: crate::permissions::MappingFidelity::Approximate,
-    }))
+        crate::permissions::MappingFidelity::Approximate,
+    )))
 }
 
 fn push_string_array_value(root: &mut Value, path: &[&str], value: &str) {

@@ -4,7 +4,7 @@ use oauth2::{AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, 
 use schematic_define::PkceRequirement;
 
 use crate::error::OAuthError;
-use crate::manager::{build_http_client, extract_tokens, OAuth2Manager};
+use crate::manager::{extract_tokens, OAuth2Manager};
 use crate::types::{AuthorizationSession, StoredTokens};
 
 impl OAuth2Manager {
@@ -27,13 +27,21 @@ impl OAuth2Manager {
             auth_request = auth_request.add_scope(Scope::new(scope.clone()));
         }
 
-        let pkce_verifier = match self.config.provider.pkce {
-            PkceRequirement::Required | PkceRequirement::Supported => {
-                let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
-                auth_request = auth_request.set_pkce_challenge(challenge);
-                Some(verifier.secret().to_string())
-            }
-            PkceRequirement::NotUsed | _ => None,
+        let use_pkce = match self.config.provider.pkce {
+            PkceRequirement::Required | PkceRequirement::Supported => true,
+            PkceRequirement::NotUsed => false,
+            // `PkceRequirement` is `#[non_exhaustive]`, so this arm is mandatory.
+            // Default an unknown future variant to PKCE-enabled rather than
+            // silently downgrading to no PKCE, which would be a security regression.
+            _ => true,
+        };
+
+        let pkce_verifier = if use_pkce {
+            let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
+            auth_request = auth_request.set_pkce_challenge(challenge);
+            Some(verifier.secret().to_string())
+        } else {
+            None
         };
 
         let (url, csrf_state) = auth_request.url();
@@ -75,18 +83,14 @@ impl OAuth2Manager {
                 token_request.set_pkce_verifier(PkceCodeVerifier::new(verifier.clone()));
         }
 
-        let http_client = build_http_client()?;
         let token_response = token_request
-            .request_async(&http_client)
+            .request_async(&self.http_client)
             .await
             .map_err(|e| OAuthError::TokenExchange(e.to_string()))?;
 
         let tokens = extract_tokens(&token_response, &self.config.scopes);
 
-        let store = self.store.write().await;
-        store
-            .save(&tokens)
-            .map_err(|e| OAuthError::TokenStore(e.to_string()))?;
+        self.store.save(&tokens)?;
 
         Ok(tokens)
     }

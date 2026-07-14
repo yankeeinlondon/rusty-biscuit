@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
@@ -890,11 +889,10 @@ fn build_one_shot_plan(change: &PolicyChange) -> Result<Option<OneShotMutationPl
         argv.push(serde_json::to_string(&overlay)?);
     }
 
-    Ok(Some(OneShotMutationPlan {
+    Ok(Some(super::common::one_shot_plan(
         argv,
-        env: BTreeMap::new(),
-        fidelity: MappingFidelity::Exact,
-    }))
+        MappingFidelity::Exact,
+    )))
 }
 
 fn push_json_array_value(root: &mut Value, path: &[&str], value: String) {

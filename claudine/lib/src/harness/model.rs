@@ -78,13 +78,26 @@ pub struct AttemptOutcome {
     pub termination: ProcessTermination,
     /// Captured stderr text, if available.
     pub stderr_text: Option<String>,
-    /// Honest per-guard label carried from the stream summary so lifecycle
+    /// Honest error label carried from the stream summary so lifecycle
     /// recovery can read it. Populated for guard-driven terminations
-    /// (`"exit_expression"`, `"runaway_repetition"`, `"runaway_volume"`) and
-    /// for the timeout labels (`"timeout"`, `"step_timeout"`); `None`
-    /// for non-error outcomes and for terminations that did not synthesize a
-    /// summary error kind.
+    /// (`"exit_expression"`, `"runaway_repetition"`, `"runaway_volume"`),
+    /// for the timeout labels (`"timeout"`, `"step_timeout"`), and for
+    /// provider-semantic kinds the stream parsers set (`"rate_limit"`,
+    /// `"billing_error"`, `"unauthorized"`, …); `None` for non-error
+    /// outcomes and for terminations that did not synthesize a summary
+    /// error kind.
     pub error_kind: Option<String>,
+    /// Provider-surfaced or wrapper-synthesized error message from the
+    /// stream summary (e.g. `"Too many requests"`, or the guard/timeout
+    /// prose `apply_early_termination_to_summary` stamps at trip time).
+    /// `None` on the capture and interactive paths, which have no stream
+    /// parser.
+    pub error_message: Option<String>,
+    /// Configured duration of the timeout rule that fired, populated only
+    /// when `termination` is [`ProcessTermination::TimedOut`] (which rule is
+    /// disambiguated via `error_kind`: `"step_timeout"` = stream silence,
+    /// otherwise wall-clock).
+    pub timeout_secs: Option<u64>,
     /// Structured detail for a content-guard trip (exit-expression pattern,
     /// repetition cycle, or volume counters). At most the cluster relevant
     /// to the trip is populated; the remaining fields stay `None`. `None`

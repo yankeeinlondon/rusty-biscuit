@@ -52,13 +52,13 @@ pub struct SchematicDocExtension {
     pub env_mapping: Option<EnvMapping>,
 
     /// Default headers for all endpoints.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub headers: Vec<(String, String)>,
 }
 
 impl From<SchematicDocExtension> for serde_json::Value {
     fn from(ext: SchematicDocExtension) -> Self {
-        serde_json::to_value(ext).unwrap_or(serde_json::Value::Null)
+        serde_json::to_value(ext).expect("x-schematic extension is always serializable")
     }
 }
 
@@ -93,7 +93,7 @@ pub struct SchematicOpExtension {
     pub response: ApiResponse,
 
     /// Endpoint-specific headers.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub headers: Vec<(String, String)>,
 
     /// OAuth2 scopes required for this operation.
@@ -103,7 +103,7 @@ pub struct SchematicOpExtension {
 
 impl From<SchematicOpExtension> for serde_json::Value {
     fn from(ext: SchematicOpExtension) -> Self {
-        serde_json::to_value(ext).unwrap_or(serde_json::Value::Null)
+        serde_json::to_value(ext).expect("x-schematic extension is always serializable")
     }
 }
 
@@ -133,7 +133,7 @@ pub struct SchematicSchemaExtension {
 
 impl From<SchematicSchemaExtension> for serde_json::Value {
     fn from(ext: SchematicSchemaExtension) -> Self {
-        serde_json::to_value(ext).unwrap_or(serde_json::Value::Null)
+        serde_json::to_value(ext).expect("x-schematic extension is always serializable")
     }
 }
 
@@ -147,7 +147,7 @@ pub struct AuthExtension {
     pub strategy: AuthStrategy,
 
     /// Environment variable names for auth credentials (legacy format).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub env_auth: Vec<String>,
 
     /// Environment variable for Basic auth username.
@@ -157,7 +157,7 @@ pub struct AuthExtension {
 
 impl From<AuthExtension> for serde_json::Value {
     fn from(ext: AuthExtension) -> Self {
-        serde_json::to_value(ext).unwrap_or(serde_json::Value::Null)
+        serde_json::to_value(ext).expect("x-schematic extension is always serializable")
     }
 }
 
@@ -428,12 +428,13 @@ mod tests {
         let ext = AuthExtension {
             strategy: AuthStrategy::ApiKey {
                 header: "X-API-Key".to_string(),
+                value_prefix: None,
             },
             env_auth: vec!["MY_API_KEY".to_string()],
             env_username: None,
         };
 
-        if let AuthStrategy::ApiKey { header } = &ext.strategy {
+        if let AuthStrategy::ApiKey { header, .. } = &ext.strategy {
             assert_eq!(header, "X-API-Key");
         } else {
             panic!("Expected ApiKey strategy");
@@ -459,12 +460,53 @@ mod tests {
         let ext = AuthExtension {
             strategy: AuthStrategy::ApiKey {
                 header: "Authorization".to_string(),
+                value_prefix: None,
             },
             env_auth: vec!["KEY1".to_string(), "KEY2".to_string()],
             env_username: None,
         };
 
         let json = serde_json::to_string(&ext).unwrap();
+        let parsed: AuthExtension = serde_json::from_str(&json).unwrap();
+        assert_eq!(ext, parsed);
+    }
+
+    // =============================================
+    // Empty-collection round-trip (re-import own export)
+    // =============================================
+
+    #[test]
+    fn doc_extension_default_roundtrips_without_headers_field() {
+        let ext = SchematicDocExtension::default();
+        let json = serde_json::to_string(&ext).unwrap();
+        assert!(!json.contains("headers"));
+        let parsed: SchematicDocExtension = serde_json::from_str(&json).unwrap();
+        assert_eq!(ext, parsed);
+    }
+
+    #[test]
+    fn op_extension_empty_headers_roundtrips() {
+        let ext = SchematicOpExtension {
+            request: Some(ApiRequest::json_type("Body")),
+            response: ApiResponse::json_type("Response"),
+            headers: vec![],
+            oauth_scopes: None,
+        };
+        let json = serde_json::to_string(&ext).unwrap();
+        assert!(!json.contains("headers"));
+        let parsed: SchematicOpExtension = serde_json::from_str(&json).unwrap();
+        assert_eq!(ext, parsed);
+    }
+
+    #[test]
+    fn auth_extension_empty_env_auth_roundtrips() {
+        let ext = AuthExtension {
+            strategy: AuthStrategy::BearerToken { header: None },
+            env_auth: vec![],
+            env_username: None,
+        };
+        let json = serde_json::to_string(&ext).unwrap();
+        assert!(!json.contains("env_auth"));
         let parsed: AuthExtension = serde_json::from_str(&json).unwrap();
         assert_eq!(ext, parsed);
     }

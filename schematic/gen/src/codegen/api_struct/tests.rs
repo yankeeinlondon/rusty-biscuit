@@ -42,6 +42,10 @@ fn generate_api_struct_basic() {
 
     // Check new() constructor
     assert!(code.contains("pub fn new() -> Self"));
+    // The default client carries a request timeout, falling back to an untimed
+    // client only if the builder fails.
+    assert!(code.contains("reqwest::Client::builder()"));
+    assert!(code.contains(".timeout("));
     assert!(code.contains("reqwest::Client::new()"));
     assert!(code.contains("Self::BASE_URL.to_string()"));
 
@@ -167,6 +171,7 @@ fn generate_api_struct_with_api_key_auth() {
         docs_url: None,
         auth: AuthStrategy::ApiKey {
             header: "X-API-Key".to_string(),
+            value_prefix: None,
         },
         auth_policy: None,
         env_auth: vec!["API_KEY".to_string()],
@@ -241,6 +246,7 @@ fn generate_auth_strategy_init_bearer_with_header() {
 fn generate_auth_strategy_init_api_key() {
     let tokens = generate_auth_strategy_init(&AuthStrategy::ApiKey {
         header: "X-API-Key".to_string(),
+        value_prefix: None,
     });
     let code = tokens.to_string();
     assert!(code.contains("AuthStrategy :: ApiKey"));

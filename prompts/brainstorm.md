@@ -1,8 +1,7 @@
 ---
 $prompt:
     # describes what we're brainstorming about
-    context: string(required)
-id:
+    context: string(required;eager)
 interactive: true
 ---
 

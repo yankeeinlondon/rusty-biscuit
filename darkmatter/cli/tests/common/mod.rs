@@ -206,6 +206,15 @@ pub mod baseline {
         // Redact both so the baseline side normalizes to `<TMP>` too.
         paths.push("/tmp/dm-baseline".to_string());
         paths.push("/private/tmp/dm-baseline".to_string());
+
+        // Redact longest paths first. `normalize_string` replaces substrings in
+        // order, so a shorter path that is a prefix of a longer one (e.g.
+        // `/tmp/dm-baseline` inside `/private/tmp/dm-baseline`, or a raw temp
+        // dir inside its `/private`-canonicalized form) would otherwise match
+        // first and leave a stray `/private` prefix. That artifact happens to
+        // align with macOS's canonicalized temp paths, so the mismatch is
+        // invisible on macOS but fails on Linux (`<TMP>/x` vs `/private<TMP>/x`).
+        paths.sort_by_key(|p| std::cmp::Reverse(p.len()));
         paths
     }
 }

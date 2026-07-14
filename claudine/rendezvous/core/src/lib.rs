@@ -8,6 +8,7 @@
 //! projection. Later phases will extend the `Rendezvous` service with
 //! pairing and sync operations.
 
+pub mod document;
 pub mod envelope;
 pub mod identity;
 pub mod invitation;
@@ -29,7 +30,8 @@ pub use proto::rendezvous_server::{Rendezvous, RendezvousServer};
 pub use proto::{
     AppendEntryRequest, AppendEntryResponse, ApprovePeerRequest, ApprovePeerResponse,
     ConnectToPeerRequest, ConnectToPeerResponse, CreateInvitationRequest,
-    CreateInvitationResponse, ListChunkEntriesRequest, ListChunkEntriesResponse,
+    CreateInvitationResponse, HostCapability, ListChunkEntriesRequest, ListChunkEntriesResponse,
+    ListHostCapabilitiesRequest, ListHostCapabilitiesResponse,
     ListPairingsRequest, ListPairingsResponse, ListPeersRequest, ListPeersResponse,
     ListSessionChunksRequest, ListSessionChunksResponse, PairingInfo, PeerConnectionState,
     PeerInfo, PeerSource, PingRequest, PingResponse, ProjectionRow, QueryProjectionRequest,
@@ -39,6 +41,7 @@ pub use proto::{
     SyncWithPeerResponse, sync_frame,
 };
 
+pub use document::{CAPABILITY_DOMAIN, DocumentId, DocumentIdParseError, SESSION_DOMAIN};
 pub use envelope::{
     ENVELOPE_HASH_LENGTH, EnvelopeError, EnvelopeInbox, EnvelopeSealer, PayloadKind,
     SignedEnvelope,

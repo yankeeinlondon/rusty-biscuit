@@ -1,5 +1,31 @@
 //! Path parameter and folder key extraction for export.
 
+/// Strips RFC 6570 reserved-expansion markers from a path template.
+///
+/// A reserved param `{+name}` is a runtime encoding hint only; exported
+/// artifacts must render it as the valid `{name}` template. This rewrites
+/// every `{+name}` to `{name}` and leaves plain params untouched.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_gen::export::strip_reserved_markers;
+///
+/// assert_eq!(strip_reserved_markers("/models/{+repo_id}"), "/models/{repo_id}");
+/// assert_eq!(strip_reserved_markers("/models/{model}"), "/models/{model}");
+/// ```
+pub fn strip_reserved_markers(path: &str) -> String {
+    let mut result = String::with_capacity(path.len());
+    let mut chars = path.chars().peekable();
+    while let Some(c) = chars.next() {
+        result.push(c);
+        if c == '{' && chars.peek() == Some(&'+') {
+            chars.next();
+        }
+    }
+    result
+}
+
 /// Extracts a folder key from a URL path for Postman folder grouping.
 ///
 /// Algorithm:
@@ -102,6 +128,24 @@ mod tests {
     #[test]
     fn folder_key_no_leading_slash() {
         assert_eq!(extract_folder_key("models"), Some("models".to_string()));
+    }
+
+    #[test]
+    fn strip_reserved_markers_rewrites_plus_form() {
+        assert_eq!(
+            strip_reserved_markers("/models/{+repo_id}"),
+            "/models/{repo_id}"
+        );
+        assert_eq!(
+            strip_reserved_markers("/repos/{owner}/{repo}/contents/{+path}"),
+            "/repos/{owner}/{repo}/contents/{path}"
+        );
+    }
+
+    #[test]
+    fn strip_reserved_markers_leaves_plain_form() {
+        assert_eq!(strip_reserved_markers("/models/{model}"), "/models/{model}");
+        assert_eq!(strip_reserved_markers("/models"), "/models");
     }
 
     #[test]

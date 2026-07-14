@@ -118,11 +118,7 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
     }
 
     fn base_extra(&self, raw_kind: &str) -> Map<String, Value> {
-        let mut m = Map::new();
-        m.insert("provider".into(), Value::from("kimi"));
-        m.insert("line_num".into(), Value::from(self.line_num));
-        m.insert("raw_kind".into(), Value::from(raw_kind));
-        m
+        super::common::base_extra(Provider::KimiCode, self.line_num, raw_kind)
     }
 
     fn info_extra_with_kind(&self, raw_kind: &str, info_kind: &str) -> Map<String, Value> {
@@ -958,26 +954,11 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
     }
 
     fn emit_provider_extension(&mut self, kind: &str, payload: Value) {
-        debug!(
-            provider = "kimi",
-            event_type = %kind,
-            "kimi parser falling back to provider extension for unknown envelope shape"
-        );
-        self.sink
-            .on_semantic_event(SemanticEvent::ProviderExtension {
-                provider: Provider::KimiCode,
-                kind: kind.to_string(),
-                payload,
-            });
+        super::common::emit_provider_extension(&mut self.sink, Provider::KimiCode, kind, payload);
     }
 
     fn emit_malformed_warning(&mut self, err: &str) {
-        let mut extra = self.base_extra("malformed_json");
-        extra.insert("line_num".into(), Value::from(self.line_num));
-        self.sink.on_semantic_event(SemanticEvent::Warning {
-            message: format!("Malformed JSON on line {}: {err}", self.line_num),
-            extra: Value::Object(extra),
-        });
+        super::common::emit_malformed_warning(&mut self.sink, Provider::KimiCode, self.line_num, err);
     }
 }
 
@@ -1082,46 +1063,41 @@ impl<S: SemanticEventSink> SemanticStreamParser for KimiSemanticStreamParser<S> 
             self.num_turns,
             self.provider_status.as_deref(),
         );
-        let mut summary = StreamExecutionSummary {
-            provider: Provider::KimiCode,
-            session_id: self.session_id,
-            model: self.model,
-            assistant_text: self.assistant_text,
-            provider_status: self.provider_status,
-            exit_code,
-            is_error: self.is_error,
-            error_kind: self.error_kind,
-            error_message: self.error_message,
-            duration_ms: self.duration_ms,
-            duration_api_ms: None,
-            num_turns: if self.num_turns > 0 {
-                Some(self.num_turns)
-            } else {
-                None
-            },
-            token_usage: self.token_usage,
-            cost_usd: self.cost_usd,
-            tool_calls: if self.tool_calls > 0 {
-                Some(self.tool_calls)
-            } else {
-                None
-            },
-            permission_prompts: None,
-            user_input_prompts: None,
-            rate_limit: None,
-            context_usage: self.context_usage,
-            badges: Vec::new(),
-            raw_summary: None,
-            stderr_text: None,
-            stderr_diagnostics: None,
-        };
         let _ = self.prompt_status_seen;
-        summary.badges = crate::stream::badges::derive_badges(&summary, Provider::KimiCode);
-        summary
+        super::common::finish_summary(
+            Provider::KimiCode,
+            StreamExecutionSummary {
+                session_id: self.session_id,
+                model: self.model,
+                assistant_text: self.assistant_text,
+                provider_status: self.provider_status,
+                exit_code,
+                is_error: self.is_error,
+                error_kind: self.error_kind,
+                error_message: self.error_message,
+                duration_ms: self.duration_ms,
+                num_turns: (self.num_turns > 0).then_some(self.num_turns),
+                token_usage: self.token_usage,
+                cost_usd: self.cost_usd,
+                tool_calls: (self.tool_calls > 0).then_some(self.tool_calls),
+                context_usage: self.context_usage,
+                ..Default::default()
+            },
+        )
     }
 }
 
 /// Map a JSON-RPC error code or message to a typed [`SemanticErrorKind`].
+const ERROR_KEYWORDS: super::common::ErrorKeywords = super::common::ErrorKeywords {
+    kind_buckets: &[
+    ],
+    msg_buckets: &[
+        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "api error", "upstream"]),
+        (SemanticErrorKind::Configuration, &["api key", "authentication", "not authorized", "permission denied", "auth", "config"]),
+        (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "aborted"]),
+    ],
+};
+
 fn classify_jsonrpc_error(code: i32, message: &str) -> SemanticErrorKind {
     match code {
         KimiJsonRpcError::AUTH_EXPIRED => return SemanticErrorKind::Configuration,
@@ -1133,28 +1109,7 @@ fn classify_jsonrpc_error(code: i32, message: &str) -> SemanticErrorKind {
         | KimiJsonRpcError::INTERNAL_ERROR => return SemanticErrorKind::AgentNative,
         _ => {}
     }
-    let lower = message.to_ascii_lowercase();
-    if lower.contains("rate limit")
-        || lower.contains("quota")
-        || lower.contains("billing")
-        || lower.contains("api error")
-        || lower.contains("upstream")
-    {
-        return SemanticErrorKind::ApiRemote;
-    }
-    if lower.contains("api key")
-        || lower.contains("authentication")
-        || lower.contains("not authorized")
-        || lower.contains("permission denied")
-        || lower.contains("auth")
-        || lower.contains("config")
-    {
-        return SemanticErrorKind::Configuration;
-    }
-    if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("aborted") {
-        return SemanticErrorKind::Interrupted;
-    }
-    SemanticErrorKind::AgentNative
+    super::common::classify_error_by_keywords(&ERROR_KEYWORDS, None, Some(message))
 }
 
 #[cfg(test)]

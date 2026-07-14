@@ -1,0 +1,2 @@
+- ✗ the document [doc.md]({DOC_URL}) failed schema validation:
+    - arm[0]: title is a required property

@@ -25,6 +25,7 @@ use tonic::{Request, Response, Status};
 
 use crate::peers::PeerRegistry;
 use crate::projection::Projection;
+use crate::register::RegisterStore;
 use crate::session_log::SessionLogManager;
 use crate::storage::Storage;
 use crate::sync::{SyncError, SyncService};
@@ -38,6 +39,7 @@ pub struct RendezvousService {
     identity: Arc<NodeIdentity>,
     storage: Storage,
     sync_service: SyncService,
+    registers: RegisterStore,
     peers: Option<PeerRegistry>,
     quic_local_addr: Option<SocketAddr>,
 }
@@ -64,6 +66,7 @@ impl RendezvousService {
         identity: Arc<NodeIdentity>,
         storage: Storage,
         sync_service: SyncService,
+        registers: RegisterStore,
     ) -> Self {
         let started_at = Instant::now();
         let started_at_unix_ms = unix_now_ms();
@@ -75,6 +78,7 @@ impl RendezvousService {
             identity,
             storage,
             sync_service,
+            registers,
             peers: None,
             quic_local_addr: None,
         }
@@ -415,6 +419,37 @@ impl Rendezvous for RendezvousService {
             .collect();
         Ok(Response::new(QueryProjectionResponse { rows: proto_rows }))
     }
+
+    async fn list_host_capabilities(
+        &self,
+        _request: Request<rendezvous_core::ListHostCapabilitiesRequest>,
+    ) -> Result<Response<rendezvous_core::ListHostCapabilitiesResponse>, Status> {
+        let registers = self.registers.clone();
+        let hosts = tokio::task::spawn_blocking(move || {
+            let docs = registers.list_documents()?;
+            let mut hosts = Vec::with_capacity(docs.len());
+            for doc in docs {
+                // Only capability registers surface on this RPC; other
+                // register domains will get their own read surfaces.
+                if !matches!(doc, rendezvous_core::DocumentId::Capability { .. }) {
+                    continue;
+                }
+                let Some(fields) = registers.deep_value(&doc)? else {
+                    continue;
+                };
+                hosts.push(rendezvous_core::HostCapability {
+                    document_id: doc.as_path(),
+                    owner_node_id: doc.owner_node_id().to_string(),
+                    fields_json: fields.to_string(),
+                });
+            }
+            Ok::<_, crate::register::RegisterError>(hosts)
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(internal)?;
+        Ok(Response::new(rendezvous_core::ListHostCapabilitiesResponse { hosts }))
+    }
 }
 
 fn parse_optional_json(raw: &str) -> Result<Option<serde_json::Value>, serde_json::Error> {
@@ -504,8 +539,14 @@ mod tests {
             Arc::clone(&identity),
         )
         .expect("mgr");
+        let registers = crate::register::RegisterStore::new(
+            storage.clone(),
+            Arc::clone(&identity),
+        )
+        .expect("registers");
         let sync_service = SyncService::new(
             session_log.clone(),
+            registers.clone(),
             storage.clone(),
             Arc::clone(&identity),
         );
@@ -515,6 +556,7 @@ mod tests {
             identity,
             storage,
             sync_service,
+            registers,
         );
         Harness {
             service,

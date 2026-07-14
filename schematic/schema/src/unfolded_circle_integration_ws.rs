@@ -21,7 +21,7 @@
     clippy::collapsible_if,
     clippy::possible_missing_else,
     clippy::result_large_err,
-    clippy::single_match
+    clippy::single_match,
 )]
 pub use schematic_definitions::unfolded_circle::integration_ws::*;
 /// Builds the Unfolded Circle Integration WebSocket API definition.
@@ -41,20 +41,19 @@ impl UnfoldedCircleIntegrationWs {
     pub fn new() -> Self {
         Self {
             base_url: "ws://remote.local".to_string(),
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(vec![
-                            "UCR_INTEGRATION_TOKEN".to_string(),
-                        ]),
+                        names: schematic_define::EnvList::new(
+                            vec!["UCR_INTEGRATION_TOKEN".to_string()],
+                        ),
                         header: "auth-token".to_string(),
                     }),
                     ..Default::default()
-                },
-            ),
+                }),
         }
     }
     /// Create a new client with a custom base URL.
@@ -62,20 +61,19 @@ impl UnfoldedCircleIntegrationWs {
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(vec![
-                            "UCR_INTEGRATION_TOKEN".to_string(),
-                        ]),
+                        names: schematic_define::EnvList::new(
+                            vec!["UCR_INTEGRATION_TOKEN".to_string()],
+                        ),
                         header: "auth-token".to_string(),
                     }),
                     ..Default::default()
-                },
-            ),
+                }),
         }
     }
     /// Returns the configured base URL.
@@ -90,10 +88,11 @@ impl UnfoldedCircleIntegrationWs {
     ) -> Result<IntegrationClient, super::ws_shared::WsError> {
         let path = "/intg".to_string();
         if path.contains('{') {
-            return Err(super::ws_shared::WsError::Protocol(format!(
-                "unresolved path placeholder in '{}'",
-                path
-            )));
+            return Err(
+                super::ws_shared::WsError::Protocol(
+                    format!("unresolved path placeholder in '{}'", path),
+                ),
+            );
         }
         let url = format!("{}{}", self.base_url, path);
         let header_pairs = self
@@ -112,7 +111,9 @@ impl Default for UnfoldedCircleIntegrationWs {
 ///Client for the Integration endpoint.
 pub struct IntegrationClient {
     transport: super::ws_shared::WsTransportHandle,
-    event_rx: tokio::sync::mpsc::Receiver<Result<serde_json::Value, super::ws_shared::WsError>>,
+    event_rx: tokio::sync::mpsc::Receiver<
+        Result<serde_json::Value, super::ws_shared::WsError>,
+    >,
     request_timeout: std::time::Duration,
     max_pending: usize,
 }
@@ -130,12 +131,19 @@ impl IntegrationClient {
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
         let mut request = url.to_string().into_client_request()?;
         for (name, value) in header_pairs {
-            if let (Ok(hdr_name), Ok(hdr_value)) = (
-                name.parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>(),
-                value.parse::<tokio_tungstenite::tungstenite::http::header::HeaderValue>(),
-            ) {
-                request.headers_mut().insert(hdr_name, hdr_value);
-            }
+            let hdr_name = name
+                .parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>()
+                .map_err(|e| super::ws_shared::WsError::InvalidHeader {
+                    name: name.clone(),
+                    reason: e.to_string(),
+                })?;
+            let hdr_value = value
+                .parse::<tokio_tungstenite::tungstenite::http::header::HeaderValue>()
+                .map_err(|e| super::ws_shared::WsError::InvalidHeader {
+                    name: name.clone(),
+                    reason: e.to_string(),
+                })?;
+            request.headers_mut().insert(hdr_name, hdr_value);
         }
         let connect = tokio_tungstenite::connect_async_with_config(
             request,
@@ -144,9 +152,9 @@ impl IntegrationClient {
         );
         let (ws_stream, _) = tokio::time::timeout(options.handshake_timeout, connect)
             .await
-            .map_err(|_| {
-                super::ws_shared::WsError::HandshakeTimeout(options.handshake_timeout.as_secs())
-            })??;
+            .map_err(|_| super::ws_shared::WsError::HandshakeTimeout(
+                options.handshake_timeout.as_secs(),
+            ))??;
         Ok(ws_stream)
     }
     /// Connect to the endpoint.
@@ -157,16 +165,24 @@ impl IntegrationClient {
     ) -> Result<Self, super::ws_shared::WsError> {
         let ws_stream = Self::dial(&url, &_options, &header_pairs).await?;
         let _receive_timeout = _options.receive_timeout;
-        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(_options.outbound_capacity);
+        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
+            _options.outbound_capacity,
+        );
         let (event_tx, event_rx) = tokio::sync::mpsc::channel(_options.inbound_capacity);
-        let (state_tx, state_rx) =
-            tokio::sync::watch::channel(super::ws_shared::WsConnectionState::Connecting);
+        let (state_tx, state_rx) = tokio::sync::watch::channel(
+            super::ws_shared::WsConnectionState::Connecting,
+        );
         let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
         let pending: std::sync::Arc<
             tokio::sync::Mutex<
-                std::collections::HashMap<u64, tokio::sync::oneshot::Sender<serde_json::Value>>,
+                std::collections::HashMap<
+                    u64,
+                    tokio::sync::oneshot::Sender<serde_json::Value>,
+                >,
             >,
-        > = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+        > = std::sync::Arc::new(
+            tokio::sync::Mutex::new(std::collections::HashMap::new()),
+        );
         let url_for_supervisor = url.clone();
         let header_pairs_for_supervisor = header_pairs.clone();
         let options_for_supervisor = _options.clone();
@@ -184,24 +200,30 @@ impl IntegrationClient {
                     stream
                 } else {
                     let Some(policy) = reconnect_policy.as_ref() else {
-                        let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
+                        let _ = state_tx
+                            .send(super::ws_shared::WsConnectionState::Closed);
                         break;
                     };
                     if let Some(max_attempts) = policy.max_attempts
                         && reconnect_attempt >= max_attempts
                     {
-                        let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
+                        let _ = state_tx
+                            .send(super::ws_shared::WsConnectionState::Closed);
                         break;
                     }
-                    let _ = state_tx.send(super::ws_shared::WsConnectionState::Connecting);
-                    let delay = super::ws_shared::reconnect_delay(policy, reconnect_attempt);
+                    let _ = state_tx
+                        .send(super::ws_shared::WsConnectionState::Connecting);
+                    let delay = super::ws_shared::reconnect_delay(
+                        policy,
+                        reconnect_attempt,
+                    );
                     tokio::time::sleep(delay).await;
                     match IntegrationClient::dial(
-                        &url_for_supervisor,
-                        &options_for_supervisor,
-                        &header_pairs_for_supervisor,
-                    )
-                    .await
+                            &url_for_supervisor,
+                            &options_for_supervisor,
+                            &header_pairs_for_supervisor,
+                        )
+                        .await
                     {
                         Ok(stream) => {
                             reconnect_attempt = reconnect_attempt.saturating_add(1);
@@ -281,7 +303,10 @@ impl IntegrationClient {
         })
     }
     /// Send a fire-and-forget message.
-    pub async fn send(&self, message: serde_json::Value) -> Result<(), super::ws_shared::WsError> {
+    pub async fn send(
+        &self,
+        message: serde_json::Value,
+    ) -> Result<(), super::ws_shared::WsError> {
         self.send_typed(&message).await
     }
     /// Send a strongly-typed message payload.
@@ -305,8 +330,9 @@ impl IntegrationClient {
     /// Returns a stream of inbound events.
     pub fn events(
         self,
-    ) -> tokio_stream::wrappers::ReceiverStream<Result<serde_json::Value, super::ws_shared::WsError>>
-    {
+    ) -> tokio_stream::wrappers::ReceiverStream<
+        Result<serde_json::Value, super::ws_shared::WsError>,
+    > {
         tokio_stream::wrappers::ReceiverStream::new(self.event_rx)
     }
     /// Initiate a graceful close.
@@ -332,9 +358,9 @@ impl IntegrationClient {
         {
             let mut pending = self.transport.pending.lock().await;
             if pending.len() >= self.max_pending {
-                return Err(super::ws_shared::WsError::BackpressureFull(
-                    self.max_pending,
-                ));
+                return Err(
+                    super::ws_shared::WsError::BackpressureFull(self.max_pending),
+                );
             }
             pending.insert(id, tx);
         }
@@ -389,20 +415,26 @@ impl UnfoldedCircleEventHub {
     pub fn new() -> Self {
         Self::default()
     }
-    async fn register_connection(&self) -> (u64, tokio::sync::mpsc::Receiver<serde_json::Value>) {
+    async fn register_connection(
+        &self,
+    ) -> (u64, tokio::sync::mpsc::Receiver<serde_json::Value>) {
         use std::sync::atomic::Ordering;
         let connection_id = self
             .state
             .next_connection_id
             .fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = tokio::sync::mpsc::channel(HOST_OUTBOUND_CAPACITY);
-        self.state.connections.write().await.insert(
-            connection_id,
-            HostConnection {
-                sender,
-                subscribed: false,
-            },
-        );
+        self.state
+            .connections
+            .write()
+            .await
+            .insert(
+                connection_id,
+                HostConnection {
+                    sender,
+                    subscribed: false,
+                },
+            );
         (connection_id, receiver)
     }
     async fn connection_sender(
@@ -428,7 +460,10 @@ impl UnfoldedCircleEventHub {
             .await
             .iter()
             .filter(|(_, connection)| !only_subscribed || connection.subscribed)
-            .map(|(connection_id, connection)| (*connection_id, connection.sender.clone()))
+            .map(|(connection_id, connection)| (
+                *connection_id,
+                connection.sender.clone(),
+            ))
             .collect();
         let mut delivered = 0;
         let mut stale = Vec::new();
@@ -445,7 +480,13 @@ impl UnfoldedCircleEventHub {
     }
     /// Mark a connection as subscribed to unsolicited events.
     pub async fn mark_subscribed(&self, connection_id: u64) -> bool {
-        if let Some(connection) = self.state.connections.write().await.get_mut(&connection_id) {
+        if let Some(connection) = self
+            .state
+            .connections
+            .write()
+            .await
+            .get_mut(&connection_id)
+        {
             connection.subscribed = true;
             true
         } else {
@@ -478,9 +519,7 @@ impl UnfoldedCircleEventHub {
             Ok(()) => Ok(()),
             Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
                 self.remove_connection(connection_id).await;
-                Err(super::ws_shared::WsError::BackpressureFull(
-                    HOST_OUTBOUND_CAPACITY,
-                ))
+                Err(super::ws_shared::WsError::BackpressureFull(HOST_OUTBOUND_CAPACITY))
             }
             Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
                 self.remove_connection(connection_id).await;
@@ -540,10 +579,11 @@ impl WsConnectionContext {
     /// ## Errors
     ///
     /// Propagates queueing errors from the underlying event hub.
-    pub async fn send(&self, message: serde_json::Value) -> Result<(), super::ws_shared::WsError> {
-        self.hub
-            .send_to_connection(self.connection_id, message)
-            .await
+    pub async fn send(
+        &self,
+        message: serde_json::Value,
+    ) -> Result<(), super::ws_shared::WsError> {
+        self.hub.send_to_connection(self.connection_id, message).await
     }
 }
 /// WebSocket host server.
@@ -573,9 +613,9 @@ impl UnfoldedCircleIntegrationWsHost {
             .status(status)
             .body(Some(message.to_string()))
             .unwrap_or_else(|_| {
-                tokio_tungstenite::tungstenite::http::Response::new(Some(
-                    "Unauthorized".to_string(),
-                ))
+                tokio_tungstenite::tungstenite::http::Response::new(
+                    Some("Unauthorized".to_string()),
+                )
             })
     }
     fn validate_upgrade_request(
@@ -592,20 +632,23 @@ impl UnfoldedCircleIntegrationWsHost {
         let Some(received) = request
             .headers()
             .get("auth-token")
-            .and_then(|value| value.to_str().ok())
-        else {
-            return Err(Self::auth_error_response(
-                tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
-                "Missing authentication header",
-            ));
+            .and_then(|value| value.to_str().ok()) else {
+            return Err(
+                Self::auth_error_response(
+                    tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
+                    "Missing authentication header",
+                ),
+            );
         };
         if expected_values.iter().any(|expected| expected == received) {
             Ok(response)
         } else {
-            Err(Self::auth_error_response(
-                tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
-                "Invalid authentication header",
-            ))
+            Err(
+                Self::auth_error_response(
+                    tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
+                    "Invalid authentication header",
+                ),
+            )
         }
     }
     /// Create a new shared event hub for integrations that need unsolicited
@@ -635,9 +678,11 @@ impl UnfoldedCircleIntegrationWsHost {
             let handler = handler.clone();
             let hub = hub.clone();
             tokio::spawn(async move {
-                if let Ok(ws_stream) =
-                    tokio_tungstenite::accept_hdr_async(stream, Self::validate_upgrade_request)
-                        .await
+                if let Ok(ws_stream) = tokio_tungstenite::accept_hdr_async(
+                        stream,
+                        Self::validate_upgrade_request,
+                    )
+                    .await
                 {
                     Self::handle_connection(ws_stream, handler, hub).await;
                 }
@@ -685,7 +730,10 @@ impl UnfoldedCircleIntegrationWsHost {
         });
         if !Self::auth_is_required()
             && hub
-                .send_to_connection(connection_id, Self::authentication_success_response())
+                .send_to_connection(
+                    connection_id,
+                    Self::authentication_success_response(),
+                )
                 .await
                 .is_err()
         {
@@ -698,8 +746,14 @@ impl UnfoldedCircleIntegrationWsHost {
                 Ok(Message::Text(text)) => {
                     match serde_json::from_str::<serde_json::Value>(text.as_ref()) {
                         Ok(request) => {
-                            let context = WsConnectionContext::new(connection_id, hub.clone());
-                            if let Some(response) = handler.handle_message(request, context).await {
+                            let context = WsConnectionContext::new(
+                                connection_id,
+                                hub.clone(),
+                            );
+                            if let Some(response) = handler
+                                .handle_message(request, context)
+                                .await
+                            {
                                 if hub
                                     .send_to_connection(connection_id, response)
                                     .await
@@ -715,8 +769,14 @@ impl UnfoldedCircleIntegrationWsHost {
                 Ok(Message::Binary(data)) => {
                     match serde_json::from_slice::<serde_json::Value>(data.as_ref()) {
                         Ok(request) => {
-                            let context = WsConnectionContext::new(connection_id, hub.clone());
-                            if let Some(response) = handler.handle_message(request, context).await {
+                            let context = WsConnectionContext::new(
+                                connection_id,
+                                hub.clone(),
+                            );
+                            if let Some(response) = handler
+                                .handle_message(request, context)
+                                .await
+                            {
                                 if hub
                                     .send_to_connection(connection_id, response)
                                     .await

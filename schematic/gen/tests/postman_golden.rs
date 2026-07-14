@@ -263,6 +263,7 @@ fn build_file_upload_elevenlabs() -> Value {
         "https://api.elevenlabs.io/v1",
         AuthStrategy::ApiKey {
             header: "xi-api-key".to_string(),
+            value_prefix: None,
         },
         None,
         vec![endpoint(

@@ -73,6 +73,9 @@ pub fn generate_request_enum_with_suffix(api: &RestApi, suffix: &str) -> TokenSt
     // Generate endpoint_id match arms
     let endpoint_id_arms = generate_endpoint_id_arms(api, suffix);
 
+    // Generate response_kind match arms
+    let response_kind_arms = generate_response_kind_arms(api);
+
     // Generate individual From implementations
     let from_impls = generate_from_impls(api, &enum_name, suffix);
 
@@ -106,6 +109,17 @@ pub fn generate_request_enum_with_suffix(api: &RestApi, suffix: &str) -> TokenSt
             pub fn endpoint_id(&self) -> &'static str {
                 match self {
                     #endpoint_id_arms
+                }
+            }
+
+            /// Returns how this endpoint's response body is decoded.
+            ///
+            /// The generic `request::<T>()` decodes JSON; it consults this to
+            /// reject text, binary, and empty endpoints up front.
+            #[must_use]
+            pub fn response_kind(&self) -> crate::shared::ResponseKind {
+                match self {
+                    #response_kind_arms
                 }
             }
         }
@@ -153,6 +167,28 @@ fn generate_endpoint_id_arms(api: &RestApi, suffix: &str) -> TokenStream {
         // Use fully qualified syntax to access the trait const
         quote! {
             Self::#variant_name(_) => <#struct_name as crate::shared::EndpointSpec>::ENDPOINT_ID,
+        }
+    });
+
+    quote! { #(#arms)* }
+}
+
+/// Generates match arms for the `response_kind()` method.
+fn generate_response_kind_arms(api: &RestApi) -> TokenStream {
+    use schematic_define::ApiResponse;
+
+    let arms = api.endpoints.iter().map(|endpoint| {
+        let variant_name = format_ident!("{}", endpoint.id);
+        let kind = match &endpoint.response {
+            ApiResponse::Text => quote! { crate::shared::ResponseKind::Text },
+            ApiResponse::Binary => quote! { crate::shared::ResponseKind::Binary },
+            ApiResponse::Empty => quote! { crate::shared::ResponseKind::Empty },
+            // JSON and any future variants decode through the JSON path.
+            _ => quote! { crate::shared::ResponseKind::Json },
+        };
+
+        quote! {
+            Self::#variant_name(_) => #kind,
         }
     });
 

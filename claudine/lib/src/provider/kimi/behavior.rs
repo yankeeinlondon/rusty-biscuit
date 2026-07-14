@@ -1,6 +1,6 @@
 //! Behavior-trait implementations for the Kimi Code provider.
 
-use crate::adapters::ProviderAdapter;
+use crate::hook_adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
 use crate::provider::behavior::{
     AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
@@ -41,7 +41,7 @@ impl AdapterBehavior for KimiProvider {
     }
 
     fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
-        &crate::adapters::KIMI_ADAPTER
+        &crate::hook_adapters::KIMI_ADAPTER
     }
 }
 impl ConfiguratorBehavior for KimiProvider {

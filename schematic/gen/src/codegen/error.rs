@@ -30,6 +30,30 @@ pub fn generate_request_parts_type() -> TokenStream {
     }
 }
 
+/// Generates the `ResponseKind` type describing how an endpoint's response is
+/// decoded.
+///
+/// The generic `request::<T>()` method decodes as JSON; each request enum
+/// reports its endpoint's [`ResponseKind`] so the JSON path can reject text,
+/// binary, and empty endpoints with an actionable error instead of a spurious
+/// JSON parse failure.
+pub fn generate_response_kind_type() -> TokenStream {
+    quote! {
+        /// How a generated endpoint's response body is decoded.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum ResponseKind {
+            /// Decoded as JSON via `request::<T>()`.
+            Json,
+            /// Returned as text via `request_text()`.
+            Text,
+            /// Returned as raw bytes via `request_bytes()`.
+            Binary,
+            /// Discarded via `request_empty()`.
+            Empty,
+        }
+    }
+}
+
 /// Generates the SchematicError enum for runtime errors.
 ///
 /// This error type is used by generated API client code and provides variants
@@ -143,6 +167,24 @@ pub fn generate_error_type() -> TokenStream {
             /// required environment variables for header values are not set.
             #[error("Header error: {0}")]
             Header(#[from] schematic_define::HeaderError),
+
+            /// The generic JSON `request()` was used on a non-JSON endpoint.
+            ///
+            /// Text, binary, and empty endpoints must be called through
+            /// `request_text()`, `request_bytes()`, or `request_empty()`
+            /// respectively. Routing them through `request::<T>()` would decode
+            /// the body as JSON, so it is rejected up front with this error.
+            #[error(
+                "endpoint `{endpoint_id}` returns a {kind} response; call `{expected_method}` instead of the generic `request()`"
+            )]
+            WrongResponseDecoder {
+                /// The endpoint that was called through the wrong decoder.
+                endpoint_id: &'static str,
+                /// The endpoint's declared response kind (e.g. "text").
+                kind: &'static str,
+                /// The convenience method that should be used instead.
+                expected_method: &'static str,
+            },
 
             /// Internal error in schematic runtime.
             ///
