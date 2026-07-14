@@ -1,16 +1,10 @@
 ---
 $schema: ./_schema.yaml
-created: 2026-07-12
-last_updated: 2026-07-12
-agent: claude-code
-model: claude-opus-4-8
-docs: https://kilocode.ai/docs/
-# Kilo reuses OpenCode's wire PARSER but is a DISTINCT provider record with its
-# own selectable vocabulary. Its Phase-A seed was transcribed as an ordered copy
-# of OpenCode's table (both front the same OpenCode-compatible stream shape), so
-# the seeded buckets below are intentionally identical to opencode.md — a
-# JUSTIFIED similarity, not copy-paste research (see `## Shared Parser, Distinct
-# Vocabulary`). Every needle is a preserved Phase-A seed (evidence: seed).
+created: 2026-07-14
+last_updated: 2026-07-14
+agent: codex
+model: default
+docs: https://kilo.ai/docs/code-with-ai/platforms/cli
 kind_buckets:
   - kind: api_remote
     needles:
@@ -61,6 +55,12 @@ msg_buckets:
         evidence: seed
       - text: api timeout
         evidence: seed
+      - text: server error
+        evidence: source_code
+        source: https://github.com/Kilo-Org/kilocode/blob/v7.2.48/packages/opencode/src/provider/error.ts#L123-L166
+      - text: response decompression failed
+        evidence: source_code
+        source: https://github.com/Kilo-Org/kilocode/blob/v7.2.48/packages/opencode/src/session/message-v2.ts#L1256-L1270
   - kind: configuration
     needles:
       - text: api key
@@ -77,6 +77,15 @@ msg_buckets:
         evidence: seed
       - text: providermodelnotfound
         evidence: seed
+      - text: please reauthenticate with the copilot provider
+        evidence: source_code
+        source: https://github.com/Kilo-Org/kilocode/blob/v7.2.48/packages/opencode/src/provider/error.ts#L48-L54
+      - text: 'unauthorized:'
+        evidence: source_code
+        source: https://github.com/Kilo-Org/kilocode/blob/v7.2.48/packages/opencode/src/provider/error.ts#L78-L86
+      - text: 'forbidden:'
+        evidence: source_code
+        source: https://github.com/Kilo-Org/kilocode/blob/v7.2.48/packages/opencode/src/provider/error.ts#L78-L86
   - kind: interrupted
     needles:
       - text: interrupt
@@ -86,155 +95,214 @@ msg_buckets:
       - text: aborted
         evidence: seed
 gaps:
-  - area: kilo-native-error-strings
+  - area: provider-specific-capacity-copy
     notes: >-
-      Kilo's provider-specific failure payloads — `PROMOTION_MODEL_LIMIT_REACHED`
-      (non-retryable promotion cap), `PAID_MODEL_AUTH_REQUIRED`, and gateway
-      `insufficient balance` / HTTP 402 — are documented in `signals/kilo.md` as
-      wire-level DETECTION records on the OpenCode-shaped SSE `session.error`
-      payload. They are NOT yet reflected as distinct rendering needles here: the
-      seed is an ordered copy of OpenCode's table, and this fleet run does not
-      graduate a Kilo-only substring without a source-pinned rendering string.
-      Recorded as a gap so Phase C can decide whether Kilo's promotion-limit /
-      paid-model-auth phrasing should diverge from the shared OpenCode seed.
-  - area: capacity-overload-phrasing
+      Kilo's retry status can carry provider-supplied overload wording, and the
+      signals research has an overloaded retry-status record. No exact tagged
+      source establishes that overloaded, at capacity, or an equivalent phrase
+      reaches the terminal error record's free-form message, so none is guessed.
+  - area: resource-exhausted-spelling
     notes: >-
-      No seeded Kilo needle covers the generic capacity/overload motivating
-      class in the rendering vocabulary. Kilo's closest surface is the
-      non-retryable `PROMOTION_MODEL_LIMIT_REACHED` promotion cap (a
-      usage-cap-family DETECTION record in `signals/kilo.md`), not a provider
-      `overloaded`/`503` string. No capacity substring needle is graduated
-      without a pinned citation; recorded as a gap for Phase C adjudication.
+      No resource_exhausted rendering was confirmed in Kilo v7.2.48's
+      structured run error path.
+  - area: numeric-code-contract
+    notes: >-
+      APIError may carry an HTTP statusCode and responseBody, but Claudine's
+      Kilo/OpenCode classifier has no numeric-code input. Bare 401, 402, 403,
+      429, and 503 message needles are deliberately rejected.
+  - area: kilo-response-body-codes
+    notes: >-
+      PAID_MODEL_AUTH_REQUIRED and PROMOTION_MODEL_LIMIT_REACHED are stable
+      Kilo response-body codes used by signal detection, but the run command
+      classifies and displays error.data.message rather than promoting those
+      responseBody tokens into the rendering message.
 changes: []
-requires_claudine_update: false
+requires_claudine_update: true
 reason: >-
-  All Phase-A seeds are preserved verbatim; no runtime vocabulary delta is
-  proposed. Kilo's seed is intentionally identical to OpenCode's (shared wire
-  parser, ordered-copy seed) — a justified similarity — and its native
-  promotion-limit / paid-model-auth phrasings are recorded as gaps rather than
-  graduated. Research does not change classification behavior.
+  The proposal preserves every seeded bucket and item position, then appends
+  source-attested Kilo-normalized server, transport, reauthentication,
+  authentication, and authorization message phrases absent from the seeded
+  runtime table.
 ---
 
-# Error Vocabulary Research on Kilo
+# Kilo Code CLI Error-Classification Vocabulary
 
 ## Overview
 
-Kilo (Kilo Code's coding CLI) speaks an OpenCode-compatible stream shape and
-therefore reuses Claudine's OpenCode wire *parser* — but it is a **distinct
-provider record** with its own selectable error vocabulary. In Phase A its
-seeded table was transcribed as an ordered copy of OpenCode's (both front the
-same wire shape), which is why the frontmatter buckets here are identical to
-`opencode.md`. That identity is a *justified* similarity, not lazily copied
-research: Kilo's genuinely distinct error surfaces are its provider-specific SSE
-`session.error` payloads (promotion limits, paid-model auth, gateway funding
-failures), which this document researches separately below.
+Kilo Code CLI is open source and is derived from OpenCode. Its non-interactive
+`kilo run --format json` mode writes newline-delimited JSON records. At tag
+`v7.2.48`, terminal session failures appear as `error` records containing a
+structured named-error object. The object has a `name` discriminator and
+usually `data.message`; API failures can additionally retain an HTTP
+`statusCode`, response headers, a serialized response body, and metadata.
 
-## Shared Parser, Distinct Vocabulary
-
-Kilo flows through `for_provider(Kilo)` into the OpenCode wire parser, which is
-constructed with a fixed `Kilo` identity so it selects `vocabulary::
-error_keywords(Kilo)` — Kilo's own table — never OpenCode's. Reusing a parser
-does **not** imply reusing a vocabulary (Phase A proved this with an end-to-end
-Kilo fixture whose winning classification differs from OpenCode). The tables
-happen to be byte-identical today because Kilo was seeded from OpenCode's; a
-future Kilo-only delta (see gaps) would diverge them without touching the shared
-parser. This is exactly the case the cross-provider copy-paste smell check is
-meant to surface, and the similarity is recorded here as justified.
+The JSON output option and event envelope are source-defined contracts, but
+Kilo's official CLI documentation does not publish an error taxonomy. Some
+messages are normalized by Kilo, while ordinary provider API messages pass
+through upstream text and are less stable. Claudine reuses its OpenCode stream
+parser for Kilo but selects Kilo's independently ordered vocabulary.
 
 ## Error Surfaces
 
 ### Structured Error Kinds
 
-The OpenCode-shaped stream carries a short kind token on error frames; the seeded
-`kind_buckets` classify from it. Diagnostic side-channel; message branch does the
-primary work.
+The JSON error object's `name` is the structured discriminator. Kilo v7.2.48
+defines `ProviderAuthError`, `MessageAbortedError`, `MessageOutputLengthError`,
+`APIError`, `ContextOverflowError`, `StructuredOutputError`, and `UnknownError`
+for assistant failures. These names are a first-class schema rather than a
+diagnostic side-channel.
+
+The seeded cascade already maps `ProviderAuthError` to `configuration`,
+`MessageAbortedError` to `interrupted`, and `APIError` to the late
+`api_remote` bucket. Output-length, context-overflow, structured-output, and
+unknown errors deliberately fall through to `agent_native`; none of their
+names alone proves a configuration or remote-service failure.
 
 ### Message Text
 
-The primary rendering surface. Error frame prose formatted from the
-OpenCode-compatible envelope plus Kilo's gateway responses. All message-branch
-seeds classify here.
-
-### SSE `session.error` Payloads (detection, not rendering)
-
-Kilo's richest, provider-specific error signal is the global SSE `/event`
-`session.error` payload with a nested `error.data.responseBody`. It carries
-`PROMOTION_MODEL_LIMIT_REACHED`, `PAID_MODEL_AUTH_REQUIRED`, and gateway
-`insufficient balance` (HTTP 402). These are wire-level **detection** records
-owned by `signals/kilo.md` (`usage_capped`, `no_funds`, `auth_invalid`); they
-fire `SignalKind` events and are cited, not duplicated as rendering needles here
-(D9).
+In JSON mode, `kilo run` emits the complete named-error object. In formatted
+mode, it displays `error.data.message` when present and otherwise displays the
+error name. Kilo normalizes a few messages itself: a Copilot reauthentication
+instruction, HTML gateway/proxy authorization prefixes, a stream server-error
+fallback, and response-decompression failure. Those locally controlled strings
+are safe substring needles. Arbitrary provider response prose is not promoted
+without separate evidence.
 
 ### Numeric Codes
 
-No JSON-RPC wire codes; Kilo's HTTP 402 (funding) surfaces in the SSE payload
-consumed by the detection classifier.
+`APIError.data.statusCode` is an optional non-negative HTTP status and
+`responseBody` can contain symbolic provider or Kilo codes. This is structured
+diagnostic metadata, but Claudine's Kilo parser does not supply a numeric code
+to `classify_error_by_keywords`; consequently this document has no
+`code_buckets`.
+
+Records that should fire usage-cap, no-funds, rate-limit, overload, or
+authentication signals are detection policy. They are documented in
+[`signals/kilo.md`](../signals/kilo.md), not duplicated in this rendering
+vocabulary.
 
 ## Rate Limit, Quota, and Billing
 
-Seeded kind needles `rate`, `quota`, `billing` and message needles `rate limit`,
-`quota`, `billing`, `api error`, `api timeout` classify to `api_remote` and are
-preserved. Kilo's account-funding failure (gateway `insufficient balance` / 402)
-is a `no_funds` *detection* record in `signals/kilo.md`, not a rendering needle
-here.
+The first kind bucket retains `rate`, `quota`, and `billing`; the first message
+bucket retains `rate limit`, `quota`, `billing`, `api error`, and `api timeout`.
+Every item remains in its seeded position and maps to `api_remote`.
+
+Kilo's stream-error normalizer recognizes `insufficient_quota` and renders the
+exact message `Quota exceeded. Check your plan and billing details.` The
+existing `quota` needle wins before `billing`, so no additional row is needed.
+Kilo-specific promotion limits and insufficient-balance responses belong to
+signal detection because they are carried in `responseBody`, not necessarily
+the message supplied to this classifier.
 
 ## Authentication, Permission, and Configuration
 
-Seeded kind needles `auth`, `config`, `permission`, `provider`, `model` and
-message needles `api key`, `authentication`, `not authorized`,
-`permission denied`, `model not found`, `invalid model`, `providermodelnotfound`
-classify to `configuration` and are preserved. Kilo's paid-model auth gate
-(`PAID_MODEL_AUTH_REQUIRED`) is an `auth_invalid` *detection* record in
-`signals/kilo.md` — noted as a gap for possible rendering divergence.
+The structured configuration bucket checks `auth`, `config`, `permission`,
+`provider`, then `model`. `ProviderAuthError` therefore classifies as
+`configuration` before the later broad `api_remote` bucket. The message bucket
+retains all seven sticky configuration phrases in their seeded order.
 
-## Interruption and Cancellation
+Three source-controlled Kilo messages are appended. GitHub Copilot HTTP 403
+errors receive `Please reauthenticate with the copilot provider...`; its full
+prefix avoids a broad `copilot` match. HTML 401 and 403 gateway responses begin
+with `Unauthorized:` and `Forbidden:` respectively. These prefixes cover
+truncated records as well as the complete explanations, while avoiding unsafe
+bare status numbers.
 
-Seeded needles `interrupt`, `cancel`, `abort` (kind) and `interrupt`, `cancel`,
-`aborted` (message) classify to `interrupted` and are preserved.
+Kilo also declares the response-body code `PAID_MODEL_AUTH_REQUIRED`, but the
+run command emits the assistant error object and chooses `data.message` for
+formatted output. The response-body code is therefore retained in the Kilo
+signals research and not guessed as a message needle here.
 
-## Upstream and Server (late ApiRemote)
+## Interruption, Cancellation, and Abort
 
-The repeated `api_remote` kind bucket `api`, `upstream`, `server` is the
-"late ApiRemote" second pass, checked after `interrupted` and the broad
-`provider`/`model` configuration needles. Preserved unchanged.
+The third kind bucket retains `interrupt`, `cancel`, and `abort`; the third
+message bucket retains `interrupt`, `cancel`, and `aborted`. Kilo converts a DOM
+`AbortError` to `MessageAbortedError`, so the structured kind classifies it as
+`interrupted` before message matching. No additional interruption phrase is
+needed.
+
+Manual termination and the decision that a streamed record constitutes a
+terminal interruption remain signal/wrapper concerns. The related detection
+record is in [`signals/kilo.md`](../signals/kilo.md).
+
+## Upstream, Server, and Provider Errors
+
+The late seeded kind bucket checks `api`, `upstream`, then `server`. Its
+position after configuration and interruption is deliberate: narrower
+`ProviderAuthError` and `MessageAbortedError` discriminators win before broad
+remote terms. A generic `APIError` reaches `api_remote` through this late
+bucket unless an earlier rate, quota, or billing term already matched.
+
+Two exact Kilo-controlled messages are appended to the first `api_remote`
+message bucket. `Server error` is the fallback when the stream error code is
+`server_error` and the provider supplied no message. `Response decompression
+failed` represents a failed compressed response and is marked retryable.
+Full phrases avoid unsafe message needles such as bare `server`, `response`,
+`failed`, or `error`.
 
 ## Capacity and Overload
 
-No seeded Kilo needle covers the generic capacity/overload class. Kilo's closest
-surface is the non-retryable `PROMOTION_MODEL_LIMIT_REACHED` promotion cap — a
-usage-cap-family *detection* record in `signals/kilo.md`, not a provider
-`overloaded`/`503` rendering string. No capacity substring needle is graduated
-without a pinned citation; recorded as the `capacity-overload-phrasing` gap.
+Kilo exposes a generic retry-status message surface, and the signals research
+records an observed status whose message contains `overloaded`. That record is
+appropriate for `provider_overloaded` detection, but it is not evidence that
+the same literal reaches `error.data.message`, which is the rendering input
+owned by this document.
+
+The tagged v7.2.48 stream normalizer has a `server_error` fallback of `Server
+error.`, which the proposed `server error` needle safely covers. It does not
+define an exact `overloaded`, `at capacity`, `resource_exhausted`, 429, or 503
+rendering in the inspected run error path. Those provider-specific capacity
+phrases remain gaps rather than being inferred from Codex or OpenCode. See
+[`signals/kilo.md`](../signals/kilo.md) for the retry-status overload record.
 
 ## Collisions and Precedence
 
-- **Identical table to OpenCode** — justified (shared wire parser, ordered-copy
-  seed); the copy-paste smell is expected and documented, not accidental.
-- **`model` / `provider`** (seeds, kind branch) — the broadest configuration
-  seeds, inherited from OpenCode; same caveat as `opencode.md`. Flagged for
-  Phase C.
-- **Kilo-native strings withheld** — `PROMOTION_MODEL_LIMIT_REACHED` /
-  `PAID_MODEL_AUTH_REQUIRED` are detection records, not proposed as rendering
-  needles here; recorded as the `kilo-native-error-strings` gap.
+| Candidate | Decision | Winning behavior or collision |
+| --- | --- | --- |
+| `server error` | Append to the first `api_remote` message bucket | Exact fallback; avoids matching ordinary prose containing only `server` or `error`. |
+| `response decompression failed` | Append to the first `api_remote` message bucket | Exact transport failure; avoids broad `response` and `failed`. |
+| `please reauthenticate with the copilot provider` | Append to `configuration` | Exact Kilo prefix; does not misclassify ordinary Copilot/model discussion. |
+| `unauthorized:` | Append to `configuration` | Colon-bound gateway prefix; safer than `unauthorized`, `auth`, or bare `401`. |
+| `forbidden:` | Append to `configuration` | Colon-bound gateway prefix; safer than `forbidden`, `permission`, or bare `403`. |
+| `overloaded` / `at capacity` | Reject pending rendering evidence | Confirmed only on the separate retry-status detection surface. |
+| `resource_exhausted` | Reject pending evidence | Not found in the tagged run error path. |
+| `401`, `402`, `403`, `429`, `503` | Reject | Bare numbers can match identifiers, counts, timestamps, tool output, or successful assistant prose. |
+| `rate`, `model`, `auth` | Preserve only in seeded kind buckets | These broad terms inspect a structured discriminator, not success prose; moving them into message matching would create collisions. |
+
+Kind matching runs before message matching. Thus `ProviderAuthError` wins
+`configuration` even if its message also mentions an API, and
+`MessageAbortedError` wins `interrupted` before message inspection. Within the
+message branch, the early `api_remote` bucket retains precedence over
+configuration and interruption exactly as seeded; none of the appended exact
+phrases overlaps an earlier seeded phrase.
 
 ## Quirks and Gaps
 
-- **Justified table identity with OpenCode** — shared parser, ordered-copy seed;
-  a future Kilo-only delta would diverge them.
-- **Kilo-native error strings live in detection** — owned by `signals/kilo.md`.
-  (`gaps`: `kilo-native-error-strings`.)
-- **Capacity class uncovered in rendering vocabulary** — closest surface is a
-  detection promotion-cap. (`gaps`: `capacity-overload-phrasing`.)
+- Kilo's CLI and IDE extensions have distinct historical lineages. This
+  document covers the current OpenCode-derived `kilo run --format json`
+  surface, not legacy Roo-derived extension messages.
+- `APIError` can retain useful `statusCode` and `responseBody` fields, but the
+  shared Kilo/OpenCode classifier receives only kind and message. Treating bare
+  numeric text as a substitute would be unsafe.
+- `PAID_MODEL_AUTH_REQUIRED` and `PROMOTION_MODEL_LIMIT_REACHED` are stable
+  response-body codes, not proven rendering messages. Their detection use is
+  documented in [`signals/kilo.md`](../signals/kilo.md).
+- No official Kilo error taxonomy was found. The official CLI page documents
+  operation, while the discriminators and exact normalized strings come from
+  the tagged source.
+- No provider-specific capacity sentence equivalent to `Selected model is at
+  capacity` was confirmed on the rendering surface. `overloaded`, `at
+  capacity`, and `resource_exhausted` remain explicit gaps.
 
 ## Sources
 
-- [Kilo Code docs](https://kilocode.ai/docs/) — CLI overview and provider
-  gateway behavior.
-- `claudine/docs/research/signals/kilo.md` — the `usage_capped`
-  (`PROMOTION_MODEL_LIMIT_REACHED`), `no_funds` (gateway 402 `insufficient
-  balance`), and `auth_invalid` (`PAID_MODEL_AUTH_REQUIRED`) **detection**
-  records for Kilo's SSE `session.error` payload (D9 cross-citation; detection,
-  not rendering vocabulary).
-- `claudine/docs/research/agent-errors/_seeds/kilo.yaml` — the immutable Phase-A
-  seed, an ordered copy of OpenCode's table, transcribed verbatim; Kilo flows
-  through the shared OpenCode wire parser with a fixed `Kilo` identity.
+- [Kilo CLI documentation](https://kilo.ai/docs/code-with-ai/platforms/cli)
+- [Kilo v7.2.48 JSON output option and raw event emission](https://github.com/Kilo-Org/kilocode/blob/v7.2.48/packages/opencode/src/cli/cmd/run.ts#L241-L255)
+- [Kilo v7.2.48 terminal error-record handling](https://github.com/Kilo-Org/kilocode/blob/v7.2.48/packages/opencode/src/cli/cmd/run.ts#L542-L551)
+- [Kilo v7.2.48 assistant error discriminators](https://github.com/Kilo-Org/kilocode/blob/v7.2.48/packages/opencode/src/session/message-v2.ts#L42-L63)
+- [Kilo v7.2.48 assistant error union](https://github.com/Kilo-Org/kilocode/blob/v7.2.48/packages/opencode/src/session/message-v2.ts#L463-L486)
+- [Kilo v7.2.48 abort, authentication, decompression, and API error normalization](https://github.com/Kilo-Org/kilocode/blob/v7.2.48/packages/opencode/src/session/message-v2.ts#L1221-L1299)
+- [Kilo v7.2.48 gateway/proxy messages and API-call normalization](https://github.com/Kilo-Org/kilocode/blob/v7.2.48/packages/opencode/src/provider/error.ts#L48-L91)
+- [Kilo v7.2.48 stream-error normalization](https://github.com/Kilo-Org/kilocode/blob/v7.2.48/packages/opencode/src/provider/error.ts#L110-L166)
+- [Kilo v7.2.48 Kilo-specific response-body codes](https://github.com/Kilo-Org/kilocode/blob/v7.2.48/packages/opencode/src/kilocode/kilo-errors.ts#L3-L40)
+- [Kilo signal-detection research](../signals/kilo.md)

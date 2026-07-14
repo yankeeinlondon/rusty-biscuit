@@ -1,14 +1,10 @@
 ---
 $schema: ./_schema.yaml
-created: 2026-07-12
-last_updated: 2026-07-12
-agent: claude-code
-model: claude-opus-4-8
+created: 2026-07-14
+last_updated: 2026-07-14
+agent: codex
+model: default
 docs: https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/
-# Ordered buckets checked against the structured error-kind discriminator.
-# Sequence order IS the cascade order (first substring hit wins). The repeated
-# api_remote bucket is a "late ApiRemote" second pass after interrupted. Every
-# needle is a preserved Phase-A seed (evidence: seed).
 kind_buckets:
   - kind: api_remote
     needles:
@@ -42,8 +38,6 @@ kind_buckets:
         evidence: seed
       - text: server
         evidence: seed
-# Ordered buckets checked against the free-form error message. All Phase-A seeds
-# are preserved; no addition is proposed.
 msg_buckets:
   - kind: api_remote
     needles:
@@ -65,6 +59,9 @@ msg_buckets:
         evidence: seed
       - text: permission denied
         evidence: seed
+      - text: no auth type is selected
+        evidence: source_code
+        source: https://github.com/QwenLM/qwen-code/blob/v0.19.6/packages/cli/src/validateNonInterActiveAuth.ts#L20-L31
   - kind: interrupted
     needles:
       - text: interrupt
@@ -73,131 +70,233 @@ msg_buckets:
         evidence: seed
       - text: aborted
         evidence: seed
+  - kind: agent_native
+    needles:
+      - text: loop detection halted the run
+        evidence: source_code
+        source: https://github.com/QwenLM/qwen-code/blob/v0.19.6/packages/cli/src/nonInteractiveCli.ts#L143-L163
 gaps:
-  - area: capacity-overload-phrasing
+  - area: capacity-overload-message
     notes: >-
-      No seeded Qwen needle covers the capacity/overload motivating class. Qwen
-      Code is a Gemini-CLI fork fronting DashScope / OpenAI-compatible endpoints,
-      whose resource-pressure surface is HTTP 429/503 and provider-specific
-      throttle prose. The exact CLI-rendered capacity string on the
-      `stream-json` error surface could not be commit-pinned to a
-      `QwenLM/qwen-code` version-tagged source permalink in this non-interactive
-      fleet run, so a capacity substring needle is deliberately NOT graduated.
-      Recorded as a gap for a live research run and Phase C adjudication.
-  - area: numeric-http-codes
+      Qwen v0.19.6 internally classifies HTTP 529 with the diagnostic reason
+      capacity-overload and treats HTTP 503 as rate limiting, but the current
+      stream-json result builder emits only the provider or CLI message. No
+      stable headless phrasing containing overloaded, at capacity,
+      resource_exhausted, or a capacity-specific 429/503 clause was confirmed,
+      so none is guessed as a substring needle.
+  - area: structured-error-kind-projection
     notes: >-
-      HTTP status numbers (429, 503) appear in Qwen message prose but are not
-      proposed as substring needles: as raw substrings they collide with token
-      counts and IDs in non-error frames. They belong behind an exact-match
-      surface, not the case-insensitive substring cascade.
+      CLIResultMessageError permits optional error.type, but the v0.19.6 shared
+      result builder emits error.message only. Claudine's sticky kind buckets
+      remain compatibility vocabulary; no new current kind discriminator was
+      confirmed on the primary headless stream.
+  - area: numeric-wire-codes
+    notes: >-
+      Qwen's internal classifiers inspect HTTP 401, 403, 429, 503, 529, 1302,
+      and 1305, but stream-json has no dedicated numeric error-code field.
+      Numeric status embedded in free-form text is not a code_buckets surface.
+  - area: upstream-provider-copy
+    notes: >-
+      Qwen supports multiple OpenAI-compatible providers and preserves their
+      formatted error messages. Exact server, authentication, billing, and
+      throttling copy therefore varies by configured backend; no additional
+      provider-independent phrase was confirmed beyond the sticky seeds.
 changes: []
-requires_claudine_update: false
+requires_claudine_update: true
 reason: >-
-  All Phase-A seeds are preserved verbatim; no runtime vocabulary delta is
-  proposed. The capacity/overload class is recorded as an explicit gap rather
-  than graduated, because its exact CLI phrasing could not be source-pinned in
-  this fleet run. Research does not change classification behavior.
+  The proposal preserves the Phase-A cascade and adds exact source-attested
+  message needles for Qwen's missing-auth preflight and provider-native loop
+  detector terminal error.
 ---
 
-# Error Vocabulary Research on Qwen Code
+# Qwen CLI Error-Classification Vocabulary
 
 ## Overview
 
-Qwen Code (Alibaba's coding CLI, `QwenLM/qwen-code`, open source, forked from
-Gemini CLI) surfaces errors in non-interactive mode through its
-`--output-format stream-json` JSONL event stream. Current headless output opens
-with a `system` frame (`subtype: init`) carrying the resolved model and session
-metadata, then streams `assistant`/`message` chunks and a terminal `result`;
-failures surface as `error` frames with a structured `error.type` or as terminal
-`result` errors and stderr diagnostics. Because Qwen Code inherits the Gemini CLI
-architecture, its classifier shape mirrors Gemini's — a thin kind-discriminator
-branch plus the primary message branch.
+Qwen Code is open source. Its documented headless mode supports JSON and
+newline-delimited `stream-json` output for automation. In `stream-json`, a
+terminal failure is a `type: "result"` record with `is_error: true`, a result
+subtype, and nested free-form `error.message`. The tagged TypeScript contract
+also permits optional `error.type`, but the shared result builder at `v0.19.6`
+does not populate it.
+
+The stable classification input is therefore message text. Qwen has richer
+internal retry diagnostics—including HTTP status, provider code, provider
+message, transport code, and reasons such as `rate-limit`, `auth-error`, and
+`capacity-overload`—but those are diagnostic side channels rather than fields
+in the primary headless result envelope. Claudine retains its seeded structured
+kind vocabulary for compatibility with accepted legacy or observed envelopes.
 
 ## Error Surfaces
 
 ### Structured Error Kinds
 
-`error` frames carry an `error.type` token (the `signals/` topic observed a
-`rate_limit` discriminator). The seeded `kind_buckets` classify from this token;
-it is a real but thin contract inherited from the Gemini fork.
+`CLIResultMessageError` allows `error.type?: string`, while its terminal subtype
+is limited to `error_max_turns` or `error_during_execution`. The current shared
+builder emits `error: { message }` and omits `error.type`; the subtype describes
+execution disposition, not the underlying family. Consequently, no new
+structured kind needle is proposed. All four seeded kind buckets and their
+needles retain their original order.
+
+The seeded kind cascade is still meaningful for compatibility records: remote
+rate, quota, and billing terms win first; configuration terms win next;
+interruption terms follow; and broad API, upstream, or server terms run last.
 
 ### Message Text
 
-The primary error surface. `result.error.message` and `error` frame prose,
-formatted from the CLI's error types and DashScope/OpenAI-compatible API
-pass-through. All message-branch seeds classify from this surface.
+The terminal result's `error.message` is a first-class headless field. Auth
+preflight failures are explicitly converted to an error result in JSON and
+`stream-json` modes. Main-loop failures also reach this field, including
+provider-formatted API errors and Qwen's provider-native loop detector message.
+
+Provider API wording is less stable than Qwen-owned CLI copy because Qwen can
+target multiple OpenAI-compatible backends. The proposal therefore adds only
+two exact Qwen-owned phrases and preserves every seeded message needle in its
+original position.
 
 ### Numeric Codes
 
-Qwen Code exposes no JSON-RPC numeric wire codes. HTTP status numbers appear in
-message prose only and are not modeled as `code_buckets` — see the
-`numeric-http-codes` gap.
+There is no numeric error-code field in the `stream-json` terminal result.
+Internally, Qwen recognizes HTTP or provider codes `401`, `403`, `429`, `503`,
+`529`, `1302`, and `1305`, plus string codes such as
+`Throttling.AllocationQuota`. These values drive retry diagnosis below the
+stream projection; they do not justify `code_buckets` or bare-number message
+needles.
+
+Wire-level rate-limit and exit-code detection is documented separately in
+[Qwen signal detection research](../signals/qwen.md).
 
 ## Rate Limit, Quota, and Billing
 
-Seeded kind needles `rate`, `quota`, `billing` and message needles `rate limit`,
-`quota`, `billing`, `api error` classify to `api_remote` and are preserved. The
-`signals/` topic separately owns Qwen's `rate_limited` (`error.type = rate_limit`)
-**detection** record — that stays in `signals/qwen.md` and is cited here rather
-than duplicated as a rendering needle.
+The first structured-kind bucket classifies `rate`, `quota`, and `billing` as
+`api_remote`. The first message bucket classifies `rate limit`, `quota`,
+`billing`, and `api error` the same way. Their order is unchanged.
+
+Qwen's internal `isRateLimitError` recognizes `429`, `503`, `1302`, and `1305`.
+The retry classifier separately recognizes Qwen OAuth's `free allocated quota
+exceeded` condition and DashScope's `Throttling.AllocationQuota`. Both quota
+phrases already contain the earlier seeded `quota` message needle. Detection
+of a typed rate-limit record, quota signal, or usage cap belongs to
+[the signals topic](../signals/qwen.md), not this rendering vocabulary.
 
 ## Authentication, Permission, and Configuration
 
-Seeded kind needles `auth`, `config`, `permission` and message needles `api key`,
-`authentication`, `not authorized`, `permission denied` classify to
-`configuration` and are preserved. Qwen auth failures (API-key / OAuth /
-DashScope credential errors) surface as message prose matched by `api key` /
-`authentication`.
+The seeded configuration kind bucket checks `auth`, `config`, and `permission`.
+The seeded message bucket checks `api key`, `authentication`, `not authorized`,
+and `permission denied`. These positions remain fixed behind the first remote
+message bucket.
 
-## Interruption and Cancellation
+Before the main loop, `validateNonInteractiveAuth` raises the exact message
+`No auth type is selected...` when configuration resolves no authentication
+method, then emits it as a terminal result in structured modes. This phrase
+does not contain any seeded message needle, so `no auth type is selected` is
+appended to the existing configuration bucket. The longer word
+`authentication` is not substituted because the source string specifically
+uses the abbreviated `auth` form.
 
-Seeded needles `interrupt`, `cancel`, `abort` (kind) and `interrupt`, `cancel`,
-`aborted` (message) classify to `interrupted` and are preserved. Note the
-preserved seed asymmetry: the kind branch matches `abort` while the message
-branch requires `aborted`.
+## Interruption, Cancellation, and Abort
 
-## Upstream and Server (late ApiRemote)
+The third kind bucket preserves `interrupt`, `cancel`, and `abort`; the third
+message bucket preserves `interrupt`, `cancel`, and `aborted`. Qwen's
+non-interactive runner throws `Operation cancelled.` and its retry classifier
+uses the reason `aborted`, so the sticky terms already cover those forms.
 
-The repeated `api_remote` kind bucket `api`, `upstream`, `server` is the
-"late ApiRemote" second pass, checked *after* `interrupted` so a broad `api`
-substring cannot shadow an interruption classification. Preserved unchanged.
+Cancellation also has exit-code behavior and does not consistently produce a
+terminal stream record. Mapping process exit 130 to an interruption signal is
+therefore owned by [Qwen signal detection research](../signals/qwen.md); this
+document only classifies text after Claudine has selected an error surface.
+
+## Upstream, Server, and Provider Errors
+
+The final seeded kind bucket classifies `api`, `upstream`, and `server` as
+`api_remote`. Its late position is intentional. A structured discriminator
+containing both an authentication or interruption term and a broad remote term
+must resolve through the earlier, more specific family.
+
+Qwen's internal retry classifier distinguishes transport errors, client
+errors, server errors, rate limits, provider-business failures, and unknown
+errors. Current headless results flatten these diagnoses to message text. No
+broad message needles such as `server`, `provider`, `http`, `failed`, or
+`error` are proposed because they occur routinely in local diagnostics, tool
+output, and successful assistant prose.
+
+## Agent-Native Loop Detection
+
+Qwen's non-interactive runner formats native loop-guard failures with the exact
+leading clause `Loop detection halted the run`. This is a Qwen agent policy
+failure, not a remote API or user interruption, so a final `agent_native`
+message bucket is appended after all seeded buckets.
+
+The late position preserves the Phase-A cascade. In a contrived mixed message,
+a seeded rate-limit, configuration, or interruption phrase still wins before
+the native-loop marker. Firing Claudine's normalized `runaway_repetition`
+signal from this record is detection behavior covered by
+[Qwen signal detection research](../signals/qwen.md).
 
 ## Capacity and Overload
 
-No seeded Qwen needle covers the capacity/overload motivating class. Qwen Code
-fronts DashScope / OpenAI-compatible endpoints whose resource-pressure surface is
-HTTP 429/503 and provider throttle prose. The exact CLI-rendered capacity string
-could not be commit-pinned to a version-tagged source permalink in this
-non-interactive run, so no capacity substring needle is graduated. Recorded as
-the `capacity-overload-phrasing` gap for a live research run and Phase C
-adjudication.
+Qwen `v0.19.6` explicitly classifies HTTP 529 as `capacity-overload` and treats
+HTTP 503 as a retryable throttling or overload status. That establishes an
+internal capacity family, but not a safe headless message vocabulary. The
+terminal result builder emits the provider's or CLI's message without the
+internal diagnosis reason, and no pinned source or fixture established a
+stable `overloaded`, `at capacity`, `resource_exhausted`, or capacity-specific
+429/503 phrase on this surface.
+
+No capacity needle is proposed. The absence is recorded in `gaps` rather than
+borrowing Codex's `Selected model is at capacity` wording or guessing that an
+internal Qwen diagnostic reaches stdout. The known HTTP status classifiers and
+their retry meaning remain documented in [the signals topic](../signals/qwen.md).
 
 ## Collisions and Precedence
 
-- **`rate`** (seed, kind branch) — broad but scoped to `api_remote`; matches
-  "rate limit"/"rate_limit" prose. Sticky, untouched.
-- **`api`** (seed, kind branch, late pass) — the broadest seed; ordered last so
-  it cannot shadow `configuration` or `interrupted`. Flagged for Phase C
-  awareness; not touched.
-- **Bare HTTP numbers (429/503)** — deliberately withheld (collision risk);
-  recorded as a gap.
+| Candidate | Decision | Winning behavior or collision |
+|---|---|---|
+| `no auth type is selected` | Add after the seeded configuration messages | Exact Qwen preflight copy; an earlier remote phrase still wins in mixed text. |
+| `loop detection halted the run` | Add in a final `agent_native` bucket | Exact native-guard marker; every sticky bucket retains precedence. |
+| `rate` | Preserve only in structured kinds | The sticky kind needle is broad; normal prose commonly discusses rates. |
+| `auth` | Preserve only in structured kinds | Too broad for messages: success text includes authentication status and setup instructions. |
+| `model` | Reject | Model selection and initialization records use it during successful runs. |
+| `overloaded` / `at capacity` | Gap | Internal capacity diagnosis exists, but no stable headless phrase was confirmed. |
+| `401`, `403`, `429`, `503`, `529` | Reject | Bare substring numbers collide with counts, IDs, tool output, and ordinary prose. |
+| `api` / `server` | Preserve only in the late structured-kind bucket | As message needles they would match configuration help, code, and successful discussion. |
+
+Representative successful surfaces include `system` initialization records
+with model metadata, assistant text, tool results, and successful terminal
+results. Authentication setup prose and model/provider discussions make broad
+`auth`, `model`, `provider`, and `server` message terms unsafe. Neither proposed
+exact phrase appears in those normal contracts.
 
 ## Quirks and Gaps
 
-- **Capacity phrasing unpinned** — 429/503 CLI string not source-pinned in this
-  run. (`gaps`: `capacity-overload-phrasing`.)
-- **Numeric HTTP codes are unsafe substrings** — need an exact-match surface.
-  (`gaps`: `numeric-http-codes`.)
-- **Gemini-fork lineage** — Qwen's stream shape and error taxonomy inherit
-  Gemini CLI's; its own error strings still require independent citation.
-- **`abort` vs `aborted` seed asymmetry** — preserved from Phase A, not a delta.
+- The stream type permits `error.type`, but the current result builder does not
+  populate it. Seeded kind buckets are compatibility behavior, not evidence of
+  a current first-class discriminator.
+- Result subtype `error_during_execution` is too generic for a semantic family;
+  `error_max_turns` describes an agent-native condition but is not passed as
+  the nested error-kind discriminator by the current builder.
+- Qwen's internal retry classifier is richer than its headless projection.
+  Diagnostic reasons and numeric statuses must not be treated as emitted
+  vocabulary without a version-pinned record path.
+- Provider error copy varies across configured OpenAI-compatible services.
+  Broad cross-provider guesses are deliberately excluded.
+- Capacity is confirmed internally but unconfirmed as stable headless copy;
+  this is the principal unresolved rendering gap.
+
+## Changelog
+
+- 2026-07-14: Reverified Qwen against tagged `v0.19.6` source, replaced the
+  earlier unpinned surface description with source-attested stream contracts,
+  and proposed exact auth-preflight and native loop-detector message needles.
 
 ## Sources
 
-- [Qwen Code headless docs](https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/)
-  — `--output-format stream-json`, `system`/`init`/`result`/`error` frames.
-- `claudine/docs/research/signals/qwen.md` — the `rate_limited` /
-  `model_resolved` **detection** records for the same stream (D9 cross-citation;
-  detection, not rendering vocabulary).
-- `claudine/docs/research/agent-errors/_seeds/qwen.yaml` — the immutable Phase-A
-  seed transcribed verbatim from `lib/src/stream/providers/qwen.rs`.
+- [Qwen Code headless mode documentation](https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/)
+- [Qwen `v0.19.6` non-interactive result types](https://github.com/QwenLM/qwen-code/blob/v0.19.6/packages/cli/src/nonInteractive/types.ts#L126-L158)
+- [Qwen `v0.19.6` terminal result builder](https://github.com/QwenLM/qwen-code/blob/v0.19.6/packages/cli/src/nonInteractive/io/BaseJsonOutputAdapter.ts#L1157-L1205)
+- [Qwen `v0.19.6` auth-preflight structured error path](https://github.com/QwenLM/qwen-code/blob/v0.19.6/packages/cli/src/validateNonInterActiveAuth.ts#L16-L82)
+- [Qwen `v0.19.6` native loop-detector message](https://github.com/QwenLM/qwen-code/blob/v0.19.6/packages/cli/src/nonInteractiveCli.ts#L143-L163)
+- [Qwen `v0.19.6` retry error classifier](https://github.com/QwenLM/qwen-code/blob/v0.19.6/packages/core/src/utils/retryErrorClassification.ts#L12-L192)
+- [Qwen `v0.19.6` rate-limit classifier](https://github.com/QwenLM/qwen-code/blob/v0.19.6/packages/core/src/utils/rateLimit.ts#L11-L170)
+- [Qwen `v0.19.6` quota detection helpers](https://github.com/QwenLM/qwen-code/blob/v0.19.6/packages/core/src/utils/quotaErrorDetection.ts#L72-L119)
+- [Qwen signal detection research](../signals/qwen.md)

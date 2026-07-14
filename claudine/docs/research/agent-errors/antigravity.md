@@ -1,16 +1,9 @@
 ---
 $schema: ./_schema.yaml
-created: 2026-07-12
-last_updated: 2026-07-12
-agent: claude-code
-model: claude-opus-4-8
-docs: https://antigravity.google/docs/cli-statusline
-# Antigravity is a message-only classifier: its buffered-JSON output surfaces
-# failures as free-form message prose, with no structured error-kind
-# discriminator, so there is no `kind_buckets`. Sequence order IS the cascade
-# order (first substring hit wins). Every needle is a preserved Phase-A seed
-# (evidence: seed). Note the configuration bucket is checked FIRST — Antigravity
-# is an OAuth-first CLI whose dominant failure surface is sign-in.
+created: 2026-07-14
+last_updated: 2026-07-14
+agent: codex
+model: default
 msg_buckets:
   - kind: configuration
     needles:
@@ -26,9 +19,9 @@ msg_buckets:
         evidence: seed
       - text: unauthorized
         evidence: seed
-      - text: "401"
+      - text: '401'
         evidence: seed
-      - text: "403"
+      - text: '403'
         evidence: seed
   - kind: api_remote
     needles:
@@ -42,7 +35,7 @@ msg_buckets:
         evidence: seed
       - text: overloaded
         evidence: seed
-      - text: "503"
+      - text: '503'
         evidence: seed
       - text: resource_exhausted
         evidence: seed
@@ -55,132 +48,215 @@ msg_buckets:
       - text: interrupt
         evidence: seed
 gaps:
-  - area: structured-error-kind-discriminator
+  - area: published-error-contract
     notes: >-
-      Antigravity (`agy`) has no published implementation source at tag 1.1.0
-      (the public `google-antigravity/antigravity-cli` repo carries only README,
-      changelog, and examples) and no official machine-readable stream/event
-      contract. Its buffered-JSON output surfaces failures as free-form message
-      prose with no typed error-kind enum, so classification is message-only and
-      there is no `kind_buckets`. The seeded auth/sign-in phrasings were captured
-      empirically from installed `agy` 1.1.0 (see `signals/antigravity.md`);
-      firmer source citations are unavailable until Google publishes source.
+      No official error-specific documentation was found. The public repository
+      at tag 1.1.2 is not source-complete and exposes no implementation error
+      enums, message constants, or structured error schema, so docs is omitted.
+  - area: structured-error-kinds
+    notes: >-
+      Print-mode JSON has status and error fields, but no documented discriminator
+      vocabulary was found. Antigravity remains a message-only classifier and has
+      no kind_buckets.
+  - area: numeric-code-contract
+    notes: >-
+      No distinct numeric wire-code field or published code enum was confirmed.
+      Seeded 401, 403, and 503 values remain message substrings, not code_buckets.
+  - area: capacity-and-overload-copy
+    notes: >-
+      The changelog confirms transient generation errors and retries, but no exact
+      at capacity, Selected model is at capacity, overloaded, RESOURCE_EXHAUSTED,
+      HTTP 429, or HTTP 503 provider message was published. The sticky overload
+      needles are preserved without guessing additional copy.
+  - area: rate-limit-quota-and-billing-copy
+    notes: >-
+      Official materials document quota and credits UI surfaces but do not publish
+      terminal error payloads for throttling, exhausted quota, billing, or funds.
+  - area: permission-error-copy
+    notes: >-
+      Official permission documentation defines allow, ask, deny, and force_ask
+      decisions, but no stable non-interactive denial message was found.
 changes: []
 requires_claudine_update: false
-reason: >-
-  All Phase-A seeds are preserved verbatim and the seeded `overloaded` / `503` /
-  `resource_exhausted` / `exhausted` needles already cover the capacity/overload
-  motivating class, so this fleet run proposes no runtime vocabulary delta.
-  Research does not change classification behavior.
 ---
 
-# Error Vocabulary Research on Antigravity
+# Antigravity CLI Error-Classification Vocabulary
 
 ## Overview
 
-Antigravity (Google's coding CLI, binary `agy`) is the roster's tenth provider
-and its first buffered-JSON stream: it emits a single JSON document at
-`finish()` rather than line-delimited events. The public
-`google-antigravity/antigravity-cli` repository at tag 1.1.0 contains only
-README, changelog, and consumer examples — no implementation source — so error
-surfaces were characterized empirically from the installed `agy` 1.1.0 binary
-and its `--log-file` output rather than from source code. Antigravity is an
-OAuth-first CLI (no API key), so its dominant failure surface is authentication
-/ sign-in, which is why the seeded `configuration` bucket is checked before
-`api_remote`.
+Antigravity CLI provides a non-interactive print mode and accepts a hidden
+`--output-format json` option. The observed result is one JSON object with
+`conversation_id`, `status`, `response`, `error`, `duration_seconds`,
+`num_turns`, and `usage`. Failures are therefore available as free-form text in
+`error`; no stream of JSON error frames, structured error-kind discriminator,
+or separate numeric error code has been established. Plain print mode can also
+write a human-readable error to stderr and return a nonzero exit status when a
+server-side request fails.
+
+The repository is public and tagged, but it is not an open-source implementation
+of the CLI. Tag `1.1.2` contains a README, changelog, statusline/title examples,
+and media, with no Go source, error enums, protocol definitions, or message
+constants. Official documentation covers general operation, authentication,
+permissions, and configuration, but no error contract was found. Consequently,
+the frontmatter retains the immutable Phase-A seed as seed evidence and does not
+promote plausible Google API vocabulary into source-attested additions.
 
 ## Error Surfaces
 
-### Message Text
+### Print-Mode JSON
 
-The primary error surface. Buffered-JSON message prose plus stdout-tail failure
-lines carry human-facing failure text. Every seeded needle classifies from this
-surface.
+`agy --print "<prompt>" --output-format json` returns a single result object.
+The `status` field indicates overall outcome and `error` carries error text; the
+available public material does not define allowed status values or the type and
+format of `error`. This is the structured wrapper surface consumed by Claudine,
+but its error payload is message-only rather than a first-class error taxonomy.
 
-### Structured Error Kinds
+Because the result is a terminal object rather than an event stream, there is no
+published JSON error-frame discriminator to populate `kind_buckets`. Treating
+`status` as an error kind would invent semantics that the provider has not
+documented.
 
-None confirmed. No typed error-kind enum is exposed and no source is published,
-so the classifier is message-only (recorded as a gap). The `signals/` topic
-keys its Antigravity `auth_invalid` **detection** records off exit code + stdout
-tail ("Please sign in to view available models", "authentication failed or timed
-out"); those stay in `signals/antigravity.md`.
+### Plain Print Output and Exit Status
 
-### App-Log Lines
+Plain `--print` mode emits human-readable output. The `1.1.2` changelog says a
+server-side request failure now writes its error to stderr and returns a nonzero
+exit code; earlier behavior could silently exit successfully with empty output.
+This establishes the channel and failure status, but not any exact provider
+message vocabulary.
 
-`agy --log-file` produces glog-style lines ("You are not logged into
-Antigravity", "Language server version:"). `signals/antigravity.md` records
-these as documented but *uncompiled* detection gaps (Claudine has no runtime
-app-log ingestion path). They are not rendering-vocabulary needles here.
+Exit-code mapping and payload records that fire authentication or other signals
+belong to [`signals/antigravity.md`](../signals/antigravity.md). In particular,
+that document records captured unauthenticated print and model-listing exits;
+those detection records are not duplicated as frontmatter needles here.
+
+### Diagnostic App Logs
+
+The CLI accepts `--log-file` and can emit glog-style diagnostic text. Existing
+signals research captured authentication diagnostics there, but Claudine does
+not ingest this side-channel as the print-mode error message. App-log record
+detection remains owned by [`signals/antigravity.md`](../signals/antigravity.md),
+not this rendering cascade.
 
 ### Numeric Codes
 
-No JSON-RPC wire codes. `401`, `403`, `503` below are substrings of HTTP-status
-phrasing rendered in message prose, not discrete wire codes, and live in the
-message branch.
+No distinct numeric code field or published error-code enum was found. The
+seeded `401`, `403`, and `503` needles are ordinary substrings checked inside the
+free-form message. `code_buckets` would incorrectly imply exact typed-code
+matching and is therefore omitted.
+
+## Rate Limit, Quota, and Billing
+
+The `api_remote` bucket retains `rate limit`, `quota`, `exhausted`, and `out of
+credits` in their seeded positions. They classify matched message text as
+`api_remote`. Official materials establish quota and credit management as
+product surfaces: the changelog describes Models & Quota, real-time quota
+reload, G1 credits, and quota usage in the statusline. They do not publish the
+exact terminal failure strings produced when those resources are depleted.
+
+No `billing`, `insufficient funds`, bare `rate`, or HTTP `429` needle is added.
+Those strings are either unattested on Antigravity's print-error surface or too
+broad for safe substring matching. Whether a particular payload fires a
+rate-limit, usage-cap, or no-funds signal is separately tracked in
+[`signals/antigravity.md`](../signals/antigravity.md).
 
 ## Authentication, Permission, and Configuration
 
-Checked first. Seeded needles `sign in`, `sign-in`, `not logged in`,
-`authentication failed`, `authentication`, `unauthorized`, `401`, `403` classify
-to `configuration` and are preserved. These are Antigravity's OAuth-preflight
-failure phrasings, captured empirically from the installed binary. Ordering this
-bucket ahead of `api_remote` encodes the real precedence: an unauthenticated
-`agy` fails at sign-in before any API call.
+The first bucket preserves `sign in`, `sign-in`, `not logged in`,
+`authentication failed`, `authentication`, `unauthorized`, `401`, and `403` in
+that order, all mapping to `configuration`. The README documents system-keyring
+authentication with Google Sign-In fallback, while the official permissions
+guide defines `allow`, `deny`, `ask`, and `force_ask` decisions. Neither source
+publishes a stable print-mode denial message or typed authentication error enum.
 
-## Rate Limit, Quota, and Capacity
+This bucket intentionally precedes remote failures. A mixed message such as an
+authentication failure while refreshing quota resolves to `configuration`
+rather than `api_remote`, preserving the established precedence quirk. The
+specific captured unauthenticated exit records remain detection evidence in the
+signals document and are not recast as new rendering vocabulary here.
 
-Seeded needles `rate limit`, `quota`, `exhausted`, `out of credits`,
-`overloaded`, `503`, `resource_exhausted` classify to `api_remote` and are
-preserved. Because Antigravity fronts Google model infrastructure, its
-capacity/overload family is unusually well-seeded — `overloaded`, `503`,
-`resource_exhausted` (the Google-style `RESOURCE_EXHAUSTED` status phrasing), and
-`exhausted` all appear here.
+## Interruption, Cancellation, and Abort
 
-## Interruption and Cancellation
+The final bucket preserves `abort`, `cancel`, then `interrupt`, classifying a
+matching message as `interrupted`. The changelog documents Ctrl+C cancellation
+of active streaming operations and separately mentions cancellation behavior,
+but it does not publish the terminal error text or JSON `error` value produced
+by an interrupted print run. The seed therefore remains the only vocabulary.
 
-Seeded needles `abort`, `cancel`, `interrupt` classify to `interrupted` and are
-preserved.
+Interruption stays last so a message containing both a remote cause and
+subsequent cancellation remains `api_remote`, while an otherwise unqualified
+abort or cancellation resolves to `interrupted`.
+
+## Upstream, Server, and Provider Errors
+
+The seeded remote bucket covers `503` and the broader quota/exhaustion family.
+The `1.1.2` changelog confirms that server-side request failures reach print-mode
+stderr, and `1.0.16` documents automatic client-side retries for transient model
+generation errors. Neither entry supplies exact message constants. Broad
+needles such as `server`, `request failed`, `error`, `transient`, or `model` are
+therefore excluded: each can occur in local diagnostics or ordinary successful
+prose and would overclassify unrelated text.
+
+No source-attested network, timeout, unavailable, internal-error, or provider
+phrase could be added without a captured print-mode fixture or implementation
+source.
 
 ## Capacity and Overload
 
-The capacity/overload motivating class is already covered by preserved seeds:
-`overloaded`, `503`, `resource_exhausted`, and `exhausted` all classify to
-`api_remote`. Antigravity's Google-backed infrastructure surfaces
-`RESOURCE_EXHAUSTED` and 503 overload prose, so these are the strongest-seeded
-capacity vocabulary of the roster. No new capacity needle is required and no gap
-is recorded for this class.
+The sticky remote bucket retains `overloaded`, `503`, and
+`resource_exhausted`. These close common capacity-shaped matches at the seeded
+behavior level, but the available Antigravity sources do not attest that the CLI
+actually emits any of them. In particular, no exact `at capacity` or `Selected
+model is at capacity` phrase was found.
+
+The changelog's reference to retries for transient generation errors proves a
+failure family exists, not its message spelling. Adding `at capacity`, `429`,
+`service unavailable`, or another inferred Google API phrase would therefore
+manufacture provenance. The missing provider-specific capacity copy is recorded
+as a frontmatter gap.
 
 ## Collisions and Precedence
 
-- **`authentication`** (seed) — broad substring, but scoped to the
-  `configuration` bucket which is intentionally checked first for this
-  OAuth-first CLI. Sticky seed, untouched.
-- **`exhausted`** (seed) — matches "exhausted"/"resource_exhausted"; acceptable
-  in the `api_remote` capacity family. Broader than `resource_exhausted` but
-  both are seeded and preserved.
-- **`401` / `403` / `503`** (seeds) — digit substrings; safe here because
-  Antigravity only emits them inside error/auth-failure prose. Sticky, untouched.
-- **`sign in` vs `sign-in`** (seeds) — both spellings preserved to catch either
-  rendering.
+Classification ASCII-lowercases the message and walks buckets in order, so the
+winning precedence is `configuration` before `api_remote` before `interrupted`.
+All retained needles are lowercase. Several collision properties follow:
+
+| Needle or family | Collision assessment | Winning behavior |
+| --- | --- | --- |
+| `authentication failed` / `authentication` | The shorter seed shadows the longer phrase only after the longer row has already been tested; both produce the same kind. | `configuration` |
+| `sign in` / `sign-in` | Separate spellings avoid a broad `sign` match against ordinary prose. | `configuration` |
+| `401`, `403`, `503` | Bare numbers can occur in filenames, counts, IDs, successful HTTP discussion, or tool output. They are retained only because seeds are immutable. | `401`/`403` are `configuration`; `503` is `api_remote` |
+| `quota` / `exhausted` | These can appear in successful usage reports or discussion rather than an error. Error-surface selection must happen before this classifier. | `api_remote` |
+| `abort`, `cancel`, `interrupt` | Broad stems can match explanatory prose, but their last position lets more actionable auth or remote causes win first. | `interrupted` if no earlier needle matches |
+| `model`, `auth`, `rate` | These broad candidates commonly occur in successful status, setup, and model-selection text. | Omitted |
+
+An error mentioning both sign-in and quota is classified as `configuration`;
+one mentioning `503` and cancellation is `api_remote`. This ordering is part of
+the vocabulary contract, not presentation preference.
 
 ## Quirks and Gaps
 
-- **No published source** — surfaces are empirical (installed `agy` 1.1.0), not
-  source-pinned. (`gaps`: `structured-error-kind-discriminator`.)
-- **Buffered-JSON stream** — errors arrive in one document at `finish()`, unlike
-  the line-delimited providers.
-- **App-log detection is uncompiled** — owned as gaps by `signals/antigravity.md`,
-  not rendering vocabulary here.
+Antigravity's JSON output flag is hidden from ordinary help, and its schema is
+not documented. The wrapper must select the error surface before keyword
+classification; running this substring cascade over `response`, statusline
+JSON, tool output, or successful quota prose would amplify the known broad-seed
+collisions.
+
+The public GitHub repository must not be described as implementation source.
+Its tagged changelog is useful for proving channels and behavior changes, but it
+cannot attest error constants or enums. No official error-specific documentation,
+structured error kinds, numeric code contract, stable permission-denial copy,
+or exact rate-limit/capacity copy was located. These unanswered surfaces are
+retained in `gaps` rather than filled with Gemini API assumptions.
+
+## Changelog
+
+This is the initial research document; `changes` is empty.
 
 ## Sources
 
-- [Antigravity CLI statusline docs](https://antigravity.google/docs/cli-statusline)
-  — the closest official documentation surface (client-rendered; no verbatim
-  payload contract).
-- `claudine/docs/research/signals/antigravity.md` — the `auth_invalid`
-  **detection** records and the uncompiled app-log gaps for the same surface
-  (D9 cross-citation; detection, not rendering vocabulary), reconfirmed against
-  installed `agy` 1.1.0.
-- `claudine/docs/research/agent-errors/_seeds/antigravity.yaml` — the immutable
-  Phase-A seed transcribed verbatim from
-  `lib/src/stream/providers/antigravity.rs`.
+- [Antigravity CLI README at `1.1.2`](https://github.com/google-antigravity/antigravity-cli/blob/1.1.2/README.md#L1-L85)
+- [Antigravity CLI changelog at `1.1.2`](https://github.com/google-antigravity/antigravity-cli/blob/1.1.2/CHANGELOG.md#L1-L265)
+- [Antigravity CLI permissions documentation](https://antigravity.google/docs/cli-permissions)
+- [Antigravity CLI settings and rendering documentation](https://antigravity.google/docs/cli-settings)
+- [Antigravity CLI overview](https://antigravity.google/docs/cli-overview)
+- [Antigravity CLI signal-detection research](../signals/antigravity.md)

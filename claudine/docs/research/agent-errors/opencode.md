@@ -1,15 +1,10 @@
 ---
 $schema: ./_schema.yaml
-created: 2026-07-12
-last_updated: 2026-07-12
-agent: claude-code
-model: claude-opus-4-8
+created: 2026-07-14
+last_updated: 2026-07-14
+agent: codex
+model: default
 docs: https://opencode.ai/docs/cli/
-# Ordered buckets checked against the structured error-kind discriminator.
-# Sequence order IS the cascade order (first substring hit wins). The repeated
-# api_remote bucket is a "late ApiRemote" second pass after interrupted. Every
-# needle is a preserved Phase-A seed (evidence: seed). Kilo reuses this same
-# parser but selects its OWN distinct vocabulary (see kilo.md).
 kind_buckets:
   - kind: api_remote
     needles:
@@ -47,8 +42,6 @@ kind_buckets:
         evidence: seed
       - text: server
         evidence: seed
-# Ordered buckets checked against the free-form error message. All Phase-A seeds
-# are preserved; no addition is proposed.
 msg_buckets:
   - kind: api_remote
     needles:
@@ -62,6 +55,18 @@ msg_buckets:
         evidence: seed
       - text: api timeout
         evidence: seed
+      - text: server error
+        evidence: source_code
+        source: https://github.com/anomalyco/opencode/blob/v1.17.7/packages/opencode/src/provider/error.ts#L102-L147
+      - text: connection reset by server
+        evidence: source_code
+        source: https://github.com/anomalyco/opencode/blob/v1.17.7/packages/opencode/src/session/message-v2.ts#L614-L648
+      - text: provider response headers timed out
+        evidence: source_code
+        source: https://github.com/anomalyco/opencode/blob/v1.17.7/packages/opencode/src/provider/error.ts#L7-L13
+      - text: response decompression failed
+        evidence: source_code
+        source: https://github.com/anomalyco/opencode/blob/v1.17.7/packages/opencode/src/session/message-v2.ts#L649-L663
   - kind: configuration
     needles:
       - text: api key
@@ -78,6 +83,12 @@ msg_buckets:
         evidence: seed
       - text: providermodelnotfound
         evidence: seed
+      - text: 'unauthorized:'
+        evidence: source_code
+        source: https://github.com/anomalyco/opencode/blob/v1.17.7/packages/opencode/src/provider/error.ts#L57-L65
+      - text: 'forbidden:'
+        evidence: source_code
+        source: https://github.com/anomalyco/opencode/blob/v1.17.7/packages/opencode/src/provider/error.ts#L57-L65
   - kind: interrupted
     needles:
       - text: interrupt
@@ -87,151 +98,229 @@ msg_buckets:
       - text: aborted
         evidence: seed
 gaps:
-  - area: capacity-overload-phrasing
+  - area: provider-specific-capacity-copy
     notes: >-
-      No seeded OpenCode needle covers the capacity/overload motivating class in
-      the RENDERING vocabulary. OpenCode's overload/usage-cap surface is real but
-      lives in its promoted-stderr log stream as typed
-      `LogClassification::ProviderLimit` kinds (`Overloaded`, `UsageCap`,
-      `RetriesExhausted`, `RateLimited`) — a wire-level DETECTION concern owned
-      by `signals/opencode.md`, not the `SemanticErrorKind` substring cascade.
-      The stdout NDJSON stream this topic classifies does not carry a confirmed,
-      source-pinned `overloaded`/`503` rendering string, so a capacity substring
-      needle is deliberately NOT graduated here. Recorded as a gap; the overload
-      family is handled by the signals detection layer today.
-  - area: numeric-http-codes
+      OpenCode v1.17.7 recognizes the provider code server_is_overloaded but
+      preserves a provider-supplied message when present. No single exact
+      provider-authored capacity sentence such as at capacity was confirmed;
+      the proposed server error needle covers only OpenCode's own fallback.
+  - area: resource-exhausted-spelling
     notes: >-
-      HTTP status numbers (429, 503) appear in OpenCode's promoted-stderr log
-      lines but are consumed by the signals detection classifier, not the
-      rendering substring cascade. As raw substrings on the message branch they
-      would collide with token counts and IDs, so they are not proposed as
-      needles.
+      No resource_exhausted spelling was found in the v1.17.7 structured run
+      error path, so it is not guessed from another provider's protocol.
+  - area: numeric-code-contract
+    notes: >-
+      APIError can carry an HTTP statusCode and responseBody codes, but the
+      shared Claudine OpenCode classifier has no numeric-code input. Bare 401,
+      403, 429, and 503 message substrings are deliberately rejected.
+  - area: billing-and-rate-limit-native-copy
+    notes: >-
+      OpenCode normalizes insufficient_quota, retry metadata, and arbitrary
+      provider response text, but no provider-independent exact billing or
+      rate-limit message beyond the sticky seeds was established.
 changes: []
-requires_claudine_update: false
+requires_claudine_update: true
 reason: >-
-  All Phase-A seeds are preserved verbatim; no runtime vocabulary delta is
-  proposed. The capacity/overload class is covered by the signals DETECTION layer
-  (`LogClassification::ProviderLimit`) rather than this rendering vocabulary, and
-  is recorded as an explicit gap here. Research does not change classification
-  behavior.
+  The proposal preserves every seeded bucket and item position, then appends
+  source-attested OpenCode-normalized remote, authentication, and authorization
+  message phrases that are absent from the seeded runtime table.
 ---
 
-# Error Vocabulary Research on OpenCode
+# OpenCode CLI Error-Classification Vocabulary
 
 ## Overview
 
-OpenCode (`sst/opencode`, open source) surfaces errors across two channels: its
-stdout NDJSON event stream (parsed by `lib/src/stream/providers/opencode.rs`,
-the subject of this rendering-vocabulary topic) and its stderr log stream, whose
-provider-limit lines Claudine *promotes* and classifies with a dedicated typed
-`LogClassification` engine. The `SemanticErrorKind` rendering vocabulary here
-keys off the stdout stream's short kind token (`kind_buckets`) and free-form
-message text (`msg_buckets`); OpenCode's richest error signal — usage caps,
-retry exhaustion, provider overload — arrives on the stderr channel and is owned
-by the `signals/` topic as *detection*, not by this rendering cascade.
+OpenCode CLI is open source. Its documented non-interactive command,
+`opencode run`, accepts `--format json` for raw newline-delimited JSON events.
+At tag `v1.17.7`, the CLI projects a `session.error` event to an `error` record
+whose `error` value is a structured named-error object. That object carries a
+`name` discriminator and usually a free-form `data.message`; API failures can
+also carry `statusCode`, response headers, and a serialized response body.
+
+The event envelope and named-error schemas are first-class source contracts,
+but the official CLI page documents only that JSON events exist, not their
+error taxonomy. Provider message copy remains partly diagnostic and can pass
+through arbitrary upstream text. OpenCode also normalizes several failures to
+stable local messages, which are the strongest safe additions to Claudine's
+substring vocabulary. There is no OpenCode numeric-code bucket in the shared
+classifier.
 
 ## Error Surfaces
 
 ### Structured Error Kinds
 
-The stdout NDJSON stream carries a short kind/type token on error frames. The
-seeded `kind_buckets` classify from it. This is a diagnostic side-channel; the
-message branch does the primary rendering work.
+The JSON error object's `name` is the structured discriminator. OpenCode's
+shared session schema defines `ProviderAuthError`, `MessageAbortedError`,
+`MessageOutputLengthError`, `APIError`, `ContextOverflowError`, and content or
+structured-output errors. Provider selection separately defines
+`ProviderModelNotFoundError` and `ProviderInitError`.
+
+The seeded kind cascade already covers the important families. `APIError`
+matches the late fourth bucket's broad `api` needle; `ProviderAuthError`,
+`ProviderModelNotFoundError`, and `ProviderInitError` match the earlier
+configuration bucket; `MessageAbortedError` matches interruption. Output
+length, context overflow, content filtering, and unknown errors intentionally
+fall through to `agent_native` because they are not necessarily remote service
+failures.
 
 ### Message Text
 
-The primary rendering surface. Error frame prose formatted from OpenCode's error
-types and the AI-SDK envelope. All message-branch seeds classify from this
-surface — including OpenCode-specific model-selection strings
-(`ProviderModelNotFoundError` → the `providermodelnotfound` needle).
+For non-interactive JSON, OpenCode emits the entire named-error object. In
+formatted mode it instead displays `data.message` when available and otherwise
+the error name. Claudine resolves the structured kind and free-form message
+separately, so the message vocabulary matters when a generic `APIError` or an
+older/partial envelope lacks a useful kind.
 
-### Promoted Stderr Logs (detection, not rendering)
-
-OpenCode's stderr `service=llm` / stream-error lines carry the provider-limit
-detail. Claudine's promoted-stderr classifier maps these to
-`LogClassification::ProviderLimit(kind = UsageCap | RetriesExhausted | Overloaded
-| RateLimited)`. This is the `signals/opencode.md` territory (multiple wire
-formats across `v1.17.7`/`v1.17.8`); it fires `SignalKind` detection events and
-is deliberately **not** duplicated as rendering needles here.
+OpenCode preserves arbitrary provider messages for ordinary API-call errors,
+but it supplies stable text for stream error codes, connection resets,
+decompression failures, header timeouts, and HTML gateway failures. Those
+locally controlled strings are suitable source-attested needles; arbitrary
+provider prose is not promoted without independent evidence.
 
 ### Numeric Codes
 
-No JSON-RPC wire codes on the stdout stream; HTTP 429/503 appear in the promoted
-stderr logs and are consumed by the detection classifier. See the
-`numeric-http-codes` gap.
+`APIError.data.statusCode` is an optional non-negative HTTP status, while
+`responseBody` can retain provider codes such as `insufficient_quota`,
+`server_is_overloaded`, and `server_error`. OpenCode's `run --format json`
+therefore carries numeric and symbolic diagnostic metadata, but Claudine's
+OpenCode parser does not pass a numeric code into the shared classifier. This
+document consequently has no `code_buckets`.
+
+Status/code records that should fire usage-cap, rate-limit, overload, or
+authentication signals are detection policy and belong to
+[`signals/opencode.md`](../signals/opencode.md), not this rendering vocabulary.
 
 ## Rate Limit, Quota, and Billing
 
-Seeded kind needles `rate`, `quota`, `billing` and message needles `rate limit`,
-`quota`, `billing`, `api error`, `api timeout` classify to `api_remote` and are
-preserved. The account usage-cap / rate-limit *detection* records live in
-`signals/opencode.md` (`usage_capped`, `retries_exhausted`, `rate_limited`);
-cited, not duplicated (D9).
+The first seeded kind bucket preserves `rate`, `quota`, and `billing`; the
+first message bucket preserves `rate limit`, `quota`, `billing`, `api error`,
+and `api timeout`. All classify as `api_remote`, and every seeded position is
+unchanged.
+
+OpenCode explicitly maps the stream code `insufficient_quota` to `Quota
+exceeded. Check your plan and billing details.` The existing `quota` message
+needle wins before `billing`, so no new row is required. Retry handling also
+recognizes free-tier and account usage-limit records, but deciding when those
+records fire `usage_capped`, `rate_limited`, or `retries_exhausted` is covered
+by the OpenCode signals research rather than duplicated here.
 
 ## Authentication, Permission, and Configuration
 
-Seeded kind needles `auth`, `config`, `permission`, `provider`, `model` and
-message needles `api key`, `authentication`, `not authorized`,
-`permission denied`, `model not found`, `invalid model`, `providermodelnotfound`
-classify to `configuration` and are preserved. OpenCode's model-resolution
-failures (`ProviderModelNotFoundError`, invalid model id) are a notable
-configuration surface unique to its multi-provider routing.
+The structured configuration bucket checks `auth`, `config`, `permission`,
+`provider`, then `model`. It therefore classifies `ProviderAuthError`,
+`ProviderInitError`, and `ProviderModelNotFoundError` without additions. The
+message bucket retains all seven sticky configuration phrases in their seeded
+order.
 
-## Interruption and Cancellation
+Two exact source-controlled gateway prefixes are appended: `unauthorized:` and
+`forbidden:`. OpenCode emits the former for an HTML 401 response and explains
+that authentication may be missing or expired. It emits the latter for an HTML
+403 response and explains that the account may lack permission. The existing
+`authentication` seed would happen to match the full 401 explanation, but the
+prefix remains useful for truncated copy; the 403 explanation does not contain
+the seeded phrase `permission denied`.
 
-Seeded needles `interrupt`, `cancel`, `abort` (kind) and `interrupt`, `cancel`,
-`aborted` (message) classify to `interrupted` and are preserved.
+## Interruption, Cancellation, and Abort
 
-## Upstream and Server (late ApiRemote)
+The third kind bucket retains `interrupt`, `cancel`, and `abort`; the third
+message bucket retains `interrupt`, `cancel`, and `aborted`. OpenCode converts a
+DOM `AbortError` to the discriminator `MessageAbortedError`, so the kind branch
+classifies it as `interrupted` before message inspection. Tool-level text such
+as `Tool execution aborted` is not necessarily a terminal session error;
+selecting the event that constitutes termination remains detection policy.
 
-The repeated `api_remote` kind bucket `api`, `upstream`, `server` is the
-"late ApiRemote" second pass, checked *after* `interrupted` and after the broad
-`provider`/`model` configuration needles, so it cannot shadow those. Preserved
-unchanged.
+No additional interruption phrase is proposed. Process exit and Ctrl+C remain
+wrapper/signal concerns unless OpenCode emits a terminal error record selected
+by the stream parser.
+
+## Upstream, Server, and Provider Errors
+
+The late seeded kind bucket checks `api`, `upstream`, and `server`. Its position
+after configuration and interruption is deliberate: `ProviderAuthError` and
+`MessageAbortedError` resolve to their narrower families before a broad remote
+term could win. `APIError` resolves to `api_remote` through the earlier first
+kind bucket's `rate`/`quota`/`billing` only when those appear, otherwise through
+this late `api` needle.
+
+Four locally normalized messages are appended to the first `api_remote`
+message bucket: `server error`, `connection reset by server`, `provider response
+headers timed out`, and `response decompression failed`. The strings represent
+remote server failure, transport reset, response-header timeout, and corrupt
+provider response compression respectively. Their full phrases avoid unsafe
+message needles such as bare `server`, `timeout`, `connection`, or `failed`.
 
 ## Capacity and Overload
 
-No seeded needle covers the capacity/overload class in this rendering vocabulary.
-OpenCode's overload surface (`LogClassification::ProviderLimit(kind =
-Overloaded)`) is real but lives on the promoted-stderr detection channel owned by
-`signals/opencode.md`, not the stdout substring cascade. The stdout NDJSON stream
-carries no confirmed, source-pinned `overloaded`/`503` rendering string, so no
-capacity substring needle is graduated. Recorded as the
-`capacity-overload-phrasing` gap; the class is handled by detection today.
+OpenCode v1.17.7 recognizes stream error codes `server_is_overloaded` and
+`server_error` as retryable `APIError`. When the provider supplies message text,
+OpenCode preserves it. When it does not, both codes normalize to the exact
+fallback `Server error.` The appended `server error` needle therefore closes
+the OpenCode-controlled capacity fallback while also correctly covering the
+broader server-error family.
+
+No exact provider-authored phrase equivalent to `Selected model is at
+capacity` was confirmed for OpenCode. In particular, source recognition of
+`server_is_overloaded` does not prove that the literal token `overloaded`
+survives into `data.message`. That unconfirmed surface is recorded as a gap
+rather than guessed. The promoted-stderr detection layer separately recognizes
+overload vocabulary and distinguishes overloaded 429 responses from generic
+rate limits; see [`signals/opencode.md`](../signals/opencode.md).
+
+Bare `429` and `503` are not proposed. Although the optional `statusCode` can
+carry them, the message matcher is substring-based and cannot distinguish an
+HTTP status from an identifier, count, timestamp, tool output, or ordinary
+assistant prose. `resource_exhausted` was not found in the tagged error path.
 
 ## Collisions and Precedence
 
-- **`provider`** (seed, kind branch) — broad substring in the `configuration`
-  bucket; matches OpenCode's provider-routing error prose. Ordered before the
-  late `api_remote` pass. Sticky, untouched.
-- **`model`** (seed, kind branch) — very broad; it would match any model-name
-  mention. Scoped to `configuration` and preserved from Phase A. Flagged for
-  Phase C awareness — this is OpenCode's broadest seed and its safety depends on
-  the stdout error frame not carrying arbitrary model prose.
-- **`api`** (seed, kind branch, late pass) — broad; ordered last. Flagged.
-- **`providermodelnotfound`** (seed) — the collapsed
-  `ProviderModelNotFoundError` type name; narrow and safe.
-- **Bare HTTP numbers (429/503)** — consumed by the detection layer, not
-  proposed as rendering needles.
+| Candidate | Decision | Winning behavior or collision |
+| --- | --- | --- |
+| `server error` | Append to first `api_remote` message bucket | Exact OpenCode fallback; earlier seeded quota/billing/API phrases retain priority. |
+| `connection reset by server` | Append to first `api_remote` message bucket | Full normalized transport message avoids broad `connection` and `server`. |
+| `provider response headers timed out` | Append to first `api_remote` message bucket | Exact timeout wording avoids matching ordinary timing prose. |
+| `response decompression failed` | Append to first `api_remote` message bucket | Exact response failure avoids broad `response` or `failed`. |
+| `unauthorized:` / `forbidden:` | Append to configuration message bucket | Exact gateway prefixes; the first `api_remote` bucket still wins if earlier remote needles occur in the same message. |
+| `rate` | Preserve only in structured kinds | Sticky seed; unsafe in messages because success prose can discuss rates. |
+| `auth` | Preserve only in structured kinds | Sticky seed; the configuration kind bucket wins before late `api`/`server`. |
+| `model` | Preserve only in structured kinds | Sticky seed; unsafe in messages because every successful run can mention its model. |
+| `overloaded` / `at capacity` | Reject pending exact OpenCode output | Recognition below the message projection is not proof that either literal reaches `data.message`. |
+| `401`, `403`, `429`, `503` | Reject | Bare numeric substrings collide with counts, IDs, timestamps, tool output, and assistant text. |
+
+Representative successful JSON records include `text`, `reasoning`,
+`tool_use`, `step_start`, and `step_finish`. Their payloads can contain arbitrary
+assistant or tool text, including models, servers, rates, and numbers. The
+proposed additions are full OpenCode-controlled failure phrases; normal prose
+such as `Server capacity planning completed`, `Model 429 processed`, or
+`Response decompression benchmark passed` matches none of them.
 
 ## Quirks and Gaps
 
-- **Overload lives in detection, not rendering** — owned by
-  `signals/opencode.md`. (`gaps`: `capacity-overload-phrasing`.)
-- **Numeric HTTP codes** — detection-channel concern, unsafe as rendering
-  substrings. (`gaps`: `numeric-http-codes`.)
-- **`model` is the broadest seed** — safe only while the stdout error frame does
-  not carry general model prose; flagged for Phase C.
-- **Shared parser, distinct vocabulary** — Kilo reuses this parser but selects
-  its own table; see `kilo.md`.
+- The official CLI documentation calls JSON output “raw JSON events” but does
+  not document the error envelope or discriminator union; tagged source is the
+  contract used here.
+- `APIError` is deliberately broad. Its message can represent quota, overload,
+  server failure, transport failure, or arbitrary upstream copy, so message
+  precedence still matters even when the kind already resolves to
+  `api_remote`.
+- OpenCode can carry `statusCode`, response headers, and `responseBody`, but
+  Claudine's OpenCode vocabulary has no numeric-code branch. Detection of
+  status-bearing operational signals belongs to the signals topic.
+- `ContextOverflowError`, `ContentFilterError`, `StructuredOutputError`, and
+  `MessageOutputLengthError` remain `agent_native`; broad `model`, `error`, or
+  `output` message needles would misclassify ordinary failures and prose.
+- Exact provider-authored capacity copy, a `resource_exhausted` spelling, and
+  provider-independent rate-limit/billing copy beyond the sticky seeds could
+  not be confirmed and are retained as frontmatter gaps.
 
 ## Sources
 
-- [OpenCode CLI docs](https://opencode.ai/docs/cli/) — stdout NDJSON event
-  stream, error frame shapes.
-- `claudine/docs/research/signals/opencode.md` — the `usage_capped` /
-  `retries_exhausted` / `provider_overloaded` / `rate_limited`
-  `LogClassification::ProviderLimit` **detection** records for the promoted
-  stderr channel (D9 cross-citation; detection, not rendering vocabulary).
-- `claudine/docs/research/agent-errors/_seeds/opencode.yaml` — the immutable
-  Phase-A seed transcribed verbatim from `lib/src/stream/providers/opencode.rs`.
+- [OpenCode CLI `run` documentation at `v1.17.7`](https://github.com/anomalyco/opencode/blob/v1.17.7/packages/web/src/content/docs/cli.mdx#L338-L383)
+- [OpenCode JSON event emission and error projection at `v1.17.7`](https://github.com/anomalyco/opencode/blob/v1.17.7/packages/opencode/src/cli/cmd/run.ts#L605-L725)
+- [OpenCode session named-error schemas at `v1.17.7`](https://github.com/anomalyco/opencode/blob/v1.17.7/packages/core/src/v1/session.ts#L30-L57)
+- [OpenCode `session.error` event schema at `v1.17.7`](https://github.com/anomalyco/opencode/blob/v1.17.7/packages/opencode/src/session/session.ts#L355-L374)
+- [OpenCode error conversion at `v1.17.7`](https://github.com/anomalyco/opencode/blob/v1.17.7/packages/opencode/src/session/message-v2.ts#L614-L740)
+- [OpenCode stream-code and API-error normalization at `v1.17.7`](https://github.com/anomalyco/opencode/blob/v1.17.7/packages/opencode/src/provider/error.ts#L23-L185)
+- [OpenCode provider model/init discriminators at `v1.17.7`](https://github.com/anomalyco/opencode/blob/v1.17.7/packages/opencode/src/provider/provider.ts#L1075-L1090)
+- [OpenCode retry and usage-limit handling at `v1.17.7`](https://github.com/anomalyco/opencode/blob/v1.17.7/packages/opencode/src/session/retry.ts#L35-L110)
+- [OpenCode error-normalization tests at `v1.17.7`](https://github.com/anomalyco/opencode/blob/v1.17.7/packages/opencode/test/session/message-v2.test.ts#L1366-L1504)
+- [Claudine OpenCode signal detection research](../signals/opencode.md)
