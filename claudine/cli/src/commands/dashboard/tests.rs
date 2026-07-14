@@ -479,6 +479,92 @@ fn waiting_on_user_still_maps_to_needs_input() {
 }
 
 #[test]
+fn idle_status_maps_to_possibly_idle_with_duration() {
+    let now = 1_000_000;
+    // A LOCAL interactive session that went idle 45s ago after its last
+    // assistant turn completed (Trigger 2). It is the weaker tier and
+    // renders its idle duration (local host — skew-free).
+    let payload = format!(
+        r#"{{"s":{{"agent":"claude","status":"idle","interactive":true,"updated_at_unix_ms":{}}}}}"#,
+        now - 45_000
+    );
+    let active = vec![(LOCAL, payload.as_str())];
+    let snap = MeshSnapshot::fold(LOCAL, now, &synced(&[]), &active, &[], &[], false);
+    let local = snap.hosts.iter().find(|h| h.is_local).expect("local host");
+    let session = &local.sessions[0];
+    assert_eq!(session.status.as_deref(), Some("idle"));
+    assert_eq!(session.intervention, Intervention::PossiblyIdle);
+    assert_eq!(session.reported_age_ms, Some(45_000));
+    // Idle is a distinct tier from needs-input, counted separately.
+    assert_eq!(snap.idle_count(), 1);
+    assert_eq!(snap.needs_input_count(), 0);
+
+    let report = DashboardReport::new(snap, "local")
+        .with_inline_terminal(Terminal::new_optimistic(200));
+    let out = report.render(&Terminal::new_optimistic(200));
+    assert!(out.contains("idle 45s"), "idle badge with duration missing: {out}");
+    // The heading appends the idle count alongside the needs-input count.
+    assert!(out.contains("1 idle"), "heading must report the idle count: {out}");
+    // The weaker idle tier must not borrow the strong needs-input glyph.
+    assert!(!out.contains("⚠ input"), "idle must not read as needs-input: {out}");
+}
+
+#[test]
+fn stale_host_suppresses_idle_signal() {
+    let now = 1_000_000;
+    // A stale remote host reporting idle: the weak signal is no more
+    // trustworthy than the strong one — it must be suppressed entirely.
+    let active = vec![(
+        REMOTE,
+        r#"{"s":{"agent":"claude","status":"idle","interactive":true}}"#,
+    )];
+    let snap = MeshSnapshot::fold(
+        LOCAL,
+        now,
+        &synced(&[(REMOTE, now - STALENESS_THRESHOLD_MS - 60_000)]),
+        &active,
+        &[(REMOTE, r#"{"name":"server"}"#)],
+        &[],
+        false,
+    );
+    let remote = snap.hosts.iter().find(|h| !h.is_local).expect("remote host");
+    assert!(!remote.sessions_trusted());
+    assert_eq!(remote.sessions[0].intervention, Intervention::None);
+    assert_eq!(snap.idle_count(), 0);
+}
+
+#[test]
+fn fresh_remote_idle_renders_without_a_duration() {
+    let now = 1_000_000;
+    // A fresh remote idle session is a genuine PossiblyIdle signal, but
+    // remote wall-clock skew makes its duration meaningless — it renders
+    // "idle" without one.
+    let active = vec![(
+        REMOTE,
+        r#"{"s":{"agent":"claude","status":"idle","interactive":true,"updated_at_unix_ms":500000}}"#,
+    )];
+    let snap = MeshSnapshot::fold(
+        LOCAL,
+        now,
+        &synced(&[(REMOTE, now - 5_000)]),
+        &active,
+        &[],
+        &[],
+        false,
+    );
+    let remote = snap.hosts.iter().find(|h| !h.is_local).expect("remote host");
+    let session = &remote.sessions[0];
+    assert_eq!(session.intervention, Intervention::PossiblyIdle);
+    assert_eq!(session.reported_age_ms, None);
+    assert_eq!(snap.idle_count(), 1);
+
+    let report = DashboardReport::new(snap, "mesh")
+        .with_inline_terminal(Terminal::new_optimistic(200));
+    let html = report.render_html_fragment().render();
+    assert!(html.contains("idle"), "html idle label missing: {html}");
+}
+
+#[test]
 fn needs_input_html_carries_basis_and_producer_provenance() {
     let now = 1_000_000;
     let active = vec![(

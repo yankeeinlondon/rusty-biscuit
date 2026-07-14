@@ -58,6 +58,10 @@ impl DashboardReport {
             plural(self.snapshot.trusted_live_sessions(), "session", "sessions"),
             needs_input_phrase(self.snapshot.needs_input_count()),
         );
+        let idle = self.snapshot.idle_count();
+        if idle > 0 {
+            heading.push_str(&format!(" · {}", idle_phrase(idle)));
+        }
         let last_known = self.snapshot.last_known_sessions();
         if last_known > 0 {
             heading.push_str(&format!(" · {last_known} last-known"));
@@ -416,6 +420,16 @@ fn needs_cell(session: &SessionRow, trusted: bool, inline: &Terminal) -> String 
             };
             Prose::new(badge).render(inline)
         }
+        Intervention::PossiblyIdle => {
+            // Weaker than needs-input: a dim marker, plus the idle
+            // duration when known (local host only — remote skew makes it
+            // meaningless, so it renders without one).
+            let badge = match session.reported_age_ms {
+                Some(age) => format!("<dim>◦ idle {}</dim>", format_age(age)),
+                None => "<dim>◦ idle</dim>".to_string(),
+            };
+            Prose::new(badge).render(inline)
+        }
         Intervention::None => match support(session, trusted) {
             Support::NoIntervention => Prose::new("<dim>no intervention needed</dim>").render(inline),
             Support::Unavailable => {
@@ -438,6 +452,10 @@ fn needs_plain(session: &SessionRow, trusted: bool) -> String {
             }
             parts.join(" · ")
         }
+        Intervention::PossiblyIdle => match session.reported_age_ms {
+            Some(age) => format!("idle {}", format_age(age)),
+            None => "idle".to_string(),
+        },
         Intervention::None => match support(session, trusted) {
             Support::NoIntervention => "no intervention needed".to_string(),
             Support::Unavailable => "permission signal unavailable".to_string(),
@@ -498,4 +516,10 @@ fn needs_input_phrase(n: usize) -> String {
         1 => "1 needs input".to_string(),
         _ => format!("{n} need input"),
     }
+}
+
+/// Idle-count phrase appended to the heading only when non-zero, so a
+/// mesh with no idle sessions reads exactly as before.
+fn idle_phrase(n: usize) -> String {
+    format!("{n} idle")
 }

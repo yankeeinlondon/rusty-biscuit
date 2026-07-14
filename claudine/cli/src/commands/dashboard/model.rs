@@ -110,6 +110,11 @@ pub enum Intervention {
     /// Trigger 1 (exact): the session reported it is waiting on the
     /// user — a permission ask / blocked hook that has not cleared.
     NeedsInput,
+    /// Trigger 2 (weak): an interactive session went idle after its last
+    /// assistant turn completed — likely waiting on the user, but softer
+    /// than an outstanding permission ask, so it must never outrank
+    /// [`NeedsInput`].
+    PossiblyIdle,
 }
 
 /// The subset of a host's capability register worth showing inline.
@@ -262,6 +267,17 @@ impl MeshSnapshot {
             .filter(|s| s.intervention == Intervention::NeedsInput)
             .count()
     }
+
+    /// Count of sessions flagged as possibly idle across trusted hosts —
+    /// the weaker Trigger-2 signal, reported alongside the strong
+    /// needs-input count rather than folded into it.
+    pub fn idle_count(&self) -> usize {
+        self.hosts
+            .iter()
+            .flat_map(|h| &h.sessions)
+            .filter(|s| s.intervention == Intervention::PossiblyIdle)
+            .count()
+    }
 }
 
 fn host_label(host: &HostView) -> &str {
@@ -317,8 +333,14 @@ fn parse_sessions(
             let status = str_field("status");
             // Only trust the intervention signal for a fresh host — a
             // stale replica's "waiting_on_user" may be an hour old.
-            let intervention = if trusted && is_waiting(status.as_deref()) {
+            // Strong needs-input outranks the weaker idle tier; both are
+            // suppressed on untrusted hosts.
+            let intervention = if !trusted {
+                Intervention::None
+            } else if is_waiting(status.as_deref()) {
                 Intervention::NeedsInput
+            } else if is_idle(status.as_deref()) {
+                Intervention::PossiblyIdle
             } else {
                 Intervention::None
             };
@@ -353,4 +375,10 @@ fn parse_sessions(
 /// Statuses a producer sets to signal a stuck-on-the-user turn.
 fn is_waiting(status: Option<&str>) -> bool {
     matches!(status, Some("waiting_on_user") | Some("blocked"))
+}
+
+/// The status Trigger 2's idle hook sets when an interactive session's
+/// last assistant turn completed and it is now waiting on the user.
+fn is_idle(status: Option<&str>) -> bool {
+    matches!(status, Some("idle"))
 }
