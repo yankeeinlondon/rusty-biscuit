@@ -1582,8 +1582,8 @@ mod tests {
 
     #[test]
     fn literal_union_combines_each_value_with_scaffolds() {
-        // `[literal(auto), number]` offers `auto` (literal) — a number arm has
-        // no scaffold — and `[literal(created), literal(deleted)]` offers both.
+        // A `number` arm contributes no value scaffold, so a literal+number union
+        // offers only the literal; an all-literal union offers each arm's value.
         let text =
             "---\n$schema:\n  width:\n    - literal(auto)\n    - number\nwidth: \n---\n\nbody\n";
         with_ctx(text, |ctx| {
@@ -1621,9 +1621,8 @@ mod tests {
 
     #[test]
     fn literal_expression_union_offers_literal_and_expression_candidates() {
-        // `[literal(auto), expression]` in either arm order: an Expression arm
-        // must not suppress the Literal value completions, and the merged list
-        // must be duplicate-free.
+        // A mixed union must not let the Expression arm suppress the Literal value
+        // completions, and the merged list must stay duplicate-free — either arm order.
         for arms in [
             "    - literal(auto)\n    - expression\n",
             "    - expression\n    - literal(auto)\n",
@@ -1667,9 +1666,8 @@ mod tests {
 
     #[test]
     fn literal_enum_boolean_union_offers_every_arm_candidate() {
-        // `[literal(auto), enum(fit, fill), boolean]`: every non-Literal arm
-        // contributes its candidates, not just the first completable one, and the
-        // merged list is duplicate-free.
+        // Every non-Literal arm contributes its candidates, not just the first
+        // completable one, and the merged list stays duplicate-free.
         let text = concat!(
             "---\n$schema:\n  width:\n",
             "    - literal(auto)\n    - enum(fit, fill)\n    - boolean\n",
@@ -1695,9 +1693,7 @@ mod tests {
 
     #[test]
     fn reversed_literal_enum_boolean_union_offers_every_arm_candidate() {
-        // Reversing the arm order — `[boolean, enum(fit, fill), literal(auto)]` —
-        // offers the same set (order may differ), and the literal is still
-        // preselected.
+        // Arm order must not change the offered set nor the literal's preselection.
         let text = concat!(
             "---\n$schema:\n  width:\n",
             "    - boolean\n    - enum(fit, fill)\n    - literal(auto)\n",
@@ -1758,9 +1754,8 @@ mod tests {
 
     #[test]
     fn literal_colliding_with_enum_member_keeps_preselected_literal() {
-        // `[literal(fit), enum(fit, fill)]`: the literal `fit` is emitted first
-        // (preselected); the enum's colliding `fit` dedups away, so the single
-        // surviving `fit` keeps its preselection, and `fill` still appears.
+        // When a preselected literal collides with an enum member, the surviving
+        // deduped entry keeps the literal's preselection.
         let text = concat!(
             "---\n$schema:\n  width:\n",
             "    - literal(fit)\n    - enum(fit, fill)\n",
@@ -2165,9 +2160,9 @@ mod tests {
 
     #[test]
     fn selected_arm_suggest_follows_discriminant_in_both_orders() {
-        // The selected arm's `suggest(...)` candidates are offered and the
-        // non-selected arm's never leak — for either discriminant and either arm
-        // order, so the selected arm is the SECOND arm in half the cases.
+        // Selection follows the discriminant, not arm position: the non-selected
+        // arm's `suggest(...)` never leaks even when the selected arm is the SECOND
+        // arm (half the cases here).
         for deleted_first in [false, true] {
             let deleted = palette_union_doc(deleted_first, "  kind: deleted\n  palette: \n");
             let labels = palette_value_labels(&deleted);
