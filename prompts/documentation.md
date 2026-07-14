@@ -1,6 +1,6 @@
 ---
 $schema:
-    doc: filepath
+    doc: file
     context: string
 $schema-descriptor: 
     - "provide 'context' for what the documentation is meant to be about"
