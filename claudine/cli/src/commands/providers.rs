@@ -54,6 +54,8 @@ pub enum ProvidersCommand {
     /// Run the provider-catalog generator (shells out to `claudine-gen`;
     /// this CLI never links the generator).
     Generate(GenerateArgs),
+    /// Run deterministic checks for provider research topics.
+    AgentErrors(AgentErrorsArgs),
 }
 
 /// Arguments accepted by `claudine providers generate`.
@@ -86,6 +88,31 @@ pub struct GenerateArgs {
     pub scaffold: bool,
 }
 
+/// Arguments accepted by `claudine providers agent-errors`.
+#[derive(Debug, Args)]
+pub struct AgentErrorsArgs {
+    #[command(subcommand)]
+    pub command: AgentErrorsCommand,
+}
+
+/// Deterministic checks for the `agent-errors` research topic.
+#[derive(Debug, Subcommand)]
+pub enum AgentErrorsCommand {
+    /// Validate one provider document and write an explicit outcome report.
+    Check(AgentErrorsCheckArgs),
+}
+
+/// Arguments accepted by `claudine providers agent-errors check`.
+#[derive(Debug, Args)]
+pub struct AgentErrorsCheckArgs {
+    /// Provider slug (the research document stem).
+    pub slug: String,
+
+    /// Outcome-report path. Defaults to the topic's `.findings` directory.
+    #[arg(long)]
+    pub findings: Option<PathBuf>,
+}
+
 fn supports_custom_resource(provider: Provider, resource: LinkableResource) -> bool {
     capabilities_for(provider)
         .support_for(resource)
@@ -102,8 +129,11 @@ fn supported_hook_count(provider: Provider) -> usize {
 
 /// Show provider capabilities for skills, slash commands, agents, and hooks.
 pub fn run(args: ProvidersArgs) -> Result<()> {
-    if let Some(ProvidersCommand::Generate(generate)) = args.command {
-        return run_generate(generate);
+    if let Some(command) = args.command {
+        return match command {
+            ProvidersCommand::Generate(generate) => run_generate(generate),
+            ProvidersCommand::AgentErrors(agent_errors) => run_agent_errors(agent_errors),
+        };
     }
     if args.describe {
         return run_describe(args.format);
@@ -176,6 +206,31 @@ fn run_generate(args: GenerateArgs) -> Result<()> {
         forwarded.push("--scaffold");
     }
     run_gen_passthrough(&forwarded)
+}
+
+/// Runs the `agent-errors` deterministic gate through the trusted Claudine
+/// command surface. The generator remains a separate binary; this mirrors
+/// `providers generate` and retains its installed-binary/dev-checkout fallback.
+fn run_agent_errors(args: AgentErrorsArgs) -> Result<()> {
+    match args.command {
+        AgentErrorsCommand::Check(check) => {
+            let mut command = gen_command()?;
+            command.args(["agent-errors", "check"]).arg(&check.slug);
+            if let Some(findings) = check.findings {
+                command.arg("--findings").arg(findings);
+            }
+            let status = command
+                .status()
+                .wrap_err("failed to launch claudine-gen agent-errors check")?;
+            if !status.success() {
+                bail!(
+                    "claudine-gen agent-errors check {} exited with {status}",
+                    check.slug
+                );
+            }
+            Ok(())
+        }
+    }
 }
 
 /// Runs `claudine-gen` with inherited stdio (interactive passthrough).
