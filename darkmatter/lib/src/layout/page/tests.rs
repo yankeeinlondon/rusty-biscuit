@@ -2486,7 +2486,7 @@
     // surface against the terminal mode, so the two surfaces drifted.
     // ================================================================
 
-    /// Pull the `.code-block` `background-color` rule out of a `render_to_browser`
+    /// Pull the `.code-block` `background-color` rule out of a browser-render
     /// HTML string. Falls back to looking for the rule in any `<style>` block the
     /// render emits, and panics with a useful message if the rule is absent.
     /// The value can be either `rgb(R, G, B)` or `#rrggbb`; we accept both.
@@ -2638,9 +2638,12 @@
         term.color_mode = TerminalColorMode::Dark;
 
         let md: Markdown = "```rust\nfn main() {}\n```\n".into();
+        // The `.code-block` panel rule lives in the standalone document's
+        // `<head>`; a bare `render_to_browser` body would not carry it, so this
+        // panel-background assertion reads the full document form.
         let out = DarkmatterPage::new(&term)
             .with_color_mode(ColorMode::Light)
-            .render_to_browser(&md)
+            .render_to_browser_document(&md)
             .unwrap();
 
         // No painted page surface to compare against; the panel alone must be
@@ -2954,7 +2957,9 @@
         term.color_mode = TerminalColorMode::Unknown;
         let page = DarkmatterPage::new(&term);
         let md: Markdown = "```rust\nfn main() {}\n```\n".into();
-        let html = page.render_to_browser(&md).unwrap();
+        // Read the standalone document form: the `.code-block` head rule this
+        // test inspects is absent from a bare `render_to_browser` body.
+        let html = page.render_to_browser_document(&md).unwrap();
         // No page wrapper: default layout is transparent, and the test
         // does not paint a page color.
         assert!(
@@ -2982,7 +2987,9 @@
         term.color_mode = TerminalColorMode::Light;
         let page = DarkmatterPage::new(&term);
         let md: Markdown = "```rust\nfn main() {}\n```\n".into();
-        let html = page.render_to_browser(&md).unwrap();
+        // The `.code-block` head rule this test reads only exists on the
+        // standalone document form, not the bare `render_to_browser` body.
+        let html = page.render_to_browser_document(&md).unwrap();
         let panel_bg = browser_code_block_bg(&html);
         let lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
         assert!(

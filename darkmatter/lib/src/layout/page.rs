@@ -953,13 +953,19 @@ impl DarkmatterPage {
 
     // ---------- Browser Rendering ----------
 
-    /// Render the given markdown document to browser-compatible HTML through
-    /// the page layout.
+    /// Render the given markdown document to a **body-only** browser HTML
+    /// fragment through the page layout.
+    ///
+    /// The return shape is content-independent: this method **never** emits
+    /// document scaffolding (`<!DOCTYPE>`/`<html>`/`<head>`/`<body>`), whatever
+    /// the Markdown contains. It is the method an embedder calls when splicing a
+    /// render into a host document. For a complete standalone document, call
+    /// [`render_to_browser_document`](Self::render_to_browser_document).
     ///
     /// Derives [`HtmlOptions`] from the page state, delegates to the existing
-    /// HTML renderer, then wraps the result in a page-level `<div>` with CSS
-    /// styles for margin, padding, max-width, background-color, and
-    /// per-component alignment / fill.
+    /// HTML renderer, then either returns the bare body or wraps it in a
+    /// page-level `<div>` with CSS styles for margin, padding, max-width,
+    /// background-color, and per-component alignment / fill.
     ///
     /// Fenced code blocks in `md` fold through [`CodeBlock`]'s
     /// [`BrowserRenderable`](crate::markdown::code_block::CodeBlock) projection
@@ -973,9 +979,12 @@ impl DarkmatterPage {
     /// `CodeBlock::rust(...).render_html_fragment()` for the same code,
     /// language, and metadata.
     ///
-    /// For **feature-free** content — no component requests a browser feature
-    /// and all layout fields are at their defaults — the output is the same as
-    /// `md.as_html(HtmlOptions::default())` with no wrapper.
+    /// For **feature-free**, undecorated content — no component requests a
+    /// browser feature and all layout fields are at their defaults — the output
+    /// is the bare `<body>` contents alone, with no wrapper and no document
+    /// scaffold. The design-token `:root` block and `.code-block` panel
+    /// stylesheet a standalone document carries in `<head>` are produced only by
+    /// [`render_to_browser_document`](Self::render_to_browser_document).
     ///
     /// Feature-bearing content diverges, because this page path is
     /// feature-aware:
@@ -1006,6 +1015,101 @@ impl DarkmatterPage {
     /// ([`HeadRequired`](renderable::browser::feature::FeatureResolveError::HeadRequired)),
     /// which a body-only fragment cannot carry.
     pub fn render_to_browser(&self, md: &Markdown) -> Result<String, PageRenderError> {
+        let parts = self.build_browser_parts(md)?;
+
+        // A body-only render never emits document scaffolding. Undecorated,
+        // feature-free content is the bare body; anything decorated or
+        // feature-bearing rides the forced wrapper fragment (still a single
+        // valid element with no nested `<!DOCTYPE>`/`<html>`/`<head>`/`<body>`).
+        if parts.is_bare(self) {
+            return Ok(parts.body);
+        }
+
+        Ok(wrap_browser_html(
+            &parts.body,
+            &parts.page_assets,
+            &parts.ctx,
+            self,
+            &parts.features,
+            &parts.feature_assets,
+        ))
+    }
+
+    /// Render the given markdown document to a complete, standalone
+    /// `<!DOCTYPE html>` browser document through the page layout.
+    ///
+    /// The return shape is content-independent: this method **always** emits a
+    /// full document with a `<head>` and `<body>`, whatever the Markdown
+    /// contains. It is the method a caller uses to produce a self-contained,
+    /// browser-openable `.html` file. For an embeddable body-only fragment (no
+    /// document scaffold), call [`render_to_browser`](Self::render_to_browser).
+    ///
+    /// Undecorated, feature-free content yields the render-tree's standalone
+    /// document — carrying the design-token `:root` block and `.code-block`
+    /// panel stylesheet in `<head>`. Decorated or feature-bearing content wraps
+    /// the body-only page fragment — whose page and feature `<style>` /
+    /// `<script>` assets are already inlined — in a minimal
+    /// `<!DOCTYPE html><html><head></head><body>…</body></html>` scaffold, so
+    /// the document is valid and self-contained.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`PageRenderError::MarginsExceedTerminalWidth`] when margin +
+    /// padding meets or exceeds the terminal width.
+    ///
+    /// Returns [`PageRenderError::MaxWidthZero`] when `max_width` is `Some(0)`.
+    ///
+    /// Returns [`PageRenderError::Render`] when the underlying markdown HTML
+    /// renderer fails.
+    ///
+    /// Returns [`PageRenderError::FeatureResolution`] when a requested browser
+    /// feature cannot be resolved or placed on the body-only page fragment (see
+    /// [`render_to_browser`](Self::render_to_browser) for the specific
+    /// variants).
+    pub fn render_to_browser_document(&self, md: &Markdown) -> Result<String, PageRenderError> {
+        let parts = self.build_browser_parts(md)?;
+
+        // Undecorated, feature-free content already has a complete standalone
+        // document from the render-tree renderer (design tokens + panel
+        // stylesheet in `<head>`).
+        if parts.is_bare(self) {
+            return Ok(parts.document);
+        }
+
+        // Decorated or feature-bearing: the wrapper fragment already inlines its
+        // page and feature `<style>`/`<script>` assets, so an empty `<head>`
+        // yields a valid, self-contained document.
+        let fragment = wrap_browser_html(
+            &parts.body,
+            &parts.page_assets,
+            &parts.ctx,
+            self,
+            &parts.features,
+            &parts.feature_assets,
+        );
+        Ok(format!(
+            "<!DOCTYPE html><html><head></head><body>{fragment}</body></html>"
+        ))
+    }
+
+    /// Build the shared browser-render pieces both public browser methods
+    /// consume: the standalone document, the body-only fragment, the page-level
+    /// assets, the requested features, and their resolved inline assets, plus
+    /// the resolved [`LayoutContext`].
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`PageRenderError::MarginsExceedTerminalWidth`] when margin +
+    /// padding meets or exceeds the terminal width.
+    ///
+    /// Returns [`PageRenderError::MaxWidthZero`] when `max_width` is `Some(0)`.
+    ///
+    /// Returns [`PageRenderError::Render`] when the underlying markdown HTML
+    /// renderer fails.
+    ///
+    /// Returns [`PageRenderError::FeatureResolution`] when a requested browser
+    /// feature cannot be resolved or placed on the body-only page fragment.
+    fn build_browser_parts(&self, md: &Markdown) -> Result<BrowserRenderParts, PageRenderError> {
         let ctx = LayoutContext::from_page(
             self.terminal_width,
             self.page_margin.clone(),
@@ -1078,47 +1182,25 @@ impl DarkmatterPage {
             graphics_mode,
         )
         .map_err(|e| PageRenderError::Render(e.to_string()))?;
-        let document = rendered.output.document;
-        let body = rendered.output.body;
-        let page_assets = rendered.output.assets;
-        let features = rendered.output.features;
 
         // Resolve the collected features into inline `<style>`/`<script>` assets
         // for the body-only wrapper (spec "Body-only renders"). A feature that
         // resolves to a `<head>` `<link>` cannot be embedded and fails with
         // `HeadRequired`.
-        let feature_assets =
-            resolve_feature_body_assets(&features, resolver.as_ref(), &feature_context)?;
-        let has_features = !features.is_empty();
+        let feature_assets = resolve_feature_body_assets(
+            &rendered.output.features,
+            resolver.as_ref(),
+            &feature_context,
+        )?;
 
-        // The page wrapper `<div>` carries page-frame geometry, the page
-        // stylesheet, and page `<meta>`. Component policies are lowered to
-        // inline CSS on the component elements themselves, never the wrapper, so
-        // their presence must not add a wrapper an unmatched policy would not
-        // need (review-1 finding 2). A requested feature also forces the wrapper
-        // into existence so its inline assets have somewhere to live.
-        //
-        // With no wrapper the output stands alone, so emit the complete
-        // standalone document. When a wrapper is forced, embed the body
-        // *fragment* (no nested `<!DOCTYPE>`/`<html>`/`<head>`/`<body>`) plus the
-        // page-level `<style>`/`<script>` the standalone `<head>` would carry, so
-        // the wrapper is a single valid element.
-        if !ctx.needs_decoration()
-            && self.stylesheet().is_none()
-            && self.page_meta().is_none()
-            && !has_features
-        {
-            return Ok(document);
-        }
-
-        Ok(wrap_browser_html(
-            &body,
-            &page_assets,
-            &ctx,
-            self,
-            &features,
-            &feature_assets,
-        ))
+        Ok(BrowserRenderParts {
+            document: rendered.output.document,
+            body: rendered.output.body,
+            page_assets: rendered.output.assets,
+            features: rendered.output.features,
+            feature_assets,
+            ctx,
+        })
     }
 
     /// Render the given markdown document to MarkdownPlus through the page
@@ -1621,6 +1703,47 @@ pub(crate) fn resolve_feature_body_assets(
     }
     let resolved = resolve_features(features, resolver, RenderTarget::Browser, ctx)?;
     Ok(serialize_features_body(&resolved)?)
+}
+
+/// The shared browser-render pieces both [`DarkmatterPage::render_to_browser`]
+/// and [`DarkmatterPage::render_to_browser_document`] consume. Building these
+/// once keeps the two public methods thin so their return shapes stay
+/// content-independent.
+struct BrowserRenderParts {
+    /// Complete standalone `<!DOCTYPE html>` document from the render-tree
+    /// browser renderer (carries the `:root` design tokens and `.code-block`
+    /// panel stylesheet in `<head>`).
+    document: String,
+    /// Body-only fragment with no document scaffolding.
+    body: String,
+    /// Page-level `<style>`/`<script>` the standalone `<head>` carries.
+    page_assets: String,
+    /// Requested browser features in first-seen order.
+    features: Vec<PageFeature>,
+    /// Resolved inline `<style>`/`<script>` markup for `features`.
+    feature_assets: String,
+    /// Resolved layout context (decoration + color mode).
+    ctx: LayoutContext,
+}
+
+impl BrowserRenderParts {
+    /// True when the render needs neither a page wrapper nor feature assets, so
+    /// the body stands alone: no decoration, no bespoke stylesheet, no page
+    /// `<meta>`, and no requested feature. Both public browser methods branch on
+    /// this to keep their return shape content-independent — `render_to_browser`
+    /// returns the bare body, `render_to_browser_document` the standalone
+    /// document.
+    ///
+    /// Component policies lower to inline CSS on the component elements, never
+    /// the wrapper, so their presence must not force a wrapper an unmatched
+    /// policy would not need (review-1 finding 2). A requested feature does force
+    /// the wrapper into existence so its inline assets have somewhere to live.
+    fn is_bare(&self, page: &DarkmatterPage) -> bool {
+        !self.ctx.needs_decoration()
+            && page.stylesheet().is_none()
+            && page.page_meta().is_none()
+            && self.features.is_empty()
+    }
 }
 
 /// Wrap an HTML markdown body **fragment** in a page-level container with
