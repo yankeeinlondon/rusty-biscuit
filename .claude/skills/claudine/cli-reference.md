@@ -195,6 +195,8 @@ claudine providers
 | `--mapping` | Render the field → source → coercion mapping registry as a table |
 | `--mapping --json` | Raw mapping JSON pass-through |
 
+**`claudine providers agent-errors check <slug> [--findings <path>]`** runs the deterministic `agent-errors` research gate through the same generator-binary boundary. The command writes an explicit `clean`, `findings`, or `gate_error` outcome report and is safe to reference from a lifecycle shell action; the shell policy continues to blacklist direct `cargo` invocations.
+
 ---
 
 ## `claudine sync`

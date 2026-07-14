@@ -40,7 +40,7 @@ success:
         #    consumed. Completed executions atomically replace the report.
         - action:
               - action: shell
-                command: "cargo run --quiet -p claudine-gen -- agent-errors check {{state.slug}} --findings {{findings}}"
+                command: "claudine providers agent-errors check {{state.slug}} --findings '{{findings}}'"
         # 3. A missing, invalid, or gate-error outcome is a failed gate, never a
         #    clean research result.
         - when: "!file_exists(findings)"

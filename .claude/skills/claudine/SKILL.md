@@ -94,7 +94,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | `claudine config` | TUI for managing configuration, including messenger routes |
 | `claudine sync [--dry-run] [--provider] [--fix]` | Re-apply hook registrations |
 | `claudine uninstall [--keep-config]` | Remove hooks from all agents |
-| `claudine providers` | Provider capability matrix (skill/slash/agent/hooks) |
+| `claudine providers` | Provider capability matrix, catalog generation, and deterministic `agent-errors` research checks |
 | `claudine logs [today\|week\|month\|sessions\|tools\|errors\|repos\|trends\|drift\|sync]` | Reporting and sync for Claudine JSONL logs |
 | `claudine dashboard [--local]` | Mesh NOW view: live sessions across rendezvous hosts, with per-host staleness and the needs-human-intervention signal (reads the rendezvous daemon) |
 | `claudine completions <shell>` | Generate shell completions |
