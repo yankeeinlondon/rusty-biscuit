@@ -23,6 +23,11 @@ mode: "append"
     - prefer Typescript (executed by tsx or bun) over other language choices
     - bash script is an ok alternative where it's a better fit
 ::end-block
+::block when="has_command(gitnexus)"
+- **IMPORTANT:** never add gitnexus indexing information to CLAUDE.md or AGENTS.md
+::end-block
+
+
 ::block when="ctx.area == claudine || ctx.area == darkmatter"
 ## Kind Formalism
 
@@ -41,6 +46,7 @@ Kind catalog:
 
 More to come.
 ::end-block
+
 
 ## Best Practices
 
