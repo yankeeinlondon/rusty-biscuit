@@ -340,9 +340,33 @@ fn literal_value_matches(value: &Value, expected: &Value) -> bool {
         return true;
     }
     match (value, expected) {
-        (Value::Number(a), Value::Number(b)) => a.as_f64() == b.as_f64(),
+        (Value::Number(a), Value::Number(b)) => numbers_equal(a, b),
         _ => false,
     }
+}
+
+/// Exact numeric equality across integer/float JSON encodings. Integer pairs
+/// compare exactly (never through `f64`, which cannot represent integers past
+/// `2^53`); an integer matches a float only when the float equals it exactly.
+fn numbers_equal(a: &serde_json::Number, b: &serde_json::Number) -> bool {
+    match (json_int(a), json_int(b)) {
+        (Some(x), Some(y)) => x == y,
+        (Some(x), None) => float_eq_int(b.as_f64(), x),
+        (None, Some(y)) => float_eq_int(a.as_f64(), y),
+        (None, None) => a.as_f64() == b.as_f64(),
+    }
+}
+
+/// Exact integer value of a JSON number, or `None` for a float-encoded number.
+fn json_int(n: &serde_json::Number) -> Option<i128> {
+    n.as_u64().map(|u| u as i128).or_else(|| n.as_i64().map(|i| i as i128))
+}
+
+/// True when `f` is present, integral, and exactly equals integer `x`.
+/// (float→int `as` casts saturate in Rust, so an out-of-range float simply
+/// fails the equality rather than misbehaving.)
+fn float_eq_int(f: Option<f64>, x: i128) -> bool {
+    f.is_some_and(|f| f.fract() == 0.0 && f as i128 == x)
 }
 
 /// Checks array-level constraints against an array value.
@@ -736,6 +760,46 @@ mod tests {
         assert!(matches(&expr, &frontmatter(&[]), ""));
         // Present-but-wrong still defeats.
         assert!(!matches(&expr, &frontmatter(&[("kind", json!("plan"))]), ""));
+    }
+
+    #[test]
+    fn literal_number_matches_float_encoded_equivalent() {
+        // AC7 regression: an integer literal still matches its float encoding for
+        // small values (`literal(2)` accepts `2.0`).
+        let expr = prop(
+            "version",
+            SimplifiedType::Literal,
+            vec![Constraint::LiteralValue(json!(2))],
+        );
+        assert!(matches(&expr, &frontmatter(&[("version", json!(2.0))]), ""));
+    }
+
+    #[test]
+    fn literal_large_integer_rejects_f64_neighbor() {
+        // Boundary integers past f64's 2^53 exact range: 2^53+1, i64::MAX,
+        // i64::MAX + 1 (a u64), and u64::MAX. Each neighbor collides with the
+        // literal under f64 rounding but must be rejected by exact comparison.
+        let cases: &[(Value, Value)] = &[
+            (json!(9007199254740993_u64), json!(9007199254740992_u64)),
+            (json!(9223372036854775807_u64), json!(9223372036854775806_u64)),
+            (json!(9223372036854775808_u64), json!(9223372036854775807_u64)),
+            (json!(18446744073709551615_u64), json!(18446744073709551614_u64)),
+        ];
+        for (lit, neighbor) in cases {
+            let expr = prop(
+                "version",
+                SimplifiedType::Literal,
+                vec![Constraint::LiteralValue(lit.clone())],
+            );
+            assert!(
+                matches(&expr, &frontmatter(&[("version", lit.clone())]), ""),
+                "literal({lit}) must accept {lit}"
+            );
+            assert!(
+                !matches(&expr, &frontmatter(&[("version", neighbor.clone())]), ""),
+                "literal({lit}) must reject f64-colliding neighbor {neighbor}"
+            );
+        }
     }
 
     #[test]

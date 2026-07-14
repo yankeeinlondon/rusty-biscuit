@@ -325,9 +325,10 @@ fn union_conflicting_multi_key_discriminants_are_not_narrowed() {
 fn union_sparse_known_key_plus_unknown_key_are_not_narrowed() {
     // Sparse arms: `kind` tags arms 0/1, `mode` tags arms 2/3. An instance
     // authors `kind: a` (which alone selects arm 0) AND `mode: z` (a qualifying
-    // discriminant matching no arm). Because arm 0 does not declare `mode`, the
-    // pre-fix selector wrongly narrowed to arm 0; the unknown second
-    // discriminant must instead preserve the merged anyOf reporting.
+    // discriminant matching no arm). Because arm 0 does not declare `mode`, a
+    // naive selector would wrongly narrow to arm 0 and report only its lone
+    // missing-required `one`. The ambiguous second discriminant must defeat
+    // narrowing, leaving the general union reporting in place.
     let doc = concat!(
         "---\n$schema:\n  cfg:\n",
         "    - '{ kind: literal(a), one: string(required) }'\n",
@@ -338,9 +339,22 @@ fn union_sparse_known_key_plus_unknown_key_are_not_narrowed() {
     );
     let report = validate(doc);
     assert!(!report.valid, "no arm is satisfied");
+    // Anti-narrowing evidence. Had the selector narrowed to arm 0, the report
+    // would be exactly one problem: its missing-required `one`. Instead the
+    // general (un-narrowed) union reporting drills the unselected arms' deeper
+    // discriminant `const` mismatches (`/cfg/kind` against literal(b),
+    // `/cfg/mode` against literal(x)/literal(y)) — multiple problems, none of
+    // them arm 0's `one`.
+    let narrowed_to_arm0 =
+        report.problems.len() == 1 && report.problems[0].property.as_deref() == Some("one");
+    assert!(!narrowed_to_arm0, "must not narrow to arm 0, got {:?}", report.problems);
     assert!(
-        report.problems.iter().any(|p| p.message.contains("anyOf")),
-        "an unknown second discriminant must retain the merged anyOf diagnostic, got {:?}",
+        report
+            .problems
+            .iter()
+            .any(|p| p.path == "/cfg/kind" || p.path == "/cfg/mode"),
+        "an unknown second discriminant must defeat narrowing and surface the \
+         unselected arms' deeper discriminant mismatches, got {:?}",
         report.problems
     );
 }
@@ -637,6 +651,51 @@ fn literal_large_integer_default_equality_is_exact() {
         assert!(
             DarkmatterSchemas::new().validate(&mismatch).is_err(),
             "an unequal large-integer default must fail to load for literal({lit})"
+        );
+    }
+}
+
+#[test]
+fn trigger_matcher_large_integer_literal_is_exact() {
+    // Exercise the PUBLIC trigger matcher path (`matches`) — the same
+    // `literal(...)` discriminant equality used to layer content-triggered
+    // schemas. A required literal gate must accept the exact large integer and
+    // reject its f64-colliding off-by-one neighbor.
+    use darkmatter::markdown::schemas::triggers::matches;
+    use darkmatter::markdown::schemas::{Constraint, MatchExpr, PropertyAtom, SimplifiedType, TypeExpr};
+
+    fn version_frontmatter(value: &Value) -> Value {
+        let mut map = serde_json::Map::new();
+        map.insert("version".to_string(), value.clone());
+        Value::Object(map)
+    }
+
+    for (lit, neighbor) in LARGE_INT_CASES {
+        let expected: Value = serde_json::from_str(lit).expect("literal is a JSON integer");
+        let neighbor_value: Value =
+            serde_json::from_str(neighbor).expect("neighbor is a JSON integer");
+
+        let expr = MatchExpr::Property {
+            name: "version".to_string(),
+            atom: PropertyAtom {
+                ty: TypeExpr::Primitive(SimplifiedType::Literal),
+                is_array: false,
+                constraints: vec![
+                    Constraint::LiteralValue(expected.clone()),
+                    Constraint::Required,
+                ],
+                array_constraints: vec![],
+                description: None,
+            },
+        };
+
+        assert!(
+            matches(&expr, &version_frontmatter(&expected), ""),
+            "trigger literal({lit}) must match {lit}"
+        );
+        assert!(
+            !matches(&expr, &version_frontmatter(&neighbor_value), ""),
+            "trigger literal({lit}) must reject f64-colliding neighbor {neighbor}"
         );
     }
 }
