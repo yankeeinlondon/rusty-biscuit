@@ -210,6 +210,157 @@ fn content_independent_render_to_browser_document_is_full_document() {
 }
 
 // ---------------------------------------------------------------------------
+// Standalone document — decorated page assembles a REAL, ordered <head>
+// ---------------------------------------------------------------------------
+
+/// Splits `html` into its `<head>` and `<body>` inner content, asserting the
+/// document scaffold is well-formed.
+fn split_head_body(html: &str) -> (&str, &str) {
+    assert!(
+        html.starts_with("<!DOCTYPE html><html><head>"),
+        "a standalone document must open the scaffold, got: {html}"
+    );
+    let head = html
+        .split_once("<head>")
+        .and_then(|(_, rest)| rest.split_once("</head>"))
+        .map(|(head, _)| head)
+        .expect("document must have a <head>…</head>");
+    let body = html
+        .split_once("<body>")
+        .and_then(|(_, rest)| rest.split_once("</body>"))
+        .map(|(body, _)| body)
+        .expect("document must have a <body>…</body>");
+    (head, body)
+}
+
+/// A decorated standalone document (page margins/padding/background, a page
+/// `<meta>` tag, and a **remote** stylesheet) assembles a real, non-empty
+/// `<head>` — not the old empty `<head></head>`. The head carries, in order, the
+/// render-tree head (charset/viewport/title + design-token `:root` block +
+/// `.code-block` panel stylesheet) followed by the page `<meta>` and the remote
+/// `<link rel="stylesheet">`. The `<body>` holds only the `.darkmatter-page`
+/// frame and rendered content — no `<meta>`, no `<link>`, and no design-token
+/// `<style>` leaks into the body.
+#[test]
+fn decorated_standalone_document_has_ordered_head_and_wrapper_only_body() {
+    use darkmatter::layout::PageBackground;
+    use darkmatter::style::bespoke::{MetaTag, PageMeta, PageStylesheet};
+
+    let md = Markdown::try_from_content(HEADING_DOC).expect("parse heading doc");
+    let html = page(80)
+        .with_margin(2)
+        .with_padding(1)
+        .with_page_background(PageBackground::Subtle)
+        .with_page_meta(PageMeta {
+            tags: vec![MetaTag::Name {
+                name: "author".into(),
+                content: "Ken".into(),
+            }],
+        })
+        .with_stylesheet(PageStylesheet::Remote {
+            href: "https://example.com/app.css".into(),
+        })
+        .render_to_browser_document(&md)
+        .expect("browser render");
+
+    let (head, body) = split_head_body(&html);
+
+    assert!(!head.is_empty(), "the decorated document head must be non-empty");
+
+    // Render-tree head first: charset/viewport/title, then the design-token
+    // `:root` block and the `.code-block` panel stylesheet.
+    let charset_at = head.find("<meta charset").expect("head carries charset");
+    assert!(head.contains("<title>"), "head carries a title, got: {head}");
+    let root_at = head.find(":root").expect("head carries the :root design tokens");
+    assert!(
+        head.contains(".code-block{"),
+        "the `.code-block` panel stylesheet rides the head, got: {head}"
+    );
+
+    // Then the page-authored meta and remote stylesheet link.
+    let meta_at = head
+        .find(r#"<meta name="author" content="Ken" />"#)
+        .expect("page <meta> rides the head");
+    let link_at = head
+        .find(r#"<link rel="stylesheet" href="https://example.com/app.css" />"#)
+        .expect("remote stylesheet <link> rides the head");
+    assert!(
+        charset_at < root_at && root_at < meta_at && meta_at < link_at,
+        "head order is render-tree head (charset→:root) then page meta then remote link, got: {head}"
+    );
+
+    // The body holds only the frame + content: no metadata, no stylesheet link,
+    // and no design-token `<style>` leaked from the head.
+    assert!(
+        body.contains(r#"<div class="darkmatter-page""#),
+        "the body holds the page frame, got: {body}"
+    );
+    assert!(!body.contains("<meta "), "no <meta> in the body, got: {body}");
+    assert!(
+        !body.contains(r#"<link rel="stylesheet""#),
+        "no remote stylesheet <link> in the body, got: {body}"
+    );
+    assert!(
+        !body.contains(":root"),
+        "the design-token block must not leak into the body, got: {body}"
+    );
+    assert!(
+        body.contains("Heading One"),
+        "the rendered content rides the body, got: {body}"
+    );
+}
+
+/// A feature-bearing standalone document requesting **both** Mermaid and Popover
+/// places each feature's assets in the real `<head>` exactly once — the Mermaid
+/// ESM bootstrap `<script type="module">` and the Popover CSS — while the
+/// `<body>` holds the rendered content (the `<pre class="mermaid">` container and
+/// the accessible popover markup) with no feature `<script>`/`<style>` inside it.
+#[test]
+fn feature_bearing_standalone_document_places_feature_assets_in_head() {
+    const MERMAID_AND_POPOVER_DOC: &str = concat!(
+        "```mermaid\ngraph TD; A --> B\n```\n\n",
+        "[Home](https://example.com \"prompt='go home'\")\n",
+    );
+
+    let md = Markdown::try_from_content(MERMAID_AND_POPOVER_DOC).expect("parse mermaid+popover doc");
+    let html = page(80)
+        .render_to_browser_document(&md)
+        .expect("browser render");
+
+    let (head, body) = split_head_body(&html);
+
+    // Both feature assets land in the head, once each.
+    assert_eq!(
+        head.matches(r#"<script type="module">"#).count(),
+        1,
+        "the Mermaid ESM bootstrap rides the head exactly once, got: {head}"
+    );
+    assert_eq!(
+        head.matches(".dm-popover-wrapper{").count(),
+        1,
+        "the Popover CSS rides the head exactly once, got: {head}"
+    );
+
+    // The body holds the rendered content, not the feature assets.
+    assert!(
+        body.contains(r#"<pre class="mermaid">"#),
+        "the interactive Mermaid container rides the body, got: {body}"
+    );
+    assert!(
+        body.contains(r#"class="dm-popover-wrapper""#),
+        "the accessible popover markup rides the body, got: {body}"
+    );
+    assert!(
+        !body.contains("<script"),
+        "no feature <script> leaks into the body, got: {body}"
+    );
+    assert!(
+        !body.contains(".dm-popover-wrapper{"),
+        "no feature <style> leaks into the body, got: {body}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Criterion 1 — dedup: two mermaid blocks inject exactly one bootstrap script
 // ---------------------------------------------------------------------------
 

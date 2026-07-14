@@ -47,6 +47,64 @@ fn style_fixture_renders_html_successfully() {
 }
 
 #[test]
+fn style_fixture_html_document_has_non_empty_ordered_head() {
+    // The decorated `style-prop.md` fixture (it configures page margins) drives
+    // `render_to_browser_document`'s decorated branch. The emitted standalone
+    // document must carry a REAL, non-empty `<head>` — charset/viewport/title
+    // then the design-token `:root` block — not the old empty `<head></head>`,
+    // and its `<body>` holds the `.darkmatter-page` frame. Without `--show`, the
+    // CLI prints the HTML artifact to stdout, so we assert on it directly.
+    let output = md_cmd()
+        .arg(style_prop_fixture())
+        .arg("--output")
+        .arg("html")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "md --output html style-prop.md must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let html = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        html.starts_with("<!DOCTYPE html><html><head>"),
+        "HTML artifact must open a standalone document, got: {html}"
+    );
+    let head = html
+        .split_once("<head>")
+        .and_then(|(_, rest)| rest.split_once("</head>"))
+        .map(|(head, _)| head)
+        .expect("document must have a <head>…</head>");
+    assert!(
+        !head.is_empty(),
+        "the standalone document head must NOT be empty (regression: empty <head></head>)"
+    );
+    let charset_at = head
+        .find("<meta charset")
+        .expect("head carries a charset meta");
+    let root_at = head.find(":root").expect("head carries the design-token :root block");
+    assert!(
+        charset_at < root_at,
+        "charset/title precede the design-token block in the head, got: {head}"
+    );
+
+    let body = html
+        .split_once("<body>")
+        .and_then(|(_, rest)| rest.split_once("</body>"))
+        .map(|(body, _)| body)
+        .expect("document must have a <body>…</body>");
+    assert!(
+        body.contains(r#"<div class="darkmatter-page""#),
+        "the decorated body holds the page frame, got: {body}"
+    );
+    assert!(
+        !body.contains("<meta "),
+        "page <meta> tags live in <head>, not <body>, got: {body}"
+    );
+}
+
+#[test]
 fn style_fixture_strict_style_passes_on_schema_clean_doc() {
     // The fixture only generates `KnownButInactive` warnings (the ul / ol
     // keys are wired in later sub-specs). `--strict-style` must NOT fail on

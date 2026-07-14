@@ -1247,6 +1247,115 @@ async fn browser_feature_free_fragment_has_no_nested_document_scaffold() {
     );
 }
 
+/// The standalone-document contract of `DarkmatterPage::render_to_browser_document`
+/// for a decorated, feature-bearing page, observed in a live DOM: page metadata,
+/// feature styles, and feature scripts are children of `document.head`, while the
+/// `.darkmatter-page` frame (and the rendered content it wraps) is a child of
+/// `document.body`. This is the head-fix regression guard — before it, the
+/// decorated path emitted an empty `<head></head>` and buried the metadata /
+/// styles / scripts inside the body wrapper. The document is loaded directly
+/// (not `wrap_fragment`) because it is already a complete `<!DOCTYPE html>`
+/// document.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_decorated_standalone_document_head_body_placement() {
+    if !require_browser() {
+        return;
+    }
+    use biscuit_terminal::terminal::Terminal;
+    use darkmatter::layout::DarkmatterPage;
+    use darkmatter::style::bespoke::{MetaTag, PageMeta};
+
+    // Mermaid (a head `<script type="module">` feature) + a prompted link (the
+    // Popover CSS feature) + a page `<meta>` + page margins — a decorated,
+    // feature-bearing page that exercises every head slot.
+    let md: Markdown = concat!(
+        "```mermaid\ngraph TD; A --> B\n```\n\n",
+        "[Home](https://example.com \"prompt='go home'\")\n",
+    )
+    .into();
+    let term = Terminal::new_optimistic(80);
+    let doc = DarkmatterPage::new(&term)
+        .with_margin(2)
+        .with_page_meta(PageMeta {
+            tags: vec![MetaTag::Name {
+                name: "author".into(),
+                content: "Ken".into(),
+            }],
+        })
+        .render_to_browser_document(&md)
+        .expect("render_to_browser_document");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let probe = "(() => {\
+        const dp = document.querySelector('.darkmatter-page');\
+        if (!dp) return 'err=no-darkmatter-page';\
+        const dpParent = dp.parentElement ? dp.parentElement.tagName : 'none';\
+        const headModuleScripts = document.head.querySelectorAll('script[type=\"module\"]').length;\
+        const bodyScripts = document.body.querySelectorAll('script').length;\
+        const headMeta = document.head.querySelectorAll('meta[name=\"author\"]').length;\
+        const bodyMeta = document.body.querySelectorAll('meta').length;\
+        const headPopover = [...document.head.querySelectorAll('style')].some(s => s.textContent.includes('.dm-popover-wrapper{')) ? 1 : 0;\
+        const bodyStyles = document.body.querySelectorAll('style').length;\
+        const mermaidInBody = dp.querySelector('pre.mermaid') ? 1 : 0;\
+        const popoverInBody = dp.querySelector('.dm-popover-wrapper') ? 1 : 0;\
+        return `dpParent=${dpParent};headModuleScripts=${headModuleScripts};bodyScripts=${bodyScripts};headMeta=${headMeta};bodyMeta=${bodyMeta};headPopover=${headPopover};bodyStyles=${bodyStyles};mermaidInBody=${mermaidInBody};popoverInBody=${popoverInBody}`;\
+    })()";
+    let result = harness.evaluate(probe).await.expect("evaluate placement probe");
+    harness.shutdown().await;
+
+    assert!(!result.starts_with("err="), "placement probe failed: {result}");
+    let kv = parse_kv(&result);
+    assert_eq!(
+        kv.get("dpParent").map(String::as_str),
+        Some("BODY"),
+        "the .darkmatter-page frame is a direct child of <body>; got {result}",
+    );
+    assert_eq!(
+        kv.get("headModuleScripts").map(String::as_str),
+        Some("1"),
+        "the Mermaid ESM bootstrap is a child of <head>; got {result}",
+    );
+    assert_eq!(
+        kv.get("bodyScripts").map(String::as_str),
+        Some("0"),
+        "no feature <script> lives in <body>; got {result}",
+    );
+    assert_eq!(
+        kv.get("headMeta").map(String::as_str),
+        Some("1"),
+        "the page <meta name=author> is a child of <head>; got {result}",
+    );
+    assert_eq!(
+        kv.get("bodyMeta").map(String::as_str),
+        Some("0"),
+        "no <meta> lives in <body>; got {result}",
+    );
+    assert_eq!(
+        kv.get("headPopover").map(String::as_str),
+        Some("1"),
+        "the Popover CSS <style> is a child of <head>; got {result}",
+    );
+    assert_eq!(
+        kv.get("bodyStyles").map(String::as_str),
+        Some("0"),
+        "no feature/design-token <style> lives in <body>; got {result}",
+    );
+    assert_eq!(
+        kv.get("mermaidInBody").map(String::as_str),
+        Some("1"),
+        "the rendered Mermaid container rides the body frame; got {result}",
+    );
+    assert_eq!(
+        kv.get("popoverInBody").map(String::as_str),
+        Some("1"),
+        "the rendered popover markup rides the body frame; got {result}",
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Review-5 finding 1: browser disclosure behavior was only verified at Level 1
 // (HTML-source substrings). The spec requires native `<details>`/`<summary>`

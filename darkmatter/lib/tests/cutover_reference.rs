@@ -11,9 +11,12 @@
 //! after `render_to_browser` became body-only. The undecorated fixtures were
 //! already complete documents and are byte-identical; the two decorated
 //! fixtures (`reference_page_background_pronounced`,
-//! `reference_page_margin_and_padding`) gained the minimal
-//! `<!DOCTYPE html><html><head></head><body>…</body></html>` scaffold around
-//! their page wrapper, so every reference is now a complete, openable document.
+//! `reference_page_margin_and_padding`) are wrapped in a real
+//! `<!DOCTYPE html><html><head>…</head><body>…</body></html>` scaffold whose
+//! `<head>` carries the charset/viewport/title and the design-token `:root` +
+//! `.code-block` panel stylesheet, while the `<body>` holds only the
+//! `.darkmatter-page` frame — so every reference is a complete, openable
+//! document with a non-empty head (the head-fix for the standalone path).
 //!
 //! ## Phase 8 review: `auto` page-wrapper side margins (accepted)
 //!
