@@ -29,7 +29,7 @@ initialize:
         - when: review
           action:
               - info: "a _review_ was passed into the implementation router and will be routed to **implement-review**"
-                proxy: ./_implement/implement-review.md
+              - proxy: ./_implement/implement-review.md
         - action:
             - error: "Unable to route the implementation to an appropriate prompt"
 ---

@@ -5,8 +5,6 @@ $schema:
     iteration: number -> the review's iteration number
     review: file -> the review file which will be created based on this prompt's execution
 description: "Reviews a _feature specification_ to make sure that the specification has been fully implemented. This prompt is also aware of the likelihood of more than one review being necessary and therefore names the reviews `review-{iteration}.md` in the same folder where the feature was specified.\n\nThe caller can pass in the **iteration** number but it should be detected automatically."
-initialize: 
-    info: "spec [{{spec}}]: {{file_exists(spec)}}"
 
 dir: "{{dirname(spec)}}"
 design: "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}"
@@ -19,12 +17,12 @@ start:
     info: "spec [{{spec}}]: {{file_exists(spec)}}"
 success:
     stack:
-        - when: "frontmatter(review_file,'ready') == true"
+        - when: "frontmatter(review,'ready') == true"
           action:
               - success: "{{feature_or_fix}} review {{iteration}} in **{{ctx.area}}** finished and deemed code to be **production ready**"
               - message: "✅  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed successfully (_**production ready**_)"
               - effect: small-group-cheer
-        - when: "frontmatter(review_file,'ready') != true"
+        - when: "frontmatter(review,'ready') != true"
           action:
               - warn: "{{feature_or_fix}} review {{iteration}} in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready: <blue>{{link(review)}}</blue>"
               - message: "⚠️  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed but was deemed NOT production ready"
