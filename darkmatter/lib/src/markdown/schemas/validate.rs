@@ -389,43 +389,23 @@ fn build_problems(
 ) -> Vec<ValidationProblem> {
     if let ValidationErrorKind::AnyOf { context } = err.kind() {
         let parent = err.instance_path().as_str();
-        // Only the optional-scalar/inline-object wrapper
-        // `anyOf: [{ "type": "null" }, X]` (see
-        // [`super::simplified::convert::wrap_optional_null`]) is drilled into,
-        // so a non-null value failing the typed arm `X` points at X's precise
-        // offending site instead of the opaque wrapper path. A genuine
-        // multi-arm union — `numberlike`/`boolish`, or a *discriminated*
-        // inline-object union that a shared literal discriminant did **not**
-        // narrow (an absent/unknown/ambiguous/conflicting discriminant, see
-        // [`super::discriminant`]) — keeps its aggregate `anyOf` message.
-        // Drilling those per-arm failures would emit partial noise (only the
-        // subset of arms whose failure happens to land deeper than `parent`)
-        // rather than the single "matches no variant" diagnostic D3/AC10
-        // require when narrowing is abandoned.
-        let is_optional_null_wrapper = context.len() == 2
-            && context
-                .iter()
-                .any(|arm| arm.len() == 1 && is_null_type_sentinel(&arm[0]));
-        if is_optional_null_wrapper {
-            let mut deeper: Vec<ValidationProblem> = context
-                .iter()
-                .flat_map(|arm| arm.iter())
-                .filter(|nested| {
-                    let path = nested.instance_path().as_str();
-                    path.len() > parent.len() && path.starts_with(parent)
-                })
-                .flat_map(|nested| build_problems(nested, positions, arm_index, anchors))
-                .collect();
-            if !deeper.is_empty() {
-                // Distinct arms can fail identically against the same value
-                // (e.g. overlapping inline-object arms); collapse exact
-                // duplicates so the report points at each offending site once.
-                // Duplicates need not be adjacent, so dedup by a seen set
-                // rather than `dedup_by`.
-                let mut seen: HashSet<(String, String)> = HashSet::new();
-                deeper.retain(|p| seen.insert((p.path.clone(), p.message.clone())));
-                return deeper;
-            }
+        let mut deeper: Vec<ValidationProblem> = context
+            .iter()
+            .flat_map(|arm| arm.iter())
+            .filter(|nested| {
+                let path = nested.instance_path().as_str();
+                path.len() > parent.len() && path.starts_with(parent)
+            })
+            .flat_map(|nested| build_problems(nested, positions, arm_index, anchors))
+            .collect();
+        if !deeper.is_empty() {
+            // Distinct arms can fail identically against the same value (e.g.
+            // overlapping inline-object arms); collapse exact duplicates so the
+            // report points at each offending site once. Duplicates need not be
+            // adjacent, so dedup by a seen set rather than `dedup_by`.
+            let mut seen: HashSet<(String, String)> = HashSet::new();
+            deeper.retain(|p| seen.insert((p.path.clone(), p.message.clone())));
+            return deeper;
         }
         let mut same_path_file_errors: Vec<ValidationProblem> = context
             .iter()
@@ -449,7 +429,11 @@ fn build_problems(
         // error instead, dropping the null sentinel's own "expected null" type
         // error. Scoped to the two-arm optional wrapper so multi-arm unions
         // (`numberlike`/`boolish`/root unions) keep their aggregate message.
-        if is_optional_null_wrapper {
+        if context.len() == 2
+            && context
+                .iter()
+                .any(|arm| arm.len() == 1 && is_null_type_sentinel(&arm[0]))
+        {
             let mut typed: Vec<ValidationProblem> = context
                 .iter()
                 .flat_map(|arm| arm.iter())
