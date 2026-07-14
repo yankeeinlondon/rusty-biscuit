@@ -144,6 +144,34 @@ details do not belong here.
   downstream human reviewer) later decides to accept an unsigned
   commit, the subagent's report must make the unsigned state explicit
   so the decision is visible in the trace.
+- **Never override `gpg.program` (or any other signing-config key) to a
+  helper that does not exist on the host (2026-07-13 darkmatter
+  phase-5 batch, recovered on retry).** This is the same failure mode
+  as the previous rule — an override that makes the commit land
+  unsigned — but the mechanism is different. `-c commit.gpgsign=false`
+  is the obvious form; `-c gpg.program=git-fpr-templated` (or any other
+  binary that isn't installed on the host) is the subtler form: the
+  override looks like a *fix* ("use this signing helper") rather than
+  a bypass, but the result is identical — git cannot find the helper,
+  signing is skipped or the commit fails outright, and the audit chain
+  is either silently weakened (signed-as-unsigned if the helper exits
+  cleanly without signing) or noisily broken (signing error if it
+  exits non-zero). Verified 2026-07-13 in the darkmatter 9-commit
+  phase-5 batch: the phase-5-tests subagent speculatively injected
+  `-c gpg.program=git-fpr-templated` while searching for the right
+  signing setup; the binary does not exist on this host (it is specific
+  to another repo), the first commit attempt failed with a signing
+  error, and re-running the same `git commit` invocation without the
+  override succeeded on the second try using the repo's normal signing
+  config. Two reinforcing points: (1) any `-c <signing-config>=<value>`
+  override on a `git commit` invocation should be treated with the same
+  suspicion as `-c commit.gpgsign=false` — if the override can break
+  signing, do not inject it; (2) when a signing helper is missing, the
+  fix is to verify the existing config (`git config --get gpg.program`
+  and the per-host `~/.gitconfig`) and let the repo default take over,
+  not to override the helper path from the command line. The broader
+  lesson — "any signing-related override is suspect" — is worth lifting
+  out of the gpgsign-specific rule above.
 - **Never run `git commit --amend` after a successful commit in a concurrent
   batch (2026-07-09 dmls + darkmatter batch, stray `7873a9a05`).** Once
   `git commit` returns zero, treat the commit as final for that invocation.
