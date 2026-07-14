@@ -253,3 +253,29 @@ details do not belong here.
   claudine + darkmatter 4-commit batch: the `style(darkmatter)`
   subagent ran this on `functions/collections.rs` (zero output)
   before committing the 9-file whitespace-only group.
+
+## Verifying That Subagent Commits Actually Landed
+
+- A subagent task returning `state: completed` does NOT prove its commit
+  landed. The Task tool returns `completed` as soon as the subagent's
+  final message is delivered; an empty result body means the subagent
+  finished without producing a report (success or failure), and the
+  commit may not have happened. Verified 2026-07-14 in the darkmatter
+  3-commit head-fix batch: the `feat(darkmatter+renderable)` subagent
+  returned `state: completed` with an empty result body. The other two
+  subagents (`test(darkmatter)` and `docs(darkmatter)`) succeeded and
+  their commits were visible in `git log`. Only the `git status --short`
+  + `git log --oneline -10` check after all subagents returned
+  revealed that the feat commit was still pending — the 3 production
+  files remained staged. The orchestrator then ran the same
+  `git commit --only -F - -- <paths> <<'COMMIT_MSG'…COMMIT_MSG`
+  invocation itself and the commit succeeded on the first try. Two
+  reinforcing points: (1) after every parallel subagent batch, always
+  run `git status --short` and `git log --oneline -N` where N matches
+  the number of subagents dispatched, and verify the staged set is
+  empty and HEAD has advanced by exactly that many commits; (2) if a
+  subagent's result body is empty or otherwise ambiguous, treat the
+  outcome as unknown, not as success — re-run the commit yourself
+  from the orchestrator rather than re-spawning the subagent (re-spawning
+  risks double-committing if the original commit did land but its
+  result was lost).
