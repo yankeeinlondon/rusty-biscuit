@@ -1,3 +1,49 @@
+---
+total_phases: 5
+source_files_during_phase_2:
+  - claudine/cli/src/commands/dashboard/model.rs
+  - claudine/cli/src/commands/dashboard/report.rs
+  - claudine/cli/src/commands/dashboard/tests.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/cli/src/commands/wrap/env/mod.rs
+  - claudine/cli/src/commands/wrap/env/tests.rs
+  - claudine/cli/src/commands/wrap/session_report.rs
+  - claudine/cli/tests/snapshots/wrap_basics__wrapper_reports_removed_sensitive_env_names.snap
+  - claudine/docs/providers/dispatch-inventory.json
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - claudine/cli/src/commands/handle.rs
+  - claudine/cli/src/commands/wrap/session_report.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+  - claudine/features/2026-07-12-rendezvous-dashboard/spec.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/claudine/cli-reference.md
+source_code:
+  - claudine/cli/src/commands/dashboard/model.rs
+  - claudine/cli/src/commands/dashboard/report.rs
+  - claudine/cli/src/commands/dashboard/tests.rs
+  - claudine/cli/src/commands/wrap/env/mod.rs
+  - claudine/cli/src/commands/wrap/env/tests.rs
+  - claudine/cli/src/commands/wrap/session_report.rs
+  - claudine/cli/src/commands/handle.rs
+  - claudine/cli/tests/snapshots/wrap_basics__wrapper_reports_removed_sensitive_env_names.snap
+  - claudine/docs/providers/dispatch-inventory.json
+documentation:
+  - claudine/features/2026-07-12-rendezvous-dashboard/spec.md
+  - .claude/skills/claudine/cli-reference.md
+packages:
+  - claudine-cli
+---
 # Trigger 2 — Interactive-Idle Intervention Signal (Implementation Plan)
 
 Completes the tiered "needs human intervention" signal (dashboard spec **D5**).
