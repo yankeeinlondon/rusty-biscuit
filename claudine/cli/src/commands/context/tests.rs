@@ -341,6 +341,21 @@ fn format_value_renders_arrays_plainly() {
     );
 }
 
+#[test]
+fn format_example_renders_tabs_as_visible_literals() {
+    let mut term = Terminal::new_optimistic(140);
+    term.color_depth = biscuit_terminal::discovery::detection::ColorDepth::None;
+    term.is_tty = false;
+    let descriptor = darkmatter::markdown::compose::expression::expression_function_descriptors()
+        .iter()
+        .find(|descriptor| descriptor.signature == "as_tsv(list)")
+        .expect("as_tsv descriptor");
+
+    let rendered = format_example(descriptor.example.as_ref(), &term);
+    assert_eq!(rendered, r#"as_tsv(items) → 1\t2\t3"#);
+    assert!(!rendered.contains('\t'));
+}
+
 /// Verify that expression and side-effect reports render without
 /// exceeding the 140ch contract at wide terminal widths.
 #[test]
