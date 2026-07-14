@@ -8,10 +8,17 @@
 //! explicit Mermaid controls (`Text` → code, `image_mode = Never` → code).
 //!
 //! Browser snapshots cover both output shapes (spec acceptance criterion 12):
-//! the standalone full-page document (`full_page_standalone_document_snapshot`)
-//! and the embeddable body-only wrapper fragment
-//! (`mermaid_body_only_wrapper_snapshot`). The wrapper is a single valid element
-//! — it never nests a `<!DOCTYPE>`/`<html>`/`<head>`/`<body>` inside itself.
+//! the standalone full-page document (`full_page_standalone_document_snapshot`,
+//! from `render_to_browser_document`) and the embeddable body-only wrapper
+//! fragment (`mermaid_body_only_wrapper_snapshot`, from `render_to_browser`).
+//! The wrapper is a single valid element — it never nests a
+//! `<!DOCTYPE>`/`<html>`/`<head>`/`<body>` inside itself.
+//!
+//! The two public browser methods have a content-independent return shape:
+//! `render_to_browser` is always body-only (bare body when undecorated and
+//! feature-free, forced wrapper fragment otherwise), and
+//! `render_to_browser_document` is always a complete standalone document. The
+//! `content_independent_*` tests below pin that contract for both.
 
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::layout::DarkmatterPage;
@@ -58,15 +65,17 @@ fn assert_body_only_wrapper(wrapper: &str) {
 // ---------------------------------------------------------------------------
 
 /// Pins the standalone full-page document form: a default-layout page with no
-/// requested feature returns the complete `<!DOCTYPE html>…` document
-/// (`DarkmatterPage::render_to_browser`'s no-wrapper path), carrying the
+/// requested feature returns the complete `<!DOCTYPE html>…` document from
+/// `DarkmatterPage::render_to_browser_document`'s no-wrapper path, carrying the
 /// design-token `:root` block and the `.code-block` panel stylesheet in
 /// `<head>`. This is the "full-page" half of criterion 12's snapshot coverage
 /// and guards the standalone document path against regressions.
 #[test]
 fn full_page_standalone_document_snapshot() {
     let md = Markdown::try_from_content(CODE_DOC).expect("parse code doc");
-    let html = page(80).render_to_browser(&md).expect("browser render");
+    let html = page(80)
+        .render_to_browser_document(&md)
+        .expect("browser render");
 
     assert!(
         html.starts_with("<!DOCTYPE html><html><head>"),
@@ -136,6 +145,67 @@ fn body_only_wrapper_has_no_nested_document_and_orders_assets_before_body() {
         html.matches(r#"<div class="darkmatter-page""#).count(),
         1,
         "exactly one wrapper element, got: {html}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Content-independent return shape of both public browser methods
+// ---------------------------------------------------------------------------
+
+/// A default-layout, feature-free document that carries a heading — the shared
+/// fixture for the content-independence pair below.
+const HEADING_DOC: &str = "# Heading One\n\nBody text.\n";
+
+/// `render_to_browser` on undecorated, feature-free content is a **bare body**:
+/// it carries no document scaffold (`<!DOCTYPE>`/`<html>`/`<head>`/`<body>`) and
+/// no `darkmatter-page` wrapper, yet still contains the rendered Markdown. This
+/// pins the body-only half of the content-independent contract — the method
+/// never emits a full document regardless of content.
+#[test]
+fn content_independent_render_to_browser_is_bare_body() {
+    let md = Markdown::try_from_content(HEADING_DOC).expect("parse heading doc");
+    let html = page(80).render_to_browser(&md).expect("browser render");
+
+    for forbidden in ["<!DOCTYPE", "<!doctype", "<html", "<head", "<body"] {
+        assert!(
+            !html.contains(forbidden),
+            "a bare body-only render must not emit `{forbidden}`, got: {html}"
+        );
+    }
+    assert!(
+        !html.contains(r#"<div class="darkmatter-page""#),
+        "a feature-free undecorated render adds no wrapper, got: {html}"
+    );
+    assert!(
+        html.contains("Heading One"),
+        "the rendered Markdown heading survives in the bare body, got: {html}"
+    );
+}
+
+/// `render_to_browser_document` on the *same* undecorated, feature-free input is
+/// a **complete standalone document**: it opens with `<!DOCTYPE html>` and
+/// carries the head assets (`:root` design tokens, `.code-block` panel
+/// stylesheet). This pins the full-document half of the content-independent
+/// contract — the method always emits a scaffolded document regardless of
+/// content.
+#[test]
+fn content_independent_render_to_browser_document_is_full_document() {
+    let md = Markdown::try_from_content(HEADING_DOC).expect("parse heading doc");
+    let html = page(80)
+        .render_to_browser_document(&md)
+        .expect("browser render");
+
+    assert!(
+        html.starts_with("<!DOCTYPE html>"),
+        "the document form must open with a doctype, got: {html}"
+    );
+    assert!(
+        html.contains("<head>") && html.contains(":root"),
+        "the document form carries the head design-token assets, got: {html}"
+    );
+    assert!(
+        html.contains("Heading One"),
+        "the rendered Markdown heading survives in the document body, got: {html}"
     );
 }
 
@@ -219,7 +289,8 @@ fn prompted_link_forces_wrapper_with_popover_css_in_body() {
 
 /// A feature-free page keeps its prior bytes: no wrapper, no feature stamp, no
 /// injected feature assets (spec acceptance criterion 2b for the browser body
-/// path). The default-layout path stands alone as a full document.
+/// path). `render_to_browser` returns a bare body fragment here — the full
+/// standalone document is `render_to_browser_document`'s job.
 #[test]
 fn feature_free_render_has_no_wrapper_or_assets() {
     let md = Markdown::try_from_content("Just a paragraph.\n").expect("parse plain doc");
