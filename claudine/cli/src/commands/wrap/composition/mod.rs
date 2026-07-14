@@ -48,6 +48,7 @@ pub(crate) mod dry_run;
 pub(crate) mod launch;
 mod preflight;
 pub(crate) mod prep_context;
+mod provider_args;
 pub(crate) mod runner;
 pub(crate) mod selection;
 pub(crate) mod target;
@@ -494,7 +495,21 @@ fn execute_composition_request_inner_with_guard(
         }
     }
 
-    let mut child_args = Vec::new();
+    // Seed the child argv with the forwarded provider tail, at the same base
+    // position as direct-wrapper passthrough — ahead of Claudine's entrypoint,
+    // model, transport, system-prompt, MCP, and prompt-delivery injections
+    // (`apply_entrypoint` inserts the entrypoint subcommand at index 0, so a
+    // tail-first base still lands after it, exactly like the wrapper). Announce
+    // it once per distinct (provider, tail) before launch.
+    provider_args::announce_forwarded_tail(
+        provider,
+        &request.provider_args,
+        request.provider_args_explicit,
+        silent,
+        quiet,
+        &term,
+    );
+    let mut child_args = request.provider_args.clone();
 
     // -- Yolo ----------------------------------------------------------------
 

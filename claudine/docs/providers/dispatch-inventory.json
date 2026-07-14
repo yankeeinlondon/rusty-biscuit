@@ -46,7 +46,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/composition/mod.rs",
-      "line": 236,
+      "line": 237,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -56,7 +56,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/composition/mod.rs",
-      "line": 336,
+      "line": 337,
       "form": "matches-macro",
       "dispatch_class": "conditional",
       "providers": [

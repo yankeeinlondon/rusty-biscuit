@@ -162,6 +162,10 @@ pub(super) fn run_sequence_steps(
                 // Sequence steps render their header in-pipeline: per-step
                 // prep already ran up front, so the executor's emit is timely.
                 header_emitted: false,
+                // The same forwarded tail applies to every sequence step,
+                // regardless of the provider each step resolves to.
+                provider_args: shared.provider_args.clone(),
+                provider_args_explicit: shared.provider_args_explicit,
             }
         };
 

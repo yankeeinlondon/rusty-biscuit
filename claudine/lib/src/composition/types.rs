@@ -736,6 +736,18 @@ pub struct CompositionExecutionRequest {
     /// `false` (the dry-run-unresolved corner and sequence steps) the
     /// executor emits it after resolving the target itself.
     pub header_emitted: bool,
+
+    /// Provider-argument tail forwarded verbatim to the underlying agent,
+    /// captured by the CLI's pre-clap ownership partition. Seeds the child
+    /// argv at the same stage as direct-wrapper passthrough, ahead of
+    /// Claudine's entrypoint / model / transport / prompt-delivery
+    /// injections. Distinct from MCP arguments. Empty when no tail was given.
+    pub provider_args: Vec<String>,
+
+    /// `true` when [`Self::provider_args`] came from an explicit `--` boundary
+    /// (opaque, unclassified) rather than an implicit non-Claudine switch.
+    /// Drives the INFO status wording only; never affects forwarding.
+    pub provider_args_explicit: bool,
 }
 
 /// Describes where the sequence definition was found.

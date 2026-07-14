@@ -664,6 +664,8 @@ fn build_execution_request(
         prep_env_context: Some(prep_context.env_context.clone()),
         prep_launch_detection_error: prep_context.launch_detection_error.clone(),
         header_emitted,
+        provider_args: shared.provider_args.clone(),
+        provider_args_explicit: shared.provider_args_explicit,
     }
 }
 
@@ -873,6 +875,8 @@ mod tests {
             perf: false,
             max_iterations: None,
             on_rate_limit: None,
+            provider_args: Vec::new(),
+            provider_args_explicit: false,
         }
     }
 

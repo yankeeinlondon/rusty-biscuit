@@ -211,6 +211,18 @@ pub struct SharedComposeArgs {
     /// `abort` to avoid unbounded sleeps.
     #[arg(long = "on-rate-limit", value_name = "POLICY", value_enum)]
     pub on_rate_limit: Option<OnRateLimitArg>,
+
+    /// Provider-argument tail forwarded to the underlying agent, captured by
+    /// the pre-clap ownership partition ([`crate::argv::partition_composition_tail`]).
+    /// Not parsed by clap — populated in `main` after the parse from the
+    /// partitioned argv, so it is deliberately excluded from the CLI surface.
+    #[arg(skip)]
+    pub provider_args: Vec<String>,
+
+    /// `true` when [`Self::provider_args`] came from an explicit `--` boundary
+    /// (opaque, unclassified) rather than an implicit non-Claudine switch.
+    #[arg(skip)]
+    pub provider_args_explicit: bool,
 }
 
 /// CLI-facing wrapper for [`claudine::composition::OnRateLimit`], exposed
