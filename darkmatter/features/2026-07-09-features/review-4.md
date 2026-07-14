@@ -1,7 +1,7 @@
 ---
 $schema: "@.claudine/schemas/review.yaml"
 ready: false
-implemented: false
+implemented: true
 agent: codex/default
 created: 2026-07-13T15:59:33-07:00
 ---

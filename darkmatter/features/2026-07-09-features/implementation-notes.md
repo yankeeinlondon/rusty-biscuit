@@ -445,15 +445,16 @@ Darkmatter's full-page browser path is now feature-aware: interactive Mermaid is
 the default and feature assets are injected **into the page wrapper body**, not a
 document `<head>` — the shape an embeddable fragment requires.
 
-### Reality vs. the spec's "body-only" model
+### Body-only rendering model
 
-`DarkmatterPage::render_to_browser` (and `Markdown::as_html`) emit a full
-`<!DOCTYPE html>` document via `renderable::render_browser_document_html`; the
-page wrapper `<div>` wraps that whole document. The spec was written against a
-"body-only fragment" mental model. Both are reconciled by the same mechanism: the
-page collects feature *requests* and places the resolved inline
-`<style>`/`<script>` in the wrapper (before the embedded body), so the feature
-assets ride the embeddable surface regardless of the inner document's `<head>`.
+`DarkmatterPage::render_to_browser` obtains both a standalone document and the
+same render's body inner HTML from `renderable::render_browser_document_body`.
+When no wrapper is needed it returns the standalone `<!DOCTYPE html>` document.
+When decoration or a requested feature forces the page wrapper, it embeds the
+body fragment directly, with no nested `<!DOCTYPE>`/`<html>`/`<head>`/`<body>`
+scaffold. The page collects feature *requests*, resolves them at this outer
+boundary, and places the resulting inline `<style>`/`<script>` before the body
+fragment so the wrapper remains self-contained.
 
 ### Renderable change (single, additive)
 
@@ -520,12 +521,13 @@ assets ride the embeddable surface regardless of the inner document's `<head>`.
 
 - `tests/style_features_baseline.rs`: the pre-Phase-5 "mermaid defaults to code"
   freeze flipped to `full_page_browser_mermaid_defaults_to_interactive`.
-- `tests/style_features_phase5.rs` (new): dedup (2 fences → 1 CSS + 1 module
-  script), body-only popover wrapper (CSS before body, injected once), feature-free
-  no-wrapper, MarkdownPlus neutrality, explicit `Text` → code, `image_mode=Never`
-  → code, and a durable `insta` snapshot of the exact injected mermaid assets
-  (CSP origins + exact version). Body-only `HeadRequired` and the empty-feature
-  case are unit tests in `layout/page/tests.rs` (they need `pub(crate)` access).
+- `tests/style_features_phase5.rs` (new): dedup (2 fences → 1 module script,
+  no Mermaid CSS, with the palette carried by `themeVariables`), body-only
+  popover wrapper (CSS before body, injected once), feature-free no-wrapper,
+  MarkdownPlus neutrality, explicit `Text` → code, `image_mode=Never` → code,
+  and a durable `insta` snapshot of the exact injected Mermaid assets (CSP
+  origins + exact version). Body-only `HeadRequired` and the empty-feature case
+  are unit tests in `layout/page/tests.rs` (they need `pub(crate)` access).
 - `mermaid/feature.rs` unit tests pin the resolver (mermaid → Module only, no
   CSS; palette via `themeVariables`; delegate Popover, asset-free off-Browser,
   CDN/version contract).
