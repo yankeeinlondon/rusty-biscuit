@@ -2700,6 +2700,13 @@ mod tests {
         }
 
         #[test]
+        fn tsv_uses_tabs_only_between_elements() {
+            assert_eq!(s(&as_tsv(&v(json!([]))).unwrap()), "");
+            assert_eq!(s(&as_tsv(&v(json!(["a"]))).unwrap()), "a");
+            assert_eq!(s(&as_tsv(&v(json!(["a", "b"]))).unwrap()), "a\tb");
+        }
+
+        #[test]
         fn mixed_scalar_types_render_via_scalar_string() {
             let list = v(json!(["a", 2, true, null]));
             // `null` renders as an empty element; a number drops its `.0`.
