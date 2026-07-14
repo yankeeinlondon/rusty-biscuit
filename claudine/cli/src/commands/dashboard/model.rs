@@ -77,6 +77,19 @@ pub struct SessionRow {
     pub interactive: Option<bool>,
     pub repo_root: Option<String>,
     pub status: Option<String>,
+    /// Daemon-projected reducer basis for [`status`](Self::status) —
+    /// e.g. `permission_ask`, `interactive_turn_complete`. Provenance the
+    /// UI surfaces so an intervention reads with its cause, not bare.
+    pub status_basis: Option<String>,
+    /// Daemon-projected producer that authored the winning status —
+    /// e.g. `sink`, `permission_hook`. Surfaced so a fallback-sink signal
+    /// is distinguishable from a first-class hook one.
+    pub status_producer: Option<String>,
+    /// Whether the launched provider can even emit a permission signal
+    /// (`supported` / `unsupported`), recorded at STARTED. Lets the UI
+    /// tell "no intervention needed" apart from "can't tell — this agent
+    /// has no permission signal" (never rendering absence as a negative).
+    pub permission_signal: Option<String>,
     /// Raw `updated_at_unix_ms` the producer stamped on this entry.
     pub updated_at_unix_ms: Option<i64>,
     /// Age of this entry (capture instant − `updated_at_unix_ms`),
@@ -324,6 +337,9 @@ fn parse_sessions(
                 interactive: entry.get("interactive").and_then(Value::as_bool),
                 repo_root: str_field("repo_root"),
                 status,
+                status_basis: str_field("status_basis"),
+                status_producer: str_field("status_producer"),
+                permission_signal: str_field("permission_signal"),
                 updated_at_unix_ms,
                 reported_age_ms,
                 intervention,

@@ -264,8 +264,8 @@ async fn fetch_snapshot_reflects_a_live_session() {
         .report_session_event(rendezvous_core::ReportSessionEventRequest {
             session_id: "sess-live".into(),
             kind: rendezvous_core::SessionEventKind::Started as i32,
-            details_json:
-                r#"{"agent":"claude","model":"opus","interactive":true,"status":"active"}"#.into(),
+            details_json: r#"{"agent":"claude","model":"opus","interactive":true}"#.into(),
+            status: None,
         })
         .await
         .expect("report session");
@@ -409,6 +409,113 @@ fn malformed_and_duplicate_registers_are_tolerated() {
     let report = DashboardReport::new(snap, "mesh")
         .with_inline_terminal(Terminal::new_optimistic(140));
     let _ = report.render(&Terminal::new_optimistic(140));
+}
+
+#[test]
+fn unsupported_permission_signal_renders_unavailable_not_fine() {
+    let now = 1_000_000;
+    // A provider with no permission-signal capability, running fine. Its
+    // silence carries no information: it must read as "can't tell", never
+    // as "no intervention needed".
+    let active = vec![(
+        LOCAL,
+        r#"{"s":{"agent":"gemini","status":"active","permission_signal":"unsupported"}}"#,
+    )];
+    let snap = MeshSnapshot::fold(LOCAL, now, &synced(&[]), &active, &[], &[], false);
+    let local = snap.hosts.iter().find(|h| h.is_local).expect("local host");
+    let session = &local.sessions[0];
+    assert_eq!(session.permission_signal.as_deref(), Some("unsupported"));
+    assert_eq!(session.intervention, Intervention::None);
+
+    let report = DashboardReport::new(snap, "local")
+        .with_inline_terminal(Terminal::new_optimistic(200));
+    let out = report.render(&Terminal::new_optimistic(200));
+    assert!(out.contains("unavailable"), "unsupported must read as unavailable: {out}");
+    // "intervention" is a single word robust to table wrapping; it must
+    // never appear for an unsupported provider.
+    assert!(!out.contains("intervention"), "unsupported must not read as fine: {out}");
+}
+
+#[test]
+fn supported_no_waiting_renders_no_intervention_needed() {
+    let now = 1_000_000;
+    let active = vec![(
+        LOCAL,
+        r#"{"s":{"agent":"claude","status":"active","permission_signal":"supported"}}"#,
+    )];
+    let snap = MeshSnapshot::fold(LOCAL, now, &synced(&[]), &active, &[], &[], false);
+    let report = DashboardReport::new(snap, "local")
+        .with_inline_terminal(Terminal::new_optimistic(200));
+    let out = report.render(&Terminal::new_optimistic(200));
+    assert!(out.contains("intervention"), "supported+no-waiting must read fine: {out}");
+    assert!(!out.contains("unavailable"), "supported must not read as can't-tell: {out}");
+
+    // The HTML target carries the full unwrapped phrase (targets in sync).
+    let html = report.render_html_fragment().render();
+    assert!(html.contains("no intervention needed"), "html support phrase: {html}");
+}
+
+#[test]
+fn waiting_on_user_still_maps_to_needs_input() {
+    let now = 1_000_000;
+    // Even a "supported" provider that IS waiting must read as needs-input,
+    // never as "no intervention needed".
+    let active = vec![(
+        LOCAL,
+        r#"{"s":{"agent":"claude","status":"waiting_on_user","permission_signal":"supported","status_basis":"permission_ask","status_producer":"permission_hook"}}"#,
+    )];
+    let snap = MeshSnapshot::fold(LOCAL, now, &synced(&[]), &active, &[], &[], false);
+    let local = snap.hosts.iter().find(|h| h.is_local).expect("local host");
+    let session = &local.sessions[0];
+    assert_eq!(session.intervention, Intervention::NeedsInput);
+    assert_eq!(session.status_basis.as_deref(), Some("permission_ask"));
+    assert_eq!(session.status_producer.as_deref(), Some("permission_hook"));
+
+    let report = DashboardReport::new(snap, "local")
+        .with_inline_terminal(Terminal::new_optimistic(220));
+    let out = report.render(&Terminal::new_optimistic(220));
+    assert!(out.contains("input"), "needs-input badge missing: {out}");
+    assert!(!out.contains("intervention"), "a waiting session must not read as fine: {out}");
+}
+
+#[test]
+fn needs_input_html_carries_basis_and_producer_provenance() {
+    let now = 1_000_000;
+    let active = vec![(
+        LOCAL,
+        r#"{"s":{"agent":"claude","status":"waiting_on_user","status_basis":"permission_ask","status_producer":"permission_hook"}}"#,
+    )];
+    let snap = MeshSnapshot::fold(LOCAL, now, &synced(&[]), &active, &[], &[], false);
+    let report = DashboardReport::new(snap, "local");
+    // HTML is unwrapped, so full multi-word provenance phrases survive.
+    let html = report.render_html_fragment().render();
+    assert!(html.contains("needs input"), "html needs-input label: {html}");
+    assert!(html.contains("permission ask"), "html basis provenance: {html}");
+    assert!(html.contains("permission hook"), "html producer provenance: {html}");
+}
+
+#[test]
+fn stale_host_suppresses_support_annotation() {
+    let now = 1_000_000;
+    // A stale host's "supported" claim is no more trustworthy than its
+    // status: the Needs? column must stay "can't tell", not assert fine.
+    let active = vec![(
+        REMOTE,
+        r#"{"s":{"agent":"gemini","status":"active","permission_signal":"supported"}}"#,
+    )];
+    let snap = MeshSnapshot::fold(
+        LOCAL,
+        now,
+        &synced(&[(REMOTE, now - STALENESS_THRESHOLD_MS - 60_000)]),
+        &active,
+        &[(REMOTE, r#"{"name":"server"}"#)],
+        &[],
+        false,
+    );
+    let report = DashboardReport::new(snap, "mesh")
+        .with_inline_terminal(Terminal::new_optimistic(200));
+    let out = report.render(&Terminal::new_optimistic(200));
+    assert!(!out.contains("intervention"), "stale host must not claim no-intervention: {out}");
 }
 
 #[tokio::test]

@@ -118,7 +118,7 @@ impl TerminalRenderable for DashboardReport {
                     dash(session.model.as_deref()).into(),
                     dash(session.repo_root.as_deref().map(basename)).into(),
                     status_cell(session, trusted).into(),
-                    needs_cell(session, &self.inline).into(),
+                    needs_cell(session, trusted, &self.inline).into(),
                 ]);
             }
             lines.push(table.render(term));
@@ -204,7 +204,7 @@ impl BrowserRenderable for DashboardReport {
                     dash(session.model.as_deref()).into(),
                     dash(session.repo_root.as_deref().map(basename)).into(),
                     status_cell(session, trusted).into(),
-                    needs_plain(session).into(),
+                    needs_plain(session, trusted).into(),
                 ]);
             }
             section = section.add_component(BrowserRenderable::render_html_fragment(&table));
@@ -328,31 +328,121 @@ fn status_cell(session: &SessionRow, trusted: bool) -> String {
     }
 }
 
-fn needs_cell(session: &SessionRow, inline: &Terminal) -> String {
-    match session.intervention {
-        Intervention::NeedsInput => {
-            let badge = match session.reported_age_ms {
-                // Age the urgency: a needs-input backed by a very old
-                // entry must not read as freshly urgent.
-                Some(age) => format!(
-                    "<yellow><bold>⚠ input</bold></yellow> <dim>· {} ago</dim>",
-                    format_age(age)
-                ),
-                None => "<yellow><bold>⚠ input</bold></yellow>".to_string(),
-            };
-            Prose::new(badge).render(inline)
-        }
-        Intervention::None => "—".to_string(),
+/// The honest three-way reading of a session that is NOT actively
+/// waiting on the user (dashboard spec D5; review Finding 4 tail):
+/// absence of a permission signal must read as "can't tell", never as a
+/// negative observation.
+enum Support {
+    /// The provider can emit a permission signal and none is outstanding.
+    NoIntervention,
+    /// The provider cannot emit a permission signal at all — its silence
+    /// carries no information, so the UI must not imply "all good".
+    Unavailable,
+    /// Untrusted host, or a provider that recorded no signal capability:
+    /// we simply do not know.
+    Unknown,
+}
+
+/// Classify a non-waiting session's support state. Untrusted hosts are
+/// always [`Support::Unknown`] — a stale replica's "supported" claim is
+/// no more trustworthy than its status.
+fn support(session: &SessionRow, trusted: bool) -> Support {
+    if !trusted {
+        return Support::Unknown;
+    }
+    match session.permission_signal.as_deref() {
+        Some("unsupported") => Support::Unavailable,
+        Some("supported") => Support::NoIntervention,
+        _ => Support::Unknown,
     }
 }
 
-fn needs_plain(session: &SessionRow) -> String {
+/// Humanized "why · who" behind the winning status, or `None` when the
+/// daemon projected neither (older entries) — so a legacy row renders
+/// exactly as before rather than gaining an empty provenance tail.
+fn needs_provenance(session: &SessionRow) -> Option<String> {
+    let basis = session.status_basis.as_deref().map(basis_label);
+    let producer = session.status_producer.as_deref().map(producer_label);
+    match (basis, producer) {
+        (Some(b), Some(p)) => Some(format!("{b} · via {p}")),
+        (Some(b), None) => Some(b.to_string()),
+        (None, Some(p)) => Some(format!("via {p}")),
+        (None, None) => None,
+    }
+}
+
+fn basis_label(basis: &str) -> &str {
+    match basis {
+        "permission_ask" => "permission ask",
+        "interactive_turn_complete" => "turn complete",
+        "process_heuristic" => "process heuristic",
+        "lifecycle" => "lifecycle",
+        // Forward-compat: show an unrecognized basis verbatim rather than
+        // dropping the daemon's provenance.
+        other => other,
+    }
+}
+
+fn producer_label(producer: &str) -> &str {
+    match producer {
+        "sink" => "stream sink",
+        "permission_hook" => "permission hook",
+        "idle_hook" => "idle hook",
+        "lifecycle" => "lifecycle",
+        "process_monitor" => "process monitor",
+        other => other,
+    }
+}
+
+fn needs_cell(session: &SessionRow, trusted: bool, inline: &Terminal) -> String {
     match session.intervention {
-        Intervention::NeedsInput => match session.reported_age_ms {
-            Some(age) => format!("needs input · {} ago", format_age(age)),
-            None => "needs input".to_string(),
+        Intervention::NeedsInput => {
+            let mut tail: Vec<String> = Vec::new();
+            if let Some(prov) = needs_provenance(session) {
+                tail.push(prov);
+            }
+            if let Some(age) = session.reported_age_ms {
+                // Age the urgency: a needs-input backed by a very old
+                // entry must not read as freshly urgent.
+                tail.push(format!("{} ago", format_age(age)));
+            }
+            let badge = if tail.is_empty() {
+                "<yellow><bold>⚠ input</bold></yellow>".to_string()
+            } else {
+                format!(
+                    "<yellow><bold>⚠ input</bold></yellow> <dim>· {}</dim>",
+                    tail.join(" · ")
+                )
+            };
+            Prose::new(badge).render(inline)
+        }
+        Intervention::None => match support(session, trusted) {
+            Support::NoIntervention => Prose::new("<dim>no intervention needed</dim>").render(inline),
+            Support::Unavailable => {
+                Prose::new("<dim>permission signal unavailable</dim>").render(inline)
+            }
+            Support::Unknown => "—".to_string(),
         },
-        Intervention::None => "—".to_string(),
+    }
+}
+
+fn needs_plain(session: &SessionRow, trusted: bool) -> String {
+    match session.intervention {
+        Intervention::NeedsInput => {
+            let mut parts = vec!["needs input".to_string()];
+            if let Some(prov) = needs_provenance(session) {
+                parts.push(prov);
+            }
+            if let Some(age) = session.reported_age_ms {
+                parts.push(format!("{} ago", format_age(age)));
+            }
+            parts.join(" · ")
+        }
+        Intervention::None => match support(session, trusted) {
+            Support::NoIntervention => "no intervention needed".to_string(),
+            Support::Unavailable => "permission signal unavailable".to_string(),
+            Support::Unknown => "—".to_string(),
+        },
     }
 }
 
