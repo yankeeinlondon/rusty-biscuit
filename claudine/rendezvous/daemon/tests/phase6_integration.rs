@@ -978,6 +978,7 @@ async fn active_sessions_converge_across_mesh() {
             session_id: "sess-42".into(),
             kind: rendezvous_core::SessionEventKind::Started as i32,
             details_json: r#"{"agent":"claude","repo":"github.com/acme/widget"}"#.into(),
+            status: None,
         })
         .await
         .expect("report start");
@@ -1030,6 +1031,7 @@ async fn active_sessions_converge_across_mesh() {
             session_id: "sess-42".into(),
             kind: rendezvous_core::SessionEventKind::Ended as i32,
             details_json: String::new(),
+            status: None,
         })
         .await
         .expect("report end");

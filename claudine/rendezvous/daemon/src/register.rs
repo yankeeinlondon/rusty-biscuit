@@ -220,6 +220,60 @@ impl RegisterStore {
         self.replace_local_fields(doc_id, &remaining)
     }
 
+    /// Atomically read-modify-write a locally-owned register under a
+    /// single held lock. `mutate` receives the register's current flat
+    /// field map (already inflated from Loro) and returns the COMPLETE
+    /// desired field set plus an arbitrary result `T`. The store diffs
+    /// `desired` against the live document and persists exactly as
+    /// [`Self::replace_local_fields`] does (delete-missing, write-changed,
+    /// then compaction), all while `inner` is held — so the read the
+    /// closure saw and the write it produces are one indivisible
+    /// operation. No concurrent transition can interleave between them.
+    ///
+    /// The `bool` in the result reports whether anything actually changed
+    /// (drives the write-on-change budget).
+    ///
+    /// The closure runs under the store mutex: it MUST be pure/synchronous
+    /// and MUST NOT call back into `RegisterStore` (parking_lot is not
+    /// reentrant).
+    pub fn mutate_local_fields<F, T>(
+        &self,
+        doc_id: &DocumentId,
+        mutate: F,
+    ) -> Result<(bool, T), RegisterError>
+    where
+        F: FnOnce(
+            &serde_json::Map<String, JsonValue>,
+        ) -> Result<(serde_json::Map<String, JsonValue>, T), RegisterError>,
+    {
+        let local = self.identity.node_id();
+        if doc_id.owner_node_id() != local {
+            return Err(RegisterError::NotOwner {
+                doc: doc_id.as_path(),
+                owner: doc_id.owner_node_id().to_string(),
+            });
+        }
+        let key = doc_id.as_path();
+        let peer = owner_peer_id(&local);
+
+        let mut inner = self.inner.lock();
+        // Read the current field map through the same inflate path
+        // `deep_value` uses, but WITHOUT releasing the lock.
+        let current = match inner.get(&key) {
+            Some(doc) => {
+                let value: LoroValue = doc.get_map(FIELDS_CONTAINER).get_deep_value();
+                match serde_json::to_value(&value).unwrap_or(JsonValue::Null) {
+                    JsonValue::Object(map) => map,
+                    _ => serde_json::Map::new(),
+                }
+            }
+            None => serde_json::Map::new(),
+        };
+        let (desired, result) = mutate(&current)?;
+        let changed = self.write_locked(&mut inner, &key, peer, &desired, true)?;
+        Ok((changed, result))
+    }
+
     fn write_local_fields(
         &self,
         doc_id: &DocumentId,
@@ -237,14 +291,29 @@ impl RegisterStore {
         let peer = owner_peer_id(&local);
 
         let mut inner = self.inner.lock();
-        if !inner.contains_key(&key) {
+        self.write_locked(&mut inner, &key, peer, fields, delete_missing)
+    }
+
+    /// Diff `fields` against the register at `key` and persist the change,
+    /// assuming the `inner` lock is already held by the caller. Shared by
+    /// the public write wrappers and [`Self::mutate_local_fields`] so the
+    /// persistence + compaction path is identical everywhere.
+    fn write_locked(
+        &self,
+        inner: &mut HashMap<String, LoroDoc>,
+        key: &str,
+        peer: u64,
+        fields: &serde_json::Map<String, JsonValue>,
+        delete_missing: bool,
+    ) -> Result<bool, RegisterError> {
+        if !inner.contains_key(key) {
             let doc = LoroDoc::new();
             doc.set_peer_id(peer)?;
-            inner.insert(key.clone(), doc);
+            inner.insert(key.to_string(), doc);
         }
         // Reference clone: shares the underlying doc with the stored
         // handle, so writes below land in the live register.
-        let doc = inner.get(&key).expect("just ensured").clone();
+        let doc = inner.get(key).expect("just ensured").clone();
 
         let map = doc.get_map(FIELDS_CONTAINER);
         let mut changed = false;
@@ -286,10 +355,10 @@ impl RegisterStore {
         if snapshot.len() > COMPACT_MAX_SNAPSHOT_BYTES || doc.len_ops() > COMPACT_MAX_OPS {
             let rebased = self.rebase(&doc, peer)?;
             let rebased_snapshot = rebased.export(ExportMode::Snapshot)?;
-            self.storage.save_register(&key, &rebased_snapshot)?;
-            inner.insert(key, rebased);
+            self.storage.save_register(key, &rebased_snapshot)?;
+            inner.insert(key.to_string(), rebased);
         } else {
-            self.storage.save_register(&key, &snapshot)?;
+            self.storage.save_register(key, &snapshot)?;
         }
         Ok(true)
     }
@@ -548,6 +617,52 @@ mod tests {
         assert_eq!(value["os"], json!("macOS"));
         assert_eq!(value["cpu_cores"], json!(32));
         assert_eq!(harness.storage.register_count().expect("count"), 1);
+    }
+
+    #[test]
+    fn mutate_local_fields_is_atomic_and_write_on_change() {
+        let harness = build_harness();
+        let doc_id = harness.store.local_capability_id();
+
+        // The closure sees the current (empty) map and returns a
+        // complete desired set; the returned `T` rides back out.
+        let (changed, count) = harness
+            .store
+            .mutate_local_fields(&doc_id, |current| {
+                assert!(current.is_empty(), "fresh register starts empty");
+                let mut next = current.clone();
+                next.insert("os".into(), json!("macOS"));
+                next.insert("cpu_cores".into(), json!(16));
+                let n = next.len() as u64;
+                Ok((next, n))
+            })
+            .expect("first mutate");
+        assert!(changed, "first mutate writes");
+        assert_eq!(count, 2);
+
+        // Returning the identical map touches nothing (write-on-change).
+        let (changed, _) = harness
+            .store
+            .mutate_local_fields(&doc_id, |current| {
+                let next = current.clone();
+                Ok((next, ()))
+            })
+            .expect("idempotent mutate");
+        assert!(!changed, "unchanged desired map must not write");
+
+        // Omitting a key from the desired set deletes it (delete-missing).
+        let (changed, _) = harness
+            .store
+            .mutate_local_fields(&doc_id, |current| {
+                let mut next = current.clone();
+                next.remove("cpu_cores");
+                Ok((next, ()))
+            })
+            .expect("delete mutate");
+        assert!(changed);
+        let value = harness.store.deep_value(&doc_id).expect("read").expect("present");
+        assert_eq!(value["os"], json!("macOS"));
+        assert!(value.get("cpu_cores").is_none(), "omitted key deleted: {value}");
     }
 
     #[test]
