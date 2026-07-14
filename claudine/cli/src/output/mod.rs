@@ -47,6 +47,17 @@ fn trim_trailing_blank_rendered_lines(rendered: &str) -> String {
     lines.join("\n")
 }
 
+fn render_operation_badge(operation: &str, term: &Terminal) -> String {
+    let open = "<bg-green-900><green-100><bold>";
+    let close = "</bold></green-100></bg-green-900>";
+
+    // Each segment owns the background because closing nested emphasis resets it.
+    Prose::new(format!(
+        "{open} Op({close}{open}<dim><i>{operation}</i></dim>{close}{open}) {close}"
+    ))
+    .render(term)
+}
+
 /// Print the one-line header: `Claudine ▸ Provider [badges] prompt`
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn log_wrapper_header(
@@ -102,12 +113,7 @@ pub(crate) fn log_wrapper_header(
     }
 
     if let Some(op) = operation {
-        header_parts.push(
-            Prose::new(format!(
-                "<bg-green-900><green-100><bold> Op(<dim><i>{op}</i></dim>) </bold></green-100></bg-green-900>"
-            ))
-            .render(term),
-        );
+        header_parts.push(render_operation_badge(op, term));
     }
 
     if let Some(package_name) = package_name_display(env_plan) {
@@ -812,6 +818,26 @@ mod tests {
         assert_eq!(
             trim_trailing_blank_rendered_lines(rendered),
             "first\nsecond"
+        );
+    }
+
+    #[test]
+    fn operation_badge_reapplies_background_before_closing_parenthesis() {
+        let rendered = render_operation_badge("commit", &Terminal::new_optimistic(80));
+        let closing_parenthesis = rendered
+            .find(')')
+            .expect("operation badge should contain a closing parenthesis");
+        let before_closing_parenthesis = &rendered[..closing_parenthesis];
+        let last_background = before_closing_parenthesis
+            .rfind("\x1b[48;2;")
+            .expect("operation badge should render a true-color background");
+        let last_reset = before_closing_parenthesis
+            .rfind("\x1b[0m")
+            .expect("nested operation styling should emit a reset");
+
+        assert!(
+            last_background > last_reset,
+            "badge background must be active for the closing parenthesis: {rendered:?}"
         );
     }
 
