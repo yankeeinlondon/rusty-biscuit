@@ -4,7 +4,7 @@ ready: false
 agent: codex/default
 created: 2026-07-13T17:06:04-07:00
 spec: 2026-07-12-literal-expression/spec.md
-implemented: false
+implemented: true
 description: "A **feature** review of `2026-07-12-literal-expression/spec.md`"
 feature: 2026-07-12-literal-expression/review-5.md
 ---
