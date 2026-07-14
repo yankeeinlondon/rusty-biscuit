@@ -35,7 +35,7 @@ println!("{}", table.display(&term));
 
 | Type | Example Input | Rendered Output |
 |------|--------------|-----------------|
-| `Text(String)` | `"Hello World"` | `Hello World` |
+| `Text(String)` | `"Hello World"` | `Hello World` (tabs use detected table-local tab stops, with an eight-column fallback) |
 | `Integer(i64)` | `1234567` | `1,234,567` |
 | `Float(f64)` | `12345.678` | `12,345.68` |
 | `Currency(Currency, f64)` | `(USD, 1234.56)` | `$1,234.56` |
