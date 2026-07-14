@@ -185,6 +185,18 @@ pub enum GateStatus {
     GateError,
 }
 
+/// Authority boundary for a deterministic gate error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GateErrorScope {
+    /// The provider-authored research document can be corrected by resuming
+    /// the same research session.
+    ResearchDocument,
+    /// An immutable seed or other authoritative checker input needs
+    /// maintainer intervention.
+    GateInput,
+}
+
 /// The durable outcome report for one provider's research document.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct FindingsReport {
@@ -194,6 +206,8 @@ pub struct FindingsReport {
     pub findings: Vec<Finding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_scope: Option<GateErrorScope>,
 }
 
 impl FindingsReport {
@@ -202,12 +216,13 @@ impl FindingsReport {
         self.status == GateStatus::Clean
     }
 
-    fn gate_error(provider: &str, error: impl Into<String>) -> Self {
+    fn gate_error(provider: &str, scope: GateErrorScope, error: impl Into<String>) -> Self {
         Self {
             status: GateStatus::GateError,
             provider: provider.to_string(),
             findings: Vec::new(),
             error: Some(error.into()),
+            error_scope: Some(scope),
         }
     }
 }
@@ -249,6 +264,7 @@ fn evaluate_with_fixture_base(
         provider: provider.to_string(),
         findings,
         error: None,
+        error_scope: None,
     }
 }
 
@@ -752,22 +768,31 @@ fn parse_research(slug: &str, frontmatter: &Value) -> Result<ResearchVocabulary,
 ///
 /// ## Returns
 ///
-/// The [`FindingsReport`] after it has been durably persisted. Input and schema
-/// failures become `gate_error` reports. An inability to persist the report is
-/// returned as an error so lifecycle processing cannot inspect stale state.
+/// The [`FindingsReport`] after it has been durably persisted. Research
+/// document failures become repairable `gate_error` reports; seed and other
+/// authoritative input failures become terminal `gate_error` reports. An
+/// inability to persist the report is returned as an error so lifecycle
+/// processing cannot inspect stale state.
 pub fn check_provider(
     area: &Path,
     slug: &str,
     findings_path: &Path,
 ) -> Result<FindingsReport, GenError> {
     let fixture_base = area.join(format!("docs/research/{TOPIC}"));
-    let report = match read_seed(area, slug).and_then(|seed| {
-        read_research(area, slug).map(|research| {
-            evaluate_with_fixture_base(slug, seed.as_ref(), &research, Some(&fixture_base))
-        })
-    }) {
-        Ok(report) => report,
-        Err(error) => FindingsReport::gate_error(slug, error.to_string()),
+    let report = match read_seed(area, slug) {
+        Err(error) => {
+            FindingsReport::gate_error(slug, GateErrorScope::GateInput, error.to_string())
+        }
+        Ok(seed) => match read_research(area, slug) {
+            Ok(research) => {
+                evaluate_with_fixture_base(slug, seed.as_ref(), &research, Some(&fixture_base))
+            }
+            Err(error) => FindingsReport::gate_error(
+                slug,
+                GateErrorScope::ResearchDocument,
+                error.to_string(),
+            ),
+        },
     };
     write_outcome_report(findings_path, &report)?;
     Ok(report)
@@ -1102,10 +1127,12 @@ mod tests {
                 detail: "x".into(),
             }],
             error: None,
+            error_scope: None,
         };
         write_outcome_report(&path, &dirty).expect("write findings");
         let dirty_text = fs::read_to_string(&path).unwrap();
         assert!(dirty_text.contains("status: findings"));
+        assert!(!dirty_text.contains("error_scope:"));
 
         // A subsequent clean run atomically replaces findings with an explicit
         // clean outcome; clean is never represented by absence.
@@ -1114,11 +1141,13 @@ mod tests {
             provider: "codex".into(),
             findings: vec![],
             error: None,
+            error_scope: None,
         };
         write_outcome_report(&path, &clean).expect("clean replace");
         let clean_text = fs::read_to_string(&path).unwrap();
         assert!(clean_text.contains("status: clean"));
         assert!(!clean_text.contains("status: findings"));
+        assert!(!clean_text.contains("error_scope:"));
     }
 }
 

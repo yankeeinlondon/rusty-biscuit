@@ -18,7 +18,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use claudine_gen::{Check, GateStatus, check_agent_errors, evaluate_agent_errors};
+use claudine_gen::{
+    Check, GateErrorScope, GateStatus, check_agent_errors, evaluate_agent_errors,
+};
 use claudine_gen::agent_errors_check::{read_research, read_seed};
 use darkmatter::markdown::compose::conditions::evaluate_condition_against;
 
@@ -59,6 +61,18 @@ fn outcome_status(path: &Path) -> String {
         .and_then(serde_json::Value::as_str)
         .expect("outcome has a string status")
         .to_string()
+}
+
+fn outcome_error_scope(path: &Path) -> Option<String> {
+    let text = fs::read_to_string(path).expect("outcome report is readable");
+    let markdown =
+        darkmatter::markdown::Markdown::try_from_content(text).expect("outcome is Markdown");
+    markdown
+        .frontmatter()
+        .as_map()
+        .get("error_scope")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
 }
 
 fn run_checker(area: &Path, slug: &str, findings: &Path) -> std::process::Output {
@@ -275,6 +289,7 @@ requires_claudine_update: false
     let findings = scaffold_area(dir.path(), "codex", SEED_BASELINE, bad_doc);
     let report = check_agent_errors(dir.path(), "codex", &findings).expect("gate error persists");
     assert_eq!(report.status, GateStatus::GateError);
+    assert_eq!(report.error_scope, Some(GateErrorScope::ResearchDocument));
     assert!(
         report.error.as_deref().unwrap_or_default().contains("schema validation")
             || report.error.as_deref().unwrap_or_default().contains("guessed"),
@@ -282,6 +297,24 @@ requires_claudine_update: false
         report.error
     );
     assert_eq!(outcome_status(&findings), "gate_error");
+    assert_eq!(outcome_error_scope(&findings).as_deref(), Some("research_document"));
+}
+
+#[test]
+fn invalid_seed_writes_terminal_gate_input_error_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let findings = scaffold_area(
+        dir.path(),
+        "codex",
+        "kind_buckets: [not-a-valid-bucket]\n",
+        CLEAN_DOC,
+    );
+
+    let report = check_agent_errors(dir.path(), "codex", &findings)
+        .expect("authoritative input error persists");
+    assert_eq!(report.status, GateStatus::GateError);
+    assert_eq!(report.error_scope, Some(GateErrorScope::GateInput));
+    assert_eq!(outcome_error_scope(&findings).as_deref(), Some("gate_input"));
 }
 
 #[test]
@@ -293,6 +326,7 @@ fn checker_process_schema_failure_emits_gate_error_not_clean_success() {
     let output = run_checker(dir.path(), "codex", &findings);
     assert!(output.status.success(), "persisted gate_error is a branchable outcome");
     assert_eq!(outcome_status(&findings), "gate_error");
+    assert_eq!(outcome_error_scope(&findings).as_deref(), Some("research_document"));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!stdout.contains("research clean"), "schema failure must not print clean: {stdout}");
 }
@@ -338,20 +372,33 @@ fn fleet_clean_action_requires_explicit_clean_status() {
         .collect();
     let clean_condition = "frontmatter(findings, 'status') == 'clean'";
     let findings_condition = "frontmatter(findings, 'status') == 'findings'";
-    let gate_error_condition = "frontmatter(findings, 'status') == 'gate_error'";
+    let repairable_gate_error_condition = "frontmatter(findings, 'status') == 'gate_error' && frontmatter(findings, 'error_scope') == 'research_document'";
+    let gate_input_condition = "frontmatter(findings, 'status') == 'gate_error' && frontmatter(findings, 'error_scope') == 'gate_input'";
+    let unknown_scope_condition = "frontmatter(findings, 'status') == 'gate_error' && frontmatter(findings, 'error_scope') != 'research_document' && frontmatter(findings, 'error_scope') != 'gate_input'";
     assert!(conditions.contains(&clean_condition));
     assert!(conditions.contains(&findings_condition));
-    assert!(conditions.contains(&gate_error_condition));
+    assert!(conditions.contains(&repairable_gate_error_condition));
+    assert!(conditions.contains(&gate_input_condition));
+    assert!(conditions.contains(&unknown_scope_condition));
     assert!(conditions.contains(&"!file_exists(findings)"));
 
-    for (status, expected_clean, expected_findings, expected_gate_error) in [
-        ("clean", true, false, false),
-        ("findings", false, true, false),
-        ("gate_error", false, false, true),
+    for (status, scope, expected_clean, expected_findings, expected_repair, expected_input) in [
+        ("clean", None, true, false, false, false),
+        ("findings", None, false, true, false, false),
+        (
+            "gate_error",
+            Some("research_document"),
+            false,
+            false,
+            true,
+            false,
+        ),
+        ("gate_error", Some("gate_input"), false, false, false, true),
     ] {
+        let scope = scope.map(|value| format!("error_scope: {value}\n")).unwrap_or_default();
         fs::write(
             &report,
-            format!("---\nstatus: {status}\nprovider: codex\n---\n# Outcome\n"),
+            format!("---\nstatus: {status}\nprovider: codex\n{scope}---\n# Outcome\n"),
         )
         .unwrap();
         assert_eq!(
@@ -363,10 +410,22 @@ fn fleet_clean_action_requires_explicit_clean_status() {
             expected_findings
         );
         assert_eq!(
-            evaluate_condition_against(gate_error_condition, &data, dir.path()).unwrap(),
-            expected_gate_error
+            evaluate_condition_against(repairable_gate_error_condition, &data, dir.path())
+                .unwrap(),
+            expected_repair
+        );
+        assert_eq!(
+            evaluate_condition_against(gate_input_condition, &data, dir.path()).unwrap(),
+            expected_input
         );
     }
+
+    fs::write(
+        &report,
+        "---\nstatus: gate_error\nprovider: codex\nerror_scope: unexpected\n---\n# Outcome\n",
+    )
+    .unwrap();
+    assert!(evaluate_condition_against(unknown_scope_condition, &data, dir.path()).unwrap());
 
     fs::remove_file(&report).unwrap();
     assert!(!report.exists(), "absence is an error branch, never clean");
