@@ -415,17 +415,64 @@ enum SessionEventKind {
     SESSION_EVENT_KIND_ENDED = 3;
 }
 
+// The displayable state of a session, ordered by intervention strength.
+// The daemon folds one of these per producer into the effective status.
+enum SessionStatusState {
+    SESSION_STATUS_STATE_UNSPECIFIED = 0;
+    ACTIVE = 1;
+    IDLE = 2;
+    WAITING_ON_USER = 3;
+}
+
+// Which producer authored a status contribution — its slot key in the
+// entry. `PERMISSION_HOOK` and `IDLE_HOOK` are distinct even though both
+// originate from `claudine handle`.
+enum StatusProducer {
+    STATUS_PRODUCER_UNSPECIFIED = 0;
+    LIFECYCLE = 1;
+    SINK = 2;
+    IDLE_HOOK = 3;
+    PROCESS_MONITOR = 4;
+    PERMISSION_HOOK = 5;
+}
+
+// Why the producer believes the state — surfaced to the UI for honesty.
+enum SessionStatusBasis {
+    SESSION_STATUS_BASIS_UNSPECIFIED = 0;
+    SESSION_STATUS_BASIS_LIFECYCLE = 1;
+    PERMISSION_ASK = 2;
+    INTERACTIVE_TURN_COMPLETE = 3;
+    PROCESS_HEURISTIC = 4;
+}
+
+// One producer's opinion about a session's displayed status. The daemon
+// stores it in the producer's slot (revision-guarded, last-writer-wins
+// per slot) and recomputes the effective status from every live slot.
+message StatusContribution {
+    SessionStatusState state = 1;
+    StatusProducer producer = 2;
+    SessionStatusBasis basis = 3;
+    // Producer-captured unix-ns wall clock. The daemon rejects any
+    // contribution whose revision <= the stored slot revision.
+    int64 revision = 4;
+}
+
 message ReportSessionEventRequest {
     // Producer-scoped session identifier (whatever identifier the
     // producer natively has; correlation across producers happens
     // downstream, per the logging-refactor rulings).
     string session_id = 1;
     SessionEventKind kind = 2;
-    // Session attributes as a JSON object string (agent, model, repo,
-    // status, interactive, pid, ...). Merged over the existing entry;
-    // ignored for ENDED. The daemon stamps started_at_unix_ms /
-    // updated_at_unix_ms itself.
+    // DESCRIPTIVE session attributes only (agent, model, repo,
+    // interactive, pid, permission_signal, ...) as a JSON object string.
+    // Merged over the existing entry; ignored for ENDED. The status
+    // opinion moved to the typed `status` field; the daemon owns and
+    // strips started_at_unix_ms / updated_at_unix_ms / status /
+    // status_basis / status_producer / status_slots.
     string details_json = 3;
+    // Present when this event carries a status opinion (a producer's
+    // slot contribution). Absent for pure descriptive updates.
+    StatusContribution status = 4;
 }
 
 message ReportSessionEventResponse {

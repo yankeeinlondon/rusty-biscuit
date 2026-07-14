@@ -14,6 +14,7 @@ pub mod identity;
 pub mod invitation;
 pub mod repo_identity;
 pub mod session_log;
+pub mod session_status;
 pub mod socket;
 pub mod sync;
 
@@ -35,7 +36,8 @@ pub use proto::{
     ListActiveSessionsRequest, ListActiveSessionsResponse, ListChunkEntriesRequest,
     ListChunkEntriesResponse, ListHostCapabilitiesRequest, ListHostCapabilitiesResponse,
     ListHostReposRequest, ListHostReposResponse, ReportSessionEventRequest,
-    ReportSessionEventResponse, SessionEventKind,
+    ReportSessionEventResponse, SessionEventKind, SessionStatusBasis, SessionStatusState,
+    StatusProducer,
     ListPairingsRequest, ListPairingsResponse, ListPeersRequest, ListPeersResponse,
     ListSessionChunksRequest, ListSessionChunksResponse, PairingInfo, PeerConnectionState,
     PeerInfo, PeerSource, PingRequest, PingResponse, ProjectionRow, QueryProjectionRequest,
