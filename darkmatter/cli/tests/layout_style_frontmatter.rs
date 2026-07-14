@@ -30,8 +30,8 @@ fn style_fixture_cli_pipe_smoke_passes() {
 #[test]
 fn style_fixture_renders_html_successfully() {
     // Acceptance: `md --output html style-prop.md` uses the same page-level
-    // frontmatter values through `render_to_browser`. MD_DRY_RUN avoids
-    // launching a browser.
+    // frontmatter values through `render_to_browser_document` (a complete
+    // standalone document). MD_DRY_RUN avoids launching a browser.
     let output = md_cmd()
         .arg(style_prop_fixture())
         .arg("--output")

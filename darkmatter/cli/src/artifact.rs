@@ -48,7 +48,7 @@ pub fn html_artifact(
     page = apply_style_frontmatter(page, md, cli, input_path)?;
 
     let content = page
-        .render_to_browser(md)
+        .render_to_browser_document(md)
         .context("Failed to convert to HTML")?;
 
     Ok(OutputArtifact {
