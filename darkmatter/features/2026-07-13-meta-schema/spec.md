@@ -1,8 +1,10 @@
 ---
-status: ready for review
-reviewed: false
-review_iterations: 0
-rulings: `type-definition` and `schema` semantic types ruled by Ken 2026-07-13
+status: ready for planning and implementation
+reviewed: true
+review_iterations: 1
+reviewed_by: codex/default
+reviewed_on: 2026-07-14
+rulings: "`type-definition` and `schema` semantic types ruled by Ken 2026-07-13"
 inputs:
   - ../../docs/schemas/darkmatter.yaml
   - ../../docs/topics/schema-definition.md
@@ -10,22 +12,36 @@ inputs:
   - ../../lib/src/markdown/schemas/simplified/grammar.rs
   - ../../lib/src/markdown/schemas/simplified/convert.rs
   - ../../lib/src/markdown/schemas/simplified/serialize.rs
+  - ../../lib/src/markdown/schemas/simplified/source.rs
+  - ../../lib/src/markdown/schemas/simplified/standalone.rs
   - ../../lib/src/markdown/schemas/format.rs
+  - ../../lib/src/markdown/schemas/validate.rs
   - ../../lib/src/markdown/schemas/resolve.rs
+  - ../../lib/src/markdown/schemas/about.rs
+  - ../../dmls/src/overlay/mod.rs
   - ../../dmls/src/providers/frontmatter.rs
 related:
-  - ../2026-07-12-literal-expression
+  - ../_completed/2026-07-12-literal-expression
   - ../_completed/2026-07-08-schema-plus
   - ../_completed/2026-07-04-dmls
 ---
 
 # SimplifiedSchema Meta-Schema Types
 
-**Status:** Ready for review. This spec introduces two first-class semantic
-types for describing SimplifiedSchema syntax as data: `type-definition` for
-one property definition and `schema` for a complete document schema
-declaration. They replace imprecise `string`, `object`, and `any` annotations
-where the value is actually interpreted by Darkmatter's schema grammar.
+**Status:** Ready for planning and implementation. This spec introduces two
+first-class semantic types for describing SimplifiedSchema syntax as data:
+`type-definition` for one property definition and `schema` for a complete
+document schema declaration. They replace imprecise `string`, `object`, and
+`any` annotations where the value is actually interpreted by Darkmatter's
+schema grammar.
+
+> **Reader's note (2026-07-14 review):** The draft rejected
+> `type-definition[]` and `schema[]` because their item type can itself use a
+> sequence carrier. The reviewed design allows both. The declared outer `[]`
+> already disambiguates an array of semantic values from one union-valued
+> semantic value, preserves SimplifiedSchema's established "arrays of every
+> type" rule, and avoids parser/serializer exceptions. This review also makes
+> the passive source-map contract and recursive-parse limit explicit.
 
 ## Goal
 
@@ -147,6 +163,11 @@ authoritative property-definition parser:
        enabled: boolish
    ```
 
+   Mapping definitions include the existing schema-object grammar: literal and
+   pattern keys, recursively nested property definitions, and the reserved
+   `$constraints` metadata entry. `$constraints` is structural authoring
+   metadata, not a property whose value is itself a `type-definition`.
+
 3. **Non-empty sequence union**, whose arms are string type expressions or
    mapping object definitions
 
@@ -164,10 +185,14 @@ the other is a parity bug.
 
 ### Semantics
 
-- Validation is **parse-only and side-effect-free**. Imports, `example(...)`
-  references, and file-bearing constraints are syntax-checked but are not
-  resolved or read. The owning schema resolver remains responsible for I/O
-  when a definition is actually used as a schema.
+- Validation is **parse-only and side-effect-free**. Imported-type,
+  `example(...)`, and other file-bearing reference text is retained exactly as
+  the authoritative property-definition parser retains it; it is not resolved,
+  opened, expanded, or subjected to resolver-only `FileReference` policy.
+  Tightening that subsyntax belongs in the shared property-definition parser,
+  never only in this semantic type. The owning schema resolver remains
+  responsible for I/O and reference preparation when a definition is actually
+  used as a schema.
 - The value is preserved exactly as authored. There is no native-to-string
   coercion: a mapping stays a mapping and a sequence stays a sequence.
 - YAML boolean, number, and null scalars are invalid because none is a valid
@@ -180,14 +205,32 @@ the other is a parity bug.
 
 `type-definition` permits the universal `required`, `default(...)`, and
 `generated` constraints. A default must itself be a valid type definition.
-All value-domain constraints (`min`, `max`, `pattern`, `suggest`, `eager`, and
-so on) are rejected because they constrain the definition's denoted values,
-not the definition artifact.
+Because SimplifiedSchema's `default(...)` grammar accepts only one scalar
+argument, v1 can express only a scalar type-expression default; compound
+mapping and sequence defaults remain unrepresentable, as they are for every
+other type. All value-domain constraints (`min`, `max`, `pattern`, `suggest`,
+`eager`, and so on) are rejected because they constrain the definition's
+denoted values, not the definition artifact.
 
-The `type-definition[]` postfix is rejected in v1. A sequence is already the
-carrier for one property-level union, so an array of independent definitions
-would be ambiguous at the YAML boundary. A concrete driver may introduce an
-explicit outer-array form later without overloading the existing sequence.
+`type-definition[]` follows the normal array rule and means an array of
+independent property definitions. The outer `[]` is declared in the schema, so
+the carrier is unambiguous:
+
+```yaml
+$schema:
+    one_union: type-definition
+    many_definitions: type-definition[]
+
+one_union: [string, number]
+many_definitions:
+    - string
+    - number
+    - [literal(auto), number]
+```
+
+The first flat sequence is one property union. The second flat sequence is an
+array containing two scalar definitions and one union definition. Standard
+array-level constraints remain available on the postfix surface.
 
 ### AST and public parser surface
 
@@ -198,12 +241,21 @@ explicit outer-array form later without overloading the existing sequence.
 - Extract the existing private property-definition entry point into a public,
   passive parser that accepts a YAML value and returns `PropertyDef` with
   structured `SchemaError` information.
-- Span-aware consumers must receive or be able to derive the same authored
-  spans used by the schema-source parser. DMLS must not reconstruct ranges
-  from decoded strings.
+- Add a source-aware companion that returns the same `PropertyDef` plus a
+  sidecar source map keyed by structural schema paths. The sidecar records the
+  authored spans of mapping keys, complete definitions, atoms, type keywords,
+  constraints, arguments, import names/references, and union arms. It projects
+  through plain, single-quoted, and double-quoted YAML scalars without
+  normalizing line endings, using the existing `yaml_scalar` projection seam.
+  Do not create an isomorphic spanned AST.
+- The source-aware schema-declaration parser reuses the same sidecar model and
+  adds outer declaration/file-reference spans. DMLS consumes these maps for
+  hover, completion context, and diagnostics; it must not search decoded text
+  to reconstruct ranges.
 
-The exact public function name is a planning decision; there must be one
-library authority, not a DMLS-only parser.
+The exact public type and function names are planning decisions. There must be
+one grammar authority with semantic-only and source-aware entry points, not a
+DMLS-only parser.
 
 ### JSON Schema lowering
 
@@ -226,7 +278,15 @@ fragment, and `required` retains its existing parent-object behavior.
 
 The custom keyword must return ordinary structured validation failures so
 `ValidationProblem` retains the instance path, source position, and
-constraint-class reporting used by other semantic formats.
+`ConstraintViolation` classification used by other semantic formats. The
+keyword's schema path identifies `x-darkmatter-type-definition`; DMLS uses that
+identity plus the source-aware parser to replace the generic problem with its
+more precise diagnostic rather than adding a new public
+`ValidationProblemCode` variant.
+
+The normal generic array lowering wraps this fragment under `items` for
+`type-definition[]`; the custom keyword always validates exactly the item value
+on which it appears.
 
 ## Feature B — `schema`
 
@@ -293,8 +353,11 @@ those shapes before document validation.
 The `schema` type validates a declaration; it does not resolve it:
 
 - Inline shapes are parsed fully and recursively.
-- File-reference strings are syntax-checked through `FileReference` but are
-  not opened, discovered, or fetched.
+- File-reference strings are trimmed, rejected when they use the resolver's
+  unsupported HTTP(S) forms, and syntax-checked through
+  `biscuit_file::FileReference`; they are not resolved, opened, discovered, or
+  fetched. Bare schema-root names remain valid declaration syntax even though
+  their existence cannot be established without discovery.
 - Root-union file arms follow the same syntax-only rule.
 - Remote references retain the existing `$schema` policy and are rejected.
 
@@ -308,8 +371,10 @@ example validation, and raw-JSON-Schema disambiguation. A user property typed
 - Add `SimplifiedType::Schema`, canonical keyword `"schema"`.
 - Introduce a passive schema-declaration parse/classification surface that
   reuses `parse_yaml_schema` for inline mappings and root-union mapping arms,
-  plus `FileReference` for reference syntax. It must not duplicate the
-  resolving loader.
+  plus the resolver's shared local-reference classifier and `FileReference`
+  construction for reference syntax. Extract the HTTP(S), bare-name, and
+  path-qualified classification policy from `resolve.rs`; do not duplicate it
+  in a custom keyword or DMLS.
 - Compile to the portable carrier domain plus a registered semantic keyword:
 
   ```json
@@ -319,28 +384,40 @@ example validation, and raw-JSON-Schema disambiguation. A user property typed
   }
   ```
 
-- `schema[]` is rejected for the same reason as `type-definition[]`: a
-  sequence already denotes one root union.
+- `schema[]` follows ordinary array lowering and means an array of independent
+  schema declarations. A root union stored as one array element uses a nested
+  sequence. The declared outer array, not carrier guessing, determines which
+  sequence is the collection boundary.
 - Constraint applicability and coercion match `type-definition`.
+
+As with `type-definition`, `x-darkmatter-schema` failures retain ordinary
+`ConstraintViolation` classification and a distinguishing schema path. DMLS
+replaces the generic diagnostic using the shared source-aware declaration
+parser.
 
 ## Relationship Between the Types
 
 The model is recursive but not circular in implementation:
 
 ```text
-TypeDefinition = TypeExpression
-               | SchemaShape
-               | PropertyUnion
+TypeDefinitionValue = TypeExpression
+                    | SchemaShape
+                    | PropertyUnion
 
-SchemaShape    = map<string, TypeDefinition>
+SchemaShape    = map<PropertyKey, TypeDefinitionValue>
+               + optional structural $constraints metadata
+
+PropertyKey    = literal property key | pattern/dictionary key
 
 PropertyUnion  = non-empty list<TypeExpression | SchemaShape>
 
-Schema         = SchemaShape
-               | FileReference
+SchemaValue    = SchemaShape
+               | LocalSchemaReference
                | RootUnion
 
-RootUnion      = non-empty list<SchemaShape | FileReference>
+RootUnion      = non-empty list<SchemaShape | LocalSchemaReference>
+
+Array<T>       = list<T> when the declaring atom carries the [] postfix
 ```
 
 `type-definition` validates one node in the schema language. `schema`
@@ -351,6 +428,9 @@ are file references.
 
 That distinction must remain explicit. A single catch-all "schema-ish" parser
 would incorrectly interpret the same string arm in two different contexts.
+Likewise, the semantic parser validates one `TypeDefinitionValue` or
+`SchemaValue`; generic array lowering is responsible for iterating values when
+the declaring atom carries `[]`.
 
 ## Meta-Schema Status
 
@@ -376,6 +456,29 @@ The main consumer benefit is schema-driven editor intelligence. DMLS must use
 the effective schema's semantic type; it must not activate these behaviors from
 key-name heuristics, except that the reserved `$schema` control key is always
 known by the Darkmatter language itself.
+
+### Activation and source model
+
+DMLS has two explicit activation paths:
+
+1. In Markdown frontmatter, a value activates from its effective
+   `PropertyDef` containing a `type-definition` or `schema` atom. The reserved
+   `$schema` control value also activates from the Darkmatter base language
+   contract while an effective schema is being prepared.
+2. In standalone YAML, content-based pure or tagged envelopes activate through
+   `parse_standalone_schema_document`. While an open buffer is temporarily
+   malformed, a lexical envelope claim (a sole top-level `$schema` key or
+   top-level `kind: schema`) retains the last-good parsed schema/source map and
+   exposes current parser errors. File extension or directory location alone
+   never activates SimplifiedSchema intelligence, so raw JSON Schema and
+   ordinary YAML remain outside this provider.
+
+`DocumentOverlay` must carry the parsed standalone schema and its source map;
+the existing `SuggestionState::Standalone` marker is not a sufficient semantic
+model. The last-good behavior mirrors frontmatter's current last-good AST
+contract so completion and hover do not disappear during an incomplete edit.
+The current buffer always owns diagnostics, and stale semantic data must not be
+used to claim that malformed current text is valid.
 
 ### Hover
 
@@ -428,6 +531,9 @@ descriptor catalogs and parser state:
 Inside a `schema` value, completion offers the appropriate outer scaffolds and
 then delegates each inline property value to `type-definition` completion.
 File-reference completion uses the existing passive path-completion machinery.
+For `type-definition[]` and `schema[]`, completion first identifies the outer
+array item at the cursor and then applies the scalar semantic completion to that
+item; nested sequences remain valid union-valued items.
 
 Completion must support inline `$schema` blocks and standalone
 SimplifiedSchema documents recognized by `parse_standalone_schema_document`.
@@ -446,6 +552,9 @@ provider.
   separately report an unresolved file.
 - Specialized diagnostics replace, rather than duplicate, a generic custom-
   keyword constraint failure for the same span.
+- Scalar grammar errors use their projected token span. Mapping/sequence shape
+  errors use the smallest key, value, or arm span available from the sidecar;
+  only a missing structural element falls back to its parent mapping span.
 - All analysis is passive. Schema intelligence must not load references,
   expand imports, validate examples, compose directives, execute expressions,
   or access the network on a keystroke.
@@ -481,11 +590,35 @@ rediscover schema regions heuristically.
   including their accepted carriers, constraints, parse-only behavior, and
   DMLS meaning.
 
+### Parse limits and failure behavior
+
+Semantic validation processes untrusted document values, so recursion limits
+are part of the contract rather than an implementation detail:
+
+- Reuse `MAX_INLINE_OBJECT_DEPTH` as the shared maximum across both string-form
+  inline objects and YAML-native mapping definitions. Root-declaration parsing
+  starts at depth zero; every nested schema object increments the same counter,
+  including mapping arms nested beneath property unions.
+- Array iteration and union parsing remain linear in the supplied YAML value.
+  No resolver, filesystem, network, compose, or expression work is permitted
+  from a custom keyword.
+- Exceeding the shared depth limit returns a structured `SchemaError::Grammar`
+  and a normal validation failure; it must never panic or overflow the stack.
+
+Applying the existing depth limit to YAML-native mappings intentionally rejects
+pathological schemas deeper than the documented grammar limit. Ordinary
+accepted schemas are unaffected, and using one limit prevents semantic-type
+validation from becoming a less-bounded second parser.
+
 ## Compatibility and Migration
 
 This is an additive grammar change: `type-definition` and `schema` become
-reserved type keywords in type-expression position. Existing schemas using
-those words as imported named-type identifiers must rename those helpers.
+reserved primitive keywords only when they occupy the complete primitive-type
+position. Existing imported named types do **not** need renaming:
+`schema@file`, `type-definition@file`, and their postfix forms remain imports
+because the established grammar recognizes terminal `Name@file` syntax before
+primitive-keyword lookup. Named definitions are mapping keys and are not
+otherwise reserved.
 
 The base-schema edit from:
 
@@ -501,9 +634,14 @@ to:
   root union for this document."
 ```
 
-does not narrow real accepted behavior. Invalid scalar shapes already fail in
-the resolver. It aligns the authored baseline, compiled schema metadata, DMLS
-hover, and runtime contract.
+does not narrow the set of documents accepted by complete `$schema`
+preparation. Invalid scalar shapes already fail in the resolver. It does make
+validation-only use of the Darkmatter base schema reject malformed `$schema`
+declarations at the validation stage instead of accepting them until a later
+resolver call. That earlier failure and its grammar-specific message are
+intentional; tests must distinguish acceptance parity for valid declarations
+from the changed failure stage for invalid declarations. The edit aligns the
+authored baseline, compiled schema metadata, DMLS hover, and runtime contract.
 
 The description must stop implying that raw JSON Schema can be authored as an
 inline mapping. Raw JSON Schema is supported through a referenced YAML or JSON
@@ -528,17 +666,18 @@ accepts only a closed subset of bare names rather than arbitrary definitions.
 | Surface | Required change |
 |---------|-----------------|
 | `simplified/types.rs` | Add `TypeDefinition` and `Schema` variants and canonical keywords |
-| `simplified/grammar.rs` | Accept the new keywords; expose the existing `PropertyDef` parser through one passive public entry point |
-| `simplified/serialize.rs` | Canonically serialize both keywords and reject `[]` postfix |
+| `simplified/grammar.rs` / `simplified/mod.rs` | Accept the new keywords; expose the existing `PropertyDef` parser; apply the shared depth limit to YAML-native mappings |
+| `simplified/source.rs` | Generalize the existing scalar projection seam into the structural sidecar source map used by both passive parsers |
+| `simplified/serialize.rs` | Canonically serialize both keywords, including ordinary `[]` postfix forms |
 | `simplified/convert.rs` | Emit carrier types plus `x-darkmatter-type-definition` / `x-darkmatter-schema` |
-| `format.rs` / validator construction | Register custom keyword validators backed by shared passive parsers |
+| `format.rs` / `validate.rs` | Register custom keyword validators backed by shared passive parsers; preserve keyword schema paths for diagnostic specialization |
 | `coerce.rs` / normalization | Explicitly preserve all accepted carriers; no semantic-type coercion |
 | `triggers/matcher.rs` | Pure parse-based matching for both variants |
 | `about.rs` | Add authoritative descriptors used by `md schema about` and DMLS |
-| `resolve.rs` | Reuse declaration classification without moving I/O into semantic validation |
+| `resolve.rs` | Extract and reuse local schema-reference classification without moving I/O into semantic validation |
 | `docs/schemas/darkmatter.yaml` | Retype `$schema` from `any` to `schema` and correct raw-JSON wording |
 | `docs/topics/schema-definition.md` | Document the semantic meta-types and carrier/denoted-type distinction |
-| DMLS frontmatter/overlay providers | Hover, completion, diagnostics, standalone-schema activation, and union-aware declared-type rendering |
+| DMLS overlay/frontmatter providers | Retain standalone parsed schema/source maps, hover, completion, precise diagnostics, last-good standalone activation, and union-aware declared-type rendering |
 | Darkmatter skill | Record the two types and the passive parser authority |
 
 ## Non-Goals
@@ -549,7 +688,8 @@ accepts only a closed subset of bare names rather than arbitrary definitions.
 - No replacement for `PropertyDef`, `SchemaShape`, `SimplifiedSchema`, named
   types, or `Name@file` structural expansion.
 - No general recursive user-defined types. The meta-types describe the
-  existing bounded grammar; they do not remove its recursion limits.
+  existing bounded grammar; they align YAML-native mappings with its recursion
+  limit rather than removing that limit.
 - No static type-checking of expressions against a `type-definition`.
 - No inference of semantic types from ordinary strings, mappings, or
   sequences.
@@ -576,26 +716,38 @@ accepts only a closed subset of bare names rather than arbitrary definitions.
    carrier domain and register grammar-backed custom keywords. Validation-only
    callers are not mutated, and compose write-back preserves the authored
    representation.
-6. `type-definition[]` and `schema[]` fail at schema-load time with an error
-   explaining that sequence syntax already represents a union.
-7. The public passive parser is the shared authority for schema authoring,
-   custom-keyword validation, and DMLS. Parser-parity tests prove representative
-   definitions cannot diverge between those entry points.
+6. `type-definition[]` and `schema[]` parse, serialize, and validate through
+   ordinary array lowering. Flat outer sequences are arrays of independent
+   semantic values; a union-valued item uses a nested sequence. Item and array
+   constraints retain the established postfix semantics.
+7. The public passive parsers are the shared authority for schema authoring,
+   custom-keyword validation, and DMLS. Their source-aware companions return
+   the same semantic AST plus structural sidecar spans. Parser-parity and span-
+   projection tests prove representative definitions cannot diverge across
+   plain/double/single-quoted YAML, CRLF, UTF-8, nested mappings, and unions.
 8. The Darkmatter base schema declares `$schema: schema`; existing valid inline,
    referenced, root-union, and referenced-raw-JSON documents continue to
    prepare successfully, while DMLS hover displays `Type: schema` instead of
    `Type: any`.
 9. DMLS provides parser-state completion and precise diagnostics inside inline
-   and standalone SimplifiedSchema. Hover identifies entries as
-   `type-definition` and renders the complete denoted union rather than only
-   its first arm.
+   and standalone SimplifiedSchema. Standalone activation is content-based,
+   retains last-good semantic data during malformed edits, and never activates
+   ordinary YAML or raw JSON Schema from filename alone. Hover identifies
+   entries as `type-definition` and renders the complete denoted union rather
+   than only its first arm.
 10. DMLS analysis of these values is side-effect-free: no reference loading,
     import/example expansion, composition, expression execution, shell
     execution, or network access occurs.
-11. Existing schemas that do not use the two new reserved keywords parse,
+11. Schema parsing and semantic validation enforce the same
+    `MAX_INLINE_OBJECT_DEPTH` across string-form and YAML-native nested objects;
+    over-limit input returns a structured error without panic or stack
+    overflow.
+12. Existing schemas that do not use the two new reserved keywords parse,
     compile, validate, and render diagnostics byte-identically except for the
-    intentional `$schema` hover/type metadata correction.
-12. L1 and L2 coverage passes through `just test` and `just test-l2`; the
+    intentional `$schema` hover/type metadata correction and earlier
+    validation-only rejection of malformed `$schema` declarations. Existing
+    imports named `schema` or `type-definition` continue to parse.
+13. L1 and L2 coverage passes through `just test` and `just test-l2`; the
     implementation remains portable across macOS, Windows, and Linux.
 
 ## Ruled Design Questions
@@ -613,3 +765,17 @@ accepts only a closed subset of bare names rather than arbitrary definitions.
   type system?** **Ruled no (2026-07-13).** Existing ASTs, parsers, and
   structural `Name@file` expansion remain authoritative. The feature names and
   validates those artifacts when they appear as data.
+- **Q5 — Are arrays of the semantic types allowed?** **Ruled yes
+  (2026-07-14 review).** The explicit `[]` postfix disambiguates the outer
+  collection from a sequence-carried union, preserves the grammar's uniform
+  array rule, and uses the existing generic lowering. A union-valued array item
+  is represented by a nested sequence.
+- **Q6 — How are source spans exposed without duplicating `PropertyDef`?**
+  **Ruled sidecar source map (2026-07-14 review).** Semantic-only and
+  source-aware entry points share one parser and AST. The latter adds
+  structural-path-keyed spans projected through the existing YAML scalar seam;
+  no second spanned AST or DMLS tokenizer is introduced.
+- **Q7 — What bounds recursive native mappings?** **Ruled the existing shared
+  depth limit (2026-07-14 review).** `MAX_INLINE_OBJECT_DEPTH` applies to both
+  string-form inline objects and YAML-native mapping definitions. Semantic
+  validation must not expose a less-bounded recursive path.
