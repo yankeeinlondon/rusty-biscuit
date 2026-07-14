@@ -24,11 +24,15 @@ initialize:
               - skip
 success:
     stack:
-        # 1. The step claimed success but never wrote the document.
+        # 1. The step claimed success but never wrote the document. Resume the
+        #    live session so it can satisfy the missing postcondition without
+        #    discarding its research context.
         - when: "!file_exists(file) || frontmatter(file, 'last_updated') != ctx.today"
           action:
               - stderr: "The step reported success but <b>{{file}}</b> was not updated — <code>last_updated</code> is not {{ctx.today}}."
-              - error: "research file was not updated"
+              - action: resume
+                message: "You reported success, but the **agent-errors** research document for **{{state.name}}** was not saved at `{{file}}` with `last_updated: {{ctx.today}}`. Complete the requested research, save the document with today's date, and run `md schema validate '{{file}}'` before finishing."
+                max_attempts: 2
         # 2. Deterministic gate (spec D10): seed preservation, needle hygiene,
         #    provenance coherence (including empirical capture fixtures),
         #    invented-seed, and motivating-class coverage.
@@ -41,24 +45,40 @@ success:
         #    clean research result.
         - when: "!file_exists(findings)"
           action:
+              - message: "deterministic gate produced no outcome report ({{state.name}})"
               - error: "deterministic gate produced no outcome report"
-        - when: "frontmatter(findings, 'status') == 'gate_error'"
+        # 4. Research-document and schema failures belong to the live research
+        #    session. Authoritative gate inputs do not.
+        - when: "frontmatter(findings, 'status') == 'gate_error' && frontmatter(findings, 'error_scope') == 'research_document'"
           action:
-              - error: "deterministic gate could not validate the research document"
+              - warn: "The deterministic gate could not validate **{{state.name}}**'s research document — resuming to correct it."
+              - action: resume
+                message: "The **agent-errors** research document for **{{state.name}}** could not be validated. Read the `gate_error` outcome at `{{findings}}`, correct only the provider-authored document at `{{file}}`, then save it and run `md schema validate '{{file}}'`. Do not alter the immutable seed or checker implementation."
+                max_attempts: 2
+        - when: "frontmatter(findings, 'status') == 'gate_error' && frontmatter(findings, 'error_scope') == 'gate_input'"
+          action:
+              - message: "deterministic gate input failed and requires maintainer intervention ({{state.name}})"
+              - error: "deterministic gate input failed"
+        - when: "frontmatter(findings, 'status') == 'gate_error' && frontmatter(findings, 'error_scope') != 'research_document' && frontmatter(findings, 'error_scope') != 'gate_input'"
+          action:
+              - message: "deterministic gate produced an unknown error scope ({{state.name}})"
+              - error: "deterministic gate produced an unknown error scope"
         - when: "frontmatter(findings, 'status') != 'clean' && frontmatter(findings, 'status') != 'findings' && frontmatter(findings, 'status') != 'gate_error'"
           action:
+              - message: "deterministic gate produced an unknown outcome status ({{state.name}})"
               - error: "deterministic gate produced an unknown outcome status"
-        # 4. When the gate reports findings, resume the SAME research session with
+        # 5. When the gate reports findings, resume the SAME research session with
         #    them so the model corrects its own output with full context.
-        #    Budgeted to two attempts; on exhaustion the dispatch falls through
-        #    to finalize, where the durable outcome is required to be clean.
+        #    All resume branches share one two-additional-turn run budget; on
+        #    exhaustion dispatch falls through to finalize, where the durable
+        #    outcome is required to be clean.
         - when: "frontmatter(findings, 'status') == 'findings'"
           action:
               - warn: "Deterministic checks flagged **{{state.name}}**'s agent-errors research — resuming to correct it."
               - action: resume
                 message: "The **agent-errors** research for **{{state.name}}** failed the deterministic gate. Read the outcome report at `{{findings}}` — its frontmatter lists each failed check (missing seed needle, non-lowercase needle, missing provenance data, invented `seed` provenance, or uncovered capacity/overload class). Fix every listed issue in `{{file}}` (re-add dropped seeds with `evidence: seed`, cite non-seed additions, attach a scrubbed `./_fixtures/...` file and capture notes to empirical rows, research or record-as-gap the capacity vocabulary), then re-save and re-run `md schema validate '{{file}}'`."
                 max_attempts: 2
-        # 5. Clean: the document is written and explicitly passed the gate.
+        # 6. Clean: the document is written and explicitly passed the gate.
         - when: "frontmatter(findings, 'status') == 'clean'"
           action:
               - info: "The **Agent Errors** research on **{{state.name}}** passed the deterministic gate: {{ link(file) }}"
@@ -66,12 +86,27 @@ success:
 failure:
     message: "💥 the Agent Errors research on **{{state.name}}** failed to complete!"
     warn: "The Agent Errors research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    stack:
+        - when: "err.category == 'timeout'"
+          action:
+              - warn: "The research session timed out — resuming it with its existing context."
+              - action: resume
+                message: "The **agent-errors** research for **{{state.name}}** timed out. Continue from the existing session, finish the research document at `{{file}}`, and run `md schema validate '{{file}}'` before finishing."
+                max_attempts: 2
+        - when: "err.is_transient"
+          action:
+              - warn: "The research session hit a transient provider failure — retrying with backoff."
+              - action: retry
+                max_attempts: 2
+                backoff: exponential
+                delay: "30s"
 finalize:
     stack:
         # Recovery re-enters before finalize, so this guard runs only after the
         # resume budget falls through or another terminal path completes.
         - when: "!file_exists(findings) || frontmatter(findings, 'status') != 'clean'"
           action:
+              - message: "deterministic gate did not reach a clean outcome ({{state.name}})"
               - error: "deterministic gate did not reach a clean outcome"
 ---
 # Error Vocabulary Research on {{state.name}}

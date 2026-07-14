@@ -1,19 +1,20 @@
 //! The `agent-errors` fleet prompt (`docs/research/agent-errors/_fleet.md`)
-//! wires the spec-D10 validate-and-resume pattern into its `success` stack:
-//! a fail-closed shell gate followed by explicit missing/error/findings/clean
-//! status branches. The `resume` branch remains budgeted by `max_attempts: 2`.
-//! A clean-only `finalize` guard prevents exhausted remediation from turning a
-//! durable findings outcome into a successful fleet result. These tests parse
-//! and execute the real committed lifecycle through the production machinery.
+//! wires the spec-D10 deterministic recovery policy into its lifecycle: one
+//! shared resume budget repairs missing output, research-document gate errors,
+//! and findings; a separate retry budget handles transient provider failures.
+//! Infrastructure and protocol failures stay fail-closed, and a clean-only
+//! `finalize` guard prevents exhausted remediation from turning a durable
+//! failing outcome into fleet success. These tests parse and execute the real
+//! committed lifecycle through the production machinery.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::{
-    ControlDispatch, DefaultLifecycleEmitter, LifecycleActionKind, LifecycleSignal, ShellRunner,
-    StackControl, StackExecutionContext, control_budget_for, decide_control,
-    parse_lifecycle_config,
+    ControlDispatch, DefaultLifecycleEmitter, LifecycleActionKind, LifecycleControlAction,
+    LifecycleSignal, RetryBackoff, ShellRunner, StackControl, StackExecutionContext,
+    control_budget_for, decide_control, parse_lifecycle_config,
 };
 use claudine::events::GlobalSettings;
 use claudine::messaging::RuntimeMessagingSettings;
@@ -47,12 +48,12 @@ fn fleet_lifecycle_config_parses() {
         .stack(LifecycleSignal::Success)
         .expect("success stack present");
 
-    // Not-updated guard, gate shell, missing/gate-error/unknown guards, resume,
-    // and clean-success report — seven items in authored order.
+    // Missing-output resume, gate shell, missing report, three gate-error
+    // scopes, unknown status, findings resume, and clean report.
     assert_eq!(
         success.len(),
-        7,
-        "expected the seven-item explicit-outcome success stack"
+        9,
+        "expected the nine-item recovery-aware success stack"
     );
 
     // Report persistence failures must stop the stack before stale report
@@ -87,37 +88,87 @@ fn fleet_lifecycle_config_parses() {
         conditions.iter().any(|condition| condition == "!file_exists(findings)"),
         "a missing report must be an explicit failure branch"
     );
+    assert!(conditions.iter().any(|condition| {
+        condition.contains("error_scope") && condition.contains("research_document")
+    }));
+    assert!(conditions
+        .iter()
+        .any(|condition| condition.contains("error_scope") && condition.contains("gate_input")));
 
-    let has_absence_based_clean = success.iter().any(|item| {
-        item.actions
-            .iter()
-            .any(|action| matches!(action.kind, LifecycleActionKind::Communication(_)))
-            && item
-                .when
-                .as_ref()
-                .is_some_and(|condition| condition.to_string().contains("!file_exists(findings)"))
-    });
-    assert!(
-        !has_absence_based_clean,
-        "clean-success communication must never be gated by report absence"
-    );
-
-    // Exactly one resume, and it is the terminal action of its stack item.
-    let resume_item = success
+    let missing_report_item = success
         .iter()
         .find(|item| {
+            item.when
+                .as_ref()
+                .is_some_and(|condition| condition.to_string() == "!file_exists(findings)")
+        })
+        .expect("missing-report branch present");
+    assert!(matches!(
+        missing_report_item.actions.last().map(|action| &action.kind),
+        Some(LifecycleActionKind::LifecycleControl(
+            LifecycleControlAction::Error { .. }
+        ))
+    ));
+
+    // All three agent-correctable postconditions resume, and each control is
+    // terminal in its stack item so later status branches cannot also fire.
+    let resume_items: Vec<_> = success
+        .iter()
+        .filter(|item| {
             item.actions.iter().any(|a| {
                 matches!(&a.kind, LifecycleActionKind::LifecycleControl(c) if c.verb() == "resume")
             })
         })
-        .expect("a resume action is present");
-    let last = resume_item
-        .actions
-        .last()
-        .expect("resume stack item is non-empty");
-    assert!(
-        matches!(&last.kind, LifecycleActionKind::LifecycleControl(c) if c.verb() == "resume"),
-        "resume must be the last action in its stack item"
+        .collect();
+    assert_eq!(resume_items.len(), 3, "missing output, document error, and findings resume");
+    for item in resume_items {
+        let last = item.actions.last().expect("resume stack item is non-empty");
+        assert!(
+            matches!(&last.kind, LifecycleActionKind::LifecycleControl(c) if c.verb() == "resume"),
+            "resume must be the last action in its stack item"
+        );
+        let LifecycleActionKind::LifecycleControl(LifecycleControlAction::Resume {
+            max_attempts,
+            ..
+        }) = &last.kind
+        else {
+            unreachable!("the terminal control was asserted as resume")
+        };
+        assert_eq!(
+            max_attempts.as_ref().map(ToString::to_string).as_deref(),
+            Some("2"),
+            "all remediation branches must share the two-additional-turn ceiling"
+        );
+    }
+
+    let failure = config
+        .stack(LifecycleSignal::Failure)
+        .expect("failure recovery stack present");
+    assert_eq!(failure.len(), 2, "timeout resume plus transient retry");
+    let timeout_control = failure[0].actions.last().expect("timeout control");
+    let LifecycleActionKind::LifecycleControl(LifecycleControlAction::Resume {
+        max_attempts,
+        ..
+    }) = &timeout_control.kind
+    else {
+        panic!("timeout recovery must resume")
+    };
+    assert_eq!(max_attempts.as_ref().map(ToString::to_string).as_deref(), Some("2"));
+
+    let transient_control = failure[1].actions.last().expect("transient control");
+    let LifecycleActionKind::LifecycleControl(LifecycleControlAction::Retry {
+        max_attempts,
+        backoff,
+        delay,
+    }) = &transient_control.kind
+    else {
+        panic!("transient recovery must retry")
+    };
+    assert_eq!(max_attempts.as_ref().map(ToString::to_string).as_deref(), Some("2"));
+    assert_eq!(*backoff, Some(RetryBackoff::Exponential));
+    assert_eq!(
+        delay.as_ref().map(ToString::to_string).as_deref(),
+        Some("\"30s\"")
     );
 }
 
