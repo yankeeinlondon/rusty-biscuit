@@ -1750,6 +1750,13 @@ fn number_to_usize(
 
 fn arg_to_json(arg: &Arg) -> serde_json::Value {
     if let Some(n) = arg.number {
+        // Parse the exact source spelling first so a large-integer default
+        // (`default(9007199254740993)`) keeps i64/u64 precision — the pre-lexed
+        // f64 `n` has already rounded values past 2^53. Non-JSON-shaped numeric
+        // tokens fall back to that f64.
+        if let Ok(num) = serde_json::Number::from_str(&arg.lex) {
+            return serde_json::Value::Number(num);
+        }
         if let Some(num) = serde_json::Number::from_f64(n) {
             return serde_json::Value::Number(num);
         }
@@ -2043,10 +2050,12 @@ mod tests {
 
     #[test]
     fn parses_default_number() {
+        // An integer default keeps integer typing (parsed from the exact source
+        // lexeme), so precision survives for values past f64's 2^53 range.
         let atom = parse("number(default(3))");
         assert_eq!(
             atom.constraints,
-            vec![Constraint::Default(serde_json::json!(3.0))]
+            vec![Constraint::Default(serde_json::json!(3))]
         );
     }
 

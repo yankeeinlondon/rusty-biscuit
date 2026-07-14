@@ -1124,6 +1124,12 @@ fn number_to_json(n: f64) -> Value {
 /// only emits scalars.
 fn normalize_json_number(value: Value) -> Value {
     match value {
+        // An already-integer-typed number (the parser preserves i64/u64 for a
+        // bare literal like `9007199254740993`) is exact — passing it through
+        // `as_f64()` would round it, so return it untouched. Only a genuine
+        // floating representation (the parser's `default(3)` emits `3.0`) is
+        // canonicalized to integer form.
+        Value::Number(n) if n.is_i64() || n.is_u64() => Value::Number(n),
         Value::Number(n) => {
             if let Some(f) = n.as_f64()
                 && f.is_finite()
@@ -2672,6 +2678,49 @@ mod schema_plus_phase1 {
                 .as_array()
                 .is_some_and(|r| r.iter().any(|k| k == "kind")),
             "the required discriminant is listed: {obj}"
+        );
+    }
+
+    #[test]
+    fn literal_large_integer_const_is_exact() {
+        // Bare integer literals beyond f64's 2^53 exact range must reach `const`
+        // verbatim — `normalize_json_number` must not round them through f64.
+        let cases: [(&str, Value); 4] = [
+            ("literal(9007199254740993)", Value::from(9_007_199_254_740_993_i64)),
+            ("literal(9223372036854775807)", Value::from(i64::MAX)),
+            ("literal(9223372036854775808)", Value::from(9_223_372_036_854_775_808_u64)),
+            ("literal(18446744073709551615)", Value::from(u64::MAX)),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(atom_value(input)["const"], expected, "const for {input}");
+        }
+    }
+
+    #[test]
+    fn integral_float_default_still_tidies() {
+        // Guard against a regression: an integral `default(3)` still emits `3`,
+        // not `3.0`.
+        assert_eq!(atom_value("number(default(3))")["default"], Value::from(3_i64));
+    }
+
+    #[test]
+    fn large_integer_default_equal_to_literal_accepted() {
+        // An equal large-integer `default(...)` must compile (values compared
+        // exactly), and the const survives.
+        let v = atom_value("literal(9007199254740993; default(9007199254740993))");
+        assert_eq!(v["const"], Value::from(9_007_199_254_740_993_i64));
+        assert_eq!(v["default"], Value::from(9_007_199_254_740_993_i64));
+    }
+
+    #[test]
+    fn large_integer_default_unequal_to_literal_rejected() {
+        let mut atom =
+            parse_type_expr("test", "literal(9007199254740993; default(9007199254740992))")
+                .expect("parse atom");
+        atom.constraints.push(Constraint::Required);
+        assert!(
+            atom_to_schema("test", &atom).is_err(),
+            "an off-by-one large-integer default must fail schema load"
         );
     }
 }
