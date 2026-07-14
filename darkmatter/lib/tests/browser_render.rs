@@ -1050,11 +1050,14 @@ fn rgb_luminance(value: &str) -> Option<f32> {
     Some((0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0)
 }
 
-/// Renders a fenced code block through `DarkmatterPage::render_to_browser` with
-/// a captured terminal `mode` (and optional `CodeBlockMode`), loads it in the
-/// browser, and returns the computed `(.code-block background-color, first
-/// .code-block span color)`. The `github` paired theme is pinned so the result
-/// is deterministic across hosts and unaffected by ambient `THEME` env.
+/// Renders a fenced code block through `DarkmatterPage::render_to_browser_document`
+/// with a captured terminal `mode` (and optional `CodeBlockMode`), loads it in
+/// the browser, and returns the computed `(.code-block background-color, first
+/// .code-block span color)`. The `.code-block` panel stylesheet lives in the
+/// document `<head>`, so this reads the full standalone document form (the
+/// body-only `render_to_browser` fragment omits it). The `github` paired theme
+/// is pinned so the result is deterministic across hosts and unaffected by
+/// ambient `THEME` env.
 async fn page_code_block_computed_styles(
     harness: &mut ChromeHarness,
     mode: ColorMode,
@@ -1070,8 +1073,9 @@ async fn page_code_block_computed_styles(
     if let Some(cbm) = code_block_mode {
         page = page.with_code_block_mode(cbm);
     }
-    let html = page.render_to_browser(&md).expect("render_to_browser");
-    let doc = wrap_fragment(&html, "#202020");
+    let doc = page
+        .render_to_browser_document(&md)
+        .expect("render_to_browser_document");
     harness.render_html(&doc).await.expect("render html");
 
     let bg = harness
@@ -1085,8 +1089,8 @@ async fn page_code_block_computed_styles(
     (bg, color)
 }
 
-/// Review-2 finding 2: `DarkmatterPage::render_to_browser` must resolve the
-/// code panel's theme variant against the *captured terminal mode* in a real
+/// Review-2 finding 2: `DarkmatterPage::render_to_browser_document` must resolve
+/// the code panel's theme variant against the *captured terminal mode* in a real
 /// browser. A dark terminal inverts (default) to a light panel and a light
 /// terminal to a dark panel; both the `.code-block` computed `background-color`
 /// and a representative syntax `<span>`'s computed `color` must follow that
@@ -1134,7 +1138,7 @@ async fn browser_page_code_block_theme_follows_captured_terminal_mode() {
 }
 
 /// Review-2 finding 2: `CodeBlockMode::Same` vs `Inverse` must be
-/// browser-observable through `DarkmatterPage::render_to_browser`. On a dark
+/// browser-observable through `DarkmatterPage::render_to_browser_document`. On a dark
 /// page, `Inverse` (default) computes a light panel while `Same` keeps a dark
 /// panel, so the `.code-block` computed `background-color` must differ and
 /// `Inverse` must be the lighter of the two.
@@ -1172,6 +1176,75 @@ async fn browser_page_code_block_mode_same_vs_inverse_computes() {
         "Inverse and Same must compute different code-panel backgrounds",
     );
     harness.shutdown().await;
+}
+
+/// The body-only contract of `DarkmatterPage::render_to_browser`, observed in a
+/// live DOM: a feature-free, undecorated fragment embedded in a host document
+/// introduces no nested document scaffold. The host keeps exactly one
+/// `<html>`/`<head>`/`<body>`, no stray `<style>` from a leaked document
+/// `<head>` reaches the DOM, and the rendered Markdown heading rides the host
+/// body. A regression that returned a full `<!DOCTYPE html>` document here would
+/// splice a second `<head>`/`<style>` into the page, which this probe catches.
+/// The standalone-document form is `render_to_browser_document`'s job and is
+/// pinned separately.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_feature_free_fragment_has_no_nested_document_scaffold() {
+    if !require_browser() {
+        return;
+    }
+    use biscuit_terminal::terminal::Terminal;
+    use darkmatter::layout::DarkmatterPage;
+
+    let md: Markdown = "# Heading One\n\nBody text.\n".into();
+    let term = Terminal::new_optimistic(80);
+    let fragment = DarkmatterPage::new(&term)
+        .render_to_browser(&md)
+        .expect("render_to_browser");
+    let doc = wrap_fragment(&fragment, "#ffffff");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let probe = "(() => {\
+        const htmls = document.getElementsByTagName('html').length;\
+        const heads = document.getElementsByTagName('head').length;\
+        const bodies = document.getElementsByTagName('body').length;\
+        const styles = document.querySelectorAll('style').length;\
+        const h1 = document.querySelector('h1');\
+        return `htmls=${htmls};heads=${heads};bodies=${bodies};styles=${styles};heading=${h1 ? h1.textContent : ''}`;\
+    })()";
+    let result = harness.evaluate(probe).await.expect("evaluate scaffold probe");
+    harness.shutdown().await;
+
+    assert!(!result.starts_with("err="), "scaffold probe failed: {result}");
+    let kv = parse_kv(&result);
+    assert_eq!(
+        kv.get("htmls").map(String::as_str),
+        Some("1"),
+        "exactly one <html> in the host DOM; got {result}",
+    );
+    assert_eq!(
+        kv.get("heads").map(String::as_str),
+        Some("1"),
+        "exactly one <head>; got {result}",
+    );
+    assert_eq!(
+        kv.get("bodies").map(String::as_str),
+        Some("1"),
+        "exactly one <body>; got {result}",
+    );
+    assert_eq!(
+        kv.get("styles").map(String::as_str),
+        Some("0"),
+        "a body-only fragment leaks no document <style> into the DOM; got {result}",
+    );
+    assert_eq!(
+        kv.get("heading").map(String::as_str),
+        Some("Heading One"),
+        "the rendered heading rides the host body; got {result}",
+    );
 }
 
 // ---------------------------------------------------------------------------

@@ -3,6 +3,18 @@
 //! These snapshots are the parity *reference* (not a byte contract) the cutover
 //! is diffed against; intended diffs are re-accepted with a note in Phase 6.
 //!
+//! ## Full-document form via `render_to_browser_document` (accepted)
+//!
+//! The browser references characterize the full-page render (design-token
+//! `:root` head, page-wrapper CSS), so they render through
+//! `render_to_browser_document` — the content-independent full-document method —
+//! after `render_to_browser` became body-only. The undecorated fixtures were
+//! already complete documents and are byte-identical; the two decorated
+//! fixtures (`reference_page_background_pronounced`,
+//! `reference_page_margin_and_padding`) gained the minimal
+//! `<!DOCTYPE html><html><head></head><body>…</body></html>` scaffold around
+//! their page wrapper, so every reference is now a complete, openable document.
+//!
 //! ## Phase 8 review: `auto` page-wrapper side margins (accepted)
 //!
 //! Five browser snapshots re-baselined the page wrapper's horizontal margins
@@ -108,12 +120,16 @@ fn render_terminal(md: &Markdown, width: u32) -> String {
     page.render(md).expect("terminal render")
 }
 
-/// Render `md` to browser HTML through a `DarkmatterPage`.
+/// Render `md` to a complete standalone browser document through a
+/// `DarkmatterPage`. These parity references characterize the full-page render
+/// (design-token `:root` head, page wrapper CSS), so they use
+/// `render_to_browser_document` — the content-independent full-document method —
+/// rather than the body-only `render_to_browser` fragment.
 fn render_browser(md: &Markdown) -> String {
     let term = Terminal::new_optimistic(80);
     let page = DarkmatterPage::new(&term);
     let page = apply_all_styles(page, md);
-    page.render_to_browser(md).expect("browser render")
+    page.render_to_browser_document(md).expect("browser render")
 }
 
 // ---------------------------------------------------------------------------
