@@ -1964,6 +1964,7 @@ impl Writer<'_> {
         let mut table = Table::new()
             .with_columns(columns.clone())
             .with_data(data.clone());
+        table.expand_tabs_in_place(self.opts.context.terminal.tab_width);
 
         // Carry only the content-box `width` from the node's layout onto the
         // planning input. Margins stay default here: the tree has already
@@ -2011,8 +2012,8 @@ impl Writer<'_> {
             .filter(|sgr| !sgr.is_empty());
 
         Ok(emit_table(
-            &columns,
-            &data,
+            table.columns(),
+            table.data(),
             &plan,
             stripe_bg.as_deref(),
             stripe_fg.as_deref(),
