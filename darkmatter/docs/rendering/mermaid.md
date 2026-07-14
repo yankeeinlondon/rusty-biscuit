@@ -39,7 +39,7 @@ Darkmatter recognizes fenced code blocks tagged with the `mermaid` language and 
 
 Whether a mermaid block is rendered as a diagram or shown as plain code is governed by the `MermaidMode` enum exposed from `darkmatter/lib/src/markdown/output/terminal.rs` and re-exported through `darkmatter::markdown::output`:
 
-| Variant         | Terminal                                                     | Browser (Darkmatter full-page path)                                  |
+| Variant         | Terminal                                                     | Browser (Darkmatter page path)                                       |
 |-----------------|-------------------------------------------------------------|----------------------------------------------------------------------|
 | `Off` (default) | Regular code fence with syntect syntax highlighting.        | **Interactive** `<pre class="mermaid">` + injected ESM bootstrap.    |
 | `Image`         | Inline diagram image (opt-in; may launch a subprocess).     | Rendered static `<svg>` (an explicit static opt-in).                 |
@@ -47,13 +47,18 @@ Whether a mermaid block is rendered as a diagram or shown as plain code is gover
 
 `MermaidMode` is wired into both `TerminalOptions` and `HtmlOptions`, so the same configuration knob controls the behaviour of `write_terminal` / `as_html`, as well as the higher-level `DarkmatterPage::with_mermaid_mode` builder method (`darkmatter/lib/src/layout/page.rs`).
 
-The **browser** column above is Darkmatter's full-page path
-(`DarkmatterPage::render_to_browser`), which remaps `MermaidMode` onto
-`renderable`'s `BrowserMermaidMode` in `render_tree/entrypoints.rs`: `Off →
-Interactive`, `Image → StaticSvg`, `Text → Code`. The low-level `renderable`
-browser renderer keeps `BrowserMermaidMode::Code` as its own default, and
-`Markdown::as_html` maps `Off → Code` (it does not opt into the interactive
-default), so only the full-page path is interactive by default. See
+The **browser** column above is Darkmatter's page browser path, shared by both
+`DarkmatterPage::render_to_browser` (a **body-only** HTML fragment — no
+`<!DOCTYPE>`/`<html>`/`<head>`/`<body>` scaffold — for embedding a render into a
+host document) and `DarkmatterPage::render_to_browser_document` (a complete
+**standalone `<!DOCTYPE html>` document** with a real `<head>`, which the `md`
+CLI uses for HTML output — see `darkmatter/cli/src/artifact.rs`). Both remap
+`MermaidMode` onto `renderable`'s `BrowserMermaidMode` in
+`render_tree/entrypoints.rs`: `Off → Interactive`, `Image → StaticSvg`,
+`Text → Code`. The low-level `renderable` browser renderer keeps
+`BrowserMermaidMode::Code` as its own default, and `Markdown::as_html` maps
+`Off → Code` (it does not opt into the interactive default), so only the
+Darkmatter page browser path is interactive by default. See
 [Rendering to the Browser](#rendering-to-the-browser).
 
 The mermaid module is intentionally thin: the actual terminal-side diagram rendering (pure-Rust pipeline via `biscuit-visualized`, terminal image display, and cached PNG artifacts) lives in `biscuit-terminal`. `darkmatter/lib/src/mermaid/render_terminal.rs` is a wrapper around `biscuit_terminal::components::mermaid::MermaidDiagram` and re-exports its `MermaidRenderError` for API compatibility.
@@ -76,9 +81,11 @@ Themes for terminal rendering are resolved through `mermaid_theme_for_syntect`, 
 
 Browser Mermaid is a page **feature**, resolved by `DarkmatterFeatureResolver`
 (`darkmatter/lib/src/mermaid/feature.rs`) — the single owner of Mermaid browser
-assets. When a `mermaid` fence is rendered through Darkmatter's full-page browser
-path (`DarkmatterPage::render_to_browser`), the render-tree browser writer emits
-the interactive body element and requests `PageFeature::MermaidDiagram`; the
+assets. When a `mermaid` fence is rendered through Darkmatter's page browser
+path (`DarkmatterPage::render_to_browser` for a body-only fragment, or
+`render_to_browser_document` for a standalone document), the render-tree browser
+writer emits the interactive body element and requests
+`PageFeature::MermaidDiagram`; the
 resolver then supplies the shared assets, which are injected once per page
 (deduplicated in first-seen order):
 
@@ -98,7 +105,7 @@ resolver then supplies the shared assets, which are injected once per page
   so only `.mermaid` elements initialize. A total load failure logs one
   `console.error` and leaves the readable source visible.
 
-The interactive experience is Darkmatter's full-page browser default. The
+The interactive experience is Darkmatter's page browser default. The
 low-level `renderable` browser renderer keeps `BrowserMermaidMode::Code`, so a
 caller constructing `BrowserRenderOptions::default()` (or using `Markdown::as_html`
 without opting in) still renders Mermaid as a plain code block, and terminal

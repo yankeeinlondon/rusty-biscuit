@@ -441,20 +441,31 @@ exists in the repo; the CSS-only fallback is engine-portable, so verify manually
 
 ## Phase 5 — Install Darkmatter Mermaid Assets and Body-Only Injection
 
-Darkmatter's full-page browser path is now feature-aware: interactive Mermaid is
-the default and feature assets are injected **into the page wrapper body**, not a
-document `<head>` — the shape an embeddable fragment requires.
+Darkmatter's page browser path is now feature-aware: interactive Mermaid is
+the default. On the body-only fragment path (`render_to_browser`) feature assets
+are injected **into the page wrapper body**, not a document `<head>` — the shape
+an embeddable fragment requires; the standalone document path
+(`render_to_browser_document`) injects them into a real `<head>`.
 
 ### Body-only rendering model
 
-`DarkmatterPage::render_to_browser` obtains both a standalone document and the
-same render's body inner HTML from `renderable::render_browser_document_body`.
-When no wrapper is needed it returns the standalone `<!DOCTYPE html>` document.
-When decoration or a requested feature forces the page wrapper, it embeds the
-body fragment directly, with no nested `<!DOCTYPE>`/`<html>`/`<head>`/`<body>`
-scaffold. The page collects feature *requests*, resolves them at this outer
-boundary, and places the resulting inline `<style>`/`<script>` before the body
-fragment so the wrapper remains self-contained.
+The two public browser methods now have content-independent return shapes.
+`DarkmatterPage::render_to_browser` **always** returns a body-only HTML fragment
+(no `<!DOCTYPE>`/`<html>`/`<head>`/`<body>` scaffold): the bare body when the
+page is undecorated and feature-free, or a forced single-element page wrapper
+(`<div class="darkmatter-page">…</div>`) carrying the inline `<style>`/`<script>`
+feature assets when decoration or a requested feature is present. It is the
+method used to *embed* a render into a host document.
+`DarkmatterPage::render_to_browser_document` **always** returns a complete
+standalone `<!DOCTYPE html>` document with a real `<head>` (charset, viewport,
+title, design-token/panel CSS, page metadata/stylesheets, and head-serialized
+feature assets) around a wrapper-only `<body>`; the `md` CLI
+(`darkmatter/cli/src/artifact.rs`) uses this method for HTML artifact output. In
+both methods the page collects feature *requests* and resolves them at this outer
+boundary — the body-only path places the resulting inline `<style>`/`<script>`
+before the body fragment so the wrapper stays self-contained, while the
+standalone path serializes them into the real `<head>` (where a head-only
+`<link>` is legal).
 
 ### Renderable change (single, additive)
 

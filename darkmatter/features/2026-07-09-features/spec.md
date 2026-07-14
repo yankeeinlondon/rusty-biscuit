@@ -1,7 +1,7 @@
 ---
 clarified: claude/fable
 reviewed: true
-review_iterations: 6
+review_iterations: 7
 status: ready for planning and implementation
 ---
 

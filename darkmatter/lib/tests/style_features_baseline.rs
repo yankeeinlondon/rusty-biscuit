@@ -4,15 +4,18 @@
 //! These pin Darkmatter behavior so every later phase can classify an output
 //! change as intended or regressive:
 //!
-//! - Darkmatter's full-page browser path renders a Mermaid fence as
+//! - Darkmatter's body-only browser fragment path
+//!   (`DarkmatterPage::render_to_browser`) renders a Mermaid fence as
 //!   **Interactive** by default (Phase 5): the body carries `<pre class="mermaid">`
 //!   and reports a feature request; the outer page resolves it through
 //!   `DarkmatterFeatureResolver` and injects one module bootstrap into the
 //!   forced page wrapper. Mermaid emits no CSS; its palette rides the script's
-//!   `themeVariables`;
-//! - a feature-free, undecorated render returns the standalone document with no
-//!   page wrapper or feature assets — a requested feature forces the wrapper
-//!   only when present (Phase 5);
+//!   `themeVariables`. (`render_to_browser_document` is the companion standalone
+//!   `<!DOCTYPE html>` document path the CLI uses for HTML output.)
+//! - a feature-free, undecorated `render_to_browser` returns a body-only
+//!   fragment — the bare body, with no `.darkmatter-page` wrapper and no feature
+//!   assets — and a requested feature forces the wrapper only when present
+//!   (Phase 5);
 //! - the terminal Mermaid default keeps the fence as code — no network or
 //!   subprocess I/O.
 //!
@@ -103,9 +106,10 @@ fn full_page_mermaid_default_markup_is_interactive() {
 // Feature-free page neutrality
 // ---------------------------------------------------------------------------
 
-/// A zero-configuration, feature-free render returns the standalone document:
-/// no `.darkmatter-page` wrapper and no feature assets. A requested feature
-/// forces the wrapper into existence only when it resolves to inline assets.
+/// A zero-configuration, feature-free `render_to_browser` returns a body-only
+/// fragment — the bare body, with no `.darkmatter-page` wrapper and no feature
+/// assets. A requested feature forces the wrapper into existence only when it
+/// resolves to inline assets.
 #[test]
 fn bare_body_render_has_no_wrapper_and_no_feature_assets() {
     let md = Markdown::try_from_content("A plain paragraph.\n").expect("parse plain doc");
