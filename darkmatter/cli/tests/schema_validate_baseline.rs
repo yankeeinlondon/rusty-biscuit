@@ -24,6 +24,7 @@ const FIXTURES: &str = concat!(
 /// The pre-change legacy cases the Phase-1 baseline recorded.
 const CASES: &[&str] = &[
     "property_union_invalid",
+    "property_union_nested_object",
     "property_union_valid",
     "root_union",
     "root_union_none_match",
