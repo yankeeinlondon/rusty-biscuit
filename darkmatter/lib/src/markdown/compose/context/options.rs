@@ -248,6 +248,10 @@ pub struct ComposeOptions {
     /// the same property, the document wins.
     pub(crate) baseline_schema: Option<crate::markdown::schemas::SimplifiedSchema>,
 
+    /// Whether file-backed compose validation discovers trigger schemas from
+    /// the source file up through its repository boundary.
+    pub(crate) trigger_schemas: bool,
+
     // ── Remote reads ────────────────────────────────────────────
     /// Configuration for remote URL reads: allowed hosts, concurrency,
     /// TTL, freshness mode, and refresh behavior.
@@ -459,6 +463,7 @@ impl ComposeOptions {
             shell_strip_ansi: true,
             env_path_whitelist: Vec::new(),
             baseline_schema: None,
+            trigger_schemas: false,
             remote_read_config: RemoteReadConfig::default(),
             defer_shell_pending_schema_problems: false,
             preflight_graph: None,
@@ -954,6 +959,16 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_darkmatter_baseline_schema(self) -> Self {
         self.with_baseline_schema(crate::markdown::schemas::darkmatter_base_schema())
+    }
+
+    /// Enables repository-scoped trigger-schema discovery for file sources.
+    ///
+    /// This is opt-in for library hosts. The `md compose` CLI enables it by
+    /// default; stdin, URL, and in-memory sources remain discovery-free.
+    #[must_use]
+    pub fn with_trigger_schemas(mut self, enabled: bool) -> Self {
+        self.trigger_schemas = enabled;
+        self
     }
 
     /// Internal builder: toggles parent-wins behavior for the `replace` map.

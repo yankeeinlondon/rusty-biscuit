@@ -13,11 +13,27 @@ the packaging steps.
 
 ## Install as a dev extension
 
-1. Build/install `dmls` so it is on your `PATH` (or configure `binary.path` in
-   the extension settings once wired).
+1. Build/install `dmls` so it is on your `PATH` (from `darkmatter/`:
+   `just install-dmls`), or configure `binary.path` in the extension settings.
 2. In Zed: **command palette → `zed: install dev extension`**, and select the
-   `zed-dmls` directory.
-3. Open a Markdown file; Zed launches `dmls` for it.
+   `zed-dmls` directory **itself** — the one containing `extension.toml`
+   (`darkmatter/dmls/zed-dmls/`). Selecting a parent directory (`dmls/`, the
+   repo root) fails with *"No extension manifest found for extension
+   \<dirname\>"*.
+3. Open a Markdown file; Zed launches `dmls` for it. Check
+   the language-server status menu (bottom bar) — `dmls` should be listed and
+   green.
+
+Zed compiles the extension itself (Rust → wasm32-wasip2) during install, and
+registers the dev extension as a **symlink** to the directory you selected —
+if that checkout moves or a worktree is deleted, reinstall from the new
+location. To pick up extension-source changes later, use the rebuild action on
+the Extensions page (`zed: extensions`); to pick up a new `dmls` binary, just
+restart the server (`editor: restart language server`) or Zed.
+
+If Zed starts with **no** language servers for the project at all (dmls *and*
+codebook/YAML missing or stuck "waiting"), that is usually not the extension —
+see the [shell env-capture note in Troubleshooting](README.md#troubleshooting).
 
 ## Minimal extension shape
 

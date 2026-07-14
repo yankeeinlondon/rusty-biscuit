@@ -235,6 +235,15 @@ pub(crate) struct LiveSemanticSink {
     /// trip is terminal) and suppresses further output rendering so the
     /// tail of a runaway is not echoed to the terminal (spec Part 1).
     content_tripped: bool,
+    /// Best-effort mid-session status reporter to the rendezvous
+    /// dashboard's `sessions-active` register (trigger 1). Inert unless
+    /// a session was bracketed against a live daemon.
+    status_reporter: super::session_report::StatusReporter,
+    /// Whether the last observed transition left the session waiting on
+    /// the user (a `PermissionRequest` not yet followed by progress).
+    /// Debounces the `waiting_on_user` → `active` status reports so only
+    /// real edges hit the daemon.
+    awaiting_user: bool,
 }
 
 impl LiveSemanticSink {
@@ -277,7 +286,18 @@ impl LiveSemanticSink {
             detector_scope_model: None,
             trip_sender: None,
             content_tripped: false,
+            status_reporter: super::session_report::StatusReporter::inert(),
+            awaiting_user: false,
         }
+    }
+
+    /// Wire the dashboard status reporter (trigger 1). Defaults to inert.
+    pub(crate) fn with_status_reporter(
+        mut self,
+        reporter: super::session_report::StatusReporter,
+    ) -> Self {
+        self.status_reporter = reporter;
+        self
     }
 
     /// Convenience constructor for the wrapped-provider call sites
@@ -363,6 +383,8 @@ impl LiveSemanticSink {
             detector_scope_model: None,
             trip_sender: None,
             content_tripped: false,
+            status_reporter: super::session_report::StatusReporter::inert(),
+            awaiting_user: false,
         }
     }
 

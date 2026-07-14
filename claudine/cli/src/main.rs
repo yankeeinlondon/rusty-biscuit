@@ -386,6 +386,7 @@ async fn async_main(
         Commands::Sequence(args) => {
             commands::sequence::run_sequence(args, cli.verbose, startup_timings)
         }
+        Commands::Dashboard(args) => commands::dashboard::run(args).await,
         Commands::Context(args) => commands::context::run(args),
         Commands::Errors(args) => commands::errors::run(args),
     }

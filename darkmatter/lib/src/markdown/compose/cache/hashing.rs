@@ -198,6 +198,7 @@ pub(crate) fn options_hash(options: &ComposeOptions) -> u64 {
         let canonical = canonical_json_sorted(&json);
         parts.push(format!("baseline_schema={}", canonical));
     }
+    parts.push(format!("trigger_schemas={}", options.trigger_schemas));
 
     // The launch-area anchor changes read-side file resolution (file_exists,
     // frontmatter, file schema validation), so distinct anchors must not share

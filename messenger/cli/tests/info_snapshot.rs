@@ -81,7 +81,13 @@ fn empty_report() -> InfoReport {
 #[test]
 fn snapshot_full_plain_rendering() {
     let report = full_report();
-    let term = Terminal::builder().is_tty(false).width(80).build();
+    // Pin color depth so the styled snapshot is byte-identical on every host
+    // (env-detected depth otherwise varies between dev and CI). See info.rs.
+    let term = Terminal::builder()
+        .is_tty(false)
+        .width(80)
+        .color_depth(biscuit_terminal::discovery::detection::ColorDepth::TrueColor)
+        .build();
     let text = render_text(&report, &term);
     insta::assert_snapshot!(text);
 }
@@ -96,7 +102,13 @@ fn snapshot_full_json_rendering() {
 #[test]
 fn snapshot_empty_plain_rendering() {
     let report = empty_report();
-    let term = Terminal::builder().is_tty(false).width(80).build();
+    // Pin color depth so the styled snapshot is byte-identical on every host
+    // (env-detected depth otherwise varies between dev and CI). See info.rs.
+    let term = Terminal::builder()
+        .is_tty(false)
+        .width(80)
+        .color_depth(biscuit_terminal::discovery::detection::ColorDepth::TrueColor)
+        .build();
     let text = render_text(&report, &term);
     insta::assert_snapshot!(text);
 }

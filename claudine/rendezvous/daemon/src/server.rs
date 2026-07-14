@@ -8,6 +8,19 @@
 //! removed automatically when the handle is dropped (or when shutdown
 //! completes), so tests can spawn ephemeral servers without leaking
 //! filesystem state.
+//!
+//! ## Platform support (review Finding 9)
+//!
+//! The local-IPC server is currently **Unix-only**: [`spawn_uds_server`]
+//! binds a `UnixListener`, and there is no Windows named-pipe server yet.
+//! The gRPC *client* ([`rendezvous_client`]) is already portable (UDS on
+//! Unix, named pipe on Windows), so the missing half is the server. Until
+//! a `spawn_named_pipe_server` lands (a tracked follow-up that needs a
+//! Windows runner to verify — see
+//! `claudine/features/2026-07-12-rendezvous-dashboard/windows-support-followup.md`),
+//! the daemon — and therefore `claudine dashboard` end-to-end — does not
+//! run on Windows. Consumers that spawn this daemon in tests gate those
+//! tests with `#[cfg(unix)]`.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -26,7 +39,9 @@ use crate::batcher::{BatcherConfig, BatcherWorker, spawn as spawn_batcher};
 use crate::discovery::{self, DiscoveryError, DiscoveryHandle};
 use crate::peers::{PeerRegistry, PeerRegistryWorkers};
 use crate::projection::{Projection, ProjectionError};
+use crate::refresher::spawn_register_refresher;
 use crate::quic::{QuicEndpoint, QuicError};
+use crate::register::{RegisterError, RegisterStore};
 use crate::service::RendezvousService;
 use crate::session_log::{SessionLogError, SessionLogManager};
 use crate::storage::{Storage, StorageError};
@@ -55,6 +70,11 @@ pub struct DaemonConfig {
     /// and the peer registry entirely, so the daemon still works for
     /// local-only Phase 1–3 testing.
     pub networking: Option<NetworkConfig>,
+    /// Directories scanned (bounded depth) for git checkouts to fill
+    /// the `repos/{node_id}` register. Empty (the default) leaves the
+    /// register unwritten — the feature is opt-in until the host's
+    /// coding roots are configured.
+    pub repo_scan_roots: Vec<PathBuf>,
 }
 
 /// Configuration for the Phase-4 networking stack (QUIC + mDNS).
@@ -92,7 +112,16 @@ impl DaemonConfig {
             chunk_config: ChunkConfig::default(),
             batcher_config: BatcherConfig::default(),
             networking: Some(NetworkConfig::default()),
+            repo_scan_roots: Vec::new(),
         }
+    }
+
+    /// Configure the directories scanned for git checkouts (the
+    /// `repos/{node_id}` register).
+    #[must_use]
+    pub fn with_repo_scan_roots(mut self, roots: Vec<PathBuf>) -> Self {
+        self.repo_scan_roots = roots;
+        self
     }
 
     /// Mark the projection database as in-memory only. The redb path is
@@ -161,6 +190,10 @@ pub enum ServerError {
     #[error(transparent)]
     Projection(#[from] ProjectionError),
 
+    /// The register store could not be rehydrated from storage.
+    #[error(transparent)]
+    Register(#[from] RegisterError),
+
     /// The session-log manager could not be initialised.
     #[error(transparent)]
     SessionLog(#[from] SessionLogError),
@@ -196,6 +229,8 @@ pub struct ServerHandle {
     shutdown_tx: Option<oneshot::Sender<()>>,
     join_handle: Option<JoinHandle<Result<(), tonic::transport::Error>>>,
     batcher: Option<BatcherWorker>,
+    capability_task: Option<JoinHandle<()>>,
+    capability_shutdown_tx: Option<oneshot::Sender<()>>,
     identity: Arc<NodeIdentity>,
     peers: Option<PeerRegistry>,
     peer_workers: Option<PeerRegistryWorkers>,
@@ -261,6 +296,16 @@ impl ServerHandle {
                 .await
                 .map_err(ServerError::Join)?;
         }
+        // Signal the capability refresher and WAIT for it: an
+        // in-flight detection pass holds the storage handle, and a
+        // restarted daemon reopening the same redb file would hit
+        // `DatabaseAlreadyOpen` if we only fired-and-forgot.
+        if let Some(tx) = self.capability_shutdown_tx.take() {
+            let _ = tx.send(());
+        }
+        if let Some(task) = self.capability_task.take() {
+            let _ = task.await;
+        }
         remove_socket(&self.socket_path);
         Ok(())
     }
@@ -276,6 +321,14 @@ impl Drop for ServerHandle {
         }
         if let Some(worker) = self.batcher.take() {
             worker.shutdown();
+        }
+        if let Some(tx) = self.capability_shutdown_tx.take() {
+            let _ = tx.send(());
+        }
+        if let Some(task) = self.capability_task.take() {
+            // Drop cannot await; the refresher exits on its own after
+            // the signal (waiting out any in-flight detection pass).
+            task.abort();
         }
         remove_socket(&self.socket_path);
     }
@@ -319,10 +372,20 @@ pub fn spawn_uds_server(
         config.chunk_config,
         Arc::clone(&identity),
     )?;
+    let registers = RegisterStore::new(storage.clone(), Arc::clone(&identity))?;
     let sync_service = SyncService::new(
         session_log.clone(),
+        registers.clone(),
         storage.clone(),
         Arc::clone(&identity),
+    );
+    // Fill (and hourly refresh) this host's capability register so the
+    // mesh learns what this node can run.
+    let (capability_shutdown_tx, capability_shutdown_rx) = oneshot::channel();
+    let capability_task = spawn_register_refresher(
+        registers.clone(),
+        config.repo_scan_roots.clone(),
+        capability_shutdown_rx,
     );
 
     let listener = UnixListener::bind(&socket_path).map_err(|source| ServerError::Bind {
@@ -337,6 +400,7 @@ pub fn spawn_uds_server(
         Arc::clone(&identity),
         storage.clone(),
         sync_service.clone(),
+        registers,
     );
     let (peers, peer_workers, discovery, quic_local_addr) = match config.networking.clone() {
         Some(net_config) => {
@@ -390,6 +454,8 @@ pub fn spawn_uds_server(
         shutdown_tx: Some(shutdown_tx),
         join_handle: Some(join_handle),
         batcher: Some(batcher),
+        capability_task: Some(capability_task),
+        capability_shutdown_tx: Some(capability_shutdown_tx),
         identity,
         peers,
         peer_workers,

@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-7a4665dac765b3c8
-last_updated: 2026-07-06
+hash: ef46db3751d8e999-5c3e5855f654694a
+last_updated: 2026-07-14
 ---
 # Claudine CLI Reference
 
@@ -363,6 +363,24 @@ Shared filters: `--provider`, `--repo`, `--package-area`, `--package`. Read comm
 | `trends` | Usage trends over time |
 | `drift` | Model-catalog drift signals and family-latest alias resolutions |
 | `sync` | Force re-sync of JSONL logs into SQLite |
+
+---
+
+## `claudine dashboard`
+
+The mesh NOW view — a one-shot, read-only render over the rendezvous daemon's live registers (rendezvous dashboard feature, D1). The historical complement is `claudine logs`; this command answers "what is running right now, where, and does anything need me?"
+
+```bash
+claudine dashboard [--local]
+```
+
+- **Mesh-wide by default** — renders every host the local daemon holds a register replica for. `--local` restricts to this host only.
+- **Data path** — folds five daemon read RPCs into one view: `ListActiveSessions` (live sessions), `ListHostCapabilities` (hostname/OS/arch/CPU/RAM/GPU), `ListHostRepos` (checked-out repo count), `ListPeers` (per-peer `last_synced_unix_ms`, the freshness clock), and `Status` (the local node id, to mark the always-fresh local host).
+- **Staleness (D4)** — every remote host row shows its last-sync age. Past **60 seconds** of sync silence a host is rendered *stale* and its sessions as *unknown* rather than as last-known status; a host never synced renders *never synced*. The clock is the daemon's `last_synced_unix_ms` (stamped only on a successful direct-sync round — not mDNS chatter), kept advancing by the daemon's periodic re-sync worker.
+- **Needs human intervention (D5, triggers 1 & 2)** — session status is a **typed per-producer model with a daemon-side precedence reducer** (session-state foundation, 2026-07-13), not a bare last-writer-wins string. Each producer owns one `status_slots` entry; the daemon folds them by intervention strength (`waiting_on_user` > `idle` > `active`, ties by revision) and projects three fields the dashboard reads: the backward-compatible flat `status`, plus `status_basis` (why) and `status_producer` (who). Trigger 1 is **hook-primary**: the permission signal is reported from the normalized `claudine handle` hook boundary so it covers interactive PTY sessions (which run no stream sink), with the wrapper stream sink demoted to a stamped fallback. The `Needs?` column is **tiered and honest**: (a) a fresh `waiting_on_user` renders a strong "⚠ input" badge (carrying its basis/producer provenance and reported age); (b) a fresh `idle` (Trigger 2, below) renders a weaker dim "◦ idle" badge; (c) a `permission_signal:"supported"` provider with nothing outstanding renders "no intervention needed"; (d) a `permission_signal:"unsupported"` provider (no permission-signal capability, recorded at STARTED from the `claudine hooks --support` matrix) renders "permission signal unavailable" — so absence of a signal reads as "can't tell", never mislabeled as fine. Untrusted (stale) hosts suppress all of these to "—".
+- **Interactive-idle signal (D5, trigger 2, IMPLEMENTED 2026-07-13)** — a wrapped **interactive** session that has been idle since its last assistant turn completed is the agent waiting on the user. It is a **hook-driven producer** (not the stream sink, which the interactive PTY path never builds): the wrapper injects `CLAUDINE_INTERACTIVE=1` into the child env, and `claudine handle` reports `idle` on a turn-complete event (Claude's `Stop` → `AgenticEvent::TurnComplete`) and clears back to `active` on the next user prompt (`AgenticEvent::BeforePrompt`). Non-interactive turn-completes report nothing (the agent auto-proceeding is not a human wait). This weaker `idle` writes its own `IdleHook` reducer slot (basis `interactive_turn_complete`), so it can **never** clobber an unresolved stronger `waiting_on_user`. The badge shows the idle duration ("◦ idle 45s") for **local** sessions only — a remote session's `updated_at` is stamped by the remote daemon, so its age is meaningless under clock skew and renders "◦ idle" without a duration. The heading appends an idle count when non-zero.
+- **v1 scope** — wrapped sessions only; unwrapped sessions appear once the process monitor lands. An absent daemon degrades to a friendly note (exit 0), never an error.
+- **Dual-target** — rendered through `DashboardReport` (`TerminalRenderable` + `BrowserRenderable`, the `MetricsReport` precedent); the component lives CLI-local (`cli/src/commands/dashboard/`) so the `claudine` library stays free of any `rendezvous-*` dependency.
 
 ---
 

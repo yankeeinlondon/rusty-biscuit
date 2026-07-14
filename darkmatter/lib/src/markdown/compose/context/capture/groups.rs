@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use crate::markdown::compose::expression::ExpressionFinder;
+
 use super::{agent, changes, datetime, docs, host, languages, repo};
 
 /// Independently captured runtime-context domains.
@@ -56,6 +58,12 @@ fn group_for_key(key: &str) -> Option<ContextGroup> {
 /// Finds the runtime-context domains referenced by `ctx.KEY` expressions.
 pub(crate) fn scan_needed_groups(content: &str) -> HashSet<ContextGroup> {
     let mut groups = HashSet::new();
+    let literal_spans: Vec<_> = ExpressionFinder::new(content)
+        .scan()
+        .literals
+        .into_iter()
+        .map(|literal| literal.start..literal.end)
+        .collect();
     let mut pos = 0;
 
     while let Some(offset) = content[pos..].find("ctx.") {
@@ -64,7 +72,12 @@ pub(crate) fn scan_needed_groups(content: &str) -> HashSet<ContextGroup> {
             .find(|c: char| !c.is_alphanumeric() && c != '_')
             .map(|offset| start + offset)
             .unwrap_or(content.len());
-        if let Some(group) = ContextGroup::for_key(&content[start..key_end]) {
+        // Skip `ctx.KEY` matches that fall inside an interpolation literal
+        // (`{{{ ... }}}`), whose content is inert on every scanning surface.
+        let key_start = pos + offset;
+        if !literal_spans.iter().any(|span| span.start <= key_start && key_end <= span.end)
+            && let Some(group) = ContextGroup::for_key(&content[start..key_end])
+        {
             groups.insert(group);
         }
         pos = key_end;
@@ -113,5 +126,19 @@ mod tests {
                 descriptor.name,
             );
         }
+    }
+
+    #[test]
+    fn literal_masks_ctx_key() {
+        let groups = scan_needed_groups("The CPU count is {{{ ctx.cpu_cores }}}.");
+        assert!(!groups.contains(&ContextGroup::Hardware));
+    }
+
+    #[test]
+    fn ctx_key_outside_literal_still_triggers_group() {
+        let groups = scan_needed_groups("CPU count: {{ ctx.cpu_cores }} and literal {{{ ctx.os }}}.");
+        assert!(groups.contains(&ContextGroup::Hardware));
+        // `ctx.os` inside a literal must not trigger the OS group.
+        assert!(!groups.contains(&ContextGroup::Os));
     }
 }

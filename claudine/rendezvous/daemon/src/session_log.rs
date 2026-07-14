@@ -68,6 +68,16 @@ pub enum SessionLogError {
     /// A remote CRDT payload failed session-log schema validation.
     #[error("remote document schema validation failed: {reason}")]
     SchemaValidation { reason: String },
+
+    /// A remote update imported without error but left operations
+    /// pending (their causal dependencies are missing locally). Every
+    /// delta in this protocol is exported against our advertised
+    /// version, so pending ops mean the sender's history no longer
+    /// reaches back to our version — typically because it re-based
+    /// (compacted) its document past us. The update must not be
+    /// treated as applied; recovery is a snapshot-replace.
+    #[error("remote update for {chunk_id} left ops pending ({detail}); snapshot-replace required")]
+    PendingRemoteOps { chunk_id: String, detail: String },
 }
 
 impl From<loro::LoroError> for SessionLogError {
@@ -85,9 +95,13 @@ impl From<loro::LoroEncodeError> for SessionLogError {
 /// Bytes returned from [`SessionLogManager::export_updates_since`].
 #[derive(Clone, Debug)]
 pub struct ExportedUpdate {
-    /// `true` when the bytes carry a full snapshot (the peer had no
-    /// prior state), `false` for an incremental update bundle.
-    pub is_snapshot: bool,
+    /// How the receiver must apply `bytes`: an incremental update
+    /// bundle (`Delta`), a full snapshot for a peer with no prior
+    /// state (`Snapshot`), or a full snapshot the peer must adopt
+    /// wholesale (`SnapshotReplace` — sent when the peer's version
+    /// predates this document's shallow root, so the connecting delta
+    /// history no longer exists).
+    pub kind: PayloadKind,
     /// Encoded Loro payload. Empty when there are no updates beyond
     /// the supplied state vector.
     pub bytes: Vec<u8>,
@@ -654,21 +668,38 @@ impl SessionLogManager {
         match remote_state_vector {
             Some(raw) => {
                 let vv = VersionVector::decode(raw)?;
+                // Shallow-root gate: a re-based (history-compacted) doc
+                // no longer holds ops before its shallow root. Exporting
+                // updates for an older peer version *succeeds*, but the
+                // ops import as permanently-pending on the receiver
+                // (verified by the register-compaction spike), so the
+                // only safe answer for such a peer is a snapshot it
+                // adopts wholesale.
+                let shallow_since = doc.shallow_since_vv();
+                let peer_covers_shallow_root = shallow_since
+                    .iter()
+                    .all(|(peer, counter)| vv.get(peer).is_some_and(|c| *c >= *counter));
+                if !peer_covers_shallow_root {
+                    return Ok(Some(ExportedUpdate {
+                        kind: PayloadKind::SnapshotReplace,
+                        bytes: doc.export(ExportMode::Snapshot)?,
+                    }));
+                }
                 let updates = doc.export(ExportMode::updates(&vv))?;
                 if updates.is_empty() {
                     Ok(Some(ExportedUpdate {
-                        is_snapshot: false,
+                        kind: PayloadKind::Delta,
                         bytes: Vec::new(),
                     }))
                 } else {
                     Ok(Some(ExportedUpdate {
-                        is_snapshot: false,
+                        kind: PayloadKind::Delta,
                         bytes: updates,
                     }))
                 }
             }
             None => Ok(Some(ExportedUpdate {
-                is_snapshot: true,
+                kind: PayloadKind::Snapshot,
                 bytes: doc.export(ExportMode::Snapshot)?,
             })),
         }
@@ -691,7 +722,8 @@ impl SessionLogManager {
             let pre_snapshot = state.snapshot_bytes()?;
             let staged_doc = LoroDoc::from_snapshot(&pre_snapshot)?;
             let original_entry_json = collect_entry_json_strings(&staged_doc)?;
-            staged_doc.import(update_bytes)?;
+            let status = staged_doc.import(update_bytes)?;
+            reject_pending_ops(chunk, &status)?;
 
             validate_metadata_unchanged(&staged_doc, &state.metadata)?;
             validate_remote_entries(&staged_doc, state.entry_count)?;
@@ -706,7 +738,8 @@ impl SessionLogManager {
             }
         } else {
             let staged_doc = LoroDoc::new();
-            staged_doc.import(update_bytes)?;
+            let status = staged_doc.import(update_bytes)?;
+            reject_pending_ops(chunk, &status)?;
 
             validate_remote_entries(&staged_doc, 0)?;
             let metadata = validate_and_extract_metadata(
@@ -759,31 +792,84 @@ impl SessionLogManager {
             }
         };
 
-        let session_key = chunk.session_key();
-        let state = inner.chunks.get(&key).expect("just inserted or merged");
-        let mut highest_seq = None;
-        state
-            .doc
-            .get_list(ENTRIES_CONTAINER)
-            .for_each(|value| {
-                if let Some(json) = value_to_string(&value)
-                    && let Ok(entry) = serde_json::from_str::<Entry>(&json)
-                {
-                    highest_seq = Some(highest_seq.map_or(entry.sequence, |h: u64| h.max(entry.sequence)));
-                }
-            });
-        let cursor = inner.sessions.entry(session_key).or_insert(SessionCursor {
-            active_chunk_index: chunk.chunk_index,
-            next_sequence: 0,
-        });
-        if chunk.chunk_index > cursor.active_chunk_index {
-            cursor.active_chunk_index = chunk.chunk_index;
-        }
-        if let Some(seq) = highest_seq
-            && seq + 1 > cursor.next_sequence
-        {
-            cursor.next_sequence = seq + 1;
-        }
+        refresh_session_cursor(&mut inner, chunk);
+
+        Ok(advanced)
+    }
+
+    /// Stage a remote snapshot-replace: the payload is a self-contained
+    /// snapshot (typically shallow, i.e. history-compacted) that will
+    /// REPLACE the local replica wholesale instead of merging into it.
+    /// Sent by an owner whose document was re-based past our version.
+    /// Validation still enforces chunk identity, entry schema, and the
+    /// append-only entry prefix against current local state — a replace
+    /// may extend the entry list but never rewrite or shrink it.
+    pub(crate) fn stage_remote_replace(
+        &self,
+        chunk: &ChunkId,
+        snapshot_bytes: &[u8],
+    ) -> Result<StagedRemoteUpdate, SessionLogError> {
+        let key = chunk.as_path();
+        let inner = self.inner.lock();
+
+        let staged_doc = LoroDoc::new();
+        let status = staged_doc.import(snapshot_bytes)?;
+        reject_pending_ops(chunk, &status)?;
+
+        let metadata = if let Some(state) = inner.chunks.get(&key) {
+            validate_metadata_unchanged(&staged_doc, &state.metadata)?;
+            validate_remote_entries(&staged_doc, state.entry_count)?;
+            let original_entry_json = collect_entry_json_strings(&state.doc)?;
+            validate_append_only_prefix(&staged_doc, &original_entry_json)?;
+            state.metadata.clone()
+        } else {
+            validate_remote_entries(&staged_doc, 0)?;
+            validate_and_extract_metadata(
+                &staged_doc,
+                &chunk.owner_node_id,
+                &chunk.session_id,
+                chunk.chunk_index,
+            )?
+        };
+
+        let (count, bytes) = doc_entry_stats(&staged_doc);
+        drop(inner);
+        Ok(StagedRemoteUpdate {
+            state: ChunkState {
+                doc: staged_doc,
+                metadata,
+                entry_count: count,
+                byte_estimate: bytes,
+            },
+        })
+    }
+
+    /// Commit a staged snapshot-replace: persist the snapshot and swap
+    /// the in-memory state wholesale. Unlike
+    /// [`Self::commit_staged_update`] this deliberately does NOT merge —
+    /// the incoming document's history root is newer than the local
+    /// replica's, and importing across that gap does not converge
+    /// (verified by the register-compaction spike). Nothing local can be
+    /// lost: replicas of a foreign-owned chunk are read-only copies of
+    /// the owner's document.
+    pub(crate) fn commit_staged_replace(
+        &self,
+        chunk: &ChunkId,
+        staged: StagedRemoteUpdate,
+    ) -> Result<bool, SessionLogError> {
+        let key = chunk.as_path();
+        let snapshot_bytes = staged.state.snapshot_bytes()?;
+
+        self.storage.save_snapshot(chunk, &snapshot_bytes)?;
+
+        let mut inner = self.inner.lock();
+        let advanced = match inner.chunks.get(&key) {
+            Some(existing) => existing.doc.oplog_vv() != staged.state.doc.oplog_vv(),
+            None => true,
+        };
+        inner.chunks.insert(key, staged.state);
+
+        refresh_session_cursor(&mut inner, chunk);
 
         Ok(advanced)
     }
@@ -805,6 +891,21 @@ impl SessionLogManager {
         }
         let staged = self.stage_remote_update(chunk, update_bytes)?;
         self.commit_staged_update(chunk, staged)
+    }
+
+    /// Apply a snapshot-replace received from a peer: stage, validate,
+    /// and swap the local replica wholesale. See
+    /// [`Self::stage_remote_replace`] / [`Self::commit_staged_replace`].
+    pub fn apply_remote_replace(
+        &self,
+        chunk: &ChunkId,
+        snapshot_bytes: &[u8],
+    ) -> Result<bool, SessionLogError> {
+        if snapshot_bytes.is_empty() {
+            return Ok(false);
+        }
+        let staged = self.stage_remote_replace(chunk, snapshot_bytes)?;
+        self.commit_staged_replace(chunk, staged)
     }
 
     /// After a remote update has been applied to a chunk, submit every
@@ -956,13 +1057,23 @@ impl SessionLogManager {
             if accepted.payload_bytes.is_empty() {
                 continue;
             }
-            let Ok(chunk_id) = accepted.document_id.parse::<ChunkId>() else {
-                tracing::warn!(
-                    target: "rendezvous_daemon::session_log",
-                    document_id = %accepted.document_id,
-                    "skipping accepted envelope with malformed document_id during replay",
-                );
-                continue;
+            let chunk_id = match accepted.document_id.parse::<rendezvous_core::DocumentId>() {
+                Ok(rendezvous_core::DocumentId::SessionChunk(chunk)) => chunk,
+                // Register envelopes are persisted for replay
+                // protection only — registers rehydrate from their own
+                // redb table, and a crash-lost register commit heals on
+                // the next sync (the peer re-sends against our
+                // advertised version). Nothing to replay here.
+                Ok(_) => continue,
+                Err(err) => {
+                    tracing::warn!(
+                        target: "rendezvous_daemon::session_log",
+                        document_id = %accepted.document_id,
+                        %err,
+                        "skipping accepted envelope with unrecognized document_id during replay",
+                    );
+                    continue;
+                }
             };
 
             let Some(signed) = reconstruct_signed_envelope(accepted) else {
@@ -984,7 +1095,13 @@ impl SessionLogManager {
                 continue;
             }
 
-            match self.apply_remote_update(&chunk_id, &accepted.payload_bytes) {
+            let apply_result = match PayloadKind::from_byte(accepted.payload_kind as i32) {
+                Some(PayloadKind::SnapshotReplace) => {
+                    self.apply_remote_replace(&chunk_id, &accepted.payload_bytes)
+                }
+                _ => self.apply_remote_update(&chunk_id, &accepted.payload_bytes),
+            };
+            match apply_result {
                 Ok(_) => {}
                 Err(SessionLogError::Loro(reason)) => {
                     tracing::warn!(
@@ -992,6 +1109,18 @@ impl SessionLogManager {
                         chunk_id = %chunk_id.as_path(),
                         %reason,
                         "skipping malformed accepted envelope during replay",
+                    );
+                }
+                Err(SessionLogError::PendingRemoteOps { detail, .. }) => {
+                    // Replay iterates envelopes in storage order, which
+                    // can deliver an old delta after a replace already
+                    // moved the doc's history root. The snapshot in redb
+                    // is authoritative; the stale envelope is skipped.
+                    tracing::warn!(
+                        target: "rendezvous_daemon::session_log",
+                        chunk_id = %chunk_id.as_path(),
+                        %detail,
+                        "skipping accepted envelope with disconnected history during replay",
                     );
                 }
                 Err(other) => return Err(other),
@@ -1284,6 +1413,56 @@ fn validate_append_only_prefix(
         }
     }
     Ok(())
+}
+
+/// Fail an import whose [`loro::ImportStatus`] parked operations as
+/// pending. Loro reports this as a *successful* import, so without the
+/// guard a replica silently stops converging (the ops' causal
+/// dependencies are missing locally and can never arrive if the sender
+/// re-based past us).
+fn reject_pending_ops(
+    chunk: &ChunkId,
+    status: &loro::ImportStatus,
+) -> Result<(), SessionLogError> {
+    match status.pending.as_ref() {
+        Some(pending) => Err(SessionLogError::PendingRemoteOps {
+            chunk_id: chunk.as_path(),
+            detail: format!("{pending:?}"),
+        }),
+        None => Ok(()),
+    }
+}
+
+/// Advance the per-session cursor (active chunk index + next sequence)
+/// after `chunk`'s in-memory state changed via a remote update or
+/// replace. Expects the chunk to be present in `inner.chunks`.
+fn refresh_session_cursor(inner: &mut ManagerInner, chunk: &ChunkId) {
+    let key = chunk.as_path();
+    let session_key = chunk.session_key();
+    let state = inner.chunks.get(&key).expect("just inserted or merged");
+    let mut highest_seq = None;
+    state
+        .doc
+        .get_list(ENTRIES_CONTAINER)
+        .for_each(|value| {
+            if let Some(json) = value_to_string(&value)
+                && let Ok(entry) = serde_json::from_str::<Entry>(&json)
+            {
+                highest_seq = Some(highest_seq.map_or(entry.sequence, |h: u64| h.max(entry.sequence)));
+            }
+        });
+    let cursor = inner.sessions.entry(session_key).or_insert(SessionCursor {
+        active_chunk_index: chunk.chunk_index,
+        next_sequence: 0,
+    });
+    if chunk.chunk_index > cursor.active_chunk_index {
+        cursor.active_chunk_index = chunk.chunk_index;
+    }
+    if let Some(seq) = highest_seq
+        && seq + 1 > cursor.next_sequence
+    {
+        cursor.next_sequence = seq + 1;
+    }
 }
 
 fn hex_decode(hex: &str) -> Option<Vec<u8>> {

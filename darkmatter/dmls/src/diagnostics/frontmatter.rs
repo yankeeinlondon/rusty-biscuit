@@ -63,7 +63,30 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
 
     suggestion_diagnostics(ctx, &overlay.suggestions, &mut out);
 
+    if let SuggestionState::TriggerError(error) = &overlay.suggestions {
+        out.push(diagnostic(
+            ctx.source_map
+                .byte_range_to_lsp(0..ctx.text.len())
+                .unwrap_or_else(zero_range),
+            DiagnosticSeverity::ERROR,
+            source::SCHEMA,
+            code::SCHEMA_PREPARE,
+            error.to_string(),
+        ));
+    }
+
     out
+}
+
+/// Builds the file-level diagnostic for a failed trigger-registry scan.
+pub fn trigger_load_diagnostic(error: &SchemaError) -> Diagnostic {
+    diagnostic(
+        zero_range(),
+        DiagnosticSeverity::ERROR,
+        source::SCHEMA,
+        code::SCHEMA_PREPARE,
+        error.to_string(),
+    )
 }
 
 /// A schema resolution/preparation failure, ranged at `$schema` (or the block).
@@ -220,7 +243,7 @@ fn suggestion_diagnostics(
     out: &mut Vec<Diagnostic>,
 ) {
     match suggestions {
-        SuggestionState::Inactive => {}
+        SuggestionState::Inactive | SuggestionState::TriggerError(_) => {}
         SuggestionState::Inline(problems) => {
             for problem in problems {
                 out.push(suggestion_warning(ctx, problem));

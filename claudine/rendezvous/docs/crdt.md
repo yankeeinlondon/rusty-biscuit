@@ -1,9 +1,10 @@
 # Rendezvous Data Model — CRDT Documents and the Analytics Projection
 
-> **Status: DRAFT** — this document establishes the shared data-model vocabulary for the
-> rendezvous feature specs (logging-refactor, host-capability-broadcast, process-monitor,
-> rendezvous-dashboard). Specs should reference this document rather than re-deriving
-> storage patterns per feature.
+> **Status: RATIFIED (2026-07-12)** — this document is the authoritative shared
+> data-model vocabulary for the rendezvous feature specs (logging-refactor,
+> host-capability-broadcast, process-monitor, rendezvous-dashboard). Specs reference
+> this document rather than re-deriving storage patterns per feature. The riskiest
+> assumptions were validated by the register-compaction spike before ratification.
 
 ## The Two Stores
 
@@ -276,12 +277,24 @@ Before adding a document type or DuckDB table, answer:
 
 ## Open Questions
 
-- **Register history compaction:** at what document size / op count do we shallow-snapshot
-  re-base a Kind-2 register, and does re-basing interact safely with peers holding older
-  state vectors? Needs a spike before any register gains a >1/minute write cadence.
-- **Foreign-writer enforcement:** the single-writer rule is currently convention; the
-  import path should reject deltas whose ops originate from a peer other than the
-  document's `owner_node_id`. Decide where this check lives (sync engine vs storage).
+- **Register history compaction:** ✅ answered by the
+  [compaction spike](../../features/2026-07-11-host-capability-broadcast/spike-register-compaction.md)
+  (2026-07-12). Growth is modest (~3–42 B/write depending on churn shape), re-basing via
+  shallow snapshot preserves state/peer-id/persistence, and lazy thresholds
+  (~256 KiB / 10k ops) suffice. One hard rule fell out: a reader behind the re-base
+  point **silently** stops converging on delta sync, so the sync engine must gate
+  updates-since requests on `shallow_since_vv` and respond with a snapshot-replace.
+  **The gate is implemented** (2026-07-12, sync protocol v2): `PayloadKind::SnapshotReplace`
+  + `SyncDelta.replace` on the wire, replica-swap semantics on receive
+  (`stage_remote_replace` / `commit_staged_replace`), and a pending-ops import guard
+  as defense-in-depth. It composes with foreign-writer enforcement (next bullet).
+- **Foreign-writer enforcement:** ✅ implemented for registers (2026-07-12). A
+  register's Loro peer id is derived deterministically from its owner's node id
+  (`register::owner_peer_id`), and the import path rejects any staged update carrying
+  ops from a different peer id — the op-level half of single-writer enforcement, on top
+  of the sync layer's existing namespace check. Session-log *chunks* remain
+  namespace-level only: existing chunk documents were created with random peer ids, so
+  op-level binding there needs a migration story first (open).
 - **Projection scheduling:** today the projection rebuilds at startup and appends on
   sync; a long-lived daemon may want periodic reconciliation (cheap `row_count` vs
   redb-entry-count comparison) to detect drift.

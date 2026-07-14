@@ -1,9 +1,12 @@
 ---
 $schema:
-    spec: file(required;match(**/*spec*.md);eager) -> path to specification file
-    design: file(match(**/*design*.md)) -> path to the design file (if exists)
-    plan: "file(required) -> the plan file this prompt will create"
-    area: "string() -> the package area (or package in some cases) where the work is being done"
+    - spec: file(required;match(**/*spec*.md);eager) -> path to specification file
+      design: file(match(**/*design*.md)) -> path to the design file (if exists)
+      plan: "file(required;match(**/*plan*.md)) -> The _plan file_ this prompt will create"
+      area: "string() -> the package area (or package in some cases) where the work is being done"
+    - review: "file(required;match(**/*review.md);eager) -> if the plan we are building is based on a review (_instead of a `spec`_)"
+      plan: "file(required;match(**/*plan*.md)) -> The _plan file_ this prompt will create"
+      area: "string() -> the package area (or package in some cases) where the work is being done"
     
 description: "Creates a multi-phase, high confidence plan from a _feature_ or _fix_"
 root: "{{ctx.repo_root}}"
@@ -21,12 +24,12 @@ failure:
 You are a planning agent. Convert the following documents into a high confidence execution plan:
 
 ::block when="spec"
-
 - Functional Specification: {{ctx.current_package_area}}/{{spec}}
 ::end-block
 ::block when="design"
 - Technical Design: {{ctx.current_package_area}}/{{design}}
 ::end-block
+::block when="review"
 
 ## Requirements
 

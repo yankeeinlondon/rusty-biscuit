@@ -38,7 +38,7 @@ We also changed the alignment of **tables** to be right aligned and with a **max
     - the next column (e.g., "status") is _centered_, 
     - and then the final column (e.g., "amount") is right justified.
 
-Example Table:
+Example Table (`{ alignment: "right", max-width: 50% }`):
 
 | Name  | Status | Amount |
 |:------|:------:| ------:|
@@ -56,7 +56,7 @@ The configuration of this page is with regard to lists is:
 - Unordered Lists are left justified (the default) but a left margin of 4ch has been applied
 - They are also limited to a max-width of 40 characters (uses a bare number not a unit based one)
 
-In order to see the ordered list:
+In order to see the ordered list (note: _ordered list should be right justified_):
 
 1. Style the page
 2. Render the page

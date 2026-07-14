@@ -6,12 +6,12 @@ expression: text
 [1mActive daemon:[0m dunst [2m(knopwob)[0m v1.9.2
 
 [1mNotification helpers[0m
-┌─────────────┬───────────┬─────────┬──────────────────────────────────────────┐
-│ Helper      │ Installed │ Version │ Install hint                             │
-├─────────────┼───────────┼─────────┼──────────────────────────────────────────┤
-│ dunstify    │     ✓     │ 1.2.0   │                                          │
-│ notify-send │     —     │         │ sudo apt install libnotify-bin           │
-└─────────────┴───────────┴─────────┴──────────────────────────────────────────┘
+┌─────────────┬───────────┬─────────┬────────────────────────────────┐
+│ Helper      │ Installed │ Version │ Install hint                   │
+├─────────────┼───────────┼─────────┼────────────────────────────────┤
+│ dunstify    │     ✓     │ 1.2.0   │                                │
+│ notify-send │     —     │         │ sudo apt install libnotify-bin │
+└─────────────┴───────────┴─────────┴────────────────────────────────┘
 
 [1mElection order on this host[0m
   [2m1.[0m dunstify

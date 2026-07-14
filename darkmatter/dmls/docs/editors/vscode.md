@@ -13,42 +13,28 @@ vary by bridge extension; the server command is simply:
 dmls
 ```
 
-## Option B — thin extension
+## Option B — the shipped `vscode-dmls` extension (recommended)
 
-The most reliable path is a small extension that starts the server with
-`vscode-languageclient`. This is the whole activation:
+The repo ships a thin client extension at
+[`../../vscode-dmls/`](../../vscode-dmls/) (`vscode-languageclient` over stdio,
+no language logic). One recipe packages and installs it:
 
-```ts
-import * as vscode from 'vscode';
-import {
-  LanguageClient,
-  LanguageClientOptions,
-  ServerOptions,
-} from 'vscode-languageclient/node';
-
-let client: LanguageClient;
-
-export function activate(context: vscode.ExtensionContext) {
-  const serverOptions: ServerOptions = {
-    command: 'dmls',
-    args: [],
-  };
-
-  const clientOptions: LanguageClientOptions = {
-    documentSelector: [{ scheme: 'file', language: 'markdown' }],
-    synchronize: {
-      fileEvents: vscode.workspace.createFileSystemWatcher('**/*.{md,markdown,mdown,mkdn}'),
-    },
-  };
-
-  client = new LanguageClient('dmls', 'Darkmatter Language Server', serverOptions, clientOptions);
-  context.subscriptions.push(client.start());
-}
-
-export function deactivate(): Thenable<void> | undefined {
-  return client?.stop();
-}
+```bash
+# from darkmatter/ — npm install, vsce package, code --install-extension
+just install-vscode-package
 ```
+
+Then reload an open window (**Developer: Reload Window**) and open a Markdown
+file. Settings:
+
+- `dmls.server.path` — absolute path to the binary (set this if VS Code was
+  launched from the GUI and cannot see your shell `PATH`; usually
+  `~/.cargo/bin/dmls`).
+- `dmls.server.args` — extra server arguments (e.g. `--log-level debug`).
+
+For extension development, open `vscode-dmls/` and press **F5** to run it in
+an Extension Development Host instead of installing. See
+[vscode-dmls/README.md](../../vscode-dmls/README.md) for details.
 
 ## What you get
 

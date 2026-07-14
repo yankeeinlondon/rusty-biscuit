@@ -286,6 +286,13 @@ impl Markdown {
                         );
                     }
                 }
+
+                // Trigger activation is a function of the current frontmatter
+                // snapshot. Re-assemble after shell expansion and interpolation
+                // pass 2 so concrete values can activate or deactivate payloads.
+                if options.trigger_schemas {
+                    schema_validation::run(self, &options)?;
+                }
             }
 
             // Build effective state for replacement/interpolation and condition checks.

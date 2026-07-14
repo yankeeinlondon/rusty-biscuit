@@ -165,6 +165,7 @@ pub fn run_compose(
     allow_reassigned_frontmatter_property: bool,
     baseline_schema: Option<&PathBuf>,
     no_baseline_schema: bool,
+    no_trigger_schemas: bool,
     timeout_secs: Option<u64>,
     allow_shell_timeout: bool,
     shell_report: bool,
@@ -218,6 +219,7 @@ pub fn run_compose(
     let opts_start = perf.then(Instant::now);
     let mut options = ComposeOptions::new_with_context(shared_context);
     options = apply_compose_baseline_schema(options, baseline_schema, no_baseline_schema)?;
+    options = options.with_trigger_schemas(!no_trigger_schemas);
 
     // Parse --state as JSON or JSON5
     if let Some(json_str) = state_json {

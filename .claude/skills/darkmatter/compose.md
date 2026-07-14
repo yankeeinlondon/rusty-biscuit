@@ -1,3 +1,6 @@
+---
+hash: ef46db3751d8e999-288d1ea4dad3a7d1
+---
 # Compose Pipeline
 
 The darkmatter compose pipeline provides document preparation through four phases:
@@ -112,7 +115,7 @@ Version: VERSION
 
 ## Interpolation
 
-Expressions between `{{ }}` are evaluated and replaced with values.
+Expressions between `{{ }}` are evaluated and replaced with values. To render `{{ ... }}` literally instead of evaluating it, use the interpolation-literal syntax `{{{ ... }}}`; the content is never evaluated and composes down to `{{ ... }}`. See `darkmatter/docs/inline/interpolation.md`.
 
 ### Variable Resolution
 

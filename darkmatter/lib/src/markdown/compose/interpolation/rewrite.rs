@@ -59,6 +59,26 @@ pub(crate) struct InterpolationRewrite {
 /// Maximum number of rescan iterations to prevent infinite loops.
 const MAX_INTERPOLATION_DEPTH: usize = 10;
 
+/// Converts `{{{ ... }}}` interpolation literals in `input` to the literal
+/// text `{{ ... }}`.
+///
+/// Literals are recognized using the shared scanner and are converted
+/// from end to start so byte offsets remain stable. This runs **after**
+/// the final interpolation pass so replacement values that introduce new
+/// literals are also converted.
+pub(crate) fn convert_literals(input: &str, scan_mode: ScanMode) -> String {
+    let scan = match scan_mode {
+        ScanMode::MarkdownAware => ExpressionFinder::new(input).scan(),
+        ScanMode::Plain => ExpressionFinder::scan_plain(input),
+    };
+    let mut output = input.to_string();
+    for lit in scan.literals.iter().rev() {
+        let replacement = format!("{}{}{}", "{{", lit.content, "}}");
+        output.replace_range(lit.start..lit.end, &replacement);
+    }
+    output
+}
+
 /// Scans `input` for `{{ }}` expressions, evaluates them, and returns
 /// the rewritten string.
 ///
@@ -174,6 +194,8 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
         }
     }
 
+    let output = convert_literals(&output, scan_mode);
+
     Ok(InterpolationRewrite {
         output,
         replacements: total_count,
@@ -212,6 +234,10 @@ pub(crate) fn interpolate_value<L: EvaluationLookup>(
     fail_fast: bool,
     warning_stage: &'static str,
 ) -> Result<(Value, usize, Vec<ComposeWarning>), MarkdownError> {
+    if is_whole_value_literal(input) {
+        let result = interpolate_text(input, evaluator, ScanMode::Plain, fail_fast, warning_stage)?;
+        return Ok((Value::String(result.output), result.replacements, result.warnings));
+    }
     if let Some(loc) = whole_value_span(input) {
         let expr = parse(&loc.expression).map_err(|e| {
             interpolation_error(&loc.expression, ExpressionError::Parse(e.to_string()))
@@ -248,6 +274,21 @@ fn whole_value_span(input: &str) -> Option<ExpressionLocation> {
         return None;
     }
     Some(loc)
+}
+
+/// Returns `true` when `input`'s trimmed content is exactly one interpolation
+/// literal (`{{{ ... }}}`).
+///
+/// Such values take the string-rewrite path rather than the typed whole-value
+/// expression path, so they resolve to the literal text `{{ ... }}`.
+fn is_whole_value_literal(input: &str) -> bool {
+    let scan = ExpressionFinder::scan_plain(input);
+    if scan.expressions.is_empty() && scan.literals.len() == 1 {
+        let lit = &scan.literals[0];
+        input[..lit.start].trim().is_empty() && input[lit.end..].trim().is_empty()
+    } else {
+        false
+    }
 }
 
 #[cfg(test)]
@@ -578,5 +619,149 @@ mod tests {
         assert!(matches!(value, Value::Number(_)));
         assert_eq!(replacements, 1);
         assert!(!warnings.iter().any(|w| w.message.contains("unknown context variable")));
+    }
+
+    mod interpolation_literal_tests {
+        use super::*;
+
+        #[test]
+        fn body_literal_converts_to_literal_text() {
+            let state = make_state(json!({}));
+            let evaluator = Evaluator::new(&state);
+            let result = interpolate_text(
+                "{{{ name }}}",
+                &evaluator,
+                ScanMode::MarkdownAware,
+                false,
+                "test",
+            )
+            .unwrap();
+            assert_eq!(result.output, "{{ name }}");
+            assert_eq!(result.replacements, 0);
+            assert!(result.warnings.is_empty());
+        }
+
+        #[test]
+        fn inline_code_literal_converts() {
+            let state = make_state(json!({}));
+            let evaluator = Evaluator::new(&state);
+            let result = interpolate_text(
+                "`{{{ name }}}`",
+                &evaluator,
+                ScanMode::MarkdownAware,
+                false,
+                "test",
+            )
+            .unwrap();
+            assert_eq!(result.output, "`{{ name }}`");
+            assert_eq!(result.replacements, 0);
+        }
+
+        #[test]
+        fn fenced_code_block_literal_is_untouched() {
+            let state = make_state(json!({}));
+            let evaluator = Evaluator::new(&state);
+            let input = "```\n{{{ name }}}\n```";
+            let result = interpolate_text(input, &evaluator, ScanMode::MarkdownAware, false, "test").unwrap();
+            assert_eq!(result.output, input);
+            assert_eq!(result.replacements, 0);
+        }
+
+        #[test]
+        fn tight_and_empty_literal_forms() {
+            let state = make_state(json!({}));
+            let evaluator = Evaluator::new(&state);
+            for (input, expected) in [
+                ("{{{x}}}", "{{x}}"),
+                ("{{{}}}", "{{}}"),
+                ("{{{ }}}", "{{ }}"),
+            ] {
+                let result = interpolate_text(input, &evaluator, ScanMode::Plain, false, "test").unwrap();
+                assert_eq!(result.output, expected, "input: {input:?}");
+                assert_eq!(result.replacements, 0, "input: {input:?}");
+            }
+        }
+
+        #[test]
+        fn adjacent_expression_and_literal() {
+            let state = make_state(json!({"a": "evaluated"}));
+            let evaluator = Evaluator::new(&state);
+            let result = interpolate_text(
+                "{{ a }}{{{ b }}}",
+                &evaluator,
+                ScanMode::Plain,
+                false,
+                "test",
+            )
+            .unwrap();
+            assert_eq!(result.output, "evaluated{{ b }}");
+            assert_eq!(result.replacements, 1);
+        }
+
+        #[test]
+        fn rescan_loop_converts_introduced_literal() {
+            let state = make_state(json!({"tmpl": "{{{ y }}}"}));
+            let evaluator = Evaluator::new(&state);
+            let result = interpolate_text(
+                "{{ tmpl }}",
+                &evaluator,
+                ScanMode::Plain,
+                false,
+                "test",
+            )
+            .unwrap();
+            assert_eq!(result.output, "{{ y }}");
+            assert_eq!(result.replacements, 1);
+        }
+
+        #[test]
+        fn fail_fast_over_only_literals_succeeds() {
+            let state = make_state(json!({}));
+            let evaluator = Evaluator::new(&state);
+            let result = interpolate_text(
+                "{{{ name }}} {{{ other }}}",
+                &evaluator,
+                ScanMode::Plain,
+                true,
+                "test",
+            )
+            .unwrap();
+            assert_eq!(result.output, "{{ name }} {{ other }}");
+            assert_eq!(result.replacements, 0);
+            assert!(result.warnings.is_empty());
+        }
+
+        #[test]
+        fn whole_value_literal_takes_string_path() {
+            let state = make_state(json!({}));
+            let evaluator = Evaluator::new(&state);
+            let (value, replacements, warnings) =
+                interpolate_value("{{{ x }}}", &evaluator, false, "frontmatter-interpolation").unwrap();
+            assert_eq!(value, Value::String("{{ x }}".to_string()));
+            assert_eq!(replacements, 0);
+            assert!(warnings.is_empty());
+        }
+
+        #[test]
+        fn literal_containing_expression_is_not_evaluated() {
+            let state = make_state(json!({"x": "replaced"}));
+            let evaluator = Evaluator::new(&state);
+            let result = interpolate_text(
+                "{{{ {{ x }} }}}",
+                &evaluator,
+                ScanMode::Plain,
+                false,
+                "test",
+            )
+            .unwrap();
+            assert_eq!(result.output, "{{ {{ x }} }}");
+            assert_eq!(result.replacements, 0);
+        }
+
+        #[test]
+        fn convert_literals_plain_leaves_expressions_intact() {
+            let output = convert_literals("{{ a }}{{{ b }}}", ScanMode::Plain);
+            assert_eq!(output, "{{ a }}{{ b }}");
+        }
     }
 }

@@ -585,6 +585,15 @@ mod tests {
     }
 
     #[test]
+    fn no_fetch_for_url_inside_interpolation_literal() {
+        // `{{{ ... }}}` content is inert: a URL inside a literal must not be
+        // discovered as remote egress.
+        let content = "See {{{ frontmatter(\"https://example.com/doc.md\") }}} for details.";
+        let results = discover_remote_urls_from_expressions(content, &file_source());
+        assert!(results.is_empty(), "URL inside interpolation literal must not be discovered");
+    }
+
+    #[test]
     fn no_fetch_for_prose_function_text() {
         // Plain prose that merely contains a function-call-shaped substring is
         // not an expression and must never be fetched.

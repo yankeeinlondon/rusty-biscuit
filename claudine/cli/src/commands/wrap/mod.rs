@@ -7,6 +7,7 @@ pub(crate) mod profile;
 pub(crate) mod repo_home;
 pub(crate) mod runaway_guard;
 pub(crate) mod section;
+pub(crate) mod session_report;
 pub(crate) mod stream_io;
 pub(crate) mod subagent_watchdog;
 pub(crate) mod system_prompt;
@@ -274,14 +275,8 @@ fn run_provider_wrapper_inner(
     let mut deferred_messages: Vec<String> = Vec::new();
 
     // ------------------------------------------------------------------
-    // Stage 3: Detect startup context (env, launch, workspace)
+    // Stage 3: Extract and optionally edit the prompt source
     // ------------------------------------------------------------------
-    let startup =
-        env::detect_wrap_startup_or_fallback(&cwd, repo_requested, &mut deferred_warnings)?;
-    let env_context = startup.env_context;
-    let launch_context = startup.launch_context;
-    let launch_workspace = startup.launch_workspace;
-
     // In the direct-wrap path the child inherits stdin automatically —
     // we don't need to detect or seed it. Pass false so that a non-tty
     // test environment (or any shell running without an attached terminal)
@@ -289,9 +284,6 @@ fn run_provider_wrapper_inner(
     // Composition (Task 14) is where InheritStdin / stdin_seed matters.
     let has_piped_stdin = false;
 
-    // ------------------------------------------------------------------
-    // Stage 4: Extract and optionally edit the prompt source
-    // ------------------------------------------------------------------
     let (extracted_args, mut prompt_source) =
         profile::extract_prompt_source_from_passthrough(profile, &child_args, has_piped_stdin)?;
     child_args = extracted_args;
@@ -313,6 +305,19 @@ fn run_provider_wrapper_inner(
     } else {
         has_prompt
     };
+
+    // ------------------------------------------------------------------
+    // Stage 4: Detect startup context (env, launch, workspace)
+    // ------------------------------------------------------------------
+    let startup = env::detect_wrap_startup_or_fallback(
+        &cwd,
+        has_prompt,
+        repo_requested,
+        &mut deferred_warnings,
+    )?;
+    let env_context = startup.env_context;
+    let launch_context = startup.launch_context;
+    let launch_workspace = startup.launch_workspace;
 
     let wrapper_span = info_span!(
         "wrapper_session",

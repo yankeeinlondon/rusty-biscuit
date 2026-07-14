@@ -125,15 +125,15 @@ pub(crate) fn preflight_proxy_target(
     state: &mut HarnessPromptState,
     approval_options: &claudine::harness::ShellApprovalOptions,
     child_cwd: &Path,
-) -> Result<(), claudine::composition::CompositionError> {
+) -> Result<(), Box<claudine::composition::CompositionError>> {
     if state.mode != HarnessPromptMode::Compose {
         return Ok(());
     }
     let source_text = fs::read_to_string(&state.source_path).map_err(|e| {
-        claudine::composition::CompositionError::PreFlightFailed(format!(
+        Box::new(claudine::composition::CompositionError::PreFlightFailed(format!(
             "proxy target pre-flight: failed to read '{}': {e}",
             state.source_path.display()
-        ))
+        )))
     })?;
     let markdown: darkmatter::markdown::Markdown = source_text.into();
 
@@ -174,7 +174,7 @@ pub(crate) fn preflight_proxy_target(
         Err(claudine::composition::CompositionError::PreFlightDiscoveryFailed(_)) => {
             return Ok(());
         }
-        Err(e) => return Err(e),
+        Err(e) => return Err(Box::new(e)),
     };
 
     if !result.approved_commands.is_empty() {

@@ -43,6 +43,12 @@ const ACCEPTED_ENVELOPES: TableDefinition<'_, &str, &[u8]> =
 const OUTBOUND_COUNTER: TableDefinition<'_, &str, u64> =
     TableDefinition::new("outbound_counter");
 
+/// Register table: document path (`{domain}/{owner_node_id}`) → Loro
+/// snapshot bytes for Kind-2 state registers. Kept separate from
+/// `snapshots` so that table's chunk-only iteration and count semantics
+/// stay undisturbed.
+const REGISTERS: TableDefinition<'_, &str, &[u8]> = TableDefinition::new("registers");
+
 /// Errors that the storage layer can return.
 ///
 /// The redb error variants carry sizable structured data, so they are
@@ -192,6 +198,7 @@ impl Storage {
             let _ = txn.open_table(PAIRINGS)?;
             let _ = txn.open_table(ACCEPTED_ENVELOPES)?;
             let _ = txn.open_table(OUTBOUND_COUNTER)?;
+            let _ = txn.open_table(REGISTERS)?;
         }
         txn.commit()?;
         Ok(())
@@ -304,6 +311,46 @@ impl Storage {
         }
         txn.commit()?;
         Ok(removed)
+    }
+
+    /// Persist a Kind-2 register snapshot under its document path.
+    pub fn save_register(&self, doc_path: &str, snapshot: &[u8]) -> Result<(), StorageError> {
+        let txn = self.db.begin_write()?;
+        {
+            let mut table = txn.open_table(REGISTERS)?;
+            table.insert(doc_path, snapshot)?;
+        }
+        txn.commit()?;
+        Ok(())
+    }
+
+    /// Load the latest persisted register snapshot, if any.
+    pub fn load_register(&self, doc_path: &str) -> Result<Option<Vec<u8>>, StorageError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(REGISTERS)?;
+        let value = table.get(doc_path)?;
+        Ok(value.map(|v| v.value().to_vec()))
+    }
+
+    /// Iterate every persisted `(document path, snapshot)` register pair.
+    pub fn iter_registers<F>(&self, mut visit: F) -> Result<(), StorageError>
+    where
+        F: FnMut(String, Vec<u8>) -> Result<(), StorageError>,
+    {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(REGISTERS)?;
+        for entry in table.iter()? {
+            let (key, value) = entry?;
+            visit(key.value().to_string(), value.value().to_vec())?;
+        }
+        Ok(())
+    }
+
+    /// Number of registers currently stored. Convenient for tests.
+    pub fn register_count(&self) -> Result<u64, StorageError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(REGISTERS)?;
+        Ok(table.len()?)
     }
 
     /// Upsert a pairing entry. The stored value is a JSON blob with the

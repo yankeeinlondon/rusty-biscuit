@@ -26,10 +26,12 @@ use darkmatter::markdown::highlighting::ColorMode as MarkdownColorMode;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::TerminalOptions;
 use darkmatter::markdown::schemas::{
-    CoercionRuleDescriptor, InlineObjectRuleDescriptor, SchemaConstraintDescriptor,
-    SchemaShapeDescriptor, SchemaTypeDescriptor, ValidationBehaviorDescriptor,
+    CoercionRuleDescriptor, InlineObjectRuleDescriptor, MatchSafeConstraintDescriptor,
+    SchemaConstraintDescriptor, SchemaShapeDescriptor, SchemaTypeDescriptor,
+    TriggerGrammarDescriptor, ValidationBehaviorDescriptor,
     coercion_rule_descriptors, inline_object_rule_descriptors, schema_constraint_descriptors,
     schema_shape_descriptors, schema_type_descriptors, validation_behavior_descriptors,
+    match_safe_constraint_descriptors, trigger_grammar_descriptors,
 };
 
 const LEFT_MARGIN_CH: u32 = 1;
@@ -52,6 +54,7 @@ pub fn run_about(verbose: bool, code_block_mode: CodeBlockMode) -> Result<()> {
     report.shapes(schema_shape_descriptors())?;
     report.types(schema_type_descriptors())?;
     report.constraints(schema_constraint_descriptors())?;
+    report.triggers(trigger_grammar_descriptors(), match_safe_constraint_descriptors())?;
     if verbose {
         report.inline_object_rules(inline_object_rule_descriptors())?;
         report.coercion_rules(coercion_rule_descriptors())?;
@@ -227,6 +230,31 @@ In this example, constraints are added to a string, a number, and an array of st
             ],
             rows,
         );
+        Ok(())
+    }
+
+    fn triggers(
+        &mut self,
+        grammar: &[TriggerGrammarDescriptor],
+        constraints: &[MatchSafeConstraintDescriptor],
+    ) -> Result<()> {
+        self.heading("Trigger Schemas");
+        self.markdown("Trigger schemas activate an object-schema payload for matching documents. Their match language is pure and side-effect-free.")?;
+        let mut markdown = String::new();
+        for item in grammar {
+            markdown.push_str(&format!(
+                "- **{}.** `{}` — {}\n",
+                escape_markdown(item.name),
+                escape_markdown(item.form),
+                item.description,
+            ));
+        }
+        self.markdown(markdown)?;
+        self.markdown(format!(
+            "**Match-safe constraints only:** {}. Constraints such as `default`, `generated`, `suggest`, `eager`, `match`, and `scheme` are rejected because trigger evaluation cannot transform values or consult external state.",
+            constraints.iter().map(|item| format!("`{}`", item.keyword)).collect::<Vec<_>>().join(", ")
+        ))?;
+        self.blank();
         Ok(())
     }
 
@@ -786,6 +814,14 @@ mod tests {
         assert!(
             signatures.contains("as_csv(list: any[]) -> string | error"),
             "missing typed as_csv signature:\n{signatures}"
+        );
+        assert!(
+            signatures.contains("link(target: file, desc: string) -> string | error"),
+            "missing authored link overload:\n{signatures}"
+        );
+        assert!(
+            signatures.contains("ensure_leading(var: any, prefix: any) -> string | error"),
+            "missing authored string signature:\n{signatures}"
         );
     }
 

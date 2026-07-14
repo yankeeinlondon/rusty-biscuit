@@ -73,9 +73,11 @@ Major entities we want to track (the storage column references the data-model do
 | **Commit / PR / CI-CD** | git-side activity correlated with sessions | Kind-1 `git/...` observation facts (git is the source of truth; we transport observations, we don't manage this state) |
 | **Project** (v2) | kanban/project-management boards associated with a repo; card movement correlates strongly with commits and PRs. We already have API support for Trello, ClickUp, Asana, etc. and would add GitHub, GitLab, Gitea(?) | Kind-1 observation facts from listener clients; future fact table |
 
-## Open Decisions
+## Decisions (RATIFIED 2026-07-12)
 
-Each decision below is **open** until ratified; recommendations are PROPOSED.
+All decisions below were ratified as recommended. The option discussion is kept for
+context; the ratified choice is the *Recommendation* line of each item. D1's concrete
+envelope shape is recorded in [data-modeling.md](./data-modeling.md).
 
 - **D1 — Canonical log envelope.** All three sources must normalize into one schema (working name `ClaudineAgenticLog`). The existing chunk `Entry` (sequence, timestamp, source, level, message, JSON metadata) is close but was designed for the POC. We need to decide the typed fields vs what rides in `metadata`: candidates for promotion are `session_id`, `agent`, `model`, `repo`, `event_kind`. *Recommendation:* keep the envelope small and typed on exactly the fields reports filter on; everything provider-specific stays in `metadata`. This decision gates everything else — settle it first.
 - **D2 — Monitor topology.** One monitor process per host that internally spawns a tailing task per log source, vs one OS process per agent, vs separate file-monitor and database-monitor binaries. *Recommendation:* a single `agent-tail` process with per-source async tasks; fewer processes to supervise, and the file-vs-database distinction is a per-source implementation detail, not a process boundary.
