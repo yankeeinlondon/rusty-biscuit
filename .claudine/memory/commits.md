@@ -79,7 +79,11 @@ do not belong here.
 - Parallel groups must have disjoint paths. If one group introduces a module,
   dependency, or symbol consumed by another group, commit the producer first.
 - Extra staged paths are normal in concurrent batches. Treat them as sibling
-  work and scope with `git commit --only -- <assigned-paths>`.
+  work and scope with `git commit --only -- <assigned-paths>`. `--only` leaves
+  every other staged entry untouched in the index, so do NOT reach for
+  `git restore --staged` (or any other index mutator) to "clean up" siblings
+  before committing. Doing so corrupts sibling work and forces the orchestrator
+  to re-stage from the working tree.
 - The staged set can shrink between inspection and commit when a sibling commit
   lands. `--only -- <paths>` handles this; verify the resulting commit shape.
 - Git accepts intermediate commits that reference files introduced by sibling
