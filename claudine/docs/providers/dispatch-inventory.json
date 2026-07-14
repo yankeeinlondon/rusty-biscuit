@@ -18,10 +18,10 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 657,
-    "provider_refs": 696,
+    "sites": 658,
+    "provider_refs": 697,
     "by_form": {
-      "direct-ref": 628,
+      "direct-ref": 629,
       "eq-comparison": 12,
       "match-provider": 2,
       "matches-macro": 4,
@@ -30,7 +30,7 @@
     },
     "by_dispatch_class": {
       "conditional": 29,
-      "reference": 628
+      "reference": 629
     }
   },
   "sites": [
@@ -680,16 +680,6 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 425,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Claude"
-      ],
-      "exempt_candidate": true
-    },
-    {
-      "path": "claudine/cli/src/commands/wrap/env/tests.rs",
       "line": 430,
       "form": "direct-ref",
       "dispatch_class": "reference",
@@ -700,7 +690,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 453,
+      "line": 435,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -710,7 +700,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 458,
+      "line": 454,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -720,7 +710,27 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 494,
+      "line": 477,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/env/tests.rs",
+      "line": 482,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/env/tests.rs",
+      "line": 518,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -730,7 +740,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 499,
+      "line": 523,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -740,7 +750,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 544,
+      "line": 568,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -750,7 +760,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 560,
+      "line": 584,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -760,27 +770,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 664,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Claude"
-      ],
-      "exempt_candidate": true
-    },
-    {
-      "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 670,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Claude"
-      ],
-      "exempt_candidate": true
-    },
-    {
-      "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 689,
+      "line": 688,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -791,6 +781,26 @@
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
       "line": 694,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/env/tests.rs",
+      "line": 713,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/env/tests.rs",
+      "line": 718,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
