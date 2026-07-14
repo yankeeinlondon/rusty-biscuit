@@ -6,11 +6,13 @@
 //!
 //! - Darkmatter's full-page browser path renders a Mermaid fence as
 //!   **Interactive** by default (Phase 5): the body carries `<pre class="mermaid">`
-//!   and the `DarkmatterFeatureResolver` injects one CSS block and one module
-//!   bootstrap into the forced page wrapper;
-//! - a bare-body render (no features, no decoration) carries no wrapper and
-//!   injects no feature assets — a requested feature forces the wrapper only
-//!   when present (Phase 5);
+//!   and reports a feature request; the outer page resolves it through
+//!   `DarkmatterFeatureResolver` and injects one module bootstrap into the
+//!   forced page wrapper. Mermaid emits no CSS; its palette rides the script's
+//!   `themeVariables`;
+//! - a feature-free, undecorated render returns the standalone document with no
+//!   page wrapper or feature assets — a requested feature forces the wrapper
+//!   only when present (Phase 5);
 //! - the terminal Mermaid default keeps the fence as code — no network or
 //!   subprocess I/O.
 //!
@@ -50,8 +52,10 @@ fn page(width: u32) -> DarkmatterPage {
 
 /// `DarkmatterPage::render_to_browser` renders a Mermaid fence as **Interactive**
 /// by default: the body carries the escaped `<pre class="mermaid">` container and
-/// the forced page wrapper carries one injected CSS block and one module
-/// bootstrap that names both CDN origins with an exact (non-floating) version.
+/// reports a feature request. The outer page resolves that request and the
+/// forced page wrapper carries one module bootstrap that names both CDN origins
+/// with an exact (non-floating) version. Mermaid emits no CSS; the bootstrap
+/// supplies its palette through `themeVariables`.
 ///
 /// This is a Level-1 *string* assertion on the emitted markup (it never launches
 /// a browser); the live-DOM behavior — module load, SVG replacement, CDN
@@ -96,12 +100,12 @@ fn full_page_mermaid_default_markup_is_interactive() {
 }
 
 // ---------------------------------------------------------------------------
-// Bare-body render neutrality (pre-Phase-5)
+// Feature-free page neutrality
 // ---------------------------------------------------------------------------
 
-/// A zero-configuration render returns a bare body: no `.darkmatter-page`
-/// wrapper and no feature assets. Phase 5 forces the wrapper into existence only
-/// when a requested feature resolves to inline assets.
+/// A zero-configuration, feature-free render returns the standalone document:
+/// no `.darkmatter-page` wrapper and no feature assets. A requested feature
+/// forces the wrapper into existence only when it resolves to inline assets.
 #[test]
 fn bare_body_render_has_no_wrapper_and_no_feature_assets() {
     let md = Markdown::try_from_content("A plain paragraph.\n").expect("parse plain doc");
@@ -113,11 +117,11 @@ fn bare_body_render_has_no_wrapper_and_no_feature_assets() {
     );
     assert!(
         !html.contains("data-darkmatter-features"),
-        "no feature-debug attribute exists yet, got: {html}"
+        "a feature-free render has no feature-debug attribute, got: {html}"
     );
     assert!(
         !html.contains("<script") && !html.contains(r#"<pre class="mermaid">"#),
-        "a bare body injects no feature assets, got: {html}"
+        "a feature-free page injects no feature assets, got: {html}"
     );
 }
 

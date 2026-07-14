@@ -1,11 +1,11 @@
 //! Phase 1 baseline freeze for the Style Features implementation
 //! (`darkmatter/features/2026-07-09-features/`).
 //!
-//! These pin the *current*, pre-implementation `renderable` behavior so every
-//! later phase can classify an output change as intended or regressive. They are
-//! deliberately "before" observations of the feature pipeline's dead-end state:
-//! components can request [`PageFeature`]s and the page de-dups them, but the
-//! rollup is never resolved into assets, so no `<script>`/CSS is injected today.
+//! These preserve the low-level `renderable` contracts the implementation builds
+//! on. Components request [`PageFeature`]s and pages dedup them; fragment-only
+//! `render_browser_node` output collects those requests but does not resolve or
+//! inject assets. Complete-document paths resolve requests through their
+//! installed resolver, and Darkmatter installs its production Mermaid resolver.
 //! All fixtures are network-free and deterministic.
 
 use renderable::browser::feature::PageFeature;
@@ -82,11 +82,12 @@ fn default_browser_mermaid_mode_is_code() {
     );
 }
 
-/// The inert dead-end the feature fixes: `Interactive` emits the container but
-/// **no script anywhere**, so the diagram never runs. This baseline flips in
-/// Phase 5 once the resolver injects the ESM bootstrap.
+/// `render_browser_node` emits the Interactive container and collects its
+/// feature request, but this composable fragment path does not resolve or inject
+/// assets. An outer document/page renderer owns resolution and bootstrap
+/// placement.
 #[test]
-fn interactive_mermaid_emits_container_but_no_script_today() {
+fn interactive_mermaid_fragment_collects_feature_without_injecting_script() {
     let out = render_browser_node(&mermaid_node("graph TD; A --> B"), &interactive_rich_opts())
         .expect("render")
         .output
@@ -97,11 +98,11 @@ fn interactive_mermaid_emits_container_but_no_script_today() {
     );
     assert!(
         !out.contains("<script"),
-        "interactive is inert today — no bootstrap script must appear, got: {out}"
+        "fragment rendering must not inject the outer page's bootstrap, got: {out}"
     );
     assert!(
         !out.contains("jsdelivr") && !out.contains("unpkg") && !out.contains("mermaid.esm"),
-        "no CDN import must appear today, got: {out}"
+        "fragment rendering must not resolve the page-level CDN import, got: {out}"
     );
 }
 
