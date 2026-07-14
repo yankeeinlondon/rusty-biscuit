@@ -559,3 +559,84 @@ fn expression_validation_never_evaluates() {
         missing.problems,
     );
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// Feature A — large-integer literal precision (regression)
+// ══════════════════════════════════════════════════════════════════════════
+
+/// Boundary integers past f64's 2^53 exact range: 2^53+1, `i64::MAX`,
+/// `i64::MAX + 1` (a u64), and `u64::MAX`. Each pairs the literal spelling with
+/// an off-by-one neighbor for the negative validation case.
+const LARGE_INT_CASES: &[(&str, &str)] = &[
+    ("9007199254740993", "9007199254740992"),
+    ("9223372036854775807", "9223372036854775806"),
+    ("9223372036854775808", "9223372036854775807"),
+    ("18446744073709551615", "18446744073709551614"),
+];
+
+#[test]
+fn literal_large_integer_round_trips_through_serialization() {
+    for (lit, _) in LARGE_INT_CASES {
+        let input = format!("literal({lit})");
+        let first = parse_type_expr("prop", &input).expect("parse");
+        let text = serialize_property_atom(&first);
+        let second = parse_type_expr("prop", &text).expect("reparse");
+        assert_eq!(first, second, "round-trip mismatch for {input}");
+    }
+}
+
+#[test]
+fn literal_large_integer_const_is_exact() {
+    for (lit, _) in LARGE_INT_CASES {
+        let expected: Value = serde_json::from_str(lit).expect("literal is a JSON number");
+        let schema = json_schema(&format!("version: literal({lit})\n"));
+        assert_eq!(*optional_const(&schema, "version"), expected, "const for literal({lit})");
+    }
+}
+
+#[test]
+fn literal_large_integer_validates_exact_and_rejects_neighbor() {
+    for (lit, neighbor) in LARGE_INT_CASES {
+        let ok = validate(&format!(
+            "---\n$schema:\n  version: literal({lit}; required)\nversion: {lit}\n---\nbody\n"
+        ));
+        assert!(ok.valid, "literal({lit}) must accept {lit}: {:?}", ok.problems);
+
+        let bad = validate(&format!(
+            "---\n$schema:\n  version: literal({lit}; required)\nversion: {neighbor}\n---\nbody\n"
+        ));
+        assert!(!bad.valid, "literal({lit}) must reject neighbor {neighbor}");
+    }
+}
+
+#[test]
+fn literal_large_integer_coerces_string_document_value() {
+    for (lit, _) in LARGE_INT_CASES {
+        let expected: Value = serde_json::from_str(lit).expect("literal is a JSON number");
+        let value = compose_value(
+            &format!("---\n$schema:\n  version: literal({lit})\nversion: '{lit}'\n---\nbody\n"),
+            "version",
+        );
+        assert_eq!(value, expected, "string '{lit}' must coerce to the exact integer");
+    }
+}
+
+#[test]
+fn literal_large_integer_default_equality_is_exact() {
+    for (lit, neighbor) in LARGE_INT_CASES {
+        let matching: Markdown =
+            format!("---\n$schema:\n  version: literal({lit}; default({lit}))\n---\nbody\n").into();
+        assert!(
+            DarkmatterSchemas::new().validate(&matching).is_ok(),
+            "an equal large-integer default must load for literal({lit})"
+        );
+
+        let mismatch: Markdown =
+            format!("---\n$schema:\n  version: literal({lit}; default({neighbor}))\n---\nbody\n")
+                .into();
+        assert!(
+            DarkmatterSchemas::new().validate(&mismatch).is_err(),
+            "an unequal large-integer default must fail to load for literal({lit})"
+        );
+    }
+}
