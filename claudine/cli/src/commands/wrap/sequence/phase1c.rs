@@ -279,10 +279,14 @@ fn run_phase_1c_attempt(
             launch_area,
         );
 
-        let approval_options = super::super::build_harness_shell_options_with_cache(
-            &step_source.resolved_path,
-            source_repo_root,
-            Some(Arc::clone(&shared_approval_cache)),
+        let approval_options = super::super::apply_composition_shell_overrides(
+            super::super::build_harness_shell_options_with_cache(
+                &step_source.resolved_path,
+                source_repo_root,
+                Some(Arc::clone(&shared_approval_cache)),
+            ),
+            shared.dry_run,
+            shared.yolo,
         );
 
         let template_preflight = composition::resolve_shell_approvals(
@@ -345,6 +349,18 @@ fn run_phase_1c_attempt(
             }
             Err(other) => return Err(other.into()),
         };
+
+        // Audit the resolved lifecycle commands during fleet-wide preflight,
+        // before any sequence step starts. Runtime performs the same check
+        // defensively, using the shared approval cache populated here.
+        let lifecycle_preflight = composition::resolve_shell_approvals(
+            None,
+            None,
+            &approval_options,
+            Some(&prepared.lifecycle),
+            Some(&prepared.resolved_path),
+        )?;
+        cumulative_approved.extend(lifecycle_preflight.approved_commands);
 
         step_contexts.push(StepContext {
             env_overrides,
