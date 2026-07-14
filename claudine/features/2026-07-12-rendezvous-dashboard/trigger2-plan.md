@@ -27,6 +27,21 @@ phasing below.
 
 ## Data model & vocabulary
 
+> **SUPERSEDED by the session-state foundation (2026-07-13).** This section's provisional
+> D2 — "reuse the flat `status` string + extend its vocabulary" — is obsolete. The
+> [`session-state-design.md`](./session-state-design.md) foundation (landed 2026-07-13)
+> replaced the bare last-writer-wins `status` string with **typed per-producer `status_slots`
+> and a precedence reducer**. Trigger 2's `idle` is now an **`IdleHook` producer contributing
+> a typed `Idle` state** (basis `interactive_turn_complete`, strength 20) into its own slot —
+> not a new string literal on a shared field. The reducer's precedence (`waiting_on_user`
+> (30) > `idle` (20) > `active` (10)) is exactly what makes the weaker `idle` unable to
+> clobber an unresolved `waiting_on_user`, resolving what D5's Finding-4 note below flagged.
+> The plan's phases below (producer wiring, consumer `PossiblyIdle` badge, gating, tests)
+> land on this foundation **unchanged in spirit**; only the mechanism shifts from "write the
+> `idle` string" to "contribute an `Idle` slot", and the daemon still projects a
+> backward-compatible flat `status: "idle"` the consumer reads. The vocabulary table below is
+> retained as the tier/consumer mapping, now read as reducer output rather than raw writes.
+
 The `sessions-active` register entry already carries a `status` string. We extend the
 vocabulary rather than adding a field:
 
@@ -52,8 +67,11 @@ gate).
 - **D1 — Hook-based producer.** Trigger 2 fires from `claudine handle`, not the sink,
   because interactive sessions bypass the sink. *(Forced by the architecture; not really
   optional.)*
-- **D2 — Vocabulary.** Reuse `status` with a new value `idle` (vs a new `basis` field).
-  Minimal, and the consumer already keys off `status`.
+- **D2 — Vocabulary.** ~~Reuse `status` with a new value `idle` (vs a new `basis` field).
+  Minimal, and the consumer already keys off `status`.~~ **SUPERSEDED (2026-07-13):** the
+  typed session-state foundation makes `idle` an `IdleHook` `Idle` slot under the reducer
+  (basis `interactive_turn_complete`), which still projects a flat `status: "idle"` for the
+  consumer — so the consumer keeps keying off `status` while precedence is now authoritative.
 - **D3 ⚠ — No dwell threshold in v1.** Flag `PossiblyIdle` immediately on turn-complete
   and show the elapsed duration, rather than waiting N seconds. Alternative: a small dwell
   (e.g. 10s) to avoid flagging brief think-pauses. *Recommend immediate + duration.*

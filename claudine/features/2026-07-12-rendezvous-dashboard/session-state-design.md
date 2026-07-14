@@ -1,13 +1,28 @@
 ---
-implemented: false
+implemented: true
 design_for: dashboard-review-1.md (Findings 1, 2, 4; Design conclusions; Recommendation)
 created: 2026-07-13
-status: awaiting-approval
+status: approved
+decisions_locked: 2026-07-13
 ---
 # Session-State Foundation — Design
 
-Design-only. No source is modified by this document; a later implementation pass
-executes the [phased plan](#phased-implementation-plan) after Ken approves.
+**APPROVED for implementation (2026-07-13).** Execute the [phased plan](#phased-implementation-plan).
+
+## Decisions locked (2026-07-13) — all four ⚠ confirms resolved as recommended
+
+1. **Revision source = producer-captured unix-ns wall clock** (not a daemon Lamport
+   counter). Section 2.
+2. **Wire status as typed proto enums** (`SessionStatusState` / `StatusProducer` /
+   `SessionStatusBasis`, each with `*_UNSPECIFIED = 0` → `Unknown`), not open strings.
+   Section 3.
+3. **Compute + store `permission_signal: supported|unsupported` at STARTED** from the
+   `claudine hooks --support` matrix for the launched provider. Section 4.
+4. **Split a distinct `ProducerId::PermissionHook` slot from `IdleHook`.** The permission-ask
+   hook writes the `PermissionHook` slot; the idle/turn-complete hook writes the `IdleHook`
+   slot. So `ProducerId = { Lifecycle, Sink, PermissionHook, IdleHook, ProcessMonitor }` and
+   `StatusProducer` enum gains a `PERMISSION_HOOK` variant. Section 4's "if cleaner, split"
+   is now the chosen path — do not have one slot double for both.
 
 ## Why this exists
 
