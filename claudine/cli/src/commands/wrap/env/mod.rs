@@ -317,6 +317,18 @@ pub(crate) fn build_child_env_with_launch(
         "CLAUDINE_PID",
         std::process::id().to_string(),
     );
+    // Advertise interactiveness to the hook subprocess (`claudine
+    // handle`) under the `CLAUDINE_` correlation namespace. The idle
+    // (Trigger 2) producer gates on this: a non-interactive turn-complete
+    // is the agent auto-proceeding, not waiting on a human, so it must not
+    // be flagged. Kept distinct from the child-facing `INTERACTIVE`
+    // ("true"/"false") above — this is a `1`/`0` gate the hook reads.
+    set_added_env(
+        &mut env,
+        &mut added,
+        "CLAUDINE_INTERACTIVE",
+        if interactive { "1" } else { "0" }.to_string(),
+    );
 
     for (key, value) in env_overrides {
         if key == "OPENCODE_CONFIG_CONTENT" {

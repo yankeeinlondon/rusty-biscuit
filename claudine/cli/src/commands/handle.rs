@@ -19,6 +19,12 @@ const RENDEZVOUS_ENABLE_ENV: &str = "CLAUDINE_RENDEZVOUS_REPORT";
 /// identity so hook-driven status agrees with presence/sink reports.
 const SESSION_ID_ENV: &str = "CLAUDINE_SESSION_ID";
 
+/// Env key the wrapper injects to advertise interactiveness to the hook
+/// subprocess. Trigger 2's idle producer gates on `"1"`: a non-interactive
+/// turn-complete is the agent auto-proceeding, not waiting on a human, so
+/// it must never be flagged idle.
+const INTERACTIVE_ENV: &str = "CLAUDINE_INTERACTIVE";
+
 /// Hard cap on the best-effort status report to the rendezvous daemon.
 const STATUS_REPORT_TIMEOUT: Duration = Duration::from_millis(250);
 
@@ -161,6 +167,22 @@ async fn run_inner(args: HandleArgs) -> Result<i32> {
         report_session_status(contribution).await;
     }
 
+    // Trigger 2 — interactive idle producer. Only a wrapped INTERACTIVE
+    // session's turn boundary means the agent is waiting on a human: a turn
+    // completing marks the `IdleHook` slot `idle`, the next user prompt clears
+    // it back to `active`. Writes a distinct producer slot from the Trigger-1
+    // PermissionHook report above, so the weaker `idle` never clobbers an
+    // unresolved `waiting_on_user` (the daemon reducer's precedence decides).
+    let interactive_raw = std::env::var(INTERACTIVE_ENV).ok();
+    if let Some(status) =
+        canonical_event.and_then(|event| idle_report_for(interactive_raw.as_deref(), event))
+        && let Some(session_id) = std::env::var(SESSION_ID_ENV)
+            .ok()
+            .filter(|value| !value.is_empty())
+    {
+        crate::commands::wrap::session_report::report_status(&session_id, status).await;
+    }
+
     if args.json {
         let output = serde_json::json!({
             "provider": provider.as_slug(),
@@ -205,6 +227,27 @@ fn status_contribution_for(
         basis: basis as i32,
         revision: revision_now(),
     })
+}
+
+/// Map a canonical event onto the interactive idle producer's status
+/// string, or `None` when this invocation must not contribute an idle
+/// signal.
+///
+/// Gated on `CLAUDINE_INTERACTIVE=1` (`interactive_raw`): a non-interactive
+/// turn-complete is the agent auto-proceeding, not waiting on a human, so it
+/// reports nothing. For an interactive session a turn completing maps to
+/// `idle` and the next user prompt to `active`; every other event is
+/// status-irrelevant here. The returned string feeds the `IdleHook` slot via
+/// [`report_status`](crate::commands::wrap::session_report::report_status).
+fn idle_report_for(interactive_raw: Option<&str>, event: AgenticEvent) -> Option<&'static str> {
+    if interactive_raw.map(str::trim) != Some("1") {
+        return None;
+    }
+    match event {
+        AgenticEvent::TurnComplete => Some("idle"),
+        AgenticEvent::BeforePrompt => Some("active"),
+        _ => None,
+    }
 }
 
 /// Producer-captured unix-ns wall clock; the daemon LWW-guards the slot
@@ -364,6 +407,41 @@ mod tests {
             assert_eq!(c.state, rendezvous_core::SessionStatusState::Active as i32);
             assert_eq!(c.producer, rendezvous_core::StatusProducer::PermissionHook as i32);
         }
+    }
+
+    #[test]
+    fn interactive_turn_boundaries_map_to_idle_producer_states() {
+        assert_eq!(
+            super::idle_report_for(Some("1"), AgenticEvent::TurnComplete),
+            Some("idle")
+        );
+        assert_eq!(
+            super::idle_report_for(Some("1"), AgenticEvent::BeforePrompt),
+            Some("active")
+        );
+    }
+
+    #[test]
+    fn non_interactive_sessions_never_report_idle() {
+        for raw in [Some("0"), Some("false"), Some(""), None] {
+            assert_eq!(
+                super::idle_report_for(raw, AgenticEvent::TurnComplete),
+                None,
+                "raw {raw:?} must not flag idle"
+            );
+        }
+    }
+
+    #[test]
+    fn idle_producer_ignores_non_turn_boundary_events() {
+        assert_eq!(
+            super::idle_report_for(Some("1"), AgenticEvent::AfterTool),
+            None
+        );
+        assert_eq!(
+            super::idle_report_for(Some("1"), AgenticEvent::PermissionRequest),
+            None
+        );
     }
 
     #[test]

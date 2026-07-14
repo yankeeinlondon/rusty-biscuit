@@ -420,12 +420,17 @@ fn build_child_env_overrides_pwd_to_match_child_cwd() {
     );
 }
 
+/// The wrapper stamps two interactiveness signals with distinct
+/// audiences: the child-facing `INTERACTIVE` ("true"/"false") and the
+/// `CLAUDINE_`-namespaced `CLAUDINE_INTERACTIVE` ("1"/"0") gate that the
+/// hook subprocess (`claudine handle`) reads to drive the Trigger 2 idle
+/// producer. Both must reflect the launch mode.
 #[test]
-fn build_child_env_uses_interactive_without_claudine_duplicate() {
+fn build_child_env_stamps_interactive_gates_for_child_and_hook() {
     let profile = profile_for_provider(claudine::provider::Provider::Claude).unwrap();
     let cwd = tempfile::tempdir().unwrap();
 
-    let plan = build_child_env(
+    let interactive_plan = build_child_env(
         profile,
         claudine::provider::Provider::Claude,
         &[],
@@ -440,9 +445,28 @@ fn build_child_env_uses_interactive_without_claudine_duplicate() {
     )
     .unwrap();
 
-    let added: std::collections::HashMap<_, _> = plan.added.into_iter().collect();
+    let added: std::collections::HashMap<_, _> = interactive_plan.added.into_iter().collect();
     assert_eq!(added.get("INTERACTIVE").map(String::as_str), Some("true"));
-    assert!(!added.contains_key("CLAUDINE_INTERACTIVE"));
+    assert_eq!(added.get("CLAUDINE_INTERACTIVE").map(String::as_str), Some("1"));
+
+    let non_interactive_plan = build_child_env(
+        profile,
+        claudine::provider::Provider::Claude,
+        &[],
+        false,
+        false,
+        &[],
+        cwd.path(),
+        &[],
+        false,
+        false,
+        None,
+    )
+    .unwrap();
+
+    let added: std::collections::HashMap<_, _> = non_interactive_plan.added.into_iter().collect();
+    assert_eq!(added.get("INTERACTIVE").map(String::as_str), Some("false"));
+    assert_eq!(added.get("CLAUDINE_INTERACTIVE").map(String::as_str), Some("0"));
 }
 
 /// `CLAUDINE_PID` must be stamped onto every wrapper env plan so the

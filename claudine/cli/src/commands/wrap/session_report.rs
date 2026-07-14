@@ -235,6 +235,82 @@ fn sink_contribution(status: &str) -> rendezvous_core::proto::StatusContribution
     }
 }
 
+/// Best-effort report of the interactive idle producer's (Trigger 2)
+/// status transition to the local rendezvous daemon, addressed by an
+/// explicit `session_id`.
+///
+/// This is the reporter the hook path (`claudine handle`) uses: a wrapped
+/// interactive session reports `idle` when a turn completes and `active`
+/// when the next prompt arrives. Reported as `UPDATED`, so a report for a
+/// session the wrapper never STARTED (or already ENDED) is a daemon-side
+/// no-op — it never resurrects a phantom session. Unlike [`StatusReporter`]
+/// (which spawns a detached task off a hot stream-render path), `handle`
+/// is already async and single-shot, so this awaits directly — no
+/// `block_in_place`, no runtime-flavor gate. Every failure degrades to a
+/// `debug!`; a missing or wedged daemon must never delay the hook. Honors
+/// the `CLAUDINE_RENDEZVOUS_REPORT` kill switch.
+// Wired into the hook path (`claudine handle`) — the interactive idle
+// producer (Trigger 2) calls this on turn-complete / next-prompt.
+pub(crate) async fn report_status(session_id: &str, status: &str) {
+    if !reporting_enabled() || session_id.is_empty() {
+        return;
+    }
+    let contribution = idle_hook_contribution(status);
+    let send = async {
+        let endpoint = rendezvous_core::socket::default_socket_path();
+        let mut client = rendezvous_client::connect(endpoint).await?;
+        client
+            .report_session_event(rendezvous_core::ReportSessionEventRequest {
+                session_id: session_id.to_string(),
+                kind: rendezvous_core::SessionEventKind::Updated as i32,
+                details_json: String::new(),
+                status: Some(contribution),
+            })
+            .await?;
+        Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+    };
+    match tokio::time::timeout(REPORT_TIMEOUT, send).await {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => tracing::debug!(
+            target: "claudine::session_report",
+            %err,
+            status,
+            "idle-hook status report skipped (daemon unreachable)",
+        ),
+        Err(_) => tracing::debug!(
+            target: "claudine::session_report",
+            status,
+            "idle-hook status report timed out",
+        ),
+    }
+}
+
+/// Map the idle producer's status string into its typed `IdleHook` slot
+/// contribution. `idle` carries the interactive-turn-complete basis;
+/// anything else (i.e. `active`) clears the `IdleHook` slot back to
+/// Active. Writing its own slot means this weaker `idle` can never
+/// clobber an unresolved `waiting_on_user` — the reducer's precedence
+/// (`waiting_on_user` > `idle` > `active`) resolves that.
+fn idle_hook_contribution(status: &str) -> rendezvous_core::proto::StatusContribution {
+    let (state, basis) = if status == "idle" {
+        (
+            rendezvous_core::SessionStatusState::Idle,
+            rendezvous_core::SessionStatusBasis::InteractiveTurnComplete,
+        )
+    } else {
+        (
+            rendezvous_core::SessionStatusState::Active,
+            rendezvous_core::SessionStatusBasis::Lifecycle,
+        )
+    };
+    rendezvous_core::proto::StatusContribution {
+        state: state as i32,
+        producer: rendezvous_core::StatusProducer::IdleHook as i32,
+        basis: basis as i32,
+        revision: revision_now(),
+    }
+}
+
 /// A handle we can safely `block_in_place` on: `block_in_place` panics
 /// on a current-thread runtime (the wrapper's main runtime is
 /// multi-thread, but unit tests and embedders may not be).
@@ -472,6 +548,93 @@ mod tests {
         // Progress clears it back to active.
         reporter.report("active");
         await_status(&mut client, "sess-status", "active").await;
+
+        drop(presence);
+        daemon.shutdown().await.expect("daemon shutdown");
+    }
+
+    #[test]
+    fn idle_hook_contribution_maps_idle_and_clears_to_active() {
+        let idle = idle_hook_contribution("idle");
+        assert_eq!(idle.state, rendezvous_core::SessionStatusState::Idle as i32);
+        assert_eq!(idle.producer, rendezvous_core::StatusProducer::IdleHook as i32);
+        assert_eq!(
+            idle.basis,
+            rendezvous_core::SessionStatusBasis::InteractiveTurnComplete as i32,
+        );
+
+        let active = idle_hook_contribution("active");
+        assert_eq!(active.state, rendezvous_core::SessionStatusState::Active as i32);
+        assert_eq!(active.producer, rendezvous_core::StatusProducer::IdleHook as i32);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn report_status_kill_switch_and_missing_session_are_fast_noops() {
+        // Kill switch off: returns without touching the socket.
+        unsafe { std::env::set_var(ENABLE_ENV, "false") };
+        report_status("sess", "idle").await;
+        unsafe { std::env::remove_var(ENABLE_ENV) };
+
+        // Empty session id: nothing to address, no connect attempted.
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        point_socket_at(&tmp.path().join("absent.sock"));
+        let started = Instant::now();
+        report_status("", "idle").await;
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "empty session id must short-circuit: {:?}",
+            started.elapsed(),
+        );
+    }
+
+    // Unix-only: spawns the `cfg(unix)`-gated `rendezvous-daemon`. The
+    // idle hook (Trigger 2) reports through the explicit-session
+    // `report_status` helper; this proves the round-trip flips a STARTED
+    // session to `idle` and the next prompt clears it back to `active`.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn report_status_flips_idle_and_clears_to_active() {
+        unsafe { std::env::remove_var(ENABLE_ENV) };
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let socket = tmp.path().join("daemon.sock");
+        point_socket_at(&socket);
+
+        let mut config = rendezvous_daemon::server::DaemonConfig::with_data_dir(
+            tmp.path().join("data"),
+        )
+        .with_in_memory_projection();
+        config.networking = None;
+        let daemon = rendezvous_daemon::server::spawn_uds_server(socket.clone(), config)
+            .expect("spawn daemon");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !socket.exists() {
+            assert!(Instant::now() < deadline, "daemon socket never appeared");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        let child_env: std::collections::HashMap<std::ffi::OsString, std::ffi::OsString> = [(
+            std::ffi::OsString::from("CLAUDINE_SESSION_ID"),
+            std::ffi::OsString::from("sess-idle"),
+        )]
+        .into_iter()
+        .collect();
+        let presence = SessionPresence::started(
+            Provider::Claude,
+            Some("opus"),
+            true,
+            &env_context(),
+            &child_env,
+        );
+
+        let mut client = rendezvous_client::connect(&socket).await.expect("client");
+
+        // Turn complete on an interactive session → idle.
+        report_status("sess-idle", "idle").await;
+        await_status(&mut client, "sess-idle", "idle").await;
+
+        // Next user prompt clears the idle slot → active.
+        report_status("sess-idle", "active").await;
+        await_status(&mut client, "sess-idle", "active").await;
 
         drop(presence);
         daemon.shutdown().await.expect("daemon shutdown");
