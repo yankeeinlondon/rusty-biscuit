@@ -47,21 +47,23 @@ pub fn available() -> bool {
 ///
 /// ## Notes
 ///
-/// Probes with `osascript -e 'tell application "System Events" to keystroke ""'`.
-/// When trust is present this is a harmless no-op keystroke that exits `0`; when
-/// trust is absent System Events fails with "not allowed assistive access"
-/// (error -1719 / -25211) and osascript exits non-zero. Any failure — including
-/// a missing `osascript` binary or a non-macOS host — is reported as "not
-/// trusted" so callers gate conservatively (skip) rather than proceed into a
-/// misleading interaction assertion. Always `false` off macOS, which has no such
-/// permission model.
+/// Probes with a non-mutating System Events window enumeration. This exercises
+/// the same Accessibility object graph used to select and raise a target
+/// window; a no-op `keystroke ""` can return success even when that access is
+/// denied. Any failure — including a missing `osascript` binary or a non-macOS
+/// host — is reported as "not trusted" so callers gate conservatively (skip)
+/// rather than proceed into a misleading interaction assertion. Always `false`
+/// off macOS, which has no such permission model.
 #[must_use]
 pub fn accessibility_trusted() -> bool {
     if !cfg!(target_os = "macos") {
         return false;
     }
     Command::new("osascript")
-        .args(["-e", r#"tell application "System Events" to keystroke """#])
+        .args([
+            "-e",
+            r#"tell application "System Events" to count every window of every application process"#,
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
@@ -399,23 +401,17 @@ on run argv
     set titleToken to item 2 of argv
     tell application "System Events"
         set targetProcess to first application process whose unix id is targetPid
-        set targetProcessName to name of targetProcess
         set matchingWindows to {}
-        set owningProcesses to {}
-        repeat with candidateProcess in (every application process whose name is targetProcessName)
-            repeat with candidateWindow in (every window of candidateProcess)
-                if (name of candidateWindow) contains titleToken then
-                    set end of matchingWindows to candidateWindow
-                    set end of owningProcesses to candidateProcess
-                end if
-            end repeat
+        repeat with candidateWindow in (every window of targetProcess)
+            if (name of candidateWindow) contains titleToken then
+                set end of matchingWindows to candidateWindow
+            end if
         end repeat
         if (count of matchingWindows) is not 1 then
-            set errorMessage to "process family " & targetProcessName & " has " & (count of matchingWindows) & " windows containing " & titleToken & "; expected exactly one"
+            set errorMessage to "process " & targetPid & " has " & (count of matchingWindows) & " windows containing " & titleToken & "; expected exactly one"
             error errorMessage
         end if
-        set owningProcess to item 1 of owningProcesses
-        tell owningProcess
+        tell targetProcess
             set frontmost to true
             tell item 1 of matchingWindows
                 perform action "AXRaise"
@@ -435,6 +431,57 @@ end run
     }
     std::thread::sleep(Duration::from_millis(300));
     Ok(())
+}
+
+/// Resolve the macOS Accessibility process that owns one nonce-titled window.
+///
+/// Chrome may hand a headed launch from its initial child process to a distinct
+/// application process. A harness can give its page a unique title, resolve
+/// that exact window's actual owner here, and then pass the returned PID plus
+/// the same title to [`activate_process_window`].
+///
+/// ## Errors
+///
+/// Returns an error when System Events cannot enumerate windows or when the
+/// title token does not identify exactly one window system-wide.
+pub fn process_id_for_window(title_contains: &str) -> io::Result<u32> {
+    const SCRIPT: &str = r#"
+on run argv
+    set titleToken to item 1 of argv
+    tell application "System Events"
+        set owningProcessIds to {}
+        repeat with candidateProcess in every application process
+            repeat with candidateWindow in every window of candidateProcess
+                if (name of candidateWindow) contains titleToken then
+                    set end of owningProcessIds to unix id of candidateProcess
+                end if
+            end repeat
+        end repeat
+        if (count of owningProcessIds) is not 1 then
+            set errorMessage to "found " & (count of owningProcessIds) & " windows containing " & titleToken & "; expected exactly one"
+            error errorMessage
+        end if
+        return item 1 of owningProcessIds
+    end tell
+end run
+"#;
+    let out = Command::new("osascript")
+        .args(["-e", SCRIPT, "--", title_contains])
+        .output()?;
+    if !out.status.success() {
+        return Err(io::Error::other(format!(
+            "failed to resolve window containing {title_contains:?}: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse::<u32>()
+        .map_err(|error| {
+            io::Error::other(format!(
+                "window owner PID for {title_contains:?} was not numeric: {error}"
+            ))
+        })
 }
 
 fn run(args: &[&str]) -> io::Result<()> {
