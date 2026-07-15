@@ -175,9 +175,20 @@ pub fn run_compose(
     cli: &Cli,
 ) -> Result<()> {
     info!("starting compose pipeline");
+    use biscuit_terminal::terminal::Terminal;
     use std::time::Instant;
 
     let cmd_start = perf.then(Instant::now);
+
+    // Detect the terminal once per invocation and reuse it across every
+    // human-rendered branch (strict validation report, verbose summary, `-vv`
+    // perf metrics, warnings footer, deferred validation report). Built lazily
+    // via `OnceCell` so pure Markdown/HTML/JSON output never detects a terminal
+    // at all — finding 3 (`run_compose` previously constructed up to four fresh
+    // `Terminal::default()`s per invocation). A per-invocation local rather than
+    // a process-global `LazyLock`, so tests and library hosts that change the
+    // cwd/env/attached streams within one process still detect afresh.
+    let term_cell: std::cell::OnceCell<Terminal> = std::cell::OnceCell::new();
 
     // Resolve the input path once through FileReference (handles @-prefixed paths)
     // and reuse for both loading and source_file/policy_root.
@@ -265,7 +276,6 @@ pub fn run_compose(
     // inside transclusion targets resolves correctly.
     let val_start = perf.then(Instant::now);
     let deferred_report = if resolved_input.is_some() {
-        use biscuit_terminal::terminal::Terminal;
         use darkmatter::markdown::reference::ReferenceGraphOptions;
         use darkmatter::markdown::reference::validate::{
             ReferenceSeverity, ReferenceValidationOptions,
@@ -291,8 +301,8 @@ pub fn run_compose(
                         // Strict mode or unallowed errors: show issues and exit
                         use biscuit_terminal::components::renderable::TerminalRenderable as _;
                         use darkmatter::markdown::reference::validate::ValidationReportView;
-                        let term = Terminal::default();
-                        let formatted = ValidationReportView::new(report.clone()).render(&term);
+                        let term = term_cell.get_or_init(Terminal::default);
+                        let formatted = ValidationReportView::new(report.clone()).render(term);
                         eprint!("{formatted}");
                         std::process::exit(2);
                     }
@@ -501,8 +511,7 @@ pub fn run_compose(
     if cli.verbose > 0 {
         use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::prelude::{Status, StatusState};
-        use biscuit_terminal::terminal::Terminal;
-        let terminal = Terminal::default();
+        let terminal = term_cell.get_or_init(Terminal::default);
         let status = Status::from_prose(format!(
             "Composed <b>{}</b> transclusions, <b>{}</b> interpolations, <b>{}</b> replacements",
             report.transclusions_applied,
@@ -510,7 +519,7 @@ pub fn run_compose(
             report.replacements_applied,
         ))
         .state(StatusState::Success);
-        eprintln!("{}", status.render(&terminal));
+        eprintln!("{}", status.render(terminal));
     }
 
     if cli.verbose > 1
@@ -518,15 +527,14 @@ pub fn run_compose(
     {
         use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::prelude::Status;
-        use biscuit_terminal::terminal::Terminal;
-        let terminal = Terminal::default();
+        let terminal = term_cell.get_or_init(Terminal::default);
         for metric in &perf_report.metrics {
             let status = Status::from_prose(format!(
                 "<dim>{:20}</dim> {:>8.2}ms",
                 metric.stage.to_string(),
                 metric.elapsed.as_secs_f64() * 1000.0
             ));
-            eprintln!("{}", status.render(&terminal));
+            eprintln!("{}", status.render(terminal));
         }
     }
 
@@ -576,21 +584,19 @@ pub fn run_compose(
     if !report.warnings.is_empty() {
         use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::prelude::{Status, StatusState};
-        use biscuit_terminal::terminal::Terminal;
-        let term = Terminal::default();
+        let term = term_cell.get_or_init(Terminal::default);
         for warning in &report.warnings {
             let status = Status::from_prose(&warning.message).state(StatusState::Warning);
-            eprintln!("{}", status.render(&term));
+            eprintln!("{}", status.render(term));
         }
     }
 
     // Emit deferred validation issues to stderr (allowed but still reported)
     if let Some(report) = deferred_report {
         use biscuit_terminal::components::renderable::TerminalRenderable as _;
-        use biscuit_terminal::terminal::Terminal;
         use darkmatter::markdown::reference::validate::ValidationReportView;
-        let term = Terminal::default();
-        let formatted = ValidationReportView::new(report).render(&term);
+        let term = term_cell.get_or_init(Terminal::default);
+        let formatted = ValidationReportView::new(report).render(term);
         if !formatted.is_empty() {
             eprint!("\n{formatted}");
         }

@@ -158,11 +158,13 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
         CliCommand::Toc { input, json } => {
             let md = load_markdown(input.as_ref())?;
             let toc = md.toc();
-            let term = Terminal::new();
 
             if json {
                 println!("{}", serde_json::to_string_pretty(&toc)?);
             } else {
+                // Detect the terminal only on the human-rendered branch so
+                // `md toc --json` never pays terminal detection (finding 3).
+                let term = Terminal::new();
                 let mut tree = TocTree::new(toc);
                 if cli.verbose > 0 {
                     tree = tree.verbose();

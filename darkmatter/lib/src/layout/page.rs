@@ -1653,10 +1653,15 @@ fn clamp_width(width: u32) -> u16 {
 /// A construction-only page (baked attributes but no frame geometry) keeps its
 /// content box at this ambient width, so an unmatched component policy cannot
 /// widen it (review-2 finding 2). This matches the width
-/// `Markdown::as_terminal(default)` resolves, since both fall back to
-/// `Terminal::default()`'s detection.
+/// `Markdown::as_terminal(default)` resolves, since both fall back to the same
+/// dynamic dimensions detector.
+///
+/// This is width-only: it calls the dynamic dimensions detector directly rather
+/// than constructing a full `Terminal`, which would pay the whole detection
+/// suite (OSC probes, color-mode, git-root walk, terminal-config parsing) just
+/// to read `width()`.
 fn ambient_terminal_width() -> u16 {
-    clamp_width(Terminal::default().width())
+    clamp_width(biscuit_terminal::discovery::detection::terminal_width())
 }
 
 impl TerminalRenderable for DarkmatterPage {
