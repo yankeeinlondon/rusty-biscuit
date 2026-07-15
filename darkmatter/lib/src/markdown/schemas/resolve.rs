@@ -1344,11 +1344,10 @@ fn resolve_one_example(
 /// object schema (rooted at `"type": "object"` with only `properties` /
 /// `required`).
 pub fn merge_baseline(baseline: &Value, document: Value) -> Result<Value, SchemaError> {
-    let baseline_obj = baseline.as_object().ok_or_else(|| SchemaError::Baseline {
-        message: "baseline must be an object schema".into(),
-        source: None,
-    })?;
-    validate_simple_object_schema(baseline_obj)?;
+    validate_baseline_schema(baseline)?;
+    let baseline_obj = baseline
+        .as_object()
+        .expect("validated baseline must be an object");
 
     // Root unions: merge into each arm independently.
     if let Some(arms) = document.get("anyOf").and_then(Value::as_array) {
@@ -1371,17 +1370,13 @@ pub fn merge_baseline(baseline: &Value, document: Value) -> Result<Value, Schema
         }
     };
 
-    let baseline_props: Map<String, Value> = baseline_obj
-        .get("properties")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    let baseline_required: Vec<String> = baseline_obj
+    let baseline_props = baseline_obj.get("properties").and_then(Value::as_object);
+    let baseline_required: std::collections::HashSet<&str> = baseline_obj
         .get("required")
         .and_then(Value::as_array)
         .map(|arr| {
             arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
+                .filter_map(Value::as_str)
                 .collect()
         })
         .unwrap_or_default();
@@ -1404,11 +1399,13 @@ pub fn merge_baseline(baseline: &Value, document: Value) -> Result<Value, Schema
         .filter_map(|v| v.as_str().map(String::from))
         .collect();
 
-    for (key, baseline_schema) in &baseline_props {
-        if !doc_props.contains_key(key) {
-            doc_props.insert(key.clone(), baseline_schema.clone());
-            if baseline_required.contains(key) && !doc_required.contains(key) {
-                doc_required.push(key.clone());
+    if let Some(baseline_props) = baseline_props {
+        for (key, baseline_schema) in baseline_props {
+            if !doc_props.contains_key(key) {
+                doc_props.insert(key.clone(), baseline_schema.clone());
+                if baseline_required.contains(key.as_str()) && !doc_required.contains(key) {
+                    doc_required.push(key.clone());
+                }
             }
         }
     }
@@ -1447,6 +1444,14 @@ pub fn merge_baseline(baseline: &Value, document: Value) -> Result<Value, Schema
     }
 
     Ok(Value::Object(document_obj))
+}
+
+pub(super) fn validate_baseline_schema(baseline: &Value) -> Result<(), SchemaError> {
+    let baseline_obj = baseline.as_object().ok_or_else(|| SchemaError::Baseline {
+        message: "baseline must be an object schema".into(),
+        source: None,
+    })?;
+    validate_simple_object_schema(baseline_obj)
 }
 
 /// Validates that a JSON Schema is a simple object schema: rooted at

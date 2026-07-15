@@ -18,7 +18,7 @@ use darkmatter::markdown::compose::find_git_root_from;
 use darkmatter::markdown::schemas::resolve::{merge_baseline, resolve_schema};
 use darkmatter::markdown::schemas::{
     DarkmatterSchemas, EffectiveSchema, SchemaError, SchemaShape, SimplifiedSchema,
-    darkmatter_base_json_schema, triggers::TriggerRegistry,
+    darkmatter_base_json_schema_ref, triggers::TriggerRegistry,
 };
 use globset::{Glob, GlobSetBuilder};
 use serde_json::Value;
@@ -80,7 +80,15 @@ pub fn assemble(
         return Ok(None);
     }
 
-    let mut schemas = DarkmatterSchemas::new().with_baseline_json_schema(combined.baseline)?;
+    let CombinedBaseline {
+        baseline,
+        extension_shapes,
+        dependencies,
+    } = combined;
+    let mut schemas = match baseline {
+        Some(baseline) => DarkmatterSchemas::new().with_baseline_json_schema(baseline),
+        None => DarkmatterSchemas::new().with_darkmatter_baseline_json_schema(),
+    }?;
     if let Some(registry) = trigger_registry {
         schemas = schemas.with_trigger_registry(registry);
     }
@@ -92,8 +100,8 @@ pub fn assemble(
         Some(effective) => Ok(Some(SchemaBundle {
             effective,
             frontmatter_json: frontmatter_json(&md),
-            extension_shapes: combined.extension_shapes,
-            extension_dependencies: combined.dependencies,
+            extension_shapes,
+            extension_dependencies: dependencies,
         })),
         None => Ok(None),
     }
@@ -121,7 +129,9 @@ pub fn trigger_boundary(doc_path: &Path, workspace_roots: &[PathBuf]) -> Option<
 /// it, plus the matched extensions' SimplifiedSchema shapes and dependency
 /// files.
 struct CombinedBaseline {
-    baseline: Value,
+    /// `None` retains the shared built-in baseline; `Some` is materialized only
+    /// when an extension must be merged over it.
+    baseline: Option<Value>,
     extension_shapes: Vec<SchemaShape>,
     dependencies: Vec<PathBuf>,
 }
@@ -134,7 +144,7 @@ fn combined_baseline(
     config: &DmlsConfig,
     workspace_roots: &[PathBuf],
 ) -> Result<CombinedBaseline, SchemaError> {
-    let mut baseline = darkmatter_base_json_schema();
+    let mut baseline: Option<Value> = None;
     let mut shapes = Vec::new();
     let mut dependencies: BTreeSet<PathBuf> = BTreeSet::new();
     for extension in config.schema.extensions.values() {
@@ -155,7 +165,10 @@ fn combined_baseline(
         dependencies.extend(resolved.examples.iter().cloned());
         // `merge_baseline(under, over)` lets `over` win — the extension
         // overrides the base, matching compose's layering.
-        baseline = merge_baseline(&baseline, resolved.json_schema)?;
+        let lower = baseline
+            .as_ref()
+            .unwrap_or_else(|| darkmatter_base_json_schema_ref());
+        baseline = Some(merge_baseline(lower, resolved.json_schema)?);
     }
     Ok(CombinedBaseline {
         baseline,

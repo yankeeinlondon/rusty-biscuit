@@ -250,9 +250,8 @@ pub struct ComposeOptions {
 
     /// Whether `baseline_schema` is the authored Darkmatter baseline (set via
     /// [`ComposeOptions::with_darkmatter_baseline_schema`]). When true, schema
-    /// validation reuses the process-cached compiled JSON Schema
-    /// ([`crate::markdown::schemas::darkmatter_base_json_schema`]) instead of
-    /// re-converting the `SimplifiedSchema` per compose (F8/F9).
+    /// validation shares the process-cached compiled JSON Schema instead of
+    /// re-converting or cloning it per compose (F8/F9).
     pub(crate) baseline_is_darkmatter_default: bool,
 
     /// Whether file-backed compose validation discovers trigger schemas from

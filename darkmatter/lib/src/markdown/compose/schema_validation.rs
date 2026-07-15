@@ -100,13 +100,10 @@ pub(crate) fn run_with_registry(
             builder = builder.with_file_ref_fallback_dir(fallback);
         }
         if let Some(baseline) = &options.baseline_schema {
-            // The Darkmatter default baseline reuses the process-cached compiled
-            // JSON Schema instead of re-converting the SimplifiedSchema every
-            // compose (F9); a caller-supplied baseline still converts once here.
+            // The Darkmatter default baseline shares the process-cached compiled
+            // JSON Schema (F9); a caller-supplied baseline still converts here.
             let built = if options.baseline_is_darkmatter_default {
-                builder.with_baseline_json_schema(
-                    crate::markdown::schemas::darkmatter_base_json_schema(),
-                )
+                builder.with_darkmatter_baseline_json_schema()
             } else {
                 builder.with_baseline(baseline.clone())
             };

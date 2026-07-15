@@ -106,7 +106,27 @@ pub use triggers::{
 pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
 
 static BASE_SCHEMA: std::sync::OnceLock<SimplifiedSchema> = std::sync::OnceLock::new();
-static BASE_JSON_SCHEMA: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+static BASE_JSON_SCHEMA: std::sync::OnceLock<Arc<Value>> = std::sync::OnceLock::new();
+
+fn darkmatter_base_schema_ref() -> &'static SimplifiedSchema {
+    BASE_SCHEMA.get_or_init(|| {
+        let raw = include_str!("../../../../docs/schemas/darkmatter.yaml");
+        let frontmatter: serde_yaml_ng::Value =
+            serde_yaml_ng::from_str(raw).expect("baseline yaml must parse");
+        let schema_value = frontmatter
+            .get("$schema")
+            .expect("baseline file must have a `$schema` key");
+        parse_yaml_schema(schema_value).expect("baseline schema must parse")
+    })
+}
+
+fn darkmatter_base_json_schema_arc() -> &'static Arc<Value> {
+    BASE_JSON_SCHEMA.get_or_init(|| {
+        Arc::new(
+            to_json_schema(darkmatter_base_schema_ref()).expect("baseline schema must convert"),
+        )
+    })
+}
 
 /// Returns the Darkmatter baseline frontmatter schema as a [`SimplifiedSchema`].
 ///
@@ -127,24 +147,16 @@ static BASE_JSON_SCHEMA: std::sync::OnceLock<Value> = std::sync::OnceLock::new()
 /// Panics if the checked-in `darkmatter.yaml` cannot be parsed. This is a
 /// library bug or repository corruption, not an author error.
 pub fn darkmatter_base_schema() -> SimplifiedSchema {
-    BASE_SCHEMA
-        .get_or_init(|| {
-            let raw = include_str!("../../../../docs/schemas/darkmatter.yaml");
-            let frontmatter: serde_yaml_ng::Value =
-                serde_yaml_ng::from_str(raw).expect("baseline yaml must parse");
-            let schema_value = frontmatter
-                .get("$schema")
-                .expect("baseline file must have a `$schema` key");
-            parse_yaml_schema(schema_value).expect("baseline schema must parse")
-        })
-        .clone()
+    darkmatter_base_schema_ref().clone()
 }
 
 /// Returns the Darkmatter baseline frontmatter schema as a compiled Draft
 /// 2020-12 JSON Schema value.
 ///
 /// The result is derived from [`darkmatter_base_schema`] and cached so repeated
-/// calls do not re-pay the conversion cost.
+/// calls do not re-pay the conversion cost. Each call returns an independent
+/// owned value; callers that only need to read the schema can use
+/// [`darkmatter_base_json_schema_ref`] instead.
 ///
 /// ## Examples
 ///
@@ -160,11 +172,21 @@ pub fn darkmatter_base_schema() -> SimplifiedSchema {
 /// Panics if the checked-in `darkmatter.yaml` cannot be converted to JSON
 /// Schema. This is a library bug or repository corruption, not an author error.
 pub fn darkmatter_base_json_schema() -> Value {
-    BASE_JSON_SCHEMA
-        .get_or_init(|| {
-            to_json_schema(&darkmatter_base_schema()).expect("baseline schema must convert")
-        })
-        .clone()
+    darkmatter_base_json_schema_ref().clone()
+}
+
+/// Borrows the process-cached Darkmatter baseline JSON Schema.
+///
+/// This accessor avoids cloning the schema for read-only use. Call
+/// [`darkmatter_base_json_schema`] when an independently owned, mutable value
+/// is required.
+///
+/// ## Panics
+///
+/// Panics if the checked-in `darkmatter.yaml` cannot be converted to JSON
+/// Schema. This is a library bug or repository corruption, not an author error.
+pub fn darkmatter_base_json_schema_ref() -> &'static Value {
+    darkmatter_base_json_schema_arc().as_ref()
 }
 
 /// Top-level entry point for the schemas subsystem.
@@ -306,12 +328,21 @@ impl DarkmatterSchemas {
         Ok(self)
     }
 
+    /// Attaches Darkmatter's built-in frontmatter schema as the baseline.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`SchemaError::Baseline`] if the built-in schema is not a
+    /// simple object schema. This indicates a library defect.
+    pub fn with_darkmatter_baseline_json_schema(mut self) -> Result<Self, SchemaError> {
+        let json_schema = Arc::clone(darkmatter_base_json_schema_arc());
+        resolve::validate_baseline_schema(&json_schema)?;
+        self.baseline = Some(BaselineSchema { json_schema });
+        Ok(self)
+    }
+
     fn set_baseline_json(&mut self, value: Value) -> Result<(), SchemaError> {
-        // Probe the baseline by running it through the merger on a trivial
-        // document — this enforces the simple-object-schema restriction at
-        // configuration time rather than at first use.
-        let probe = serde_json::json!({"type":"object","properties":{}});
-        resolve::merge_baseline(&value, probe)?;
+        resolve::validate_baseline_schema(&value)?;
         self.baseline = Some(BaselineSchema {
             json_schema: Arc::new(value),
         });
@@ -2259,13 +2290,33 @@ mod tests {
         );
     }
 
-    /// `darkmatter_base_json_schema()` caches the converted value so repeated
-    /// calls return an equivalent schema without re-parsing the YAML.
+    /// The borrowed accessor returns the same cached allocation, while the
+    /// owned accessor preserves independent-value semantics.
     #[test]
     fn darkmatter_base_json_schema_is_cached() {
-        let a = super::darkmatter_base_json_schema();
-        let b = super::darkmatter_base_json_schema();
-        assert_eq!(a, b, "cached JSON schemas must be equal");
+        let borrowed_a = super::darkmatter_base_json_schema_ref();
+        let borrowed_b = super::darkmatter_base_json_schema_ref();
+        assert!(std::ptr::eq(borrowed_a, borrowed_b));
+
+        let mut owned = super::darkmatter_base_json_schema();
+        owned["title"] = serde_json::json!("independent clone");
+        assert_ne!(&owned, borrowed_a);
+    }
+
+    #[test]
+    fn darkmatter_baseline_builder_shares_cached_json_schema() {
+        let first = DarkmatterSchemas::new()
+            .with_darkmatter_baseline_json_schema()
+            .expect("built-in baseline must be valid");
+        let second = DarkmatterSchemas::new()
+            .with_darkmatter_baseline_json_schema()
+            .expect("built-in baseline must be valid");
+        let first = &first.baseline.expect("baseline must be configured").json_schema;
+        let second = &second
+            .baseline
+            .expect("baseline must be configured")
+            .json_schema;
+        assert!(Arc::ptr_eq(first, second));
     }
 
     /// The compiled baseline allows unknown user-defined frontmatter keys

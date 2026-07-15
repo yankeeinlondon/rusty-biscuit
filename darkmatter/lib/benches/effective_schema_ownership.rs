@@ -5,9 +5,11 @@
 //! document-only controls distinguish that ownership cost from schema parsing,
 //! validator lookup, and baseline merging.
 
-use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, darkmatter_base_json_schema};
+use darkmatter::markdown::schemas::{
+    DarkmatterSchemas, darkmatter_base_json_schema, resolve::merge_baseline,
+};
 use serde_json::{Map, Value, json};
 use std::hint::black_box;
 
@@ -126,6 +128,76 @@ fn bench_document_only(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_default_baseline_initialization(c: &mut Criterion) {
+    let baseline = darkmatter_base_json_schema();
+    let properties = property_count(&baseline);
+    let baseline_only = baseline_only_document();
+    let empty_document_schema = json!({"type": "object", "properties": {}});
+    let tiny_document_schema = json!({
+        "type": "object",
+        "properties": {
+            "benchmark-owned": {"type": "string"}
+        },
+        "required": ["benchmark-owned"]
+    });
+
+    let mut group = c.benchmark_group("effective_schema_initialization/darkmatter_baseline");
+    group.sample_size(100);
+    group.throughput(Throughput::Elements(properties));
+
+    group.bench_function("owned_accessor", |b| {
+        b.iter(|| black_box(darkmatter_base_json_schema()));
+    });
+
+    group.bench_function("configure_default_baseline", |b| {
+        b.iter(|| {
+            let api = DarkmatterSchemas::new()
+                .with_darkmatter_baseline_json_schema()
+                .expect("built-in benchmark baseline must be valid");
+            black_box(api);
+        });
+    });
+
+    group.bench_function("configure_and_resolve_default_baseline", |b| {
+        b.iter(|| {
+            let api = DarkmatterSchemas::new()
+                .with_darkmatter_baseline_json_schema()
+                .expect("built-in benchmark baseline must be valid");
+            let effective = api
+                .effective_for(black_box(&baseline_only))
+                .expect("baseline-only assembly must succeed")
+                .expect("configured baseline must produce an effective schema");
+            black_box(effective);
+        });
+    });
+
+    group.bench_function("merge_empty_document", |b| {
+        b.iter_batched(
+            || empty_document_schema.clone(),
+            |document| {
+                let merged = merge_baseline(black_box(&baseline), black_box(document))
+                    .expect("empty document schema must merge");
+                black_box(merged);
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    group.bench_function("merge_tiny_document", |b| {
+        b.iter_batched(
+            || tiny_document_schema.clone(),
+            |document| {
+                let merged = merge_baseline(black_box(&baseline), black_box(document))
+                    .expect("tiny document schema must merge");
+                black_box(merged);
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    group.finish();
+}
+
 fn bench_effective_schema_ownership(c: &mut Criterion) {
     bench_baseline(c, "darkmatter_baseline", darkmatter_base_json_schema());
     bench_baseline(
@@ -134,6 +206,7 @@ fn bench_effective_schema_ownership(c: &mut Criterion) {
         synthetic_baseline(SYNTHETIC_PROPERTY_COUNT),
     );
     bench_document_only(c);
+    bench_default_baseline_initialization(c);
 }
 
 criterion_group!(benches, bench_effective_schema_ownership);
