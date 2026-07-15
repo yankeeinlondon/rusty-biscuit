@@ -5,8 +5,8 @@ created: "2026-07-12"
 method: "4 parallel code-review passes (compose, rendering, schemas, CLI/IO) + empirical verification with hyperfine, RUST_LOG tracing, and `md compose --perf` against a release build of the current branch"
 reviewed: true
 reviewed_by: codex/default
-reviewed_on: 2026-07-14
-review_iterations: '1'
+reviewed_on: 2026-07-15
+review_iterations: '2'
 ---
 
 # Performance Review: Darkmatter Library and CLI
@@ -20,6 +20,14 @@ review_iterations: '1'
 > source-ordered body-shell execution; and retains collision-resistant validator
 > cache identity through `biscuit-hash`. It also adds the missing delivery,
 > reproducibility, compatibility, and cross-platform contracts below.
+
+> **Finding 29 follow-up (2026-07-15):** The public
+> `EffectiveSchema::json_schema` ownership change from `Value` to `Arc<Value>`
+> is now an explicit compatibility exception. This repository has no
+> established external users, and the same-source Criterion comparison showed
+> material improvements in every ownership-sensitive case. A second measured
+> refinement removes all deep clones from built-in baseline configuration and
+> baseline-only resolution. See [`results-2.md`](./results-2.md).
 
 ## Executive Summary
 
@@ -57,6 +65,39 @@ This document is a measured optimization backlog, not authorization to land all
 independent change and must pass its own before/after checkpoint. Findings that
 do not show a repeatable improvement outside measurement noise should not land.
 
+### Finding disposition and approval
+
+A finding is not complete merely because a safe subset landed or because the
+remaining work is broad, risky, uncommon, or better suited to a dedicated
+change. Those considerations can determine sequencing, but they do not remove
+the residual work from this specification. A partially implemented finding
+remains open and must not be represented by a completed checkbox without an
+explicit list of its still-open sub-items.
+
+A finding, or a separately identified sub-item, can be closed without an
+implementation only when one of these dispositions is recorded:
+
+- A requirement-matched benchmark shows no repeatable improvement outside the
+  harness noise, with the evidence retained alongside the finding.
+- The proposed optimization conflicts with a compatibility or correctness
+  invariant. Reject the unsafe approach explicitly and keep the underlying
+  performance problem open when a compatible alternative remains possible.
+- The repository owner explicitly approves removing or deferring the work from
+  this review. A deferral must link to an active or unscheduled follow-up spec;
+  moving residual work there is a scope decision, not evidence of completion.
+
+Implementation complexity, public or internal blast radius, regression risk,
+or an assertion that a path is rare are not sufficient closeout evidence by
+themselves. An aggregate phase checkpoint also cannot mark unimplemented
+sub-items complete.
+
+The current plan's residual work therefore remains part of this active review:
+the deep cross-pass portions of Findings 7 and 16; Findings 11, 12, 13, and 32;
+the unimplemented portions of Findings 14, 23, 25, 33, and 35; and Finding 17's
+10 ms process-polling issue. Finding 17's proposed parallel execution of body
+shell directives is explicitly rejected because it violates invariant 5; that
+decision does not close the independent polling sub-item.
+
 ### In scope
 
 - The `darkmatter` library and `md` CLI hot paths named in the findings.
@@ -82,8 +123,14 @@ do not show a repeatable improvement outside measurement noise should not land.
    probe, public behavior is byte-for-byte and error-for-error compatible.
    Snapshot/golden tests must cover composed Markdown, terminal output, JSON,
    diagnostics, and exit status where the changed path can affect them.
-2. Public Rust APIs remain source-compatible. When an internal borrowed or
-   `Cow` path is useful (Finding 13), retain the existing owned public facade.
+2. Public Rust APIs remain source-compatible except for Finding 29's explicitly
+   approved `EffectiveSchema::json_schema: Value` → `Arc<Value>` ownership
+   change. That exception is supported by the measurements in
+   [`results-2.md`](./results-2.md) and by the absence of established external
+   users. Other internal borrowed, shared, or `Cow` paths retain their existing
+   owned public facades; in particular,
+   `darkmatter_base_json_schema() -> Value` remains source-compatible and
+   independently mutable.
 3. Cache identity must include every input that can affect the cached result.
    Schema validators include schema bytes, document `base_dir`, and
    `file_ref_fallback_dir`; file-backed caches also retain their existing
@@ -380,9 +427,17 @@ the existing `with_trigger_registry` API. Fix the doc claim either way.
 per compose — the already-cached `BASE_JSON_SCHEMA` (`mod.rs:161-167`) is never
 consulted on this path. `effective_for` then clones the baseline JSON into
 `base_layers` per call — twice per `run()` (finding 5). Measured: the baseline
-schema accounts for ~47 ms of wall on a trivial compose. Fix: feed
-`with_baseline_json_schema(darkmatter_base_json_schema())` when the baseline
-is the darkmatter base; hold layers as `Arc<Value>`.
+schema accounts for ~47 ms of wall on a trivial compose. Fix: add a dedicated
+built-in-baseline builder that shares the cached JSON Schema as `Arc<Value>`;
+retain the owned accessor for callers that require an independent value.
+
+**Follow-up (2026-07-15).** Complete and measured. The default compose path now
+uses `DarkmatterSchemas::with_darkmatter_baseline_json_schema()`, which shares
+the process-cached `Arc<Value>` and validates it by reference. DMLS also keeps
+the built-in baseline shared until a matching extension requires an owned merge.
+Built-in configuration improved from 391.12 µs to 26.42 ns and configuration
+plus baseline-only resolution improved from 450.91 µs to 56.47 µs. The owned
+accessor remains unchanged. See [`results-2.md`](./results-2.md).
 
 ### 10. Full ctx-values map deep-cloned on every frontmatter `ctx.*` lookup
 
@@ -593,6 +648,25 @@ Baseline JSON, trigger payloads, and document JSON are cloned per call — 2×
 per `run()`, 4× with trigger re-assembly. Falls out of findings 5/8/9;
 otherwise `Arc<Value>` layers.
 
+**Status (2026-07-15): implemented, measured, and approved with an explicit
+compatibility exception.** `EffectiveSchema::json_schema` is retained as
+`Arc<Value>`. Against the prior owned `Value`, the Darkmatter baseline-only
+case improved 69.4%, baseline-plus-document improved 28.6%, and cloning an
+assembled Darkmatter effective schema improved 99.7% (125.53 µs → 340.21 ns).
+The 512-property synthetic cases improved 56.2%, 16.9%, and 91.5%,
+respectively, while the document-only control showed no significant change.
+
+The follow-up implementation stores the built-in JSON Schema once as
+`Arc<Value>`, adds a borrowed accessor and a dedicated shared-baseline builder,
+validates baseline shape without a probe merge, and makes `merge_baseline`
+borrow the baseline property map. The common built-in configuration and
+baseline-only paths now perform zero deep clones. Merged results clone each
+baseline property at most once because `merge_baseline` must produce an owned
+`Value` before it is wrapped in `Arc`. The existing
+`darkmatter_base_json_schema() -> Value` facade continues to return an
+independent deep clone. Full measurements and verification are recorded in
+[`results-2.md`](./results-2.md).
+
 ### 30. `doc.*` namespace lookups rebuild the entire effective state as a `Value::Object`
 
 **Location:** `context/effective_state.rs:182-184`; `frontmatter_interpolation.rs:88-91`
@@ -706,6 +780,10 @@ good.
   interpolation + `$schema` + one transclusion, and one for `as_terminal` on a
   code-heavy 100 KB doc — the two paths this review found regressions in are
   exactly the ones with no bench coverage today.
+- Keep `effective_schema_ownership` as the Finding 29 regression harness. Save
+  a named Criterion baseline before changing ownership, configuration, or merge
+  behavior; its baseline-only, merged, accessor, initialization, and control
+  cases distinguish Arc sharing from unrelated parse/validation work.
 - Keep `md compose --perf` in the loop: it attributed the NTP stall precisely
   and is the right harness for validating fixes 1/5/6/7.
 - Re-run the `toc` scaling test (81 KB / 326 KB / 1.3 MB) after fix 4; the
