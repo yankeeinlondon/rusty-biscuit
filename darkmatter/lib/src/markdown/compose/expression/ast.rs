@@ -41,7 +41,8 @@ use std::fmt;
 /// Arithmetic binary operators supported by the expression evaluator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
-    /// Addition `+` (also string concatenation when either operand is a string).
+    /// Addition `+`; mixed numbers and numeric strings add, while strings
+    /// concatenate otherwise.
     Add,
     /// Subtraction `-`.
     Sub,

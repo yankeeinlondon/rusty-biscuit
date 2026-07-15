@@ -272,12 +272,15 @@ For `>`, `>=`, `<`, and `<=`, both sides are coerced to numbers.
 
 ## Arithmetic Operators
 
-All arithmetic operators (`+`, `-`, `*`, `/`, `%`) require numeric operands,
-with one exception: `+` performs **string concatenation** when either operand
-is a string.
+All arithmetic operators (`+`, `-`, `*`, `/`, `%`) accept numbers and numeric
+strings. For `+`, a numeric string paired with a number is coerced before
+addition. Other string combinations use **string concatenation**, including
+two numeric strings.
 
 ```md
 {{ 5 + 3 }}            ⇒ 8
+{{ "2" + 1 }}          ⇒ 3
+{{ "2" + "1" }}        ⇒ "21"
 {{ "count: " + 5 }}    ⇒ "count: 5"
 {{ 10 * (1 + 2) }}     ⇒ 30
 {{ 7 % 3 }}            ⇒ 1
@@ -289,7 +292,7 @@ Arithmetic errors fail composition:
 
 - **Division by zero** — `x / 0` and `x % 0` raise an error
 - **Non-numeric operands** — using `-`, `*`, `/`, or `%` on `null`, booleans,
-  arrays, or objects raises an error; same for `+` when neither side is a string
+  arrays, or objects raises an error
 
 ### Remainder Semantics
 

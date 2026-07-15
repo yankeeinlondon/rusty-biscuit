@@ -26,8 +26,8 @@
 //!    `foo.bar`, `foo[0]`, `(expr)`)
 //! 2. Unary `!`, `-`
 //! 3. Multiplicative `*`, `/`, `%`
-//! 4. Additive `+`, `-` (`+` doubles as string concatenation when either
-//!    operand is a string)
+//! 4. Additive `+`, `-` (`+` coerces a numeric string paired with a number,
+//!    and otherwise doubles as string concatenation)
 //! 5. Comparison `==`, `!=`, `>`, `>=`, `<`, `<=`
 //! 6. Logical AND `&&`
 //! 7. Logical OR / Fallback `||`
@@ -57,8 +57,8 @@
 //! ## Arithmetic Errors
 //!
 //! Division by zero (`x / 0`) and remainder by zero (`x % 0`) raise
-//! evaluator errors. Non-numeric operands for `-`, `*`, `/`, `%` (and `+`
-//! when neither side is a string) also raise errors.
+//! evaluator errors. Non-numeric operands for `-`, `*`, `/`, `%` also raise
+//! errors; `+` concatenates operands that do not form a mixed numeric pair.
 //!
 //! For full grammar, helper catalog, and timezone behavior see the
 //! [Darkmatter Expressions](../../../../docs/topics/darkmatter-expressions.md)
@@ -478,7 +478,17 @@ pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, E
 }
 
 fn evaluate_binary(op: BinaryOp, left: &Value, right: &Value) -> Result<Value, ExpressionError> {
-    if op == BinaryOp::Add && (left.is_string() || right.is_string()) {
+    let mixed_number_and_numeric_string = op == BinaryOp::Add
+        && matches!(
+            (left, right),
+            (Value::Number(_), Value::String(_)) | (Value::String(_), Value::Number(_))
+        )
+        && to_number_arithmetic(left).is_some()
+        && to_number_arithmetic(right).is_some();
+    if op == BinaryOp::Add
+        && (left.is_string() || right.is_string())
+        && !mixed_number_and_numeric_string
+    {
         return Ok(Value::String(format!(
             "{}{}",
             scalar_string(left),
@@ -1189,6 +1199,30 @@ mod tests {
             assert_eq!(
                 binary(BinaryOp::Add, json!(5), json!(" items")).unwrap(),
                 json!("5 items")
+            );
+        }
+
+        #[test]
+        fn mixed_numeric_string_and_number_addition_is_arithmetic() {
+            assert_eq!(
+                binary(BinaryOp::Add, json!("2"), json!(1)).unwrap(),
+                json!(3)
+            );
+            assert_eq!(
+                binary(BinaryOp::Add, json!(1), json!("2")).unwrap(),
+                json!(3)
+            );
+            assert_eq!(
+                binary(BinaryOp::Add, json!("2.5"), json!(1)).unwrap(),
+                json!(3.5)
+            );
+        }
+
+        #[test]
+        fn two_numeric_strings_still_concatenate() {
+            assert_eq!(
+                binary(BinaryOp::Add, json!("2"), json!("1")).unwrap(),
+                json!("21")
             );
         }
 
