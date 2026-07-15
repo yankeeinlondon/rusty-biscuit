@@ -1,8 +1,8 @@
 ---
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Kilo, Pi, Antigravity), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
-last_updated: 2026-07-13
-hash: 65dc854540ca152c-643ca246ac704d99
+last_updated: 2026-07-14
+hash: 65dc854540ca152c-032486619ccbd812
 ---
 
 ## Overview
@@ -217,7 +217,9 @@ roster, with structured facts in frontmatter validated by a `_schema.yaml` sidec
   `lib/src/stream/providers/vocabulary.rs`. Immutable Phase-A baselines under
   `agent-errors/_seeds/` let the deterministic gate detect removals, re-kinds,
   and reorders after facts graduation. New parser-backed providers must research
-  this topic rather than add keyword constants or facts seeds.
+  this topic rather than add keyword constants or facts seeds. The 2026-07-14
+  live roster converged in ten clean first attempts; its 55 accepted additions
+  are locked by generated-row, precedence, exact-code, and near-miss tests.
 - `model-config/` — user-side model extension (cloud + local) across all 9 roster
   providers: config files/formats, API standards spoken (`api_standards`), local-runner
   integration paths framed as API-standard bridging

@@ -1,10 +1,14 @@
 ---
-hash: ef46db3751d8e999-a1ea52605fab1dd7
-last_updated: 2026-06-30
+hash: ef46db3751d8e999-e4f336a03aa80e2d
+last_updated: 2026-07-14
 ---
 # Claudine Change Timeline
 
 Condensed history of significant Claudine features and refactors, newest first. Each entry names the feature/fix slug and the durable takeaway; deep references live in the linked docs. For current behavior always trust [architecture.md](architecture.md), [cli-reference.md](cli-reference.md), and the repo `docs/topics/*` — this file is historical context, not a spec.
+
+## 2026-07
+
+- **2026-07-14 — `provider-errors-as-data`**: Completed the research-to-runtime error-vocabulary pipeline. A live ten-provider Codex fleet converged in ten clean first attempts with no resumes; Ken accepted 55 source-attested append-only additions across Claude, Codex, Gemini, Kilo, Kimi, OpenCode, Pi, and Qwen. `claudine-gen` projects the schema-validated research frontmatter into `stream/providers/vocabulary.rs`; archived seeds fail removals, re-kinds, and reorders; the deterministic gate enforces provenance and motivating-class coverage; Level-1 tests lock every accepted row, first-match precedence, exact Kimi codes, and near-miss controls. See the [completed spec](../../../claudine/features/_completed/2026-07-11-provider-errors-as-data/spec.md) and [fleet review](../../../claudine/docs/research/agent-errors/_fleet-review.md).
 
 ## 2026-06
 
