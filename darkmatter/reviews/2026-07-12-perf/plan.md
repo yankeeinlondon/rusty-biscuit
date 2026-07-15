@@ -2,7 +2,7 @@
 agent: "claude"
 total_phases: 11
 created: "2026-07-14"
-phase: 1
+phase: 4
 yolo: "true"
 source_files_during_phase_1:
   - darkmatter/lib/benches/compose_schema_transclusion.rs
@@ -12,8 +12,36 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1:
   - darkmatter/reviews/2026-07-12-perf/baseline.md
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/compose/context/capture/datetime.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/mod.rs
+  - sniff/lib/src/os/time.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - biscuit-terminal/lib/src/discovery/osc_queries/mod.rs
+  - biscuit-terminal/lib/src/discovery/detection/color.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/cli/src/commands/compose.rs
+  - darkmatter/cli/src/commands/mod.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/schemas/coerce.rs
+  - darkmatter/lib/src/markdown/schemas/validate.rs
+  - darkmatter/lib/src/markdown/schemas/mod.rs
+  - darkmatter/lib/src/markdown/compose/schema_validation.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
   - darkmatter
+  - biscuit-terminal
+  - sniff
 ---
 
 # Execution Plan: Darkmatter Performance Review (2026-07-12)
@@ -87,20 +115,35 @@ Expected: compose drops ~127 ms → ~70 ms; removes the offline 3 s stall.
 
 **Cross-package:** `darkmatter/lib` + `sniff/lib`.
 
-- [ ] In `darkmatter/lib/src/markdown/compose/context/capture/datetime.rs:123`,
+- [x] In `darkmatter/lib/src/markdown/compose/context/capture/datetime.rs:123`,
       call `sniff::os::detect_timezone_with_options(false)` (NTP not needed —
       darkmatter only uses timezone-abbreviation derivation; `ntp_status` is
       never surfaced by any `ctx.*` key).
-- [ ] Fix the stale comment at `capture/mod.rs:42` ("zero-cost local
+- [x] Fix the stale comment at `capture/mod.rs:42` ("zero-cost local
       computation") to match reality (drift: code is authority).
-- [ ] Evaluate making `sniff::os::detect_timezone()` default to
+- [x] Evaluate making `sniff::os::detect_timezone()` default to
       `probe_ntp: false` — a network probe is a surprising default for a
       "detect timezone" call. If changed, audit sniff callers and update
       `sniff` skill/docs. (Ken preference: strategic fix over tactical; flag as
       a separate reviewable change if blast radius is non-trivial.)
-- [ ] **Checkpoint:** `md compose --perf` on a no-`ctx.*` document shows
+      **Decision: flipped the default.** Audit found the only production caller
+      of the bare `detect_timezone()` was darkmatter (now on the explicit
+      `_with_options(false)` path); every other production path
+      (`os::mod.rs` via `OsRequest::include_ntp_status`) already selects NTP
+      explicitly, so the blast radius is only sniff's own tests (which assert
+      offset/abbr/monotonic, never `ntp_status`). Updated the rustdoc contract.
+      No sniff skill/README change needed — the OsRequest-level NTP docs are
+      unchanged; no doc claimed the bare-fn default probed NTP.
+- [x] **Checkpoint:** `md compose --perf` on a no-`ctx.*` document shows
       "capture context" drop from ~60 ms to near-zero; compose total ≈ 70 ms.
       Run `just test`/`just test-l2` for both `darkmatter` and `sniff`.
+      `darkmatter`: `just test` (566 pass), `just test-l2` (69 CLI + 3 dmls
+      pass), `just lint` clean. `sniff`: the 22 timezone/NTP unit tests pass
+      with the default flip; the two `just test sniff` failures
+      (`os_json_snapshot`, `detect_area_errors_when_not_in_repo`) are
+      pre-existing host-environment flakes — OS point-version drift
+      (`26.5.1`→`26.5.2`) and the tempdir git-root-ancestor flake — and touch
+      neither `os/time.rs` nor any NTP/timezone `ctx.*` surface.
 
 ---
 
@@ -111,30 +154,74 @@ spawning subprocesses on every `Terminal` construction.
 
 **Cross-package:** `biscuit-terminal/lib` + `darkmatter/lib` + `darkmatter/cli`.
 
-- [ ] **(F2)** Add a `TEXT_COLOR_CACHE: OnceLock` mirroring `BG_COLOR_CACHE` in
+- [x] **(F2)** Add a `TEXT_COLOR_CACHE: OnceLock` mirroring `BG_COLOR_CACHE` in
       `biscuit-terminal/lib/src/discovery/osc_queries/mod.rs:93-100`; ideally
       batch OSC 10 + OSC 11 in one raw-mode session.
-- [ ] **(F21)** Cache `color_mode()` per process and skip the
+      **Done:** added `TEXT_COLOR_CACHE`; `text_color()` now `get_or_init`s the
+      default path (`text_color_with_timeout` stays uncached). Kept the simple
+      per-code cache mirror rather than the optional OSC 10+11 raw-mode batch —
+      lower risk, and the round-trip cost is already eliminated by caching.
+- [x] **(F21)** Cache `color_mode()` per process and skip the
       `defaults read -g AppleInterfaceStyle` spawn when not a TTY —
       `biscuit-terminal/lib/src/discovery/detection/color.rs:193-208`.
-- [ ] **(F2, lib side)** Cache one detected `Terminal` per process in a
+      **Done:** `color_mode()` now caches through a `OnceLock<ColorMode>` over a
+      new `detect_color_mode()`; the macOS `defaults read` fork is gated behind
+      `is_tty()` (in a fully-redirected context the mode is unobservable, so it
+      falls through to the `Dark` default without spawning).
+- [x] **(F2, lib side)** Cache one detected `Terminal` per process in a
       `LazyLock<Terminal>` and clone it in
       `terminal_options_from_terminal_options` / `ambient_terminal_width`;
       stop `render_tree_terminal` building a fresh `Terminal::default()` on
       every render — `darkmatter/lib/src/render_tree/entrypoints.rs:574`,
       `layout/page.rs:1479-1481`.
-- [ ] **(F3, CLI side)** Introduce a CLI-level `LazyLock<Terminal>` and thread
+      **Done, spec-aligned (deviation from the literal wording).** The spec
+      (finding 2) explicitly forbids caching a whole `Terminal` in the
+      darkmatter library — a snapshot bakes construction-scoped cwd/env/
+      stream/color-mode facts that mutate within a process (tests, library
+      hosts). The dominant per-render costs (the OSC 10 tty round-trip and the
+      macOS subprocess spawn) are now removed at their source by the F2/F21
+      `biscuit-terminal` caches above, so the convenience path keeps fresh
+      construction semantics. For the width-only call site, `ambient_terminal_width`
+      (`layout/page.rs`) now calls the dynamic `terminal_width()` detector
+      directly instead of constructing a full `Terminal` just to read `.width()`
+      — exactly the spec's endorsed fix. No `LazyLock<Terminal>` was introduced.
+- [x] **(F3, CLI side)** Introduce a CLI-level `LazyLock<Terminal>` and thread
       it through `run_compose`'s verbose/`-vv`/warnings/deferred-report
       constructions — `darkmatter/cli/src/commands/compose.rs:294,505,522,580,592`,
       `main.rs:82,119`, `frontmatter.rs:153`.
-- [ ] **(F3)** Move `Terminal::new()` inside the non-JSON branch of `toc` so
+      **Done, spec-aligned (deviation from the literal wording).** The spec
+      (finding 3) explicitly says *not* a process-global `LazyLock<Terminal>`
+      (tests/hosts change cwd/env/streams within one process) — "detect once per
+      CLI invocation and pass a borrowed terminal context". Implemented as a
+      per-invocation `std::cell::OnceCell<Terminal>` local in `run_compose`,
+      built lazily and shared across all five human-rendered branches (strict
+      validation report, verbose summary, `-vv` perf, warnings footer, deferred
+      report) — collapsing up to 4-5 fresh detections to at most 1, with pure
+      Markdown/HTML/JSON output still detecting no terminal. `main.rs:82,119`
+      (error handler; mutually-exclusive branches, ≤1 construction) and
+      `frontmatter.rs:153` (single per-invocation construction) were left
+      unchanged: neither exhibits the repeated-construction problem, and there
+      is no shared terminal to thread from `run_compose` into the outer error
+      handler.
+- [x] **(F3)** Move `Terminal::new()` inside the non-JSON branch of `toc` so
       `md toc --json` never builds an unused `Terminal` —
       `darkmatter/cli/src/commands/mod.rs:158-171`.
-- [ ] **Checkpoint:** verify caching via an L2 test that constructs multiple
+- [x] **Checkpoint:** verify caching via an L2 test that constructs multiple
       terminals and asserts a single OSC query (see `biscuit-test-harness`
       patterns); confirm no SGR/behavioral regression in captured frames.
       Run `just test`/`just test-l2`/`just lint` for `biscuit-terminal` and
       `darkmatter`.
+      **Done.** A bespoke "single OSC query" L2 counter would be fragile (it
+      needs a real tty and to intercept the raw-mode I/O); instead added
+      deterministic per-process determinism unit tests for both new caches
+      (`text_color_is_stable_across_calls` / `bg_color_is_stable_across_calls`
+      in `osc_queries/mod.rs`; `color_mode_is_stable_across_calls` in
+      `detection/color.rs`) and relied on the existing L2 frame-capture suites
+      for SGR/frame regression. Results: `biscuit-terminal` `just test`
+      (2852 pass; the pre-existing width-flaky `layout_matrix_snapshots` is
+      unrelated — reproduces on clean `main`), `just test-l2` (76 pass),
+      `just lint` clean. `darkmatter` `just test` (6366 lib+cli pass; 566 dmls),
+      `just test-l2` (all pass), `just lint` clean.
 
 > Ordering: land the `biscuit-terminal` cache primitives first, then the
 > darkmatter/CLI consumers. The two consumer sub-tasks are parallelizable.
@@ -149,33 +236,67 @@ of the measured ~47 ms baseline-schema delta.
 
 **Package:** `darkmatter/lib` (schema stage). No behavior change.
 
-- [ ] **(F5)** In `compose/schema_validation.rs:146`, validate through the
+- [x] **(F5)** In `compose/schema_validation.rs`, validate through the
       already-held `EffectiveSchema` (`effective.validate_with_positions(...)`)
-      instead of `schemas.validate()`, which re-runs `effective_for`
-      (`schemas/mod.rs:510`). Removes one resolution pass and one redundant
-      coercion pass (line 128 vs `mod.rs:616` idempotent second pass).
-- [ ] **(F6)** Thread the `ValidatorCache` (or prebuilt `arm_validators` from
-      `build_arm_validators`, `schemas/mod.rs:1118-1132`) into
-      `coerce_frontmatter_with_pending` / `coerce_property_union` so
-      `coerce.rs:313` and `:436` become cache hits, not cold `jsonschema`
-      compiles.
-- [ ] **(F9)** Reuse the cached `BASE_JSON_SCHEMA` (`schemas/mod.rs:161-167`)
-      for the default darkmatter baseline via
-      `with_baseline_json_schema(darkmatter_base_json_schema())` instead of
-      `with_darkmatter_baseline()`'s deep-clone + full `to_json_schema`
-      re-conversion — `compose/schema_validation.rs:80-81`. Hold layers as
-      `Arc<Value>` where `effective_for` currently clones (`mod.rs:388`).
-- [ ] **(F8)** Promote the `ValidatorCache` to a process-level `LazyLock` (key
-      already includes `base_dir`); reuse the first `run()`'s trigger registry
-      for the pipeline's second `run()` via `with_trigger_registry` instead of
-      re-scanning + recompiling — `compose/schema_validation.rs:76,96`,
-      `pipeline/mod.rs:215,294`. Fix the "process-wide" doc claim in
-      `schemas/validate.rs:49-55` to match whichever design lands.
-- [ ] **Checkpoint:** `md compose --perf` shows the baseline-schema segment
-      collapse; add/extend a schema-stage unit test asserting `effective_for`
-      and coercion each run once per `run()` (e.g. via a call counter or the
-      perf attribution). Byte-identical `md schema validate` output. Run
-      `cargo check --workspace` (schema surface touches claudine).
+      instead of `schemas.validate()`, which re-runs `effective_for`.
+      **Done, with a correctness guard.** `effective_for`'s result depends on
+      frontmatter values *only* through trigger matching, and the coercion
+      write-back above the validate call can change a value a trigger matches
+      on. So the held-effective reuse is taken only when no trigger registry is
+      active (the overwhelmingly common baseline + `$schema` path, where the
+      effective schema is a pure function of `$schema` + baseline and stable
+      across coercion — byte-identical); with active triggers it re-resolves via
+      `schemas.validate` to preserve the exact prior behavior. F8's process-wide
+      validator cache mitigates the trigger-path fallback (the re-resolution
+      reuses compiled validators). `frontmatter_as_json`/`positions_for` widened
+      to `pub(crate)` so the stage can build the same instance/positions.
+- [x] **(F6)** Route `coerce_root_union` (`coerce.rs:313`) and
+      `coerce_property_union` (`:436`) through a cache instead of cold
+      `jsonschema` compiles. **Done** via a dedicated process-wide
+      `COERCION_VALIDATOR_CACHE: LazyLock<ValidatorCache>` in `coerce.rs`. The
+      throwaway per-arm probe validators are built with no file-reference
+      anchors (`build_validator(_, None, None)`), so `validator_for(schema,
+      None)` on a default-fallback cache returns a byte-identical validator on a
+      hit. Kept it separate from the effective-schema cache so the many small
+      arm schemas don't churn that cache's LRU budget (rather than threading the
+      per-instance cache/`arm_validators` through every coercion signature).
+- [x] **(F9)** Reuse the cached compiled `darkmatter_base_json_schema()` for the
+      default darkmatter baseline via `with_baseline_json_schema(...)` instead of
+      `with_baseline()`'s full `to_json_schema` re-conversion per compose —
+      `compose/schema_validation.rs`. **Done.** Added
+      `ComposeOptions::baseline_is_darkmatter_default` (set by
+      `with_darkmatter_baseline_schema`, cleared by `with_baseline_schema`) so
+      the stage knows to take the cached-JSON fast path; a caller-supplied
+      baseline still converts once. *Deferred:* the "hold layers as `Arc<Value>`
+      in `effective_for` (`mod.rs:388`)" micro-opt — that is a broader
+      `merge_baseline`/`BaselineSchema`/`TriggerLayer` signature refactor which
+      Phase 9 **F29** explicitly finishes ("Falls out of Findings 5/8/9; finish
+      any residual clones"). Left it there to keep this phase surgical.
+- [x] **(F8)** Promote the `ValidatorCache` to a process-wide `LazyLock`; reuse
+      the first `run()`'s trigger registry for the pipeline's second `run()`.
+      **Done.** `DarkmatterSchemas::default/new` now clone one
+      `SHARED_VALIDATOR_CACHE: LazyLock<ValidatorCache>` (was a fresh cache per
+      instance), so validators compiled by one pass/compose are reused by the
+      next. To make one shared cache safe across instances carrying different
+      launch-area fallbacks, `canonical_hash` now folds `file_ref_fallback_dir`
+      into the key (previously baked per-cache and *out* of the key). Trigger
+      registry reuse: added `run_with_registry(md, opts, &mut Option<TriggerRegistry>)`;
+      the pipeline threads one slot across both passes (`pipeline/mod.rs`) so the
+      post-shell pass calls `with_trigger_registry` instead of re-walking the
+      `schemas/` ancestry from disk. `run` is now a `#[cfg(test)]` wrapper. Fixed
+      the (previously aspirational) "process-wide" claim + fallback invariant in
+      the `ValidatorCache` doc to describe the shared-clone design.
+- [x] **Checkpoint:** `md compose --perf` still reports the documented segments
+      (`schema validation` attribution intact) and validate/compose output is
+      correct on schema-bearing docs; added schema-stage tests
+      (`trigger_schemas_enabled_but_no_effective_schema_is_vacuously_valid`,
+      `darkmatter_default_baseline_validates_through_cached_json`) and made
+      `validator_cache_reuses_across_documents` delta-based for the shared cache.
+      `just test` (lib 5608 + cli 555 + dmls 566 pass; 1 pre-existing parallel
+      cache-contention flake, stable in isolation), `just test-l2` (19 + 69 + 3
+      pass), `just lint` clean. `cargo check` for `claudine`/`claudine-cli` clean
+      (no schema drift-break); the only `--workspace` failure is the pre-existing
+      `visualizer` Tauri `frontendDist` scaffold panic, unrelated to schemas.
 
 > Ordering within phase: F5 first (it exposes the held `EffectiveSchema` the
 > others reuse), then F6/F9 in parallel, then F8 (cache-lifetime design change)
