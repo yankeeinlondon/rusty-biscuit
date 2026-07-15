@@ -9,7 +9,7 @@ claudine/lib/src/
 ├── actions/      → Hook action types and response model
 ├── badges/       → Styled terminal badge constants (YOLO, Non-Interactive, Interactive, etc.)
 ├── composition/  → Markdown frontmatter composition (inline and chained prompt pipelines)
-│   ├── lifecycle/ → Lifecycle config/types, parsing, validation, actions, context, control, execution, and provider-neutral runtime routing
+│   ├── lifecycle/ → Lifecycle config/types, parsing, validation, actions, context, control, execution, and the pure transition core shared by composition preflight and the harness loop
 │   ├── looping/   → Loop configuration, action DSL, condition evaluation, and execution orchestration (looping/{engine,types,seed,config,dsl,actions,expression}.rs — engine holds only execution/routing/gate logic; types holds the option/context/output/result value types; seed holds loop-seed construction)
 │   └── schema/    → Schema-aware preparation, error translation, problem classification, and status reporting
 ├── config/       → Agent detection, hook registration, atomic writes, backups
@@ -414,8 +414,15 @@ Markdown frontmatter-based composition pipelines for delivering prompts to provi
 - **Inline composition** (`--frontmatter-prompt`): reads frontmatter `prompt` field as input, replaces document body with provider output
 - **Chained composition** (`--compose`): composes full document as prompt without file mutation
 
-The CLI executor under `cli/src/commands/wrap/composition/` keeps the entry and
-setup pipeline in `mod.rs`, with incidental concerns split by responsibility:
+The CLI executor under `cli/src/commands/wrap/composition/` keeps stable entry
+points and public re-exports in `mod.rs`. `pipeline.rs` owns one
+`CompositionAttempt` across ordered selection/launch, environment/MCP,
+argv/system-prompt, lifecycle-runtime, initialize-routing, and provider-handoff
+phases. Each phase returns `CompositionPhaseResult`, so completed dry runs,
+blocked lifecycle routing, preparation failures, and normal progression stay
+explicit without flattening attempt state into the entry module.
+
+Other concerns remain split by responsibility:
 
 - `selection.rs` — favorite-provider and model-override configuration loading
 - `launch.rs` — launch-workspace selection and `--repo` detection enforcement
@@ -428,9 +435,28 @@ setup pipeline in `mod.rs`, with incidental concerns split by responsibility:
 Composition execution headers are shared output helpers in
 `cli/src/output/mod.rs`; they do not live in the executor pipeline.
 
+## Harness Attempt Loop
+
+`cli/src/commands/wrap/harness_orch/loop_control.rs` keeps one
+`HarnessLoopState` across all retry, resume, and proxy iterations. It owns the
+immutable run context alongside the attempt counter, prompt/session overrides,
+retry/resume budgets, proxy chain, cached shell approvals, lifecycle guard,
+run-level timing anchor, and accumulated performance data.
+
+`run_harness_loop_inner` is an ordered coordinator over three typed phases:
+prompt materialization/preflight (including lifecycle `start`), provider
+attempt execution, and result classification/recovery. Re-entry and terminal
+outcomes cross phase boundaries as `LoopStep` values. Provider command and
+process details remain in `harness_orch/{launch,attempt}.rs`; lifecycle event
+execution remains in `loop_control/lifecycle_events.rs`; and
+`drive_terminal_recovery` in `loop_control/control_dispatch.rs` remains the
+single terminal-tail executor for retry, resume, proxy, and finalize recovery.
+
 ## Test Placement
 
 **Inline tests** (`#[cfg(test)] mod tests { … }`) are the default for small files. Once a file exceeds **~800 production lines** or its test module exceeds **~300 lines**, move tests to a sibling file declared via `#[cfg(test)] mod tests;` at the bottom of the parent. This pattern is already established in `lib/src/provider/`, `cli/…/wrap/composition/`, and `cli/…/wrap/exec/wiring/`.
+
+`claudine-cli/tests/test_placement.rs` enforces this convention as a Level 1 package-area structural test. It scans every source tree in the Claudine family, counts production and inline-test lines separately with a Rust-aware lexer, excludes generated sources only through explicit path/header rules, and rejects stale path-specific exceptions. Exceptions must be file-specific, explain why co-location materially clarifies a private invariant, and remain below the separately stated ceiling in the exception rationale; stale or rationale-free entries fail the gate.
 
 ## Skill Linking
 
