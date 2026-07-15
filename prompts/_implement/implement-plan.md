@@ -40,6 +40,8 @@ loop:
 ::end-block
 ::block when="!total_phases"
 # Implement Phase {{phase}}
+
+> ⚠️ there was no `total_phases` set on this plan! This metadata missing may indicate a problem
 ::end-block
 
 Your task is to implement phase {{phase}} of the plan found in '@{{area}}/{{plan}}'.
@@ -56,13 +58,47 @@ Your task is to implement phase {{phase}} of the plan found in '@{{area}}/{{plan
 > **NOTE:** this plan is based on the specification file: {{spec}}
 ::end-block
 
+## Test Design Requirements
+
+  Before changing implementation code, map every behavior changed by this phase
+  to a concrete test. For regressions, first add or identify a test that fails
+  for the reported behavior and succeeds only after the fix.
+
+  For every changed behavior:
+
+  - test the public observable result, not implementation details
+  - include the original failing input exactly
+  - include relevant representation variants, such as native versus quoted
+    YAML values, missing versus present values, and boundary values
+  - assert dependent outputs and downstream state, not only the immediate value
+  - include negative/error behavior where malformed or invalid input is possible
+  - choose the verification level required by `rust-testing`; unit coverage alone
+    is insufficient when behavior crosses crate, CLI, filesystem, terminal, or
+    persistence boundaries
+
+  When changing parsers, schemas, templates, prompts, or configuration-driven
+  behavior:
+
+  - add a passive corpus test covering all shipped artifacts
+  - add at least one end-to-end test using the real shipped artifact and normal
+    invocation path
+  - include a repeated read/write/read round trip when values are persisted
+
+  A broad test suite passing does not substitute for a targeted regression test.
+  Before declaring the phase complete, report the requirement-to-test mapping,
+  the exact targeted tests added, the broader gates run, and every skipped or
+  pre-existing failure.
+
+## Completion
+
 You are done when:
 
 - all functionality defined in phase {{phase}} has been implemented
+- all tests are passing (using `just test` in the {{ctx.current_package_area}} package area)
+- all tests meet the design requirements for testing (stated above)
+- all lints are passing (using `just lint` in the {{ctx.current_package_area}} package area)
 - all GFM tasks/todos in the plan have been completed (and have been marked as complete)
     - NOTE: you should mark tasks as complete as soon as you believe they are complete (e.g., implemented and any relevant tests suggest this is complete). Doing this allows an immediate feedback loop but also helps in recovering from a phase that didn't complete
-- all tests are passing (using `just test` in the {{ctx.current_package_area}} package area)
-- all lints are passing (using `just lint` in the {{ctx.current_package_area}} package area)
 - You must set the following Frontmatter properties:
     - `source_files_during_phase_{{phase}}` should be set to all source code files which were created or updated during this phase of the implementation; put an empty list (e.g., `[]`) if none
     - `docs_updated_during_phase_{{phase}}` should be set to all documentation files which were updated during this phase of the implementation; put an empty list (e.g., `[]`) if none

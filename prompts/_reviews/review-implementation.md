@@ -5,7 +5,7 @@ $schema:
     plan: file
 description: Reviews how well the _implementation_ of a certain set of review findings addressed the underlying problems which were raised.
 
-plan: "{{ basename(review) + '/' + }}"
+plan: "{{ dirname(review) + '/' + replace(basename(review),'review','plan')  }}"
 
 start:
     message: "🥸 reviewing the _implementation_ of the findings in `{{parent_dir(review)}}`"
@@ -17,9 +17,9 @@ success:
 
 ## Context
 
-The review findings found in '{{review}}' were based on the following review template:
+The review findings found in '{{review}}' were based on the following review template/prompt:
 
-- Review Template: {{template}}
+- Review Template/Prompt: {{template}}
 
 The review _findings_ which came from that review were captured here:
 
