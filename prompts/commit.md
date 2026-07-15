@@ -6,6 +6,8 @@ show_system_prompt: false
 operation: commit
 agent: opencode
 model: minimax/MiniMax-M3
+success: 
+    message: "git commits completed in {{ctx.area}}"
 ---
 
 # Commit Staged Files
