@@ -188,8 +188,10 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             } else {
                 use darkmatter::markdown::delta::DeltaReport;
 
-                let mut report =
-                    DeltaReport::new(delta).with_documents(base_md.clone(), updated_md.clone());
+                // `delta` is already an owned `MarkdownDelta`, and neither
+                // document is used after this point, so move them into the
+                // report instead of cloning two full documents.
+                let mut report = DeltaReport::new(delta).with_documents(base_md, updated_md);
                 if cli.verbose > 0 {
                     report = report.verbose();
                 }
