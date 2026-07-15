@@ -1,4 +1,10 @@
+//! Captured-output spawn mode: PID/env capture, wall-clock timeout, and the
+//! per-run volume cap.
+
+use super::super::captured::capture_stream_with_volume_cap;
 use super::*;
+use claudine::stream::logs::EarlyTermination;
+use std::sync::Arc;
 
 /// VC-6.4: the per-run volume cap bounds the capture buffer and sends a
 /// `RunawayVolume` trip once the running totals breach the threshold.
@@ -57,61 +63,6 @@ fn capture_volume_cap_disabled_captures_all() {
         capture_stream_with_volume_cap(Cursor::new(input.into_bytes()), &[], &first_at, None, &tx);
     assert!(rx.try_recv().is_err(), "no cap means no trip");
     assert_eq!(captured, "a\nb\nc");
-}
-
-/// Minimal env that satisfies the `PATH` / `HOME` debug-asserts inside
-/// every spawn function. Test-owned so we never depend on the host
-/// shell's environment.
-fn minimal_env() -> HashMap<OsString, OsString> {
-    let mut env = HashMap::new();
-    env.insert(OsString::from("PATH"), OsString::from("/usr/bin:/bin"));
-    env.insert(OsString::from("HOME"), OsString::from("/tmp"));
-    env
-}
-
-/// Find a working `/bin/true`-equivalent on the test host. macOS ships
-/// `/usr/bin/true`; Linux distros typically have both `/bin/true` and
-/// `/usr/bin/true`. We prefer `/usr/bin/true` (always present on macOS)
-/// and fall back to `/bin/true`.
-fn true_binary() -> &'static Path {
-    if Path::new("/usr/bin/true").exists() {
-        Path::new("/usr/bin/true")
-    } else {
-        Path::new("/bin/true")
-    }
-}
-
-/// Spawn must populate `ProcessResult.agent_pid` immediately after
-/// `command.spawn()?` returns. The captured PID must match a real
-/// positive integer. This test exercises the legacy/interactive spawn
-/// path used by direct wrappers and legacy composition runs.
-#[test]
-fn run_child_captures_agent_pid_after_successful_spawn() {
-    let env = minimal_env();
-    let cwd = Path::new("/tmp");
-    let mut child_spawned = false;
-
-    let result = run_child(
-        true_binary(),
-        &[],
-        &env,
-        cwd,
-        None,
-        false,
-        ChildIoOptions {
-            stdout_noise_prefixes: &[],
-            stderr_noise_prefixes: &[],
-            stdin_seed: None,
-        },
-        &mut child_spawned,
-    )
-    .expect("spawning /usr/bin/true must succeed on the test host");
-
-    assert!(child_spawned, "child_spawned flag must flip on success");
-    let pid = result
-        .agent_pid
-        .expect("agent_pid must be Some after a successful spawn");
-    assert!(pid > 0, "spawned child PID must be a positive integer");
 }
 
 /// `run_child_capture` shares the same spawn path as `run_child` and
@@ -292,18 +243,6 @@ fn consecutive_spawns_produce_distinct_agent_pids() {
     );
 }
 
-/// Locate a `sleep`-equivalent for the wall-clock-timeout tests. macOS and
-/// Linux both ship `/bin/sleep`; some Linux distros only have
-/// `/usr/bin/sleep`.
-#[cfg(unix)]
-fn sleep_binary() -> &'static Path {
-    if Path::new("/bin/sleep").exists() {
-        Path::new("/bin/sleep")
-    } else {
-        Path::new("/usr/bin/sleep")
-    }
-}
-
 /// VC-5.2 / tasks 5.1+5.2: a configured wall-clock `timeout` now routes
 /// through the unified signal-aware wait loop (via the dedicated
 /// wall-clock ticker) on the capture path. A child that would otherwise
@@ -313,6 +252,8 @@ fn sleep_binary() -> &'static Path {
 #[cfg(unix)]
 #[test]
 fn run_child_capture_wall_clock_timeout_reaps_child() {
+    use std::time::{Duration, Instant};
+
     let env = minimal_env();
     let cwd = Path::new("/tmp");
     let mut child_spawned = false;
@@ -347,45 +288,5 @@ fn run_child_capture_wall_clock_timeout_reaps_child() {
         elapsed < Duration::from_secs(20),
         "the wall-clock timeout must kill the child well before its own \
          30s sleep elapses; took {elapsed:?}"
-    );
-}
-
-/// VC-5.2 / tasks 5.1+5.2: the same wall-clock routing for the direct
-/// (`run_child`) path with inherited stdio. Proves both non-streaming
-/// spawn paths share the one signal-aware wait loop.
-#[cfg(unix)]
-#[test]
-fn run_child_wall_clock_timeout_reaps_child() {
-    let env = minimal_env();
-    let cwd = Path::new("/tmp");
-    let mut child_spawned = false;
-
-    let start = Instant::now();
-    let result = run_child(
-        sleep_binary(),
-        &["30".to_string()],
-        &env,
-        cwd,
-        Some(1),
-        false,
-        ChildIoOptions {
-            stdout_noise_prefixes: &[],
-            stderr_noise_prefixes: &[],
-            stdin_seed: None,
-        },
-        &mut child_spawned,
-    )
-    .expect("spawning sleep must succeed on the test host");
-    let elapsed = start.elapsed();
-
-    assert!(child_spawned);
-    assert_eq!(
-        result.termination,
-        claudine::harness::ProcessTermination::TimedOut,
-        "a breached wall-clock timeout must report TimedOut"
-    );
-    assert!(
-        elapsed < Duration::from_secs(20),
-        "the wall-clock timeout must kill the child promptly; took {elapsed:?}"
     );
 }
