@@ -299,6 +299,26 @@ docs_updated_during_phase_7:
   - reviews/2026-07-14-module-assessment/plan.md
 docs_created_during_phase_7: []
 skills_files_updated_during_phase_7: []
+source_files_during_phase_8:
+  - rendezvous/daemon/src/session_log/mod.rs
+  - rendezvous/daemon/src/session_log/append.rs
+  - rendezvous/daemon/src/session_log/staging.rs
+  - rendezvous/daemon/src/session_log/rehydrate.rs
+  - rendezvous/daemon/src/session_log/validate.rs
+  - rendezvous/daemon/src/sync/tests/mod.rs
+  - rendezvous/daemon/src/sync/tests/envelope_validation.rs
+  - rendezvous/daemon/src/sync/tests/schema_validation.rs
+  - rendezvous/daemon/src/sync/tests/snapshot_replace.rs
+  - rendezvous/daemon/src/service/tests/mod.rs
+  - rendezvous/daemon/src/service/tests/rpc.rs
+  - rendezvous/daemon/src/service/tests/session_register.rs
+  - rendezvous/daemon/src/service/tests/validation.rs
+docs_updated_during_phase_8:
+  - reviews/2026-07-14-module-assessment/plan.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+  - .claude/skills/claudine/SKILL.md
+  - .claude/skills/claudine/architecture.md
 packages:
   - claudine
   - claudine-cli
@@ -571,47 +591,47 @@ Acceptance gates:
 Apply the package area's architectural conventions to
 `rendezvous/{core,client,daemon}`.
 
-- Update the Claudine skill overview and architecture document to enumerate
+- [x] Update the Claudine skill overview and architecture document to enumerate
   all three rendezvous crates, their dependency direction, public roles, and
   test commands.
-- Keep `SessionLogManager` as the public facade while extracting its existing
+- [x] Keep `SessionLogManager` as the public facade while extracting its existing
   responsibilities into modules for local append/rotation, export/import
   staging, startup replay/rehydration, and remote metadata/schema/append-only
   validation.
-- Make shared session state and invariants explicit without exposing internal
+- [x] Make shared session state and invariants explicit without exposing internal
   Loro/storage types unnecessarily. Preserve persistence ordering and recovery
   semantics pinned in Phase 1.
-- Complete the sync/service test extraction started in Phase 6 and organize
+- [x] Complete the sync/service test extraction started in Phase 6 and organize
   those suites by protocol framing/timeouts, service RPC behavior, projection,
   and error mapping.
-- Review session-log, sync, and service docs/comments for stale responsibility
+- [x] Review session-log, sync, and service docs/comments for stale responsibility
   descriptions after the moves.
 
 Acceptance gates:
 
-- The facade's public API is unchanged unless a separately reviewed API change
+- [x] The facade's public API is unchanged unless a separately reviewed API change
   is required, and startup replay, crash-window, signature, append-only, and
   sync tests remain green.
-- `cd claudine/rendezvous && just check && just test && just lint` passes.
-- Root `cargo check --workspace --all-targets` still includes all three crates.
+- [x] `cd claudine/rendezvous && just check && just test && just lint` passes.
+- [x] Root `cargo check --workspace --all-targets` still includes all three crates.
 
 ## Phase 9 — Split wrapper spawn modes and platform termination
 
 Refactor the HIGH-risk process layer by execution mode and platform boundary.
 
-- Split spawn code into shared command/process setup plus inherited-output,
+- [ ] Split spawn code into shared command/process setup plus inherited-output,
   captured-output, and semantic-stream execution modules. Share only stable
   setup and wait contracts; keep mode-specific pipe/thread/parser behavior
   local.
-- Split termination into provider-neutral termination reasons, summary/guard
+- [ ] Split termination into provider-neutral termination reasons, summary/guard
   projection, and human-facing rendering, plus `cfg(unix)` and `cfg(windows)`
   wait/escalation implementations behind one internal interface.
-- Keep one semantic signal ladder and one early-termination projection. Unix
+- [ ] Keep one semantic signal ladder and one early-termination projection. Unix
   process-group signaling and Windows Job Object/console-event behavior must
   remain platform implementations of the same contract, not copied policy.
-- Render termination messages through existing terminal components and retain
+- [ ] Render termination messages through existing terminal components and retain
   stdout/stderr separation.
-- Move the extracted platform tests into matching module trees and retain the
+- [ ] Move the extracted platform tests into matching module trees and retain the
   L2/L3 integration coverage.
 
 Acceptance gates:
@@ -629,22 +649,22 @@ Acceptance gates:
 Preserve the strong generator crate boundary while reducing procedural
 concentration and raw terminal output.
 
-- Split `gen/src/emit.rs` by stable catalog domains: identity/paths,
+- [ ] Split `gen/src/emit.rs` by stable catalog domains: identity/paths,
   execution/prompting, models/offerings, event/support policy, and linking
   resources. Keep shared literal/import helpers small and leave
   `emit_data_file` as a thin, visibly ordered assembler.
-- Split the `coerce_to_catalog_shape` decision tree along the same domain
+- [ ] Split the `coerce_to_catalog_shape` decision tree along the same domain
   vocabulary so registry entries, coercion, and emission have predictable
   owners. Do not split the declarative registry merely because it is long.
-- Introduce typed generator report data and `TerminalRenderable` renderers
+- [ ] Introduce typed generator report data and `TerminalRenderable` renderers
   using biscuit-terminal components (`Prose`, `UnorderedList`, `Table`,
   `CodeBlock`, or status components as appropriate). Replace human-facing
   `println!`/`eprintln!` paths for generate, check, provenance, diff, prompt,
   and agent-error reports.
-- Preserve raw JSON exclusively for explicit machine-facing modes such as
+- [ ] Preserve raw JSON exclusively for explicit machine-facing modes such as
   mapping/structured reports, with stdout for data and stderr for diagnostics.
   Keep inherited-stdio `claudine providers generate` working.
-- Refresh `lib/src/provider/mod.rs` to describe the completed generated-data /
+- [ ] Refresh `lib/src/provider/mod.rs` to describe the completed generated-data /
   handwritten-behavior architecture, and update
   `docs/topics/provider-metadata.md` from the stale 18-site statement to the
   authoritative current inventory (19 at assessment time, derived rather than
@@ -665,16 +685,16 @@ Acceptance gates:
 Complete C6 at the actionable rendering boundary while preserving the central
 typed error vocabulary.
 
-- Keep `CompositionError` and its public variants in `error/mod.rs`.
-- Divide `BlockError::status_block` rendering into focused modules for
+- [ ] Keep `CompositionError` and its public variants in `error/mod.rs`.
+- [ ] Divide `BlockError::status_block` rendering into focused modules for
   lifecycle, schema/frontmatter, selection/target, sequence/loop, and
   provider/execution/file-reference errors.
-- Make the trait method a thin exhaustive dispatcher. Each family renderer
+- [ ] Make the trait method a thin exhaustive dispatcher. Each family renderer
   returns the same `StatusBlock` and reuses shared path/link/code helpers rather
   than copying styles or prose.
-- Preserve diagnostic source chains, error codes, frontmatter appendices,
+- [ ] Preserve diagnostic source chains, error codes, frontmatter appendices,
   TTY/color behavior, and the CLI error walker's deepest-typed-error rule.
-- Update comments only where responsibility or behavior descriptions moved.
+- [ ] Update comments only where responsibility or behavior descriptions moved.
 
 Acceptance gates:
 
@@ -689,11 +709,11 @@ Acceptance gates:
 Make the loop/lifecycle rendering relationship explicit, then close all
 documentation and verification work.
 
-- Add one shared conformance matrix for syntax supported by both loop actions
+- [ ] Add one shared conformance matrix for syntax supported by both loop actions
   and lifecycle actions: literal/mixed strings, whole-value typed expansion,
   arrays/objects, namespaces and missing values, functions, escaping,
   malformed expressions, and strict/fail-closed behavior.
-- Compare `render_action_value`/`render_string_with_lookup` with lifecycle DM2
+- [ ] Compare `render_action_value`/`render_string_with_lookup` with lifecycle DM2
   `SubtreeCompose`. If the same input/state can preserve every established loop
   result, migrate loop action rendering to the Darkmatter substrate and remove
   the duplicate renderer. If a required semantic difference remains, keep the
@@ -701,13 +721,13 @@ documentation and verification work.
   composition architecture, and require both engines to pass the shared
   overlap matrix. This is an explicit evidence gate, not an open-ended design
   choice.
-- Update all READMEs, Claudine skill pages, topic docs, and symbol comments
+- [ ] Update all READMEs, Claudine skill pages, topic docs, and symbol comments
   affected by the 12 phases. Treat code and generated inventories as authority
   where old prose drifted.
-- Rerun `hug god-files --json claudine` and report actionable production
+- [ ] Rerun `hug god-files --json claudine` and report actionable production
   changes separately from generated/test files; success is clearer ownership
   and state-machine reviewability, not an indiscriminate line-count target.
-- Run GitNexus `detect_changes` against `main` and inspect every affected
+- [ ] Run GitNexus `detect_changes` against `main` and inspect every affected
   execution flow before any commit. Re-run impact analysis for each changed
   public/shared symbol whose callers changed during implementation.
 
