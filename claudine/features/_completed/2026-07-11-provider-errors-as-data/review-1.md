@@ -38,7 +38,7 @@ explicitly Phase-A facts-backed:
 - All nine parser-backed facts files still carry `error_vocabulary`.
 - `claudine/docs/research/agent-errors/_delta-report.md` leaves the only delta,
   Codex `overloaded`, pending human adjudication.
-- `claudine/features/2026-07-11-provider-errors-as-data/plan.md:513-615` marks
+- `claudine/features/_completed/2026-07-11-provider-errors-as-data/plan.md:513-615` marks
   source projection, facts deletion, delta tests, regeneration, documentation,
   and final acceptance incomplete.
 

@@ -3,11 +3,17 @@ created: 2026-07-11
 review_iterations: 6
 status: complete
 reviewed: true
-reviewed_by: unknown/default
-reviewed_on: 2026-07-11
+reviewed_by: ken
+reviewed_on: 2026-07-14
 ---
 
 # Provider Error Vocabulary as Data
+
+> **Status:** COMPLETED 2026-07-14. The live ten-provider Phase-B fleet
+> converged with ten clean first attempts and no resumes. Ken accepted all 55
+> evidence-backed append-only additions at C1; C2 regenerated the runtime
+> vocabulary with exhaustive Level-1 addition, precedence, code, and near-miss
+> coverage. C3 retained the live telemetry and closed the feature.
 
 Move the per-provider error-classification vocabulary out of the stream
 parsers and into the provider-metadata knowledge base, then **do it right**:

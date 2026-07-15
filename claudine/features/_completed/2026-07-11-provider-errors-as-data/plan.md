@@ -85,7 +85,7 @@ docs_created_during_phase_4:
 skills_files_updated_during_phase_4: []
 source_files_during_phase_5: []
 docs_updated_during_phase_5:
-  - claudine/features/2026-07-11-provider-errors-as-data/plan.md
+  - claudine/features/_completed/2026-07-11-provider-errors-as-data/plan.md
 docs_created_during_phase_5:
   - claudine/docs/research/agent-errors/codex.md
   - claudine/docs/research/agent-errors/_pilot-codex.md
@@ -93,7 +93,7 @@ docs_created_during_phase_5:
 skills_files_updated_during_phase_5: []
 source_files_during_phase_6: []
 docs_updated_during_phase_6:
-  - claudine/features/2026-07-11-provider-errors-as-data/plan.md
+  - claudine/features/_completed/2026-07-11-provider-errors-as-data/plan.md
 docs_created_during_phase_6:
   - claudine/docs/research/agent-errors/claude.md
   - claudine/docs/research/agent-errors/gemini.md
@@ -108,26 +108,36 @@ docs_created_during_phase_6:
 skills_files_updated_during_phase_6: []
 source_files_during_phase_7: []
 docs_updated_during_phase_7:
-  - claudine/features/2026-07-11-provider-errors-as-data/plan.md
+  - claudine/features/_completed/2026-07-11-provider-errors-as-data/plan.md
 docs_created_during_phase_7:
   - claudine/docs/research/agent-errors/_delta-report.md
 skills_files_updated_during_phase_7: []
 # Phase 8 graduated the research source and landed the two accepted Codex
-# capacity additions. Review iterations also closed the durable-outcome and
-# exact-capacity follow-ups before closeout.
+# capacity additions. The 2026-07-14 live fleet subsequently produced 53 more
+# accepted additions; C2 regenerated all 55 and added exhaustive vocabulary
+# regression coverage before the final C3 closeout.
 source_files_during_phase_8:
   - claudine/gen/src/vocabulary.rs
+  - claudine/gen/tests/vocabulary.rs
   - claudine/lib/src/stream/providers/vocabulary.rs
   - claudine/lib/src/stream/providers/codex.rs
+  - claudine/lib/src/stream/providers/mod.rs
+  - claudine/lib/src/stream/providers/vocabulary_tests.rs
   - claudine/lib/tests/agent_errors_fleet.rs
 docs_updated_during_phase_8:
-  - claudine/features/2026-07-11-provider-errors-as-data/plan.md
-  - claudine/features/2026-07-11-provider-errors-as-data/spec.md
+  - claudine/features/_completed/2026-07-11-provider-errors-as-data/plan.md
+  - claudine/features/_completed/2026-07-11-provider-errors-as-data/spec.md
+  - claudine/docs/providers/dispatch-inventory.json
   - claudine/docs/research/agent-errors/_fleet.md
   - claudine/docs/research/agent-errors/_fleet-review.md
   - claudine/docs/research/agent-errors/_delta-report.md
+  - claudine/docs/research/agent-errors/_pilot-codex.md
 docs_created_during_phase_8: []
-skills_files_updated_during_phase_8: []
+skills_files_updated_during_phase_8:
+  - .claude/skills/claudine/SKILL.md
+  - .claude/skills/claudine/architecture.md
+  - .claude/skills/claudine/cli-reference.md
+  - .claude/skills/claudine/timeline.md
 # Cumulative source-code files created/updated across all phases.
 source_code:
   - claudine/gen/src/vocabulary.rs
@@ -153,6 +163,7 @@ source_code:
   - claudine/lib/src/stream/providers/mod.rs
   - claudine/lib/src/stream/providers/vocabulary.rs
   - claudine/lib/src/stream/providers/vocabulary_parity_tests.rs
+  - claudine/lib/src/stream/providers/vocabulary_tests.rs
   - claudine/lib/tests/agent_errors_fleet.rs
   - claudine/cli/tests/dispatch_inventory.rs
   - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
@@ -168,7 +179,7 @@ source_code:
   - claudine/docs/providers/facts/kimi.yaml
 # Cumulative documentation files created/updated across all phases (3–8).
 documentation:
-  - claudine/features/2026-07-11-provider-errors-as-data/plan.md
+  - claudine/features/_completed/2026-07-11-provider-errors-as-data/plan.md
   - claudine/docs/providers/dispatch-inventory.json
   - claudine/docs/research/agent-errors/_schema.yaml
   - claudine/docs/research/agent-errors/_fleet.md
