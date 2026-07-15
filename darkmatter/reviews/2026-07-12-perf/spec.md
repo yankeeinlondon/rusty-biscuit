@@ -6,6 +6,7 @@ method: "4 parallel code-review passes (compose, rendering, schemas, CLI/IO) + e
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-07-14
+review_iterations: '1'
 ---
 
 # Performance Review: Darkmatter Library and CLI
