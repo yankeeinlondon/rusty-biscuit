@@ -519,3 +519,26 @@ Note: OpenCode also reads `.claude/skills/` directly
 - **Atomic writes prevent config corruption**: all config file mutations go through `config::atomic` to handle concurrent hook firings safely.
 - **Runtime config precompiles regexes**: matcher patterns and Call action mapper regexes are compiled once at config load time, failing fast on invalid patterns with contextual error messages.
 - **Legacy single-brace templates are deprecated**: `{placeholder}` is automatically rewritten to `{{placeholder}}` with a tracing warning. New configs should use Handlebars-style double braces.
+
+## Rendezvous Package-Area Family
+
+`claudine/rendezvous/` is a first-class package-area family of **three crates** that back `claudine dashboard` and the (unwired) lifecycle `defer` scheduler. It follows a `core → {daemon, client}` dependency shape — both leaf crates depend on `rendezvous-core`, neither depends on the other.
+
+| Crate | Path | Depends on | Public role |
+|-------|------|-----------|-------------|
+| `rendezvous-core` | `rendezvous/core` | *(leaf)* | Shared protobuf/gRPC stubs, `NodeIdentity`, `SignedEnvelope`/`EnvelopeSealer`/`EnvelopeInbox`, `DocumentId`/`ChunkId`, invitations, and the sync wire framing (`rendezvous_core::sync`). |
+| `rendezvous-daemon` | `rendezvous/daemon` | `rendezvous-core` | The long-running service: the `RendezvousService` gRPC impl over a UDS transport, the `redb → Loro → DuckDB` session-log pipeline, the register store, peer discovery/QUIC, and the direct-sync engine. Binary `main`; the gRPC and persistence layers live in library modules so integration tests exercise them without spawning a child. |
+| `rendezvous-client` | `rendezvous/client` | `rendezvous-core` | Thin tonic gRPC test client that drives the daemon over the UDS (testing/POC only). |
+
+Test commands run from the `claudine/rendezvous/` area justfile: `just check`, `just build`, `just test`, `just lint` each iterate all three crates (`test-l2` is a no-op — real-terminal tests do not apply). The root `cargo check --workspace --all-targets` includes all three.
+
+### Session-log module boundary
+
+`SessionLogManager` (`rendezvous/daemon/src/session_log/`) is the single public facade over the in-memory chunk map plus the redb source-of-truth and the DuckDB projection batcher. Its behavior is split across private sibling modules, each owning one responsibility, while the shared session state (`ChunkState`, `ManagerInner`, `SessionCursor`) and its Loro/redb-facing invariants stay private to the module tree:
+
+- `append` — local append/rotation and the in-memory/on-disk read surfaces.
+- `staging` — snapshot signing, version-vector advertising, delta export, and the two-phase stage→commit that validates a remote update/replace before it touches durable state.
+- `rehydrate` — startup rehydration from redb, accepted-envelope replay (crash recovery), and DuckDB projection rebuild.
+- `validate` — remote-document invariants: metadata identity, entry schema/monotonicity, and the append-only prefix guard (read-only over a staged doc; nothing persists).
+
+Persistence ordering is invariant: an append persists the redb snapshot before mutating live in-memory state; the sync receive path persists the accepted envelope before committing the snapshot, so a crash window recovers on the next startup replay. The daemon's `sync` and `service` inline-test suites are divided by behavior into sibling `tests/` trees (sync: `envelope_validation`, `schema_validation`, `snapshot_replace`; service: `rpc`, `session_register`, `validation`).
