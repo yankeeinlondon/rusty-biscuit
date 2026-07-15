@@ -1,5 +1,6 @@
+//! Summary-field and guard-context projection, plus message/summary drift.
+
 use super::*;
-use claudine::stream::summary::StreamExecutionSummary;
 
 #[test]
 fn apply_early_termination_rate_limit_sets_usage_limit_summary_fields() {
@@ -77,18 +78,6 @@ fn apply_early_termination_preserves_existing_rate_limit_fields() {
 }
 
 #[test]
-fn early_termination_process_outcome_maps_step_timeout_to_timed_out() {
-    let termination = EarlyTermination::StepTimeout {
-        message: "no stream activity for 6s; terminating due to step_timeout".into(),
-        outstanding: Vec::new(),
-    };
-
-    let outcome = early_termination_process_outcome(Some(&termination));
-
-    assert_eq!(outcome, claudine::harness::ProcessTermination::TimedOut);
-}
-
-#[test]
 fn apply_early_termination_step_timeout_sets_step_timeout_error() {
     let mut summary = StreamExecutionSummary::default();
 
@@ -113,17 +102,6 @@ fn apply_early_termination_step_timeout_sets_step_timeout_error() {
 }
 
 #[test]
-fn early_termination_process_outcome_maps_timeout_to_timed_out() {
-    let termination = EarlyTermination::Timeout {
-        message: "wall-clock budget exceeded after 2h".into(),
-    };
-
-    let outcome = early_termination_process_outcome(Some(&termination));
-
-    assert_eq!(outcome, claudine::harness::ProcessTermination::TimedOut);
-}
-
-#[test]
 fn apply_early_termination_timeout_sets_timeout_error() {
     let mut summary = StreamExecutionSummary::default();
 
@@ -143,7 +121,7 @@ fn apply_early_termination_timeout_sets_timeout_error() {
     );
 }
 
-// ---- Phase 4: content-guard variant coverage (VC-4.1 / VC-4.2 / VC-4.3) ----
+// ---- Content-guard variant coverage (VC-4.1 / VC-4.2 / VC-4.3) ----
 
 #[test]
 fn apply_early_termination_exit_expression_sets_summary_fields_without_scope() {
@@ -255,58 +233,6 @@ fn apply_early_termination_runaway_volume_names_lines_and_bytes() {
 }
 
 #[test]
-fn early_termination_process_outcome_maps_exit_expression_to_aborted() {
-    let termination = EarlyTermination::ExitExpression {
-        pattern: "STOP.".into(),
-        scope: None,
-    };
-
-    let outcome = early_termination_process_outcome(Some(&termination));
-
-    assert_eq!(outcome, claudine::harness::ProcessTermination::Aborted);
-}
-
-#[test]
-fn early_termination_process_outcome_maps_runaway_repetition_to_aborted() {
-    let termination = EarlyTermination::RunawayRepetition {
-        cycle_len: 6,
-        repeats: 30,
-    };
-
-    let outcome = early_termination_process_outcome(Some(&termination));
-
-    assert_eq!(outcome, claudine::harness::ProcessTermination::Aborted);
-}
-
-#[test]
-fn early_termination_process_outcome_maps_runaway_volume_to_aborted() {
-    let termination = EarlyTermination::RunawayVolume {
-        lines: 50_001,
-        bytes: 32 * 1024 * 1024 + 1,
-    };
-
-    let outcome = early_termination_process_outcome(Some(&termination));
-
-    assert_eq!(outcome, claudine::harness::ProcessTermination::Aborted);
-}
-
-#[test]
-fn early_termination_process_outcome_maps_stalled_generation_to_aborted() {
-    // Fail-fast: a stalled-generation loop must never route through
-    // `TimedOut` / `handle_timeout:` (which would re-run the provider and
-    // reproduce the silent generation-drop stall).
-    let termination = EarlyTermination::StalledGeneration {
-        generation_count: 4,
-        stall_duration: Duration::from_secs(600),
-        context: StalledGenerationContext::default(),
-    };
-
-    let outcome = early_termination_process_outcome(Some(&termination));
-
-    assert_eq!(outcome, claudine::harness::ProcessTermination::Aborted);
-}
-
-#[test]
 fn apply_early_termination_stalled_generation_sets_summary_fields_and_context() {
     let mut summary = StreamExecutionSummary {
         exit_code: 143,
@@ -345,42 +271,6 @@ fn apply_early_termination_stalled_generation_sets_summary_fields_and_context() 
     // Safe context is surfaced; prompt text / tool payloads never are.
     assert!(msg.contains("ses_x"), "message must name the session id: {msg}");
     assert!(msg.contains("glm-5.2"), "message must name the model id: {msg}");
-}
-
-#[test]
-fn trip_to_early_termination_preserves_exit_expression_fields() {
-    let trip = claudine::runaway::Trip::ExitExpression {
-        pattern: "STOP.".into(),
-        scope: Some("opencode/kimi-for-coding/k2p7".into()),
-    };
-
-    let early = trip_to_early_termination(trip);
-
-    match early {
-        EarlyTermination::ExitExpression { pattern, scope } => {
-            assert_eq!(pattern, "STOP.");
-            assert_eq!(scope.as_deref(), Some("opencode/kimi-for-coding/k2p7"));
-        }
-        other => panic!("expected ExitExpression, got {other:?}"),
-    }
-}
-
-#[test]
-fn trip_to_early_termination_preserves_runaway_repetition_fields() {
-    let trip = claudine::runaway::Trip::RunawayRepetition {
-        cycle_len: 6,
-        repeats: 30,
-    };
-
-    let early = trip_to_early_termination(trip);
-
-    match early {
-        EarlyTermination::RunawayRepetition { cycle_len, repeats } => {
-            assert_eq!(cycle_len, 6);
-            assert_eq!(repeats, 30);
-        }
-        other => panic!("expected RunawayRepetition, got {other:?}"),
-    }
 }
 
 #[test]
@@ -485,24 +375,6 @@ fn early_termination_guard_context_carries_opencode_identity_metadata() {
     assert_eq!(gc.mode.as_deref(), Some("all"));
 }
 
-#[test]
-fn trip_to_early_termination_preserves_runaway_volume_fields() {
-    let trip = claudine::runaway::Trip::RunawayVolume {
-        lines: 50_001,
-        bytes: 33_554_432,
-    };
-
-    let early = trip_to_early_termination(trip);
-
-    match early {
-        EarlyTermination::RunawayVolume { lines, bytes } => {
-            assert_eq!(lines, 50_001);
-            assert_eq!(bytes, 33_554_432);
-        }
-        other => panic!("expected RunawayVolume, got {other:?}"),
-    }
-}
-
 /// `early_termination_message` must return the same string that
 /// `apply_early_termination_to_summary` writes to `summary.error_message`
 /// — the inline stderr rendering and the summary field must never drift
@@ -558,268 +430,4 @@ fn early_termination_message_matches_summary_error_message_for_all_variants() {
              for {termination:?}",
         );
     }
-}
-
-#[test]
-fn watchdog_request_to_early_termination_maps_timeout_reason() {
-    use super::{WatchdogTermination, WatchdogTerminationReason};
-    use crate::commands::wrap::exec::subagent_watchdog::ActiveSubagentSnapshot;
-
-    let req = WatchdogTermination {
-        reason: WatchdogTerminationReason::Timeout,
-        message: "wall-clock budget exceeded".into(),
-        stuck_subagents: Vec::new(),
-    };
-
-    let early = watchdog_request_to_early_termination(req);
-    assert!(matches!(
-        early,
-        EarlyTermination::Timeout { ref message } if message == "wall-clock budget exceeded"
-    ));
-}
-
-#[test]
-fn watchdog_request_to_early_termination_carries_stuck_subagents() {
-    use super::{WatchdogTermination, WatchdogTerminationReason};
-    use crate::commands::wrap::exec::subagent_watchdog::ActiveSubagentSnapshot;
-
-    let now = Instant::now();
-    let snapshot = ActiveSubagentSnapshot {
-        id: "ses_a".into(),
-        name: Some("Commit feature work".into()),
-        started_at: now,
-        last_progress_at: now,
-        elapsed_since_start: Duration::from_secs(900),
-        elapsed_since_progress: Duration::from_secs(900),
-    };
-    let req = WatchdogTermination {
-        reason: WatchdogTerminationReason::StepTimeout,
-        message: "no stream activity for 30m".into(),
-        stuck_subagents: vec![snapshot],
-    };
-
-    let early = watchdog_request_to_early_termination(req);
-    let outstanding = match early {
-        EarlyTermination::StepTimeout { outstanding, .. } => outstanding,
-        other => panic!("expected StepTimeout, got {other:?}"),
-    };
-    assert_eq!(outstanding.len(), 1);
-    assert_eq!(outstanding[0].id, "ses_a");
-    assert_eq!(outstanding[0].name.as_deref(), Some("Commit feature work"));
-    assert_eq!(
-        outstanding[0].elapsed_since_progress,
-        Duration::from_secs(900)
-    );
-}
-
-/// Regression: a disconnected watchdog channel must log a warning rather
-/// than silently disabling timeout enforcement. The wait loop should still
-/// return normally once the child exits.
-#[cfg(unix)]
-#[test]
-#[tracing_test::traced_test]
-fn disconnected_watchdog_channel_warns_and_returns_on_child_exit() {
-    use std::os::unix::process::CommandExt;
-    use std::process::Command;
-    use std::sync::mpsc::channel;
-
-    let mut child = Command::new("sleep")
-        .arg("0.5")
-        .process_group(0)
-        .spawn()
-        .expect("sleep must be available on PATH");
-    let (_early_tx, early_rx) = channel::<EarlyTermination>();
-    let (watchdog_tx, watchdog_rx) = channel::<WatchdogTermination>();
-    // Drop the sender to disconnect the channel before the loop polls it.
-    drop(watchdog_tx);
-
-    let result = wait_with_signal_and_early_termination(
-        &mut child,
-        true,
-        early_rx,
-        Some(watchdog_rx),
-        Duration::from_secs(1),
-        true,
-    );
-
-    let (code, termination, _) = result.expect("wait loop must return when child exits");
-    assert_eq!(code, 0, "sleep should exit 0; got {code}");
-    assert_eq!(termination, claudine::harness::ProcessTermination::Completed);
-    assert!(
-        logs_contain("watchdog ticker channel disconnected"),
-        "expected warning log for disconnected watchdog channel"
-    );
-}
-
-/// The SIGTERM/SIGKILL escalation path should still reap a normally
-/// exiting child after an early-termination signal. This exercises the
-/// loop-driven kill path and its PID-recycle guard (the guard re-checks
-/// try_wait immediately before each signal).
-#[cfg(unix)]
-#[test]
-fn early_termination_signal_reaps_child_and_reports_timed_out() {
-    use std::os::unix::process::CommandExt;
-    use std::process::Command;
-    use std::sync::mpsc::channel;
-
-    let mut child = Command::new("sleep")
-        .arg("10")
-        .process_group(0)
-        .spawn()
-        .expect("sleep must be available on PATH");
-    let (early_tx, early_rx) = channel::<EarlyTermination>();
-    let (_watchdog_tx, watchdog_rx) = channel::<WatchdogTermination>();
-
-    // Send the early-termination signal from another thread so the wait
-    // loop has time to start polling.
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(50));
-        let _ = early_tx.send(EarlyTermination::Timeout {
-            message: "test timeout".into(),
-        });
-    });
-
-    let result = wait_with_signal_and_early_termination(
-        &mut child,
-        true,
-        early_rx,
-        Some(watchdog_rx),
-        Duration::from_millis(100),
-        true,
-    );
-
-    let (code, termination, early) = result.expect("wait loop must return");
-    assert!(
-        matches!(early, Some(EarlyTermination::Timeout { ref message }) if message == "test timeout"),
-        "early termination should be carried through; got {early:?}"
-    );
-    assert_eq!(termination, claudine::harness::ProcessTermination::TimedOut);
-    // Killed by SIGTERM or SIGKILL; either way the exit code is non-zero.
-    assert!(code != 0, "child should have been terminated; got {code}");
-}
-
-/// Kimi wire mode uses completion termination after receiving the final
-/// prompt response: the child tree must still be terminated through the
-/// shared signal-aware path, but the wrapper outcome remains Completed.
-#[cfg(unix)]
-#[test]
-fn completion_termination_reaps_child_and_reports_completed() {
-    use std::os::unix::process::CommandExt;
-    use std::process::Command;
-    use std::sync::mpsc::channel;
-
-    let mut child = Command::new("sleep")
-        .arg("10")
-        .process_group(0)
-        .spawn()
-        .expect("sleep must be available on PATH");
-    let (_early_tx, early_rx) = channel::<EarlyTermination>();
-    let (completion_tx, completion_rx) = channel::<CompletionTermination>();
-
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(50));
-        let _ = completion_tx.send(CompletionTermination);
-    });
-
-    let result = wait_with_signal_early_termination_and_completion(
-        &mut child,
-        true,
-        early_rx,
-        None,
-        Some(completion_rx),
-        Duration::from_millis(100),
-        false,
-    );
-
-    let (code, termination, early) = result.expect("wait loop must return");
-    assert_eq!(code, 0);
-    assert_eq!(termination, claudine::harness::ProcessTermination::Completed);
-    assert!(early.is_none(), "completion is not an error path: {early:?}");
-}
-
-/// VC-5.4: the non-interactive ladder is SIGTERM-first (F5). A single
-/// counted press on a non-interactive run must escalate straight to
-/// SIGTERM (no human is mid-session to react to a graceful SIGINT), while
-/// an interactive run keeps the full `SIGINT → SIGTERM → SIGKILL` ladder.
-#[cfg(unix)]
-#[test]
-fn escalation_signal_compresses_ladder_when_non_interactive() {
-    // Interactive: three presses to force-kill.
-    assert_eq!(escalation_signal(true, 1), libc::SIGINT);
-    assert_eq!(escalation_signal(true, 2), libc::SIGTERM);
-    assert_eq!(escalation_signal(true, 3), libc::SIGKILL);
-
-    // Non-interactive: SIGTERM on the first press, SIGKILL on the next.
-    assert_eq!(escalation_signal(false, 1), libc::SIGTERM);
-    assert_eq!(escalation_signal(false, 2), libc::SIGKILL);
-    assert_eq!(escalation_signal(false, 3), libc::SIGKILL);
-}
-
-/// Smoke-test for the non-Unix parity path. Only runs on Windows, but the
-/// branch is compile-checked on every target.
-#[cfg(not(unix))]
-#[test]
-fn non_unix_wait_loop_returns_on_child_exit() {
-    use std::process::Command;
-    use std::sync::mpsc::channel;
-
-    let mut child = Command::new("cmd")
-        .args(["/C", "timeout /T 1 /nobreak >nul"])
-        .spawn()
-        .expect("cmd must be available");
-    let (_early_tx, early_rx) = channel::<EarlyTermination>();
-    let (_watchdog_tx, watchdog_rx) = channel::<WatchdogTermination>();
-
-    let result = wait_with_signal_and_early_termination(
-        &mut child,
-        false,
-        early_rx,
-        Some(watchdog_rx),
-        Duration::from_secs(1),
-        true,
-    );
-
-    let (code, termination, _) = result.expect("wait loop must return when child exits");
-    assert_eq!(code, 0);
-    assert_eq!(termination, claudine::harness::ProcessTermination::Completed);
-}
-
-/// Windows-specific coverage for Kimi's prompt-finished fallback: the
-/// child is spawned in a new process group and completion termination
-/// travels through the Job Object wait loop rather than `Child::kill`.
-#[cfg(windows)]
-#[test]
-fn windows_completion_termination_uses_job_object_path() {
-    use std::os::windows::process::CommandExt;
-    use std::process::Command;
-    use std::sync::mpsc::channel;
-
-    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-    let mut child = Command::new("cmd")
-        .args(["/C", "timeout /T 30 /nobreak >nul"])
-        .creation_flags(CREATE_NEW_PROCESS_GROUP)
-        .spawn()
-        .expect("cmd must be available");
-    let (_early_tx, early_rx) = channel::<EarlyTermination>();
-    let (completion_tx, completion_rx) = channel::<CompletionTermination>();
-
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(50));
-        let _ = completion_tx.send(CompletionTermination);
-    });
-
-    let result = wait_with_signal_early_termination_and_completion(
-        &mut child,
-        true,
-        early_rx,
-        None,
-        Some(completion_rx),
-        Duration::from_millis(100),
-        false,
-    );
-
-    let (code, termination, early) = result.expect("wait loop must return");
-    assert_eq!(code, 0);
-    assert_eq!(termination, claudine::harness::ProcessTermination::Completed);
-    assert!(early.is_none(), "completion is not an error path: {early:?}");
 }
