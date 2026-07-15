@@ -85,16 +85,28 @@ pub(super) fn dispatch_terminal_control(
         _ => 0,
     };
 
-    let dispatch = decide_control(
-        control,
+    let proxy_hops_used = proxy.chain.len()
+        + usize::from(!proxy.chain.iter().any(|path| path == &prompt_state.source_path));
+    let decision = decide_lifecycle_transition(&LifecycleTransitionInput {
+        event: lifecycle_guard
+            .terminal_signal()
+            .unwrap_or(LifecycleSignal::Finalize),
+        terminal_slot: lifecycle_guard.terminal_signal(),
+        provider_launched: lifecycle_guard.provider_launched(),
+        has_prior_error: false,
+        outcome,
+        has_session: session_id.is_some(),
         attempt,
-        budget,
-        session_id.is_some(),
-        lifecycle_guard.provider_launched(),
-    );
+        control_budget: budget,
+        proxy_hops_used,
+        proxy_target_seen: false,
+        finalize_emitted: lifecycle_guard.finalize_emitted(),
+    });
 
-    match dispatch {
-        ControlDispatch::Stop => match control {
+    match decision {
+        LifecycleTransitionDecision::TerminalFailure {
+            error: LifecycleTransitionError::ExplicitControl,
+        } => match control {
             StackControl::Error { reason } => TerminalControlAction::Abort(eyre!(
                 "{}",
                 reason
@@ -103,11 +115,10 @@ pub(super) fn dispatch_terminal_control(
             )),
             _ => TerminalControlAction::Fallthrough,
         },
-        ControlDispatch::Exhausted => TerminalControlAction::Fallthrough,
-        ControlDispatch::Retry {
+        LifecycleTransitionDecision::Reenter(ControlDispatch::Retry {
             delay,
             reenter_preflight,
-        } => {
+        }) => {
             if show_checks {
                 let what = if reenter_preflight { "pre-flight" } else { "the agent" };
                 claudine::harness::report::report_lifecycle_recovery(
@@ -127,7 +138,7 @@ pub(super) fn dispatch_terminal_control(
                 next_attempt: attempt + 1,
             }
         }
-        ControlDispatch::Resume { message } => {
+        LifecycleTransitionDecision::Reenter(ControlDispatch::Resume { message }) => {
             // Honor the provider's resume capability. The CLI-side resume gate
             // surfaces a clear error when the provider cannot resume or the
             // session id is missing.
@@ -154,7 +165,7 @@ pub(super) fn dispatch_terminal_control(
                 next_attempt: attempt + 1,
             }
         }
-        ControlDispatch::ResumeWithoutSession => {
+        LifecycleTransitionDecision::Abort(LifecycleTransitionAbort::ResumeWithoutSession) => {
             TerminalControlAction::Abort(
                 CompositionError::LifecycleResumeWithoutSession {
                     source_path: prompt_state.source_path.clone(),
@@ -162,7 +173,7 @@ pub(super) fn dispatch_terminal_control(
                 .into(),
             )
         }
-        ControlDispatch::Proxy { target } => {
+        LifecycleTransitionDecision::ProxyHandoff { target } => {
             let resolve_ctx = claudine::harness::HarnessResolutionContext {
                 source_path: &prompt_state.source_path,
                 repo_root,
@@ -215,7 +226,9 @@ pub(super) fn dispatch_terminal_control(
             // document's attempt count.
             TerminalControlAction::Continue { next_attempt: 1 }
         }
-        ControlDispatch::Defer { .. } => {
+        LifecycleTransitionDecision::Abort(
+            LifecycleTransitionAbort::DeferredExecutionUnsupported,
+        ) => {
             // `defer` (deferred re-execution) is accepted in every event, but its
             // runtime home — the rendezvous deferred-execution scheduler — is not
             // ready to receive prompts yet, so surface a clear "not implemented"
@@ -227,6 +240,35 @@ pub(super) fn dispatch_terminal_control(
                 }
                 .into(),
             )
+        }
+        LifecycleTransitionDecision::Abort(LifecycleTransitionAbort::ProxyBudgetExhausted) => {
+            let mut chain = proxy.chain.clone();
+            if !chain.iter().any(|path| path == &prompt_state.source_path) {
+                chain.push(prompt_state.source_path.clone());
+            }
+            TerminalControlAction::Abort(CompositionError::LifecycleProxyCycle {
+                source_path: prompt_state.source_path.clone(),
+                target: match control {
+                    StackControl::Proxy { target } => target.clone(),
+                    _ => String::new(),
+                },
+                chain: chain.iter().map(|path| path.display().to_string()).collect(),
+                limit: claudine::composition::MAX_PROXY_HOPS,
+            }
+            .into())
+        }
+        LifecycleTransitionDecision::Continue
+        | LifecycleTransitionDecision::CatchFailure { .. }
+        | LifecycleTransitionDecision::Finalize { .. }
+        | LifecycleTransitionDecision::TerminalSuccess
+        | LifecycleTransitionDecision::TerminalFailure { .. } => {
+            TerminalControlAction::Fallthrough
+        }
+        LifecycleTransitionDecision::Abort(LifecycleTransitionAbort::EvaluationAfterFinalize) => {
+            unreachable!("evaluation errors are handled before control dispatch")
+        }
+        LifecycleTransitionDecision::Reenter(_) => {
+            unreachable!("only retry and resume controls re-enter")
         }
     }
 }

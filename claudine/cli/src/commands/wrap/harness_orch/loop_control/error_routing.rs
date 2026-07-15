@@ -7,7 +7,7 @@ use super::*;
 /// Route a pre-launch setup failure through the stack-aware terminal +
 /// `Finalize` events carrying an `err` payload.
 ///
-/// Mirrors [`LifecycleRunGuard::emit_blocked_or_failure`]'s signal selection
+/// Uses [`LifecycleRunGuard::emit_blocked_or_failure`]'s signal contract
 /// (`Failure` once the provider launched, `Blocked` before) but, unlike the
 /// legacy `emit_blocked_or_err`, runs the typed stack and the `finalize` event
 /// so user-authored `blocked.stack`/`failure.stack`/`finalize.stack` fire with
@@ -29,7 +29,8 @@ use super::*;
 /// `Failure` and runs the failure stack directly via
 /// [`LifecycleRunGuard::run_event_stack`] (bypassing
 /// [`LifecycleRunGuard::record_event_emission`], which would refuse the taken
-/// slot). Mirrors [`run_failure_event_for_downgrade`].
+/// slot). This is the same terminal-slot rule used by
+/// [`run_failure_event_for_downgrade`].
 #[allow(clippy::too_many_arguments)]
 pub(super) fn emit_blocked_finalize_with_err(
     guard: &mut claudine::composition::LifecycleRunGuard<'_>,
@@ -160,8 +161,8 @@ pub(super) fn emit_blocked_finalize_with_err(
 /// Route a **post-`start`** setup failure through the stack-aware `Failure` +
 /// `Finalize` events carrying an `err` payload.
 ///
-/// Mirrors [`emit_blocked_finalize_with_err`] but hardcodes `Failure` as the
-/// terminal signal: these sites run after `start` has fired and pre-flight has
+/// Uses `Failure` as the terminal signal because these sites run after `start`
+/// has fired and pre-flight has
 /// already passed, so the failure is never semantically `Blocked` (which means
 /// pre-flight failed). The harness setup steps between `start` and the first
 /// terminal event — snapshot capture, launch construction, and the
