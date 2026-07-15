@@ -111,6 +111,42 @@ fn introduce_drift(area: &Path) {
     fs::write(&path, text.replace("CLAUDE_MODEL", "DOCTORED_MODEL")).unwrap();
 }
 
+/// Compact snapshot of the human-facing clean report. Detail rows remain
+/// covered by the focused report tests; the top-level lines pin provider and
+/// full-scope artifact ordering without embedding a volatile wall of research
+/// diagnostics.
+#[test]
+fn clean_check_report_summary_matches_phase_1_snapshot() {
+    let fixture = full_fixture();
+    let output = run_gen(fixture.path(), &["check"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("generator output must be UTF-8");
+    let summary = stdout
+        .lines()
+        .filter(|line| !line.starts_with(' '))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert_eq!(
+        summary,
+        "claude: clean (inputs match the committed data.rs)\n\
+codex: clean (inputs match the committed data.rs)\n\
+gemini: clean (inputs match the committed data.rs)\n\
+goose: clean (inputs match the committed data.rs)\n\
+kimi: clean (inputs match the committed data.rs)\n\
+opencode: clean (inputs match the committed data.rs)\n\
+qwen: clean (inputs match the committed data.rs)\n\
+kilo: clean (inputs match the committed data.rs)\n\
+pi: clean (inputs match the committed data.rs)\n\
+antigravity: clean (inputs match the committed data.rs)\n\
+catalog.json: clean (inputs match the committed catalog)\n\
+signals generated.rs: clean (inputs match the committed tables)\n\
+stream vocabulary.rs: clean (inputs match the committed tables)\n\
+families generated.rs: clean (26 family keys compiled)\n\
+roster: every active entry has a wired Provider variant"
+    );
+}
+
 #[test]
 fn clean_area_generates_nothing_and_exits_zero() {
     let fixture = full_fixture();

@@ -43,3 +43,6 @@ tempfile = "3"
 
 # Variant-name introspection for the schema<->catalog compatibility gate
 strum = "0.28"
+
+[dev-dependencies]
+biscuit-hash = { path = "../../biscuit-hash/lib" }

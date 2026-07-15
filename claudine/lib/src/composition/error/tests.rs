@@ -1036,6 +1036,43 @@ fn lifecycle_short_form_removed_status_block_is_escape_free_at_none() {
 }
 
 #[test]
+fn phase_1_plain_composition_error_block_snapshots() {
+    use biscuit_terminal::discovery::detection::ColorDepth;
+
+    let term = Terminal {
+        color_depth: ColorDepth::None,
+        ..Terminal::new_optimistic(80)
+    };
+    let short_form = CompositionError::LifecycleShortFormRemoved {
+        source_path: PathBuf::from("prompts/plan.md"),
+        property: "success".to_string(),
+        raw: "success(\"x\")".to_string(),
+        rewrite: "success: \"x\"".to_string(),
+    }
+    .report_block_error(&term);
+    let selection = CompositionError::NoRunnableProviders.report_block_error(&term);
+
+    assert_eq!(
+        short_form,
+        "⤫ CompositionError: short-form action removed\n\
+┃ \n\
+┃ Short-form lifecycle action `success(\\\"x\\\")` in `success` in\n\
+┃ prompts/plan.md has been removed.\n\
+┃ \n\
+┃ Rewrite to positional form: `success: \\\"x\\\"`\n\
+┃ \n\
+┃ Use positional form (`verb: value`) or key/value form (`{ action: verb,\n\
+┃ ... }`). `verb(args)` is no longer accepted."
+    );
+    assert_eq!(
+        selection,
+        "⤫ CompositionError: composition failed\n\
+┃ \n\
+┃ no runnable providers available (all excluded or uninstalled)"
+    );
+}
+
+#[test]
 fn lifecycle_unknown_verb_display_includes_rewrite() {
     let err = CompositionError::LifecycleUnknownVerb {
         source_path: PathBuf::from("prompts/plan.md"),
