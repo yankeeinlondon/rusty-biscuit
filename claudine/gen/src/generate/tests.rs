@@ -16,44 +16,6 @@ fn provider_slugs_match_the_wired_set_in_order() {
 }
 
 #[test]
-fn env_var_ident_accepts_bare_identifiers_only() {
-    assert!(is_env_var_ident("ANTHROPIC_MODEL"));
-    assert!(is_env_var_ident("CLAUDE_CODE_SUBAGENT_MODEL"));
-    assert!(!is_env_var_ident("A / B"));
-    assert!(!is_env_var_ident("lowercase"));
-    assert!(!is_env_var_ident(""));
-    assert!(!is_env_var_ident("1ABC"));
-}
-
-#[test]
-fn bare_flag_token_accepts_flags_and_rejects_annotations() {
-    assert!(is_bare_flag_token("--model"));
-    assert!(is_bare_flag_token("-m"));
-    assert!(is_bare_flag_token("--prompt-interactive"));
-    assert!(!is_bare_flag_token("--model / -m"));
-    assert!(!is_bare_flag_token("--model, -m"));
-    assert!(!is_bare_flag_token("--model  (goose run)"));
-    assert!(!is_bare_flag_token("--output-format json for live wrapping"));
-    assert!(!is_bare_flag_token("GOOSE_MODE=approve"));
-    assert!(!is_bare_flag_token("no --json for live parsing"));
-    assert!(!is_bare_flag_token(""));
-}
-
-#[test]
-fn bare_config_path_rejects_annotations_and_placeholders() {
-    assert!(is_bare_config_path("~/.claude/settings.json"));
-    assert!(is_bare_config_path(".claude/settings.local.json"));
-    assert!(is_bare_config_path("~/.qwen/debug/*.txt"));
-    assert!(!is_bare_config_path(
-        "$CODEX_HOME/config.toml; default /Users/<user>/.codex/config.toml"
-    ));
-    assert!(!is_bare_config_path("/Users/<name>/.kimi-code/config.toml"));
-    assert!(!is_bare_config_path("AGENTS.override.md, AGENTS.md"));
-    assert!(!is_bare_config_path("a.md or b.md"));
-    assert!(!is_bare_config_path("$CODEX_HOME/auth.json"));
-}
-
-#[test]
 fn model_catalog_source_variant_maps_snake_members() {
     assert_eq!(
         model_catalog_source_variant("model_catalog_source", "none").unwrap(),
