@@ -68,8 +68,9 @@ pub use lifecycle_executor::{
     LifecycleEventOutcome, ShellRunner, StackControl, StackExecutionContext, SystemShellRunner,
 };
 pub use lifecycle::runtime::{
-    IterationSummarySignals, TerminalRoutingDecision, route_blocked_finalize,
-    route_failure_finalize, route_loop_gate,
+    IterationSummarySignals, LifecycleTransitionAbort, LifecycleTransitionDecision,
+    LifecycleTransitionError, LifecycleTransitionInput, TerminalRoutingDecision,
+    decide_lifecycle_transition, route_blocked_finalize, route_failure_finalize, route_loop_gate,
 };
 pub use looping::{
     extract_control_variables, resolve_fail_fast_from_env, resolve_loop_config,
