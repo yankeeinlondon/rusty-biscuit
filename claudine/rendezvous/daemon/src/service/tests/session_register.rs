@@ -1,120 +1,11 @@
+//! Sessions-active register projection: STARTED/UPDATED merge only
+//! descriptive attributes (daemon-owned clocks and status are stamped by
+//! the reducer), ENDED removes the entry, the per-producer status reducer
+//! honors causal revisions and cross-producer precedence, and the atomic
+//! read-modify-write barrier prevents UPDATE-after-END resurrection and
+//! START/END lost updates.
+
 use super::*;
-use crate::batcher::{BatcherConfig, BatcherWorker, spawn};
-use crate::projection::Projection;
-use crate::session_log::SessionLogManager;
-use crate::storage::Storage;
-use rendezvous_core::{ChunkConfig, NodeIdentity};
-use std::sync::Arc;
-use std::time::Duration;
-use tempfile::TempDir;
-
-struct Harness {
-    service: RendezvousService,
-    _worker: BatcherWorker,
-    _tmp: TempDir,
-}
-
-fn harness() -> Harness {
-    let tmp = TempDir::new().expect("tempdir");
-    let storage = Storage::open(tmp.path().join("session.redb")).expect("storage");
-    let projection = Projection::in_memory().expect("projection");
-    let worker = spawn(projection.clone(), BatcherConfig {
-        flush_interval: Duration::from_millis(20),
-        flush_size: 16,
-    });
-    let identity = Arc::new(NodeIdentity::from_seed([5u8; 32]));
-    let session_log = SessionLogManager::new(
-        storage.clone(),
-        worker.handle(),
-        projection.clone(),
-        ChunkConfig::default(),
-        Arc::clone(&identity),
-    )
-    .expect("mgr");
-    let registers = crate::register::RegisterStore::new(
-        storage.clone(),
-        Arc::clone(&identity),
-    )
-    .expect("registers");
-    let sync_service = SyncService::new(
-        session_log.clone(),
-        registers.clone(),
-        storage.clone(),
-        Arc::clone(&identity),
-    );
-    let service = RendezvousService::new(
-        session_log,
-        projection,
-        identity,
-        storage,
-        sync_service,
-        registers,
-    );
-    Harness {
-        service,
-        _worker: worker,
-        _tmp: tmp,
-    }
-}
-
-#[tokio::test]
-async fn ping_echoes_nonce_and_reports_version() {
-    let h = harness();
-    let response = h
-        .service
-        .ping(Request::new(PingRequest {
-            nonce: "abc-123".into(),
-        }))
-        .await
-        .expect("ping ok");
-    let body = response.into_inner();
-    assert_eq!(body.nonce, "abc-123");
-    assert_eq!(body.daemon_version, DAEMON_VERSION);
-    assert!(body.timestamp_unix_ms > 0);
-}
-
-#[tokio::test]
-async fn status_reports_the_local_node_id() {
-    let h = harness();
-    let body = h
-        .service
-        .status(Request::new(StatusRequest {}))
-        .await
-        .expect("status ok")
-        .into_inner();
-    // The dashboard uses this to tell its own registers (always
-    // fresh) apart from synced peer replicas.
-    assert_eq!(body.node_id, h.service.identity.node_id());
-    assert!(!body.node_id.is_empty());
-}
-
-#[tokio::test]
-async fn append_then_list_chunk_entries() {
-    let h = harness();
-    let node_id = h.service.identity.node_id();
-    h.service
-        .append_entry(Request::new(AppendEntryRequest {
-            owner_node_id: String::new(),
-            session_id: "s-1".into(),
-            source: "test".into(),
-            level: "info".into(),
-            message: "hello".into(),
-            metadata_json: String::new(),
-        }))
-        .await
-        .expect("append");
-    let chunk_id = format!("session/{node_id}/s-1/part/0");
-    let listed = h
-        .service
-        .list_chunk_entries(Request::new(ListChunkEntriesRequest {
-            chunk_id: chunk_id.clone(),
-        }))
-        .await
-        .expect("list")
-        .into_inner();
-    assert_eq!(listed.entries.len(), 1);
-    assert_eq!(listed.entries[0].message, "hello");
-}
 
 #[tokio::test]
 async fn session_events_drive_the_active_register() {
@@ -634,41 +525,4 @@ fn started_projects_active_from_lifecycle_slot() {
         entry_field(&store, "s", "status_producer"),
         Some(serde_json::json!("lifecycle")),
     );
-}
-
-#[tokio::test]
-async fn session_event_validation_rejects_bad_input() {
-    let h = harness();
-    let empty_id = h
-        .service
-        .report_session_event(Request::new(rendezvous_core::ReportSessionEventRequest {
-            session_id: String::new(),
-            kind: rendezvous_core::SessionEventKind::Started as i32,
-            details_json: String::new(),
-            status: None,
-        }))
-        .await;
-    assert!(empty_id.is_err());
-
-    let bad_details = h
-        .service
-        .report_session_event(Request::new(rendezvous_core::ReportSessionEventRequest {
-            session_id: "sess-2".into(),
-            kind: rendezvous_core::SessionEventKind::Started as i32,
-            details_json: "[1,2,3]".into(),
-            status: None,
-        }))
-        .await;
-    assert!(bad_details.is_err(), "non-object details must be rejected");
-
-    let unspecified = h
-        .service
-        .report_session_event(Request::new(rendezvous_core::ReportSessionEventRequest {
-            session_id: "sess-3".into(),
-            kind: rendezvous_core::SessionEventKind::Unspecified as i32,
-            details_json: String::new(),
-            status: None,
-        }))
-        .await;
-    assert!(unspecified.is_err());
 }
