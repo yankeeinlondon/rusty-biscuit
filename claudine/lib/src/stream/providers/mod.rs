@@ -11,6 +11,8 @@ pub mod qwen;
 /// Every parser's `classify_error*` consults [`vocabulary::error_keywords`]
 /// for its runtime provider identity.
 mod vocabulary;
+#[cfg(test)]
+mod vocabulary_tests;
 
 // Re-exports so the moved parser files can keep their original `super::`
 // references without modification.  `super` inside `providers/{name}.rs`

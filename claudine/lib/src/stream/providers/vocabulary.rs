@@ -27,12 +27,12 @@ use crate::provider_id::Provider;
 pub(crate) static CLAUDE_VOCABULARY: ErrorKeywords = ErrorKeywords {
     kind_buckets: &[
         (SemanticErrorKind::ApiRemote, &["billing", "rate_limit", "ratelimit", "quota", "overload", "api_error", "upstream", "server"]),
-        (SemanticErrorKind::Configuration, &["auth", "permission", "config"]),
+        (SemanticErrorKind::Configuration, &["auth", "permission", "config", "oauth_org_not_allowed", "invalid_request", "model_not_found"]),
         (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "abort"]),
     ],
     msg_buckets: &[
-        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "credit", "api error", "overloaded"]),
-        (SemanticErrorKind::Configuration, &["api key", "authentication", "not authorized", "permission denied"]),
+        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "credit", "api error", "overloaded", "server is temporarily limiting requests", "request rejected (429)", "is temporarily unavailable, so auto mode cannot determine"]),
+        (SemanticErrorKind::Configuration, &["api key", "authentication", "not authorized", "permission denied", "not logged in", "invalid api key", "could not resolve authentication method", "oauth token revoked", "oauth token has expired", "login expired"]),
         (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "aborted"]),
     ],
     code_buckets: &[],
@@ -55,13 +55,14 @@ pub(crate) static CODEX_VOCABULARY: ErrorKeywords = ErrorKeywords {
 
 pub(crate) static GEMINI_VOCABULARY: ErrorKeywords = ErrorKeywords {
     kind_buckets: &[
-        (SemanticErrorKind::Configuration, &["auth", "permission", "config", "denied"]),
+        (SemanticErrorKind::Configuration, &["auth", "permission", "config", "denied", "forbidden", "unauthorized"]),
         (SemanticErrorKind::ApiRemote, &["rate", "quota", "billing"]),
         (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "abort"]),
         (SemanticErrorKind::ApiRemote, &["api", "upstream", "server"]),
+        (SemanticErrorKind::AgentNative, &["fatalturnlimitederror"]),
     ],
     msg_buckets: &[
-        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "api error"]),
+        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "api error", "overloaded", "resource_exhausted", "no capacity available for model"]),
         (SemanticErrorKind::Configuration, &["api key", "authentication", "not authorized", "permission denied"]),
         (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "aborted"]),
     ],
@@ -89,6 +90,10 @@ pub(crate) static KIMI_VOCABULARY: ErrorKeywords = ErrorKeywords {
         (-32601, SemanticErrorKind::AgentNative),
         (-32602, SemanticErrorKind::AgentNative),
         (-32603, SemanticErrorKind::AgentNative),
+        (-32000, SemanticErrorKind::AgentNative),
+        (-32001, SemanticErrorKind::Configuration),
+        (-32002, SemanticErrorKind::Configuration),
+        (-32003, SemanticErrorKind::ApiRemote),
     ],
 };
 
@@ -100,8 +105,8 @@ pub(crate) static OPENCODE_VOCABULARY: ErrorKeywords = ErrorKeywords {
         (SemanticErrorKind::ApiRemote, &["api", "upstream", "server"]),
     ],
     msg_buckets: &[
-        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "api error", "api timeout"]),
-        (SemanticErrorKind::Configuration, &["api key", "authentication", "not authorized", "permission denied", "model not found", "invalid model", "providermodelnotfound"]),
+        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "api error", "api timeout", "server error", "connection reset by server", "provider response headers timed out", "response decompression failed"]),
+        (SemanticErrorKind::Configuration, &["api key", "authentication", "not authorized", "permission denied", "model not found", "invalid model", "providermodelnotfound", "unauthorized:", "forbidden:"]),
         (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "aborted"]),
     ],
     code_buckets: &[],
@@ -116,8 +121,9 @@ pub(crate) static QWEN_VOCABULARY: ErrorKeywords = ErrorKeywords {
     ],
     msg_buckets: &[
         (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "api error"]),
-        (SemanticErrorKind::Configuration, &["api key", "authentication", "not authorized", "permission denied"]),
+        (SemanticErrorKind::Configuration, &["api key", "authentication", "not authorized", "permission denied", "no auth type is selected"]),
         (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "aborted"]),
+        (SemanticErrorKind::AgentNative, &["loop detection halted the run"]),
     ],
     code_buckets: &[],
 };
@@ -130,8 +136,8 @@ pub(crate) static KILO_VOCABULARY: ErrorKeywords = ErrorKeywords {
         (SemanticErrorKind::ApiRemote, &["api", "upstream", "server"]),
     ],
     msg_buckets: &[
-        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "api error", "api timeout"]),
-        (SemanticErrorKind::Configuration, &["api key", "authentication", "not authorized", "permission denied", "model not found", "invalid model", "providermodelnotfound"]),
+        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "api error", "api timeout", "server error", "response decompression failed"]),
+        (SemanticErrorKind::Configuration, &["api key", "authentication", "not authorized", "permission denied", "model not found", "invalid model", "providermodelnotfound", "please reauthenticate with the copilot provider", "unauthorized:", "forbidden:"]),
         (SemanticErrorKind::Interrupted, &["interrupt", "cancel", "aborted"]),
     ],
     code_buckets: &[],
@@ -140,7 +146,7 @@ pub(crate) static KILO_VOCABULARY: ErrorKeywords = ErrorKeywords {
 pub(crate) static PI_VOCABULARY: ErrorKeywords = ErrorKeywords {
     kind_buckets: &[],
     msg_buckets: &[
-        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "out of credits", "overloaded", "503", "api error", "api timeout"]),
+        (SemanticErrorKind::ApiRemote, &["rate limit", "quota", "billing", "out of credits", "overloaded", "503", "api error", "api timeout", "insufficient_quota", "out of budget", "quota exceeded", "too many requests", "service unavailable", "server error", "internal error", "provider returned error", "network error", "connection refused", "fetch failed", "reset before headers", "socket hang up", "websocket closed", "websocket error", "stream ended before message_stop", "http2 request did not get a response", "resourceexhausted"]),
         (SemanticErrorKind::Configuration, &["api key", "authentication", "no api key", "not authorized", "no models available", "model not found", "invalid model"]),
         (SemanticErrorKind::Interrupted, &["abort", "cancel", "interrupt"]),
     ],
