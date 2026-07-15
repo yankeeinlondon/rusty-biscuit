@@ -1239,7 +1239,11 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 - `suggestions_for_path(&SimplifiedSchema, &[&str])` — query lint-valid completion candidates for a property path; returns `Option<SuggestionQuery>` with YAML-safe insertion text.
 - `parse_standalone_schema_document(&str, path)` — classify and parse a standalone YAML file as a SimplifiedSchema authoring document; returns `Option<StandaloneSchemaDocument>` (`None` for ordinary YAML / raw JSON Schema).
 - `darkmatter_base_schema()` — the Darkmatter base frontmatter schema (authored in `docs/schemas/darkmatter.yaml`) as a `SimplifiedSchema`.
-- `darkmatter_base_json_schema()` — the same base schema compiled to Draft 2020-12 JSON Schema.
+- `darkmatter_base_json_schema()` — the same base schema compiled to an independently owned Draft 2020-12 JSON Schema value.
+- `darkmatter_base_json_schema_ref()` — a read-only borrow of the process-cached JSON Schema, avoiding a deep clone.
+
+Use `DarkmatterSchemas::with_darkmatter_baseline_json_schema()` when configuring
+the built-in baseline; each configured instance shares the cached JSON Schema.
 
 ### Span-Aware Validation and Normalization
 
