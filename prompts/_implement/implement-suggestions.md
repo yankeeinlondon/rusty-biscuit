@@ -15,6 +15,12 @@ ready: "{{ review && file_exists(review) ? frontmatter(review, 'ready') : null }
 design: "{{ file_exists(dirname(review) + '/design.md') ? dirname(review) + '/design.md' : null }}"
 
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
+initialize: 
+    stack:
+        - when: ready
+          action:
+              - message: "review implementation for `{{parent_dir(review)}}` in _{{ctx.area}}_ not necessary; already production ready"
+              - stop
 
 start:
     message: "🏃 starting implementation #{{ file_index(review) }} of `{{ parent_dir(review) }}` review suggestions (_using_ {{ctx.agent}}/{{ctx.model}} _in_ {{ctx.area}})"
