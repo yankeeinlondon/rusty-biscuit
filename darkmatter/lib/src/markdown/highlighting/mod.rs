@@ -18,6 +18,7 @@ pub(crate) use resolve::Surface;
 
 use crate::markdown::language_grammar::LanguageGrammar;
 
+use std::fmt::Write as _;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::Theme as SyntectTheme;
 use syntect::parsing::SyntaxSet;
@@ -35,7 +36,7 @@ use syntect::util::LinesWithEndings;
 #[derive(Debug)]
 pub struct CodeHighlighter {
     syntax_set: &'static SyntaxSet,
-    theme: SyntectTheme,
+    theme: &'static SyntectTheme,
     color_mode: ColorMode,
 }
 
@@ -87,7 +88,7 @@ impl CodeHighlighter {
 
     /// Returns a reference to the current theme.
     pub fn theme(&self) -> &SyntectTheme {
-        &self.theme
+        self.theme
     }
 
     /// Returns the current color mode.
@@ -186,10 +187,11 @@ pub fn highlight_yaml_lines_with_theme(
             if text_no_newline.is_empty() {
                 continue;
             }
-            buf.push_str(&format!(
+            let _ = write!(
+                buf,
                 "\x1b[38;2;{};{};{}m{}",
                 style.foreground.r, style.foreground.g, style.foreground.b, text_no_newline
-            ));
+            );
         }
         // Reset SGR at end-of-line so styling does not bleed into anything
         // appended after the highlighted slice (e.g. trailing whitespace
