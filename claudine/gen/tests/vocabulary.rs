@@ -47,12 +47,27 @@ fn every_research_vocabulary_projects_to_runtime_strings() {
 fn kimi_research_projects_the_complete_jsonrpc_code_mapping() {
     let inputs = load(area(), "kimi", &[RESEARCH_TOPIC]).unwrap();
     let vocab = load_error_vocabulary(&inputs).unwrap().unwrap();
-    // AUTH_EXPIRED, CHAT_PROVIDER_ERROR, then the five standard JSON-RPC codes.
-    let codes: Vec<i64> = vocab.code_buckets.iter().map(|c| c.code).collect();
-    assert_eq!(codes, [-32004, -32005, -32700, -32600, -32601, -32602, -32603]);
-    assert_eq!(vocab.code_buckets[0].kind, "configuration");
-    assert_eq!(vocab.code_buckets[1].kind, "api_remote");
-    assert!(vocab.code_buckets[2..].iter().all(|c| c.kind == "agent_native"));
+    let mapping: Vec<(i64, &str)> = vocab
+        .code_buckets
+        .iter()
+        .map(|bucket| (bucket.code, bucket.kind.as_str()))
+        .collect();
+    assert_eq!(
+        mapping,
+        [
+            (-32004, "configuration"),
+            (-32005, "api_remote"),
+            (-32700, "agent_native"),
+            (-32600, "agent_native"),
+            (-32601, "agent_native"),
+            (-32602, "agent_native"),
+            (-32603, "agent_native"),
+            (-32000, "agent_native"),
+            (-32001, "configuration"),
+            (-32002, "configuration"),
+            (-32003, "api_remote"),
+        ]
+    );
 }
 
 #[test]
@@ -68,7 +83,7 @@ fn build_vocabulary_is_deterministic_and_well_formed() {
 }
 
 #[test]
-fn kilo_research_is_a_verbatim_ordered_copy_of_opencode() {
+fn kilo_research_preserves_shared_seed_order() {
     let opencode = load_error_vocabulary(
         &load(area(), "opencode", &[RESEARCH_TOPIC]).unwrap(),
     )
@@ -77,8 +92,20 @@ fn kilo_research_is_a_verbatim_ordered_copy_of_opencode() {
     let kilo = load_error_vocabulary(&load(area(), "kilo", &[RESEARCH_TOPIC]).unwrap())
         .unwrap()
         .unwrap();
+    assert_eq!(opencode.kind_buckets, kilo.kind_buckets);
     assert_eq!(
-        opencode, kilo,
-        "Kilo's graduated research must remain an ordered copy of OpenCode's table"
+        &opencode.msg_buckets[0].needles[..6],
+        &kilo.msg_buckets[0].needles[..6]
+    );
+    assert_eq!(
+        &opencode.msg_buckets[1].needles[..7],
+        &kilo.msg_buckets[1].needles[..7]
+    );
+    assert_eq!(opencode.msg_buckets[2], kilo.msg_buckets[2]);
+    assert!(opencode.msg_buckets[0].needles.contains(&"connection reset by server".to_owned()));
+    assert!(
+        kilo.msg_buckets[1]
+            .needles
+            .contains(&"please reauthenticate with the copilot provider".to_owned())
     );
 }
