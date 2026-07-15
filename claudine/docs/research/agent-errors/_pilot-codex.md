@@ -1,127 +1,72 @@
-# Codex Pilot — telemetry, review, and checkpoint
+# Codex Pilot — live telemetry and retrospective checkpoint
 
-Increment **B2** of spec `2026-07-11-provider-errors-as-data` (Phase 5 of the
-execution plan). This records the Codex pilot's telemetry, the broad-substring
-false-positive review, the signals-topic coordination outcome, and the state of
-the mandatory human checkpoint.
+Increment **B2** of spec `2026-07-11-provider-errors-as-data`. This records the
+real Codex research execution, deterministic-gate outcome, collision review,
+and Ken's accepted retrospective checkpoint.
 
-## How the pilot was run
+## Execution
 
-The live fleet (`claudine sequence` over
-[`_fleet.md`](./_fleet.md), provider OpenCode / `kimi-for-coding/k2p7`) spawns a
-networked agentic research session and is **not** runnable in this
-non-interactive execution session. The pilot was instead executed by the
-implementing agent acting as the researcher: [`codex.md`](./codex.md) was
-authored against the Phase-A seed
-([`_seeds/codex.yaml`](./_seeds/codex.yaml)) and the sibling
-`signals/codex.md` research, then run through the **exact** mechanical
-verification the fleet's `success` stack runs — `md schema validate` and the
-deterministic gate (`claudine-gen agent-errors check`). The implementation review
-accepted this exact mechanical proxy because a live fleet run was unavailable;
-the schema, prompt, gate, and their behavior are all exercised here.
+The live roster sequence ran on 2026-07-14 with:
 
-## Deterministic-gate telemetry
+```sh
+claudine sequence docs/research/agent-errors/_fleet.md -y --codex \
+  -c 'model_reasoning_effort="low"'
+```
 
-Checks in the gate (`gen/src/agent_errors_check.rs`): seed preservation, needle
-hygiene, provenance coherence, invented-seed, motivating-class coverage.
+The Codex step was a real `source=exec` session in the provider-errors
+worktree. Codex retained rollout
+`019f62bc-375a-7560-8c52-ae00f441edb9`, started at 15:25:29 PDT, using
+resolved model `gpt-5.6-sol` with low reasoning effort. The prompt's `model`
+selector was `default`, which is why the research frontmatter records
+`model: default`; the rollout metadata records the resolved model.
 
-| Run | Input | Checks fired | Findings written | Findings file | Resume trigger |
-|---|---|---|---|---|---|
-| Clean (committed `codex.md`) | preserves all seeds, `overloaded` documented, capacity gap recorded | 0 | 0 | `status: clean` | none |
-| Broken control (dropped `quota` seed, uncited `upstream`, no capacity coverage) | — | 3 | 3 | written | would fire one resume |
+[`codex.md`](./codex.md) was saved at 15:28:05. The success lifecycle then
+validated its schema and ran the deterministic gate, which wrote an explicit
+clean outcome at 15:28:50. The step therefore reached clean in 3 minutes 21
+seconds from session start.
 
-Broken-control findings (verbatim, the payload a resume message would carry):
+## Validate-and-resume telemetry
 
-1. `seed_removal` / `kind` — seeded `quota` missing (R1).
-2. `provenance_coherence` / `kind` — `upstream` has `evidence: source_code` but
-   no `source`.
-3. `motivating_class` — no overload/capacity vocabulary and no `gaps` entry.
+| Measure | Observed result |
+|---|---|
+| Provider sessions | 1 |
+| Research attempts | 1 |
+| Resumes fired | 0 |
+| Deterministic findings | 0 |
+| Final outcome | `status: clean` |
+| Budget | 1 of the initial attempt plus 2 allowed remediation turns used |
 
-Observations:
+The clean first attempt establishes that the live provider received the fleet
+prompt, wrote the intended document, retained every seed, supplied coherent
+provenance, and completed within the configured budget. No correction prompt
+was needed. Synthetic lifecycle tests continue to cover the findings/resume
+and exhausted-budget paths that a clean live document cannot exercise.
 
-- **Findings emitted:** the committed document is clean — 0 findings and an
-  explicit `status: clean` outcome report.
-  All five check classes are demonstrably wired (three fired on the control).
-- **Resumes fired:** 0 on the clean document. The
-  `frontmatter(findings, 'status') == 'findings'` guard in `_fleet.md` only
-  fires for a findings outcome, so a clean run
-  performs no resume — the intended behavior.
-- **Convergence:** the clean document converged in a single authoring pass
-  because it was written seed-first with provenance. The broken control shows
-  the mechanism would surface precise, actionable findings for a resume.
-- **Budget fit (`max_attempts: 2`):** all three control findings are
-  single-edit corrections (re-add a seed, add a `source`, add a capacity needle
-  or gap). Two attempts is comfortably sufficient for this failure profile; no
-  evidence the budget is too small. Recommend keeping `max_attempts: 2` for the
-  fleet.
+## Collision review
 
-## Broad-substring false-positive review
+The accepted Codex additions remain narrow message needles in the first
+`api_remote` bucket:
 
-Per Phase 5, reviewing `rate`, `model`, `auth`, and numeric HTTP terms against
-representative non-error prose and earlier buckets:
+- `overloaded`
+- `selected model is at capacity`
 
-- **`overloaded` (the pilot's initial addition)** — narrow and unambiguous; absent
-  from Codex success/progress frames (`turn.completed`, `agent_message`, tool
-  item events). Appended *after* the seeded needles in the first `api_remote`
-  message bucket, so seed precedence is unchanged. **Safe.**
-- **`auth` (seed, kind branch)** — broad but sticky (Phase-A seed); untouched.
-  Matches "auth"/"authenticated"/"authorization"; acceptable in the
-  `configuration` bucket. No change.
-- **`api` (seed, kind branch)** — the broadest seed; matches any "api" prose.
-  Sticky; untouched. Flagged in `codex.md` collisions so Phase C is aware.
-- **Bare HTTP numbers (`429`/`503`/`401`/`403`)** — **rejected** as substring
-  needles: as raw substrings they collide with token counts, IDs, and
-  timestamps in non-error frames. Recorded as the `numeric-http-codes` gap for a
-  future exact-match / `code_buckets`-style surface. Not graduated.
-- **`model`** — not proposed (would collide with every model-name mention in
-  normal Codex output).
+Both are appended after the immutable seeds. Structured configuration kinds
+still win before message classification, and ordinary capacity-planning prose
+without the exact phrase remains `AgentNative`. Bare HTTP numbers and the broad
+words `model` and `capacity` were not added as message needles.
 
-## Hardening outcome (prompt / schema / validator)
+## Signals boundary
 
-The pilot exposed **no defect** requiring a code change to the schema, fleet
-prompt, or validator:
+Usage-cap and rate-limit detection records remain in
+[`signals/codex.md`](../signals/codex.md). This topic owns only the rendering
+classification vocabulary. [`_signals-overlap.md`](./_signals-overlap.md)
+records that boundary.
 
-- The schema accepted the nested needle/provenance shape and rejected the
-  invalid-provenance fixture (existing `gen/tests/agent_errors_check.rs`
-  coverage).
-- The gate's five checks all fired correctly on the control and stayed silent on
-  the clean document; explicit outcome replacement behaved as specified.
-- The fleet `success` stack's status-guarded `resume` and clean branches are
-  regression-locked by `gen/tests/agent_errors_check.rs`.
+## Human checkpoint (◆ B2) — accepted retrospectively
 
-**Recommendation carried to the checkpoint (not implemented — Phase C scope):**
-add a validator check that flags bare numeric-HTTP substrings (`\b(4|5)\d\d\b`)
-proposed as `kind_buckets`/`msg_buckets` needles, steering them toward an
-exact-match surface. Deferred deliberately: it is a *reconciliation* rule (R2a
-collision discipline), the pilot produced no such needle to test it against, and
-Rule 3 (surgical changes) argues against speculative validator surface before a
-real failure motivates it.
-
-## Signals-topic coordination (D9)
-
-Recorded in [`_signals-overlap.md`](./_signals-overlap.md). Summary: Codex's
-usage-cap / rate-limit **detection** records stay in `signals/`; `codex.md`
-cites them rather than duplicating. The graduated `overloaded` needle is a
-*rendering* concern unique to this topic. No `_overlap-exclusions.yaml` is
-needed because the `agent-errors` gate does not replay cross-topic fixtures.
-
-## Human checkpoint (◆ B2) — ACCEPTED
-
-Spec B2 and plan Phase 5 required a human (Ken) checkpoint before Phase 6 to
-approve:
-
-1. the Codex research output ([`codex.md`](./codex.md)),
-2. the validate-and-resume telemetry (above), and
-3. whether the D10 validate-and-resume pattern graduates into the general fleet
-   recipe (tracked as `features/_unscheduled/fleet-validate-and-resume.md`, P5).
-
-The implementation review accepted the Codex output and telemetry and graduated
-the D10 pattern into the general fleet recipe. Phases 6 through 8 subsequently
-completed; this checkpoint is no longer a blocker. Its mechanical prerequisites
-were green:
-
-- `md schema validate 'docs/research/agent-errors/codex.md'` → valid.
-- `claudine-gen agent-errors check codex` → explicit clean outcome report.
-- `claudine-gen check codex` → `codex: clean` and `stream vocabulary.rs: clean`
-  (the archived seed and research projection preserve the pre-graduation
-  classification behavior apart from adjudicated additions).
+The full roster was launched as one sequence, so the originally specified
+human pause between the Codex pilot and the remaining providers did not occur.
+After the run, the live Codex rollout, clean gate result, convergence, and
+budget fit were reviewed. Ken accepted this retrospective B2 checkpoint on
+2026-07-14 and authorized C2/C3. The sequencing variance did not conceal a
+repair need: Codex and every later provider converged in one attempt.
