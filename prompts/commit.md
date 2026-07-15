@@ -1,11 +1,16 @@
 ---
 lessons_learned: "@.claudine/memory/commits.md"
-timeout: 20m
+timeout: 30m
 step_timeout: 12m
 show_system_prompt: false
 operation: commit
 agent: opencode
 model: minimax/MiniMax-M3
+success: 
+    message: "staged files committed in {{ctx.area}}"
+    stack:
+        - action:
+            - shell: gitnexus analyze --force
 ---
 
 # Commit Staged Files

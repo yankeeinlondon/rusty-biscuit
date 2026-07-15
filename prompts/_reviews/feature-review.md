@@ -9,8 +9,8 @@ description: "Reviews a _feature specification_ to make sure that the specificat
 dir: "{{dirname(spec)}}"
 design: "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}"
 iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1  : 1   }}"
-review: {{ dirname(spec) + '/review-' + iteration + '.md' }}
-previous: {{ iteration < 2 ? null : 'decrement_file_index(review)' }}
+review: "{{ dirname(spec) + '/review-' + iteration + '.md' }}"
+previous: {{ iteration < 2 ? null : decrement_file_index(review) }}
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 start:
     message: "👓 starting {{feature_or_fix}} review #{{iteration}} of `{{parent_dir(spec)}}` (_in the **{{ctx.area}}** package area_)"
@@ -27,12 +27,6 @@ success:
               - warn: "{{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready: <blue>{{link(review)}}</blue>"
               - message: "⚠️  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed but was deemed NOT production ready"
               - effect: sad-trombone
-        - when: "!file_exists(review)"
-          action:
-              - message: "💥 the agent 'successfully' completed the review but the review does not exist (at least in the location it was supposed to)!"
-              - warn: "the agent believes it successful completed the review but it does not exist (at least not in the location it was supposed to): {{review}} ... will try to resume and get the agent to correct this"
-              - effect: sneeze
-              - resume: "the review file was supposed to be saved to '{{review}}' but there is no file saved to that location!"
 failure:
     stderr: "{{feature_or_fix}} review {{iteration}} for `{{parent_dir(spec)}}` in the {{ctx.area}} package area failed to complete!"
     message: "💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area }}** failed to complete ({{err.msg}})!"
@@ -118,10 +112,10 @@ test is at the wrong level under "Findings" with severity at least "high".
     ::block when="iteration < 2"
     - set the `previous` property to "{{parent_dir(previous)}}/{{basename(previous)}}"
     ::end-block
-::block when="iteration <  2"
+::block when="iteration >  1"
 - Now set the frontmatter properties of the _previous review_ located at @{{previous}}:
-- set the `next` property on the _previous review_ to "{{parent_dir(review)}}/{{basename(review)}}"
-- set the `implemented` property to `true`
+    - set the `next` property on the _previous review_ to "{{parent_dir(review)}}/{{basename(review)}}"
+    - set the `implemented` property to `true`
 ::end-block
 - Set the spec file's ({{spec}}) `review_iterations` Frontmatter property to '{{iteration}}'
 - Summarize to the caller what was found and be sure to mention whether the review deemed the {{feature_or_fix}} to be **production ready** or not.

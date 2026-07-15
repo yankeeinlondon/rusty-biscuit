@@ -11,7 +11,7 @@ underlying: {{ spec || review }}
 underlying_name: '{{ spec ? "spec" : "review" }}'
 plan: "{{ dirname(spec || review) + '/plan.md' }}"
 start:
-    message: '{{ spec ? "🖊️ creating a plan for the `{{spec}}` specification" : review ? "🖊️ creating a plan for the `{{review}}` review" : "" }}'
+    message: "🖊️ creating a plan for the `{{underlying}}` {{underlying_name}}"
 success:
     stderr: "The `{{link(plan)}}` _plan_ has been created"
     message: "✅  the _plan_ for the spec `{{parent_dir(plan)}}` was created _at_ {{ctx.time}}"
