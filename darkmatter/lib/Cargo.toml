@@ -103,7 +103,6 @@ jsonschema = { version = "0.42", default-features = false }
 # added build cost; used both to select `jsonschema`'s fancy-regex pattern engine
 # for such schemas and to validate emitted patterns at conversion time.
 fancy-regex = "0.17"
-sha2 = "0.10"
 
 [dev-dependencies]
 # Re-declares the renderable path dep with the test-only `hint-access-counter`

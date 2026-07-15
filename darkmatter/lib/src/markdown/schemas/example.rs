@@ -43,7 +43,7 @@
 
 use std::{
     collections::HashMap,
-    sync::{Mutex, OnceLock},
+    sync::{LazyLock, Mutex, OnceLock},
 };
 
 use serde_json::Value;
@@ -53,8 +53,21 @@ use super::{
     errors::SchemaError,
     simplified::parse_yaml_schema,
     simplified::to_json_schema,
-    validate::build_validator,
+    validate::{ValidatorCache, build_validator},
 };
+
+/// Process-wide cache for `example(...)` returns-target validators (F28).
+///
+/// A property carrying multiple `example(...)` references — or the same schema
+/// resolved more than once — otherwise rebuilds the identical target validator
+/// per reference per resolution. The returns-target is compiled with no
+/// file-reference anchors (`build_validator(target, None, None)` — the check is
+/// structural/type-level, never filesystem existence), so a cache keyed on the
+/// target JSON alone returns a byte-identical validator on a hit. Kept separate
+/// from the effective-schema and coercion caches so these small target schemas
+/// do not churn their LRU budgets.
+static RETURNS_TARGET_VALIDATOR_CACHE: LazyLock<ValidatorCache> =
+    LazyLock::new(ValidatorCache::new);
 
 /// The example-artifact envelope, authored in the SimplifiedSchema grammar. The
 /// on-disk `example.yaml` fixture under the schema-plus feature directory is the
@@ -235,8 +248,9 @@ pub fn validate_returns_against_target(
     // to its string form) rather than rejecting it against `type: string`
     // (Feature D). The caller's `object` is never mutated.
     let coerced = coerce_value_against_schema(target, returns);
-    let validator =
-        build_validator(target, None, None).map_err(|source| SchemaError::InvalidExample {
+    let validator = RETURNS_TARGET_VALIDATOR_CACHE
+        .validator_for(target, None)
+        .map_err(|source| SchemaError::InvalidExample {
             reference: reference.to_string(),
             message: format!("annotated target schema failed to build a validator: {source}"),
         })?;

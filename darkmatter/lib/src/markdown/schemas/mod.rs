@@ -210,7 +210,10 @@ impl Default for DarkmatterSchemas {
 
 #[derive(Clone)]
 struct BaselineSchema {
-    json_schema: Value,
+    /// Held as `Arc<Value>` so `effective_for` shares it by reference (a
+    /// refcount bump) instead of deep-cloning the whole baseline schema on the
+    /// common baseline-only / baseline+document paths (F29).
+    json_schema: Arc<Value>,
 }
 
 /// A resolved trigger payload layer, ready to merge into the effective schema.
@@ -309,7 +312,9 @@ impl DarkmatterSchemas {
         // configuration time rather than at first use.
         let probe = serde_json::json!({"type":"object","properties":{}});
         resolve::merge_baseline(&value, probe)?;
-        self.baseline = Some(BaselineSchema { json_schema: value });
+        self.baseline = Some(BaselineSchema {
+            json_schema: Arc::new(value),
+        });
         Ok(())
     }
 
@@ -406,33 +411,58 @@ impl DarkmatterSchemas {
         // Trigger matching + payload resolution.
         let trigger_layers = self.resolve_trigger_layers(source)?;
 
-        // Build the merged schema: baseline → triggers → document.
-        let mut base_layers: Vec<Value> = Vec::new();
-        if let Some(b) = &self.baseline {
-            base_layers.push(b.json_schema.clone());
-        }
-        for layer in &trigger_layers {
-            base_layers.push(layer.json_schema.clone());
-        }
-        let doc_json = resolved.as_ref().map(|r| r.json_schema.clone());
+        // Build the merged schema in precedence order: baseline → triggers →
+        // document (highest precedence wins). The lowest-precedence layer is the
+        // borrowed merge base and is never deep-cloned; only the
+        // higher-precedence layers are consumed (owned) by `merge_baseline`. When
+        // there is a single layer, it is shared directly (an `Arc` refcount bump)
+        // rather than materialized (F29).
+        let doc_json: Option<Value> = resolved.as_ref().map(|r| r.json_schema.clone());
 
-        let merged_json = match (base_layers.is_empty(), doc_json) {
-            (true, None) => return Ok(None),
-            (true, Some(doc)) => doc,
-            (false, None) => {
-                let mut acc = base_layers.remove(0);
-                for layer in base_layers {
-                    acc = resolve::merge_baseline(&acc, layer)?;
+        let merged_json: Arc<Value> = match &self.baseline {
+            Some(base) => {
+                if trigger_layers.is_empty() && doc_json.is_none() {
+                    // Baseline only — share the Arc, no deep clone.
+                    Arc::clone(&base.json_schema)
+                } else {
+                    // Fold the higher-precedence layers into the borrowed baseline.
+                    let mut higher: Vec<Value> =
+                        Vec::with_capacity(trigger_layers.len() + 1);
+                    for layer in &trigger_layers {
+                        higher.push(layer.json_schema.clone());
+                    }
+                    if let Some(doc) = doc_json {
+                        higher.push(doc);
+                    }
+                    let mut higher = higher.into_iter();
+                    let mut acc =
+                        resolve::merge_baseline(&base.json_schema, higher.next().expect("non-empty"))?;
+                    for layer in higher {
+                        acc = resolve::merge_baseline(&acc, layer)?;
+                    }
+                    Arc::new(acc)
                 }
-                acc
             }
-            (false, Some(doc)) => {
-                let mut acc = base_layers.remove(0);
-                for layer in base_layers {
-                    acc = resolve::merge_baseline(&acc, layer)?;
+            None => match (trigger_layers.is_empty(), doc_json) {
+                (true, None) => return Ok(None),
+                (true, Some(doc)) => Arc::new(doc),
+                (false, doc_opt) => {
+                    // No baseline: the first trigger is the (owned) merge base.
+                    let mut layers: Vec<Value> = trigger_layers
+                        .iter()
+                        .map(|l| l.json_schema.clone())
+                        .collect();
+                    if let Some(doc) = doc_opt {
+                        layers.push(doc);
+                    }
+                    let mut layers = layers.into_iter();
+                    let mut acc = layers.next().expect("non-empty");
+                    for layer in layers {
+                        acc = resolve::merge_baseline(&acc, layer)?;
+                    }
+                    Arc::new(acc)
                 }
-                resolve::merge_baseline(&acc, doc)?
-            }
+            },
         };
 
         // Anchor `format: darkmatter-file` value resolution document-first
@@ -564,7 +594,11 @@ pub struct EffectiveSchema {
     /// or when a root union mixed SimplifiedSchema and JSON Schema arms.
     pub simplified: Option<SimplifiedSchema>,
     /// The final Draft 2020-12 JSON Schema used by the validator.
-    pub json_schema: Value,
+    ///
+    /// Held as `Arc<Value>` so the common baseline-only effective schema is
+    /// shared from the configured baseline by reference rather than deep-cloned
+    /// per resolution (F29). Derefs to `&Value` transparently at read sites.
+    pub json_schema: Arc<Value>,
     /// Per-top-level-property origins (document vs baseline vs referenced
     /// file), so diagnostics can point `relatedInformation` at the schema
     /// source (R-5 Priority 2). Empty for root-union schemas, whose per-arm

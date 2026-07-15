@@ -31,7 +31,6 @@ use jsonschema::{
     error::{TypeKind, ValidationErrorKind},
 };
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 use super::{
     FileReferenceDiagnostic, JsonPointer, ValidationProblem, ValidationProblemCode,
@@ -91,7 +90,7 @@ impl Default for ValidatorCache {
 }
 
 struct CacheInner {
-    entries: HashMap<[u8; 32], CacheEntry>,
+    entries: HashMap<u64, CacheEntry>,
     tick: u64,
     capacity: usize,
 }
@@ -169,7 +168,7 @@ impl ValidatorCache {
         Ok(validator)
     }
 
-    fn lookup(&self, key: &[u8; 32]) -> Option<Arc<Validator>> {
+    fn lookup(&self, key: &u64) -> Option<Arc<Validator>> {
         let mut guard = self.inner.lock().expect("validator cache lock poisoned");
         guard.tick = guard.tick.wrapping_add(1);
         let tick = guard.tick;
@@ -178,7 +177,7 @@ impl ValidatorCache {
         Some(entry.validator.clone())
     }
 
-    fn insert(&self, key: [u8; 32], validator: Arc<Validator>) {
+    fn insert(&self, key: u64, validator: Arc<Validator>) {
         let mut guard = self.inner.lock().expect("validator cache lock poisoned");
         guard.tick = guard.tick.wrapping_add(1);
         let tick = guard.tick;
@@ -1006,7 +1005,7 @@ fn default_capacity() -> usize {
     })
 }
 
-/// SHA-256 of the canonicalised JSON Schema bytes plus both file-reference
+/// xxHash (XXH64) of the canonicalised JSON Schema bytes plus both file-reference
 /// anchors (the document `base_dir` and the launch-area `fallback`) used as the
 /// cache key.
 ///
@@ -1017,29 +1016,29 @@ fn default_capacity() -> usize {
 /// would resolve against the other's directories. Keying on the fallback (not
 /// just baking it per-cache) is what lets a single process-wide cache serve
 /// every `DarkmatterSchemas` instance safely, regardless of its fallback.
-fn canonical_hash(schema: &Value, base_dir: Option<&Path>, fallback: Option<&Path>) -> [u8; 32] {
+///
+/// A non-cryptographic hash suffices here: this is a cache identity, not a
+/// security boundary. An accidental collision could only serve a wrong
+/// validator, and XXH64's collision resistance over these small distinct inputs
+/// is more than adequate (repo convention — [`biscuit_hash`]).
+fn canonical_hash(schema: &Value, base_dir: Option<&Path>, fallback: Option<&Path>) -> u64 {
     // `serde_json::to_vec` is stable per the active feature set; this is
     // sufficient for cache identity (false misses are tolerable, false hits
     // are not — which `to_vec` guarantees because identical Values
     // serialise to identical bytes).
-    let bytes = serde_json::to_vec(schema).expect("schema serialises to JSON");
-    let mut hasher = Sha256::new();
-    hasher.update(&bytes);
+    let mut bytes = serde_json::to_vec(schema).expect("schema serialises to JSON");
     // Domain-separate each anchor from the schema bytes (and from each other)
     // so a schema ending in bytes that collide with a path prefix cannot alias
     // a different (schema, base_dir, fallback) triple.
-    hasher.update([0xff]);
+    bytes.push(0xff);
     if let Some(dir) = base_dir {
-        hasher.update(dir.to_string_lossy().as_bytes());
+        bytes.extend_from_slice(dir.to_string_lossy().as_bytes());
     }
-    hasher.update([0xff]);
+    bytes.push(0xff);
     if let Some(dir) = fallback {
-        hasher.update(dir.to_string_lossy().as_bytes());
+        bytes.extend_from_slice(dir.to_string_lossy().as_bytes());
     }
-    let digest = hasher.finalize();
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&digest);
-    out
+    biscuit_hash::xx_hash_bytes(&bytes)
 }
 
 #[cfg(test)]

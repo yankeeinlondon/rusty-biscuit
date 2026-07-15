@@ -22,7 +22,7 @@
 //! with [`SchemaError::RemoteUnsupported`].
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap},
     fs,
     path::{Path, PathBuf},
 };
@@ -593,6 +593,16 @@ struct ImportEngine {
     dependencies: BTreeSet<PathBuf>,
     /// Schema-root resolution context for bare-name import targets (Phase 3).
     schema_roots: Vec<PathBuf>,
+    /// Named-type namespaces already loaded this expansion, keyed by canonical
+    /// path, so `A@types.yaml` / `B@types.yaml` / `C@types.yaml` read and parse
+    /// `types.yaml` once instead of once per import site.
+    namespace_cache: HashMap<PathBuf, CachedNamespace>,
+}
+
+/// A parsed named-type file cached on [`ImportEngine`] by canonical path.
+struct CachedNamespace {
+    base_dir: PathBuf,
+    named_types: IndexMap<String, PropertyDef>,
 }
 
 /// Expands every `Name@file` import in `schema`. `base_dir` and `key` describe
@@ -626,6 +636,7 @@ fn expand_document_imports(
         stack: Vec::new(),
         dependencies: BTreeSet::new(),
         schema_roots: schema_roots.to_vec(),
+        namespace_cache: HashMap::new(),
     };
     let expanded = engine.expand_schema(schema, &current)?;
     Ok((expanded, engine.dependencies.into_iter().collect()))
@@ -870,11 +881,28 @@ impl ImportEngine {
 
         let canonical = canonical_path(&path);
         self.dependencies.insert(canonical.clone());
+        // Reuse an already-loaded namespace for this file: multiple import sites
+        // targeting the same file (`A@types.yaml`, `B@types.yaml`, …) otherwise
+        // re-read and re-parse it once each.
+        if let Some(cached) = self.namespace_cache.get(&canonical) {
+            return Ok(Namespace {
+                key: NamespaceKey::File(canonical),
+                base_dir: cached.base_dir.clone(),
+                named_types: cached.named_types.clone(),
+            });
+        }
         let named_types = load_named_types(&path)?;
         let base_dir = path
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
+        self.namespace_cache.insert(
+            canonical.clone(),
+            CachedNamespace {
+                base_dir: base_dir.clone(),
+                named_types: named_types.clone(),
+            },
+        );
         Ok(Namespace {
             key: NamespaceKey::File(canonical),
             base_dir,
@@ -1138,7 +1166,10 @@ fn resolve_document_examples(
     schema_roots: &[PathBuf],
 ) -> Result<Vec<PathBuf>, SchemaError> {
     let mut deps: BTreeSet<PathBuf> = BTreeSet::new();
-    resolve_examples_in_json(json, base_dir, this_file, schema_roots, &mut deps)?;
+    // Per-run read cache: an example file referenced by more than one
+    // `example(...)` site is read from disk once, not once per site (F28).
+    let mut reads: HashMap<PathBuf, Vec<u8>> = HashMap::new();
+    resolve_examples_in_json(json, base_dir, this_file, schema_roots, &mut deps, &mut reads)?;
     Ok(deps.into_iter().collect())
 }
 
@@ -1148,6 +1179,7 @@ fn resolve_examples_in_json(
     this_file: Option<&Path>,
     schema_roots: &[PathBuf],
     deps: &mut BTreeSet<PathBuf>,
+    reads: &mut HashMap<PathBuf, Vec<u8>>,
 ) -> Result<(), SchemaError> {
     match value {
         Value::Object(map) => {
@@ -1173,6 +1205,7 @@ fn resolve_examples_in_json(
                         Some(&target),
                         schema_roots,
                         deps,
+                        reads,
                     )?);
                 }
                 map.insert("x-darkmatter-example".into(), Value::Array(resolved));
@@ -1184,12 +1217,12 @@ fn resolve_examples_in_json(
                 if key == "x-darkmatter-example" {
                     continue;
                 }
-                resolve_examples_in_json(child, base_dir, this_file, schema_roots, deps)?;
+                resolve_examples_in_json(child, base_dir, this_file, schema_roots, deps, reads)?;
             }
         }
         Value::Array(items) => {
             for item in items.iter_mut() {
-                resolve_examples_in_json(item, base_dir, this_file, schema_roots, deps)?;
+                resolve_examples_in_json(item, base_dir, this_file, schema_roots, deps, reads)?;
             }
         }
         _ => {}
@@ -1212,6 +1245,7 @@ fn resolve_one_example(
     target: Option<&Value>,
     schema_roots: &[PathBuf],
     deps: &mut BTreeSet<PathBuf>,
+    reads: &mut HashMap<PathBuf, Vec<u8>>,
 ) -> Result<Value, SchemaError> {
     let trimmed = reference.trim();
     let path = if trimmed == "this" {
@@ -1268,10 +1302,20 @@ fn resolve_one_example(
         }
     };
 
-    let bytes = fs::read(&path).map_err(|source| SchemaError::Io {
-        path: path.clone(),
-        source,
-    })?;
+    let canonical = canonical_path(&path);
+    // Reuse the bytes when another `example(...)` site already read this file
+    // during the same resolution run.
+    let bytes = match reads.get(&canonical) {
+        Some(cached) => cached.clone(),
+        None => {
+            let read = fs::read(&path).map_err(|source| SchemaError::Io {
+                path: path.clone(),
+                source,
+            })?;
+            reads.insert(canonical.clone(), read.clone());
+            read
+        }
+    };
     let object = super::example::validate_example_bytes(reference, &bytes)?;
     // Layer 3: the example's `returns` must match the property it annotates.
     // Applied here (not inside the byte cache) so the same file validated
@@ -1279,7 +1323,7 @@ fn resolve_one_example(
     if let Some(target) = target {
         super::example::validate_returns_against_target(reference, &object, target)?;
     }
-    deps.insert(canonical_path(&path));
+    deps.insert(canonical);
     Ok(object)
 }
 
@@ -2855,6 +2899,64 @@ mod bare_name_phase3 {
         assert_eq!(
             r1_canonical, &expected,
             "$schema and Name@file must resolve to the same file through the shared ladder"
+        );
+    }
+
+    /// Multiple `Name@file` imports targeting the same file all inline
+    /// correctly and record the target as a single dependency edge — the
+    /// per-run namespace cache (F27) must not change resolution semantics.
+    #[test]
+    fn multiple_imports_from_same_file_resolve_and_dedup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("docs")).unwrap();
+
+        write(
+            &root.join("docs"),
+            "types.yaml",
+            "$schema:\n  A: 'string(required)'\n  B: 'number'\n  C: 'enum(x, y)'\n",
+        );
+        write(
+            &root.join("docs"),
+            "importer.yaml",
+            "$schema:\n  first: A@types.yaml\n  second: B@types.yaml\n  third: C@types.yaml\n",
+        );
+
+        let raw = std::fs::read_to_string(root.join("docs/importer.yaml")).unwrap();
+        let importer: YamlValue = serde_yaml_ng::from_str(&raw).unwrap();
+        let schema_value = importer.get("$schema").unwrap();
+        let resolved =
+            resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &[]).unwrap();
+
+        // All three named types inlined to their declared shapes. Top-level
+        // presence is re-decided at the use site, so each imported type is
+        // optional here and lowers to a nullable `anyOf`.
+        let props = resolved.json_schema["properties"].as_object().unwrap();
+        let arm_type = |key: &str| -> String {
+            props[key]["anyOf"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find_map(|arm| arm.get("type").filter(|t| *t != "null"))
+                .map(|t| t.as_str().unwrap().to_string())
+                .unwrap_or_default()
+        };
+        assert_eq!(arm_type("first"), "string");
+        assert_eq!(arm_type("second"), "number");
+        let third_enum = props["third"]["anyOf"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|arm| arm.get("enum"))
+            .unwrap();
+        assert_eq!(third_enum.as_array().unwrap().len(), 2);
+
+        // The shared target file is recorded exactly once as a dependency edge.
+        let expected = canonical_path(&root.join("docs/types.yaml"));
+        assert_eq!(
+            resolved.imports.iter().filter(|p| *p == &expected).count(),
+            1,
+            "the shared import target must appear once, not once per import site"
         );
     }
 
