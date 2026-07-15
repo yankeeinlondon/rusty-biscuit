@@ -7,7 +7,7 @@ operation: commit
 agent: opencode
 model: minimax/MiniMax-M3
 success: 
-    message: "git commits completed in {{ctx.area}}"
+    message: "staged files committed in {{ctx.area}}"
     stack:
         - action:
             - shell: gitnexus analyze --force
