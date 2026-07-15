@@ -90,6 +90,9 @@ You are done when:
 
 ::block when="area"
 - use the '{{area}}' skill during the implementation
+::block when="phase == total_phases"
+- do NOT move the spec directory into the `_completed` folder when the final phase is complete (that is done as a separate step which you are not responsible for)
+::end-block
 ::end-block
 - Do NOT commit or stage files to git, this will be done as a separate process.
 - Report a summary of what you did including all the source files you changed.
