@@ -319,6 +319,396 @@ docs_created_during_phase_8: []
 skills_files_updated_during_phase_8:
   - .claude/skills/claudine/SKILL.md
   - .claude/skills/claudine/architecture.md
+source_files_during_phase_9:
+  - cli/src/commands/wrap/exec/spawn/mod.rs
+  - cli/src/commands/wrap/exec/spawn/setup.rs
+  - cli/src/commands/wrap/exec/spawn/inherited.rs
+  - cli/src/commands/wrap/exec/spawn/captured.rs
+  - cli/src/commands/wrap/exec/spawn/semantic.rs
+  - cli/src/commands/wrap/exec/spawn/tests/mod.rs
+  - cli/src/commands/wrap/exec/spawn/tests/inherited.rs
+  - cli/src/commands/wrap/exec/spawn/tests/captured.rs
+  - cli/src/commands/wrap/exec/termination/mod.rs
+  - cli/src/commands/wrap/exec/termination/reasons.rs
+  - cli/src/commands/wrap/exec/termination/summary.rs
+  - cli/src/commands/wrap/exec/termination/message.rs
+  - cli/src/commands/wrap/exec/termination/unix.rs
+  - cli/src/commands/wrap/exec/termination/windows.rs
+  - cli/src/commands/wrap/exec/termination/tests/mod.rs
+  - cli/src/commands/wrap/exec/termination/tests/projection.rs
+  - cli/src/commands/wrap/exec/termination/tests/reasons.rs
+  - cli/src/commands/wrap/exec/termination/tests/wait.rs
+docs_updated_during_phase_9:
+  - reviews/2026-07-14-module-assessment/plan.md
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9: []
+packages_during_phase_9:
+  - claudine-cli
+source_files_during_phase_10:
+  - gen/Cargo.toml
+  - gen/src/lib.rs
+  - gen/src/main.rs
+  - gen/src/report.rs
+  - gen/src/report/tests.rs
+  - gen/src/emit/mod.rs
+  - gen/src/emit/identity_paths.rs
+  - gen/src/emit/execution_prompting.rs
+  - gen/src/emit/models_offerings.rs
+  - gen/src/emit/event_policy.rs
+  - gen/src/emit/linking.rs
+  - gen/src/generate.rs
+  - gen/src/generate/tests.rs
+  - gen/src/generate/coerce/mod.rs
+  - gen/src/generate/coerce/identity_paths.rs
+  - gen/src/generate/coerce/execution_prompting.rs
+  - gen/src/generate/coerce/models_offerings.rs
+  - gen/src/generate/coerce/event_policy.rs
+  - gen/tests/generate_ux.rs
+  - lib/src/provider/mod.rs
+docs_updated_during_phase_10:
+  - docs/topics/provider-metadata.md
+  - reviews/2026-07-14-module-assessment/plan.md
+docs_created_during_phase_10: []
+skills_files_updated_during_phase_10: []
+packages_during_phase_10:
+  - claudine
+  - claudine-gen
+source_files_during_phase_11:
+  - lib/src/composition/error/render/mod.rs
+  - lib/src/composition/error/render/lifecycle.rs
+  - lib/src/composition/error/render/schema.rs
+  - lib/src/composition/error/render/selection.rs
+  - lib/src/composition/error/render/sequence_loop.rs
+  - lib/src/composition/error/render/provider.rs
+  - lib/src/composition/error/tests.rs
+docs_updated_during_phase_11:
+  - reviews/2026-07-14-module-assessment/plan.md
+docs_created_during_phase_11: []
+skills_files_updated_during_phase_11: []
+packages_during_phase_11:
+  - claudine
+source_files_during_phase_12:
+  - lib/src/composition/mod.rs
+  - lib/src/composition/interpolation_conformance.rs
+  - lib/src/composition/looping/actions.rs
+docs_updated_during_phase_12:
+  - docs/topics/composition.md
+  - docs/topics/flow-control/looping.md
+  - reviews/2026-07-14-module-assessment/plan.md
+docs_created_during_phase_12: []
+skills_files_updated_during_phase_12: []
+packages_during_phase_12:
+  - claudine
+source_code:
+  - cli/src/commands/compose/prep.rs
+  - cli/src/commands/compose/prep/tests.rs
+  - cli/src/commands/context_render.rs
+  - cli/src/commands/context_render/tests.rs
+  - cli/src/commands/schema_interactive/mod.rs
+  - cli/src/commands/schema_interactive/tests.rs
+  - cli/src/commands/wrap/composition/dry_run.rs
+  - cli/src/commands/wrap/composition/dry_run/tests.rs
+  - cli/src/commands/wrap/composition/mod.rs
+  - cli/src/commands/wrap/composition/pipeline.rs
+  - cli/src/commands/wrap/composition/pipeline/tests.rs
+  - cli/src/commands/wrap/composition/preflight.rs
+  - cli/src/commands/wrap/composition/runner.rs
+  - cli/src/commands/wrap/exec/spawn.rs
+  - cli/src/commands/wrap/exec/spawn/captured.rs
+  - cli/src/commands/wrap/exec/spawn/inherited.rs
+  - cli/src/commands/wrap/exec/spawn/mod.rs
+  - cli/src/commands/wrap/exec/spawn/semantic.rs
+  - cli/src/commands/wrap/exec/spawn/setup.rs
+  - cli/src/commands/wrap/exec/spawn/tests.rs
+  - cli/src/commands/wrap/exec/spawn/tests/captured.rs
+  - cli/src/commands/wrap/exec/spawn/tests/inherited.rs
+  - cli/src/commands/wrap/exec/spawn/tests/mod.rs
+  - cli/src/commands/wrap/exec/termination.rs
+  - cli/src/commands/wrap/exec/termination/message.rs
+  - cli/src/commands/wrap/exec/termination/mod.rs
+  - cli/src/commands/wrap/exec/termination/reasons.rs
+  - cli/src/commands/wrap/exec/termination/summary.rs
+  - cli/src/commands/wrap/exec/termination/tests.rs
+  - cli/src/commands/wrap/exec/termination/tests/mod.rs
+  - cli/src/commands/wrap/exec/termination/tests/projection.rs
+  - cli/src/commands/wrap/exec/termination/tests/reasons.rs
+  - cli/src/commands/wrap/exec/termination/tests/wait.rs
+  - cli/src/commands/wrap/exec/termination/unix.rs
+  - cli/src/commands/wrap/exec/termination/windows.rs
+  - cli/src/commands/wrap/exec/timeouts.rs
+  - cli/src/commands/wrap/exec/timeouts/tests.rs
+  - cli/src/commands/wrap/flags.rs
+  - cli/src/commands/wrap/flags/tests.rs
+  - cli/src/commands/wrap/harness_orch/loop_control.rs
+  - cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+  - cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs
+  - cli/src/commands/wrap/harness_orch/loop_control/tests.rs
+  - cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs
+  - cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+  - cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs
+  - cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+  - cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+  - cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_evaluation.rs
+  - cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_routing.rs
+  - cli/src/commands/wrap/repo_home.rs
+  - cli/src/commands/wrap/repo_home/tests.rs
+  - cli/src/commands/wrap/session_report.rs
+  - cli/src/commands/wrap/session_report/tests.rs
+  - cli/src/commands/wrap/system_prompt.rs
+  - cli/src/commands/wrap/system_prompt/tests.rs
+  - cli/src/completion/bootstrap.rs
+  - cli/src/completion/bootstrap/tests.rs
+  - cli/src/completion/composition/mod.rs
+  - cli/src/completion/composition/tests.rs
+  - cli/src/completion/engine/mod.rs
+  - cli/src/completion/engine/tests.rs
+  - cli/src/completion/scopes.rs
+  - cli/src/completion/scopes/tests.rs
+  - cli/src/completion/setter_value.rs
+  - cli/src/completion/setter_value/tests.rs
+  - cli/src/completion/walker.rs
+  - cli/src/completion/walker/tests.rs
+  - cli/src/output/error_walker.rs
+  - cli/src/output/error_walker/tests.rs
+  - cli/tests/dispatch_inventory.rs
+  - cli/tests/test_placement.rs
+  - cli/tests/wrap_perf.rs
+  - contract/src/tests.rs
+  - contract/src/tests/tracing_capture.rs
+  - gen/Cargo.toml
+  - gen/src/agent_errors_check.rs
+  - gen/src/agent_errors_check/tests.rs
+  - gen/src/emit.rs
+  - gen/src/emit/event_policy.rs
+  - gen/src/emit/execution_prompting.rs
+  - gen/src/emit/identity_paths.rs
+  - gen/src/emit/linking.rs
+  - gen/src/emit/mod.rs
+  - gen/src/emit/models_offerings.rs
+  - gen/src/emit/tests.rs
+  - gen/src/generate.rs
+  - gen/src/generate/coerce/event_policy.rs
+  - gen/src/generate/coerce/execution_prompting.rs
+  - gen/src/generate/coerce/identity_paths.rs
+  - gen/src/generate/coerce/mod.rs
+  - gen/src/generate/coerce/models_offerings.rs
+  - gen/src/generate/tests.rs
+  - gen/src/lib.rs
+  - gen/src/main.rs
+  - gen/src/registry.rs
+  - gen/src/registry/tests.rs
+  - gen/src/report.rs
+  - gen/src/report/tests.rs
+  - gen/src/vocabulary.rs
+  - gen/src/vocabulary/tests.rs
+  - gen/tests/drift.rs
+  - gen/tests/generate_ux.rs
+  - lib/src/actions/hook_action.rs
+  - lib/src/actions/hook_action/tests.rs
+  - lib/src/composition/closure.rs
+  - lib/src/composition/closure/tests.rs
+  - lib/src/composition/error/render/lifecycle.rs
+  - lib/src/composition/error/render/mod.rs
+  - lib/src/composition/error/render/provider.rs
+  - lib/src/composition/error/render/schema.rs
+  - lib/src/composition/error/render/selection.rs
+  - lib/src/composition/error/render/sequence_loop.rs
+  - lib/src/composition/error/tests.rs
+  - lib/src/composition/interpolation_conformance.rs
+  - lib/src/composition/lifecycle/actions.rs
+  - lib/src/composition/lifecycle/actions/tests.rs
+  - lib/src/composition/lifecycle/context.rs
+  - lib/src/composition/lifecycle/context/tests.rs
+  - lib/src/composition/lifecycle/control.rs
+  - lib/src/composition/lifecycle/control/tests.rs
+  - lib/src/composition/lifecycle/executor/tests.rs
+  - lib/src/composition/lifecycle/executor/tests/action_dispatch.rs
+  - lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+  - lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+  - lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+  - lib/src/composition/lifecycle/executor/tests/mod.rs
+  - lib/src/composition/lifecycle/executor/tests/mutation_visibility.rs
+  - lib/src/composition/lifecycle/runtime.rs
+  - lib/src/composition/lifecycle/runtime/tests.rs
+  - lib/src/composition/lifecycle/tests.rs
+  - lib/src/composition/lifecycle/tests/action_shape_control.rs
+  - lib/src/composition/lifecycle/tests/audio_emission.rs
+  - lib/src/composition/lifecycle/tests/diagnostics.rs
+  - lib/src/composition/lifecycle/tests/guard_runtime.rs
+  - lib/src/composition/lifecycle/tests/mod.rs
+  - lib/src/composition/lifecycle/tests/parse_config.rs
+  - lib/src/composition/lifecycle/tests/validation.rs
+  - lib/src/composition/looping/actions.rs
+  - lib/src/composition/looping/actions/tests.rs
+  - lib/src/composition/looping/config.rs
+  - lib/src/composition/looping/config/tests.rs
+  - lib/src/composition/looping/engine/tests.rs
+  - lib/src/composition/looping/engine/tests/iteration_actions.rs
+  - lib/src/composition/looping/engine/tests/lifecycle_control.rs
+  - lib/src/composition/looping/engine/tests/mod.rs
+  - lib/src/composition/looping/engine/tests/rate_limits.rs
+  - lib/src/composition/looping/engine/tests/seed_state.rs
+  - lib/src/composition/mod.rs
+  - lib/src/composition/preflight.rs
+  - lib/src/composition/preflight/tests.rs
+  - lib/src/composition/prepare.rs
+  - lib/src/composition/prepare/tests.rs
+  - lib/src/composition/resolve.rs
+  - lib/src/composition/resolve/tests.rs
+  - lib/src/composition/select.rs
+  - lib/src/composition/select/tests.rs
+  - lib/src/composition/sequence.rs
+  - lib/src/composition/sequence/tests.rs
+  - lib/src/composition/types.rs
+  - lib/src/composition/types/tests.rs
+  - lib/src/config/claude.rs
+  - lib/src/config/claude/tests.rs
+  - lib/src/config/claudine_config.rs
+  - lib/src/config/claudine_config/tests.rs
+  - lib/src/config/messaging_block.rs
+  - lib/src/config/messaging_block/tests.rs
+  - lib/src/dispatch/expression.rs
+  - lib/src/dispatch/expression/tests.rs
+  - lib/src/dispatch/loader.rs
+  - lib/src/dispatch/loader/tests.rs
+  - lib/src/dispatch/matcher.rs
+  - lib/src/dispatch/matcher/tests.rs
+  - lib/src/dispatch/mod.rs
+  - lib/src/dispatch/runner/mod.rs
+  - lib/src/dispatch/runner/tests.rs
+  - lib/src/dispatch/template.rs
+  - lib/src/dispatch/template/tests.rs
+  - lib/src/dispatch/tests.rs
+  - lib/src/harness/runtime.rs
+  - lib/src/harness/runtime/tests.rs
+  - lib/src/linking/compatibility/mod.rs
+  - lib/src/linking/compatibility/tests.rs
+  - lib/src/linking/skills/portable.rs
+  - lib/src/linking/skills/portable/tests.rs
+  - lib/src/mcp/import.rs
+  - lib/src/mcp/import/tests.rs
+  - lib/src/messaging/config.rs
+  - lib/src/messaging/config/tests.rs
+  - lib/src/messaging/send.rs
+  - lib/src/messaging/send/tests.rs
+  - lib/src/model_catalog/service.rs
+  - lib/src/model_catalog/service/tests.rs
+  - lib/src/permissions/engine.rs
+  - lib/src/permissions/engine/tests.rs
+  - lib/src/permissions/providers/claude.rs
+  - lib/src/permissions/providers/claude/tests.rs
+  - lib/src/permissions/providers/codex.rs
+  - lib/src/permissions/providers/codex/tests.rs
+  - lib/src/permissions/providers/gemini.rs
+  - lib/src/permissions/providers/gemini/tests.rs
+  - lib/src/permissions/providers/qwen.rs
+  - lib/src/permissions/providers/qwen/tests.rs
+  - lib/src/permissions/query.rs
+  - lib/src/permissions/query/tests.rs
+  - lib/src/protect/catalog.rs
+  - lib/src/protect/catalog/tests.rs
+  - lib/src/protect/observe.rs
+  - lib/src/protect/observe/tests.rs
+  - lib/src/protect/service.rs
+  - lib/src/protect/service/tests.rs
+  - lib/src/provider/methods.rs
+  - lib/src/provider/methods/tests.rs
+  - lib/src/provider/mod.rs
+  - lib/src/render/prompt/system.rs
+  - lib/src/render/prompt/system/tests.rs
+  - lib/src/reporting/ingest.rs
+  - lib/src/reporting/ingest/tests.rs
+  - lib/src/runaway/config.rs
+  - lib/src/runaway/config/tests.rs
+  - lib/src/runaway/detector.rs
+  - lib/src/runaway/detector/tests.rs
+  - lib/src/signals/bespoke.rs
+  - lib/src/signals/bespoke/tests.rs
+  - lib/src/stream/badges.rs
+  - lib/src/stream/badges/tests.rs
+  - lib/src/stream/logs/opencode/bridge/tests.rs
+  - lib/src/stream/logs/opencode/bridge/tests/ingest_classification.rs
+  - lib/src/stream/logs/opencode/bridge/tests/mod.rs
+  - lib/src/stream/logs/opencode/bridge/tests/session_lifecycle.rs
+  - lib/src/stream/logs/opencode/bridge/tests/signal_projection.rs
+  - lib/src/stream/logs/opencode/bridge/tests/stalled_generation_progress.rs
+  - lib/src/stream/logs/opencode/bridge/tests/stdout_stderr_coordination.rs
+  - lib/src/stream/logs/opencode/bridge/tests/usage_retry_guards.rs
+  - lib/src/stream/logs/opencode/events.rs
+  - lib/src/stream/logs/opencode/events/tests.rs
+  - lib/src/stream/progress.rs
+  - lib/src/stream/progress/tests.rs
+  - lib/src/stream/protocol/claude.rs
+  - lib/src/stream/protocol/claude/tests.rs
+  - lib/src/stream/protocol/codex.rs
+  - lib/src/stream/protocol/codex/tests.rs
+  - lib/src/stream/protocol/kimi.rs
+  - lib/src/stream/protocol/kimi/tests.rs
+  - lib/src/stream/protocol/opencode.rs
+  - lib/src/stream/protocol/opencode/tests.rs
+  - lib/src/stream/providers/claude.rs
+  - lib/src/stream/providers/claude/tests.rs
+  - lib/src/stream/providers/codex.rs
+  - lib/src/stream/providers/codex/tests.rs
+  - lib/src/stream/providers/gemini.rs
+  - lib/src/stream/providers/gemini/tests.rs
+  - lib/src/stream/providers/kimi.rs
+  - lib/src/stream/providers/kimi/tests.rs
+  - lib/src/stream/providers/opencode.rs
+  - lib/src/stream/providers/opencode/tests.rs
+  - lib/src/stream/providers/pi.rs
+  - lib/src/stream/providers/pi/tests.rs
+  - lib/src/stream/reporting.rs
+  - lib/src/stream/reporting/tests.rs
+  - lib/src/stream/semantic.rs
+  - lib/src/stream/semantic/tests.rs
+  - lib/src/stream/stderr.rs
+  - lib/src/stream/stderr/tests.rs
+  - lib/src/stream/tool_display.rs
+  - lib/src/stream/tool_display/from_event_tests.rs
+  - lib/src/stream/tool_display/humanize_tests.rs
+  - lib/src/stream/tool_display/summary_tests.rs
+  - lib/src/stream/tool_display/tests.rs
+  - lib/src/system_prompt/prepare.rs
+  - lib/src/system_prompt/prepare/tests.rs
+  - lib/src/system_prompt/resolve.rs
+  - lib/src/system_prompt/resolve/tests.rs
+  - rendezvous/daemon/src/peers.rs
+  - rendezvous/daemon/src/peers/tests.rs
+  - rendezvous/daemon/src/register.rs
+  - rendezvous/daemon/src/register/tests.rs
+  - rendezvous/daemon/src/service.rs
+  - rendezvous/daemon/src/service/tests.rs
+  - rendezvous/daemon/src/service/tests/mod.rs
+  - rendezvous/daemon/src/service/tests/rpc.rs
+  - rendezvous/daemon/src/service/tests/session_register.rs
+  - rendezvous/daemon/src/service/tests/validation.rs
+  - rendezvous/daemon/src/session_log/append.rs
+  - rendezvous/daemon/src/session_log/mod.rs
+  - rendezvous/daemon/src/session_log/rehydrate.rs
+  - rendezvous/daemon/src/session_log/staging.rs
+  - rendezvous/daemon/src/session_log/tests.rs
+  - rendezvous/daemon/src/session_log/tests/append_rotation.rs
+  - rendezvous/daemon/src/session_log/tests/durability.rs
+  - rendezvous/daemon/src/session_log/tests/mod.rs
+  - rendezvous/daemon/src/session_log/tests/remote_validation.rs
+  - rendezvous/daemon/src/session_log/tests/replace_update.rs
+  - rendezvous/daemon/src/session_log/tests/replay_rehydration.rs
+  - rendezvous/daemon/src/session_log/validate.rs
+  - rendezvous/daemon/src/sync.rs
+  - rendezvous/daemon/src/sync/tests.rs
+  - rendezvous/daemon/src/sync/tests/envelope_validation.rs
+  - rendezvous/daemon/src/sync/tests/mod.rs
+  - rendezvous/daemon/src/sync/tests/schema_validation.rs
+  - rendezvous/daemon/src/sync/tests/snapshot_replace.rs
+documentation:
+  - docs/providers/dispatch-inventory.json
+  - docs/topics/composition.md
+  - docs/topics/flow-control/looping.md
+  - docs/topics/provider-metadata.md
+  - reviews/2026-07-14-module-assessment/generated-artifact-baseline.json
+  - reviews/2026-07-14-module-assessment/phase-1-baseline.md
+  - reviews/2026-07-14-module-assessment/plan.md
 packages:
   - claudine
   - claudine-cli
@@ -619,19 +1009,19 @@ Acceptance gates:
 
 Refactor the HIGH-risk process layer by execution mode and platform boundary.
 
-- [ ] Split spawn code into shared command/process setup plus inherited-output,
+- [x] Split spawn code into shared command/process setup plus inherited-output,
   captured-output, and semantic-stream execution modules. Share only stable
   setup and wait contracts; keep mode-specific pipe/thread/parser behavior
   local.
-- [ ] Split termination into provider-neutral termination reasons, summary/guard
+- [x] Split termination into provider-neutral termination reasons, summary/guard
   projection, and human-facing rendering, plus `cfg(unix)` and `cfg(windows)`
   wait/escalation implementations behind one internal interface.
-- [ ] Keep one semantic signal ladder and one early-termination projection. Unix
+- [x] Keep one semantic signal ladder and one early-termination projection. Unix
   process-group signaling and Windows Job Object/console-event behavior must
   remain platform implementations of the same contract, not copied policy.
-- [ ] Render termination messages through existing terminal components and retain
+- [x] Render termination messages through existing terminal components and retain
   stdout/stderr separation.
-- [ ] Move the extracted platform tests into matching module trees and retain the
+- [x] Move the extracted platform tests into matching module trees and retain the
   L2/L3 integration coverage.
 
 Acceptance gates:
@@ -649,22 +1039,22 @@ Acceptance gates:
 Preserve the strong generator crate boundary while reducing procedural
 concentration and raw terminal output.
 
-- [ ] Split `gen/src/emit.rs` by stable catalog domains: identity/paths,
+- [x] Split `gen/src/emit.rs` by stable catalog domains: identity/paths,
   execution/prompting, models/offerings, event/support policy, and linking
   resources. Keep shared literal/import helpers small and leave
   `emit_data_file` as a thin, visibly ordered assembler.
-- [ ] Split the `coerce_to_catalog_shape` decision tree along the same domain
+- [x] Split the `coerce_to_catalog_shape` decision tree along the same domain
   vocabulary so registry entries, coercion, and emission have predictable
   owners. Do not split the declarative registry merely because it is long.
-- [ ] Introduce typed generator report data and `TerminalRenderable` renderers
+- [x] Introduce typed generator report data and `TerminalRenderable` renderers
   using biscuit-terminal components (`Prose`, `UnorderedList`, `Table`,
   `CodeBlock`, or status components as appropriate). Replace human-facing
   `println!`/`eprintln!` paths for generate, check, provenance, diff, prompt,
   and agent-error reports.
-- [ ] Preserve raw JSON exclusively for explicit machine-facing modes such as
+- [x] Preserve raw JSON exclusively for explicit machine-facing modes such as
   mapping/structured reports, with stdout for data and stderr for diagnostics.
   Keep inherited-stdio `claudine providers generate` working.
-- [ ] Refresh `lib/src/provider/mod.rs` to describe the completed generated-data /
+- [x] Refresh `lib/src/provider/mod.rs` to describe the completed generated-data /
   handwritten-behavior architecture, and update
   `docs/topics/provider-metadata.md` from the stale 18-site statement to the
   authoritative current inventory (19 at assessment time, derived rather than
@@ -685,16 +1075,16 @@ Acceptance gates:
 Complete C6 at the actionable rendering boundary while preserving the central
 typed error vocabulary.
 
-- [ ] Keep `CompositionError` and its public variants in `error/mod.rs`.
-- [ ] Divide `BlockError::status_block` rendering into focused modules for
+- [x] Keep `CompositionError` and its public variants in `error/mod.rs`.
+- [x] Divide `BlockError::status_block` rendering into focused modules for
   lifecycle, schema/frontmatter, selection/target, sequence/loop, and
   provider/execution/file-reference errors.
-- [ ] Make the trait method a thin exhaustive dispatcher. Each family renderer
+- [x] Make the trait method a thin exhaustive dispatcher. Each family renderer
   returns the same `StatusBlock` and reuses shared path/link/code helpers rather
   than copying styles or prose.
-- [ ] Preserve diagnostic source chains, error codes, frontmatter appendices,
+- [x] Preserve diagnostic source chains, error codes, frontmatter appendices,
   TTY/color behavior, and the CLI error walker's deepest-typed-error rule.
-- [ ] Update comments only where responsibility or behavior descriptions moved.
+- [x] Update comments only where responsibility or behavior descriptions moved.
 
 Acceptance gates:
 
@@ -709,11 +1099,11 @@ Acceptance gates:
 Make the loop/lifecycle rendering relationship explicit, then close all
 documentation and verification work.
 
-- [ ] Add one shared conformance matrix for syntax supported by both loop actions
+- [x] Add one shared conformance matrix for syntax supported by both loop actions
   and lifecycle actions: literal/mixed strings, whole-value typed expansion,
   arrays/objects, namespaces and missing values, functions, escaping,
   malformed expressions, and strict/fail-closed behavior.
-- [ ] Compare `render_action_value`/`render_string_with_lookup` with lifecycle DM2
+- [x] Compare `render_action_value`/`render_string_with_lookup` with lifecycle DM2
   `SubtreeCompose`. If the same input/state can preserve every established loop
   result, migrate loop action rendering to the Darkmatter substrate and remove
   the duplicate renderer. If a required semantic difference remains, keep the
@@ -721,15 +1111,42 @@ documentation and verification work.
   composition architecture, and require both engines to pass the shared
   overlap matrix. This is an explicit evidence gate, not an open-ended design
   choice.
-- [ ] Update all READMEs, Claudine skill pages, topic docs, and symbol comments
+  - **Evidence-gate outcome: keep the loop renderer.** Both engines already share
+    the Darkmatter expression core (`parse`/`evaluate`/`ExpressionFinder`/`scalar_string`)
+    over `EvaluationLookup`; the loop is not a parallel *expression* engine. Three
+    required semantic differences block migration: (1) the loop re-parses a
+    mixed-string result as JSON (documented at `looping.md`), DM2 keeps mixed
+    strings as strings; (2) the loop needs contextual `CompositionError::InvalidAction`
+    errors (iteration/action index), DM2 returns generic `MarkdownError::Transform`;
+    (3) the loop tolerates unknown roots (empty, matching condition evaluation),
+    lifecycle DM2 runs strict/fail-closed. Shared overlap matrix:
+    `lib/src/composition/interpolation_conformance.rs`.
+- [x] Update all READMEs, Claudine skill pages, topic docs, and symbol comments
   affected by the 12 phases. Treat code and generated inventories as authority
   where old prose drifted.
-- [ ] Rerun `hug god-files --json claudine` and report actionable production
+  - Added "Loop vs lifecycle interpolation" to `docs/topics/composition.md`
+    (symlinked into the claudine skill; hash re-stamped), cross-linked from
+    `docs/topics/flow-control/looping.md`, and added a module-level design
+    pointer on `looping/actions.rs`. Prior phases already updated their own
+    skill/README/topic docs (see per-phase frontmatter); no residual drift
+    surfaced in this sweep.
+- [x] Rerun `hug god-files --json claudine` and report actionable production
   changes separately from generated/test files; success is clearer ownership
   and state-machine reviewability, not an indiscriminate line-count target.
-- [ ] Run GitNexus `detect_changes` against `main` and inspect every affected
+  - Census reran (96 production / 96 test / 11 generated over-threshold files).
+    The largest remaining production files are the deliberately-excluded central
+    `CompositionError` enum (`error/mod.rs`) and the cohesive state machines
+    (`pipeline.rs`, `loop_control.rs`, `lifecycle/executor.rs`, `looping/engine.rs`)
+    — no actionable split remains beyond what the excluded-file list already
+    protects. Ownership and reviewability improved via phases 3/4/8/9/10/11.
+- [x] Run GitNexus `detect_changes` against `main` and inspect every affected
   execution flow before any commit. Re-run impact analysis for each changed
   public/shared symbol whose callers changed during implementation.
+  - `detect_changes` (medium risk): the only affected execution flows are the
+    `gen` codegen paths (`run`/`run_generate`) from Phase 10. Phase 12 itself
+    adds only a `#[cfg(test)]` conformance module plus documentation — no
+    production callers and no changed public/shared symbol, so no per-symbol
+    impact re-analysis is required for phase 12.
 
 Final acceptance gates:
 
