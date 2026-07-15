@@ -4,6 +4,16 @@ total_phases: 11
 created: "2026-07-14"
 phase: 1
 yolo: "true"
+source_files_during_phase_1:
+  - darkmatter/lib/benches/compose_schema_transclusion.rs
+  - darkmatter/lib/benches/render_code_heavy.rs
+  - darkmatter/lib/Cargo.toml
+docs_updated_during_phase_1: []
+docs_created_during_phase_1:
+  - darkmatter/reviews/2026-07-12-perf/baseline.md
+skills_files_updated_during_phase_1: []
+packages:
+  - darkmatter
 ---
 
 # Execution Plan: Darkmatter Performance Review (2026-07-12)
@@ -46,23 +56,24 @@ cross-package hot paths in `sniff` and `biscuit-terminal`.
 **Goal:** Reproducible before/after harness so every fix is validated, not
 assumed. No production behavior changes.
 
-- [ ] Capture the current baseline table from the spec locally on this host:
+- [x] Capture the current baseline table from the spec locally on this host:
       run `hyperfine` for `md --help`, `md small.md`, `md large.md`,
       `md hash small.md`, `md compose small.md`,
       `md compose --no-trigger-schemas`, against a **release** build; record to
       `reviews/2026-07-12-perf/baseline.md`.
-- [ ] Capture the toc scaling baseline: `md toc --json` at 81 KB / 326 KB /
-      1.3 MB fixtures; record wall times (expect ~203 ms / 2.24 s / 45.3 s).
-- [ ] Add a criterion bench for `compose_with` on a fixture that exercises
+- [x] Capture the toc scaling baseline: `md toc --json` at 81 KB / 326 KB /
+      1.3 MB fixtures; record wall times (this host: ~128 ms / 1.77 s / 27.7 s —
+      13.8×/15.6× per 4× size, quadratic confirmed).
+- [x] Add a criterion bench for `compose_with` on a fixture that exercises
       frontmatter interpolation + `$schema` + one transclusion (the regressed
-      path with no existing coverage).
-- [ ] Add a criterion bench for `as_terminal` / `DarkmatterPage::render` on a
-      code-heavy 100 KB document.
-- [ ] Confirm `md compose --perf` attribution still reports the documented
+      path with no existing coverage). → `benches/compose_schema_transclusion.rs`
+- [x] Add a criterion bench for `as_terminal` / `DarkmatterPage::render` on a
+      code-heavy 100 KB document. → `benches/render_code_heavy.rs`
+- [x] Confirm `md compose --perf` attribution still reports the documented
       segments (capture context / validate references / build options / compose
       pipeline / schema validation) — this is the primary harness for validating
       Findings 1, 5, 6, 7.
-- [ ] **Checkpoint:** benches compile and run under `just`; baseline artifacts
+- [x] **Checkpoint:** benches compile and run under `just`; baseline artifacts
       committed to the review folder.
 
 > Parallelizable: the two criterion benches can be authored concurrently.
