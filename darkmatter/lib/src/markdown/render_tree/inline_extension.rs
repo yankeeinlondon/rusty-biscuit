@@ -251,6 +251,21 @@ pub(crate) fn rewrite_inline_extensions(source: &str) -> InlineRewrite<'_> {
         };
     }
 
+    // A rewrite can only happen when some token kind has an opener followed by
+    // a later closer of the same kind. When no such ordered pair exists here it
+    // cannot exist in any subset `protected_ranges` filtering later produces
+    // (openness/closedness is a per-delimiter property of the source, so
+    // removing delimiters never creates a pair), so the expensive second
+    // pulldown-cmark parse below would only rediscover an all-literal result.
+    // This is the common case for a lone `==` in `a == b` — ubiquitous in code
+    // and technical prose (finding 19).
+    if !has_plausible_pair(&delimiters) {
+        return InlineRewrite {
+            source: Cow::Borrowed(source),
+            provenance: ProvenanceTable::default(),
+        };
+    }
+
     // Drop any delimiter that falls inside a verbatim region (code, raw HTML,
     // link destination, image) so the rewrite only rephrases eligible prose.
     let protected = protected_ranges(source);
@@ -537,6 +552,28 @@ fn classify_flanking(text: &str, byte_pos: usize, len: usize) -> (bool, bool) {
     (can_open, can_close)
 }
 
+/// Whether the scanned delimiters could possibly form at least one pair.
+///
+/// A pair requires an opener delimiter followed by a later closer delimiter of
+/// the *same* token kind. Because each delimiter's open/close capability is a
+/// property of the surrounding source (never of the other delimiters), a `false`
+/// result here holds for every subset of these delimiters too — so the caller
+/// can skip the [`protected_ranges`] pre-parse and return the source borrowed
+/// unchanged. Escaped delimiters carry `can_open == can_close == false`, so they
+/// neither open nor satisfy this check.
+fn has_plausible_pair(delimiters: &[Delim]) -> bool {
+    let mut seen_open = vec![false; INLINE_TOKENS.len()];
+    for delim in delimiters {
+        if delim.can_close && seen_open[delim.spec_index] {
+            return true;
+        }
+        if delim.can_open {
+            seen_open[delim.spec_index] = true;
+        }
+    }
+    false
+}
+
 /// Assigns each scanned delimiter a [`Role`] by pairing greedily, left to
 /// right, with an independent stack per token kind.
 ///
@@ -594,6 +631,36 @@ mod tests {
         assert!(!result.was_rewritten(), "no-extension input must not rewrite");
         assert_eq!(result.source, source);
         assert!(result.provenance.is_empty());
+    }
+
+    #[test]
+    fn lone_unpaired_delimiter_is_borrowed_unchanged() {
+        // `a == b` is a single `==` — no closer follows, so no pair is
+        // possible. The result must be the borrowed source (finding 19: this
+        // path must skip the second pulldown-cmark parse).
+        for source in ["a == b", "value ⌄ 3", "trailing =="] {
+            let result = rewrite_inline_extensions(source);
+            assert!(
+                !result.was_rewritten(),
+                "unpaired/odd delimiters must not rewrite: {source:?}"
+            );
+            assert_eq!(result.source, source);
+            assert!(result.provenance.is_empty());
+        }
+    }
+
+    #[test]
+    fn plausible_pair_detection_matches_pairing_outcome() {
+        // The pre-parse skip must never suppress a real rewrite: whenever a
+        // document does rewrite, `has_plausible_pair` must have returned true.
+        for source in ["==hi==", "a ==b== c", "\u{2304}d\u{2304}"] {
+            let delimiters = scan_delimiters(source);
+            assert!(
+                has_plausible_pair(&delimiters),
+                "a rewriting document must report a plausible pair: {source:?}"
+            );
+            assert!(rewrite_inline_extensions(source).was_rewritten());
+        }
     }
 
     #[test]

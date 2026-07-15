@@ -512,7 +512,13 @@ fn split_disclosure_directives<'a>(
                 .min_by_key(|(pos, _)| *pos);
 
             let Some((dir_pos, dir_len)) = match_pos else {
-                if split_from < text_str.len() {
+                if split_from == 0 {
+                    // No directive occurs anywhere in this text event — the
+                    // common case for documents with no disclosure directives.
+                    // Forward the borrowed event unchanged rather than copying
+                    // its bytes into a fresh `String` (finding 20).
+                    out.push((Event::Text(text), range));
+                } else if split_from < text_str.len() {
                     let tail = text_str[split_from..].to_string();
                     let tail_len = tail.len();
                     out.push((Event::Text(CowStr::from(tail)), offset..offset + tail_len));
