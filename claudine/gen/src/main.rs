@@ -1,17 +1,21 @@
 //! `claudine-gen` — the provider-catalog generator binary.
 //!
-//! Dev-facing tool: plain-text output, no rendering dependencies.
-//! `claudine providers generate` shells out to this binary so the
-//! user-facing UX lives in claudine-cli without the CLI linking the
-//! generator (bootstrap rule).
+//! Dev-facing tool. Human-facing reports render through the
+//! [`claudine_gen::report`] module (biscuit-terminal `Prose` /
+//! `UnorderedList`), so styling degrades cleanly on a pipe / `NO_COLOR` and
+//! honors `FORCE_COLOR`. Machine-facing output — the `mapping` JSON document
+//! and the `agent-errors` findings file — stays raw. `claudine providers
+//! generate` shells out to this binary so the user-facing UX lives in
+//! claudine-cli without the CLI linking the generator (bootstrap rule).
 
 use std::io::{BufRead, IsTerminal, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use biscuit_terminal::terminal::Terminal;
 use clap::{Parser, Subcommand};
 
-use claudine_gen::{CheckOutcome, Decision, GenError, Provenance};
+use claudine_gen::{CheckOutcome, Decision, GenError, report};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -107,18 +111,21 @@ fn main() -> ExitCode {
     } else {
         cli.command.unwrap_or(Command::Check { slug: None })
     };
-    match run(cli.area, command) {
+    let term = report::output_terminal();
+    match run(&term, cli.area, command) {
         Ok(code) => code,
         Err(err) => {
-            eprintln!("claudine-gen error: {err}");
+            eprint!("{}", report::fatal(&term, &err));
             ExitCode::FAILURE
         }
     }
 }
 
-fn run(area: Option<PathBuf>, command: Command) -> Result<ExitCode, GenError> {
+fn run(term: &Terminal, area: Option<PathBuf>, command: Command) -> Result<ExitCode, GenError> {
     match command {
         Command::Mapping => {
+            // Machine-facing: raw JSON on stdout, never routed through the
+            // terminal renderer.
             println!(
                 "{}",
                 serde_json::to_string_pretty(&claudine_gen::mapping_json())
@@ -133,7 +140,7 @@ fn run(area: Option<PathBuf>, command: Command) -> Result<ExitCode, GenError> {
             scaffold,
         } => {
             let area = resolve_area(area)?;
-            run_generate(&area, &slug, yes, dry_run, scaffold)
+            run_generate(term, &area, &slug, yes, dry_run, scaffold)
         }
         Command::Check { slug } => {
             let area = resolve_area(area)?;
@@ -146,124 +153,72 @@ fn run(area: Option<PathBuf>, command: Command) -> Result<ExitCode, GenError> {
             for slug in &slugs {
                 let (generation, outcome) = claudine_gen::check_area(&area, slug)?;
                 if scope.contains(slug) {
-                    match outcome {
-                        CheckOutcome::Clean => {
-                            println!("{slug}: clean (inputs match the committed data.rs)");
-                        }
-                        CheckOutcome::Drift { details } => {
-                            drifted = true;
-                            println!("{slug}: DRIFT — regenerate with `claudine-gen generate`:");
-                            for line in details {
-                                println!("  {line}");
-                            }
-                        }
-                        CheckOutcome::MissingCommitted { path } => {
-                            drifted = true;
-                            println!(
-                                "{slug}: committed data.rs missing at {} — run `claudine-gen generate`",
-                                path.display()
-                            );
-                        }
+                    if !matches!(outcome, CheckOutcome::Clean) {
+                        drifted = true;
                     }
-                    report_provenance(&generation);
+                    print!("{}", report::provider_check(term, slug, &outcome));
+                    print!("{}", report::provenance(term, &generation));
                 }
                 generations.push(generation);
             }
-            report_artifact_warning(&generations);
-            match claudine_gen::check_catalog(&area, &generations)? {
-                CheckOutcome::Clean => {
-                    println!("catalog.json: clean (inputs match the committed catalog)");
-                }
-                CheckOutcome::Drift { details } => {
-                    drifted = true;
-                    println!("catalog.json: DRIFT — regenerate with `claudine-gen generate`:");
-                    print_capped_diff(&details, "  ");
-                }
-                CheckOutcome::MissingCommitted { path } => {
-                    drifted = true;
-                    println!(
-                        "catalog.json missing at {} — run `claudine-gen generate`",
-                        path.display()
-                    );
-                }
-            }
-            match claudine_gen::check_signals(&area)? {
-                CheckOutcome::Clean => {
-                    println!(
-                        "signals generated.rs: clean (inputs match the committed tables)"
-                    );
-                }
-                CheckOutcome::Drift { details } => {
-                    drifted = true;
-                    println!(
-                        "signals generated.rs: DRIFT — regenerate with `claudine-gen generate`:"
-                    );
-                    print_capped_diff(&details, "  ");
-                }
-                CheckOutcome::MissingCommitted { path } => {
-                    drifted = true;
-                    println!(
-                        "signals generated.rs missing at {} — run `claudine-gen generate`",
-                        path.display()
-                    );
-                }
-            }
-            match claudine_gen::check_vocabulary(&area)? {
-                CheckOutcome::Clean => {
-                    println!(
-                        "stream vocabulary.rs: clean (inputs match the committed tables)"
-                    );
-                }
-                CheckOutcome::Drift { details } => {
-                    drifted = true;
-                    println!(
-                        "stream vocabulary.rs: DRIFT — regenerate with `claudine-gen generate`:"
-                    );
-                    print_capped_diff(&details, "  ");
-                }
-                CheckOutcome::MissingCommitted { path } => {
-                    drifted = true;
-                    println!(
-                        "stream vocabulary.rs missing at {} — run `claudine-gen generate`",
-                        path.display()
-                    );
-                }
-            }
+            print!("{}", report::artifact_warning(term, &generations));
+
+            let catalog = claudine_gen::check_catalog(&area, &generations)?;
+            drifted |= !matches!(catalog, CheckOutcome::Clean);
+            print!(
+                "{}",
+                report::artifact_check(
+                    term,
+                    "catalog.json",
+                    "(inputs match the committed catalog)",
+                    &catalog,
+                )
+            );
+
+            let signals = claudine_gen::check_signals(&area)?;
+            drifted |= !matches!(signals, CheckOutcome::Clean);
+            print!(
+                "{}",
+                report::artifact_check(
+                    term,
+                    "signals generated.rs",
+                    "(inputs match the committed tables)",
+                    &signals,
+                )
+            );
+
+            let vocabulary = claudine_gen::check_vocabulary(&area)?;
+            drifted |= !matches!(vocabulary, CheckOutcome::Clean);
+            print!(
+                "{}",
+                report::artifact_check(
+                    term,
+                    "stream vocabulary.rs",
+                    "(inputs match the committed tables)",
+                    &vocabulary,
+                )
+            );
+
             let family_count = claudine_gen::compiled_family_keys(&generations).len();
-            match claudine_gen::check_families(&area, &generations)? {
-                CheckOutcome::Clean => {
-                    println!(
-                        "families generated.rs: clean ({family_count} family keys compiled)"
-                    );
-                }
-                CheckOutcome::Drift { details } => {
-                    drifted = true;
-                    println!(
-                        "families generated.rs: DRIFT — regenerate with `claudine-gen generate`:"
-                    );
-                    print_capped_diff(&details, "  ");
-                }
-                CheckOutcome::MissingCommitted { path } => {
-                    drifted = true;
-                    println!(
-                        "families generated.rs missing at {} — run `claudine-gen generate`",
-                        path.display()
-                    );
-                }
-            }
+            let families = claudine_gen::check_families(&area, &generations)?;
+            drifted |= !matches!(families, CheckOutcome::Clean);
+            print!(
+                "{}",
+                report::artifact_check(
+                    term,
+                    "families generated.rs",
+                    &format!("({family_count} family keys compiled)"),
+                    &families,
+                )
+            );
+
             // Roster ↔ wired-set cross-validation: a wired slug with no
             // active roster entry is a loud error (propagates out); active
             // roster slugs with no wired variant are the "researched but not
             // yet code-supported" set, reported informationally.
             let cross = claudine_gen::cross_validate_roster(&area)?;
-            if cross.unwired_active.is_empty() {
-                println!("roster: every active entry has a wired Provider variant");
-            } else {
-                println!(
-                    "roster: {} researched but not wired (no Provider variant) — informational",
-                    cross.unwired_active.join(", ")
-                );
-            }
+            print!("{}", report::roster(term, &cross.unwired_active));
+
             Ok(if drifted {
                 ExitCode::FAILURE
             } else {
@@ -279,23 +234,28 @@ fn run(area: Option<PathBuf>, command: Command) -> Result<ExitCode, GenError> {
                     let report = claudine_gen::check_agent_errors(&area, &slug, &findings_path)?;
                     match report.status {
                         claudine_gen::GateStatus::Clean => {
-                            println!("{slug}: agent-errors research clean (explicit outcome)");
+                            print!("{}", report::agent_errors_clean(term, &slug));
                         }
                         claudine_gen::GateStatus::Findings => {
-                            println!(
-                                "{slug}: {} deterministic finding(s) written to {}",
-                                report.findings.len(),
-                                findings_path.display()
+                            print!(
+                                "{}",
+                                report::agent_errors_findings(
+                                    term,
+                                    &slug,
+                                    &report.findings,
+                                    &findings_path,
+                                )
                             );
-                            for finding in &report.findings {
-                                println!("  {}", finding.detail);
-                            }
                         }
                         claudine_gen::GateStatus::GateError => {
-                            println!(
-                                "{slug}: deterministic gate error written to {}: {}",
-                                findings_path.display(),
-                                report.error.as_deref().unwrap_or("unknown gate error")
+                            print!(
+                                "{}",
+                                report::agent_errors_gate_error(
+                                    term,
+                                    &slug,
+                                    &findings_path,
+                                    report.error.as_deref(),
+                                )
                             );
                         }
                     }
@@ -312,6 +272,7 @@ fn run(area: Option<PathBuf>, command: Command) -> Result<ExitCode, GenError> {
 /// confirmation, decline → override scaffolding, non-zero exit while drift
 /// remains unreconciled.
 fn run_generate(
+    term: &Terminal,
     area: &std::path::Path,
     slug: &Option<String>,
     yes: bool,
@@ -329,57 +290,56 @@ fn run_generate(
         // any file is written.
         let variant = claudine_gen::scaffold::provider_variant(slug)?;
         if claudine_gen::scaffold_facts(area, slug)? {
-            println!(
-                "scaffolded docs/providers/facts/{slug}.yaml — fill the TODO(required) fields, \
-                 then rerun `claudine-gen generate {slug} --scaffold`"
-            );
+            print!("{}", report::scaffold_facts_notice(term, slug));
             return Ok(ExitCode::SUCCESS);
         }
-        report_stub(
-            claudine_gen::scaffold_mod(area, slug, variant)?,
-            &format!("lib/src/provider/{slug}/mod.rs"),
+        print!(
+            "{}",
+            report::scaffold_stub(
+                term,
+                claudine_gen::scaffold_mod(area, slug, variant)?,
+                &format!("lib/src/provider/{slug}/mod.rs"),
+            )
         );
-        report_stub(
-            claudine_gen::scaffold_behavior(area, slug, variant)?,
-            &format!("lib/src/provider/{slug}/behavior.rs"),
+        print!(
+            "{}",
+            report::scaffold_stub(
+                term,
+                claudine_gen::scaffold_behavior(area, slug, variant)?,
+                &format!("lib/src/provider/{slug}/behavior.rs"),
+            )
         );
         // Fall through to the normal data.rs generate/apply for this slug.
     }
     let scope = slug_scope(slug);
     let generations = claudine_gen::generate_all(area)?;
-    report_artifact_warning(&generations);
+    print!("{}", report::artifact_warning(term, &generations));
     // The signals and families artifacts are full-scope like catalog.json:
     // always rebuilt, written through the same per-file confirmation flow.
     let signals = claudine_gen::build_signals(area)?;
     let families = claudine_gen::build_families(area, &generations)?;
     let vocabulary = claudine_gen::build_vocabulary(area)?;
-    println!(
-        "families: {} family keys compiled from expected-offering joins",
-        claudine_gen::compiled_family_keys(&generations).len()
+    print!(
+        "{}",
+        report::families_count(term, claudine_gen::compiled_family_keys(&generations).len())
     );
 
     let interactive = !yes && !dry_run && std::io::stdin().is_terminal();
     let report_only = dry_run || (!yes && !interactive);
     if report_only && !dry_run {
-        println!("stdin is not a TTY — report-only (pass --yes to write unconditionally)");
+        print!("{}", report::report_only_notice(term));
     }
 
     let mut decide = |path: &std::path::Path, diff: &[String]| -> Decision {
-        println!(
-            "{}: {} differing line{}",
-            path.display(),
-            diff.len(),
-            if diff.len() == 1 { "" } else { "s" }
-        );
-        print_capped_diff(diff, "  ");
+        print!("{}", report::decide_header(term, path, diff));
         if yes {
-            println!("  writing (--yes)");
+            print!("{}", report::writing_yes(term));
             return Decision::Accept;
         }
         if report_only {
             return Decision::Decline;
         }
-        prompt_decision(path)
+        prompt_decision(term, path)
     };
     let outcome = claudine_gen::apply_generations(
         area,
@@ -392,11 +352,11 @@ fn run_generate(
     )?;
 
     for path in &outcome.written {
-        println!("wrote {}", path.display());
+        print!("{}", report::wrote(term, path));
     }
     for generation in &generations {
         if scope.contains(&generation.slug.as_str()) {
-            report_provenance(generation);
+            print!("{}", report::provenance(term, generation));
         }
     }
 
@@ -404,39 +364,21 @@ fn run_generate(
         return Ok(ExitCode::SUCCESS);
     }
 
-    println!();
-    if report_only {
-        println!(
-            "{} file(s) drifted — rerun on a TTY to confirm per file, or pass --yes",
-            outcome.declined.len()
-        );
-    } else {
-        println!(
-            "{} declined file(s) remain unreconciled — pin the committed value with an \
-             override, or revert the offending input, then regenerate:",
-            outcome.declined.len()
-        );
-    }
-    for declined in &outcome.declined {
-        println!("  declined: {}", declined.path.display());
-        if let Some(snippet) = &declined.override_snippet {
-            for line in snippet.lines() {
-                println!("    {line}");
-            }
-        }
-    }
+    print!(
+        "{}",
+        report::declined_summary(term, report_only, &outcome.declined)
+    );
     Ok(ExitCode::FAILURE)
 }
 
 /// `[y/N/q]` prompt on stdin (default No; `q` stops prompting entirely).
-fn prompt_decision(path: &std::path::Path) -> Decision {
+fn prompt_decision(term: &Terminal, path: &std::path::Path) -> Decision {
     loop {
-        print!(
-            "write {}? [y/N/q] ",
-            path.file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.display().to_string())
-        );
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        print!("{}", report::prompt(term, &name));
         let _ = std::io::stdout().flush();
         let mut line = String::new();
         if std::io::stdin().lock().read_line(&mut line).is_err() || line.is_empty() {
@@ -447,28 +389,8 @@ fn prompt_decision(path: &std::path::Path) -> Decision {
             "y" | "yes" => return Decision::Accept,
             "" | "n" | "no" => return Decision::Decline,
             "q" | "quit" => return Decision::Quit,
-            other => println!("unrecognized `{other}` — expected y, n, or q"),
+            other => print!("{}", report::prompt_unrecognized(term, other)),
         }
-    }
-}
-
-/// Reports whether a never-overwrite stub was written or already present.
-fn report_stub(written: bool, rel: &str) {
-    if written {
-        println!("scaffolded {rel}");
-    } else {
-        println!("{rel} already present — left untouched");
-    }
-}
-
-/// Compact diff: the first lines verbatim, then an elision count.
-fn print_capped_diff(details: &[String], indent: &str) {
-    const MAX_LINES: usize = 20;
-    for line in details.iter().take(MAX_LINES) {
-        println!("{indent}{line}");
-    }
-    if details.len() > MAX_LINES {
-        println!("{indent}… {} more differing lines", details.len() - MAX_LINES);
     }
 }
 
@@ -481,72 +403,6 @@ fn resolve_area(area: Option<PathBuf>) -> Result<PathBuf, GenError> {
                 source,
             })?;
             claudine_gen::find_area(&cwd)
-        }
-    }
-}
-
-/// Prints the models-catalog staleness warning once per run (the warning
-/// is artifact-global, so every generation carries the same one).
-fn report_artifact_warning(generations: &[claudine_gen::Generation]) {
-    if let Some(warning) = generations
-        .iter()
-        .find_map(|generation| generation.artifact_warning.as_deref())
-    {
-        println!("WARNING: {warning}");
-    }
-}
-
-/// Lists active overrides (with the value they suppress), staleness,
-/// coercion skips (input records a coercion was pointed at but dropped —
-/// silent drops would otherwise surface only after the field graduates off
-/// its override), and expected-offering artifact-join coverage.
-fn report_provenance(generation: &claudine_gen::Generation) {
-    let join = &generation.offering_join;
-    println!(
-        "  expected offerings: {}/{} joined to the models-catalog artifact",
-        join.joined, join.total
-    );
-    for id in &join.unjoined {
-        println!("    unjoined: {id}");
-    }
-    for alias in &join.ambiguous_aliases {
-        println!(
-            "    ambiguous alias: `{alias}` spans multiple families — resolves mark dropped"
-        );
-    }
-    for skip in &generation.skips {
-        println!(
-            "  coercion skipped {} record{} for {} ({}):",
-            skip.records.len(),
-            if skip.records.len() == 1 { "" } else { "s" },
-            skip.field,
-            skip.reason
-        );
-        for record in &skip.records {
-            println!("    {record:?}");
-        }
-    }
-    for field in &generation.fields {
-        if let Provenance::Override {
-            reason,
-            suppressed,
-            stale,
-        } = &field.provenance
-        {
-            let suppressed = suppressed
-                .as_ref()
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "<source unresolvable>".to_string());
-            println!(
-                "  override active: {} (suppressing {suppressed}) — {reason}",
-                field.field
-            );
-            if *stale {
-                println!(
-                    "  STALE override: {} now equals the source value — delete it",
-                    field.field
-                );
-            }
         }
     }
 }

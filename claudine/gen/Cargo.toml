@@ -21,6 +21,10 @@ path = "src/main.rs"
 claudine-catalog-types = { path = "../catalog-types" }
 biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["file-reference"] }
 darkmatter = { path = "../../darkmatter/lib" }
+# Human-facing report rendering (Phase 10). biscuit-terminal is already in the
+# dependency tree transitively via darkmatter and does not depend on the
+# `claudine` lib/CLI, so the bootstrap boundary is preserved.
+biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

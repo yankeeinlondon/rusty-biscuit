@@ -22,6 +22,7 @@ pub mod generate;
 pub mod inputs;
 pub mod offerings;
 pub mod registry;
+pub mod report;
 pub mod scaffold;
 pub mod schema_compat;
 pub mod signals;
