@@ -1,11 +1,12 @@
 ---
 created: 2026-07-13
 status: draft
-reviewed: false
+reviewed: true
+reviewed_by: codex/default
+reviewed_on: 2026-07-15
 depends_on:
     - ../_completed/2026-05-12-lifecycle/spec.md
     - ../_completed/2026-06-26-positional-and-key-value/spec.md
-related:
     - ../2026-07-13-file-resolution/spec.md
     - ../2026-07-13-error-propogation/spec.md
 ---
@@ -80,6 +81,17 @@ Intentional differences are limited to:
 - proxy provenance, cycle detection, and hop accounting; and
 - the immediate target overlay supplied by `proxy.with`.
 
+The contract applies when a proxy is actually selected during live execution.
+Existing dry-run behavior remains side-effect-free: dry run does not fire
+lifecycle events and therefore does not traverse a dynamic proxy route.
+
+A clean handoff is control transfer, not source completion or source failure.
+Once `proxy` is selected, the coordinator does not synthesize any later source
+lifecycle signal or apply an uncommitted source closure. Events that already
+fired remain observable; a proxy selected by `success` or `failure` skips that
+source attempt's ordinary `finalize`, while a proxy selected by `finalize`
+obviously does not re-enter it. The target becomes the closure/output owner.
+
 Equivalence is semantic, not an assertion that internal allocation, tracing,
 or performance timings are byte-identical.
 
@@ -104,6 +116,8 @@ or performance timings are byte-identical.
   preserving caller overrides as the highest-precedence input layer.
 - Preserve typed errors and source context through every transition route.
 - Make direct-versus-proxy equivalence mechanically testable.
+- Preserve the enclosing command's composition mode and sequence-step identity
+  while transferring document identity and closure ownership to the target.
 
 ## Non-goals
 
@@ -121,6 +135,8 @@ or performance timings are byte-identical.
   starts a fresh target session.
 - Adding general nested-map parameters to every lifecycle action. `with:` is a
   typed field owned specifically by `proxy`.
+- Changing dry-run into lifecycle simulation or statically predicting which
+  dynamic proxy branch would run.
 
 ## Current State Transfer and Failure Modes
 
@@ -194,7 +210,7 @@ Target lifecycle shell commands can be discovered after a target-only preflight
 that did not include target lifecycle configuration. Approval caching can then
 freeze before a fresh target has had a chance to request approval. Parallel
 proxy/retry routes also wrap some typed failures into generic messages. The
-related file-resolution and error-propagation specifications define the shared
+file-resolution and error-propagation dependency specifications define the shared
 resolver and diagnostic transport; this feature must use them rather than add
 transition-local substitutes.
 
@@ -202,9 +218,13 @@ transition-local substitutes.
 
 ### R1 — One active-document coordinator
 
-The composition command owns one coordinator above both the document-loop
-engine and provider-attempt harness. Only this coordinator may change active
-document identity.
+Each composition command run owns one coordinator above both the document-loop
+engine and provider-attempt harness. Only this coordinator may commit a change
+to active document identity. The provider-neutral transition types and pure
+state decisions live in `claudine::composition`; the CLI driver owns process,
+terminal, filesystem, and provider adapters. Library loop code therefore
+returns the same transition rather than exposing a second optional proxy-target
+channel.
 
 All lifecycle control paths return a shared typed transition to it. Names are
 illustrative, but the semantic surface is required:
@@ -217,7 +237,7 @@ pub enum DocumentTransition {
         session: SessionId,
         message: String,
     },
-    Proxy(ProxyHandoff),
+    Proxy(EvaluatedProxyRequest),
     Complete,
     Abort(CompositionError),
 }
@@ -232,6 +252,17 @@ Initialize routing, terminal recovery, target-initialize chaining, and library
 loop routing must all converge on this transition. There must be no parallel
 target-only return value whose consumption is optional.
 
+The coordinator is nested inside, and cannot mutate, command-level ownership:
+
+- `inline-compose` remains inline mode, but a committed proxy makes the target
+  the only document eligible for the eventual inline closure; the router is
+  not rewritten with target output;
+- a sequence proxy remains inside the current sequence step until the target
+  completes, fails, or proxies again; it neither advances nor restarts the
+  sequence and it retains the step's scoped inputs and timing identity; and
+- direct `compose` continues to route the final active document's output to
+  stdout.
+
 ### R2 — State has four explicit ownership layers
 
 The implementation must keep these concerns distinct. Exact Rust names may
@@ -242,6 +273,8 @@ differ.
 Immutable for the whole command:
 
 - authored CLI reference and caller `key=value` / `--set` overrides;
+- command mode (`compose`, `inline-compose`, or a particular sequence step),
+  step-scoped overrides, and command-level output policy;
 - explicit provider/model/interactivity flags and provider arguments;
 - approval/yolo policy and the exact-command approval cache;
 - launch CWD and launch-workspace discovery inputs;
@@ -253,19 +286,33 @@ every document.
 
 #### Handoff state
 
-Created only by a proxy transition:
+Handoff construction has two typed stages. Lifecycle evaluation produces a
+provider-neutral request without consulting the filesystem:
 
 ```rust
-pub struct ProxyHandoff {
+pub struct EvaluatedProxyRequest {
     pub target: String,
-    pub with: IndexMap<String, serde_json::Value>,
+    pub overlay: IndexMap<String, serde_json::Value>,
     pub provenance: ProxyProvenance,
 }
 ```
 
-It contains the unevaluated target only until lifecycle evaluation resolves it;
-the coordinator receives an atomic resolved handoff. Provenance carries the
-source path/event/action location needed for cycle checks and diagnostics.
+The coordinator resolves that target through the file-resolution dependency,
+performs hop/cycle validation, and only then creates a committable handoff:
+
+```rust
+pub struct ProxyHandoff {
+    pub authored_target: String,
+    pub resolved_target: PathBuf,
+    pub overlay: IndexMap<String, serde_json::Value>,
+    pub provenance: ProxyProvenance,
+}
+```
+
+Exact Rust names and the related spec's resolved-path wrapper may differ. The
+required distinction is evaluated request versus resolved handoff; no string
+target is resolved again downstream. Provenance carries the source path,
+event, action/property location, and proxy chain needed for diagnostics.
 
 #### Prepared document
 
@@ -274,6 +321,7 @@ The complete canonical output for one active document:
 - resolved source and source-specific repository/file-resolution context;
 - exact `ComposeContext` and environment layers;
 - authored and effective frontmatter, prompt, schema result, and warnings;
+- composition mode, target-owned closure plan, and command output routing;
 - selection hints and the resolved provider/model/interactivity;
 - lifecycle configuration and lifecycle lookup context;
 - loop definition and loop state adapter;
@@ -300,6 +348,12 @@ Proxy discards attempt state and creates fresh target attempt state. Retry
 starts a new session attempt. Resume alone retains the compatible live session.
 The global proxy hop chain remains invocation-run state and is not reset by a
 handoff.
+
+The immediate overlay stored at document scope is the immutable, evaluated,
+pre-schema handoff input. Schema defaults, coercion, and invalid-optional
+drops affect prepared effective frontmatter, never the stored overlay; a later
+refresh reapplies the same overlay and reruns the stage required by its entry
+policy.
 
 ### R3 — One canonical preparation service
 
@@ -328,6 +382,25 @@ input to the canonical service with an honest limited name, or be replaced by
 the invocation/document state above. Adding more source-specific fields to it
 is not the strategic solution.
 
+"One service" does not mean every re-entry repeats every lifecycle stage. The
+service accepts an explicit entry reason and enforces this policy:
+
+| Entry reason | Source/input basis | `initialize` | Schema and complete shell audit | Loop ownership |
+|---|---|---:|---:|---|
+| Direct document | Fresh read plus caller overrides | once | run | establish |
+| Proxy target | Fresh read plus handoff overlay plus caller overrides | once | run | establish |
+| Retry | Fresh read of the same document plus retained inputs | no | rerun | refresh current document definition |
+| Resume | Fresh read of the same document plus retained inputs | no | rerun | refresh current document definition |
+| Next loop iteration | Prepared source snapshot plus in-memory loop state | no | reuse | retain |
+
+This table preserves the ratified loop contract: later loop iterations do not
+reread an externally changed document, rerun schema validation, or prompt for
+shell approval. They re-materialize prompt/data state through the canonical
+service while reusing the validated structural plan and the exact stamped
+commands established for the active document. Retry or resume is the explicit
+fresh-read boundary. No entry reason may silently fall through to a different
+policy.
+
 ### R4 — Bootstrap initialize before full preparation
 
 The documented lifecycle order requires a fresh target to reach its own
@@ -341,16 +414,32 @@ A staged canonical boot is expected:
 1. resolve/read the candidate document and apply its input layers;
 2. derive the target-specific repository, selection hints, provider/model
    environment, and exact early-binding context needed by `initialize`;
-3. parse and run the target's `initialize` through the normal lifecycle
-   evaluator;
-4. consume `skip`, `error`, or another `Proxy` transition atomically;
-5. once document identity stabilizes, perform full canonical preparation,
+3. parse the target's bootstrap lifecycle surface and run a narrow safety gate
+   for actions that could execute during `initialize`;
+4. run the target's `initialize` through the normal lifecycle evaluator;
+5. consume `skip`, `error`, or another `Proxy` transition atomically;
+6. once document identity stabilizes, reread the target so successful
+   initialize-time mutations are visible, then perform full canonical preparation,
    validation, shell approval, loop recognition, and launch planning.
 
 This staging must not create two composition implementations. Shared work is a
 shared service with explicit stage boundaries. Any executable initialize action
 must still satisfy the existing approval and security policy before dispatch;
 "initialize before full pre-flight" never means "execute unapproved shell."
+
+The narrow safety gate parses and approves every potentially selected
+`initialize` shell command against the same early-binding snapshot, and routes
+all other initialize actions through the existing effect/permission engine. It
+does not run target schema validation or audit later-event commands. The full
+audit after identity stabilizes covers every remaining lifecycle and template
+shell surface and reuses exact-command approvals already granted by the narrow
+gate.
+
+Malformed frontmatter or a failure too early to construct the target's
+lifecycle configuration cannot fire target catch events; it returns the normal
+typed parse/bootstrap diagnostic. After the target lifecycle exists, later
+bootstrap/preparation failures follow the normal `failure`/`finalize` routing
+without emitting either event more than once.
 
 ### R5 — Context is prepared data, not ambient process state
 
@@ -380,7 +469,9 @@ When proxy changes the active document, the coordinator recalculates every
 document-dependent launch decision from the target plus immutable invocation
 state. This includes provider/model selection, interactivity, MCP tags and
 runtime injection, workspace/repository behavior, profile/binary, structured
-mode, system prompt, argv, environment, child CWD, and dispatch context.
+mode, system prompt, argv, environment, child CWD, dispatch context, and the
+target-owned closure plan. The enclosing command/sequence output policy remains
+invocation state.
 
 Normal precedence still applies: explicit CLI intent remains authoritative,
 while target frontmatter can affect values that were not fixed explicitly.
@@ -418,9 +509,17 @@ prepared document.
 refreshes mutable document/lifecycle material through the same canonical
 service, then deliberately substitutes the evaluated follow-up message as the
 provider input. It does not rerun `initialize`, change active document, or
-silently select a different provider. If canonical refresh would make the live
-session incompatible with the resolved provider/model, resume fails with a
-typed error instead of mixing configurations.
+silently select a different session contract.
+
+Compatibility is not merely provider/model equality. The prepared document
+computes a session-compatibility key containing every launch property that the
+provider cannot renegotiate on resume, including at least provider, model,
+profile/binary and resume protocol, workspace/child CWD, permission/tool mode,
+structured-output mode, system-prompt delivery/content, and effective MCP
+server set. Provider adapters may add provider-specific identity fields. If a
+canonical refresh changes that key, resume fails with a typed diagnostic that
+names the incompatible facets and recommends retry; it never mixes a live
+session with a newly prepared launch plan.
 
 Retry and resume budgets are scoped to the active document iteration. A proxy
 target receives fresh document-attempt budgets, while the invocation-wide
@@ -435,6 +534,12 @@ across the invocation, but only an exact already-approved command may bypass a
 new prompt. Freezing the cache for the source must not prevent a target from
 requesting approval for newly discovered commands.
 
+Retry and resume fresh-read preparation also rerun discovery and approval;
+unchanged exact commands hit the invocation cache, while newly introduced or
+changed commands receive normal review. Loop iteration materialization reuses
+the already stamped structural plan under R3 and cannot introduce new command
+bytes.
+
 Target body/frontmatter/lifecycle shell surfaces are resolved from the same
 prepared document that will execute. A `with:` value that influences a command
 must be present both when the command is approved and when it runs.
@@ -446,10 +551,10 @@ resume, and proxy failures retain their concrete error and source/provenance
 context. The active-document coordinator does not flatten a transition failure
 into an `eyre!` string.
 
-The related error-propagation specification owns registry and rendering
-mechanics. The equivalence requirement here is that the same target failure has
-the same typed identity and actionable rendering whether the target was direct,
-proxied from initialize, or proxied from terminal recovery.
+The error-propagation dependency owns registry and rendering mechanics. The
+equivalence requirement here is that the same target failure has the same typed
+identity and actionable rendering whether the target was direct, proxied from
+initialize, or proxied from terminal recovery.
 
 ## `proxy.with` Authoring Contract
 
@@ -471,12 +576,19 @@ proxied from initialize, or proxied from terminal recovery.
 | `action` | yes | literal `proxy` | Selects key/value lifecycle action form |
 | `target` | yes | lifecycle string | Existing proxy target reference |
 | `with` | no | mapping | Transient top-level frontmatter overlay for the immediate target |
-| `no_error` | no | boolean | Existing dispatch-error behavior; evaluation errors remain unsuppressed |
+| `no_error` | no | boolean | Universal action flag; proxy evaluation/transition failures are not suppressible |
 
 `with: {}` is valid and equivalent to omitting `with:`. A non-mapping value is
-a typed frontmatter error. In v1, an entire mapping cannot be supplied as
-`with: "{{ payload }}"`; authors write the mapping explicitly and may inject
-typed object or array values at individual keys.
+a typed frontmatter error. Mapping keys must be static YAML strings; dynamic or
+non-string keys are rejected with a property-path diagnostic. In v1, an entire
+mapping cannot be supplied as `with: "{{ payload }}"`; authors write the
+mapping explicitly and may inject typed object or array values at individual
+keys.
+
+The action parser recognizes this field through the typed proxy descriptor
+before applying the generic "direct parameter maps are unsupported" rule. That
+exception is exact: it does not make nested maps valid for another proxy field
+or any other lifecycle action.
 
 Positional form remains intentionally compact and unchanged:
 
@@ -530,6 +642,29 @@ frontmatter is visible to `with:`. Unknown roots, malformed expressions,
 unknown functions, or out-of-scope late-binding globals fail closed as
 lifecycle evaluation errors.
 
+`no_error` remains accepted because it is a universal key/value-action field,
+but proxy has no side-effect-dispatch phase to suppress. Overlay/target
+evaluation, file resolution, cycle/hop rejection, and target bootstrap are
+expression or control-transition failures and remain fatal to the handoff.
+
+The entire mapping is evaluated at the source handoff and then transported as
+typed JSON-compatible data. It is not a template passed to the target. A
+string installed under a target lifecycle/configuration key is therefore
+literal target data after handoff; raw `{{ ... }}` syntax may not survive DM2
+and become a second target-time evaluation. This rule prevents ambiguous
+source-versus-target binding.
+
+`with:` may intentionally set any top-level frontmatter key, including
+selection, lifecycle, loop, schema, timeout, MCP, or other control-plane keys.
+This is not an authority escalation: the source prompt could already select
+those behaviors or execute equivalent lifecycle actions. It is nevertheless
+executable configuration, not inert data. The target reparses and validates
+all resulting structural configuration, and every shell, filesystem, network,
+messaging, and provider effect remains subject to its normal target-side
+policy. Documentation must recommend schema-declared data properties for
+ordinary parameter passing and call out control-plane overlays as an advanced,
+trusted-prompt capability.
+
 ### Atomic handoff
 
 The target and complete `with:` mapping are evaluated before active-document
@@ -539,20 +674,30 @@ must all succeed before the coordinator begins target bootstrap.
 If any step fails:
 
 - no partial overlay is installed;
-- the source remains the active document for failure/finalize handling;
+- the source remains the active document for diagnostic attribution and any
+  catch routing still legal for the event that requested the proxy;
 - the target is not initialized or composed;
 - the concrete failure follows the existing lifecycle evaluation/setup-error
   route; and
 - `no_error` does not suppress expression evaluation failures.
+
+Failure routing remains event-aware even though proxy dispatch is shared. A
+handoff failure must not synthesize a duplicate terminal/finalize event: before
+finalize it follows the existing failure/finalize transition; after finalize
+has fired it surfaces directly. A failure inside `finalize` never re-enters
+`finalize`. The source stays active only until this routing completes; a failed
+handoff never half-activates the target.
 
 Once target bootstrap begins, any target-origin failure is attributed to the
 target while retaining proxy provenance for diagnostics.
 
 ## Target Composition and Precedence
 
-The resolved `with:` mapping is merged into the target's authored frontmatter
-before target initialize composition, full Darkmatter composition, and schema
-validation. It participates in:
+The resolved `with:` mapping is merged into every read of the target's authored
+frontmatter: the bootstrap read before target `initialize` and the fresh read
+after initialize-time mutations. Caller overrides are then reapplied. This
+occurs before full Darkmatter composition and schema validation. The overlay
+participates in:
 
 - target frontmatter interpolation and computed properties;
 - target selection hints and initialize conditions;
@@ -579,8 +724,8 @@ The overlay is shallow at the top level:
 - null removes that target-authored top-level property before composition.
 
 Caller overrides may subsequently restore or replace any key. File-valued
-properties use the target's canonical file-resolution context from the related
-file-resolution specification; `with:` does not add a second path resolver.
+properties use the target's canonical file-resolution context from the
+file-resolution dependency; `with:` does not add a second path resolver.
 
 ## Lifetime and Proxy Chains
 
@@ -610,8 +755,11 @@ document paths; an overlay does not create a distinct document identity.
 
 ## Security and Side Effects
 
-`with:` is data-only. It does not invoke Darkmatter's effect engine, create a
-temporary Markdown file, or trigger frontmatter hashing.
+Evaluating and transporting `with:` is data-only: that step does not invoke
+Darkmatter's effect engine, create a temporary Markdown file, or trigger
+frontmatter hashing. The installed values are not necessarily inert because
+the target may interpret control-plane frontmatter as executable
+configuration, as defined above.
 
 Because the overlay participates in target preparation, executable target
 configuration influenced by it passes the same schema, permission, and shell
@@ -622,11 +770,17 @@ Status output may report that a handoff includes an overlay, but must not print
 overlay values. Tracing may record property names and counts; values can contain
 secrets and follow existing redaction policy.
 
+Any new terminal status or diagnostic renders through existing
+`TerminalRenderable` components (`StatusBlock`, `Prose`, lists, or tables as
+appropriate), preserving TTY/color/link behavior. No transition path writes
+ad hoc formatted status with raw `println!`/`eprintln!`.
+
 ## Errors and Diagnostics
 
 Add typed, source-aware diagnostics for:
 
 - `with:` being anything other than a mapping;
+- a dynamic/non-string `with:` key;
 - interpolation failure at a specific `with.<key>` path;
 - a proxy-only `with:` parameter used on another action;
 - target bootstrap/preparation failure with source and proxy provenance;
@@ -660,12 +814,12 @@ The authoring surface is additive:
 - action parameters other than `proxy.with` continue to reject direct mapping
   values.
 
-The runtime refactor intentionally corrects behavior that depended on the
-router path. A proxied target may now execute additional loop iterations,
-select its authored provider/model, request approval for its own shell actions,
-or surface the typed error already produced by direct invocation. Those are
-compatibility fixes required by the equivalence contract, not preserved route
-quirks.
+> Reader note: the runtime refactor intentionally corrects behavior that
+> depended on the router path. A proxied target may now execute additional loop
+> iterations, select its authored provider/model, request approval for its own
+> shell actions, or surface the typed error already produced by direct
+> invocation. Those are compatibility fixes required by the equivalence
+> contract, not preserved route quirks.
 
 ## Documentation
 
@@ -675,8 +829,11 @@ Update the lifecycle topic, composition topic, and Claudine skill to cover:
 - active-document ownership and the retry/resume re-entry contract;
 - target-specific context/provider/MCP/workspace/loop behavior;
 - key/value `proxy.with` syntax and typed interpolation;
-- precedence and immediate-target overlay lifetime; and
-- transient `with:` versus persistent `set_frontmatter`/`merge_frontmatter`.
+- precedence and immediate-target overlay lifetime;
+- transient `with:` versus persistent `set_frontmatter`/`merge_frontmatter`;
+- source-time evaluation and the advanced control-plane-overlay trust model;
+- retry/resume/loop entry policies and the resume compatibility key; and
+- inline closure ownership, sequence-step containment, and dry-run behavior.
 
 Correct stale documentation that describes retry/resume/proxy behavior in
 terms of a reduced harness path or implies that recovery is limited to failure
@@ -691,48 +848,77 @@ when the universal lifecycle contract supports other runtime events.
 3. Initialize, terminal recovery, target-initialize chaining, and library loop
    proxy routes return one typed handoff that is always consumed or rejected
    explicitly.
-4. A target reached through proxy acquires its own document loop before its
+4. Lifecycle evaluation produces an evaluated proxy request, while the
+   coordinator alone resolves it, checks hop/cycle state, and atomically commits
+   a resolved handoff; no downstream layer resolves the target again.
+5. A clean proxy emits no synthetic source terminal/finalize/loop event and
+   applies no uncommitted source closure; the target owns the eventual closure
+   and output.
+6. `compose`, `inline-compose`, and sequence-step modes remain command state;
+   an inline proxy can rewrite only its final target, and a sequence proxy
+   cannot advance or restart its step.
+7. A target reached through proxy acquires its own document loop before its
    first provider attempt and executes the same number of iterations as direct
    invocation under the same inputs.
-5. Body, effective frontmatter, lifecycle, schema/file evaluation, and shell
+8. Body, effective frontmatter, lifecycle, schema/file evaluation, and shell
    pre-flight use the same stored target `ComposeContext` and environment
    layers.
-6. `ctx.area`, `ctx.agent`, `ctx.model`, `env.AGENT`, and `env.MODEL` match
+9. `ctx.area`, `ctx.agent`, `ctx.model`, `env.AGENT`, and `env.MODEL` match
    direct execution in body, frontmatter, and lifecycle surfaces.
-7. Provider/model/interactivity, MCP, workspace/repository, profile/binary,
+10. Provider/model/interactivity, MCP, workspace/repository, profile/binary,
    structured mode, system prompt, argv, environment, child CWD, and dispatch
    configuration are recalculated for the active target subject to immutable
    CLI precedence.
-8. Target `initialize` runs at its documented stage before target schema
-   validation/full pre-flight and may chain another atomic proxy.
-9. Retry canonically refreshes the current document and starts a fresh provider
+11. Target `initialize` runs at its documented stage after the narrow
+   initialize-action safety gate but before target schema validation/full
+   pre-flight, and it may chain another atomic proxy.
+12. Full preparation rereads the stabilized target after `initialize`, reapplies
+   the immutable overlay/caller layers, and observes successful initialize-time
+   file/frontmatter mutations without firing `initialize` twice.
+13. Direct, proxy, retry, resume, and loop entry reasons obey the locked stage
+   matrix; in particular, loop iterations reuse the prepared source/validated
+   structural plan while retry and resume are fresh-read boundaries.
+14. Retry canonically refreshes the current document and starts a fresh provider
    attempt without losing its overlay or prepared context.
-10. Resume canonically refreshes mutable document/lifecycle state, retains only
-    a compatible live session, and deliberately uses its follow-up message.
-11. Retry/resume budgets are scoped to the active document iteration; proxy
+15. Resume canonically refreshes mutable document/lifecycle state, retains only
+    a live session whose complete compatibility key still matches, and
+    deliberately uses its follow-up message; incompatibility identifies changed
+    facets and recommends retry.
+16. Retry/resume budgets are scoped to the active document iteration; proxy
     resets them while preserving invocation-wide hop/cycle accounting.
-12. Every fresh target receives complete shell discovery/approval, including
+17. Every fresh target receives complete shell discovery/approval, including
     lifecycle shell actions, and approved bytes equal executed bytes.
-13. Key/value `proxy` accepts an optional mapping-valued `with:` field; omitted
-    and empty mappings preserve existing authoring behavior.
-14. Positional proxy remains valid; positional proxy plus sibling `with:`
+18. Key/value `proxy` accepts an optional mapping-valued `with:` field with
+    static string keys; omitted and empty mappings preserve existing authoring
+    behavior.
+19. Positional proxy remains valid; positional proxy plus sibling `with:`
     remains an ambiguous-action error with an actionable rewrite.
-15. `with:` recursively resolves through lifecycle DM2; whole-value
-    interpolation preserves bool, number, null, array, and object values.
-16. Malformed/unknown/illegal interpolation aborts the handoff atomically
+20. `with:` recursively resolves once through source lifecycle DM2;
+    whole-value interpolation preserves bool, number, null, array, and object
+    values, and no raw span is deferred into target-time evaluation.
+21. Malformed/unknown/illegal interpolation aborts the handoff atomically
     before active-document state changes.
-17. Target-authored frontmatter < `proxy.with` < caller overrides, with shallow
+22. Target-authored frontmatter < `proxy.with` < caller overrides, with shallow
     replacement and null removal at the proxy layer.
-18. A target schema requirement can be satisfied by `with:`, and an invalid
+23. The stored document overlay remains the immutable pre-schema handoff input;
+    defaults, coercion, and invalid-optional drops affect only prepared effective
+    frontmatter and are deterministically reapplied on fresh preparation.
+24. A target schema requirement can be satisfied by `with:`, and an invalid
     overlay produces the normal typed target schema error without invoking the
     provider.
-19. The immediate overlay survives retry, resume, and loop refresh, but a
+25. Control-plane overlay values are reparsed and validated as target
+    configuration and cannot bypass effect, permission, shell, filesystem,
+    network, messaging, or provider policy.
+26. The immediate overlay survives retry, resume, and loop refresh, but a
     downstream proxy replaces it unless forwarding is explicit.
-20. Neither source nor target Markdown bytes or Darkmatter hashes change solely
+27. Neither source nor target Markdown bytes or Darkmatter hashes change solely
     because `with:` is used.
-21. The same target failure retains the same typed diagnostic identity across
+28. The same target failure retains the same typed diagnostic identity across
     direct, initialize-proxy, and terminal-recovery-proxy routes.
-22. User-facing status, tracing, and errors do not disclose overlay values.
+29. A failed handoff follows existing event-aware catch/finalize routing without
+    duplicate lifecycle emissions or half-activating the target.
+30. User-facing status, tracing, and errors do not disclose overlay values, and
+    new terminal output uses `TerminalRenderable` components.
 
 ## Test Strategy
 
@@ -744,13 +930,18 @@ when the universal lifecycle contract supports other runtime events.
 - Assert the provider harness cannot mutate active document identity.
 - Assert every supported proxy producer returns the shared typed handoff and
   every coordinator outcome consumes or explicitly rejects it.
+- Assert evaluation cannot resolve/commit document identity and that a resolved
+  handoff is never sent back through file resolution.
 - Prove canonical preparation returns semantically equivalent prepared targets
   for direct and proxy entry.
+- Lock the per-entry stage matrix, including one initialize emission, target
+  reread after initialize mutation, full retry/resume validation, and loop
+  structural-plan reuse.
 - Prove context construction is independent of later process-CWD changes.
 - Prove target-dependent provider/MCP/workspace/launch decisions refresh on
   proxy but immutable CLI inputs do not.
-- Prove retry starts a fresh session, resume retains only a compatible session,
-  and proxy clears session/attempt state.
+- Prove retry starts a fresh session, resume retains only a session with an
+  identical compatibility key, and proxy clears session/attempt state.
 - Prove retry/resume budgets reset at the documented document boundary while
   proxy hop/cycle state continues.
 - Parse key/value proxy with omitted, empty, scalar-valued, and nested `with:`;
@@ -758,6 +949,11 @@ when the universal lifecycle contract supports other runtime events.
 - Prove literal, mixed, whole-value, and nested interpolation semantics.
 - Test shallow replacement, null removal, precedence, atomic failure, and
   immediate-target overlay replacement independently.
+- Prove schema normalization never mutates the stored handoff overlay and
+  control-plane values are source-resolved once, reparsed by the target, and
+  subject to normal policy.
+- Lock closure/output ownership for direct, inline, and sequence-step command
+  modes, including the absence of synthetic source finalize after clean proxy.
 
 ### L2 — direct/proxy equivalence matrix
 
@@ -771,6 +967,7 @@ then compare:
   child environment;
 - lifecycle event order and target initialize count;
 - loop iteration count and mutations;
+- closure target, sequence-step identity, and stdout/stderr routing;
 - shell approval/execution bytes; and
 - typed failure identity and rendered diagnostic.
 
@@ -789,21 +986,30 @@ Additional L2 cases cover:
   values;
 - failure/finalize proxy using `err.*` inside `with:`;
 - retry, resume, and loop refresh retaining the immediate overlay;
+- resume incompatibility for each compatibility-key facet;
 - a three-document chain with explicit and omitted forwarding;
 - cross-repository proxy context and file resolution;
 - target-authored provider/model and target-specific MCP tags;
 - cycle, hop-limit, missing target, invalid overlay, schema failure, shell
-  denial, and resume incompatibility; and
+  denial;
 - initialize proxy returned from the library loop route, proving it cannot be
-  dropped silently.
+  dropped silently;
+- initialize-time mutation followed by the stabilized target reread;
+- control-plane overlays that add target lifecycle/shell configuration and
+  prove target-side validation and approval still run;
+- `inline-compose` proxy closure ownership and a proxy inside a sequence step;
+  and
+- dry-run proving no lifecycle side effect or dynamic proxy traversal occurs.
 
 ### Regression and drift guards
 
 - Existing proxy parser, lifecycle placement, cycle/hop, retry, resume, loop,
   and caller-override tests remain green unless they encode the route drift
   intentionally corrected here.
-- Add a structural guard against a second production Darkmatter composition
-  path in the harness or a new target-only proxy carrier.
+- Add a narrow allowlist guard for production Darkmatter composition call sites
+  so a second harness composer or target-only proxy carrier cannot appear
+  unnoticed; the guard reports semantic owners rather than relying on a broad
+  substring ban.
 - Add passive corpus tests proving every production proxy route carries the
   complete handoff and every canonical preparation caller supplies explicit
   context.
