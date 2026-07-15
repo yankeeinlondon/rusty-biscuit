@@ -34,10 +34,12 @@ use super::types::{
     Constraint, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
     SimplifiedType, TypeExpr,
 };
+use crate::markdown::compose::expression::parse_condition;
 use crate::markdown::schemas::errors::SchemaError;
 use crate::markdown::schemas::format::{
-    DARKMATTER_DATETIME_FORMAT, DARKMATTER_FILE_FORMAT, DARKMATTER_FILE_REFERENCE_FORMAT,
-    DARKMATTER_JSON_FORMAT, DARKMATTER_TIME_FORMAT, DARKMATTER_YAML_FORMAT,
+    DARKMATTER_DATETIME_FORMAT, DARKMATTER_EXPRESSION_FORMAT, DARKMATTER_FILE_FORMAT,
+    DARKMATTER_FILE_REFERENCE_FORMAT, DARKMATTER_JSON_FORMAT, DARKMATTER_TIME_FORMAT,
+    DARKMATTER_YAML_FORMAT,
 };
 
 /// Draft 2020-12 schema URI emitted on every generated root schema.
@@ -761,6 +763,13 @@ fn type_fragment(
         // coercion pass before validation.
         SimplifiedType::Yaml => content_format_fragment(name, "yaml", DARKMATTER_YAML_FORMAT, constraints),
         SimplifiedType::Json => content_format_fragment(name, "json", DARKMATTER_JSON_FORMAT, constraints),
+        // `literal` lowers to a typed `const`; the optional-nullable wrapper and
+        // the `literal(x)[]` array `items` placement fall out of the shared atom
+        // path. `expression` is the third content-format string type, lowering
+        // to `{ type: string, format: darkmatter-expression }` (parse-only, never
+        // evaluated).
+        SimplifiedType::Literal => literal_fragment(name, constraints),
+        SimplifiedType::Expression => expression_fragment(name, constraints),
         SimplifiedType::Any => any_fragment(name, constraints),
     }
 }
@@ -987,6 +996,81 @@ fn content_format_fragment(
     Ok(json!({ "type": "string", "format": format }))
 }
 
+/// Lowers a `literal(value)` atom to a JSON Schema `const` fragment.
+///
+/// The typed scalar comes from the required [`Constraint::LiteralValue`] the
+/// grammar attaches; the value is emitted verbatim (numbers normalized so an
+/// integral float renders as `2`, not `2.0`). Only the universal constraints
+/// and an **equal** `default(...)` are permitted — a `default` that disagrees
+/// with the const is always an authoring bug and fails schema load
+/// ([`SchemaError::Convert`]); `suggest` and unrelated constraints are rejected
+/// (most are already refused by the grammar's positional-value path).
+///
+/// The optional-nullable wrapper and the `literal(x)[]` array `items` placement
+/// are handled by the shared atom path ([`atom_fragment_without_null_wrap`] /
+/// [`atom_to_schema`]), so this only builds the bare `{ "const": … }` core.
+fn literal_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
+    let mut literal_value: Option<Value> = None;
+    let mut default_value: Option<Value> = None;
+    for c in constraints {
+        match c {
+            // Hoisted to the property level by the shared atom path.
+            Constraint::Required | Constraint::Generated | Constraint::Example(_) => {}
+            Constraint::LiteralValue(v) => literal_value = Some(normalize_json_number(v.clone())),
+            Constraint::Default(v) => default_value = Some(normalize_json_number(v.clone())),
+            other => return Err(invalid_constraint(name, "literal", other)),
+        }
+    }
+    let value = literal_value.ok_or_else(|| SchemaError::Convert {
+        property: name.to_string(),
+        message: "`literal` requires a value".into(),
+    })?;
+    if let Some(default) = default_value
+        && default != value
+    {
+        return Err(SchemaError::Convert {
+            property: name.to_string(),
+            message: format!("`default({default})` must equal the literal value `{value}`"),
+        });
+    }
+    let mut m = Map::new();
+    m.insert("const".into(), value);
+    Ok(Value::Object(m))
+}
+
+/// Lowers an `expression` atom to `{ "type": "string", "format":
+/// "darkmatter-expression" }` — the third content-format string type alongside
+/// `yaml` / `json`. Constraint applicability mirrors those types (only the
+/// universal set; `suggest` and string constraints are rejected by
+/// [`reject_unsupported`]). A `default(...)` must itself parse as a Darkmatter
+/// expression, checked here at schema-load time.
+fn expression_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
+    reject_unsupported(name, "expression", constraints, &[])?;
+    for c in constraints {
+        if let Constraint::Default(v) = c
+            && parse_condition(&expression_default_source(v)).is_err()
+        {
+            return Err(SchemaError::Convert {
+                property: name.to_string(),
+                message: format!("`default({v})` is not a valid Darkmatter expression"),
+            });
+        }
+    }
+    Ok(json!({ "type": "string", "format": DARKMATTER_EXPRESSION_FORMAT }))
+}
+
+/// Renders an expression `default(...)` value as the source text handed to the
+/// parser. Native boolean/number defaults are valid degenerate expressions
+/// (`true`, `3`); a string default parses as-authored.
+fn expression_default_source(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        other => other.to_string(),
+    }
+}
+
 fn any_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
     reject_unsupported(name, "any", constraints, &[])?;
     Ok(Value::Object(Map::new()))
@@ -1040,6 +1124,12 @@ fn number_to_json(n: f64) -> Value {
 /// only emits scalars.
 fn normalize_json_number(value: Value) -> Value {
     match value {
+        // An already-integer-typed number (the parser preserves i64/u64 for a
+        // bare literal like `9007199254740993`) is exact — passing it through
+        // `as_f64()` would round it, so return it untouched. Only a genuine
+        // floating representation (the parser's `default(3)` emits `3.0`) is
+        // canonicalized to integer form.
+        Value::Number(n) if n.is_i64() || n.is_u64() => Value::Number(n),
         Value::Number(n) => {
             if let Some(f) = n.as_f64()
                 && f.is_finite()
@@ -2223,6 +2313,20 @@ mod schema_plus_phase1 {
         atom_to_schema("test", &atom).expect("convert").0
     }
 
+    /// Lowers one type expression as an **optional** property (the standard
+    /// nullable `anyOf` wrapper is applied).
+    fn optional_atom_value(input: &str) -> Value {
+        let atom = parse_type_expr("test", input).expect("parse atom");
+        atom_to_schema("test", &atom).expect("convert").0
+    }
+
+    /// Compiles a `$schema`-body YAML mapping to its full JSON Schema.
+    fn convert(schema_body: &str) -> Value {
+        let v: serde_yaml_ng::Value =
+            serde_yaml_ng::from_str(schema_body).expect("yaml parse");
+        to_json_schema(&parse_yaml_schema(&v).expect("schema parse")).expect("convert")
+    }
+
     // ── Feature C — pattern keys + object arity ──────────────────────────
 
     #[test]
@@ -2470,5 +2574,153 @@ mod schema_plus_phase1 {
         let v = atom_value("json");
         assert_eq!(v["type"], "string");
         assert_eq!(v["format"], "darkmatter-json");
+    }
+
+    // ── literal / expression (2026-07-12-literal-expression, Phase 3) ─────
+
+    #[test]
+    fn literal_string_lowers_to_const() {
+        let v = atom_value("literal(spec)");
+        assert_eq!(v["const"], "spec");
+    }
+
+    #[test]
+    fn literal_number_and_boolean_preserve_scalar_type() {
+        let n = atom_value("literal(2)");
+        assert_eq!(n["const"], json!(2));
+        assert!(n["const"].is_number());
+
+        let b = atom_value("literal(false)");
+        assert_eq!(b["const"], json!(false));
+        assert!(b["const"].is_boolean());
+
+        // Quoting and leading zeros opt out of typing → string const.
+        assert_eq!(atom_value("literal('2')")["const"], json!("2"));
+        assert_eq!(atom_value("literal(007)")["const"], json!("007"));
+    }
+
+    #[test]
+    fn literal_array_places_const_under_items() {
+        let v = atom_value("literal(auto)[]");
+        assert_eq!(v["type"], "array");
+        assert_eq!(v["items"]["const"], "auto");
+    }
+
+    #[test]
+    fn optional_literal_wraps_const_in_nullable_any_of() {
+        // A non-required literal accepts missing/null via the shared wrapper.
+        let v = optional_atom_value("literal(spec)");
+        assert_eq!(v["anyOf"][0]["type"], "null");
+        assert_eq!(v["anyOf"][1]["const"], "spec");
+    }
+
+    #[test]
+    fn literal_equal_default_loads_and_mismatch_errors() {
+        // An equal default is fine.
+        assert!(parse_type_expr("kind", "literal(spec; default(spec))")
+            .and_then(|a| atom_to_schema("kind", &a))
+            .is_ok());
+        // A default that violates its own const fails conversion.
+        let atom = parse_type_expr("kind", "literal(spec; default(other))").expect("parse");
+        let err = atom_to_schema("kind", &atom).expect_err("mismatched default must fail");
+        assert!(matches!(err, SchemaError::Convert { .. }));
+    }
+
+    #[test]
+    fn literal_rejects_unrelated_constraint() {
+        // `min(1)` is meaningless on a literal identity and must be rejected at
+        // conversion (the grammar admits it; convert is the enforcement point).
+        let atom = parse_type_expr("v", "literal(2; min(1))").expect("parse");
+        let err = atom_to_schema("v", &atom).expect_err("min not valid on literal");
+        assert!(matches!(err, SchemaError::Convert { .. }));
+    }
+
+    #[test]
+    fn expression_lowers_to_string_with_format() {
+        let v = atom_value("expression");
+        assert_eq!(v["type"], "string");
+        assert_eq!(v["format"], "darkmatter-expression");
+    }
+
+    #[test]
+    fn expression_default_must_parse() {
+        // A parseable default loads.
+        let ok = parse_type_expr("when", "expression(default('is_agent()'))").expect("parse");
+        assert!(atom_to_schema("when", &ok).is_ok());
+        // An unparseable default fails at schema load.
+        let bad = parse_type_expr("when", "expression(default('(('))").expect("parse");
+        let err = atom_to_schema("when", &bad).expect_err("bad default must fail");
+        assert!(matches!(err, SchemaError::Convert { .. }));
+    }
+
+    #[test]
+    fn property_union_mixes_literal_with_atom() {
+        // `[literal(auto), number(min(1))]` — a literal arm beside a numeric arm.
+        let v = convert("width:\n  - literal(auto)\n  - 'number(min(1))'\n");
+        let arms = v["properties"]["width"]["anyOf"].as_array().expect("anyOf");
+        // Optional union prepends a null arm; the literal and number arms follow.
+        assert!(arms.iter().any(|a| a["const"] == "auto"));
+        assert!(arms.iter().any(|a| a["type"] == "number"));
+    }
+
+    #[test]
+    fn inline_object_discriminant_carries_const() {
+        // A tagged-union arm: the required `kind` discriminant lowers to a const.
+        let v = convert(
+            "event: '{ kind: literal(created; required), path: file(required) }'\n",
+        );
+        let event = &v["properties"]["event"];
+        // Optional inline object → nullable wrapper; the object is the typed arm.
+        let obj = &event["anyOf"][1];
+        assert_eq!(obj["properties"]["kind"]["const"], "created");
+        assert!(
+            obj["required"]
+                .as_array()
+                .is_some_and(|r| r.iter().any(|k| k == "kind")),
+            "the required discriminant is listed: {obj}"
+        );
+    }
+
+    #[test]
+    fn literal_large_integer_const_is_exact() {
+        // Bare integer literals beyond f64's 2^53 exact range must reach `const`
+        // verbatim — `normalize_json_number` must not round them through f64.
+        let cases: [(&str, Value); 4] = [
+            ("literal(9007199254740993)", Value::from(9_007_199_254_740_993_i64)),
+            ("literal(9223372036854775807)", Value::from(i64::MAX)),
+            ("literal(9223372036854775808)", Value::from(9_223_372_036_854_775_808_u64)),
+            ("literal(18446744073709551615)", Value::from(u64::MAX)),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(atom_value(input)["const"], expected, "const for {input}");
+        }
+    }
+
+    #[test]
+    fn integral_float_default_still_tidies() {
+        // Guard against a regression: an integral `default(3)` still emits `3`,
+        // not `3.0`.
+        assert_eq!(atom_value("number(default(3))")["default"], Value::from(3_i64));
+    }
+
+    #[test]
+    fn large_integer_default_equal_to_literal_accepted() {
+        // An equal large-integer `default(...)` must compile (values compared
+        // exactly), and the const survives.
+        let v = atom_value("literal(9007199254740993; default(9007199254740993))");
+        assert_eq!(v["const"], Value::from(9_007_199_254_740_993_i64));
+        assert_eq!(v["default"], Value::from(9_007_199_254_740_993_i64));
+    }
+
+    #[test]
+    fn large_integer_default_unequal_to_literal_rejected() {
+        let mut atom =
+            parse_type_expr("test", "literal(9007199254740993; default(9007199254740992))")
+                .expect("parse atom");
+        atom.constraints.push(Constraint::Required);
+        assert!(
+            atom_to_schema("test", &atom).is_err(),
+            "an off-by-one large-integer default must fail schema load"
+        );
     }
 }

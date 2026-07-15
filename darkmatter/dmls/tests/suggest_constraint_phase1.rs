@@ -353,8 +353,12 @@ fn suggest_phase1_union_selection_and_raw_schema_exclusion() {
 
     let property_union = fixture.completion(union_uri.as_str(), 7, 10);
     assert_eq!(labels(&property_union), vec!["second"]);
+    // `root` is declared in both discriminant-less root-union arms, so the
+    // effective shape merges the arms per-key: the shared property becomes the
+    // union of both arms' atoms and its suggestions merge in arm-declaration
+    // order.
     let root_union = fixture.completion(union_uri.as_str(), 8, 8);
-    assert_eq!(labels(&root_union), vec!["arm-one"]);
+    assert_eq!(labels(&root_union), vec!["arm-one", "arm-two"]);
     assert!(
         fixture.completion(consumer_uri.as_str(), 2, 9).is_empty(),
         "raw JSON Schema annotations must not activate suggestion completion"

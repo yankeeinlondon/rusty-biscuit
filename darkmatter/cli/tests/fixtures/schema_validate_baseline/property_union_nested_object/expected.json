@@ -1,0 +1,1 @@
+{"file":"doc.md","problems":[{"arm_index":null,"column":1,"description":null,"kind":"type","line":6,"message":"1 is not of type \"string\"","path":"/event/a","property":null},{"arm_index":null,"column":1,"description":null,"kind":"type","line":6,"message":"\"nope\" is not of type \"number\"","path":"/event/b","property":null}],"schema":null,"valid":false}

@@ -5,6 +5,13 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::rc::Rc;
+
+use renderable::browser::feature::{
+    FeatureAssets, FeatureContext, FeatureResolver, PageFeature, resolve_features,
+    serialize_features_body, serialize_features_head,
+};
+use renderable::target::RenderTarget;
 
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::discovery::detection::ColorMode as TerminalColorMode;
@@ -947,13 +954,19 @@ impl DarkmatterPage {
 
     // ---------- Browser Rendering ----------
 
-    /// Render the given markdown document to browser-compatible HTML through
-    /// the page layout.
+    /// Render the given markdown document to a **body-only** browser HTML
+    /// fragment through the page layout.
+    ///
+    /// The return shape is content-independent: this method **never** emits
+    /// document scaffolding (`<!DOCTYPE>`/`<html>`/`<head>`/`<body>`), whatever
+    /// the Markdown contains. It is the method an embedder calls when splicing a
+    /// render into a host document. For a complete standalone document, call
+    /// [`render_to_browser_document`](Self::render_to_browser_document).
     ///
     /// Derives [`HtmlOptions`] from the page state, delegates to the existing
-    /// HTML renderer, then wraps the result in a page-level `<div>` with CSS
-    /// styles for margin, padding, max-width, background-color, and
-    /// per-component alignment / fill.
+    /// HTML renderer, then either returns the bare body or wraps it in a
+    /// page-level `<div>` with CSS styles for margin, padding, max-width,
+    /// background-color, and per-component alignment / fill.
     ///
     /// Fenced code blocks in `md` fold through [`CodeBlock`]'s
     /// [`BrowserRenderable`](crate::markdown::code_block::CodeBlock) projection
@@ -967,8 +980,23 @@ impl DarkmatterPage {
     /// `CodeBlock::rust(...).render_html_fragment()` for the same code,
     /// language, and metadata.
     ///
-    /// When all layout fields are at their defaults, the output is the same as
-    /// `md.as_html(HtmlOptions::default())` with no wrapper.
+    /// For **feature-free**, undecorated content — no component requests a
+    /// browser feature and all layout fields are at their defaults — the output
+    /// is the bare `<body>` contents alone, with no wrapper and no document
+    /// scaffold. The design-token `:root` block and `.code-block` panel
+    /// stylesheet a standalone document carries in `<head>` are produced only by
+    /// [`render_to_browser_document`](Self::render_to_browser_document).
+    ///
+    /// Feature-bearing content diverges, because this page path is
+    /// feature-aware:
+    ///
+    /// - Mermaid defaults to the interactive experience here, whereas
+    ///   `HtmlOptions::default()` (and the low-level renderable path) keeps
+    ///   Mermaid in `Code` mode. A document with a mermaid fence therefore does
+    ///   not match the low-level output.
+    /// - Prompted links and Mermaid force the body wrapper into existence so
+    ///   their inline `<style>`/`<script>` assets can be embedded (body-only
+    ///   feature rendering), rather than emitting a bare no-wrapper body.
     ///
     /// ## Errors
     ///
@@ -979,7 +1007,125 @@ impl DarkmatterPage {
     ///
     /// Returns [`PageRenderError::Render`] when the underlying markdown HTML
     /// renderer fails.
+    ///
+    /// Returns [`PageRenderError::FeatureResolution`] when a requested browser
+    /// feature cannot be resolved or placed on this body-only path — either an
+    /// unresolved browser feature
+    /// ([`UnresolvedFeature`](renderable::browser::feature::FeatureResolveError::UnresolvedFeature)),
+    /// or a feature whose assets require a document-head `<link>`
+    /// ([`HeadRequired`](renderable::browser::feature::FeatureResolveError::HeadRequired)),
+    /// which a body-only fragment cannot carry.
     pub fn render_to_browser(&self, md: &Markdown) -> Result<String, PageRenderError> {
+        let parts = self.build_browser_parts(md)?;
+
+        // A body-only render never emits document scaffolding. Undecorated,
+        // feature-free content is the bare body; anything decorated or
+        // feature-bearing rides the forced wrapper fragment (still a single
+        // valid element with no nested `<!DOCTYPE>`/`<html>`/`<head>`/`<body>`).
+        if parts.is_bare(self) {
+            return Ok(parts.body);
+        }
+
+        // Body-only placement policy: serialize the resolved features for a
+        // wrapper, which raises `HeadRequired` if any feature carries a
+        // head-only `<link>` (a body fragment has no `<head>` to host it).
+        let feature_assets = serialize_features_body(&parts.resolved_features)?;
+        Ok(wrap_browser_html(
+            &parts.body,
+            &parts.page_assets,
+            &parts.ctx,
+            self,
+            &parts.features,
+            &feature_assets,
+        ))
+    }
+
+    /// Render the given markdown document to a complete, standalone
+    /// `<!DOCTYPE html>` browser document through the page layout.
+    ///
+    /// The return shape is content-independent: this method **always** emits a
+    /// full document with a `<head>` and `<body>`, whatever the Markdown
+    /// contains. It is the method a caller uses to produce a self-contained,
+    /// browser-openable `.html` file. For an embeddable body-only fragment (no
+    /// document scaffold), call [`render_to_browser`](Self::render_to_browser).
+    ///
+    /// Undecorated, feature-free content yields the render-tree's standalone
+    /// document — carrying the design-token `:root` block and `.code-block`
+    /// panel stylesheet in `<head>`. Decorated or feature-bearing content
+    /// assembles a **real `<head>`** around a wrapper-only `<body>`: the head
+    /// carries the render-tree's own head (charset, viewport, title, `:root`
+    /// design tokens, `.code-block` panel stylesheet), then the page-authored
+    /// `<meta>` tags and stylesheet (inline `<style>` or remote `<link>`), then
+    /// the resolved feature assets — which, unlike the body-only path, may
+    /// include a head-only `<link>` here. The `<body>` holds only the
+    /// `<div class="darkmatter-page">` frame (margins, padding, background,
+    /// max-width) wrapping the rendered content; the page/feature assets live in
+    /// `<head>`, not inside the frame. Page-authored links/styles precede
+    /// feature assets, per the spec's asset-ordering contract.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`PageRenderError::MarginsExceedTerminalWidth`] when margin +
+    /// padding meets or exceeds the terminal width.
+    ///
+    /// Returns [`PageRenderError::MaxWidthZero`] when `max_width` is `Some(0)`.
+    ///
+    /// Returns [`PageRenderError::Render`] when the underlying markdown HTML
+    /// renderer fails.
+    ///
+    /// Returns [`PageRenderError::FeatureResolution`] with
+    /// [`UnresolvedFeature`](renderable::browser::feature::FeatureResolveError::UnresolvedFeature)
+    /// when a requested browser feature cannot be resolved. A standalone
+    /// document has a real `<head>`, so a feature's head-only `<link>` is placed
+    /// there rather than rejected — unlike [`render_to_browser`](Self::render_to_browser),
+    /// this path never raises
+    /// [`HeadRequired`](renderable::browser::feature::FeatureResolveError::HeadRequired).
+    pub fn render_to_browser_document(&self, md: &Markdown) -> Result<String, PageRenderError> {
+        let parts = self.build_browser_parts(md)?;
+
+        // Undecorated, feature-free content already has a complete standalone
+        // document from the render-tree renderer (design tokens + panel
+        // stylesheet in `<head>`).
+        if parts.is_bare(self) {
+            return Ok(parts.document);
+        }
+
+        // Decorated or feature-bearing: assemble a real `<head>` around a
+        // wrapper-only `<body>`. The head starts with the render-tree's own head
+        // (which already carries the `:root` tokens and `.code-block` panel
+        // stylesheet, so `page_assets` is deliberately *not* re-emitted), then
+        // the page-authored meta/stylesheet, then the feature assets serialized
+        // for a head (`<link>`s legal here) — keeping page-authored assets ahead
+        // of feature assets per the spec ordering. The body is the frame only.
+        let mut head = parts.head.clone();
+        append_page_meta_head(&mut head, self);
+        append_page_stylesheet_head(&mut head, self);
+        head.push_str(&serialize_features_head(&parts.resolved_features));
+
+        let frame = wrap_browser_frame(&parts.body, &parts.ctx, self, &parts.features);
+        Ok(format!(
+            "<!DOCTYPE html><html><head>{head}</head><body>{frame}</body></html>"
+        ))
+    }
+
+    /// Build the shared browser-render pieces both public browser methods
+    /// consume: the standalone document, the body-only fragment, the page-level
+    /// assets, the requested features, and their resolved inline assets, plus
+    /// the resolved [`LayoutContext`].
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`PageRenderError::MarginsExceedTerminalWidth`] when margin +
+    /// padding meets or exceeds the terminal width.
+    ///
+    /// Returns [`PageRenderError::MaxWidthZero`] when `max_width` is `Some(0)`.
+    ///
+    /// Returns [`PageRenderError::Render`] when the underlying markdown HTML
+    /// renderer fails.
+    ///
+    /// Returns [`PageRenderError::FeatureResolution`] when a requested browser
+    /// feature cannot be resolved or placed on the body-only page fragment.
+    fn build_browser_parts(&self, md: &Markdown) -> Result<BrowserRenderParts, PageRenderError> {
         let ctx = LayoutContext::from_page(
             self.terminal_width,
             self.page_margin.clone(),
@@ -1023,27 +1169,60 @@ impl DarkmatterPage {
             hr_defaults: hr_defaults_owned.as_ref(),
         };
 
-        let body = if self.is_default_layout() {
-            md.as_html(html_options)
-                .map_err(|e| PageRenderError::Render(e.to_string()))?
-        } else {
-            crate::markdown::render_tree::entrypoints::render_tree_html_with_context(
-                md, &html_options, &build_ctx,
-            )
-            .map(|r| r.output)
-            .map_err(|e| PageRenderError::Render(e.to_string()))?
+        // Darkmatter's full-page browser path is feature-aware: interactive
+        // Mermaid is the default and the page owns feature placement. The
+        // resolver derives Mermaid colors from the page's resolved code theme;
+        // the resolved color mode rides the `FeatureContext`. Every other
+        // feature (e.g. Popover) delegates to the shared `DefaultFeatureResolver`.
+        let resolver: Rc<dyn FeatureResolver> = Rc::new(
+            crate::mermaid::DarkmatterFeatureResolver::new(html_options.code_theme),
+        );
+        let feature_context = FeatureContext {
+            color_mode: render_color_mode_to_renderable(ctx.render_color_mode),
+            semantic_colors: Vec::new(),
+        };
+        // `image_mode == Never` caps browser Mermaid to code; every other mode
+        // leaves the interactive/static path enabled (the streaming writer caps
+        // `Vector` → static SVG and `Off` → code itself).
+        let graphics_mode = match self.options.image_mode {
+            TerminalImageMode::Never => renderable::tree::GraphicsMode::Off,
+            _ => renderable::tree::GraphicsMode::Rich,
         };
 
-        // The page wrapper `<div>` carries page-frame geometry, the page
-        // stylesheet, and page `<meta>`. Component policies are lowered to
-        // inline CSS on the component elements themselves, never the wrapper, so
-        // their presence must not add a wrapper an unmatched policy would not
-        // need (review-1 finding 2).
-        if !ctx.needs_decoration() && self.stylesheet().is_none() && self.page_meta().is_none() {
-            return Ok(body);
-        }
+        let rendered = crate::markdown::render_tree::entrypoints::render_tree_html_page_body(
+            md,
+            &html_options,
+            &build_ctx,
+            Rc::clone(&resolver),
+            feature_context.clone(),
+            graphics_mode,
+        )
+        .map_err(|e| PageRenderError::Render(e.to_string()))?;
 
-        Ok(wrap_browser_html(&body, &ctx, self))
+        // Resolve the collected features into typed `(feature, assets)` pairs
+        // once. Resolution is placement-agnostic — it only fails when a feature
+        // is unresolved (`UnresolvedFeature`), which is wrong on either path —
+        // and never rejects `<link>` dependencies here. Each public method then
+        // applies its own placement policy: `render_to_browser` serializes for a
+        // body wrapper (which rejects head-only `<link>`s), while
+        // `render_to_browser_document` serializes into the real `<head>` (where
+        // `<link>`s are legal).
+        let resolved_features = resolve_features(
+            &rendered.output.features,
+            resolver.as_ref(),
+            RenderTarget::Browser,
+            &feature_context,
+        )?;
+
+        Ok(BrowserRenderParts {
+            document: rendered.output.document,
+            head: rendered.output.head,
+            body: rendered.output.body,
+            page_assets: rendered.output.assets,
+            features: rendered.output.features,
+            resolved_features,
+            ctx,
+        })
     }
 
     /// Render the given markdown document to MarkdownPlus through the page
@@ -1513,66 +1692,259 @@ impl TerminalRenderable for DarkmatterPage {
 // through the inherent [`DarkmatterPage::render_to_browser`] method,
 // which takes the `Markdown` explicitly.
 
-/// Wrap HTML markdown body in a page-level container with layout CSS.
-fn wrap_browser_html(body: &str, ctx: &LayoutContext, page: &DarkmatterPage) -> String {
+/// Maps the layout context's resolved highlighting [`ColorMode`] onto the
+/// renderable [`ColorMode`](renderable::color::ColorMode) the
+/// [`FeatureContext`] carries.
+fn render_color_mode_to_renderable(mode: ColorMode) -> renderable::color::ColorMode {
+    match mode {
+        ColorMode::Light => renderable::color::ColorMode::Light,
+        ColorMode::Dark => renderable::color::ColorMode::Dark,
+        ColorMode::Unknown => renderable::color::ColorMode::Unknown,
+    }
+}
+
+/// Resolves the requested `features` into inline body assets for an embeddable
+/// wrapper — the resolve-then-serialize-for-body composition that
+/// [`DarkmatterPage::render_to_browser`] performs (via
+/// [`resolve_features`] into [`BrowserRenderParts::resolved_features`] and then
+/// [`serialize_features_body`]). Kept as a test-only helper so the body-only
+/// placement policy — including the [`HeadRequired`](renderable::browser::feature::FeatureResolveError::HeadRequired)
+/// rejection of a head-only `<link>` — can be exercised directly against a
+/// synthetic resolver without driving a full page render.
+///
+/// Returns the serialized `<style>`/`<script>` markup (empty when no feature is
+/// requested). Because the output is a body-only fragment with no controllable
+/// `<head>`, a feature that resolves to a `<link>` dependency is rejected.
+///
+/// ## Errors
+///
+/// Returns [`PageRenderError::FeatureResolution`] when a feature is unresolved
+/// for the Browser target or resolves to a `<head>`-only `<link>` dependency
+/// ([`HeadRequired`](renderable::browser::feature::FeatureResolveError::HeadRequired)).
+#[cfg(test)]
+pub(crate) fn resolve_feature_body_assets(
+    features: &[PageFeature],
+    resolver: &dyn FeatureResolver,
+    ctx: &FeatureContext,
+) -> Result<String, PageRenderError> {
+    if features.is_empty() {
+        return Ok(String::new());
+    }
+    let resolved = resolve_features(features, resolver, RenderTarget::Browser, ctx)?;
+    Ok(serialize_features_body(&resolved)?)
+}
+
+/// The shared browser-render pieces both [`DarkmatterPage::render_to_browser`]
+/// and [`DarkmatterPage::render_to_browser_document`] consume. Building these
+/// once keeps the two public methods thin so their return shapes stay
+/// content-independent.
+struct BrowserRenderParts {
+    /// Complete standalone `<!DOCTYPE html>` document from the render-tree
+    /// browser renderer (carries the `:root` design tokens and `.code-block`
+    /// panel stylesheet in `<head>`). Used verbatim only by the bare
+    /// (undecorated, feature-free) standalone path.
+    document: String,
+    /// The render-tree document's inner `<head>` content (charset / viewport /
+    /// title / design-token `:root` block / `.code-block` panel stylesheet),
+    /// with no feature assets. The decorated standalone path reuses this as the
+    /// real `<head>` so it never emits an empty one; because it already carries
+    /// the `:root` tokens and panel stylesheet, that path must **not** also
+    /// re-emit `page_assets` into the head.
+    head: String,
+    /// Body-only fragment with no document scaffolding.
+    body: String,
+    /// Page-level `<style>`/`<script>` the body-only wrapper embeds inline
+    /// (design-token `:root` block, `.code-block` panel stylesheet). The
+    /// standalone path takes these from `head` instead, so it does not use this.
+    page_assets: String,
+    /// Requested browser features in first-seen order.
+    features: Vec<PageFeature>,
+    /// The requested features resolved to typed `(feature, assets)` pairs once,
+    /// so each public method can apply its own placement policy:
+    /// `render_to_browser` serializes them for a body wrapper
+    /// ([`serialize_features_body`], which rejects head-only `<link>`s), while
+    /// `render_to_browser_document` serializes them into the real `<head>`
+    /// ([`serialize_features_head`], where `<link>`s are legal). Resolution
+    /// itself fails only on an unresolved feature, so both paths agree on that.
+    resolved_features: Vec<(PageFeature, FeatureAssets)>,
+    /// Resolved layout context (decoration + color mode).
+    ctx: LayoutContext,
+}
+
+impl BrowserRenderParts {
+    /// True when the render needs neither a page wrapper nor feature assets, so
+    /// the body stands alone: no decoration, no bespoke stylesheet, no page
+    /// `<meta>`, and no requested feature. Both public browser methods branch on
+    /// this to keep their return shape content-independent — `render_to_browser`
+    /// returns the bare body, `render_to_browser_document` the standalone
+    /// document.
+    ///
+    /// Component policies lower to inline CSS on the component elements, never
+    /// the wrapper, so their presence must not force a wrapper an unmatched
+    /// policy would not need (review-1 finding 2). A requested feature does force
+    /// the wrapper into existence so its inline assets have somewhere to live.
+    fn is_bare(&self, page: &DarkmatterPage) -> bool {
+        !self.ctx.needs_decoration()
+            && page.stylesheet().is_none()
+            && page.page_meta().is_none()
+            && self.features.is_empty()
+    }
+}
+
+/// Wrap an HTML markdown body **fragment** in a page-level container with
+/// layout CSS.
+///
+/// `body` must be a body-only fragment (no `<!DOCTYPE>`/`<html>`/`<head>`/
+/// `<body>`); it is embedded directly so the wrapper is a single valid element.
+/// `page_assets` carries the page-level `<style>`/`<script>` the standalone
+/// document would place in `<head>` (design-token `:root` block, `.code-block`
+/// panel stylesheet, component styles); it is emitted inside the wrapper before
+/// the body so the fragment is self-contained.
+///
+/// When `features` is non-empty the wrapper is stamped with a stable
+/// `data-darkmatter-features` attribute (space-separated feature names, for
+/// debugging only) and `feature_assets` — the resolved inline `<style>` /
+/// `<script>` markup — is emitted **before** the body inside the wrapper, so an
+/// embeddable fragment carries its own feature assets.
+fn wrap_browser_html(
+    body: &str,
+    page_assets: &str,
+    ctx: &LayoutContext,
+    page: &DarkmatterPage,
+    features: &[PageFeature],
+    feature_assets: &str,
+) -> String {
     let mut output = String::new();
 
-    // Emit page-level meta tags first.
-    if let Some(meta) = page.page_meta() {
-        for tag in &meta.tags {
-            match tag {
-                crate::style::bespoke::MetaTag::Charset(charset) => {
-                    output.push_str(&format!(
-                        r#"<meta charset="{}" />"#,
-                        html_escape::encode_text(charset)
-                    ));
-                    output.push('\n');
-                }
-                crate::style::bespoke::MetaTag::Name { name, content } => {
-                    output.push_str(&format!(
-                        r#"<meta name="{}" content="{}" />"#,
-                        html_escape::encode_text(name),
-                        html_escape::encode_text(content)
-                    ));
-                    output.push('\n');
-                }
-                crate::style::bespoke::MetaTag::Property { property, content } => {
-                    output.push_str(&format!(
-                        r#"<meta property="{}" content="{}" />"#,
-                        html_escape::encode_text(property),
-                        html_escape::encode_text(content)
-                    ));
-                    output.push('\n');
-                }
+    // A body-only fragment has no `<head>`, so the page-authored `<meta>` tags
+    // and stylesheet ride inside the wrapper alongside the body (the standalone
+    // document path places these in the real `<head>` instead).
+    append_page_meta_head(&mut output, page);
+    append_page_stylesheet_head(&mut output, page);
+
+    output.push_str(&darkmatter_frame_open(ctx, page, features));
+
+    // Page-level `<style>`/`<script>` (the `:root` design tokens and the
+    // `.code-block` panel stylesheet the standalone `<head>` would carry) are
+    // embedded inside the wrapper so the fragment styles its own content without
+    // a nested `<head>`.
+    output.push_str(page_assets);
+
+    // Inline feature assets are placed before the body so feature code can rely
+    // on its own declarations being present when the body renders.
+    output.push_str(feature_assets);
+
+    output.push_str(body);
+    output.push_str("</div>\n");
+
+    output
+}
+
+/// Wrap an HTML markdown body **fragment** in the page-level frame `<div>` only.
+///
+/// Emits exactly `<div class="darkmatter-page" [data-darkmatter-features] …>{body}
+/// </div>` — the frame's layout CSS (margins, padding, background, max-width)
+/// around `body`, with **no** page `<meta>`, page stylesheet, `page_assets`, or
+/// feature assets inside it. Those belong in the document `<head>` on the
+/// standalone-document path ([`DarkmatterPage::render_to_browser_document`]),
+/// which is the sole caller. The body-only path ([`wrap_browser_html`]) keeps
+/// emitting those assets inside the wrapper because a fragment has no `<head>`.
+fn wrap_browser_frame(
+    body: &str,
+    ctx: &LayoutContext,
+    page: &DarkmatterPage,
+    features: &[PageFeature],
+) -> String {
+    let mut output = darkmatter_frame_open(ctx, page, features);
+    output.push_str(body);
+    output.push_str("</div>\n");
+    output
+}
+
+/// Appends the page's [`PageMeta`](crate::style::bespoke::PageMeta) tags to
+/// `out`, one `<meta …/>` per line.
+///
+/// Shared by the body-only wrapper ([`wrap_browser_html`], which emits them
+/// inside the wrapper) and the standalone document
+/// ([`DarkmatterPage::render_to_browser_document`], which emits them in
+/// `<head>`) so the two paths agree on the exact escaping and format.
+fn append_page_meta_head(out: &mut String, page: &DarkmatterPage) {
+    let Some(meta) = page.page_meta() else {
+        return;
+    };
+    for tag in &meta.tags {
+        match tag {
+            crate::style::bespoke::MetaTag::Charset(charset) => {
+                out.push_str(&format!(
+                    r#"<meta charset="{}" />"#,
+                    html_escape::encode_text(charset)
+                ));
+                out.push('\n');
+            }
+            crate::style::bespoke::MetaTag::Name { name, content } => {
+                out.push_str(&format!(
+                    r#"<meta name="{}" content="{}" />"#,
+                    html_escape::encode_text(name),
+                    html_escape::encode_text(content)
+                ));
+                out.push('\n');
+            }
+            crate::style::bespoke::MetaTag::Property { property, content } => {
+                out.push_str(&format!(
+                    r#"<meta property="{}" content="{}" />"#,
+                    html_escape::encode_text(property),
+                    html_escape::encode_text(content)
+                ));
+                out.push('\n');
             }
         }
     }
+}
 
-    // Emit page-level stylesheet.
-    if let Some(sheet) = page.stylesheet() {
-        match sheet {
-            crate::style::bespoke::PageStylesheet::Inline { source, css } => {
-                output.push_str(&format!(
-                    r#"<style data-darkmatter-source="{}">"#,
-                    html_escape::encode_text(&source.display().to_string())
-                ));
-                output.push('\n');
-                output.push_str(css);
-                if !css.ends_with('\n') {
-                    output.push('\n');
-                }
-                output.push_str("</style>\n");
+/// Appends the page-authored [`PageStylesheet`](crate::style::bespoke::PageStylesheet)
+/// to `out` — an inline `<style>` block or a remote `<link rel="stylesheet">`.
+///
+/// Shared by the body-only wrapper and the standalone document so both paths
+/// emit byte-identical markup (the body-only path inside the wrapper, the
+/// standalone path in `<head>`).
+fn append_page_stylesheet_head(out: &mut String, page: &DarkmatterPage) {
+    let Some(sheet) = page.stylesheet() else {
+        return;
+    };
+    match sheet {
+        crate::style::bespoke::PageStylesheet::Inline { source, css } => {
+            out.push_str(&format!(
+                r#"<style data-darkmatter-source="{}">"#,
+                html_escape::encode_text(&source.display().to_string())
+            ));
+            out.push('\n');
+            out.push_str(css);
+            if !css.ends_with('\n') {
+                out.push('\n');
             }
-            crate::style::bespoke::PageStylesheet::Remote { href } => {
-                output.push_str(&format!(
-                    r#"<link rel="stylesheet" href="{}" />"#,
-                    html_escape::encode_text(href)
-                ));
-                output.push('\n');
-            }
+            out.push_str("</style>\n");
+        }
+        crate::style::bespoke::PageStylesheet::Remote { href } => {
+            out.push_str(&format!(
+                r#"<link rel="stylesheet" href="{}" />"#,
+                html_escape::encode_text(href)
+            ));
+            out.push('\n');
         }
     }
+}
 
+/// Builds the opening `<div class="darkmatter-page" …>\n` tag carrying the
+/// frame's layout CSS and the debug-only `data-darkmatter-features` stamp.
+///
+/// Shared by [`wrap_browser_html`] (body-only wrapper) and
+/// [`wrap_browser_frame`] (standalone document) so the frame geometry is emitted
+/// identically on both paths.
+fn darkmatter_frame_open(
+    ctx: &LayoutContext,
+    page: &DarkmatterPage,
+    features: &[PageFeature],
+) -> String {
     // Build page-level wrapper styles. The page frame retains the authored
     // `Length`, so the browser emits the original unit (`%` percentages resolve
     // against the viewport, not the terminal-cell count the terminal resolves).
@@ -1645,14 +2017,22 @@ fn wrap_browser_html(body: &str, ctx: &LayoutContext, page: &DarkmatterPage) -> 
     };
     wrapper_styles.push_str(&format!("max-width: {max_width_css};"));
 
-    // Start the wrapper div.
-    output.push_str("<div class=\"darkmatter-page\" style=\"");
+    // Start the wrapper div. A feature-bearing render stamps a stable
+    // `data-darkmatter-features` attribute (debug-only; not a runtime lookup
+    // surface) listing the requested feature names in first-seen order.
+    let mut output = String::new();
+    output.push_str("<div class=\"darkmatter-page\"");
+    if !features.is_empty() {
+        let names = features
+            .iter()
+            .map(|f| f.name())
+            .collect::<Vec<_>>()
+            .join(" ");
+        output.push_str(&format!(" data-darkmatter-features=\"{names}\""));
+    }
+    output.push_str(" style=\"");
     output.push_str(&wrapper_styles);
     output.push_str("\">\n");
-
-    output.push_str(body);
-    output.push_str("</div>\n");
-
     output
 }
 

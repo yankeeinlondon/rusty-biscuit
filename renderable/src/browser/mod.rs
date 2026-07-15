@@ -3,6 +3,10 @@ pub mod fragment;
 pub mod renderable;
 pub mod utils;
 
+pub use feature::{
+    DefaultFeatureResolver, FeatureAssets, FeatureContext, FeatureResolveError, FeatureResolver,
+    FeatureScript, PageFeature,
+};
 pub use renderable::BrowserRenderable;
 
 use std::path::{Path, PathBuf};

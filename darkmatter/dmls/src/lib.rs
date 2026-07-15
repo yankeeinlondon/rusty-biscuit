@@ -19,6 +19,7 @@ pub mod graph;
 pub mod overlay;
 pub mod providers;
 pub mod router;
+pub mod semantic_legend;
 pub mod source_map;
 pub mod wiki;
 pub mod workspace;

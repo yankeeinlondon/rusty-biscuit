@@ -17,7 +17,7 @@ use oauth2::{
     AuthUrl, ClientId, ClientSecret, EndpointMaybeSet, EndpointNotSet, EndpointSet, RedirectUrl,
     RevocationUrl, TokenResponse, TokenUrl,
 };
-use tokio::sync::RwLock;
+use tokio::sync::Mutex;
 
 use crate::error::OAuthError;
 use crate::store::TokenStore;
@@ -42,8 +42,10 @@ type OAuthClient = oauth2::Client<
 
 /// Manages the OAuth2 token lifecycle for a single API provider.
 ///
-/// Thread-safe via internal `RwLock` on token state. Supports authorization
-/// code (with PKCE), client credentials, refresh, and revocation flows.
+/// Supports authorization code (with PKCE), client credentials, refresh, and
+/// revocation flows. Token refreshes are serialized through `refresh_lock` so
+/// concurrent callers of [`OAuth2Manager::get_valid_token`] perform a single
+/// refresh rather than stampeding the token endpoint.
 ///
 /// ## Examples
 ///
@@ -73,7 +75,13 @@ type OAuthClient = oauth2::Client<
 pub struct OAuth2Manager {
     pub(super) client: OAuthClient,
     pub(super) config: OAuth2RuntimeConfig,
-    pub(super) store: RwLock<Box<dyn TokenStore>>,
+    /// `TokenStore` is `Send + Sync` with `&self` methods, so the store needs no
+    /// outer lock for access; single-flight refresh is guarded separately.
+    pub(super) store: Box<dyn TokenStore>,
+    /// Shared HTTP client reused across token operations.
+    pub(super) http_client: reqwest::Client,
+    /// Serializes the load -> check-expiry -> refresh -> save critical section.
+    pub(super) refresh_lock: Mutex<()>,
 }
 
 impl OAuth2Manager {
@@ -128,7 +136,9 @@ impl OAuth2Manager {
         Ok(Self {
             client,
             config,
-            store: RwLock::new(store),
+            store,
+            http_client: build_http_client()?,
+            refresh_lock: Mutex::new(()),
         })
     }
 }

@@ -257,6 +257,11 @@ Canonical renderer: `to_html_with_popover()`
 
 Compatibility alias: `to_browser_with_popover()`
 
+Returns `Option<String>` — the canonical accessible wrapper/anchor/prompt
+markup the render-tree browser path emits, or `None` when the link carries no
+prompt. See [Prompted Links (Popover)](../rendering/popover.md) for the full
+markup, ARIA, and keyboard contract.
+
 ```rust
 use darkmatter::render::Link;
 
@@ -264,9 +269,15 @@ let link = Link::new("Help", "https://docs.example.com")
     .unwrap()
     .with_prompt("Open documentation");
 
-let (anchor, popover) = link.to_html_with_popover().unwrap();
-assert!(anchor.contains("interestfor="));
-assert!(popover.contains("popover=\"hint\""));
+let markup = link.to_html_with_popover().unwrap();
+assert!(markup.contains(r#"class="dm-popover-wrapper""#));
+assert!(markup.contains("interestfor="));
+assert!(markup.contains("aria-describedby="));
+assert!(markup.contains(r#"popover="hint""#));
+
+// A link without a prompt has no popover markup.
+let plain = Link::new("Help", "https://docs.example.com").unwrap();
+assert!(plain.to_html_with_popover().is_none());
 ```
 
 ### Markdown

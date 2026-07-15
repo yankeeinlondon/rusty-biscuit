@@ -1,0 +1,3 @@
+- ✗ the document [doc.md]({DOC_URL}) failed schema validation:
+    - event/a 1 is not of type "string" (at line 6 of frontmatter)
+    - event/b "nope" is not of type "number" (at line 6 of frontmatter)

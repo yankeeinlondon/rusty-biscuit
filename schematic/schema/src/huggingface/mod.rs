@@ -65,9 +65,9 @@
 //!
 //! let client = HuggingFaceHub::with_base_url("https://staging.example.com/v1");
 //! ```
-pub mod client;
 pub mod requests;
 pub mod responses;
+pub mod client;
 pub use requests::*;
 pub use responses::*;
 /// Hugging Face Hub API for model discovery, dataset management, spaces, and repository operations client.
@@ -91,38 +91,50 @@ impl HuggingFaceHub {
     /// Base URL for the API.
     pub const BASE_URL: &'static str = "https://huggingface.co/api";
     /// Official API documentation URL, if available.
-    pub const DOCS_URL: Option<&'static str> = Some("https://huggingface.co/docs/hub/api");
+    pub const DOCS_URL: Option<&'static str> = Some(
+        "https://huggingface.co/docs/hub/api",
+    );
     /// Creates a new API client with the default base URL.
     pub fn new() -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             base_url: Self::BASE_URL.to_string(),
             env_auth: vec![
-                "HF_TOKEN".to_string(),
-                "HUGGING_FACE_API_KEY".to_string(),
-                "HF_API_KEY".to_string(),
+                "HF_TOKEN".to_string(), "HUGGING_FACE_API_KEY".to_string(), "HF_API_KEY"
+                .to_string()
             ],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::BearerToken { header: None }],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken { header: None }),
+                explicit: vec![
+                    schematic_define::AuthMethod::BearerToken { header : None }
+                ],
+                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
+                    header: None,
+                }),
             },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "HF_TOKEN".to_string(),
-                        "HUGGING_FACE_API_KEY".to_string(),
-                        "HF_API_KEY".to_string(),
-                    ])),
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(
+                            vec![
+                                "HF_TOKEN".to_string(), "HUGGING_FACE_API_KEY".to_string(),
+                                "HF_API_KEY".to_string()
+                            ],
+                        ),
+                    ),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -135,34 +147,44 @@ impl HuggingFaceHub {
     /// ```
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             base_url: base_url.into(),
             env_auth: vec![
-                "HF_TOKEN".to_string(),
-                "HUGGING_FACE_API_KEY".to_string(),
-                "HF_API_KEY".to_string(),
+                "HF_TOKEN".to_string(), "HUGGING_FACE_API_KEY".to_string(), "HF_API_KEY"
+                .to_string()
             ],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::BearerToken { header: None }],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken { header: None }),
+                explicit: vec![
+                    schematic_define::AuthMethod::BearerToken { header : None }
+                ],
+                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
+                    header: None,
+                }),
             },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "HF_TOKEN".to_string(),
-                        "HUGGING_FACE_API_KEY".to_string(),
-                        "HF_API_KEY".to_string(),
-                    ])),
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(
+                            vec![
+                                "HF_TOKEN".to_string(), "HUGGING_FACE_API_KEY".to_string(),
+                                "HF_API_KEY".to_string()
+                            ],
+                        ),
+                    ),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -184,31 +206,38 @@ impl HuggingFaceHub {
             client,
             base_url: Self::BASE_URL.to_string(),
             env_auth: vec![
-                "HF_TOKEN".to_string(),
-                "HUGGING_FACE_API_KEY".to_string(),
-                "HF_API_KEY".to_string(),
+                "HF_TOKEN".to_string(), "HUGGING_FACE_API_KEY".to_string(), "HF_API_KEY"
+                .to_string()
             ],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::BearerToken { header: None }],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken { header: None }),
+                explicit: vec![
+                    schematic_define::AuthMethod::BearerToken { header : None }
+                ],
+                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
+                    header: None,
+                }),
             },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "HF_TOKEN".to_string(),
-                        "HUGGING_FACE_API_KEY".to_string(),
-                        "HF_API_KEY".to_string(),
-                    ])),
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(
+                            vec![
+                                "HF_TOKEN".to_string(), "HUGGING_FACE_API_KEY".to_string(),
+                                "HF_API_KEY".to_string()
+                            ],
+                        ),
+                    ),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -223,36 +252,46 @@ impl HuggingFaceHub {
     ///     .unwrap();
     /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
     /// ```
-    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
+    pub fn with_client_and_base_url(
+        client: reqwest::Client,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
             client,
             base_url: base_url.into(),
             env_auth: vec![
-                "HF_TOKEN".to_string(),
-                "HUGGING_FACE_API_KEY".to_string(),
-                "HF_API_KEY".to_string(),
+                "HF_TOKEN".to_string(), "HUGGING_FACE_API_KEY".to_string(), "HF_API_KEY"
+                .to_string()
             ],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::BearerToken { header: None }],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken { header: None }),
+                explicit: vec![
+                    schematic_define::AuthMethod::BearerToken { header : None }
+                ],
+                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
+                    header: None,
+                }),
             },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "HF_TOKEN".to_string(),
-                        "HUGGING_FACE_API_KEY".to_string(),
-                        "HF_API_KEY".to_string(),
-                    ])),
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(
+                            vec![
+                                "HF_TOKEN".to_string(), "HUGGING_FACE_API_KEY".to_string(),
+                                "HF_API_KEY".to_string()
+                            ],
+                        ),
+                    ),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -280,12 +319,14 @@ impl HuggingFaceHub {
     /// Returns `None` if the authentication strategy is not `ApiKey`
     /// or if the API key environment variable is not set.
     pub fn api_key_header(&self) -> Option<(String, String)> {
-        let header = self
+        let (header, value_prefix) = self
             .auth_policy
             .explicit
             .iter()
             .find_map(|method| match method {
-                schematic_define::AuthMethod::ApiKey { header } => Some(header.clone()),
+                schematic_define::AuthMethod::ApiKey { header, value_prefix } => {
+                    Some((header.clone(), value_prefix.clone()))
+                }
                 _ => None,
             })
             .or_else(|| {
@@ -293,22 +334,25 @@ impl HuggingFaceHub {
                     .env_mapping()
                     .api_key
                     .as_ref()
-                    .map(|api_key| api_key.header.clone())
-            });
-        header.and_then(|header| {
-            self.headers
-                .env_mapping()
-                .api_key
-                .as_ref()
-                .and_then(|api_key| {
-                    api_key
-                        .names
-                        .names()
-                        .iter()
-                        .find_map(|env_name| std::env::var(env_name).ok())
-                })
-                .map(|value| (header, value))
-        })
+                    .map(|api_key| (api_key.header.clone(), None))
+            })?;
+        self.headers
+            .env_mapping()
+            .api_key
+            .as_ref()
+            .and_then(|api_key| {
+                api_key
+                    .names
+                    .names()
+                    .iter()
+                    .find_map(|env_name| std::env::var(env_name).ok())
+            })
+            .map(|value| {
+                let value = format!(
+                    "{}{}", value_prefix.clone().unwrap_or_default(), value
+                );
+                (header, value)
+            })
     }
     /// Creates a variant builder for customizing this API client.
     ///
@@ -511,9 +555,7 @@ impl<'a> HuggingFaceHubVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError>
-            + Send
-            + Sync
+            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
             + 'static,
     {
         self.pre_response_json = Some(std::sync::Arc::new(hook));
@@ -541,15 +583,13 @@ impl<'a> HuggingFaceHubVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError>
-            + Send
-            + Sync
-            + 'static,
+            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
     {
-        self.response_mutators.insert(
-            R::ENDPOINT_ID,
-            std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-        );
+        self.response_mutators
+            .insert(
+                R::ENDPOINT_ID,
+                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+            );
         self
     }
     /// Builds the variant API client with the configured options.
@@ -575,15 +615,17 @@ impl<'a> HuggingFaceHubVariantBuilder<'a> {
         let headers = match self.headers {
             Some(headers) => headers,
             None if has_env_auth_override
-                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) =>
-            {
-                self.base.headers.clone().with_env_mapping(
-                    schematic_define::RestApi::legacy_env_mapping_for(
-                        &auth_strategy,
-                        &env_auth,
-                        self.base.env_username.as_deref(),
-                    ),
-                )
+                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) => {
+                self.base
+                    .headers
+                    .clone()
+                    .with_env_mapping(
+                        schematic_define::RestApi::legacy_env_mapping_for(
+                            &auth_strategy,
+                            &env_auth,
+                            self.base.env_username.as_deref(),
+                        ),
+                    )
             }
             None => self.base.headers.clone(),
         };

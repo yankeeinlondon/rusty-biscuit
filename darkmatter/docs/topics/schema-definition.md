@@ -98,10 +98,12 @@ $schema:
 | `object`     | Any YAML/JSON object.                                                                                  | No nested-schema authoring in v1 — `object` accepts any shape. Reference an external file for deeper typing.                                                                    |
 | `file`       | A file reference parsed via `biscuit-file::FileReference`. Single or array form.                       | Constraints: `eager`, `match(glob, ...)`, `required`. **Lazy by default** (syntax-only); `file(eager)` resolves & checks existence **document-first, then launch-area fallback**, and on validation success its stored value is **rewritten** to the repo-relative resolved path. Bare `file` is left verbatim. See [Files](#files).        |
 | `enum`       | A value from an explicit set.                                                                          | Constraints required — the members are the constraint. See [Enumerations](#enumerations).                                                                                       |
+| `literal`    | Exactly one scalar value, of any scalar type.                                                          | Compiles to JSON Schema `const`. Bare `true`/`2` are typed; quoting forces string. Constraints: `required`, an equal `default`. See [Literals](#literals).                       |
 | `url`        | A string parseable as an absolute URL.                                                                 | Constraints: `scheme(...)`, `default`, `required`.                                                                                                                              |
 | `email`      | A string in `addr-spec` form.                                                                          | JSON Schema `format: email`.                                                                                                                                                    |
 | `yaml`       | A string whose **content** parses as YAML, **or** a native mapping/sequence/scalar coerced to a YAML string. | JSON Schema `format: darkmatter-yaml`. Accepts JSON too (JSON is valid YAML). See [Content-Format Types](#content-format-types-yaml--json).                              |
 | `json`       | A string whose **content** parses as strict JSON, **or** a native value coerced to a JSON string.      | JSON Schema `format: darkmatter-json`. Rejects YAML-only syntax. See [Content-Format Types](#content-format-types-yaml--json).                                                  |
+| `expression` | A string that parses under the Darkmatter expression grammar. Parse-only — never evaluated.            | JSON Schema `format: darkmatter-expression`. The third content-format string type. Native booleans/numbers coerce to their string form. See [Expressions](#expressions).        |
 | `any`        | Anything.                                                                                              | Only `required` is meaningful. `any(required)` is presence-only because `any` already includes `null`.                                                                          |
 
 Append `[]` to any type for an array of that type — e.g. `string[]`, `enum(red,green,blue)[]`, `file(match('*.md'))[]`.
@@ -246,6 +248,99 @@ $schema:
     status: "enum(draft, published, archived; default(draft))"
     spaced: "enum('a, b', 'c; d')"
 ```
+
+### Literals
+
+`literal(value)` types a property whose value must **equal exactly one scalar**. It compiles to JSON Schema `const`, replaces the single-member-enum workaround (`kind: enum(spec)`), and makes discriminated unions first-class.
+
+```yaml
+$schema:
+    kind:     literal(spec)                     # string literal
+    version:  literal(2; required)              # number literal + constraint
+    archived: literal(false)                    # boolean literal
+    note:     "literal('a, b'; default('a, b'))"  # quoted value (protects , ; )
+```
+
+- Exactly **one** positional value, lexed with the same rules as enum members: a bare token or a single-/double-quoted string. Quoting protects `,`, `;`, and `)`.
+- Constraints follow after `;`, exactly like `enum(a, b; required)`.
+- `literal()` with no value is a `SchemaError` (*literal requires a value*). Two or more positional values is a `SchemaError` whose message points you at `enum(...)`.
+
+#### Value Typing
+
+The positional value is lexed as a YAML-style scalar, so the literal's JSON type mirrors how YAML would type the frontmatter value being validated:
+
+| Authored                                | Typed as |
+|-----------------------------------------|----------|
+| bare `true` / `false`                   | boolean  |
+| bare integer / float (numberlike-shaped) | number   |
+| any other bare token                    | string   |
+| quoted (`'2'`, `"true"`)                | string   |
+
+`version: 2` in a document therefore satisfies `literal(2)` without coercion gymnastics, and quoting opts out (`literal('2')` matches the string `"2"`, not the number `2`). Number detection reuses the existing numberlike-shape test — no scientific notation, no leading-zero octal surprises; anything that fails the shape test is text.
+
+A **bare `null`** is rejected with an actionable error (*quote it or drop the key*): optional properties already accept `null`, so a null literal is always an authoring mistake.
+
+#### Constraints
+
+| Constraint  | Allowed | Notes                                                                                                          |
+|-------------|---------|----------------------------------------------------------------------------------------------------------------|
+| `required`  | yes     | Enforces presence and equality.                                                                                |
+| `default(v)` | yes     | Schema-load lint: `v` must equal the literal value, else `SchemaError` — a default that violates its own `const` is always a bug. |
+| `suggest(...)` | no   | Completion is implied by the value itself.                                                                     |
+| everything else (`min`, `pattern`, …) | no | Nothing to constrain beyond identity.                                                            |
+
+A non-`required` literal accepts missing/`null` through the standard optional-nullable wrapper; otherwise the value must equal the literal.
+
+#### JSON Schema Emission
+
+`literal(spec)` → `{ "const": "spec" }`; `literal(2)` → `{ "const": 2 }`. The array form `literal(x)[]` is **allowed** and places the `const` under `items`, so every item must equal the value — grammatically uniform with every other type, niche but well-defined.
+
+#### Coercion
+
+The literal implies its scalar type, so the write-back pass treats it like the corresponding primitive: a document value `"2"` against `literal(2)` coerces to the number `2`; `"true"` against `literal(true)` coerces to the boolean `true`. **String literals never coerce.** As with all coercion, write-back happens only when the coerced result validates, and `$(...)`-pending values are skipped.
+
+#### Relationship to `enum`
+
+`literal(x)` validates **identically to `enum(x)` for string values**. Keep using `enum` for "one of N strings"; reach for `literal` when you mean "exactly this value, of any scalar type" — including non-string discriminants (`version: 2`) that `enum` cannot express. Single-member enums keep working; there is no deprecation.
+
+#### Trigger Matches
+
+`literal` is a pure value-equality constraint (no I/O), so it is permitted in [trigger-schema](#repository-trigger-schemas) match expressions. `kind: literal(spec)` is the idiomatic trigger discriminant, replacing the older `enum(spec)` spelling.
+
+### Expressions
+
+`expression` types a **string that must parse under the Darkmatter expression grammar**. It is the third member of the content-format string-type family alongside [`yaml` / `json`](#content-format-types-yaml--json), and it is **parse-only** — never evaluated, no I/O, no shell, no function execution.
+
+```yaml
+$schema:
+    when:  expression                           # bare
+    guard: expression(required)                 # with constraints
+    hooks: "{ on-error: expression, on-done: expression }"
+```
+
+- A plain keyword type with no positional value — parses exactly like `string`.
+- There is **no** parameterized form in v1. `expression(condition)` is reserved for a future backward-compatible opt-in and is rejected today.
+
+#### Semantics
+
+The expression language has two dialects that disagree on `&&` / `||`: the **value** dialect (body `{{ }}` interpolation) and the **condition** dialect (`when="..."`, where `&&`/`||` are logical AND/OR). A bare `expression` validates when the string parses under **either** dialect, so `when: expression` accepts `is_agent() && os == "macos"` on day one. In practice this is a single condition-mode parse, because the condition parser accepts a parse-superset of the value dialect.
+
+Validation checks **parseability only**:
+
+- **No evaluation, ever** — the same passivity contract as `yaml` / `json` content-format validation.
+- **Unknown identifiers are not schema errors.** Identifier resolution (frontmatter keys, `ctx.*`, `env.*`) is a compose-time concern. DMLS layers richer advisory diagnostics on top inside the editor.
+
+#### JSON Schema Emission and Constraints
+
+Emits `{ "type": "string", "format": "darkmatter-expression" }`, backed by a pure parse check. Constraint applicability, optional-nullability, and the `$()` / `{{ }}` pending-value deferral rules mirror `yaml` / `json` exactly: it permits the universal `required`, `default(...)`, and `generated` constraints plus array constraints when suffixed with `[]`; string constraints and `suggest(...)` are rejected. A `default(...)` value must itself parse as an expression, or the schema fails to load.
+
+#### Coercion
+
+`when: true` and `retries: 3` are valid degenerate expressions that YAML types as boolean/number before the validator sees them. The coercion pass serializes native boolean and number scalars to their canonical literal string forms (`true` → `"true"`, `3` → `"3"`), the same native-value-accepted-then-serialized behavior `yaml`/`json` already have. Number spelling canonicalizes through YAML's reading (`3.10` → `"3.1"`); quoting preserves exact spelling. **Mappings and sequences do not coerce — they are type mismatches.**
+
+#### Consumer Layering
+
+The type ships in Darkmatter; consumers adopt it in their own schemas. Claudine's extension baseline retypes `when: string` → `when: expression` with zero Claudine-specific code in Darkmatter, then DMLS lights up schema-driven expression completion, hover, and diagnostics inside those frontmatter values.
 
 ### Files
 
@@ -591,6 +686,34 @@ $schema:
 ```
 
 Arm-level constraints stay arm-local. Arm descriptions (`-> ...`) annotate that arm in the generated JSON Schema.
+
+A property-level union may mix a `literal` arm with any other atom — something `enum` cannot do, because `enum` members are homogeneous strings:
+
+```yaml
+$schema:
+    width: [literal(auto), "number(min(1))"]   # the keyword `auto` or a positive number
+```
+
+### Discriminated Unions
+
+When the arms of a union are inline objects that each carry a `literal`-typed **discriminant** key, the union becomes a genuine tagged union. Both `md schema validate` diagnostics and DMLS editor behavior narrow to the single matched arm.
+
+```yaml
+$schema:
+    event:
+      - "{ kind: literal(created), path: file(required) }"
+      - "{ kind: literal(deleted), reason: string }"
+```
+
+Given a document with `kind: created`, validation reports only the `created` arm's missing/unknown/type problems instead of the full `anyOf` noise, and DMLS sibling-key completion offers only that arm's keys.
+
+An arm is selected **only when** all of the following hold:
+
+- the same discriminant key is present as a `literal` in **at least two** arms,
+- the instance contains that key with an authored value, and
+- exactly **one** arm's typed literal equals the instance value.
+
+Equality is **type-sensitive**: a typed `2` does not select an arm tagged `'2'`. If multiple discriminant keys qualify, they must all select the same arm. For an absent, unknown, duplicate, or conflicting discriminant, validation and completion fall back to the normal merged/union behavior — narrowing never guesses an arm from a partial or ambiguous match. Schemas without literal discriminants keep byte-identical `anyOf` diagnostics.
 
 ### Root-Level Unions
 
@@ -1273,6 +1396,8 @@ unless the same baseline is supplied explicitly.
 - **No constraint inference in detection.** Patterns, `min` / `max`, and enum members are never synthesised from values.
 - **No `additionalProperties: false` opt-in at the root.** Root schemas always allow extra keys; a `strict` mode may land later. Inline objects always set `additionalProperties: false`.
 - **No cross-document constraints.** Uniqueness across a corpus is out of scope for v1.
+- **No parameterized `expression(condition)`.** The dialect-restricting form is reserved for a future backward-compatible opt-in and is rejected today; bare `expression` accepts either dialect.
+- **No expression evaluation or static return-type checking.** `expression` validates syntax only; whether `when` evaluates to a boolean is never checked.
 
 ## See Also
 
@@ -1281,6 +1406,7 @@ unless the same baseline is supplied explicitly.
 - [Inline object spec](../../features/_completed/2026-06-10-schema-improvement/spec.md) — inline object literals, postfix constraints, nesting rules, and the `md schema about` descriptor catalog.
 - [Schema-plus spec](../../features/_completed/2026-07-08-schema-plus/spec.md) — composition primitives: `example(...)`, `Name@file` imports, pattern keys, `min-keys` / `max-keys`, `yaml` / `json`.
 - [Suggest-constraint spec](../../features/_completed/2026-07-09-suggest-constraint/spec.md) — the `suggest(...)` advisory-completion constraint.
+- [Literal / expression spec](../../features/2026-07-12-literal-expression/spec.md) — the `literal(value)` and `expression` types and the DMLS unlocks they enable.
 - [`json-schema-primitives.md`](./json-schema-primitives.md) — JSON Schema primitives reused under the hood.
 - [`magic-paths.md`](./magic-paths.md) — `FileReference` resolution rules.
 - [`frontmatter-recursion.md`](./frontmatter-recursion.md) — how frontmatter is layered through the compose pipeline.

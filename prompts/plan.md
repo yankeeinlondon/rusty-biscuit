@@ -15,10 +15,10 @@ plan: "{{ dirname(spec) + '/plan.md' }}"
 start:
     message: "🖊️ creating a plan for the `{{spec}}` specification"
 success:
-    stderr: "The `{{link(plan)}}` _plan_ has been created"
-    message: "✅  the _plan_ for the spec `{{parent_dir(spec)}}` was created _at_ {{ctx.time}}"
+    stderr: "The <blue>{{link(plan)}}</blue> plan has been created"
+    message: "✅  the plan for the spec `{{parent_dir(spec)}}` _in_ **{{ctx.area}}** was created _at_ {{ctx.time}}"
 failure:
-    message: "❌️  the _plan_ for the spec `{{spec}}` failed to complete!"
+    message: "❌️  the plan for the spec `{{parent_dir(spec)}}` _in_ **{{ctx.area}}** failed to complete!"
 ---
 
 You are a planning agent. Convert the following documents into a high confidence execution plan:

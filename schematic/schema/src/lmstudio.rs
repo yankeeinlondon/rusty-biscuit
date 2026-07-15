@@ -41,9 +41,9 @@
 //!
 //! let client = LmStudio::with_base_url("https://staging.example.com/v1");
 //! ```
-use crate::shared::{RequestParts, SchematicError};
-pub use schematic_definitions::lmstudio::*;
 use serde::{Deserialize, Serialize};
+pub use schematic_definitions::lmstudio::*;
+use crate::shared::{RequestParts, SchematicError};
 /// Request for `Chat` endpoint.
 ///
 /// ## Example
@@ -89,7 +89,7 @@ impl ChatRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -185,7 +185,7 @@ impl LoadModelRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -245,7 +245,7 @@ impl UnloadModelRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -305,7 +305,7 @@ impl DownloadModelRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -365,7 +365,7 @@ impl GetDownloadStatusRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -423,8 +423,12 @@ impl LmStudioRequest {
     pub fn endpoint_id(&self) -> &'static str {
         match self {
             Self::Chat(_) => <ChatRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
-            Self::ListModels(_) => <ListModelsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
-            Self::LoadModel(_) => <LoadModelRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::ListModels(_) => {
+                <ListModelsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::LoadModel(_) => {
+                <LoadModelRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::UnloadModel(_) => {
                 <UnloadModelRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -434,6 +438,21 @@ impl LmStudioRequest {
             Self::GetDownloadStatus(_) => {
                 <GetDownloadStatusRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
+        }
+    }
+    /// Returns how this endpoint's response body is decoded.
+    ///
+    /// The generic `request::<T>()` decodes JSON; it consults this to
+    /// reject text, binary, and empty endpoints up front.
+    #[must_use]
+    pub fn response_kind(&self) -> crate::shared::ResponseKind {
+        match self {
+            Self::Chat(_) => crate::shared::ResponseKind::Binary,
+            Self::ListModels(_) => crate::shared::ResponseKind::Json,
+            Self::LoadModel(_) => crate::shared::ResponseKind::Json,
+            Self::UnloadModel(_) => crate::shared::ResponseKind::Json,
+            Self::DownloadModel(_) => crate::shared::ResponseKind::Binary,
+            Self::GetDownloadStatus(_) => crate::shared::ResponseKind::Json,
         }
     }
 }
@@ -488,21 +507,32 @@ impl LmStudio {
     /// Base URL for the API.
     pub const BASE_URL: &'static str = "http://localhost:1234";
     /// Official API documentation URL, if available.
-    pub const DOCS_URL: Option<&'static str> = Some("https://lmstudio.ai/docs/developer/rest");
+    pub const DOCS_URL: Option<&'static str> = Some(
+        "https://lmstudio.ai/docs/developer/rest",
+    );
     /// Creates a new API client with the default base URL.
     pub fn new() -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             base_url: Self::BASE_URL.to_string(),
             env_auth: vec!["LM_API_TOKEN".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::BearerToken { header: None }],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken { header: None }),
+                explicit: vec![
+                    schematic_define::AuthMethod::BearerToken { header : None }
+                ],
+                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
+                    header: None,
+                }),
             },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
@@ -510,8 +540,7 @@ impl LmStudio {
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -524,17 +553,26 @@ impl LmStudio {
     /// ```
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             base_url: base_url.into(),
             env_auth: vec!["LM_API_TOKEN".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::BearerToken { header: None }],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken { header: None }),
+                explicit: vec![
+                    schematic_define::AuthMethod::BearerToken { header : None }
+                ],
+                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
+                    header: None,
+                }),
             },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
@@ -542,8 +580,7 @@ impl LmStudio {
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -565,14 +602,20 @@ impl LmStudio {
             client,
             base_url: Self::BASE_URL.to_string(),
             env_auth: vec!["LM_API_TOKEN".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::BearerToken { header: None }],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken { header: None }),
+                explicit: vec![
+                    schematic_define::AuthMethod::BearerToken { header : None }
+                ],
+                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
+                    header: None,
+                }),
             },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
@@ -580,8 +623,7 @@ impl LmStudio {
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -596,19 +638,28 @@ impl LmStudio {
     ///     .unwrap();
     /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
     /// ```
-    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
+    pub fn with_client_and_base_url(
+        client: reqwest::Client,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
             client,
             base_url: base_url.into(),
             env_auth: vec!["LM_API_TOKEN".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::BearerToken { header: None }],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken { header: None }),
+                explicit: vec![
+                    schematic_define::AuthMethod::BearerToken { header : None }
+                ],
+                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
+                    header: None,
+                }),
             },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
@@ -616,8 +667,7 @@ impl LmStudio {
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -645,12 +695,14 @@ impl LmStudio {
     /// Returns `None` if the authentication strategy is not `ApiKey`
     /// or if the API key environment variable is not set.
     pub fn api_key_header(&self) -> Option<(String, String)> {
-        let header = self
+        let (header, value_prefix) = self
             .auth_policy
             .explicit
             .iter()
             .find_map(|method| match method {
-                schematic_define::AuthMethod::ApiKey { header } => Some(header.clone()),
+                schematic_define::AuthMethod::ApiKey { header, value_prefix } => {
+                    Some((header.clone(), value_prefix.clone()))
+                }
                 _ => None,
             })
             .or_else(|| {
@@ -658,22 +710,25 @@ impl LmStudio {
                     .env_mapping()
                     .api_key
                     .as_ref()
-                    .map(|api_key| api_key.header.clone())
-            });
-        header.and_then(|header| {
-            self.headers
-                .env_mapping()
-                .api_key
-                .as_ref()
-                .and_then(|api_key| {
-                    api_key
-                        .names
-                        .names()
-                        .iter()
-                        .find_map(|env_name| std::env::var(env_name).ok())
-                })
-                .map(|value| (header, value))
-        })
+                    .map(|api_key| (api_key.header.clone(), None))
+            })?;
+        self.headers
+            .env_mapping()
+            .api_key
+            .as_ref()
+            .and_then(|api_key| {
+                api_key
+                    .names
+                    .names()
+                    .iter()
+                    .find_map(|env_name| std::env::var(env_name).ok())
+            })
+            .map(|value| {
+                let value = format!(
+                    "{}{}", value_prefix.clone().unwrap_or_default(), value
+                );
+                (header, value)
+            })
     }
     /// Creates a variant builder for customizing this API client.
     ///
@@ -876,9 +931,7 @@ impl<'a> LmStudioVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError>
-            + Send
-            + Sync
+            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
             + 'static,
     {
         self.pre_response_json = Some(std::sync::Arc::new(hook));
@@ -906,15 +959,13 @@ impl<'a> LmStudioVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError>
-            + Send
-            + Sync
-            + 'static,
+            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
     {
-        self.response_mutators.insert(
-            R::ENDPOINT_ID,
-            std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-        );
+        self.response_mutators
+            .insert(
+                R::ENDPOINT_ID,
+                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+            );
         self
     }
     /// Builds the variant API client with the configured options.
@@ -940,15 +991,17 @@ impl<'a> LmStudioVariantBuilder<'a> {
         let headers = match self.headers {
             Some(headers) => headers,
             None if has_env_auth_override
-                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) =>
-            {
-                self.base.headers.clone().with_env_mapping(
-                    schematic_define::RestApi::legacy_env_mapping_for(
-                        &auth_strategy,
-                        &env_auth,
-                        self.base.env_username.as_deref(),
-                    ),
-                )
+                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) => {
+                self.base
+                    .headers
+                    .clone()
+                    .with_env_mapping(
+                        schematic_define::RestApi::legacy_env_mapping_for(
+                            &auth_strategy,
+                            &env_auth,
+                            self.base.env_username.as_deref(),
+                        ),
+                    )
             }
             None => self.base.headers.clone(),
         };
@@ -976,11 +1029,13 @@ impl LmStudio {
             .explicit
             .iter()
             .map(|method| match method {
-                schematic_define::AuthMethod::BearerToken { header } => match header.as_deref() {
-                    Some(header) => format!("an explicit bearer token in `{header}`"),
-                    None => "an explicit bearer token".to_string(),
-                },
-                schematic_define::AuthMethod::ApiKey { header } => {
+                schematic_define::AuthMethod::BearerToken { header } => {
+                    match header.as_deref() {
+                        Some(header) => format!("an explicit bearer token in `{header}`"),
+                        None => "an explicit bearer token".to_string(),
+                    }
+                }
+                schematic_define::AuthMethod::ApiKey { header, .. } => {
                     format!("an explicit API key in `{header}`")
                 }
                 schematic_define::AuthMethod::Basic => {
@@ -995,20 +1050,22 @@ impl LmStudio {
     }
     fn env_fallback_var_names(&self) -> Vec<String> {
         match &self.auth_policy.env_fallback {
-            Some(schematic_define::EnvAuthStrategy::BearerToken { .. }) => self
-                .headers
-                .env_mapping()
-                .bearer_token
-                .as_ref()
-                .map(|list| list.names().to_vec())
-                .unwrap_or_default(),
-            Some(schematic_define::EnvAuthStrategy::ApiKey { .. }) => self
-                .headers
-                .env_mapping()
-                .api_key
-                .as_ref()
-                .map(|api_key| api_key.names.names().to_vec())
-                .unwrap_or_default(),
+            Some(schematic_define::EnvAuthStrategy::BearerToken { .. }) => {
+                self.headers
+                    .env_mapping()
+                    .bearer_token
+                    .as_ref()
+                    .map(|list| list.names().to_vec())
+                    .unwrap_or_default()
+            }
+            Some(schematic_define::EnvAuthStrategy::ApiKey { .. }) => {
+                self.headers
+                    .env_mapping()
+                    .api_key
+                    .as_ref()
+                    .map(|api_key| api_key.names.names().to_vec())
+                    .unwrap_or_default()
+            }
             Some(schematic_define::EnvAuthStrategy::Basic) => {
                 let mut vars = Vec::new();
                 if let Some(user) = self.headers.env_mapping().basic_user.as_ref() {
@@ -1031,10 +1088,13 @@ impl LmStudio {
             options.push(explicit_methods.join(", "));
         }
         if !env_fallback_vars.is_empty() {
-            options.push(format!(
-                "set one of the fallback env vars `{}`",
-                env_fallback_vars.join("`, `")
-            ));
+            options
+                .push(
+                    format!(
+                        "set one of the fallback env vars `{}`", env_fallback_vars
+                        .join("`, `")
+                    ),
+                );
         }
         let mut message = if options.is_empty() {
             "Authentication required.".to_string()
@@ -1053,15 +1113,19 @@ impl LmStudio {
             env_fallback_vars,
         }
     }
-    fn apply_env_fallback(&self, headers: schematic_define::Headers) -> schematic_define::Headers {
+    fn apply_env_fallback(
+        &self,
+        headers: schematic_define::Headers,
+    ) -> schematic_define::Headers {
         let env_mapping = self.headers.env_mapping().clone();
         match &self.auth_policy.env_fallback {
             Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                let token = env_mapping.bearer_token.as_ref().and_then(|list| {
-                    list.names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
+                let token = env_mapping
+                    .bearer_token
+                    .as_ref()
+                    .and_then(|list| {
+                        list.names().iter().find_map(|name| std::env::var(name).ok())
+                    });
                 match (token, header.as_deref()) {
                     (Some(token), Some(header)) => {
                         headers.use_bearer_token_with_header(token, header)
@@ -1070,32 +1134,44 @@ impl LmStudio {
                     _ => headers,
                 }
             }
-            Some(schematic_define::EnvAuthStrategy::ApiKey { header }) => {
-                let key = env_mapping.api_key.as_ref().and_then(|api_key| {
-                    api_key
-                        .names
-                        .names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
+            Some(schematic_define::EnvAuthStrategy::ApiKey { header, value_prefix }) => {
+                let key = env_mapping
+                    .api_key
+                    .as_ref()
+                    .and_then(|api_key| {
+                        api_key
+                            .names
+                            .names()
+                            .iter()
+                            .find_map(|name| std::env::var(name).ok())
+                    });
                 match key {
-                    Some(key) => headers.header(header.clone(), key),
+                    Some(key) => {
+                        let value = format!(
+                            "{}{}", value_prefix.clone().unwrap_or_default(), key
+                        );
+                        headers.header(header.clone(), value)
+                    }
                     None => headers,
                 }
             }
             Some(schematic_define::EnvAuthStrategy::Basic) => {
-                let username = env_mapping.basic_user.as_ref().and_then(|list| {
-                    list.names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
-                let password = env_mapping.basic_pass.as_ref().and_then(|list| {
-                    list.names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
+                let username = env_mapping
+                    .basic_user
+                    .as_ref()
+                    .and_then(|list| {
+                        list.names().iter().find_map(|name| std::env::var(name).ok())
+                    });
+                let password = env_mapping
+                    .basic_pass
+                    .as_ref()
+                    .and_then(|list| {
+                        list.names().iter().find_map(|name| std::env::var(name).ok())
+                    });
                 match (username, password) {
-                    (Some(username), Some(password)) => headers.use_basic_auth(username, password),
+                    (Some(username), Some(password)) => {
+                        headers.use_basic_auth(username, password)
+                    }
                     _ => headers,
                 }
             }
@@ -1106,12 +1182,14 @@ impl LmStudio {
     fn headers_satisfy_fallback(&self, headers: &schematic_define::Headers) -> bool {
         match &self.auth_policy.env_fallback {
             Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                header.as_deref().map_or_else(
-                    || headers.has_authorization(),
-                    |header| headers.has_header(header),
-                )
+                header
+                    .as_deref()
+                    .map_or_else(
+                        || headers.has_authorization(),
+                        |header| headers.has_header(header),
+                    )
             }
-            Some(schematic_define::EnvAuthStrategy::ApiKey { header }) => {
+            Some(schematic_define::EnvAuthStrategy::ApiKey { header, .. }) => {
                 headers.has_header(header)
             }
             Some(schematic_define::EnvAuthStrategy::Basic) => headers.has_authorization(),
@@ -1124,8 +1202,7 @@ impl LmStudio {
         if !headers.has_explicit_auth() {
             headers = self.apply_env_fallback(headers);
         }
-        if self.auth_is_required()
-            && !headers.has_explicit_auth()
+        if self.auth_is_required() && !headers.has_explicit_auth()
             && !self.headers_satisfy_fallback(&headers)
         {
             return Err(self.authentication_required_error());
@@ -1235,6 +1312,31 @@ impl LmStudio {
         &self,
         request: impl Into<LmStudioRequest>,
     ) -> Result<T, SchematicError> {
+        let request = request.into();
+        match request.response_kind() {
+            crate::shared::ResponseKind::Json => {}
+            crate::shared::ResponseKind::Text => {
+                return Err(SchematicError::WrongResponseDecoder {
+                    endpoint_id: request.endpoint_id(),
+                    kind: "text",
+                    expected_method: "request_text",
+                });
+            }
+            crate::shared::ResponseKind::Binary => {
+                return Err(SchematicError::WrongResponseDecoder {
+                    endpoint_id: request.endpoint_id(),
+                    kind: "binary",
+                    expected_method: "request_bytes",
+                });
+            }
+            crate::shared::ResponseKind::Empty => {
+                return Err(SchematicError::WrongResponseDecoder {
+                    endpoint_id: request.endpoint_id(),
+                    kind: "empty",
+                    expected_method: "request_empty",
+                });
+            }
+        }
         let (response, ctx) = self.build_and_send_request(request).await?;
         let has_pre_hook = self.variant_hooks.pre_response_json.is_some();
         let has_mutator = self
@@ -1248,7 +1350,11 @@ impl LmStudio {
                 json_value = hook(&ctx, json_value)?;
             }
             let mut result: T = serde_json::from_value(json_value)?;
-            if let Some(mutator) = self.variant_hooks.response_mutators.get(ctx.endpoint_id) {
+            if let Some(mutator) = self
+                .variant_hooks
+                .response_mutators
+                .get(ctx.endpoint_id)
+            {
                 mutator.mutate(&ctx, &mut result)?;
             }
             Ok(result)
@@ -1280,7 +1386,10 @@ impl LmStudio {
     ///
     /// Chat completion with SSE streaming support
     #[must_use = "this returns a Future that must be awaited"]
-    pub async fn chat(&self, request: ChatRequest) -> Result<bytes::Bytes, SchematicError> {
+    pub async fn chat(
+        &self,
+        request: ChatRequest,
+    ) -> Result<bytes::Bytes, SchematicError> {
         self.request_bytes(request).await
     }
     /// Convenience method for the `DownloadModel` endpoint.

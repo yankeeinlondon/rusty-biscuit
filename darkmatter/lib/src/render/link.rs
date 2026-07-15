@@ -602,18 +602,40 @@ impl Link {
         self.to_markdown(false)
     }
 
-    /// Renders HTML with Popover companion element when prompt is present.
-    pub fn to_html_with_popover(&self) -> Option<(String, String)> {
+    /// Renders the accessible prompted-link markup when a prompt is present.
+    ///
+    /// The returned string is the canonical wrapper/anchor/prompt structure the
+    /// production render-tree browser path emits (see
+    /// `renderable::tree::render`): a `dm-popover-wrapper` span holding the
+    /// navigable anchor (real `href`, `interestfor` + `aria-describedby`
+    /// association) followed by a `dm-popover-prompt` `popover="hint"` element
+    /// with escaped content. The shared Popover CSS is supplied separately by the
+    /// feature resolver. This standalone helper is for callers rendering a single
+    /// `Link` outside the document pipeline; it deliberately mirrors production so
+    /// the two do not diverge.
+    ///
+    /// ## Returns
+    ///
+    /// `None` when the link carries no prompt.
+    ///
+    /// ## Notes
+    ///
+    /// The popover `id` is derived deterministically from this link's target and
+    /// display alone, with no document-scoped occurrence state, so this helper
+    /// guarantees a document-unique id only for a **single** prompted link.
+    /// Emitting several links this way and concatenating the fragments can repeat
+    /// an id and make `aria-describedby` ambiguous. For a document with more than
+    /// one prompted link, render through the render-tree browser path
+    /// (`renderable::tree::render`), which defers id allocation to final-document
+    /// assembly and keeps every occurrence unique.
+    pub fn to_html_with_popover(&self) -> Option<String> {
         let prompt = self
             .prompt
             .as_ref()
             .and_then(|p| normalize_optional(strip_ansi_sequences(p)))?;
 
         let id = generate_popover_id(&self.link_to, &self.display);
-        let mut attrs = vec![
-            format!(r#"href="{}""#, html_escape(&self.link_to)),
-            format!(r#"interestfor="{}""#, id),
-        ];
+        let mut attrs = vec![format!(r#"href="{}""#, html_escape(&self.link_to))];
 
         if let Some(class) = &self.class {
             attrs.push(format!(r#"class="{}""#, html_escape(class)));
@@ -639,22 +661,26 @@ impl Link {
             ));
         }
 
+        attrs.push(format!(r#"interestfor="{id}""#));
+        attrs.push(format!(r#"aria-describedby="{id}""#));
+
         let anchor = format!(
             "<a {}>{}</a>",
             attrs.join(" "),
             html_escape(&self.display_plain())
         );
-        let popover = format!(
-            r#"<div id="{}" popover="hint">{}</div>"#,
-            id,
+        let prompt = format!(
+            r#"<span id="{id}" class="dm-popover-prompt" popover="hint" role="note">{}</span>"#,
             html_escape(&prompt)
         );
 
-        Some((anchor, popover))
+        Some(format!(
+            r#"<span class="dm-popover-wrapper">{anchor}{prompt}</span>"#
+        ))
     }
 
     /// Backward-compatible alias for legacy callers.
-    pub fn to_browser_with_popover(&self) -> Option<(String, String)> {
+    pub fn to_browser_with_popover(&self) -> Option<String> {
         self.to_html_with_popover()
     }
 
@@ -1464,10 +1490,13 @@ mod tests {
             .expect("link should build")
             .with_prompt("Hover me");
 
-        let (anchor, popover) = link
+        let html = link
             .to_html_with_popover()
             .expect("popover should be generated");
-        assert!(anchor.contains("interestfor"));
-        assert!(popover.contains("popover=\"hint\""));
+        assert!(html.contains(r#"<span class="dm-popover-wrapper">"#));
+        assert!(html.contains("interestfor"));
+        assert!(html.contains("aria-describedby"));
+        assert!(html.contains(r#"popover="hint""#));
+        assert!(html.contains(r#"class="dm-popover-prompt""#));
     }
 }

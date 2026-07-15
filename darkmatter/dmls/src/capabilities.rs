@@ -11,8 +11,9 @@ use lsp_types::{
     ClientCapabilities, CodeActionProviderCapability, CompletionOptions, DocumentLinkOptions,
     FileOperationFilter, FileOperationPattern, FileOperationPatternKind,
     FileOperationRegistrationOptions, FoldingRangeProviderCapability, HoverProviderCapability,
-    InitializeParams, OneOf, PositionEncodingKind, RenameOptions, SaveOptions, ServerCapabilities,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    InitializeParams, OneOf, PositionEncodingKind, RenameOptions, SaveOptions,
+    SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensServerCapabilities,
+    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
     WorkspaceFileOperationsServerCapabilities, WorkspaceServerCapabilities,
     WorkDoneProgressOptions,
 };
@@ -54,7 +55,9 @@ pub fn negotiate_position_encoding(capabilities: &ClientCapabilities) -> Positio
 /// (`publishDiagnostics`) and need no capability advertisement. Phase 10 adds the
 /// editing surface — rename (with prepare support), quick-fix code actions, and
 /// whole-document formatting — plus `workspace/willRenameFiles` gated on the
-/// client's file-operation support (R-7: not Neovim).
+/// client's file-operation support (R-7: not Neovim). The semantic-tokens
+/// surface (full + range, no delta) is advertised only when the client requests
+/// semantic tokens, publishing the frozen V1 legend.
 pub fn server_capabilities(profile: &ClientProfile) -> ServerCapabilities {
     ServerCapabilities {
         workspace: workspace_capabilities(profile),
@@ -105,8 +108,23 @@ pub fn server_capabilities(profile: &ClientProfile) -> ServerCapabilities {
         folding_range_provider: profile
             .supports_folding
             .then_some(FoldingRangeProviderCapability::Simple(true)),
+        semantic_tokens_provider: profile
+            .supports_semantic_tokens
+            .then(semantic_tokens_capabilities),
         ..Default::default()
     }
+}
+
+/// The semantic-token server capability: the frozen V1 legend with full and
+/// range support and no delta (delta is explicitly out of V1).
+fn semantic_tokens_capabilities() -> SemanticTokensServerCapabilities {
+    SemanticTokensOptions {
+        work_done_progress_options: WorkDoneProgressOptions::default(),
+        legend: crate::semantic_legend::legend(),
+        range: Some(true),
+        full: Some(SemanticTokensFullOptions::Bool(true)),
+    }
+    .into()
 }
 
 /// Workspace-scoped server capabilities: `willRenameFiles` for Markdown files,
@@ -213,6 +231,11 @@ pub struct ClientProfile {
     pub supports_file_operations: bool,
     /// Client answers `workspace/configuration` requests.
     pub supports_workspace_configuration: bool,
+    /// Client requests semantic tokens (`textDocument.semanticTokens`).
+    pub supports_semantic_tokens: bool,
+    /// Client honors a server-sent `workspace/semanticTokens/refresh`
+    /// (`workspace.semanticTokens.refreshSupport`).
+    pub supports_semantic_tokens_refresh: bool,
     /// Client supports LSP folding ranges at all (Helix does not).
     pub supports_folding: bool,
     /// Folding ranges must be line-only (Neovim).
@@ -279,6 +302,12 @@ impl ClientProfile {
                 .unwrap_or(false),
             supports_workspace_configuration: workspace
                 .and_then(|ws| ws.configuration)
+                .unwrap_or(false),
+            supports_semantic_tokens: text_document
+                .is_some_and(|td| td.semantic_tokens.is_some()),
+            supports_semantic_tokens_refresh: workspace
+                .and_then(|ws| ws.semantic_tokens.as_ref())
+                .and_then(|st| st.refresh_support)
                 .unwrap_or(false),
             supports_folding: folding.is_some(),
             folding_line_only: folding
@@ -501,7 +530,8 @@ mod tests {
                         "changeAnnotationSupport": { "groupsOnLabel": true }
                     },
                     "didChangeWatchedFiles": { "dynamicRegistration": true },
-                    "fileOperations": { "willRename": true }
+                    "fileOperations": { "willRename": true },
+                    "semanticTokens": { "refreshSupport": true }
                 },
                 "textDocument": {
                     "completion": {
@@ -513,12 +543,20 @@ mod tests {
                     "codeAction": { "resolveSupport": { "properties": ["edit"] } },
                     "foldingRange": { "lineFoldingOnly": false },
                     "selectionRange": {},
-                    "linkedEditingRange": {}
+                    "linkedEditingRange": {},
+                    "semanticTokens": {
+                        "requests": { "full": true, "range": true },
+                        "tokenTypes": [],
+                        "tokenModifiers": [],
+                        "formats": []
+                    }
                 },
                 "window": { "workDoneProgress": true }
             }
         }));
         let profile = ClientProfile::from_initialize(&params, PositionEncoding::Utf16);
+        assert!(profile.supports_semantic_tokens);
+        assert!(profile.supports_semantic_tokens_refresh);
         assert!(profile.supports_resource_operations);
         assert!(profile.supports_change_annotations);
         assert!(profile.supports_code_action_resolve);
@@ -604,7 +642,57 @@ mod tests {
         let profile = ClientProfile::from_initialize(&params, PositionEncoding::Utf16);
         assert!(!profile.supports_resource_operations);
         assert!(!profile.supports_snippets);
+        assert!(!profile.supports_semantic_tokens);
+        assert!(!profile.supports_semantic_tokens_refresh);
         assert!(profile.needs_watch_fallback);
         assert_eq!(profile.hover_media, HoverMediaProfile::TextFirst);
+    }
+
+    /// A minimal valid `textDocument.semanticTokens` client capability object.
+    fn semantic_tokens_client_capability() -> serde_json::Value {
+        json!({
+            "requests": { "full": true, "range": true },
+            "tokenTypes": [],
+            "tokenModifiers": [],
+            "formats": []
+        })
+    }
+
+    #[test]
+    fn test_profile_semantic_tokens_without_refresh_support() {
+        // A client that requests semantic tokens but omits refresh support: the
+        // request gate is on, the refresh gate stays conservatively off.
+        let profile = profile_with(
+            PositionEncoding::Utf16,
+            json!({ "textDocument": { "semanticTokens": semantic_tokens_client_capability() } }),
+        );
+        assert!(profile.supports_semantic_tokens);
+        assert!(!profile.supports_semantic_tokens_refresh);
+    }
+
+    #[test]
+    fn test_semantic_tokens_advertised_only_when_supported() {
+        // Capable client: the frozen legend is published with full + range and
+        // no delta support.
+        let capable = profile_with(
+            PositionEncoding::Utf16,
+            json!({ "textDocument": { "semanticTokens": semantic_tokens_client_capability() } }),
+        );
+        let Some(SemanticTokensServerCapabilities::SemanticTokensOptions(options)) =
+            server_capabilities(&capable).semantic_tokens_provider
+        else {
+            panic!("expected semantic-token options for a capable client");
+        };
+        assert_eq!(options.legend, crate::semantic_legend::legend());
+        assert_eq!(options.range, Some(true));
+        assert_eq!(options.full, Some(SemanticTokensFullOptions::Bool(true)));
+
+        // Incapable client: no semantic-token capability is advertised at all.
+        let incapable = profile_with(PositionEncoding::Utf16, json!({}));
+        assert!(
+            server_capabilities(&incapable)
+                .semantic_tokens_provider
+                .is_none()
+        );
     }
 }

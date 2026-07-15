@@ -53,6 +53,7 @@ pub mod about;
 pub mod coerce;
 pub mod completion;
 pub mod detect;
+pub mod discriminant;
 pub mod errors;
 pub mod example;
 pub mod format;
@@ -83,12 +84,14 @@ pub use about::{
 };
 pub use completion::{CompletionKind, CompletionSuggestion};
 pub use detect::{DetectOptions, detect_from_document, detect_schema, schema_to_yaml};
+pub use discriminant::select_literal_discriminant_arm;
 pub use errors::SchemaError;
 pub use rewrite::NormalizationOutcome;
 pub use simplified::{
-    Constraint, DRAFT_2020_12, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
-    SimplifiedType, SuggestionItem, SuggestionLintProblem, SuggestionLintReason, SuggestionQuery,
-    TypeExpr, lint_suggestions, suggestions_for_path,
+    Constraint, DRAFT_2020_12, DecodedScalar, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
+    SimplifiedSchema, SimplifiedType, SuggestionItem, SuggestionLintProblem, SuggestionLintReason,
+    SuggestionQuery, TypeExpr, decode_scalar, decode_scalar_at, lint_suggestions,
+    suggestions_for_def, suggestions_for_path,
     StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
     parse_yaml_schema, to_json_schema,
 };
@@ -617,18 +620,49 @@ impl EffectiveSchema {
             fallback: self.file_ref_fallback_dir.as_deref(),
         };
         let mut problems = match &self.arm_validators {
-            Some(arms) => validate::collect_root_union_problems_with_anchors(
-                arms,
-                &coerced.value,
-                positions,
-                anchors,
-            ),
-            None => validate::collect_problems_with_anchors(
-                &self.validator,
-                &coerced.value,
-                positions,
-                anchors,
-            ),
+            // Root `anyOf` union. When a shared literal discriminant selects a
+            // single arm, report only that arm's problems; otherwise fall back
+            // to the closest-matching-arm report (byte-identical to before).
+            Some(arms) => {
+                match self
+                    .json_schema
+                    .get("anyOf")
+                    .and_then(Value::as_array)
+                    .and_then(|root_arms| {
+                        discriminant::select_literal_discriminant_arm(root_arms, &coerced.value)
+                    }) {
+                    Some(idx) => validate::collect_arm_problems_with_anchors(
+                        &arms[idx],
+                        &coerced.value,
+                        positions,
+                        anchors,
+                        idx,
+                    ),
+                    None => validate::collect_root_union_problems_with_anchors(
+                        arms,
+                        &coerced.value,
+                        positions,
+                        anchors,
+                    ),
+                }
+            }
+            // Ordinary object schema. Narrow any discriminated property-level
+            // union to its selected arm; unrelated properties are untouched.
+            None => {
+                let problems = validate::collect_problems_with_anchors(
+                    &self.validator,
+                    &coerced.value,
+                    positions,
+                    anchors,
+                );
+                validate::narrow_property_union_problems(
+                    &self.json_schema,
+                    &coerced.value,
+                    positions,
+                    anchors,
+                    problems,
+                )
+            }
         };
         // Enrich each problem with its declared property description (Decision
         // #2). Whitespace-only descriptions (#8) and descriptions identical to

@@ -57,4 +57,20 @@ pub enum GeneratorError {
         /// Explanation of why the suffix is invalid.
         reason: String,
     },
+
+    /// A definition name cannot be turned into a valid Rust identifier.
+    ///
+    /// Emitters build type and variant identifiers directly from names such as
+    /// the API name and endpoint IDs. A name that is empty, starts with a
+    /// digit, contains punctuation, or is a Rust keyword would make identifier
+    /// construction panic during generation; this error surfaces it up front.
+    #[error("Invalid {context} '{name}': {reason}")]
+    InvalidIdentifier {
+        /// Where the offending name came from (e.g. "endpoint ID", "API name").
+        context: String,
+        /// The offending name.
+        name: String,
+        /// Why the name cannot be used as a Rust identifier.
+        reason: String,
+    },
 }

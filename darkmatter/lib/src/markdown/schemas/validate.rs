@@ -905,6 +905,90 @@ pub fn wrap_arm_as_root_schema(arm: &Value) -> Value {
     Value::Object(map)
 }
 
+/// Collects problems for a single already-selected root-union arm, tagging each
+/// with `arm_index`. Used to narrow a discriminated **root** union to the arm a
+/// shared literal discriminant selects, so only that arm's problems surface
+/// (instead of the closest-by-count arm the general union report picks).
+pub(super) fn collect_arm_problems_with_anchors(
+    validator: &Validator,
+    instance: &Value,
+    positions: &PositionMap,
+    anchors: FileRefAnchors<'_>,
+    arm_index: usize,
+) -> Vec<ValidationProblem> {
+    validator
+        .iter_errors(instance)
+        .flat_map(|err| build_problems(&err, positions, Some(arm_index), anchors))
+        .collect()
+}
+
+/// Narrows discriminated **property-level** unions to their selected arm.
+///
+/// For each top-level property whose schema is an `anyOf` union that a shared
+/// literal discriminant selects unambiguously
+/// ([`super::discriminant::select_literal_discriminant_arm`]), the problems
+/// under that property are replaced with the result of validating the instance
+/// against a synthetic single-property schema carrying only the chosen arm — so
+/// only the matched arm's missing/unknown/type problems surface. Every property
+/// without such a selection keeps its original `anyOf` diagnostics
+/// byte-for-byte.
+///
+/// Validating the whole instance against `{ "properties": { key: arm } }`
+/// (rather than the sub-value against the bare arm) keeps problem paths in the
+/// `/key/...` form the normal report and the `positions` map already use.
+pub(super) fn narrow_property_union_problems(
+    schema: &Value,
+    instance: &Value,
+    positions: &PositionMap,
+    anchors: FileRefAnchors<'_>,
+    mut problems: Vec<ValidationProblem>,
+) -> Vec<ValidationProblem> {
+    let (Some(props), Some(obj)) = (
+        schema.get("properties").and_then(Value::as_object),
+        instance.as_object(),
+    ) else {
+        return problems;
+    };
+    for (key, prop_schema) in props {
+        let Some(arms) = prop_schema.get("anyOf").and_then(Value::as_array) else {
+            continue;
+        };
+        let Some(value) = obj.get(key).filter(|value| !value.is_null()) else {
+            continue;
+        };
+        let Some(arm_index) = super::discriminant::select_literal_discriminant_arm(arms, value)
+        else {
+            continue;
+        };
+        let synthetic = serde_json::json!({
+            "$schema": super::simplified::DRAFT_2020_12,
+            "type": "object",
+            "properties": { key: arms[arm_index] }
+        });
+        let Ok(validator) = build_validator(&synthetic, anchors.base_dir, anchors.fallback) else {
+            continue;
+        };
+        let narrowed: Vec<ValidationProblem> = validator
+            .iter_errors(instance)
+            .flat_map(|err| build_problems(&err, positions, None, anchors))
+            .collect();
+        let prefix = json_pointer_segment(key);
+        problems.retain(|problem| !path_is_under(&problem.path, &prefix));
+        problems.extend(narrowed);
+    }
+    problems
+}
+
+/// The JSON-pointer prefix (`/<escaped-key>`) for a top-level property.
+fn json_pointer_segment(key: &str) -> String {
+    format!("/{}", key.replace('~', "~0").replace('/', "~1"))
+}
+
+/// Whether `path` names the property at `prefix` or a descendant of it.
+fn path_is_under(path: &str, prefix: &str) -> bool {
+    path == prefix || path.starts_with(&format!("{prefix}/"))
+}
+
 fn default_capacity() -> usize {
     static CAP: OnceLock<usize> = OnceLock::new();
     *CAP.get_or_init(|| {

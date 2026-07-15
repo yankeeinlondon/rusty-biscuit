@@ -1,6 +1,6 @@
 # GraphExpression
 
-Renders graph diagrams inline in the terminal as raster images. Parses graph expressions (e.g., `a -> b -> c`) using multiple input syntaxes, delegates layout to `biscuit-visualized`, and displays via `TerminalImage` using the terminal's image protocol.
+Renders graph diagrams inline in the terminal as raster images. Parses graph expressions (e.g., `a -> b -> c`) using multiple input syntax's, delegates layout to `biscuit-visualized`, and displays via `TerminalImage` using the terminal's image protocol.
 
 Supports configurable orientation (left-to-right, top-to-bottom), titles, scale factor, transparent backgrounds, and standard layout options.
 

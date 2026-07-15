@@ -22,7 +22,7 @@
     clippy::collapsible_if,
     clippy::possible_missing_else,
     clippy::result_large_err,
-    clippy::single_match
+    clippy::single_match,
 )]
 pub use schematic_definitions::unfolded_circle::dock_ws::*;
 /// Builds the Unfolded Circle Dock WebSocket API definition.
@@ -42,15 +42,14 @@ impl UnfoldedCircleDockWs {
     pub fn new() -> Self {
         Self {
             base_url: "ws://dock.local".to_string(),
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
                     ..Default::default()
-                },
-            ),
+                }),
         }
     }
     /// Create a new client with a custom base URL.
@@ -58,15 +57,14 @@ impl UnfoldedCircleDockWs {
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
                     ..Default::default()
-                },
-            ),
+                }),
         }
     }
     /// Returns the configured base URL.
@@ -81,10 +79,11 @@ impl UnfoldedCircleDockWs {
     ) -> Result<DockRootClient, super::ws_shared::WsError> {
         let path = "/".to_string();
         if path.contains('{') {
-            return Err(super::ws_shared::WsError::Protocol(format!(
-                "unresolved path placeholder in '{}'",
-                path
-            )));
+            return Err(
+                super::ws_shared::WsError::Protocol(
+                    format!("unresolved path placeholder in '{}'", path),
+                ),
+            );
         }
         let url = format!("{}{}", self.base_url, path);
         let header_pairs = self
@@ -103,7 +102,9 @@ impl Default for UnfoldedCircleDockWs {
 ///Client for the DockRoot endpoint.
 pub struct DockRootClient {
     transport: super::ws_shared::WsTransportHandle,
-    event_rx: tokio::sync::mpsc::Receiver<Result<serde_json::Value, super::ws_shared::WsError>>,
+    event_rx: tokio::sync::mpsc::Receiver<
+        Result<serde_json::Value, super::ws_shared::WsError>,
+    >,
     request_timeout: std::time::Duration,
     max_pending: usize,
 }
@@ -121,12 +122,19 @@ impl DockRootClient {
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
         let mut request = url.to_string().into_client_request()?;
         for (name, value) in header_pairs {
-            if let (Ok(hdr_name), Ok(hdr_value)) = (
-                name.parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>(),
-                value.parse::<tokio_tungstenite::tungstenite::http::header::HeaderValue>(),
-            ) {
-                request.headers_mut().insert(hdr_name, hdr_value);
-            }
+            let hdr_name = name
+                .parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>()
+                .map_err(|e| super::ws_shared::WsError::InvalidHeader {
+                    name: name.clone(),
+                    reason: e.to_string(),
+                })?;
+            let hdr_value = value
+                .parse::<tokio_tungstenite::tungstenite::http::header::HeaderValue>()
+                .map_err(|e| super::ws_shared::WsError::InvalidHeader {
+                    name: name.clone(),
+                    reason: e.to_string(),
+                })?;
+            request.headers_mut().insert(hdr_name, hdr_value);
         }
         let connect = tokio_tungstenite::connect_async_with_config(
             request,
@@ -135,9 +143,9 @@ impl DockRootClient {
         );
         let (ws_stream, _) = tokio::time::timeout(options.handshake_timeout, connect)
             .await
-            .map_err(|_| {
-                super::ws_shared::WsError::HandshakeTimeout(options.handshake_timeout.as_secs())
-            })??;
+            .map_err(|_| super::ws_shared::WsError::HandshakeTimeout(
+                options.handshake_timeout.as_secs(),
+            ))??;
         Ok(ws_stream)
     }
     /// Connect to the endpoint.
@@ -148,16 +156,24 @@ impl DockRootClient {
     ) -> Result<Self, super::ws_shared::WsError> {
         let ws_stream = Self::dial(&url, &_options, &header_pairs).await?;
         let _receive_timeout = _options.receive_timeout;
-        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(_options.outbound_capacity);
+        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
+            _options.outbound_capacity,
+        );
         let (event_tx, event_rx) = tokio::sync::mpsc::channel(_options.inbound_capacity);
-        let (state_tx, state_rx) =
-            tokio::sync::watch::channel(super::ws_shared::WsConnectionState::Connecting);
+        let (state_tx, state_rx) = tokio::sync::watch::channel(
+            super::ws_shared::WsConnectionState::Connecting,
+        );
         let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
         let pending: std::sync::Arc<
             tokio::sync::Mutex<
-                std::collections::HashMap<u64, tokio::sync::oneshot::Sender<serde_json::Value>>,
+                std::collections::HashMap<
+                    u64,
+                    tokio::sync::oneshot::Sender<serde_json::Value>,
+                >,
             >,
-        > = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+        > = std::sync::Arc::new(
+            tokio::sync::Mutex::new(std::collections::HashMap::new()),
+        );
         let url_for_supervisor = url.clone();
         let header_pairs_for_supervisor = header_pairs.clone();
         let options_for_supervisor = _options.clone();
@@ -175,24 +191,30 @@ impl DockRootClient {
                     stream
                 } else {
                     let Some(policy) = reconnect_policy.as_ref() else {
-                        let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
+                        let _ = state_tx
+                            .send(super::ws_shared::WsConnectionState::Closed);
                         break;
                     };
                     if let Some(max_attempts) = policy.max_attempts
                         && reconnect_attempt >= max_attempts
                     {
-                        let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
+                        let _ = state_tx
+                            .send(super::ws_shared::WsConnectionState::Closed);
                         break;
                     }
-                    let _ = state_tx.send(super::ws_shared::WsConnectionState::Connecting);
-                    let delay = super::ws_shared::reconnect_delay(policy, reconnect_attempt);
+                    let _ = state_tx
+                        .send(super::ws_shared::WsConnectionState::Connecting);
+                    let delay = super::ws_shared::reconnect_delay(
+                        policy,
+                        reconnect_attempt,
+                    );
                     tokio::time::sleep(delay).await;
                     match DockRootClient::dial(
-                        &url_for_supervisor,
-                        &options_for_supervisor,
-                        &header_pairs_for_supervisor,
-                    )
-                    .await
+                            &url_for_supervisor,
+                            &options_for_supervisor,
+                            &header_pairs_for_supervisor,
+                        )
+                        .await
                     {
                         Ok(stream) => {
                             reconnect_attempt = reconnect_attempt.saturating_add(1);
@@ -272,7 +294,10 @@ impl DockRootClient {
         })
     }
     /// Send a fire-and-forget message.
-    pub async fn send(&self, message: serde_json::Value) -> Result<(), super::ws_shared::WsError> {
+    pub async fn send(
+        &self,
+        message: serde_json::Value,
+    ) -> Result<(), super::ws_shared::WsError> {
         self.send_typed(&message).await
     }
     /// Send a strongly-typed message payload.
@@ -296,8 +321,9 @@ impl DockRootClient {
     /// Returns a stream of inbound events.
     pub fn events(
         self,
-    ) -> tokio_stream::wrappers::ReceiverStream<Result<serde_json::Value, super::ws_shared::WsError>>
-    {
+    ) -> tokio_stream::wrappers::ReceiverStream<
+        Result<serde_json::Value, super::ws_shared::WsError>,
+    > {
         tokio_stream::wrappers::ReceiverStream::new(self.event_rx)
     }
     /// Initiate a graceful close.
@@ -323,9 +349,9 @@ impl DockRootClient {
         {
             let mut pending = self.transport.pending.lock().await;
             if pending.len() >= self.max_pending {
-                return Err(super::ws_shared::WsError::BackpressureFull(
-                    self.max_pending,
-                ));
+                return Err(
+                    super::ws_shared::WsError::BackpressureFull(self.max_pending),
+                );
             }
             pending.insert(id, tx);
         }

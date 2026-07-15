@@ -416,7 +416,7 @@
         let end = rest.find('m').expect("unterminated SGR");
         let nums: Vec<u8> = rest[..end]
             .split(';')
-            .map(|n| n.parse().expect("rgb component"))
+            .map(|n| n.parse::<u8>().expect("rgb component"))
             .collect();
         (nums[0], nums[1], nums[2])
     }
@@ -2486,7 +2486,7 @@
     // surface against the terminal mode, so the two surfaces drifted.
     // ================================================================
 
-    /// Pull the `.code-block` `background-color` rule out of a `render_to_browser`
+    /// Pull the `.code-block` `background-color` rule out of a browser-render
     /// HTML string. Falls back to looking for the rule in any `<style>` block the
     /// render emits, and panics with a useful message if the rule is absent.
     /// The value can be either `rgb(R, G, B)` or `#rrggbb`; we accept both.
@@ -2638,9 +2638,12 @@
         term.color_mode = TerminalColorMode::Dark;
 
         let md: Markdown = "```rust\nfn main() {}\n```\n".into();
+        // The `.code-block` panel rule lives in the standalone document's
+        // `<head>`; a bare `render_to_browser` body would not carry it, so this
+        // panel-background assertion reads the full document form.
         let out = DarkmatterPage::new(&term)
             .with_color_mode(ColorMode::Light)
-            .render_to_browser(&md)
+            .render_to_browser_document(&md)
             .unwrap();
 
         // No painted page surface to compare against; the panel alone must be
@@ -2954,7 +2957,9 @@
         term.color_mode = TerminalColorMode::Unknown;
         let page = DarkmatterPage::new(&term);
         let md: Markdown = "```rust\nfn main() {}\n```\n".into();
-        let html = page.render_to_browser(&md).unwrap();
+        // Read the standalone document form: the `.code-block` head rule this
+        // test inspects is absent from a bare `render_to_browser` body.
+        let html = page.render_to_browser_document(&md).unwrap();
         // No page wrapper: default layout is transparent, and the test
         // does not paint a page color.
         assert!(
@@ -2982,7 +2987,9 @@
         term.color_mode = TerminalColorMode::Light;
         let page = DarkmatterPage::new(&term);
         let md: Markdown = "```rust\nfn main() {}\n```\n".into();
-        let html = page.render_to_browser(&md).unwrap();
+        // The `.code-block` head rule this test reads only exists on the
+        // standalone document form, not the bare `render_to_browser` body.
+        let html = page.render_to_browser_document(&md).unwrap();
         let panel_bg = browser_code_block_bg(&html);
         let lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
         assert!(
@@ -3026,4 +3033,125 @@
                 }
             }
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Phase 5 — body-only feature injection: `HeadRequired` rejection
+    // ---------------------------------------------------------------------
+
+    /// A resolver whose feature resolves to a `<head>` `<link>` — the exact case
+    /// a body-only render cannot embed.
+    struct LinkFeatureResolver;
+
+    impl FeatureResolver for LinkFeatureResolver {
+        fn resolve(
+            &self,
+            _feature: PageFeature,
+            _target: RenderTarget,
+            _ctx: &FeatureContext,
+        ) -> Result<
+            Option<renderable::browser::feature::FeatureAssets>,
+            renderable::browser::feature::FeatureResolveError,
+        > {
+            Ok(Some(renderable::browser::feature::FeatureAssets {
+                css: None,
+                js: None,
+                links: vec![renderable::html::tag::link::LinkTag::new(
+                    renderable::html::attribute::rel::LinkRel::Stylesheet,
+                    "mermaid.css",
+                )],
+            }))
+        }
+    }
+
+    /// A body-only render whose requested feature resolves to a `<head>` `<link>`
+    /// dependency fails with the typed
+    /// [`FeatureResolveError::HeadRequired`](renderable::browser::feature::FeatureResolveError::HeadRequired)
+    /// variant (spec acceptance criterion 9): callers match the variant rather
+    /// than parse prose, and the document-head dependency is never silently
+    /// dropped or mis-placed inside an embeddable fragment.
+    #[test]
+    fn body_only_feature_requiring_head_link_fails_with_head_required() {
+        let err = resolve_feature_body_assets(
+            &[PageFeature::MermaidDiagram],
+            &LinkFeatureResolver,
+            &FeatureContext::default(),
+        )
+        .expect_err("a head-only <link> cannot be embedded in a body-only render");
+        assert!(
+            matches!(
+                err,
+                PageRenderError::FeatureResolution(
+                    renderable::browser::feature::FeatureResolveError::HeadRequired {
+                        feature: PageFeature::MermaidDiagram,
+                        target: RenderTarget::Browser,
+                    }
+                )
+            ),
+            "body-only head-link render fails with typed HeadRequired: {err:?}"
+        );
+    }
+
+    /// A resolver that refuses to produce assets for the requested Browser
+    /// feature, forcing the typed
+    /// [`FeatureResolveError::UnresolvedFeature`](renderable::browser::feature::FeatureResolveError::UnresolvedFeature)
+    /// failure through `resolve_feature_body_assets`.
+    struct UnresolvedFeatureResolver;
+
+    impl FeatureResolver for UnresolvedFeatureResolver {
+        fn resolve(
+            &self,
+            feature: PageFeature,
+            target: RenderTarget,
+            _ctx: &FeatureContext,
+        ) -> Result<
+            Option<renderable::browser::feature::FeatureAssets>,
+            renderable::browser::feature::FeatureResolveError,
+        > {
+            Err(
+                renderable::browser::feature::FeatureResolveError::UnresolvedFeature {
+                    feature,
+                    target,
+                },
+            )
+        }
+    }
+
+    /// An unresolved Browser feature surfaces the typed
+    /// [`FeatureResolveError::UnresolvedFeature`](renderable::browser::feature::FeatureResolveError::UnresolvedFeature)
+    /// variant through `PageRenderError::FeatureResolution`, so callers match the
+    /// variant (naming the feature and target) rather than parsing the message.
+    #[test]
+    fn body_only_unresolved_feature_fails_with_unresolved_feature() {
+        let err = resolve_feature_body_assets(
+            &[PageFeature::MermaidDiagram],
+            &UnresolvedFeatureResolver,
+            &FeatureContext::default(),
+        )
+        .expect_err("an unresolved feature cannot produce body assets");
+        assert!(
+            matches!(
+                err,
+                PageRenderError::FeatureResolution(
+                    renderable::browser::feature::FeatureResolveError::UnresolvedFeature {
+                        feature: PageFeature::MermaidDiagram,
+                        target: RenderTarget::Browser,
+                    }
+                )
+            ),
+            "unresolved feature render fails with typed UnresolvedFeature: {err:?}"
+        );
+    }
+
+    /// No requested feature resolves to no injected assets (empty string), so a
+    /// feature-free page keeps its prior bytes with no wrapper feature markup.
+    #[test]
+    fn no_features_resolve_to_empty_body_assets() {
+        let assets = resolve_feature_body_assets(
+            &[],
+            &crate::mermaid::DarkmatterFeatureResolver::default(),
+            &FeatureContext::default(),
+        )
+        .expect("no features resolve cleanly");
+        assert!(assets.is_empty(), "no features → no injected assets");
     }

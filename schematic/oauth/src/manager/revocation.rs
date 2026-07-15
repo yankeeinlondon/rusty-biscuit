@@ -3,7 +3,7 @@
 use oauth2::AccessToken;
 
 use crate::error::OAuthError;
-use crate::manager::{build_http_client, OAuth2Manager};
+use crate::manager::OAuth2Manager;
 
 impl OAuth2Manager {
     /// Revokes the current token if a revocation URL is configured.
@@ -22,24 +22,18 @@ impl OAuth2Manager {
             ));
         }
 
-        let store = self.store.read().await;
-        let tokens = store.load()?;
-        drop(store);
+        let tokens = self.store.load()?.ok_or(OAuthError::AuthenticationRequired)?;
 
-        let tokens = tokens.ok_or(OAuthError::AuthenticationRequired)?;
-
-        let http_client = build_http_client()?;
         let token_to_revoke = AccessToken::new(tokens.access_token);
 
         self.client
             .revoke_token(token_to_revoke.into())
             .map_err(|e| OAuthError::Configuration(e.to_string()))?
-            .request_async(&http_client)
+            .request_async(&self.http_client)
             .await
             .map_err(|e| OAuthError::TokenRefresh(format!("Revocation failed: {e}")))?;
 
-        let store = self.store.write().await;
-        store.clear()?;
+        self.store.clear()?;
 
         Ok(())
     }

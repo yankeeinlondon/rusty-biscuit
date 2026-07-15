@@ -78,25 +78,14 @@ do not belong here.
 
 - Parallel groups must have disjoint paths. If one group introduces a module,
   dependency, or symbol consumed by another group, commit the producer first.
-- Extra staged paths are normal in concurrent batches. Treat them as sibling
-  work and scope with `git commit --only -- <assigned-paths>`.
-- The staged set can shrink between inspection and commit when a sibling commit
-  lands. `--only -- <paths>` handles this; verify the resulting commit shape.
-- Git accepts intermediate commits that reference files introduced by sibling
-  commits. That may make individual commits non-compiling; this is expected for
-  parallel structural refactors when the full final history is coherent.
+
 - Git lock failures are transient contention. Retry the identical commit up to
-  five times with a short backoff.
-- Never disable repository signing to avoid or preempt signing failures. If
-  signing hangs or fails, stop and report it.
-- Never amend or create follow-up fixup commits after a successful commit in a
-  concurrent batch. Report the issue so the orchestrator can decide whether to
-  accept, revert, or coordinate a rewrite.
+
 - Run commands from the inherited worktree root. Do not change to a guessed
   repository path, and do not push commits.
 - In zsh wrappers, avoid special variable names such as `status` and `path`.
 
-## Sub-Agent Message Delivery
+## Orchestration
 
 - When the orchestrator delegates a commit to a sub-agent via heredoc, the
   body sometimes truncates mid-line: the file set, tree, and subject land
@@ -122,6 +111,19 @@ do not belong here.
   and verify that hash. Prefer unwrapped `git commit` so stdout is visible.
 - After all groups finish, inspect `git status --short` for staged paths left
   behind and report or commit them as appropriate.
+- For whitespace-only groups, sanity-check with
+  `git diff --staged --stat --ignore-all-space --ignore-blank-lines` or
+  `--numstat --ignore-all-space --ignore-blank-lines`. Zero output means no
+  non-whitespace changes remain.
+- A successful `git commit` exit status is authoritative for that invocation.
+- Capture the new commit hash from `git commit` stdout and verify that hash with
+  `git show --stat <hash>` or `git show --name-status <hash>`. Do not rely on
+  `git log -1` after concurrent commits; HEAD may already have advanced.
+- If a wrapper hides commit stdout, recover immediately with `git reflog -1`
+  and verify that hash. Prefer unwrapped `git commit` so stdout is visible.
+- Agent or task completion alone does not prove that its commit landed. After
+  all groups finish, inspect `git status --short` and recent history for staged
+  paths or missing commits. Treat empty or ambiguous agent reports as unknown.
 - For whitespace-only groups, sanity-check with
   `git diff --staged --stat --ignore-all-space --ignore-blank-lines` or
   `--numstat --ignore-all-space --ignore-blank-lines`. Zero output means no

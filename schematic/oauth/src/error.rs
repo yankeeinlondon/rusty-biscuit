@@ -14,7 +14,10 @@ pub enum OAuthError {
     AuthenticationRequired,
 
     /// CSRF state parameter mismatch between request and callback.
-    #[error("OAuth2 CSRF state mismatch: expected {expected}, got {actual}")]
+    ///
+    /// The state values are intentionally omitted from the `Display` message to
+    /// avoid leaking CSRF tokens into logs; inspect the fields directly if needed.
+    #[error("OAuth2 CSRF state mismatch: the CSRF state parameter did not match the expected value")]
     StateMismatch {
         /// The expected CSRF state value.
         expected: String,

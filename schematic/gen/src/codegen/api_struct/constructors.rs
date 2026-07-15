@@ -34,6 +34,17 @@ pub(super) fn generate_constructors(
     let headers_init = init.headers_init;
     let docs_url_init = init.docs_url_init;
 
+    // A hung server would block a timeout-less client forever, so the default
+    // client carries a sensible request timeout. `with_client(...)` overrides
+    // it; if the builder ever fails we fall back to an untimed client rather
+    // than panicking in a constructor.
+    let default_client = quote! {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    };
+
     quote! {
         /// Base URL for the API.
         pub const BASE_URL: &'static str = #base_url;
@@ -44,7 +55,7 @@ pub(super) fn generate_constructors(
         /// Creates a new API client with the default base URL.
         pub fn new() -> Self {
             Self {
-                client: reqwest::Client::new(),
+                client: #default_client,
                 base_url: Self::BASE_URL.to_string(),
                 env_auth: vec![#(#env_auth.to_string()),*],
                 auth_strategy: #auth_strategy_init,
@@ -64,7 +75,7 @@ pub(super) fn generate_constructors(
         /// ```
         pub fn with_base_url(base_url: impl Into<String>) -> Self {
             Self {
-                client: reqwest::Client::new(),
+                client: #default_client,
                 base_url: base_url.into(),
                 env_auth: vec![#(#env_auth.to_string()),*],
                 auth_strategy: #auth_strategy_init,

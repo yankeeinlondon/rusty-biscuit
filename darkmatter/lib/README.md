@@ -8,13 +8,13 @@ Markdown parsing, rendering, and Mermaid diagram support for terminal and HTML o
     - **Multi-format output**: Terminal (ANSI), HTML, [MDAST](https://github.com/syntax-tree/mdast) JSON, and Regular or Enriched Markdown
     - **Syntax highlighting**: 200+ languages via `syntect` and `two-face` with curated theme pairs
     - **Inline formatting extensions**: `==highlighted==` (mark) and `⌄dimmed⌄` (faint/dim) syntax beyond standard CommonMark/GFM
-    - **Mermaid Diagrams:** Render [Mermaid](https://mermaid.js.org/) code blocks into both HTML (using dynamic runtime engine) and Markdown (as inline images)
+    - **Mermaid Diagrams:** Render [Mermaid](https://mermaid.js.org/) code blocks as interactive client-side diagrams in HTML (injected ESM bootstrap), inline images or code in the terminal, and an unchanged `mermaid` fence in Markdown
     - **Visualization of Graph Structures:** Render [DOT](https://graphviz.org/doc/info/lang.html) based graph schemas as vector or raster based images.
     - **Tables:** Richly formatted tables with dynamic sizing and business logic; renders to both HTML and Terminal
     - **Inline TOC:** Render an inline table of contents linking to the various sections of a page
     - **YouTube Embeddings (future):** Embed a YouTube video player for sharable YouTube video references
     - **Disclosure Blocks:** Show only a summary line initially, but click to expand to full prose.
-    - **Popovers (future):**
+    - **Popovers:** Prompted links reveal a hover/focus-reachable prompt in the browser via CSS-only progressive enhancement (see [Prompted Links](../docs/rendering/popover.md)).
     - **Columnar Support (future):** Provides first class primitives for using columns to better utilize horizontal design space
 - **Composition**
     - **Frontmatter support**: YAML parsing with typed access, merge strategies, and insertion-order preservation
@@ -192,7 +192,7 @@ For each of these rendering features there are detailed documents which will des
 
     - Mermaid charts/visualizations and Markdown documents are a form of ying and yang (aka, very complimentary and meant to be used together).
     - A Mermaid chart/visualization is to added to a Markdown document's content as a _code block_ with the language set to `mermaid`.
-    - **Darkmatter** will see these code blocks as a special use case and pass it to our Mermaid rendering engine described in [Mermaid Rendering](../docs/rendering/mermaid-rendering.md).
+    - **Darkmatter** will see these code blocks as a special use case and pass it to our Mermaid rendering engine described in [Mermaid Rendering](../docs/rendering/mermaid.md).
 
 - **Graph Expression Visualization:**
 
@@ -209,7 +209,7 @@ For each of these rendering features there are detailed documents which will des
 
     - A **Popover effect** is something many are familiar with on the web and it presents most commonly as a part of the page which when _hovered over_ (or sometimes clicked on, etc.), makes an small informational dialog box above (or at least not masking) the linked part of the page appear.
     - This can be a useful UI pattern for allowing people to "inspect but not commit" to more information on a given topic while not overwhelming the user with all the content being rendered immediately but instead only when a user expresses interest.
-    - More detail on how this is implemented and on which platforms is found in the [popovers](../docs/popovers.md) document.
+    - **Darkmatter** implements this for prompted links as a CSS-only progressive enhancement (no JavaScript): the prompt is reachable by hover and keyboard focus and degrades to an ordinary navigable link. More detail on how this is implemented, its accessibility contract, and cross-browser behavior is found in the [Prompted Links](../docs/rendering/popover.md) document.
 
 - **Disclosure Blocks:**
 
@@ -668,18 +668,23 @@ let (releveled, adjustment) = md.relevel(HeadingLevel::H2)?;
 
 ### Mermaid Diagrams
 
-For HTML output, use darkmatter's theming:
+For browser output, render a `lang="mermaid"` fence through Darkmatter's
+full-page browser path (`DarkmatterPage::render_to_browser`). The default is
+interactive Mermaid: the body carries `<pre class="mermaid">…</pre>` and the
+`DarkmatterFeatureResolver` injects the shared CSS + inline ESM bootstrap once
+per page. Delivery requires network access and a Content Security Policy that
+permits the `cdn.jsdelivr.net` (primary) and `unpkg.com` (fallback) origins and
+inline modules.
 
 ```rust
-use darkmatter::mermaid::{Mermaid, MermaidTheme};
+use biscuit_terminal::terminal::Terminal;
+use darkmatter::layout::DarkmatterPage;
+use darkmatter::markdown::Markdown;
 
-let diagram = Mermaid::new("flowchart LR\n    A --> B")
-    .with_title("My Flowchart")
-    .with_footer("Generated 2026-01-29");
-
-// HTML output with theme
-let html = diagram.render_for_html();
-println!("<head>{}</head><body>{}</body>", html.head, html.body);
+let md = Markdown::from("```mermaid\nflowchart LR\n    A --> B\n```\n");
+let term = Terminal::new_optimistic(80);
+let html = DarkmatterPage::new(&term).render_to_browser(&md).unwrap();
+assert!(html.contains(r#"<pre class="mermaid">"#));
 ```
 
 For terminal output, use biscuit-terminal's `MermaidDiagram`:

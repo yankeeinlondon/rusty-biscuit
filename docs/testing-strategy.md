@@ -172,6 +172,51 @@ Per-package legacy variables such as `DARKMATTER_LEVEL2_REQUIRED` are
 deprecated and removed as of Phase 6. Use the unified `BISCUIT_*` contract
 exclusively.
 
+## Platform Coverage (CI)
+
+The tier taxonomy above decides *what* runs; this section decides *where* (which
+OS). The repo mandate is that every package compiles and works on macOS,
+Windows, and Linux, so CI is organized around a single reusable workflow
+(`.github/workflows/_area-ci.yml`, invoked via `workflow_call`) that every
+curated area calls through a thin per-area caller. Platform behavior is uniform
+by construction instead of accreting per-area and per-incident.
+
+### Policy
+
+| Concern | Linux (`ubuntu-latest`) | Windows (`windows-latest`) | macOS (`macos-latest`) |
+|---------|-------------------------|-----------------------------|--------------------------|
+| Compile (`cargo check --all-targets`) | via test job | via test job | dedicated `check` job |
+| L1 (`just test`) | full, shardable | full | compile-check only |
+| L2 (`test-l2`) | yes (tmux) | skips (harness absent) | opt-in |
+| Browser | yes | skips | opt-in |
+| L3 (`level3_`) | opt-in (`RUN_LEVEL3=1`) | opt-in | opt-in |
+
+- **macOS is compile-checked on every PR, not full-tested** — GitHub macOS
+  minutes bill ~10× Linux. The `check` job still catches macOS-specific compile
+  breakage (`cfg(target_os = "macos")` paths) cheaply; full macOS L1 runs on the
+  nightly schedule or an on-demand label.
+- **Windows runs full L1** — it is the platform most prone to silent API/type
+  drift (the `HRESULT`, `PATH`-casing, and `VARIANT_BOOL` classes of bug that
+  compile-only checks would miss at runtime). Windows-only tests stay gated
+  (`#[ignore]` / `level3_`).
+- **L2/browser skip cleanly on non-Linux** via `require_level!`; no special
+  casing. `BISCUIT_TEST_LEVEL_REQUIRED=2` is set only on the Linux leg (where the
+  tmux harness is guaranteed) so a genuinely broken harness still hard-fails.
+- **Heavy areas shard** their L1 run via nextest `--partition count:i/N` across
+  parallel matrix jobs (e.g. darkmatter). Combined with the build cache this
+  keeps wall-clock under the 30-min ceiling.
+- **Build cache**: the reusable workflow enables `kache` (GitHub Actions cache
+  backend) on the Linux/macOS legs; Windows is unsupported by kache and uses
+  `Swatinem/rust-cache` only.
+
+### Retired / folded workflows
+
+The bespoke single-behavior Windows workflows (`playa-windows`,
+`claudine-windows-ctrl-c`, `biscuit-tui-windows-captured-stdout`) fold into their
+areas' reusable-workflow calls as Windows matrix legs / gated tests. `coverage`
+(report-only, Linux), `bench-nightly` and `fuzz-nightly` (nightly), and
+`build-integrations` (on release) remain standalone by design.
+
 ## Why this matters
 
 - Agents can always type `just sanity`, `just test`, `just test-l2` and get the
@@ -232,6 +277,10 @@ Rust and long wall-clock times.
 | Fuzz corpus stored in-repo (seed only) | Avoids Git LFS dependency. Only minimized crash inputs are committed back. |
 | tmux as default L2 backend | Most portable: headless, runs on any CI runner without GUI. |
 | `[package.metadata.benchmarks] required = false` convention | Grep-able opt-out for pure data crates. Enforced by reviewer discretion only. |
+| One reusable `_area-ci.yml` + thin per-area callers | Uniform platform behavior; a CI fix lands everywhere at once instead of per-area drift. |
+| macOS compile-checked (not full-tested) on PRs | GitHub macOS runners bill ~10× Linux; the `check` job catches macOS compile drift cheaply while full L1 runs on Linux + Windows. |
+| Windows runs full L1 | Windows is the highest-risk platform for silent API/type drift; compile-only would miss runtime-shaped bugs. |
+| `kache` on Linux/macOS legs only | kache does not support Windows (compilation fails there); Windows stays on `Swatinem/rust-cache`. |
 
 See also:
 

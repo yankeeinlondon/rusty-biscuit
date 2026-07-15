@@ -1,0 +1,1 @@
+{"file":"doc.md","problems":[{"arm_index":null,"column":1,"description":null,"kind":"invalid","line":4,"message":"\"orange\" is not one of \"draft\", \"published\" or \"archived\"","path":"/status","property":null}],"schema":null,"valid":false}

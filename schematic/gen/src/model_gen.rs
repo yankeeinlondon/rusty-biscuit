@@ -147,11 +147,27 @@ fn generate_enum(def: &EnumDef) -> TokenStream {
         None
     };
 
-    let variants: Vec<TokenStream> = def.variants.iter().map(generate_variant).collect();
+    // Deriving `Default` (with `#[default]` on the first variant) keeps structs
+    // that hold a required field of this enum — and the `..Default::default()`
+    // pattern in generated doc examples — compiling. All variants are unit
+    // variants, so a first-variant default is always valid.
+    let can_default = !def.variants.is_empty();
+    let variants: Vec<TokenStream> = def
+        .variants
+        .iter()
+        .enumerate()
+        .map(|(i, variant)| generate_variant(variant, can_default && i == 0))
+        .collect();
+
+    let derives = if can_default {
+        quote! { #[derive(Debug, Clone, Default, Serialize, Deserialize)] }
+    } else {
+        quote! { #[derive(Debug, Clone, Serialize, Deserialize)] }
+    };
 
     quote! {
         #doc
-        #[derive(Debug, Clone, Serialize, Deserialize)]
+        #derives
         #untagged_attr
         pub enum #name {
             #(#variants)*
@@ -160,7 +176,10 @@ fn generate_enum(def: &EnumDef) -> TokenStream {
 }
 
 /// Generates a single enum variant.
-fn generate_variant(def: &EnumVariant) -> TokenStream {
+///
+/// `is_default` marks the variant with `#[default]` so the enum can derive
+/// [`Default`].
+fn generate_variant(def: &EnumVariant, is_default: bool) -> TokenStream {
     let name = format_ident!("{}", def.name);
     let doc = doc_comment(&def.description);
 
@@ -168,9 +187,16 @@ fn generate_variant(def: &EnumVariant) -> TokenStream {
         quote! { #[serde(rename = #v)] }
     });
 
+    let default_attr = if is_default {
+        Some(quote! { #[default] })
+    } else {
+        None
+    };
+
     quote! {
         #doc
         #rename
+        #default_attr
         #name,
     }
 }
@@ -384,6 +410,73 @@ mod tests {
         assert!(code.contains("available"));
         assert!(code.contains("pending"));
         assert!(code.contains("sold"));
+    }
+
+    #[test]
+    fn generated_enum_derives_default_on_first_variant() {
+        let catalog = make_simple_catalog();
+        let code = assemble_model_tokens(&catalog).to_string();
+        // The enum must derive Default and mark its first variant `#[default]`
+        // so structs holding a required field of this enum stay Default.
+        assert!(code.contains("Default"), "enum should derive Default:\n{code}");
+        assert!(
+            code.contains("# [default] Available")
+                || code.contains("#[default] Available")
+                || code.contains("# [default]\nAvailable"),
+            "first variant should be marked #[default]:\n{code}"
+        );
+    }
+
+    #[test]
+    fn struct_with_required_enum_field_is_default_compatible() {
+        // A struct whose required field is a generated enum must produce
+        // syntactically valid code; the enum's derived Default is what makes
+        // the struct's own derived Default satisfiable.
+        let catalog = ModelCatalog {
+            module_path: None,
+            types: vec![
+                ModelDef::Enum(EnumDef {
+                    name: "Kind".to_string(),
+                    description: None,
+                    variants: vec![
+                        EnumVariant {
+                            name: "First".to_string(),
+                            value: Some("first".to_string()),
+                            description: None,
+                        },
+                        EnumVariant {
+                            name: "Second".to_string(),
+                            value: Some("second".to_string()),
+                            description: None,
+                        },
+                    ],
+                    untagged: false,
+                }),
+                ModelDef::Struct(StructDef {
+                    name: "Item".to_string(),
+                    description: None,
+                    fields: vec![FieldDef {
+                        name: "kind".to_string(),
+                        serde_rename: None,
+                        description: None,
+                        required: true,
+                        field_type: TypeRef::Named("Kind".to_string()),
+                    }],
+                    additional_properties: None,
+                }),
+            ],
+        };
+        let tokens = assemble_model_tokens(&catalog);
+        assert!(
+            validate_code(&tokens).is_ok(),
+            "generated code should parse"
+        );
+        let code = tokens.to_string();
+        // Both the struct and the enum derive Default.
+        assert!(
+            code.matches("Default").count() >= 2,
+            "struct and enum should both derive Default:\n{code}"
+        );
     }
 
     #[test]

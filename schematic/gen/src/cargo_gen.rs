@@ -36,6 +36,7 @@ tokio-tungstenite = { version = "0.26", default-features = false, features = ["c
 urlencoding = "2.1"
 
 [dev-dependencies]
+serial_test = "3"
 wiremock = "0.6"
 "#;
 
@@ -287,6 +288,22 @@ mod tests {
     }
 
     #[test]
+    fn generate_cargo_toml_includes_serial_test_dev_dependency() {
+        let content = generate_cargo_toml(None);
+        let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
+
+        let dev_deps = parsed
+            .get("dev-dependencies")
+            .unwrap()
+            .as_table()
+            .unwrap();
+        assert!(
+            dev_deps.contains_key("serial_test"),
+            "serial_test dev-dependency is required by generated env-mutating tests"
+        );
+    }
+
+    #[test]
     fn generate_cargo_toml_includes_schematic_define() {
         let content = generate_cargo_toml(None);
         let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
@@ -386,13 +403,17 @@ mod tests {
 
         write_cargo_toml(&output_dir, false, None).unwrap();
 
-        // Check no .tmp file exists
-        let temp_path = output_dir.join("Cargo.toml.tmp");
-        assert!(!temp_path.exists());
-
-        // Also check with .rs.tmp extension (the write_atomic pattern)
-        let temp_path2 = output_dir.join("Cargo.toml.rs.tmp");
-        assert!(!temp_path2.exists());
+        // No scratch file (regardless of its pid/counter suffix) should survive.
+        let leftover_temp = std::fs::read_dir(&output_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".tmp")
+            });
+        assert!(!leftover_temp, "a .tmp scratch file was left behind");
     }
 
     #[test]

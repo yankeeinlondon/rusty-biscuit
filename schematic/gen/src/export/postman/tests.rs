@@ -419,6 +419,31 @@ fn url_with_path_params() {
 }
 
 #[test]
+fn reserved_path_param_strips_marker_in_collection() {
+    let mut api = minimal_api();
+    api.endpoints = vec![Endpoint {
+        id: "GetModel".to_string(),
+        method: RestMethod::Get,
+        path: "/models/{+repo_id}".to_string(),
+        description: "Get a model".to_string(),
+        request: None,
+        response: ApiResponse::json_type("Model"),
+        headers: vec![],
+        params: None,
+        oauth_scopes: None,
+    }];
+
+    let collection = build_postman_collection(&api);
+    let json = serde_json::to_string(&collection).unwrap();
+
+    // The `+` is a runtime encoding hint; it must never reach the collection.
+    assert!(!json.contains("{+"), "reserved marker leaked: {json}");
+    assert!(json.contains(":repo_id"), "expected `:repo_id` segment: {json}");
+    // The path variable key is the bare name.
+    assert!(json.contains("\"key\":\"repo_id\""));
+}
+
+#[test]
 fn folder_grouping() {
     let mut api = minimal_api();
     api.endpoints = vec![
@@ -642,6 +667,7 @@ fn build_postman_collection_api_key_declares_api_key_variable() {
     let mut api = minimal_api();
     api.auth = AuthStrategy::ApiKey {
         header: "X-API-Key".to_string(),
+        value_prefix: None,
     };
     let collection = build_postman_collection(&api);
     let keys: Vec<&str> = collection.variable.iter().map(|v| v.key.as_str()).collect();

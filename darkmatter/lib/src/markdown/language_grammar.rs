@@ -103,8 +103,19 @@ pub enum LanguageGrammar {
     Yaml,
     /// JSON data.
     Json,
+    /// JSON5 data (JSON with comments and relaxed syntax).
+    ///
+    /// Highlights through the JSON grammar (syntect ships no JSON5 grammar) but
+    /// is a recognized language so tooling never flags it as unknown.
+    Json5,
     /// TOML configuration.
     Toml,
+    /// Mermaid diagram source.
+    ///
+    /// Darkmatter renders Mermaid as a diagram rather than highlighting it, and
+    /// syntect ships no Mermaid grammar, so this resolves to plain text. It is a
+    /// recognized language so tooling never flags it as unknown.
+    Mermaid,
     /// Plain text / no grammar.
     ///
     /// This variant is the infallible fallback. Its [`Display`] representation
@@ -380,9 +391,13 @@ impl LanguageGrammar {
             LanguageGrammar::Json => {
                 find_first(syntax_set, &[("extension", "json"), ("name", "JSON")])
             }
+            LanguageGrammar::Json5 => {
+                find_first(syntax_set, &[("extension", "json"), ("name", "JSON")])
+            }
             LanguageGrammar::Toml => {
                 find_first(syntax_set, &[("extension", "toml"), ("name", "TOML")])
             }
+            LanguageGrammar::Mermaid => Ok(syntax_set.find_syntax_plain_text()),
             LanguageGrammar::OtherByExtension(ext) => syntax_set
                 .find_syntax_by_extension(ext)
                 .ok_or_else(|| LanguageGrammarError::UnknownGrammar(format!("extension:{ext}"))),
@@ -445,7 +460,9 @@ impl fmt::Display for LanguageGrammar {
             LanguageGrammar::Markdown => f.write_str("markdown"),
             LanguageGrammar::Yaml => f.write_str("yaml"),
             LanguageGrammar::Json => f.write_str("json"),
+            LanguageGrammar::Json5 => f.write_str("json5"),
             LanguageGrammar::Toml => f.write_str("toml"),
+            LanguageGrammar::Mermaid => f.write_str("mermaid"),
             LanguageGrammar::PlainText => Ok(()),
             LanguageGrammar::OtherByExtension(ext)
             | LanguageGrammar::OtherByName(ext)
@@ -522,7 +539,9 @@ fn grammar_from_alias(token: &str) -> Option<LanguageGrammar> {
         "markdown" | "md" => Some(LanguageGrammar::Markdown),
         "yaml" | "yml" => Some(LanguageGrammar::Yaml),
         "json" => Some(LanguageGrammar::Json),
+        "json5" => Some(LanguageGrammar::Json5),
         "toml" => Some(LanguageGrammar::Toml),
+        "mermaid" | "mmd" => Some(LanguageGrammar::Mermaid),
         _ => None,
     }
 }
@@ -776,6 +795,29 @@ mod tests {
             LanguageGrammar::from_token("yml").unwrap(),
             LanguageGrammar::Yaml
         ));
+    }
+
+    #[test]
+    fn json5_and_mermaid_are_recognized_languages() {
+        // Neither has a syntect grammar, but both are recognized so tooling
+        // (e.g. DMLS's fence diagnostic) never flags them as unknown.
+        for token in ["json5", "mermaid", "mmd", "JSON5", "Mermaid"] {
+            let grammar = LanguageGrammar::from_token(token)
+                .unwrap_or_else(|_| panic!("{token} should resolve"));
+            assert!(grammar.resolve_default().is_ok(), "{token} should resolve to a syntax");
+        }
+
+        // JSON5 highlights through the JSON grammar; Mermaid falls back to plain
+        // text (it is rendered as a diagram, not highlighted).
+        let json5 = LanguageGrammar::from_token("json5").unwrap();
+        assert!(matches!(json5, LanguageGrammar::Json5));
+        assert_eq!(json5.resolve_default().unwrap().name, "JSON");
+        assert_eq!(format!("{json5}"), "json5");
+
+        let mermaid = LanguageGrammar::from_token("mermaid").unwrap();
+        assert!(matches!(mermaid, LanguageGrammar::Mermaid));
+        assert_eq!(mermaid.resolve_default().unwrap().name, "Plain Text");
+        assert_eq!(format!("{mermaid}"), "mermaid");
     }
 
     #[test]

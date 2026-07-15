@@ -1726,7 +1726,7 @@ mod tests {
     fn test_browser_render_html_page_includes_fragment() {
         let compose: Compose = "hello".into();
         let page = renderable::browser::BrowserRenderable::render_html_page(&compose, None);
-        let html = page.render();
+        let html = page.render().expect("render");
         assert!(html.contains("<html"));
         assert!(html.contains("<body>"));
         assert!(html.contains("hello"));

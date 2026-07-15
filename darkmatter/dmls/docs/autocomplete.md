@@ -2,6 +2,7 @@
 features:
   - 2026-07-04-dmls
   - 2026-07-08-modal-and-autocomplete
+  - 2026-07-09-suggest-constraint
 ---
 # DMLS Autocomplete
 
@@ -53,8 +54,19 @@ registration order (substrate → wiki → frontmatter → DSL).
 |----------|---------|--------|
 | substrate (Markdown) | inside a link path / after `#` | document paths; `#`-anchor names for the target; fenced-code language tokens |
 | wiki | inside `[[ … ]]` | wiki targets (path style configurable) and `#heading` names; never inserts a `.md` extension |
-| frontmatter | inside the frontmatter block | schema keys (required-marked), enum values, boolish scaffolds, `file(...)` paths, `style.*` keys, and `ctx.*` variables |
+| frontmatter | inside the frontmatter block | schema keys (required-marked), enum values, boolish scaffolds, `file(...)` paths, `style.*` keys, `suggest(...)` value candidates, and `ctx.*` variables |
 | DSL | on a `::` line or inside `{{ }}` | directive names, per-family option keys/enum values, and interpolation variables/functions |
+
+### `suggest(...)` value candidates
+
+A property whose effective schema carries a `suggest(...)` constraint offers its
+candidates as **advisory** value completions — they aid discovery but never
+validate (any value the type allows remains legal). Candidates are
+prefix-filtered against the partial value, offered both for scalar values and
+for block-sequence items (`- value`), and a suggest-bearing union arm wins over
+the enum / boolish / file families for the same position. The candidates come
+from the schema itself (via the library's `suggestions_for_path`), so DMLS
+holds no parallel suggestion table.
 
 ## Interpolation completion (`{{ … }}`)
 

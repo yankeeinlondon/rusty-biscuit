@@ -27,7 +27,7 @@
 //!     description: "ElevenLabs Text-to-Speech WebSocket API".to_string(),
 //!     base_url: "wss://api.elevenlabs.io/v1".to_string(),
 //!     docs_url: Some("https://elevenlabs.io/docs/api-reference/websockets".to_string()),
-//!     auth: AuthStrategy::ApiKey { header: "xi-api-key".to_string() },
+//!     auth: AuthStrategy::ApiKey { header: "xi-api-key".to_string(), value_prefix: None },
 //!     env_auth: vec!["ELEVEN_LABS_API_KEY".to_string()],
 //!     version: None,
 //!     endpoints: vec![
@@ -508,6 +508,7 @@ mod tests {
             },
             AuthStrategy::ApiKey {
                 header: "X-API-Key".to_string(),
+                value_prefix: None,
             },
             AuthStrategy::Basic,
         ];
@@ -767,6 +768,7 @@ mod tests {
             docs_url: Some("https://elevenlabs.io/docs/api-reference/websockets".to_string()),
             auth: AuthStrategy::ApiKey {
                 header: "xi-api-key".to_string(),
+                value_prefix: None,
             },
             env_auth: vec![
                 "ELEVEN_LABS_API_KEY".to_string(),

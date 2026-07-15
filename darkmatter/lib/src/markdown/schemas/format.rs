@@ -88,6 +88,14 @@ pub const DARKMATTER_YAML_FORMAT: &str = "darkmatter-yaml";
 /// D). The value must parse as strict JSON; YAML-only syntax is rejected.
 pub const DARKMATTER_JSON_FORMAT: &str = "darkmatter-json";
 
+/// Format name registered for the `expression` content-format string type
+/// (feature `2026-07-12-literal-expression`). The value must parse under the
+/// Darkmatter expression grammar and is **never evaluated** — validation is
+/// pure `parse_condition(value).is_ok()`. Condition mode accepts a parse
+/// superset of the value dialect (`&&` added, `||` re-lowered), so a string
+/// valid in either dialect passes.
+pub const DARKMATTER_EXPRESSION_FORMAT: &str = "darkmatter-expression";
+
 /// Format name registered for the `datetime` SimplifiedSchema type.
 ///
 /// Emitted in place of JSON Schema's built-in `date-time` format, whose RFC
@@ -197,6 +205,22 @@ pub fn register_darkmatter_formats(
             // `json` is strict: only well-formed JSON parses, so YAML-only
             // syntax (e.g. `title: Foo`) is rejected.
             serde_json::from_str::<Value>(value).is_ok()
+        })
+        // The `expression` content-format string type. Parse-only and
+        // side-effect-free: `parse_condition` never evaluates functions, shell,
+        // I/O, or context. Condition mode is the either-dialect superset (§Q2),
+        // so a value valid in either expression dialect validates here.
+        .with_format(DARKMATTER_EXPRESSION_FORMAT, |value: &str| {
+            // A value still holding an unresolved `$(...)` shell expression or
+            // `{{ ... }}` template is pending, not a final expression: defer
+            // rather than eager-fail the parse. This mirrors the pending-value
+            // deferral the compose/validation layers apply to every content
+            // string, and neither marker is part of expression syntax, so the
+            // guard never masks a genuinely malformed expression.
+            if value.contains("$(") || value.contains("{{") {
+                return true;
+            }
+            crate::markdown::compose::expression::parse_condition(value).is_ok()
         })
         // ISO 8601 date/time types with an optional zone offset (the built-in
         // `date-time` / `time` formats require one; see the const docs).

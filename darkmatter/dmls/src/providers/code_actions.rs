@@ -211,7 +211,17 @@ fn add_missing_required_keys(ctx: &DocumentContext, diagnostics: &[Diagnostic]) 
     }
     let insert_offset = root_insertion_offset(ast)?;
     let position = ctx.source_map.byte_to_lsp(insert_offset)?;
-    let new_text: String = keys.iter().map(|key| format!("\n{key}: ")).collect();
+    // A key the schema types as a single `literal(x)` is inserted with its
+    // correct-by-construction value (YAML-quoted where required) instead of an
+    // empty scaffold.
+    let shape = crate::providers::frontmatter::known_shape(ctx);
+    let new_text: String = keys
+        .iter()
+        .map(|key| match literal_scaffold(&shape, key) {
+            Some(value) => format!("\n{key}: {value}"),
+            None => format!("\n{key}: "),
+        })
+        .collect();
     let related: Vec<Diagnostic> = diagnostics
         .iter()
         .filter(|diag| string_code(diag) == Some(code::SCHEMA_MISSING_REQUIRED))
@@ -237,6 +247,14 @@ fn add_missing_required_keys(ctx: &DocumentContext, diagnostics: &[Diagnostic]) 
         edit: Some(builder.build(ctx.profile)),
         ..Default::default()
     })
+}
+
+/// The YAML value text to seed a missing required top-level `key` with when the
+/// schema types it as a single `literal(x)`, else `None` (an empty scaffold).
+fn literal_scaffold(shape: &darkmatter::markdown::schemas::SchemaShape, key: &str) -> Option<String> {
+    let def = crate::providers::frontmatter::def_at_path(shape, &[key])?;
+    let value = crate::providers::frontmatter::sole_literal_value(def)?;
+    Some(crate::providers::frontmatter::yaml_scalar_literal(value))
 }
 
 /// The byte offset to insert a new top-level key at: just past the last
@@ -437,6 +455,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_literal_scaffold_inserts_value_with_yaml_quoting() {
+        use darkmatter::markdown::schemas::{
+            Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType,
+        };
+
+        let literal = |value: serde_json::Value| {
+            let mut atom = PropertyAtom::bare(SimplifiedType::Literal);
+            atom.constraints.push(Constraint::LiteralValue(value));
+            PropertyDef::Single(atom)
+        };
+
+        let mut shape = SchemaShape::new();
+        shape.properties.insert("kind".into(), literal(serde_json::json!("created")));
+        // A string literal that looks numeric must be YAML-quoted.
+        shape.properties.insert("tag".into(), literal(serde_json::json!("2")));
+        shape
+            .properties
+            .insert("title".into(), PropertyDef::Single(PropertyAtom::bare(SimplifiedType::String)));
+
+        assert_eq!(literal_scaffold(&shape, "kind").as_deref(), Some("created"));
+        assert_eq!(literal_scaffold(&shape, "tag").as_deref(), Some("'2'"));
+        // A non-literal required key still gets an empty scaffold (None here).
+        assert!(literal_scaffold(&shape, "title").is_none());
+    }
+
+    #[test]
     fn test_is_creatable_filename_rejects_windows_invalid() {
         assert!(is_creatable_filename(std::path::Path::new("/w/note.md")));
         assert!(!is_creatable_filename(std::path::Path::new("/w/no:te.md")));
@@ -508,6 +552,8 @@ mod tests {
             needs_watch_fallback: false,
             supports_file_operations: false,
             supports_workspace_configuration: false,
+            supports_semantic_tokens: false,
+            supports_semantic_tokens_refresh: false,
             supports_folding: false,
             folding_line_only: false,
             supports_selection_range: false,

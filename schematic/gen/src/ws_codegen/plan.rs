@@ -529,6 +529,7 @@ mod tests {
             docs_url: None,
             auth: AuthStrategy::ApiKey {
                 header: "API-KEY".to_string(),
+                value_prefix: None,
             },
             env_auth: vec!["TEST_KEY".to_string()],
             version: None,

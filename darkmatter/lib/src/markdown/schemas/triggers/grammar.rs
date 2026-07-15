@@ -441,13 +441,17 @@ fn parse_union_atoms(name: &str, value: &YamlValue) -> Result<Vec<PropertyAtom>,
 /// Match loading rejects constraints that resolve files, import types, load
 /// examples, provide defaults, mark generated values, or otherwise consult
 /// state outside the candidate value. Allowed: `required`, `enum` members,
-/// `pattern`, length/range, item-count, key-count, and structural purity
-/// constraints (`integer`, `not-empty`, `unique`).
+/// `literal` value equality, `pattern`, length/range, item-count, key-count,
+/// and structural purity constraints (`integer`, `not-empty`, `unique`).
 pub fn is_match_safe_constraint(constraint: &Constraint) -> bool {
     matches!(
         constraint,
         Constraint::Required
             | Constraint::Members(_)
+            // `literal(...)` value equality is pure (no I/O, no state), so it is
+            // a valid trigger discriminant — the idiomatic replacement for a
+            // single-member `enum(...)` tag.
+            | Constraint::LiteralValue(_)
             | Constraint::Pattern(_)
             | Constraint::MinLen(_)
             | Constraint::MaxLen(_)

@@ -21,6 +21,10 @@ struct ClientFixture {
     /// Server → client notifications buffered while awaiting a response (the
     /// server pushes `publishDiagnostics` out-of-band).
     notifications: Vec<Notification>,
+    /// Server → client requests buffered while awaiting a response (the server
+    /// pushes `workspace/semanticTokens/refresh`, progress-create, and watcher
+    /// registrations fire-and-forget).
+    server_requests: Vec<Request>,
 }
 
 impl ClientFixture {
@@ -37,6 +41,7 @@ impl ClientFixture {
             server_outcome: outcome_rx,
             next_id: 0,
             notifications: Vec::new(),
+            server_requests: Vec::new(),
         }
     }
 
@@ -75,8 +80,9 @@ impl ClientFixture {
                 Message::Response(response) if response.id == id => return response,
                 Message::Notification(notification) => self.notifications.push(notification),
                 // Server-initiated requests (progress create, watcher
-                // registration) are fire-and-forget; ignore them.
-                Message::Request(_) => {}
+                // registration, semantic-tokens refresh) are fire-and-forget;
+                // buffer them so tests can observe what the server pushed.
+                Message::Request(request) => self.server_requests.push(request),
                 other => panic!("unexpected message while waiting for response: {other:?}"),
             }
         }
@@ -103,7 +109,7 @@ impl ClientFixture {
                 .expect("diagnostics before timeout");
             match message {
                 Message::Notification(notification) => self.notifications.push(notification),
-                Message::Request(_) => {}
+                Message::Request(request) => self.server_requests.push(request),
                 other => panic!("unexpected message while waiting for diagnostics: {other:?}"),
             }
         }
@@ -139,7 +145,7 @@ impl ClientFixture {
                 .expect("startup progress before timeout");
             match message {
                 Message::Notification(notification) => self.notifications.push(notification),
-                Message::Request(_) => {}
+                Message::Request(request) => self.server_requests.push(request),
                 other => panic!("unexpected message while waiting for startup: {other:?}"),
             }
         }
@@ -159,6 +165,43 @@ impl ClientFixture {
     fn flush_server(&mut self) {
         let response = self.request("workspace/symbol", json!({ "query": "" }));
         assert!(response.error.is_none(), "server flush request failed: {:?}", response.error);
+    }
+
+    /// Pumps messages until a buffered server-initiated request with `method`
+    /// is seen, removing and returning `true`; returns `false` if none arrives
+    /// within a short window (the in-memory pair delivers immediately, so a
+    /// miss reliably means the server never sent it).
+    fn wait_for_server_request(&mut self, method: &str) -> bool {
+        self.take_server_request(method).is_some()
+    }
+
+    /// Like [`wait_for_server_request`], but returns the matched `Request` so a
+    /// caller can inspect its `id` (e.g. proving two refreshes carry distinct
+    /// request ids); `None` on the same short-window miss.
+    fn take_server_request(&mut self, method: &str) -> Option<Request> {
+        loop {
+            if let Some(position) =
+                self.server_requests.iter().position(|request| request.method == method)
+            {
+                return Some(self.server_requests.remove(position));
+            }
+            match self.client.receiver.recv_timeout(Duration::from_secs(1)) {
+                Ok(Message::Request(request)) => self.server_requests.push(request),
+                Ok(Message::Notification(notification)) => self.notifications.push(notification),
+                Ok(Message::Response(_)) => {}
+                Err(_) => return None,
+            }
+        }
+    }
+
+    /// Sends a client → server response, e.g. answering a server-initiated
+    /// `workspace/semanticTokens/refresh` so it routes through the loop's
+    /// `Message::Response` arm and into the `RefreshLedger`.
+    fn respond(&self, response: Response) {
+        self.client
+            .sender
+            .send(Message::Response(response))
+            .expect("send response");
     }
 
     fn shutdown(self) {
@@ -1672,6 +1715,66 @@ fn dsl_valid_document_has_no_dsl_diagnostics() {
     fixture.shutdown();
 }
 
+/// A schema-declared-but-unset property is a valid body interpolation, and
+/// `json5` / `mermaid` are recognized fenced languages: none of the three emit a
+/// DSL diagnostic. The `spec` property is declared by the inline `$schema` (a
+/// caller-supplied `file` parameter) yet never set in the document frontmatter,
+/// exactly the compose-time-merge pattern; `{{ spec }}` must not be flagged as
+/// an unknown identifier, and its hover surfaces the schema type/description.
+const SCHEMA_PROPERTY_DOC: &str = "---\ntitle: Review\n$schema:\n  spec: file(required) -> the specification file being reviewed\n---\n\n# Review\n\nReviewing {{ spec }}.\n\n```json5\n{ id: \"one\" }\n```\n\n```mermaid\ngraph TD; A-->B;\n```\n";
+
+#[test]
+fn schema_declared_property_and_json5_mermaid_have_no_dsl_diagnostics() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("review.md"), SCHEMA_PROPERTY_DOC).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("review.md")).unwrap();
+    open(&fixture, uri.as_str(), SCHEMA_PROPERTY_DOC);
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    let codes: Vec<&str> = diagnostics
+        .iter()
+        .filter_map(|diagnostic| diagnostic["code"].as_str())
+        .collect();
+    assert!(
+        !codes.contains(&"dm.expression.unknown_identifier"),
+        "schema-declared `spec` must not be flagged: {codes:?}"
+    );
+    assert!(
+        !codes.contains(&"dm.fence.unknown_language"),
+        "json5 and mermaid are recognized: {codes:?}"
+    );
+
+    // Hover on `{{ spec }}` (line 8, `spec` starts at character 13) surfaces the
+    // schema type and description even though the property is unset.
+    let hover = fixture
+        .request(
+            "textDocument/hover",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 8, "character": 14 }
+            }),
+        )
+        .result
+        .expect("interpolation hover");
+    let hover_text = hover["contents"]["value"].as_str().unwrap_or_default();
+    assert!(hover_text.contains("file"), "schema type in hover: {hover_text}");
+    assert!(
+        hover_text.contains("the specification file being reviewed"),
+        "schema description in hover: {hover_text}"
+    );
+    // The name appears once (in the `**Expression**` header); the schema details
+    // carry no second `**`spec`**` heading.
+    assert!(
+        !hover_text.contains("**`spec`**"),
+        "property name must not render twice: {hover_text}"
+    );
+
+    fixture.shutdown();
+}
+
 /// Layer-3 shell awareness reaches into `::shell-block` bodies: a disallowed
 /// command inside the block is flagged with `dm.security.disallowed_command`,
 /// ranged on the offending body line, while a benign sibling line is not — and
@@ -2396,6 +2499,614 @@ fn period_trigger_outside_interpolation_offers_nothing() {
         completions,
         json!([]),
         "a period outside an open interpolation must produce no completion items"
+    );
+
+    fixture.shutdown();
+}
+
+// ── Phase 5: semantic tokens end-to-end ──
+//
+// The V1 legend indices, mirrored here as the wire contract the session tests
+// assert against (kept in lock-step with `semantic_legend::legend`).
+const TT_MACRO: u32 = 0;
+const TT_PROPERTY: u32 = 3;
+const TT_STRING: u32 = 4;
+const TM_INTERPOLATION: u32 = 1 << 0;
+const TM_INERT: u32 = 1 << 1;
+const TM_DIRECTIVE: u32 = 1 << 2;
+const TM_CLOSER: u32 = 1 << 3;
+const TM_WIKI: u32 = 1 << 4;
+
+/// One decoded absolute semantic token: `(line, character, length, type, modifiers)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Tok {
+    line: u32,
+    character: u32,
+    length: u32,
+    token_type: u32,
+    modifiers: u32,
+}
+
+fn tok(line: u32, character: u32, length: u32, token_type: u32, modifiers: u32) -> Tok {
+    Tok { line, character, length, token_type, modifiers }
+}
+
+/// A minimal valid `textDocument.semanticTokens` client capability.
+fn semantic_tokens_client_capability() -> Value {
+    json!({
+        "requests": { "full": true, "range": true },
+        "tokenTypes": [],
+        "tokenModifiers": [],
+        "formats": []
+    })
+}
+
+/// Initialize params for a semantic-token-capable client. `encoding` is the only
+/// position encoding the client offers, so the negotiated encoding is
+/// deterministic; `refresh` advertises `workspace.semanticTokens.refreshSupport`.
+fn semantic_capable_params(root: &std::path::Path, encoding: &str, refresh: bool) -> Value {
+    let mut params = neovim_like_initialize_params(root);
+    params["capabilities"]["general"]["positionEncodings"] = json!([encoding]);
+    params["capabilities"]["textDocument"]["semanticTokens"] = semantic_tokens_client_capability();
+    if refresh {
+        params["capabilities"]["workspace"]["semanticTokens"] = json!({ "refreshSupport": true });
+    }
+    params
+}
+
+/// Reverses the LSP relative-delta encoding in a semantic-token response back to
+/// absolute `(line, character, length, type, modifiers)` tuples.
+fn decode_tokens(result: &Value) -> Vec<Tok> {
+    let data = result["data"].as_array().expect("semantic-token data array");
+    assert_eq!(data.len() % 5, 0, "token data must be 5-integer groups: {data:?}");
+    let mut out = Vec::new();
+    let mut line = 0u32;
+    let mut character = 0u32;
+    for group in data.chunks(5) {
+        let field = |index: usize| group[index].as_u64().expect("token integer") as u32;
+        let (delta_line, delta_start) = (field(0), field(1));
+        if delta_line == 0 {
+            character += delta_start;
+        } else {
+            line += delta_line;
+            character = delta_start;
+        }
+        out.push(Tok {
+            line,
+            character,
+            length: field(2),
+            token_type: field(3),
+            modifiers: field(4),
+        });
+    }
+    out
+}
+
+fn semantic_full(fixture: &mut ClientFixture, uri: &str) -> Vec<Tok> {
+    let result = fixture
+        .request("textDocument/semanticTokens/full", json!({ "textDocument": { "uri": uri } }))
+        .result
+        .expect("full semantic tokens");
+    decode_tokens(&result)
+}
+
+fn semantic_range(
+    fixture: &mut ClientFixture,
+    uri: &str,
+    start: (u32, u32),
+    end: (u32, u32),
+) -> Vec<Tok> {
+    let result = fixture
+        .request(
+            "textDocument/semanticTokens/range",
+            json!({
+                "textDocument": { "uri": uri },
+                "range": {
+                    "start": { "line": start.0, "character": start.1 },
+                    "end": { "line": end.0, "character": end.1 }
+                }
+            }),
+        )
+        .result
+        .expect("range semantic tokens");
+    decode_tokens(&result)
+}
+
+/// Every semantic-token response must be strictly `(line, character)`-ordered
+/// with no overlapping decoded span (spec criteria 4 and 10).
+fn assert_ordered_nonoverlapping(tokens: &[Tok]) {
+    for pair in tokens.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        assert!(
+            (a.line, a.character) < (b.line, b.character),
+            "tokens not strictly (line, char)-ordered: {a:?} then {b:?}"
+        );
+        if a.line == b.line {
+            assert!(a.character + a.length <= b.character, "tokens overlap: {a:?} then {b:?}");
+        }
+    }
+}
+
+#[test]
+fn semantic_tokens_capability_is_gated_on_client_support() {
+    // Criterion 6: only a client advertising `textDocument.semanticTokens` sees
+    // the provider capability, and it publishes the frozen V1 legend with full +
+    // range and no delta support.
+    let workspace = tempfile::tempdir().unwrap();
+
+    let mut capable = ClientFixture::start();
+    let result = capable.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
+    let provider = result["capabilities"]["semanticTokensProvider"].clone();
+    assert_eq!(
+        provider["legend"]["tokenTypes"],
+        json!(["macro", "function", "variable", "property", "string", "number", "operator"]),
+        "capable client must receive the frozen token-type legend: {provider}"
+    );
+    assert_eq!(
+        provider["legend"]["tokenModifiers"],
+        json!([
+            "interpolation",
+            "inert",
+            "directive",
+            "closer",
+            "wiki",
+            "injected",
+            "defaultLibrary",
+            "readonly"
+        ]),
+        "capable client must receive the frozen modifier legend: {provider}"
+    );
+    assert_eq!(provider["full"], json!(true), "full support advertised: {provider}");
+    assert_eq!(provider["range"], json!(true), "range support advertised: {provider}");
+    assert!(provider["delta"].is_null(), "v1 advertises no delta support: {provider}");
+    capable.shutdown();
+
+    // An incapable client (default Neovim params carry no `semanticTokens`
+    // capability) sees no provider entry at all.
+    let mut incapable = ClientFixture::start();
+    let result = incapable.initialize(neovim_like_initialize_params(workspace.path()));
+    assert!(
+        result["capabilities"]["semanticTokensProvider"].is_null(),
+        "incapable client must not see a semantic-token provider: {result}"
+    );
+    incapable.shutdown();
+}
+
+#[test]
+fn semantic_tokens_full_interpolations_ordinary_inert_and_multiline() {
+    // Criteria 1 and 4: an ordinary `{{ }}` interpolation, a `{{{ }}}` inert
+    // literal, and a multi-line interpolation split into one token per line.
+    let workspace = tempfile::tempdir().unwrap();
+    let text = "{{ title }} and {{{ verbatim }}}\n{{ a\nb }}\n";
+    std::fs::write(workspace.path().join("doc.md"), text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let full = semantic_full(&mut fixture, uri.as_str());
+    assert_eq!(
+        full,
+        vec![
+            tok(0, 0, 11, TT_MACRO, TM_INTERPOLATION),
+            tok(0, 16, 16, TT_MACRO, TM_INTERPOLATION | TM_INERT),
+            tok(1, 0, 4, TT_MACRO, TM_INTERPOLATION),
+            tok(2, 0, 4, TT_MACRO, TM_INTERPOLATION),
+        ]
+    );
+    assert_ordered_nonoverlapping(&full);
+
+    fixture.shutdown();
+}
+
+#[test]
+fn semantic_tokens_full_directive_token_classes() {
+    // Criterion 2: keyword, structured target, option key, and option value, plus
+    // the `closer` modifier on a structural closer.
+    let workspace = tempfile::tempdir().unwrap();
+    let text = "::file ./doc.md when=env.DEBUG\n::end-block\n";
+    std::fs::write(workspace.path().join("doc.md"), text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let full = semantic_full(&mut fixture, uri.as_str());
+    assert_eq!(
+        full,
+        vec![
+            tok(0, 0, 6, TT_MACRO, TM_DIRECTIVE),      // ::file
+            tok(0, 7, 8, TT_STRING, TM_DIRECTIVE),     // ./doc.md
+            tok(0, 16, 4, TT_PROPERTY, TM_DIRECTIVE),  // when
+            tok(0, 21, 9, TT_STRING, TM_DIRECTIVE),    // env.DEBUG
+            tok(1, 0, 11, TT_MACRO, TM_DIRECTIVE | TM_CLOSER), // ::end-block
+        ]
+    );
+    assert_ordered_nonoverlapping(&full);
+
+    fixture.shutdown();
+}
+
+#[test]
+fn semantic_tokens_full_wiki_segments_identical_for_resolved_and_unresolved() {
+    // Criterion 3: bracket/separator machinery is `macro.wiki`, inner segments are
+    // `string.wiki`, and the token shape is identical whether the target resolves.
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("Target.md"), "# Target\n").unwrap();
+    let text = "[[doc#H|Alias]]\n\n[[Target]] and [[Missing]]\n";
+    std::fs::write(workspace.path().join("Source.md"), text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
+    let uri = url::Url::from_file_path(workspace.path().join("Source.md")).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let full = semantic_full(&mut fixture, uri.as_str());
+    assert_ordered_nonoverlapping(&full);
+
+    // `[[doc#H|Alias]]`: brackets and `#`/`|` separators macro.wiki, segments string.wiki.
+    let line0: Vec<Tok> = full.iter().copied().filter(|token| token.line == 0).collect();
+    assert_eq!(
+        line0,
+        vec![
+            tok(0, 0, 2, TT_MACRO, TM_WIKI),  // [[
+            tok(0, 2, 3, TT_STRING, TM_WIKI), // doc
+            tok(0, 5, 1, TT_MACRO, TM_WIKI),  // #
+            tok(0, 6, 1, TT_STRING, TM_WIKI), // H
+            tok(0, 7, 1, TT_MACRO, TM_WIKI),  // |
+            tok(0, 8, 5, TT_STRING, TM_WIKI), // Alias
+            tok(0, 13, 2, TT_MACRO, TM_WIKI), // ]]
+        ]
+    );
+
+    // The resolved `[[Target]]` and the unresolved `[[Missing]]` share a shape.
+    let shape = |tokens: &[Tok]| {
+        tokens.iter().map(|token| (token.token_type, token.modifiers)).collect::<Vec<_>>()
+    };
+    let resolved: Vec<Tok> =
+        full.iter().copied().filter(|token| token.line == 2 && token.character < 11).collect();
+    let unresolved: Vec<Tok> =
+        full.iter().copied().filter(|token| token.line == 2 && token.character >= 15).collect();
+    assert_eq!(
+        shape(&resolved),
+        shape(&unresolved),
+        "resolved and unresolved wiki links must share a token shape: {resolved:?} vs {unresolved:?}"
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn semantic_tokens_encoding_utf8_vs_utf16_on_non_ascii() {
+    // Criterion 4: the same interpolation lands at a different column in UTF-8 vs
+    // UTF-16 because the preceding `é` is two bytes but one UTF-16 unit.
+    let workspace = tempfile::tempdir().unwrap();
+    let text = "é {{ x }}\n";
+    std::fs::write(workspace.path().join("doc.md"), text).unwrap();
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+
+    let mut utf8 = ClientFixture::start();
+    utf8.initialize(semantic_capable_params(workspace.path(), "utf-8", false));
+    open(&utf8, uri.as_str(), text);
+    let utf8_tokens = semantic_full(&mut utf8, uri.as_str());
+    // Byte column: "é " is 3 bytes.
+    assert_eq!(utf8_tokens, vec![tok(0, 3, 7, TT_MACRO, TM_INTERPOLATION)]);
+    utf8.shutdown();
+
+    let mut utf16 = ClientFixture::start();
+    utf16.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
+    open(&utf16, uri.as_str(), text);
+    let utf16_tokens = semantic_full(&mut utf16, uri.as_str());
+    // UTF-16 column: "é " is 2 units.
+    assert_eq!(utf16_tokens, vec![tok(0, 2, 7, TT_MACRO, TM_INTERPOLATION)]);
+    utf16.shutdown();
+}
+
+#[test]
+fn semantic_tokens_crlf_multiline_splits_per_line() {
+    // Criterion 4: a multi-line interpolation in a CRLF document splits per line,
+    // excluding the line terminators.
+    let workspace = tempfile::tempdir().unwrap();
+    let text = "{{ a\r\nb }}\r\n";
+    std::fs::write(workspace.path().join("doc.md"), text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let full = semantic_full(&mut fixture, uri.as_str());
+    assert_eq!(
+        full,
+        vec![
+            tok(0, 0, 4, TT_MACRO, TM_INTERPOLATION), // {{ a
+            tok(1, 0, 4, TT_MACRO, TM_INTERPOLATION), // b }}
+        ]
+    );
+    assert_ordered_nonoverlapping(&full);
+
+    fixture.shutdown();
+}
+
+#[test]
+fn semantic_tokens_range_is_full_intersected() {
+    // Criterion 9: a range response is exactly the full response intersected and
+    // clipped to the requested half-open range — including a boundary inside a
+    // token and a range that crosses a line ending.
+    let workspace = tempfile::tempdir().unwrap();
+    let text = "{{aaa}} {{bbb}}\nzz {{ccc}}\n";
+    std::fs::write(workspace.path().join("doc.md"), text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let full = semantic_full(&mut fixture, uri.as_str());
+    assert_eq!(
+        full,
+        vec![
+            tok(0, 0, 7, TT_MACRO, TM_INTERPOLATION),
+            tok(0, 8, 7, TT_MACRO, TM_INTERPOLATION),
+            tok(1, 3, 7, TT_MACRO, TM_INTERPOLATION),
+        ]
+    );
+
+    // A single-line range whose start lands inside the first token.
+    let single = semantic_range(&mut fixture, uri.as_str(), (0, 3), (0, 10));
+    assert_eq!(
+        single,
+        vec![
+            tok(0, 3, 4, TT_MACRO, TM_INTERPOLATION), // "{{aaa}}" clipped to cols 3..7
+            tok(0, 8, 2, TT_MACRO, TM_INTERPOLATION), // "{{bbb}}" clipped to cols 8..10
+        ]
+    );
+    assert_ordered_nonoverlapping(&single);
+
+    // A range crossing the line ending: line-0 tail plus a clipped line-1 head.
+    let across = semantic_range(&mut fixture, uri.as_str(), (0, 10), (1, 6));
+    assert_eq!(
+        across,
+        vec![
+            tok(0, 10, 5, TT_MACRO, TM_INTERPOLATION), // "{{bbb}}" clipped to cols 10..15
+            tok(1, 3, 3, TT_MACRO, TM_INTERPOLATION),  // "{{ccc}}" clipped to cols 3..6
+        ]
+    );
+    assert_ordered_nonoverlapping(&across);
+
+    fixture.shutdown();
+}
+
+#[test]
+fn semantic_tokens_family_precedence_full_and_range() {
+    // Criterion 10: an interpolation inside a directive option value proves F1
+    // owns the `{{ }}` bytes and clips the F2 string around it, and the wiki
+    // separators exercise structural-subtoken precedence — for both requests.
+    let workspace = tempfile::tempdir().unwrap();
+    let text = "::file ./z.md when=\"{{ e }}\"\nSee [[doc#H]] here.\n";
+    std::fs::write(workspace.path().join("doc.md"), text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let full = semantic_full(&mut fixture, uri.as_str());
+    assert_eq!(
+        full,
+        vec![
+            tok(0, 0, 6, TT_MACRO, TM_DIRECTIVE),      // ::file
+            tok(0, 7, 6, TT_STRING, TM_DIRECTIVE),     // ./z.md
+            tok(0, 14, 4, TT_PROPERTY, TM_DIRECTIVE),  // when
+            tok(0, 19, 1, TT_STRING, TM_DIRECTIVE),    // opening quote (F2, clipped)
+            tok(0, 20, 7, TT_MACRO, TM_INTERPOLATION), // {{ e }} (F1 owns the interior)
+            tok(0, 27, 1, TT_STRING, TM_DIRECTIVE),    // closing quote (F2, clipped)
+            tok(1, 4, 2, TT_MACRO, TM_WIKI),           // [[
+            tok(1, 6, 3, TT_STRING, TM_WIKI),          // doc
+            tok(1, 9, 1, TT_MACRO, TM_WIKI),           // # (structural separator over the frame)
+            tok(1, 10, 1, TT_STRING, TM_WIKI),         // H
+            tok(1, 11, 2, TT_MACRO, TM_WIKI),          // ]]
+        ]
+    );
+    assert_ordered_nonoverlapping(&full);
+
+    // A range starting inside the interpolation keeps the precedence: F1 owns the
+    // interior, the trailing quote stays F2.
+    let ranged = semantic_range(&mut fixture, uri.as_str(), (0, 22), (0, 28));
+    assert_eq!(
+        ranged,
+        vec![
+            tok(0, 22, 5, TT_MACRO, TM_INTERPOLATION), // "{{ e }}" clipped to cols 22..27
+            tok(0, 27, 1, TT_STRING, TM_DIRECTIVE),    // closing quote
+        ]
+    );
+    assert_ordered_nonoverlapping(&ranged);
+
+    fixture.shutdown();
+}
+
+#[test]
+fn semantic_tokens_master_switch_toggles_and_requests_refresh() {
+    // Criterion 7: a runtime `true -> false -> true` master-switch transition
+    // suppresses and restores emission without a restart, requesting a refresh
+    // each time the capable client honors one.
+    let workspace = tempfile::tempdir().unwrap();
+    let text = "Body {{ title }} here.\n";
+    std::fs::write(workspace.path().join("doc.md"), text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", true));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let enabled = semantic_full(&mut fixture, uri.as_str());
+    assert_eq!(enabled, vec![tok(0, 5, 11, TT_MACRO, TM_INTERPOLATION)]);
+
+    // Disable → refresh requested, then a live request returns an empty stream.
+    fixture.notify(
+        "workspace/didChangeConfiguration",
+        json!({ "settings": { "dmls": { "semantic_tokens": { "enable": false } } } }),
+    );
+    assert!(
+        fixture.wait_for_server_request("workspace/semanticTokens/refresh"),
+        "disabling emission must request a refresh"
+    );
+    assert!(
+        semantic_full(&mut fixture, uri.as_str()).is_empty(),
+        "the master switch must suppress emission without a restart"
+    );
+
+    // Re-enable → refresh requested again, tokens return identically.
+    fixture.notify(
+        "workspace/didChangeConfiguration",
+        json!({ "settings": { "dmls": { "semantic_tokens": { "enable": true } } } }),
+    );
+    assert!(
+        fixture.wait_for_server_request("workspace/semanticTokens/refresh"),
+        "re-enabling emission must request a refresh"
+    );
+    assert_eq!(semantic_full(&mut fixture, uri.as_str()), enabled);
+
+    fixture.shutdown();
+}
+
+#[test]
+fn semantic_tokens_two_configs_issue_distinct_refreshes_routed_through_loop() {
+    // Criterion 7, through the real router loop: two token-affecting config
+    // changes sent before either refresh is answered must issue two distinct
+    // `workspace/semanticTokens/refresh` request ids, and routing a success and
+    // an error `Message::Response` back into the `RefreshLedger` must neither
+    // terminate nor disturb the session.
+    let workspace = tempfile::tempdir().unwrap();
+    let text = "Body {{ title }} here.\n";
+    std::fs::write(workspace.path().join("doc.md"), text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", true));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let enabled = semantic_full(&mut fixture, uri.as_str());
+    assert_eq!(enabled, vec![tok(0, 5, 11, TT_MACRO, TM_INTERPOLATION)]);
+
+    // Two token-affecting changes back-to-back, before replying to either
+    // refresh: disabling then re-enabling the master switch each warrants a
+    // refresh, so the ledger must allocate two ids in flight at once.
+    fixture.notify(
+        "workspace/didChangeConfiguration",
+        json!({ "settings": { "dmls": { "semantic_tokens": { "enable": false } } } }),
+    );
+    fixture.notify(
+        "workspace/didChangeConfiguration",
+        json!({ "settings": { "dmls": { "semantic_tokens": { "enable": true } } } }),
+    );
+
+    let first = fixture
+        .take_server_request("workspace/semanticTokens/refresh")
+        .expect("first refresh request");
+    let second = fixture
+        .take_server_request("workspace/semanticTokens/refresh")
+        .expect("second refresh request");
+    assert_ne!(
+        first.id, second.id,
+        "two in-flight refreshes must carry distinct request ids: {:?} vs {:?}",
+        first.id, second.id
+    );
+
+    // Answer the first with a success and the second with a client rejection;
+    // both route through the loop's `Message::Response` arm. The error must be
+    // retired at warn (not fail the loop), the success retired quietly.
+    fixture.respond(Response::new_ok(first.id.clone(), Value::Null));
+    fixture.respond(Response::new_err(
+        second.id.clone(),
+        -32803,
+        "client rejected refresh".to_string(),
+    ));
+
+    // The session stays fully responsive: a normal follow-up request answers,
+    // and the net `false -> true` toggle leaves the token stream restored.
+    assert_eq!(
+        semantic_full(&mut fixture, uri.as_str()),
+        enabled,
+        "the server must remain responsive after routing both refresh responses"
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn semantic_tokens_config_applies_without_refresh_capability() {
+    // Criterion 7: a client that does not honor refresh still sees the new config
+    // on every later request, and the server sends no refresh it cannot use.
+    let workspace = tempfile::tempdir().unwrap();
+    let text = "Body {{ title }} here.\n";
+    std::fs::write(workspace.path().join("doc.md"), text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    assert_eq!(
+        semantic_full(&mut fixture, uri.as_str()),
+        vec![tok(0, 5, 11, TT_MACRO, TM_INTERPOLATION)]
+    );
+
+    fixture.notify(
+        "workspace/didChangeConfiguration",
+        json!({ "settings": { "dmls": { "semantic_tokens": { "enable": false } } } }),
+    );
+    // The next request (which also pumps any server-initiated message) reflects
+    // the new config.
+    assert!(
+        semantic_full(&mut fixture, uri.as_str()).is_empty(),
+        "config must apply to later requests even without refresh support"
+    );
+    assert!(
+        !fixture
+            .server_requests
+            .iter()
+            .any(|request| request.method == "workspace/semanticTokens/refresh"),
+        "a refresh must not be sent to a client that does not support it"
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn semantic_tokens_wiki_enable_suppresses_only_f4() {
+    // Criterion 7: `wiki.enable = false` drops F4 wiki tokens while leaving F1
+    // interpolation tokens untouched.
+    let workspace = tempfile::tempdir().unwrap();
+    let text = "{{ a }} [[doc]]\n";
+    std::fs::write(workspace.path().join("doc.md"), text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let full = semantic_full(&mut fixture, uri.as_str());
+    assert!(
+        full.iter().any(|token| token.modifiers & TM_WIKI != 0),
+        "wiki tokens must be present by default: {full:?}"
+    );
+
+    fixture.notify(
+        "workspace/didChangeConfiguration",
+        json!({ "settings": { "dmls": { "wiki": { "enable": false } } } }),
+    );
+    let suppressed = semantic_full(&mut fixture, uri.as_str());
+    assert!(
+        suppressed.iter().all(|token| token.modifiers & TM_WIKI == 0),
+        "wiki.enable = false must suppress every F4 token: {suppressed:?}"
+    );
+    assert_eq!(
+        suppressed,
+        vec![tok(0, 0, 7, TT_MACRO, TM_INTERPOLATION)],
+        "the F1 interpolation must survive the wiki gate: {suppressed:?}"
     );
 
     fixture.shutdown();

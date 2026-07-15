@@ -49,6 +49,51 @@ an Extension Development Host instead of installing. See
 - File + heading rename with workspace-wide reference updates
   (`workspace/willRenameFiles` supported), the v1 code-action set, and
   whole-document formatting.
+- Semantic tokens classifying interpolations, directives/closers, and wiki
+  links for theme-driven de-emphasis (see below).
+
+## Semantic tokens (de-emphasize Darkmatter machinery)
+
+VS Code enables LSP semantic tokens by default (no opt-in), so once `dmls` is
+attached, interpolations, directive lines, and wiki links are classified and
+ready to style. Semantic tokens **merge over** the Markdown grammar, and token
+colors **cannot carry alpha** — "dim" is a *muted foreground*, not transparency.
+Add copyable rules to your `settings.json` and tune the palette to your theme:
+
+```json
+{
+  "editor.semanticTokenColorCustomizations": {
+    "enabled": true,
+    "rules": {
+      "*.interpolation": { "foreground": "#7d8590" },
+      "*.directive": { "foreground": "#7d8590" },
+      "*.closer": { "foreground": "#6e7681" },
+      "macro.wiki": { "foreground": "#7d8590" },
+      "string.wiki": { "foreground": "#539bf5" }
+    }
+  }
+}
+```
+
+The custom modifiers (`interpolation`, `directive`, `closer`, `wiki`) are the
+targeting surface; `*.interpolation` matches every token type carrying that
+modifier. `macro.wiki` mutes the `[[ ]]` brackets and `#`/`|` separators while
+`string.wiki` keeps the inner path/heading/alias text link-like. `{{{ literal }}}`
+spans additionally carry `inert` (`*.inert`) if you want to fade them harder.
+The server-side master switch is `[semantic_tokens] enable = false` in
+`.dmls.toml`; `wiki.enable = false` suppresses only the wiki tokens.
+
+Scope the rules to Markdown if a language-wide rule is too broad:
+
+```json
+{
+  "editor.semanticTokenColorCustomizations": {
+    "[Default Dark Modern]": {
+      "rules": { "*.directive": { "foreground": "#7d8590" } }
+    }
+  }
+}
+```
 
 ## Notes
 

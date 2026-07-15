@@ -46,14 +46,14 @@ pub(crate) use helpers::{generate_explicit_auth_helpers, generate_headers_init_f
 ///
 ///     pub fn new() -> Self {
 ///         Self {
-///             client: reqwest::Client::new(),
+///             client: reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).build().unwrap_or_else(|_| reqwest::Client::new()),
 ///             base_url: Self::BASE_URL.to_string(),
 ///         }
 ///     }
 ///
 ///     pub fn with_base_url(base_url: impl Into<String>) -> Self {
 ///         Self {
-///             client: reqwest::Client::new(),
+///             client: reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).build().unwrap_or_else(|_| reqwest::Client::new()),
 ///             base_url: base_url.into(),
 ///         }
 ///     }

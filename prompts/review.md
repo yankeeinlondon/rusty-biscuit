@@ -43,6 +43,15 @@ initialize:
         - action:
               - warn: "using the parameters passed in, we found no match for a review type!"
               - stop
+
+finalize:
+    stack:
+        - when: "(!area || area=='root') && spec && !file_exists(spec)"
+          action:
+            - warn: |-
+                    It looks like you ran this from the root of the monorepo and this prompt is most typically run from
+                    a package area. If you were in fact trying to run it on a root level specification file then make sure
+                    you have the right path or use shell completions to help you ensure that.
 ---
 
 You asked for a review but didn't pass in the right parameters to get proxied to

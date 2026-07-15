@@ -43,6 +43,50 @@ Per-platform release asset names (see the release recipe `just dist` in
 | Linux aarch64 | `dmls-<version>-linux-aarch64.tar.gz` |
 | Windows x86_64 | `dmls-<version>-windows-x86_64.zip` |
 
+## Semantic token styling
+
+`dmls` emits LSP semantic tokens that classify Darkmatter machinery so a theme
+can de-emphasize it: interpolations (`macro.interpolation`), directive keywords
+and closers (`macro.directive`, `macro.directive.closer`), and wiki-link frames
+(`macro.wiki`) read as muted machinery, while wiki inner text (`string.wiki`)
+reads link-like. Directive targets and option values are `string.directive`;
+option keys are `property.directive`.
+
+Zed keeps semantic tokens **disabled by default**; a user must opt in per
+language in `settings.json`:
+
+```json
+{
+  "languages": {
+    "Markdown": { "semantic_tokens": "combined" }
+  }
+}
+```
+
+Zed resolves semantic-token colors through the **active theme**, not through a
+language-server extension — this Markdown-launcher extension has no API to inject
+token colors (that would require registering a distinct `Darkmatter` language,
+deferred by design). The recommended defaults therefore ship here as a copyable
+theme override. Add to `settings.json` and adjust the palette to your theme
+(muted machinery vs. link-like wiki text):
+
+```json
+{
+  "experimental.theme_overrides": {
+    "syntax": {
+      "comment": { "color": "#7d8590" },
+      "link_uri": { "color": "#539bf5" }
+    }
+  }
+}
+```
+
+Zed maps the custom modifiers onto its highlight names; where a theme does not
+distinguish a Darkmatter modifier, the token falls back to its standard base
+type (`macro`, `string`, `property`) and still renders sensibly. The
+`interpolation` / `directive` / `closer` / `wiki` distinctions are the targeting
+surface a richer theme can address individually.
+
 ## Develop
 
 ```

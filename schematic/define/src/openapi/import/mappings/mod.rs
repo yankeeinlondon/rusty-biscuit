@@ -122,6 +122,7 @@ pub fn map_security_scheme(
         SecurityScheme::APIKey { location, name, .. } => match location {
             openapiv3::APIKeyLocation::Header => Ok(AuthStrategy::ApiKey {
                 header: name.clone(),
+                value_prefix: None,
             }),
             openapiv3::APIKeyLocation::Query => Ok(AuthStrategy::ApiKeyParam {
                 name: name.clone(),
@@ -285,7 +286,7 @@ mod tests {
 
         let result = map_security_scheme(&scheme, &mut Vec::new(), "#/test").unwrap();
         match result {
-            AuthStrategy::ApiKey { header } => {
+            AuthStrategy::ApiKey { header, .. } => {
                 assert_eq!(header, "X-API-Key");
             }
             _ => panic!("Expected ApiKey"),

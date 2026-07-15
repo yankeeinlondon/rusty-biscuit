@@ -18,7 +18,12 @@
 // directly to exercise the render-tree code path.
 #![allow(deprecated)]
 
-use biscuit_browser_harness::{BrowserHarness, ChromeHarness, require_browser, wrap_fragment};
+use biscuit_browser_harness::{
+    BrowserHarness, ChromeHarness, InputStep, KeyStroke, require_browser, wrap_fragment,
+};
+use darkmatter::mermaid::{
+    MERMAID_CDN_FALLBACK_ORIGIN, MERMAID_CDN_PRIMARY_ORIGIN, MERMAID_VERSION,
+};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::highlighting::{CodeBlockMode, ColorMode, ThemePair};
 use darkmatter::markdown::output::HtmlOptions;
@@ -382,6 +387,7 @@ fn render_tree_path_mermaid_html() -> String {
         .expect("browser tree render")
         .output
         .render()
+        .expect("browser tree render")
 }
 
 /// Review-4 finding 1: the browser Mermaid static-SVG promotion must be proven
@@ -1044,11 +1050,14 @@ fn rgb_luminance(value: &str) -> Option<f32> {
     Some((0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0)
 }
 
-/// Renders a fenced code block through `DarkmatterPage::render_to_browser` with
-/// a captured terminal `mode` (and optional `CodeBlockMode`), loads it in the
-/// browser, and returns the computed `(.code-block background-color, first
-/// .code-block span color)`. The `github` paired theme is pinned so the result
-/// is deterministic across hosts and unaffected by ambient `THEME` env.
+/// Renders a fenced code block through `DarkmatterPage::render_to_browser_document`
+/// with a captured terminal `mode` (and optional `CodeBlockMode`), loads it in
+/// the browser, and returns the computed `(.code-block background-color, first
+/// .code-block span color)`. The `.code-block` panel stylesheet lives in the
+/// document `<head>`, so this reads the full standalone document form (the
+/// body-only `render_to_browser` fragment omits it). The `github` paired theme
+/// is pinned so the result is deterministic across hosts and unaffected by
+/// ambient `THEME` env.
 async fn page_code_block_computed_styles(
     harness: &mut ChromeHarness,
     mode: ColorMode,
@@ -1064,8 +1073,9 @@ async fn page_code_block_computed_styles(
     if let Some(cbm) = code_block_mode {
         page = page.with_code_block_mode(cbm);
     }
-    let html = page.render_to_browser(&md).expect("render_to_browser");
-    let doc = wrap_fragment(&html, "#202020");
+    let doc = page
+        .render_to_browser_document(&md)
+        .expect("render_to_browser_document");
     harness.render_html(&doc).await.expect("render html");
 
     let bg = harness
@@ -1079,8 +1089,8 @@ async fn page_code_block_computed_styles(
     (bg, color)
 }
 
-/// Review-2 finding 2: `DarkmatterPage::render_to_browser` must resolve the
-/// code panel's theme variant against the *captured terminal mode* in a real
+/// Review-2 finding 2: `DarkmatterPage::render_to_browser_document` must resolve
+/// the code panel's theme variant against the *captured terminal mode* in a real
 /// browser. A dark terminal inverts (default) to a light panel and a light
 /// terminal to a dark panel; both the `.code-block` computed `background-color`
 /// and a representative syntax `<span>`'s computed `color` must follow that
@@ -1128,7 +1138,7 @@ async fn browser_page_code_block_theme_follows_captured_terminal_mode() {
 }
 
 /// Review-2 finding 2: `CodeBlockMode::Same` vs `Inverse` must be
-/// browser-observable through `DarkmatterPage::render_to_browser`. On a dark
+/// browser-observable through `DarkmatterPage::render_to_browser_document`. On a dark
 /// page, `Inverse` (default) computes a light panel while `Same` keeps a dark
 /// panel, so the `.code-block` computed `background-color` must differ and
 /// `Inverse` must be the lighter of the two.
@@ -1166,6 +1176,184 @@ async fn browser_page_code_block_mode_same_vs_inverse_computes() {
         "Inverse and Same must compute different code-panel backgrounds",
     );
     harness.shutdown().await;
+}
+
+/// The body-only contract of `DarkmatterPage::render_to_browser`, observed in a
+/// live DOM: a feature-free, undecorated fragment embedded in a host document
+/// introduces no nested document scaffold. The host keeps exactly one
+/// `<html>`/`<head>`/`<body>`, no stray `<style>` from a leaked document
+/// `<head>` reaches the DOM, and the rendered Markdown heading rides the host
+/// body. A regression that returned a full `<!DOCTYPE html>` document here would
+/// splice a second `<head>`/`<style>` into the page, which this probe catches.
+/// The standalone-document form is `render_to_browser_document`'s job and is
+/// pinned separately.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_feature_free_fragment_has_no_nested_document_scaffold() {
+    if !require_browser() {
+        return;
+    }
+    use biscuit_terminal::terminal::Terminal;
+    use darkmatter::layout::DarkmatterPage;
+
+    let md: Markdown = "# Heading One\n\nBody text.\n".into();
+    let term = Terminal::new_optimistic(80);
+    let fragment = DarkmatterPage::new(&term)
+        .render_to_browser(&md)
+        .expect("render_to_browser");
+    let doc = wrap_fragment(&fragment, "#ffffff");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let probe = "(() => {\
+        const htmls = document.getElementsByTagName('html').length;\
+        const heads = document.getElementsByTagName('head').length;\
+        const bodies = document.getElementsByTagName('body').length;\
+        const styles = document.querySelectorAll('style').length;\
+        const h1 = document.querySelector('h1');\
+        return `htmls=${htmls};heads=${heads};bodies=${bodies};styles=${styles};heading=${h1 ? h1.textContent : ''}`;\
+    })()";
+    let result = harness.evaluate(probe).await.expect("evaluate scaffold probe");
+    harness.shutdown().await;
+
+    assert!(!result.starts_with("err="), "scaffold probe failed: {result}");
+    let kv = parse_kv(&result);
+    assert_eq!(
+        kv.get("htmls").map(String::as_str),
+        Some("1"),
+        "exactly one <html> in the host DOM; got {result}",
+    );
+    assert_eq!(
+        kv.get("heads").map(String::as_str),
+        Some("1"),
+        "exactly one <head>; got {result}",
+    );
+    assert_eq!(
+        kv.get("bodies").map(String::as_str),
+        Some("1"),
+        "exactly one <body>; got {result}",
+    );
+    assert_eq!(
+        kv.get("styles").map(String::as_str),
+        Some("0"),
+        "a body-only fragment leaks no document <style> into the DOM; got {result}",
+    );
+    assert_eq!(
+        kv.get("heading").map(String::as_str),
+        Some("Heading One"),
+        "the rendered heading rides the host body; got {result}",
+    );
+}
+
+/// The standalone-document contract of `DarkmatterPage::render_to_browser_document`
+/// for a decorated, feature-bearing page, observed in a live DOM: page metadata,
+/// feature styles, and feature scripts are children of `document.head`, while the
+/// `.darkmatter-page` frame (and the rendered content it wraps) is a child of
+/// `document.body`. This is the head-fix regression guard — before it, the
+/// decorated path emitted an empty `<head></head>` and buried the metadata /
+/// styles / scripts inside the body wrapper. The document is loaded directly
+/// (not `wrap_fragment`) because it is already a complete `<!DOCTYPE html>`
+/// document.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_decorated_standalone_document_head_body_placement() {
+    if !require_browser() {
+        return;
+    }
+    use biscuit_terminal::terminal::Terminal;
+    use darkmatter::layout::DarkmatterPage;
+    use darkmatter::style::bespoke::{MetaTag, PageMeta};
+
+    // Mermaid (a head `<script type="module">` feature) + a prompted link (the
+    // Popover CSS feature) + a page `<meta>` + page margins — a decorated,
+    // feature-bearing page that exercises every head slot.
+    let md: Markdown = concat!(
+        "```mermaid\ngraph TD; A --> B\n```\n\n",
+        "[Home](https://example.com \"prompt='go home'\")\n",
+    )
+    .into();
+    let term = Terminal::new_optimistic(80);
+    let doc = DarkmatterPage::new(&term)
+        .with_margin(2)
+        .with_page_meta(PageMeta {
+            tags: vec![MetaTag::Name {
+                name: "author".into(),
+                content: "Ken".into(),
+            }],
+        })
+        .render_to_browser_document(&md)
+        .expect("render_to_browser_document");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let probe = "(() => {\
+        const dp = document.querySelector('.darkmatter-page');\
+        if (!dp) return 'err=no-darkmatter-page';\
+        const dpParent = dp.parentElement ? dp.parentElement.tagName : 'none';\
+        const headModuleScripts = document.head.querySelectorAll('script[type=\"module\"]').length;\
+        const bodyScripts = document.body.querySelectorAll('script').length;\
+        const headMeta = document.head.querySelectorAll('meta[name=\"author\"]').length;\
+        const bodyMeta = document.body.querySelectorAll('meta').length;\
+        const headPopover = [...document.head.querySelectorAll('style')].some(s => s.textContent.includes('.dm-popover-wrapper{')) ? 1 : 0;\
+        const bodyStyles = document.body.querySelectorAll('style').length;\
+        const mermaidInBody = dp.querySelector('pre.mermaid') ? 1 : 0;\
+        const popoverInBody = dp.querySelector('.dm-popover-wrapper') ? 1 : 0;\
+        return `dpParent=${dpParent};headModuleScripts=${headModuleScripts};bodyScripts=${bodyScripts};headMeta=${headMeta};bodyMeta=${bodyMeta};headPopover=${headPopover};bodyStyles=${bodyStyles};mermaidInBody=${mermaidInBody};popoverInBody=${popoverInBody}`;\
+    })()";
+    let result = harness.evaluate(probe).await.expect("evaluate placement probe");
+    harness.shutdown().await;
+
+    assert!(!result.starts_with("err="), "placement probe failed: {result}");
+    let kv = parse_kv(&result);
+    assert_eq!(
+        kv.get("dpParent").map(String::as_str),
+        Some("BODY"),
+        "the .darkmatter-page frame is a direct child of <body>; got {result}",
+    );
+    assert_eq!(
+        kv.get("headModuleScripts").map(String::as_str),
+        Some("1"),
+        "the Mermaid ESM bootstrap is a child of <head>; got {result}",
+    );
+    assert_eq!(
+        kv.get("bodyScripts").map(String::as_str),
+        Some("0"),
+        "no feature <script> lives in <body>; got {result}",
+    );
+    assert_eq!(
+        kv.get("headMeta").map(String::as_str),
+        Some("1"),
+        "the page <meta name=author> is a child of <head>; got {result}",
+    );
+    assert_eq!(
+        kv.get("bodyMeta").map(String::as_str),
+        Some("0"),
+        "no <meta> lives in <body>; got {result}",
+    );
+    assert_eq!(
+        kv.get("headPopover").map(String::as_str),
+        Some("1"),
+        "the Popover CSS <style> is a child of <head>; got {result}",
+    );
+    assert_eq!(
+        kv.get("bodyStyles").map(String::as_str),
+        Some("0"),
+        "no feature/design-token <style> lives in <body>; got {result}",
+    );
+    assert_eq!(
+        kv.get("mermaidInBody").map(String::as_str),
+        Some("1"),
+        "the rendered Mermaid container rides the body frame; got {result}",
+    );
+    assert_eq!(
+        kv.get("popoverInBody").map(String::as_str),
+        Some("1"),
+        "the rendered popover markup rides the body frame; got {result}",
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1320,4 +1508,1221 @@ async fn browser_nested_disclosure_toggles_independently() {
     );
 
     harness.shutdown().await;
+}
+
+/// Phase 4 (Popover): a prompted link's CSS-only enhancement must actually work
+/// in a real browser. Proven against computed styles / live focus rather than
+/// HTML-source substrings:
+///
+/// - the prompt's computed `display` is `block` — our author rule overrides the
+///   popover-supporting UA `[popover]{display:none}` rule, so the `:hover` /
+///   `:focus-within` fallback is never defeated (the key cross-browser point);
+/// - the prompt is `visibility:hidden` by default and becomes `visible` when the
+///   anchor is keyboard-focused (`:focus-within` — keyboard reachable, no JS);
+/// - the anchor keeps its real `href` and the `aria-describedby` association
+///   names the prompt element's `id`.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_prompted_link_popover_reveals_on_focus() {
+    if !require_browser() {
+        return;
+    }
+
+    let md: Markdown =
+        "[Click](https://example.com \"prompt='Extra detail'\")\n".into();
+    let doc = md.as_html(HtmlOptions::default()).expect("as_html");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    // Everything runs in one page load: fresh `page()` calls do not share focus
+    // state, so the focus + re-query must happen inside a single evaluate.
+    let probe = "(() => {\
+        const p = document.querySelector('.dm-popover-prompt');\
+        const a = document.querySelector('.dm-popover-wrapper a');\
+        if (!p || !a) return 'err=missing';\
+        const cs = getComputedStyle(p);\
+        const display = cs.display;\
+        const visDefault = cs.visibility;\
+        a.focus();\
+        const visFocus = getComputedStyle(p).visibility;\
+        return `display=${display};visDefault=${visDefault};visFocus=${visFocus};` +\
+            `href=${a.getAttribute('href')};describedby=${a.getAttribute('aria-describedby')};promptId=${p.id}`;\
+    })()";
+    let result = harness.evaluate(probe).await.expect("evaluate popover probe");
+    assert!(!result.starts_with("err="), "popover DOM probe failed: {result}");
+    let kv = parse_kv(&result);
+
+    assert_eq!(
+        kv.get("display").map(String::as_str),
+        Some("block"),
+        "the prompt must override the UA [popover] display:none; got {result}",
+    );
+    assert_eq!(
+        kv.get("visDefault").map(String::as_str),
+        Some("hidden"),
+        "the prompt must be hidden by default; got {result}",
+    );
+    assert_eq!(
+        kv.get("visFocus").map(String::as_str),
+        Some("visible"),
+        "keyboard focus must reveal the prompt via :focus-within; got {result}",
+    );
+    assert_eq!(
+        kv.get("href").map(String::as_str),
+        Some("https://example.com"),
+        "the anchor must keep its real href; got {result}",
+    );
+    assert_eq!(
+        kv.get("describedby"),
+        kv.get("promptId"),
+        "aria-describedby must name the prompt element id; got {result}",
+    );
+
+    harness.shutdown().await;
+}
+
+/// The single-quoted popover fixture (`prompt='…'` title). `{PROMPT}` is
+/// substituted so a test can supply a short or a deliberately long prompt.
+fn popover_doc(prompt: &str) -> Markdown {
+    format!("[Click](https://example.com \"prompt='{prompt}'\")\n").into()
+}
+
+/// A JS snippet that moves the popover wrapper into a `position:fixed` box
+/// pinned to `{EDGE}` (`right`/`left`), focuses the anchor to reveal the
+/// prompt, forces layout, and reports the prompt's viewport-space geometry.
+/// Placing the trigger hard against a viewport edge is what exposes the
+/// right-edge overflow the CSS fix addresses.
+fn edge_geometry_probe(edge: &str) -> String {
+    format!(
+        "(() => {{\
+            const w = document.querySelector('.dm-popover-wrapper');\
+            const a = w && w.querySelector('a');\
+            const p = document.querySelector('.dm-popover-prompt');\
+            if (!w || !a || !p) return 'err=missing';\
+            const box = document.createElement('div');\
+            box.style.cssText = 'position:fixed;top:2px;margin:0;{edge}:2px';\
+            w.parentNode.insertBefore(box, w);\
+            box.appendChild(w);\
+            a.focus();\
+            void p.getBoundingClientRect();\
+            const r = p.getBoundingClientRect();\
+            const supports = CSS.supports('position-try-fallbacks', 'flip-inline');\
+            return `left=${{r.left}};right=${{r.right}};width=${{r.width}};`+\
+                `iw=${{window.innerWidth}};supports=${{supports}}`;\
+        }})()"
+    )
+}
+
+/// Review-1 finding (High): the popover's `left:0; width:max-content` rule
+/// overflows the viewport when the trigger sits near the RIGHT edge. This
+/// validates the CSS fix — with the trigger pinned 2px from the right edge and
+/// the prompt revealed, the prompt's bounding box must stay on-screen
+/// (`right <= innerWidth`). CSS anchor positioning (`flip-inline`) is what keeps
+/// it on-screen; the probe reports `supports` so a regression that loses anchor
+/// positioning is legible in the failure message.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_popover_stays_within_viewport_right_edge() {
+    if !require_browser() {
+        return;
+    }
+    let doc = popover_doc("Extra detail").as_html(HtmlOptions::default()).expect("as_html");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let result = harness
+        .evaluate(&edge_geometry_probe("right"))
+        .await
+        .expect("evaluate right-edge probe");
+    assert!(!result.starts_with("err="), "right-edge probe failed: {result}");
+    let kv = parse_kv(&result);
+    let right: f64 = kv["right"].parse().expect("right is a number");
+    let iw: f64 = kv["iw"].parse().expect("iw is a number");
+    assert_eq!(kv.get("supports").map(String::as_str), Some("true"), "anchor positioning must be active: {result}");
+    assert!(
+        right <= iw + 0.5,
+        "popover near the right edge must stay on-screen: right={right} > innerWidth={iw} ({result})",
+    );
+
+    harness.shutdown().await;
+}
+
+/// The mirror of the right-edge test: with the trigger pinned to the LEFT edge
+/// the prompt must not spill off the left (`left >= 0`) and must still fit
+/// (`right <= innerWidth`).
+#[tokio::test]
+#[serial(browser)]
+async fn browser_popover_stays_within_viewport_left_edge() {
+    if !require_browser() {
+        return;
+    }
+    let doc = popover_doc("Extra detail").as_html(HtmlOptions::default()).expect("as_html");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let result = harness
+        .evaluate(&edge_geometry_probe("left"))
+        .await
+        .expect("evaluate left-edge probe");
+    assert!(!result.starts_with("err="), "left-edge probe failed: {result}");
+    let kv = parse_kv(&result);
+    let left: f64 = kv["left"].parse().expect("left is a number");
+    let right: f64 = kv["right"].parse().expect("right is a number");
+    let iw: f64 = kv["iw"].parse().expect("iw is a number");
+    assert!(left >= -0.5, "popover near the left edge must not spill left: left={left} ({result})");
+    assert!(right <= iw + 0.5, "popover near the left edge must stay on-screen: right={right} > iw={iw} ({result})");
+
+    harness.shutdown().await;
+}
+
+/// A long prompt must WRAP inside the capped `max-width` panel rather than
+/// overflow it or the viewport. Asserts the panel is no wider than the 20rem
+/// cap, has no horizontal overflow, wraps onto multiple lines, and stays
+/// on-screen.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_popover_long_prompt_wraps_within_viewport() {
+    if !require_browser() {
+        return;
+    }
+    let long = "This is a deliberately long prompt that must wrap onto several lines \
+                instead of overflowing the popover panel or spilling past the right edge \
+                of the viewport when rendered in a real browser window.";
+    let doc = popover_doc(long).as_html(HtmlOptions::default()).expect("as_html");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let probe = "(() => {\
+        const a = document.querySelector('.dm-popover-wrapper a');\
+        const p = document.querySelector('.dm-popover-prompt');\
+        if (!a || !p) return 'err=missing';\
+        a.focus();\
+        void p.getBoundingClientRect();\
+        const r = p.getBoundingClientRect();\
+        const lh = parseFloat(getComputedStyle(p).lineHeight) || 16;\
+        const lines = Math.round(p.scrollHeight / lh);\
+        return `width=${r.width};right=${r.right};iw=${window.innerWidth};`+\
+            `overflow=${p.scrollWidth - p.clientWidth};lines=${lines}`;\
+    })()";
+    let result = harness.evaluate(probe).await.expect("evaluate long-prompt probe");
+    assert!(!result.starts_with("err="), "long-prompt probe failed: {result}");
+    let kv = parse_kv(&result);
+    let width: f64 = kv["width"].parse().expect("width is a number");
+    let right: f64 = kv["right"].parse().expect("right is a number");
+    let iw: f64 = kv["iw"].parse().expect("iw is a number");
+    let overflow: f64 = kv["overflow"].parse().expect("overflow is a number");
+    let lines: i64 = kv["lines"].parse().expect("lines is a number");
+    // 20rem == 320px content cap; the border-box adds padding (.5rem each side)
+    // + 1px border, so ~338px. The point is that the cap engaged — far below the
+    // ~1100px an unwrapped single line would need.
+    assert!(width <= 340.5, "panel must not exceed the 20rem cap plus box model: width={width} ({result})");
+    assert!(right <= iw + 0.5, "wrapped panel must stay on-screen: right={right} > iw={iw} ({result})");
+    assert!(overflow <= 1.0, "prompt text must wrap, not overflow horizontally: overflow={overflow} ({result})");
+    assert!(lines >= 2, "a long prompt must wrap onto multiple lines: lines={lines} ({result})");
+
+    harness.shutdown().await;
+}
+
+/// Token-less embeds track the OS theme: with no page-level `--color-*` tokens
+/// defined, the popover's fallback colors must differ between an emulated dark
+/// and light `prefers-color-scheme`. Proven through CDP media emulation on a
+/// single page (`evaluate_with_media`), which the per-call fresh-page
+/// `evaluate` cannot express.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_popover_color_modes_differ() {
+    if !require_browser() {
+        return;
+    }
+    let doc = popover_doc("Extra detail").as_html(HtmlOptions::default()).expect("as_html");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let probe = "(() => {\
+        const p = document.querySelector('.dm-popover-prompt');\
+        if (!p) return 'err=missing';\
+        const cs = getComputedStyle(p);\
+        return `bg=${cs.backgroundColor};fg=${cs.color}`;\
+    })()";
+    let dark = harness
+        .evaluate_with_media(&[("prefers-color-scheme", "dark")], probe)
+        .await
+        .expect("evaluate dark");
+    let light = harness
+        .evaluate_with_media(&[("prefers-color-scheme", "light")], probe)
+        .await
+        .expect("evaluate light");
+    assert!(!dark.starts_with("err="), "dark probe failed: {dark}");
+    assert!(!light.starts_with("err="), "light probe failed: {light}");
+    assert_ne!(dark, light, "dark and light popover colors must differ (dark={dark}, light={light})");
+
+    harness.shutdown().await;
+}
+
+/// `prefers-reduced-motion: reduce` must suppress the popover's opacity
+/// transition. Under emulation the computed `transition-duration` collapses to
+/// `0s`, while the default retains a non-zero duration.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_popover_reduced_motion_suppresses_transition() {
+    if !require_browser() {
+        return;
+    }
+    let doc = popover_doc("Extra detail").as_html(HtmlOptions::default()).expect("as_html");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let probe = "(() => {\
+        const p = document.querySelector('.dm-popover-prompt');\
+        if (!p) return 'err=missing';\
+        return getComputedStyle(p).transitionDuration;\
+    })()";
+    let reduced = harness
+        .evaluate_with_media(&[("prefers-reduced-motion", "reduce")], probe)
+        .await
+        .expect("evaluate reduced");
+    let normal = harness
+        .evaluate_with_media(&[("prefers-reduced-motion", "no-preference")], probe)
+        .await
+        .expect("evaluate normal");
+    assert_eq!(reduced, "0s", "reduced motion must suppress the transition, got {reduced}");
+    assert_ne!(normal, "0s", "the default keeps a non-zero transition, got {normal}");
+
+    harness.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// Browser-tier popover interaction tests (real CDP keyboard/pointer input).
+//
+// Review-1 finding (High): the existing popover coverage calls `a.focus()` from
+// JS, which proves the CSS result but not that the *user actions* work. These
+// tests drive Tab / Shift-Tab / Enter and pointer hover through headless
+// Chromium's real input pipeline — CDP `Input.dispatch{Key,Mouse}Event` via the
+// harness's `drive` — which exercises Chromium's own focus traversal and
+// default-action handling.
+//
+// CDP input is injected directly into the renderer and never enters the host OS
+// input path. These therefore use the same Browser-tier gate as every other
+// `browser_*` test in this file (`if !require_browser() { return; }`) and remain
+// headless, isolated from the developer's windows, keyboard focus, and pointer.
+// ---------------------------------------------------------------------------
+
+/// Tab must move focus to the anchor (keyboard reachability) and that focus
+/// must reveal the prompt via `:focus-within` — the user action the old
+/// `a.focus()` shortcut never exercised.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_popover_tab_reaches_anchor() {
+    if !require_browser() {
+        return;
+    }
+    let doc = popover_doc("Extra detail").as_html(HtmlOptions::default()).expect("as_html");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let result = harness
+        .drive(&[
+            InputStep::Key(KeyStroke::TAB),
+            InputStep::Eval(
+                "(() => {\
+                    const a = document.querySelector('.dm-popover-wrapper a');\
+                    const p = document.querySelector('.dm-popover-prompt');\
+                    return `active=${document.activeElement === a};`+\
+                        `vis=${getComputedStyle(p).visibility}`;\
+                })()",
+            ),
+        ])
+        .await
+        .expect("drive tab probe");
+    let kv = parse_kv(&result);
+    assert_eq!(kv.get("active").map(String::as_str), Some("true"), "Tab must focus the anchor: {result}");
+    assert_eq!(kv.get("vis").map(String::as_str), Some("visible"), "focusing the anchor must reveal the prompt: {result}");
+
+    harness.shutdown().await;
+}
+
+/// Shift+Tab must move focus AWAY from the anchor, and losing focus must
+/// re-hide the prompt.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_popover_shift_tab_leaves_anchor() {
+    if !require_browser() {
+        return;
+    }
+    let doc = popover_doc("Extra detail").as_html(HtmlOptions::default()).expect("as_html");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let result = harness
+        .drive(&[
+            InputStep::Key(KeyStroke::TAB),
+            InputStep::Key(KeyStroke::SHIFT_TAB),
+            InputStep::Eval(
+                "(() => {\
+                    const a = document.querySelector('.dm-popover-wrapper a');\
+                    const p = document.querySelector('.dm-popover-prompt');\
+                    return `active=${document.activeElement === a};`+\
+                        `vis=${getComputedStyle(p).visibility}`;\
+                })()",
+            ),
+        ])
+        .await
+        .expect("drive shift-tab probe");
+    let kv = parse_kv(&result);
+    assert_eq!(kv.get("active").map(String::as_str), Some("false"), "Shift+Tab must move focus off the anchor: {result}");
+    assert_eq!(kv.get("vis").map(String::as_str), Some("hidden"), "losing focus must re-hide the prompt: {result}");
+
+    harness.shutdown().await;
+}
+
+/// Enter on the focused anchor must trigger ordinary link activation with the
+/// real `href` preserved (the popover enhancement must not swallow navigation).
+/// A capturing click listener records the resolved href and prevents an actual
+/// (network) navigation.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_popover_enter_activates_link() {
+    if !require_browser() {
+        return;
+    }
+    let doc = popover_doc("Extra detail").as_html(HtmlOptions::default()).expect("as_html");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let result = harness
+        .drive(&[
+            InputStep::Eval(
+                "(() => {\
+                    const a = document.querySelector('.dm-popover-wrapper a');\
+                    a.addEventListener('click', (e) => { e.preventDefault(); window.__nav = a.href; });\
+                    return 'ready';\
+                })()",
+            ),
+            InputStep::Key(KeyStroke::TAB),
+            InputStep::Key(KeyStroke::ENTER),
+            InputStep::Eval("(() => `nav=${window.__nav || ''}`)()"),
+        ])
+        .await
+        .expect("drive enter probe");
+    let kv = parse_kv(&result);
+    assert_eq!(
+        kv.get("nav").map(String::as_str),
+        Some("https://example.com/"),
+        "Enter must activate the link with its real href: {result}",
+    );
+
+    harness.shutdown().await;
+}
+
+/// Pointer hover over the anchor must reveal the prompt via `:hover` — driven
+/// by a real CDP `mouseMoved`, not a synthetic JS event.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_popover_pointer_hover_reveals_prompt() {
+    if !require_browser() {
+        return;
+    }
+    let doc = popover_doc("Extra detail").as_html(HtmlOptions::default()).expect("as_html");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let result = harness
+        .drive(&[
+            InputStep::Eval(
+                "(() => { window.__before = getComputedStyle(\
+                    document.querySelector('.dm-popover-prompt')).visibility; return 'ready'; })()",
+            ),
+            InputStep::Hover(".dm-popover-wrapper a"),
+            InputStep::Eval(
+                "(() => `before=${window.__before};after=${getComputedStyle(\
+                    document.querySelector('.dm-popover-prompt')).visibility}`)()",
+            ),
+        ])
+        .await
+        .expect("drive hover probe");
+    let kv = parse_kv(&result);
+    assert_eq!(kv.get("before").map(String::as_str), Some("hidden"), "prompt must start hidden: {result}");
+    assert_eq!(kv.get("after").map(String::as_str), Some("visible"), "pointer hover must reveal the prompt: {result}");
+
+    harness.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// Review-1 finding (High): interactive Mermaid and body placement had no
+// real-browser verification. `full_page_..._mermaid_defaults_to_interactive`
+// (in `style_features_baseline.rs`) is a synchronous L1 string test that never
+// launches Chrome and only proves the emitted *markup* — it cannot observe
+// Mermaid load the module, replace the `<pre>` source with an SVG, fall back
+// from the primary CDN to the fallback, leave readable source when both fail,
+// dedup two blocks in the live DOM, place the body wrapper, or apply the theme.
+//
+// These Browser-tier tests exercise all six through a real headless Chromium.
+// They stay NETWORK-FREE without touching production output: the rendered
+// fragment already emits `import('https://cdn.jsdelivr.net/…mermaid@<VER>…')`
+// with an unpkg fallback, so the page is wrapped in a shell whose
+// `<script type="importmap">` maps those two *exact* absolute URLs to local
+// `data:text/javascript` stub ES modules. The bootstrap's dynamic imports then
+// resolve to the stubs — no CDN request is ever made. A head-level classic
+// script captures `console.error` so the total-failure path is observable.
+//
+// Stub-module contract (matches the bootstrap in `darkmatter/lib/src/mermaid/
+// feature.rs`): the module's *default export* is a `mermaid` object with
+// `initialize(config)` — which records `config.theme`/`config.themeVariables`
+// on `window` — and `run({ querySelector })` — which replaces each matched
+// `.mermaid` element's content with an `<svg>`. A "throwing" stub throws at
+// module-evaluation time so the corresponding `import()` rejects.
+// ---------------------------------------------------------------------------
+
+/// One Mermaid fence — the single-diagram fixture.
+const MERMAID_ONE_DOC: &str = "```mermaid\ngraph TD; A --> B\n```\n";
+
+/// Two Mermaid fences in one document — the dedup fixture (one bootstrap must
+/// run; both diagrams must render).
+const MERMAID_TWO_DOC: &str =
+    "```mermaid\ngraph TD; A --> B\n```\n\n```mermaid\nsequenceDiagram\n  A->>B: hi\n```\n";
+
+/// A working Mermaid stub module. `__SOURCE__` is replaced with a label
+/// (`PRIMARY`/`FALLBACK`) so a test can prove *which* CDN specifier served the
+/// render. `initialize` records the theme inputs; `run` swaps each `.mermaid`
+/// element's content for an `<svg>` colored from the received `background`.
+const WORKING_STUB_TEMPLATE: &str = r#"
+const mermaid = {
+  initialize(cfg) {
+    window.__dmInit = (window.__dmInit || 0) + 1;
+    window.__dmTheme = cfg.theme;
+    window.__dmVars = cfg.themeVariables || {};
+    window.__dmSource = '__SOURCE__';
+  },
+  run(opts) {
+    window.__dmRun = (window.__dmRun || 0) + 1;
+    const els = document.querySelectorAll(opts.querySelector);
+    window.__dmRunEls = els.length;
+    const bg = (window.__dmVars && window.__dmVars.background) || '#000000';
+    els.forEach(function (el) {
+      el.setAttribute('data-processed', 'true');
+      el.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" data-stub="1"><rect width="10" height="10" fill="' + bg + '"></rect></svg>';
+    });
+    return Promise.resolve();
+  }
+};
+export default mermaid;
+"#;
+
+/// A stub that throws at module-evaluation time, so `import()` of it rejects —
+/// standing in for a blocked/failed CDN fetch.
+const THROWING_STUB: &str = "throw new Error('darkmatter-test: mermaid stub import failure');";
+
+/// A live-DOM probe run inside a single page load. It waits (bounded) for the
+/// Mermaid bootstrap's async work to settle — either an SVG appears or a
+/// `console.error` is captured — then reports the observable outcome as a
+/// `key=value;…` payload (parsed by [`parse_kv`]). No asserted field contains a
+/// `;`/`=`, so the diagram source is reported only as the boolean `hasSource`.
+const MERMAID_DOM_PROBE: &str = r#"(async () => {
+  const deadline = Date.now() + 4000;
+  const first = document.querySelector('.mermaid');
+  if (!first) return 'mermaid=0;svg=0';
+  while (Date.now() < deadline
+      && !document.querySelector('.mermaid svg')
+      && (window.__dmConsoleErrors || []).length === 0) {
+    await new Promise(function (r) { setTimeout(r, 25); });
+  }
+  const mermaid = document.querySelectorAll('.mermaid').length;
+  const svg = document.querySelectorAll('.mermaid svg').length;
+  const scripts = document.querySelectorAll('script[type="module"]').length;
+  const errs = (window.__dmConsoleErrors || []).length;
+  const source = window.__dmSource || '';
+  const vars = window.__dmVars || {};
+  const bg = vars.background || '';
+  const hasSource = (first.textContent || '').indexOf('graph TD') >= 0;
+  return 'mermaid=' + mermaid + ';svg=' + svg + ';init=' + (window.__dmInit || 0)
+    + ';run=' + (window.__dmRun || 0) + ';runEls=' + (window.__dmRunEls || 0)
+    + ';source=' + source + ';scripts=' + scripts + ';errs=' + errs
+    + ';bg=' + bg + ';hasSource=' + hasSource;
+})()"#;
+
+/// A synchronous probe for the body-only wrapper placement: reports the
+/// `.darkmatter-page` element's parent tag and how many nested document
+/// elements (`html`/`head`/`body`) it wrongly contains.
+const MERMAID_WRAPPER_PROBE: &str = r#"(() => {
+  const page = document.querySelector('.darkmatter-page');
+  if (!page) return 'parent=MISSING;nested=0';
+  const parent = page.parentElement ? page.parentElement.tagName : 'NULL';
+  const nested = page.querySelectorAll('html, head, body').length;
+  return 'parent=' + parent + ';nested=' + nested;
+})()"#;
+
+/// Percent-encodes `source` into a `data:text/javascript` URL usable as an
+/// import-map target. Everything outside the URL "unreserved" set is
+/// `%`-escaped, so the result is a valid URL and safe to embed verbatim in the
+/// import map's JSON (no `"`/`\` survive to break the string).
+fn data_module(source: &str) -> String {
+    let mut out = String::from("data:text/javascript,");
+    for byte in source.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char);
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+/// Builds a working Mermaid stub module labeled with its serving CDN.
+fn working_mermaid_stub(source_label: &str) -> String {
+    WORKING_STUB_TEMPLATE.replace("__SOURCE__", source_label)
+}
+
+/// Renders a Mermaid document through `DarkmatterPage::render_to_browser` at a
+/// captured terminal color mode, returning the body-only wrapper fragment (the
+/// interactive default: a `.darkmatter-page` div carrying the injected bootstrap
+/// `<script type="module">` and the `<pre class="mermaid">` body).
+fn mermaid_body_fragment(color_mode: ColorMode, doc: &str) -> String {
+    use biscuit_terminal::terminal::Terminal;
+    use darkmatter::layout::DarkmatterPage;
+
+    let mut term = Terminal::new_optimistic(80);
+    term.color_mode = color_mode;
+    let page = DarkmatterPage::new(&term);
+    let md = Markdown::try_from_content(doc).expect("parse mermaid doc");
+    page.render_to_browser(&md).expect("render_to_browser")
+}
+
+/// Wraps a rendered Mermaid `fragment` in a standalone document that redirects
+/// the bootstrap's two exact CDN imports to local stub modules via an import
+/// map, keeping the whole test network-free. The `primary_module` /
+/// `fallback_module` sources become `data:` URL ES modules mapped to the
+/// jsDelivr and unpkg specifiers the bootstrap imports. A head-level classic
+/// script captures `console.error` into `window.__dmConsoleErrors` before the
+/// deferred module bootstrap can run.
+fn wrap_mermaid_stub_page(
+    fragment: &str,
+    primary_module: &str,
+    fallback_module: &str,
+) -> String {
+    // Must byte-match the specifiers emitted by `mermaid_bootstrap` in
+    // `darkmatter/lib/src/mermaid/feature.rs`; an import-map URL key only
+    // redirects an exactly-equal `import()` specifier.
+    let primary_url =
+        format!("{MERMAID_CDN_PRIMARY_ORIGIN}/npm/mermaid@{MERMAID_VERSION}/dist/mermaid.esm.min.mjs");
+    let fallback_url =
+        format!("{MERMAID_CDN_FALLBACK_ORIGIN}/mermaid@{MERMAID_VERSION}/dist/mermaid.esm.min.mjs");
+    let primary_data = data_module(primary_module);
+    let fallback_data = data_module(fallback_module);
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\">\
+<script>window.__dmConsoleErrors=[];var __e=console.error.bind(console);\
+console.error=function(){{window.__dmConsoleErrors.push(\
+Array.prototype.map.call(arguments,String).join(' '));__e.apply(console,arguments);}};</script>\
+<script type=\"importmap\">{{\"imports\":{{\
+\"{primary_url}\":\"{primary_data}\",\
+\"{fallback_url}\":\"{fallback_data}\"}}}}</script>\
+</head><body style=\"margin:0;background:#fff;\">{fragment}</body></html>"
+    )
+}
+
+/// (1) Successful interactive rendering: the bootstrap loads the (stubbed)
+/// primary Mermaid module and `run` replaces the `<pre class="mermaid">` source
+/// with a live `<svg>` in the DOM — `initialize`/`run` each fire once and no
+/// `console.error` is emitted. This is the load-and-render path the L1 string
+/// test can never observe.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_mermaid_interactive_renders_svg_in_live_dom() {
+    if !require_browser() {
+        return;
+    }
+
+    let fragment = mermaid_body_fragment(ColorMode::Dark, MERMAID_ONE_DOC);
+    let doc = wrap_mermaid_stub_page(
+        &fragment,
+        &working_mermaid_stub("PRIMARY"),
+        &working_mermaid_stub("PRIMARY"),
+    );
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+    let result = harness.evaluate(MERMAID_DOM_PROBE).await.expect("mermaid probe");
+    harness.shutdown().await;
+
+    let kv = parse_kv(&result);
+    assert_eq!(
+        kv.get("svg").map(String::as_str),
+        Some("1"),
+        "Mermaid must replace the <pre class=\"mermaid\"> source with one live SVG; got {result}",
+    );
+    assert_eq!(
+        kv.get("init").map(String::as_str),
+        Some("1"),
+        "mermaid.initialize must run exactly once; got {result}",
+    );
+    assert_eq!(
+        kv.get("run").map(String::as_str),
+        Some("1"),
+        "mermaid.run must run exactly once; got {result}",
+    );
+    assert_eq!(
+        kv.get("source").map(String::as_str),
+        Some("PRIMARY"),
+        "the primary (jsDelivr) specifier must serve the render; got {result}",
+    );
+    assert_eq!(
+        kv.get("errs").map(String::as_str),
+        Some("0"),
+        "no console.error may be emitted on success; got {result}",
+    );
+}
+
+/// (2) Primary failure + fallback success: the jsDelivr import throws, the
+/// unpkg import succeeds, and the diagram still renders — proving the
+/// try/catch fallback in the bootstrap actually works at runtime. The recorded
+/// `source=FALLBACK` shows the second specifier served it, and no total-failure
+/// `console.error` is emitted.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_mermaid_primary_failure_falls_back_to_unpkg() {
+    if !require_browser() {
+        return;
+    }
+
+    let fragment = mermaid_body_fragment(ColorMode::Dark, MERMAID_ONE_DOC);
+    let doc = wrap_mermaid_stub_page(
+        &fragment,
+        THROWING_STUB,
+        &working_mermaid_stub("FALLBACK"),
+    );
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+    let result = harness.evaluate(MERMAID_DOM_PROBE).await.expect("mermaid probe");
+    harness.shutdown().await;
+
+    let kv = parse_kv(&result);
+    assert_eq!(
+        kv.get("svg").map(String::as_str),
+        Some("1"),
+        "the diagram must still render after the primary import fails; got {result}",
+    );
+    assert_eq!(
+        kv.get("source").map(String::as_str),
+        Some("FALLBACK"),
+        "the fallback (unpkg) specifier must serve the render; got {result}",
+    );
+    assert_eq!(
+        kv.get("errs").map(String::as_str),
+        Some("0"),
+        "a recovered fallback must not emit the total-failure console.error; got {result}",
+    );
+}
+
+/// (3) Total failure with readable source: both imports throw, so no SVG is
+/// produced, the escaped diagram source stays visible in the `<pre>`, and the
+/// bootstrap emits its single `console.error`. Proven against the live DOM (an
+/// SVG never appears; `hasSource` stays true) plus the captured console error.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_mermaid_total_failure_keeps_readable_source() {
+    if !require_browser() {
+        return;
+    }
+
+    let fragment = mermaid_body_fragment(ColorMode::Dark, MERMAID_ONE_DOC);
+    let doc = wrap_mermaid_stub_page(&fragment, THROWING_STUB, THROWING_STUB);
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+    let result = harness.evaluate(MERMAID_DOM_PROBE).await.expect("mermaid probe");
+    harness.shutdown().await;
+
+    let kv = parse_kv(&result);
+    assert_eq!(
+        kv.get("svg").map(String::as_str),
+        Some("0"),
+        "no SVG may be produced when both imports fail; got {result}",
+    );
+    assert_eq!(
+        kv.get("init").map(String::as_str),
+        Some("0"),
+        "initialize must not run when no module loaded; got {result}",
+    );
+    assert_eq!(
+        kv.get("hasSource").map(String::as_str),
+        Some("true"),
+        "the escaped diagram source must remain readable in the <pre>; got {result}",
+    );
+    let errs: u32 = kv
+        .get("errs")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    assert!(
+        errs >= 1,
+        "a total load failure must emit a console.error; got {result}",
+    );
+}
+
+/// (4) Deduplication in the live DOM: two Mermaid fences emit two
+/// `<pre class="mermaid">` containers but exactly one injected bootstrap; the
+/// single `run` processes both, so both diagrams render as SVG and `initialize`
+/// still fires once. The L1 dedup test counts source substrings; this proves the
+/// deduped bootstrap actually drives *both* diagrams in a real browser.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_mermaid_dedup_renders_both_diagrams_once() {
+    if !require_browser() {
+        return;
+    }
+
+    let fragment = mermaid_body_fragment(ColorMode::Dark, MERMAID_TWO_DOC);
+    let doc = wrap_mermaid_stub_page(
+        &fragment,
+        &working_mermaid_stub("PRIMARY"),
+        &working_mermaid_stub("PRIMARY"),
+    );
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+    let result = harness.evaluate(MERMAID_DOM_PROBE).await.expect("mermaid probe");
+    harness.shutdown().await;
+
+    let kv = parse_kv(&result);
+    assert_eq!(
+        kv.get("mermaid").map(String::as_str),
+        Some("2"),
+        "both fences must parse into two .mermaid containers; got {result}",
+    );
+    assert_eq!(
+        kv.get("scripts").map(String::as_str),
+        Some("1"),
+        "exactly one bootstrap module script may be injected; got {result}",
+    );
+    assert_eq!(
+        kv.get("init").map(String::as_str),
+        Some("1"),
+        "the single deduped bootstrap must initialize once; got {result}",
+    );
+    assert_eq!(
+        kv.get("runEls").map(String::as_str),
+        Some("2"),
+        "the single run must process both diagrams; got {result}",
+    );
+    assert_eq!(
+        kv.get("svg").map(String::as_str),
+        Some("2"),
+        "both diagrams must render as live SVG; got {result}",
+    );
+}
+
+/// (5) Valid wrapper placement (the DOM assertion Review-1 Finding 1 asked for):
+/// the body-only `<div class="darkmatter-page">` wrapper must be a real direct
+/// child of `<body>` and must nest NO `html`/`head`/`body` element. The L1 tests
+/// assert this on the source string; this parses the fragment into a real DOM
+/// and checks the wrapper's `parentElement` and descendant document elements.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_mermaid_body_wrapper_is_direct_child_of_body() {
+    if !require_browser() {
+        return;
+    }
+
+    let fragment = mermaid_body_fragment(ColorMode::Dark, MERMAID_ONE_DOC);
+    let doc = wrap_mermaid_stub_page(
+        &fragment,
+        &working_mermaid_stub("PRIMARY"),
+        &working_mermaid_stub("PRIMARY"),
+    );
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+    let result = harness
+        .evaluate(MERMAID_WRAPPER_PROBE)
+        .await
+        .expect("wrapper probe");
+    harness.shutdown().await;
+
+    let kv = parse_kv(&result);
+    assert_eq!(
+        kv.get("parent").map(String::as_str),
+        Some("BODY"),
+        "the .darkmatter-page wrapper must be a direct child of <body>; got {result}",
+    );
+    assert_eq!(
+        kv.get("nested").map(String::as_str),
+        Some("0"),
+        "the wrapper must not nest any html/head/body element; got {result}",
+    );
+}
+
+/// (6) Theme application: the resolved `themeVariables` palette must actually
+/// reach `mermaid.initialize`, and a light page and a dark page must produce
+/// *different* applied theme inputs. The stub records the received
+/// `themeVariables.background`; rendering the same diagram in each mode must
+/// yield two distinct, non-empty backgrounds — proving the palette is a live
+/// input to Mermaid, not dead markup.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_mermaid_theme_variables_differ_by_color_mode() {
+    if !require_browser() {
+        return;
+    }
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+
+    let dark_doc = wrap_mermaid_stub_page(
+        &mermaid_body_fragment(ColorMode::Dark, MERMAID_ONE_DOC),
+        &working_mermaid_stub("PRIMARY"),
+        &working_mermaid_stub("PRIMARY"),
+    );
+    harness.render_html(&dark_doc).await.expect("render dark");
+    let dark = parse_kv(&harness.evaluate(MERMAID_DOM_PROBE).await.expect("dark probe"));
+
+    let light_doc = wrap_mermaid_stub_page(
+        &mermaid_body_fragment(ColorMode::Light, MERMAID_ONE_DOC),
+        &working_mermaid_stub("PRIMARY"),
+        &working_mermaid_stub("PRIMARY"),
+    );
+    harness.render_html(&light_doc).await.expect("render light");
+    let light = parse_kv(&harness.evaluate(MERMAID_DOM_PROBE).await.expect("light probe"));
+
+    harness.shutdown().await;
+
+    let dark_bg = dark.get("bg").map(String::as_str).unwrap_or("");
+    let light_bg = light.get("bg").map(String::as_str).unwrap_or("");
+    assert!(
+        !dark_bg.is_empty() && !light_bg.is_empty(),
+        "the themeVariables background must reach mermaid.initialize in both modes; \
+         dark={dark_bg:?} light={light_bg:?}",
+    );
+    assert_ne!(
+        dark_bg, light_bg,
+        "light and dark pages must apply different Mermaid theme inputs; \
+         dark={dark_bg:?} light={light_bg:?}",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Review finding (High): the stub Mermaid tests above prove the bootstrap can
+// drive an API shape the TEST defines — they never execute the REAL pinned
+// Mermaid 11.6.0, so they cannot prove that real Mermaid exports that shape,
+// accepts the resolver's `themeVariables`, parses the diagram, or produces a
+// correctly themed SVG (spec acceptance criteria 3 and 11).
+//
+// This test runs the REAL pinned engine, network-free. Mermaid 11.6.0's
+// `dist/mermaid.esm.min.mjs` is vendored (with its complete `chunks/` import
+// closure) under `tests/fixtures/mermaid/<MERMAID_VERSION>/dist/` and served by
+// a loopback-only (`127.0.0.1:0`) static server. The page's import map
+// redirects the two EXACT CDN specifiers the bootstrap emits to that server, so
+// the bootstrap's real `import()` resolves to the vendored engine — no external
+// egress ever occurs. See `tests/fixtures/mermaid/README.md` for the vendoring
+// and its `regen.mjs` regeneration script.
+//
+// Gating: `require_browser()` AND the vendored entry's presence. A checkout
+// without the fixtures skips cleanly (an explanatory line, green suite).
+// ---------------------------------------------------------------------------
+
+/// Absolute path to the vendored Mermaid `dist/` tree for the pinned version.
+fn mermaid_fixture_dist() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/mermaid")
+        .join(MERMAID_VERSION)
+        .join("dist")
+}
+
+/// The first `\r\n\r\n` (end of HTTP request headers) in `buf`, if present.
+fn find_crlfcrlf(buf: &[u8]) -> Option<usize> {
+    buf.windows(4).position(|w| w == b"\r\n\r\n")
+}
+
+/// Maps a request target to a file in the vendored `dist/` tree, accepting both
+/// the jsDelivr (`/npm/mermaid@<V>/dist/…`) and unpkg (`/mermaid@<V>/dist/…`)
+/// URL shapes — plus the relative `chunks/…` requests the browser derives from
+/// the module's own URL (which keep whichever prefix served the entry). Returns
+/// `None` for anything outside the tree or containing `..`.
+fn resolve_mermaid_fixture(dist: &std::path::Path, target: &str) -> Option<std::path::PathBuf> {
+    let path = target.split(['?', '#']).next().unwrap_or(target);
+    let rest = path
+        .strip_prefix(&format!("/npm/mermaid@{MERMAID_VERSION}/dist/"))
+        .or_else(|| path.strip_prefix(&format!("/mermaid@{MERMAID_VERSION}/dist/")))?;
+    if rest.is_empty() || rest.contains("..") {
+        return None;
+    }
+    Some(dist.join(rest))
+}
+
+/// The `Content-Type` for a served fixture. `.mjs`/`.js` MUST be
+/// `text/javascript`: a browser refuses to execute a module served with any
+/// other MIME type, which would silently break the import.
+fn mermaid_content_type(path: &std::path::Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("mjs" | "js") => "text/javascript",
+        Some("json" | "map") => "application/json",
+        Some("css") => "text/css",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Builds a minimal HTTP/1.1 response. `Access-Control-Allow-Origin: *` lets the
+/// `file://` test page (a `null` origin) fetch the cross-origin ES module.
+fn mermaid_http_response(status: u16, content_type: &str, body: &[u8]) -> Vec<u8> {
+    let reason = if status == 200 { "OK" } else { "Not Found" };
+    let mut out = format!(
+        "HTTP/1.1 {status} {reason}\r\n\
+Content-Type: {content_type}\r\n\
+Content-Length: {len}\r\n\
+Access-Control-Allow-Origin: *\r\n\
+Cache-Control: no-store\r\n\
+Connection: keep-alive\r\n\r\n",
+        len = body.len(),
+    )
+    .into_bytes();
+    out.extend_from_slice(body);
+    out
+}
+
+/// Serves keep-alive GET requests for one connection until it closes. Mermaid's
+/// entry statically and dynamically imports many `chunks/` files, so a
+/// connection carries several sequential requests.
+async fn serve_mermaid_conn(mut socket: tokio::net::TcpStream, dist: std::path::PathBuf) {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let mut buf: Vec<u8> = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        let header_end = loop {
+            if let Some(pos) = find_crlfcrlf(&buf) {
+                break pos + 4;
+            }
+            match socket.read(&mut chunk).await {
+                Ok(0) => return,
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                Err(_) => return,
+            }
+        };
+        let head = String::from_utf8_lossy(&buf[..header_end]);
+        let target = head
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap_or("");
+        let response = match resolve_mermaid_fixture(&dist, target) {
+            Some(path) => match tokio::fs::read(&path).await {
+                Ok(body) => mermaid_http_response(200, mermaid_content_type(&path), &body),
+                Err(_) => mermaid_http_response(404, "text/plain", b"not found"),
+            },
+            None => mermaid_http_response(404, "text/plain", b"not found"),
+        };
+        if socket.write_all(&response).await.is_err() {
+            return;
+        }
+        // GET carries no body; drop this request and await the next on the
+        // same keep-alive connection.
+        buf.drain(..header_end);
+    }
+}
+
+/// Binds a loopback static server rooted at the vendored `dist` tree and returns
+/// its port plus the accept-loop task handle (aborted by the caller at teardown).
+async fn spawn_mermaid_loopback_server(
+    dist: std::path::PathBuf,
+) -> (u16, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind loopback mermaid server");
+    let port = listener.local_addr().expect("loopback addr").port();
+    let handle = tokio::spawn(async move {
+        while let Ok((socket, _)) = listener.accept().await {
+            let root = dist.clone();
+            tokio::spawn(async move { serve_mermaid_conn(socket, root).await });
+        }
+    });
+    (port, handle)
+}
+
+/// Wraps a rendered Mermaid `fragment` in a standalone document whose import map
+/// redirects the bootstrap's two EXACT CDN specifiers to the loopback `base_url`
+/// (jsDelivr shape → `/npm/…`, unpkg shape → `/…`). The URLs are built from the
+/// same `MERMAID_CDN_*`/`MERMAID_VERSION` constants the bootstrap uses, so the
+/// import-map keys stay byte-identical to the emitted `import()` specifiers (an
+/// import-map key only redirects an exactly-equal specifier). A head-level
+/// classic script captures `console.error` for diagnostics.
+fn wrap_mermaid_loopback_page(fragment: &str, base_url: &str) -> String {
+    let primary_url = format!(
+        "{MERMAID_CDN_PRIMARY_ORIGIN}/npm/mermaid@{MERMAID_VERSION}/dist/mermaid.esm.min.mjs"
+    );
+    let fallback_url =
+        format!("{MERMAID_CDN_FALLBACK_ORIGIN}/mermaid@{MERMAID_VERSION}/dist/mermaid.esm.min.mjs");
+    let primary_local =
+        format!("{base_url}/npm/mermaid@{MERMAID_VERSION}/dist/mermaid.esm.min.mjs");
+    let fallback_local = format!("{base_url}/mermaid@{MERMAID_VERSION}/dist/mermaid.esm.min.mjs");
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\">\
+<script>window.__dmConsoleErrors=[];var __e=console.error.bind(console);\
+console.error=function(){{window.__dmConsoleErrors.push(\
+Array.prototype.map.call(arguments,String).join(' '));__e.apply(console,arguments);}};</script>\
+<script type=\"importmap\">{{\"imports\":{{\
+\"{primary_url}\":\"{primary_local}\",\
+\"{fallback_url}\":\"{fallback_local}\"}}}}</script>\
+</head><body style=\"margin:0;background:#fff;\">{fragment}</body></html>"
+    )
+}
+
+/// A live-DOM probe that waits (bounded) for the REAL Mermaid engine to replace
+/// the `<pre class="mermaid">` source with an SVG, then reports engine-identity
+/// and computed-theme signals as a `key=value;…` payload (parsed by
+/// [`parse_kv`]). `fill`/`stroke`/`labelColor` are `getComputedStyle` results
+/// (`rgb(…)` — no `;`/`=`, so kv-safe) proving the palette reached the engine.
+const MERMAID_REAL_PROBE: &str = r#"(async () => {
+  const deadline = Date.now() + 6000;
+  const done = function () {
+    const s = document.querySelector('.mermaid svg');
+    return s && s.querySelectorAll('g.node').length > 0;
+  };
+  while (Date.now() < deadline
+      && !done()
+      && (window.__dmConsoleErrors || []).length === 0) {
+    await new Promise(function (r) { setTimeout(r, 25); });
+  }
+  const errs = (window.__dmConsoleErrors || []).length;
+  const svg = document.querySelector('.mermaid svg');
+  if (!svg) return 'svg=0;errs=' + errs;
+  const role = svg.getAttribute('aria-roledescription') || '';
+  const stub = document.querySelectorAll('[data-stub]').length;
+  const nodes = svg.querySelectorAll('g.node').length;
+  const edges = svg.querySelectorAll('.edgePaths path, path.flowchart-link').length;
+  const nodeEl = svg.querySelector('g.node');
+  const shape = nodeEl ? nodeEl.querySelector('rect, polygon, path, circle, ellipse') : null;
+  const cs = shape ? getComputedStyle(shape) : null;
+  const fill = cs ? cs.fill : '';
+  const stroke = cs ? cs.stroke : '';
+  const labelEl = svg.querySelector('.nodeLabel, g.node text');
+  const labelColor = labelEl ? getComputedStyle(labelEl).color : '';
+  return 'svg=1;errs=' + errs + ';role=' + role + ';stub=' + stub
+    + ';nodes=' + nodes + ';edges=' + edges
+    + ';fill=' + fill + ';stroke=' + stroke + ';labelColor=' + labelColor;
+})()"#;
+
+/// The REAL pinned Mermaid 11.6.0 engine, served over loopback, must render a
+/// genuine (non-stub) flowchart SVG and honor the resolved `themeVariables`:
+/// rendering the same diagram under the light and dark palettes must yield a
+/// DIFFERENT computed node fill. This is the proof the stub tests cannot give —
+/// that real Mermaid exports the bootstrap's API shape, parses the diagram, and
+/// applies the palette (criteria 3/11). Runtime is loopback-only; no external
+/// network is touched.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_mermaid_real_engine_renders_and_themes() {
+    if !require_browser() {
+        return;
+    }
+    let dist = mermaid_fixture_dist();
+    if !dist.join("mermaid.esm.min.mjs").is_file() {
+        eprintln!(
+            "skipping browser_mermaid_real_engine_renders_and_themes: vendored Mermaid \
+             {MERMAID_VERSION} fixtures absent at {} — run \
+             `node darkmatter/lib/tests/fixtures/mermaid/regen.mjs`",
+            dist.display(),
+        );
+        return;
+    }
+
+    let (port, server) = spawn_mermaid_loopback_server(dist).await;
+    let base = format!("http://127.0.0.1:{port}");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+
+    let dark_doc =
+        wrap_mermaid_loopback_page(&mermaid_body_fragment(ColorMode::Dark, MERMAID_ONE_DOC), &base);
+    harness.render_html(&dark_doc).await.expect("render dark");
+    let dark_raw = harness.evaluate(MERMAID_REAL_PROBE).await.expect("dark probe");
+    let dark = parse_kv(&dark_raw);
+
+    let light_doc = wrap_mermaid_loopback_page(
+        &mermaid_body_fragment(ColorMode::Light, MERMAID_ONE_DOC),
+        &base,
+    );
+    harness.render_html(&light_doc).await.expect("render light");
+    let light_raw = harness.evaluate(MERMAID_REAL_PROBE).await.expect("light probe");
+    let light = parse_kv(&light_raw);
+
+    harness.shutdown().await;
+    server.abort();
+
+    // A real SVG appears in both modes.
+    assert_eq!(
+        dark.get("svg").map(String::as_str),
+        Some("1"),
+        "real Mermaid must render an SVG (dark); got {dark_raw}",
+    );
+    assert_eq!(
+        light.get("svg").map(String::as_str),
+        Some("1"),
+        "real Mermaid must render an SVG (light); got {light_raw}",
+    );
+
+    // It is the REAL engine, not a stub: flowchart role present, no stub marker.
+    for (mode, kv, raw) in [("dark", &dark, &dark_raw), ("light", &light, &light_raw)] {
+        assert!(
+            kv.get("role").map(String::as_str).unwrap_or("").contains("flowchart"),
+            "the {mode} SVG must carry Mermaid's flowchart aria-roledescription \
+             (real engine output); got {raw}",
+        );
+        assert_eq!(
+            kv.get("stub").map(String::as_str),
+            Some("0"),
+            "the {mode} SVG must NOT be the handwritten stub (data-stub); got {raw}",
+        );
+        assert!(
+            kv.get("nodes").and_then(|v| v.parse::<u32>().ok()).unwrap_or(0) >= 2,
+            "the {mode} flowchart must render both nodes as real Mermaid <g class=node>; got {raw}",
+        );
+        assert_eq!(
+            kv.get("errs").map(String::as_str),
+            Some("0"),
+            "the real engine must load and render without a console.error ({mode}); got {raw}",
+        );
+    }
+
+    // The resolved themeVariables reached the engine: the same diagram under the
+    // light vs dark palette must compute a DIFFERENT node fill. `mainBkg`
+    // resolves to `#1e1e1e` (dark) vs `#ececff` (light), so the base-theme node
+    // fill must differ — a fact only the real engine, honoring themeVariables,
+    // can produce.
+    let dark_fill = dark.get("fill").map(String::as_str).unwrap_or("");
+    let light_fill = light.get("fill").map(String::as_str).unwrap_or("");
+    assert!(
+        !dark_fill.is_empty() && !light_fill.is_empty(),
+        "a node fill must compute in both modes; dark={dark_fill:?} light={light_fill:?} \
+         (dark={dark_raw}) (light={light_raw})",
+    );
+    assert_ne!(
+        dark_fill, light_fill,
+        "real Mermaid must apply the resolved themeVariables — light and dark node fills \
+         must differ; dark={dark_fill:?} light={light_fill:?}",
+    );
 }

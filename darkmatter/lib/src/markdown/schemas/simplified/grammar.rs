@@ -850,6 +850,16 @@ impl<'a> Parser<'a> {
             );
         }
 
+        // A `literal` atom without a `LiteralValue` (bare `literal` or
+        // `literal()`) is rejected the same way `enum` without members is.
+        if matches!(ty, SimplifiedType::Literal)
+            && !item_constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::LiteralValue(_)))
+        {
+            return self.err("literal requires a value", name_span);
+        }
+
         Ok(PropertyAtom {
             ty: TypeExpr::Primitive(ty),
             is_array,
@@ -1021,6 +1031,13 @@ impl<'a> Parser<'a> {
             }
             constraints.append(&mut tail);
             return Ok(constraints);
+        }
+
+        // `literal` mirrors the enum delimiter rules but takes exactly one
+        // positional (typed) value, then `;`-separated constraints. The
+        // array-level paren list is regular array constraints.
+        if matches!(ty, SimplifiedType::Literal) && !is_array_level {
+            return self.parse_literal_value();
         }
 
         loop {
@@ -1207,6 +1224,62 @@ impl<'a> Parser<'a> {
                     return self.err("unterminated constraint list (missing `)`)", span);
                 }
             }
+        }
+    }
+
+    /// Parses a `literal(...)` item-constraint list: exactly one positional
+    /// value (typed per the Q1 ruling) followed by optional `;`-separated
+    /// constraints. Positioned just after the opening `(` with the leading
+    /// whitespace already skipped and a non-`)` byte guaranteed.
+    fn parse_literal_value(&mut self) -> Result<Vec<Constraint>, SchemaError> {
+        self.lex.skip_ws();
+        let tok = self.next_token(LexMode::ArgList)?;
+        let value = match tok.tok {
+            // Quoted values are always strings (quoting opts out of typing).
+            Tok::Quoted(s) => serde_json::Value::String(s),
+            // Bare tokens are typed like YAML would type the frontmatter value.
+            Tok::Number(_) | Tok::Word(_) => {
+                let raw = self.src[tok.span.clone()].to_string();
+                match classify_bare_literal(&raw) {
+                    BareLiteral::Value(value) => value,
+                    BareLiteral::RejectedNull => {
+                        return self.err(
+                            "bare `null` is not a valid literal value; quote it \
+                             (`literal('null')`) or drop the optional key",
+                            tok.span,
+                        );
+                    }
+                }
+            }
+            other => {
+                return self.err(
+                    format!("expected a literal value, found `{other:?}`"),
+                    tok.span,
+                );
+            }
+        };
+
+        let constraints = vec![Constraint::LiteralValue(value)];
+        self.lex.skip_ws();
+        match self.lex.peek_byte() {
+            Some(b',') => self.err(
+                "`literal` takes exactly one value; use `enum(...)` for multiple allowed values",
+                self.lex.pos..self.lex.pos + 1,
+            ),
+            Some(b';') => {
+                self.lex.pos += 1;
+                // Tail constraints accumulate after the leading `LiteralValue`.
+                self.parse_remaining_constraints(SimplifiedType::Literal, constraints)
+            }
+            Some(b')') => Ok(constraints),
+            Some(other) => self.err(
+                format!("expected `;` or `)` after the literal value, found `{}`", other as char),
+                self.lex.pos..self.lex.pos + 1,
+            ),
+            None => self.err(
+                "unterminated constraint list (missing `)`)",
+                self.lex.pos..self.lex.pos,
+            ),
         }
     }
 
@@ -1677,6 +1750,13 @@ fn number_to_usize(
 
 fn arg_to_json(arg: &Arg) -> serde_json::Value {
     if let Some(n) = arg.number {
+        // Parse the exact source spelling first so a large-integer default
+        // (`default(9007199254740993)`) keeps i64/u64 precision — the pre-lexed
+        // f64 `n` has already rounded values past 2^53. Non-JSON-shaped numeric
+        // tokens fall back to that f64.
+        if let Ok(num) = serde_json::Number::from_str(&arg.lex) {
+            return serde_json::Value::Number(num);
+        }
         if let Some(num) = serde_json::Number::from_f64(n) {
             return serde_json::Value::Number(num);
         }
@@ -1695,6 +1775,75 @@ fn format_number(n: f64) -> String {
         format!("{}", n as i64)
     } else {
         format!("{n}")
+    }
+}
+
+/// Classification of an unquoted `literal(...)` value token (Q1 typing rule).
+///
+/// A quoted value is always a string and never routed through here.
+pub(super) enum BareLiteral {
+    /// A typed scalar: `Bool`, a JSON `Number`, or a plain `String` (the raw
+    /// token spelling that fails the boolean/number shape tests).
+    Value(serde_json::Value),
+    /// Bare `null` — always an authoring mistake for a literal (an optional
+    /// property already accepts `null`), rejected with an actionable error.
+    RejectedNull,
+}
+
+/// Types an unquoted `literal(...)` value token the way YAML would type the
+/// frontmatter value it validates: bare `true`/`false` → boolean, a
+/// numberlike token → number, everything else → string. Bare `null` is
+/// rejected ([`BareLiteral::RejectedNull`]).
+pub(super) fn classify_bare_literal(raw: &str) -> BareLiteral {
+    match raw {
+        "true" => BareLiteral::Value(serde_json::Value::Bool(true)),
+        "false" => BareLiteral::Value(serde_json::Value::Bool(false)),
+        "null" => BareLiteral::RejectedNull,
+        _ => BareLiteral::Value(
+            literal_number(raw).unwrap_or_else(|| serde_json::Value::String(raw.to_string())),
+        ),
+    }
+}
+
+/// Returns `true` when a bare (unquoted) string value round-trips through the
+/// literal grammar as the *same* string — i.e. it is neither `true`/`false`/
+/// `null` nor numberlike. Serialization uses this to decide whether a literal
+/// string value must be quoted so it does not re-type on re-parse.
+pub(super) fn bare_literal_round_trips_as_string(value: &str) -> bool {
+    !matches!(value, "true" | "false" | "null") && literal_number(value).is_none()
+}
+
+/// Parses a numberlike-shaped bare token into a typed JSON number, preserving
+/// integer vs. float. Rejects any spelling that is not `^-?\d+(\.\d+)?$` and
+/// leading-zero integers (`007`), which stay strings (no octal surprises, per
+/// the Q1 ruling).
+fn literal_number(raw: &str) -> Option<serde_json::Value> {
+    if !is_literal_numberlike(raw) {
+        return None;
+    }
+    serde_json::Number::from_str(raw)
+        .ok()
+        .map(serde_json::Value::Number)
+}
+
+/// Mirrors `^-?\d+(\.\d+)?$` (an optional `-`, one or more integer digits, an
+/// optional `.` plus one or more fraction digits) and additionally rejects a
+/// multi-digit integer part with a leading zero (`007`, `-08`).
+fn is_literal_numberlike(s: &str) -> bool {
+    let unsigned = s.strip_prefix('-').unwrap_or(s);
+    let (integer, fraction) = match unsigned.split_once('.') {
+        Some((integer, fraction)) => (integer, Some(fraction)),
+        None => (unsigned, None),
+    };
+    if integer.is_empty() || !integer.bytes().all(|b| b.is_ascii_digit()) {
+        return false;
+    }
+    if integer.len() > 1 && integer.starts_with('0') {
+        return false;
+    }
+    match fraction {
+        Some(fraction) => !fraction.is_empty() && fraction.bytes().all(|b| b.is_ascii_digit()),
+        None => true,
     }
 }
 
@@ -1901,10 +2050,12 @@ mod tests {
 
     #[test]
     fn parses_default_number() {
+        // An integer default keeps integer typing (parsed from the exact source
+        // lexeme), so precision survives for values past f64's 2^53 range.
         let atom = parse("number(default(3))");
         assert_eq!(
             atom.constraints,
-            vec![Constraint::Default(serde_json::json!(3.0))]
+            vec![Constraint::Default(serde_json::json!(3))]
         );
     }
 
@@ -1970,6 +2121,125 @@ mod tests {
             panic!("expected Grammar error, got {err:?}")
         };
         assert!(message.contains("requires a constraint list"));
+    }
+
+    // ── literal grammar ────────────────────────────────────────────────
+
+    fn literal_value(atom: &PropertyAtom) -> &serde_json::Value {
+        atom.constraints
+            .iter()
+            .find_map(|c| match c {
+                Constraint::LiteralValue(v) => Some(v),
+                _ => None,
+            })
+            .expect("expected a LiteralValue constraint")
+    }
+
+    #[test]
+    fn parses_bare_string_literal() {
+        let atom = parse("literal(spec)");
+        assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::Literal));
+        assert_eq!(literal_value(&atom), &serde_json::json!("spec"));
+    }
+
+    #[test]
+    fn types_bare_number_literal() {
+        assert_eq!(literal_value(&parse("literal(2)")), &serde_json::json!(2));
+        assert_eq!(literal_value(&parse("literal(-5)")), &serde_json::json!(-5));
+        assert_eq!(literal_value(&parse("literal(2.5)")), &serde_json::json!(2.5));
+    }
+
+    #[test]
+    fn types_bare_boolean_literal() {
+        assert_eq!(literal_value(&parse("literal(true)")), &serde_json::json!(true));
+        assert_eq!(literal_value(&parse("literal(false)")), &serde_json::json!(false));
+    }
+
+    #[test]
+    fn quoted_literal_is_always_string() {
+        assert_eq!(literal_value(&parse("literal('2')")), &serde_json::json!("2"));
+        assert_eq!(literal_value(&parse(r#"literal("true")"#)), &serde_json::json!("true"));
+        assert_eq!(literal_value(&parse("literal('a, b')")), &serde_json::json!("a, b"));
+    }
+
+    #[test]
+    fn leading_zero_literal_is_string() {
+        // `007` fails the numberlike shape test (leading zero) → typed as text.
+        assert_eq!(literal_value(&parse("literal(007)")), &serde_json::json!("007"));
+    }
+
+    #[test]
+    fn literal_with_constraints() {
+        let atom = parse("literal(spec; required)");
+        assert_eq!(
+            atom.constraints,
+            vec![
+                Constraint::LiteralValue(serde_json::json!("spec")),
+                Constraint::Required,
+            ]
+        );
+    }
+
+    #[test]
+    fn literal_array_suffix() {
+        let atom = parse("literal(auto)[]");
+        assert!(atom.is_array);
+        assert_eq!(literal_value(&atom), &serde_json::json!("auto"));
+    }
+
+    #[test]
+    fn bare_literal_requires_value() {
+        for input in ["literal", "literal()"] {
+            let SchemaError::Grammar { message, .. } = parse_err(input) else {
+                panic!("expected Grammar error for {input:?}");
+            };
+            assert!(
+                message.contains("literal requires a value"),
+                "unexpected message for {input:?}: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn literal_multiple_values_directs_to_enum() {
+        let SchemaError::Grammar { message, .. } = parse_err("literal(a, b)") else {
+            panic!("expected Grammar error");
+        };
+        assert!(message.contains("enum"), "got: {message}");
+    }
+
+    #[test]
+    fn bare_null_literal_rejected() {
+        let SchemaError::Grammar { message, .. } = parse_err("literal(null)") else {
+            panic!("expected Grammar error");
+        };
+        let lower = message.to_lowercase();
+        assert!(lower.contains("quote") || lower.contains("drop"), "got: {message}");
+    }
+
+    // ── expression grammar ─────────────────────────────────────────────
+
+    #[test]
+    fn parses_bare_expression() {
+        let atom = parse("expression");
+        assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::Expression));
+        assert!(atom.constraints.is_empty());
+    }
+
+    #[test]
+    fn parses_expression_with_required() {
+        let atom = parse("expression(required)");
+        assert_eq!(atom.constraints, vec![Constraint::Required]);
+    }
+
+    #[test]
+    fn parameterized_expression_is_rejected() {
+        // The reserved future `expression(condition)` form is rejected in v1
+        // as an unknown constraint (never the generic unknown-type error).
+        let SchemaError::Grammar { message, .. } = parse_err("expression(condition)") else {
+            panic!("expected Grammar error");
+        };
+        assert!(!message.contains("unknown type"), "got: {message}");
     }
 
     #[test]

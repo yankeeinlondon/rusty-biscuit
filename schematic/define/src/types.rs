@@ -322,13 +322,16 @@ impl RestApi {
                 bearer_token: (!env_auth.is_empty()).then(|| EnvList::new(env_auth.to_vec())),
                 ..Default::default()
             },
-            Some(EnvAuthStrategy::ApiKey { header }) => EnvMapping {
+            Some(EnvAuthStrategy::ApiKey { header, .. }) => EnvMapping {
                 api_key: (!env_auth.is_empty()).then(|| crate::headers::ApiKeyEnv {
                     names: EnvList::new(env_auth.to_vec()),
                     header,
                 }),
                 ..Default::default()
             },
+            // Parameter-based keys (query/cookie) have no header-based
+            // `EnvMapping` representation; the legacy mapping omits them.
+            Some(EnvAuthStrategy::ApiKeyParam { .. }) => EnvMapping::default(),
             Some(EnvAuthStrategy::Basic) => EnvMapping {
                 basic_user: env_username.map(EnvList::single),
                 basic_pass: env_auth.first().cloned().map(EnvList::single),
@@ -689,6 +692,7 @@ mod tests {
             docs_url: None,
             auth: AuthStrategy::ApiKey {
                 header: "Authorization".to_string(),
+                value_prefix: None,
             },
             auth_policy: None,
             env_auth: vec![],

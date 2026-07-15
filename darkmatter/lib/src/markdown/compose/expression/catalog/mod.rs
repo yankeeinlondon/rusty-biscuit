@@ -85,7 +85,11 @@ impl DataType {
             SimplifiedType::Yaml => Self::Yaml,
             SimplifiedType::Json => Self::Json,
             SimplifiedType::Any => Self::Any,
-            SimplifiedType::NumberLike | SimplifiedType::Boolish | SimplifiedType::Enum => {
+            SimplifiedType::NumberLike
+            | SimplifiedType::Boolish
+            | SimplifiedType::Enum
+            | SimplifiedType::Literal
+            | SimplifiedType::Expression => {
                 return None;
             }
         })

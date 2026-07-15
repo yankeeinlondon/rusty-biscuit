@@ -183,6 +183,7 @@ pub fn define_unfolded_circle_core_ws_api() -> WebSocketApi {
         docs_url: Some("https://unfoldedcircle.github.io/core-api/ws/".to_string()),
         auth: AuthStrategy::ApiKey {
             header: "API-KEY".to_string(),
+            value_prefix: None,
         },
         env_auth: vec![
             "UCR_CORE_API_KEY".to_string(),
@@ -207,7 +208,7 @@ mod tests {
             api.docs_url.as_deref(),
             Some("https://unfoldedcircle.github.io/core-api/ws/")
         );
-        assert!(matches!(api.auth, AuthStrategy::ApiKey { ref header } if header == "API-KEY"));
+        assert!(matches!(api.auth, AuthStrategy::ApiKey { ref header, .. } if header == "API-KEY"));
         assert_eq!(
             api.env_auth,
             vec![
