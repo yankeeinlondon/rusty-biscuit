@@ -3029,38 +3029,54 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_table_expands_tabs_before_width_planning_and_rendering() {
+    fn assert_table_uses_tab_width(term: &Terminal, expected_tab_width: usize) {
+        assert_eq!(term.tab_width, expected_tab_width);
         let table = Table::new()
             .with_columns(vec![TableColumn::new("Key\tValue")])
             .with_data(vec![vec!["1\t2\t3".into()]]);
-        let term = Terminal::new_optimistic(80);
 
         let plan = table
-            .plan_widths_for_terminal(&term)
+            .plan_widths_for_terminal(term)
             .expect("tabbed table width plan");
         let expected_width = ["Key\tValue", "1\t2\t3"]
             .into_iter()
             .map(|content| {
-                visible_width(&expand_tabs_with_width(content, term.tab_width)) as usize
+                visible_width(&expand_tabs_with_width(content, expected_tab_width)) as usize
             })
             .max()
             .expect("tabbed test content");
         assert_eq!(plan.content_widths(), vec![expected_width]);
 
-        let output = table.render(&term);
+        let expanded_data = expand_tabs_with_width("1\t2\t3", expected_tab_width);
+        let output = table.render(term);
         assert!(!output.contains('\t'), "table output retained a raw tab: {output:?}");
-        assert!(output.contains("1       2       3"));
+        assert!(output.contains(expanded_data.as_ref()));
         let widths: Vec<u32> = output.lines().map(visible_width).collect();
         assert!(
             widths.windows(2).all(|pair| pair[0] == pair[1]),
             "table borders diverged after tab expansion: {widths:?}\n{output}",
         );
+    }
 
-        let mut four_column_tabs = term;
-        four_column_tabs.tab_width = 4;
-        let output = table.render(&four_column_tabs);
-        assert!(output.contains("1   2   3"));
+    #[test]
+    fn test_table_uses_detected_terminal_tab_width() {
+        let mut term = Terminal::new();
+        term.fixed_width = Some(80);
+        let detected_tab_width = term.tab_width;
+        assert!(detected_tab_width > 0);
+        assert_table_uses_tab_width(&term, detected_tab_width);
+    }
+
+    #[test]
+    fn test_table_uses_four_column_tab_override() {
+        let term = Terminal::builder().width(80).tab_width(4).build();
+        assert_table_uses_tab_width(&term, 4);
+    }
+
+    #[test]
+    fn test_table_uses_eight_column_tab_override() {
+        let term = Terminal::builder().width(80).tab_width(8).build();
+        assert_table_uses_tab_width(&term, 8);
     }
 
     #[test]
