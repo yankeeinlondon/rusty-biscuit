@@ -482,8 +482,13 @@ pub fn detect_timezone_with_options(probe_ntp: bool) -> TimeInfo {
 
 /// Detects timezone and time-related system information.
 ///
-/// Gathers timezone name, UTC offset, DST status, and NTP synchronization state.
-/// This is equivalent to calling [`detect_timezone_with_options`] with `true`.
+/// Gathers timezone name, UTC offset, and DST status. This is equivalent to
+/// calling [`detect_timezone_with_options`] with `false`: the NTP probe is
+/// **not** run, so `ntp_status` is [`NtpStatus::Unknown`] and the call stays
+/// fast and purely local. A network round-trip is a surprising default for a
+/// "detect timezone" call; opt into it explicitly with
+/// `detect_timezone_with_options(true)` when NTP synchronization state is
+/// actually needed.
 ///
 /// ## Examples
 ///
@@ -501,7 +506,7 @@ pub fn detect_timezone_with_options(probe_ntp: bool) -> TimeInfo {
 /// A [`TimeInfo`] struct containing all detected time information.
 /// Fields that cannot be detected will have sensible defaults.
 pub fn detect_timezone() -> TimeInfo {
-    detect_timezone_with_options(true)
+    detect_timezone_with_options(false)
 }
 
 #[cfg(test)]
