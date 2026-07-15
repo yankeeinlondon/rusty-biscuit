@@ -10,26 +10,37 @@
 
 ## Executive assessment
 
-The work was a **substantial but incomplete success**.
+The work was a **substantial but incomplete success**. Incorporating the completed provider-metadata work makes the architectural result stronger than the first version of this assessment recognized, without changing the remaining orchestration and test-placement concerns.
 
-The module taxonomy is markedly better. Lifecycle, looping, schema, OpenCode log handling, dispatch helpers, hook adapters, permissions helpers, and several CLI reporting/completion concerns now have names and directory boundaries that match their responsibilities. Most of the Strong and Nice-to-Have work landed cleanly, with compatibility barrels preserving callers and with good judgment shown where the original proposal would have created an abstraction without enough common structure.
+The module taxonomy is markedly better. Lifecycle, looping, schema, OpenCode log handling, dispatch helpers, hook adapters, permissions helpers, provider catalog generation, and several CLI reporting/completion concerns now have names and directory boundaries that match their responsibilities. Most of the Strong and Nice-to-Have work landed cleanly, with compatibility barrels preserving callers and with good judgment shown where the original proposal would have created an abstraction without enough common structure. The provider-metadata implementation adds an especially strong boundary: `catalog-types` is a leaf shared by `lib` and `gen`, `gen` does not depend on the library it regenerates, and each provider has generated `data.rs` separated from hand-written `behavior.rs`.
 
-God-file remediation was less successful than module organization. The largest original files were split or had their tests moved, but two central orchestration functions remain essentially intact, the provider-neutral lifecycle runtime promotion is narrower than the original concern called for, and the test-placement convention has not become an enforced area-wide invariant. New growth in rendezvous and wrapper execution has also created fresh hotspots.
+God-file remediation was less successful than module organization. The largest original files were split or had their tests moved, but two central orchestration functions remain essentially intact, the provider-neutral lifecycle runtime promotion is narrower than the original concern called for, and the test-placement convention has not become an enforced area-wide invariant. New growth in rendezvous and wrapper execution has also created fresh hotspots, while provider metadata introduced a concentrated generator emitter and a large structural dispatch test.
 
 | Dimension | Assessment | Summary |
 |---|---|---|
 | Module naming and discoverability | **Strong** | The new directory families are coherent and materially easier to navigate. |
 | Separation of concerns | **Mostly strong** | Most file-level concern splits landed; orchestration remains concentrated. |
+| Provider metadata ownership | **Strong** | Generated facts, hand-written behavior, shared vocabulary, and registry dispatch have explicit owners. |
 | Removal of god-functions | **Partial** | The worst duplicated terminal sequence is gone, but the two main state-machine functions remain over 800 effective sloc each. |
 | Duplication control | **Strong in targeted areas** | Stream parser and composition/permissions duplication was consolidated pragmatically. |
-| Regression resistance | **Weak to partial** | The written test-placement rule has no automated guard and is already violated broadly. |
-| Documentation alignment | **Partial** | The main module maps improved, but rendezvous is still missing from the package-area architecture overview. |
+| Catalog/dispatch regression resistance | **Strong** | Byte-level generation checks, catalog invariants, and the unified dispatch inventory guard prevent silent metadata divergence. |
+| Test-placement regression resistance | **Weak** | The written test-placement rule has no automated guard and is already violated broadly. |
+| Documentation alignment | **Partial** | Rendezvous is still missing from the package-area architecture overview, and provider module prose retains completed-phase language and a stale dispatch count. |
 
 The most important distinction is that **the codebase is better organized without yet being consistently less concentrated**.
 
 ## Quantitative reality check
 
-Running `hug god-files --json claudine` on the current tree reports **42 High-risk and 172 Moderate-risk files**, compared with **41 High-risk and 154 Moderate-risk files** in the original review. This is not a clean before/after quality score: the scan counts generated files and test files, the area has grown since July 11, and several formerly inline test blocks are now separately visible as large files. It does show that the three plans did not reduce the area-wide god-file inventory as a headline metric.
+Running `hug god-files --json claudine` on the current tree reports **42 High-risk and 172 Moderate-risk files**, compared with **41 High-risk and 154 Moderate-risk files** in the original review. This is not a clean before/after quality score: the scan counts generated files and test files, the area has grown since July 11, and several formerly inline test blocks are now separately visible as large files. It shows that the three module-structure plans did not reduce the area-wide god-file inventory as a headline metric, but it should not be read as evidence that provider metadata made the architecture worse.
+
+The provider-metadata implementation explains a material and mostly intentional slice of the current inventory:
+
+- `lib/src/signals/generated.rs` is High-risk by size but generated.
+- All ten `lib/src/provider/<slug>/data.rs` files are Moderate-risk but generated, reviewable data snapshots rather than hand-maintained procedural modules.
+- `cli/tests/dispatch_inventory.rs` is High-risk but is structural test tooling.
+- `gen/src/emit.rs` is the genuinely actionable High-risk production source: 1,763 raw lines, 1,568 effective sloc, 58 top-level symbols, and a 237-effective-sloc `emit_data_file` assembler.
+
+This distinction improves the interpretation of the aggregate count, but it also identifies `claudine-gen` as a real new maintenance boundary that the original assessment omitted.
 
 The largest extracted test modules are now independent navigation hotspots:
 
@@ -57,7 +68,7 @@ The concern was not fully closed:
 - The convention was applied to the selected files, not to the area as a whole.
 - Large sibling test modules were not subdivided by concern.
 - No lint or structural test prevents new inline test blocks from crossing the stated thresholds.
-- Current violations include `rendezvous/daemon/src/sync.rs`, `cli/src/commands/wrap/exec/{spawn,termination}.rs`, several stream providers, and many composition/dispatch modules.
+- Current violations include `rendezvous/daemon/src/sync.rs`, `cli/src/commands/wrap/exec/{spawn,termination}.rs`, several stream providers, many composition/dispatch modules, and generator modules such as `gen/src/{emit,generate,registry,agent_errors_check}.rs`.
 
 **Verdict: Partial.** The mechanical extraction succeeded; the maintenance mechanism did not.
 
@@ -150,21 +161,47 @@ The Nice-to-Have plan was generally well executed:
 
 These changes are good examples of surgical structure work. Their limitation is simply that they address secondary hygiene while the two central orchestration functions remain concentrated.
 
+## Reassessment of the completed provider-metadata feature
+
+The provider-metadata work materially improves Claudine's module structure and should have been a first-class part of the original assessment.
+
+### What landed well
+
+1. **The crate layering is deliberate and sound.** `claudine-catalog-types` is a small leaf crate shared by the library and generator. `claudine-gen` depends on that leaf but not on `claudine` or `claudine-cli`, so a stale or broken generated catalog cannot prevent building the tool that repairs it. This is a real bootstrap boundary, not merely a directory split.
+2. **Generated data and hand-written behavior are cleanly separated.** Every provider follows `provider/<slug>/{mod.rs,data.rs,behavior.rs}`. The ten generated data files hold the large static tables; the hand-written behavior files are small—the largest is 138 raw lines—and contain the four dynamic behavior-trait implementations. The retired `AgentCapabilities` and temporary `legacy.rs` layer did not survive the migration.
+3. **`ProviderInfo` is now a credible central catalog.** Static facts, typed descriptors, and behavior trait objects meet at one registry. Consumers across configuration, event mapping, MCP, model selection, linking, contract execution, and rendering use `provider_info(provider)` rather than reconstructing facts locally. `DisplayPolicy` is catalog data consumed by shared render code rather than provider checks inside renderers.
+4. **Drift controls are unusually strong.** Generation byte-compares the committed provider data and related artifacts, generator and library tests pin the serialized field boundary, registry invariants cover every provider, and `cli/tests/dispatch_inventory.rs` governs conditional provider dispatch across both `lib/src` and `cli/src`. The current inventory records 19 conditional non-exempt sites; all are consciously grandfathered behavioral cases rather than pending static-fact migrations.
+5. **The provider ladder validated the structure.** Kilo, Pi, and Antigravity entered through the roster/research/generation/behavior split, which is stronger evidence than a design that has only generated the original providers.
+
+### What remains incomplete
+
+The generator now concentrates several catalog domains in a few files. `gen/src/emit.rs` emits identity, streams, events, models, prompts, permissions-adjacent policy, linking resource support, and the final file assembly in one 1,568-effective-sloc module. `gen/src/generate.rs` is 849 effective sloc and contains a 259-effective-sloc `coerce_to_catalog_shape`. The mapping registry is large but predominantly declarative; the emitter and coercion pipeline are the more actionable concentrations. Splitting them by stable catalog domain would preserve the good crate boundary while making field additions less likely to conflict.
+
+The rendering goal is also only partially complete. `claudine providers generate --mapping` captures structured generator output and renders it through the shared `Table`, but normal `claudine providers generate` uses inherited stdio from `claudine-gen`. The generator binary explicitly declares plain-text output and contains many direct `println!`/`eprintln!` paths. That means the generation, check, provenance, diff, and prompt surfaces do not flow through `TerminalRenderable`, contrary to the feature's rendering goal and the package-area terminal-output rule.
+
+There is minor source/documentation drift around the otherwise successful migration. `lib/src/provider/mod.rs` still describes the catalog as a Phase-1 scaffold with subsequent migration work, even though those phases are complete. `docs/topics/provider-metadata.md` says there are 18 governed dispatch sites while the committed inventory currently contains 19 conditional non-exempt sites. In both cases the code and generated inventory are the authority; the prose should be refreshed.
+
+**Verdict: Strong architectural success, partial generator decomposition, and partial rendering completion.** The feature improves the overall module assessment, but it also adds a focused generator-maintenance priority that should not be hidden by excluding generated files from god-file counts.
+
 ## What is now notably good
 
-### 1. Domain families are visible in the filesystem
+### 1. Provider facts and behavior have explicit owners
+
+The `catalog-types` leaf, independent `gen` crate, central `ProviderInfo` registry, and per-provider `data.rs`/`behavior.rs` split form a coherent end-to-end ownership model. This is the strongest newly recognized result from incorporating the provider-metadata spec.
+
+### 2. Domain families are visible in the filesystem
 
 `composition/lifecycle/`, `composition/looping/`, `composition/schema/`, and `stream/logs/opencode/{bridge,classify}/` are strong module boundaries. A contributor can infer ownership from the path rather than opening a multipurpose root file and searching for a cluster.
 
-### 2. Compatibility barrels were used effectively
+### 3. Compatibility barrels were used effectively
 
 The refactors avoided unnecessary caller churn. Existing public names continued through facades while implementation files moved behind them. This is especially effective in `composition/`, where many consumers use the barrel.
 
-### 3. The implementation avoided speculative abstractions
+### 4. The implementation avoided speculative abstractions
 
 The stream parser work is the best example. The original `ParserShared` proposal was revised after inspecting the state shapes, and only demonstrably common behavior was shared. The event renderer and protocol fixture work made similarly restrained go/no-go decisions.
 
-### 4. Several misleading names and roots were corrected
+### 5. Several misleading names and roots were corrected
 
 `reasoning.rs` becoming the OpenCode `bridge/`, `errors.rs` becoming `classify/`, and `adapters/` becoming `hook_adapters/` materially improve comprehension even when they do not change line counts.
 
@@ -215,6 +252,12 @@ The original review called `wrap/exec/` a good internal template. It has since a
 
 Split by stable responsibility: execution mode for spawn, and platform wait implementation versus provider-neutral termination projection/rendering for termination. Cross-platform behavior is subtle here, so preserve the shared semantic tests and avoid duplicating the signal ladder between OS modules.
 
+### P2 — Bound generator growth and finish its rendering boundary
+
+Keep the generator crate boundary, but split `gen/src/emit.rs` and the large coercion section of `gen/src/generate.rs` by stable catalog domain—for example identity/paths, execution/prompting, models/offerings, event/support policy, and linking resources—leaving `emit_data_file` as a thin ordered assembler. Do not split `gen/src/registry.rs` merely because its declarative table is long.
+
+Then make the generation UX honor the rendering contract. Either have `claudine-gen` render its human-facing mode with `TerminalRenderable` components or add a structured report mode that `claudine-cli` renders; retain raw JSON only for machine-facing output. The generator's bootstrap independence does not require raw terminal strings.
+
 ### P2 — Break up error rendering by error family
 
 Keep the central `CompositionError` enum unless there is a separate API reason to change it. Instead, reduce the 699-sloc `status_block` match by delegating to renderers for lifecycle, schema, selection, sequence, and provider/execution errors. This would complete C6 without weakening the typed error vocabulary.
@@ -228,6 +271,8 @@ Document whether the divergence is intentional. If it is, add shared conformance
 ## Areas that should not be prioritized solely by line count
 
 - Generated provider data and `signals/generated.rs` should remain excluded from god-file decisions.
+- `gen/src/registry.rs` is mostly the explicit source/coercion matrix; its length is less concerning than procedural concentration in `emit.rs` and `generate.rs`.
+- `catalog-types/src/signal.rs` is a cohesive shared vocabulary leaf. Split it only if its type families gain distinct consumers or dependency needs.
 - `config/claudine_config.rs` is still mostly a schema aggregator; its raw size is dominated by inline tests, not production responsibility sprawl.
 - Large stream provider files should first have tests extracted. Their remaining production code is mostly protocol-specific dispatch; the common skeleton has already been consolidated.
 - `render/event_renderer/mod.rs` is a cohesive stateful renderer with useful leaf modules. The Nice plan was right not to fragment it mechanically.
@@ -235,17 +280,18 @@ Document whether the divergence is intentional. If it is, add shared conformance
 
 ## Final judgment
 
-The three-plan effort was worthwhile and improved Claudine's architecture. The strongest result is a filesystem and module graph that now communicates the major domains clearly. The weakest result is that completion was sometimes measured by moving clusters and checking plan boxes rather than by re-running the original area-wide outcomes: god-function size, test-placement compliance, and ownership of provider-neutral lifecycle transitions.
+The three-plan effort and the completed provider-metadata work were worthwhile and improved Claudine's architecture. The strongest results are a filesystem and module graph that communicate the major domains clearly, plus a provider catalog whose data, behavior, generation, and drift controls have explicit owners. The weakest result remains that completion was sometimes measured by moving clusters and checking plan boxes rather than by re-running the original area-wide outcomes: god-function size, test-placement compliance, and ownership of provider-neutral lifecycle transitions. Provider metadata also demonstrates that strong macro-architecture can coexist with concentrated implementation files inside the new boundary.
 
 The next module-structure effort should be smaller and more outcome-driven:
 
 1. decompose the two central orchestration functions;
 2. enforce and then apply the test-placement rule;
 3. document and split rendezvous before it hardens further;
-4. address the newly grown wrapper execution hotspots.
+4. address the newly grown wrapper execution hotspots;
+5. split the generator's procedural hotspots and finish its renderable user-facing output.
 
 If those items land, the implementation will have addressed both halves of the original review: not only where code lives, but also how much behavior any one file or function owns.
 
 ## Verification notes
 
-This assessment used the current source tree, all three completed plan documents, `hug god-files --json claudine`, targeted line/symbol inventories, and GitNexus query/context results for lifecycle routing, stream parser sharing, `run_harness_loop_inner`, and `execute_composition_request_inner_with_guard`. No runtime code was changed, so the full test and lint suites were not re-run for this documentation-only review.
+This assessment used the current source tree, all three completed module-structure plan documents, the completed provider-metadata spec and supplemental designs, the live provider-metadata topic documentation, `hug god-files --json claudine`, targeted line/symbol/dispatch inventories, and GitNexus query/context results. GitNexus remained 13 commits stale because an attempted refresh failed on an invalid-UTF-8 record, so every graph-derived observation was cross-checked against current source and no conclusion relies on the stale graph alone. The package-area `just test` recipe passed for `claudine-catalog-types`, `claudine`, `claudine-contract`, `claudine-cli`, and `claudine-gen`, including generated-artifact drift, registry-coverage, dispatch-inventory, and dispatch-guard checks. No runtime code was changed.
