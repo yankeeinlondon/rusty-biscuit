@@ -139,6 +139,10 @@ name = "schema_validation"
 harness = false
 
 [[bench]]
+name = "effective_schema_ownership"
+harness = false
+
+[[bench]]
 name = "render_tree"
 harness = false
 
