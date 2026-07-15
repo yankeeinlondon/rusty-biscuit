@@ -1035,7 +1035,7 @@ const GUARD_ALLOWLIST: &[GuardEntry] = &[
     // --- CLI: Codex/Gemini shadow-HOME MCP injection need (dup pair; kept per
     //     Checkpoint I — consolidating reopens Phase-D catalog-data discipline).
     GuardEntry {
-        path: "claudine/cli/src/commands/wrap/composition/mod.rs",
+        path: "claudine/cli/src/commands/wrap/composition/pipeline.rs",
         form: FORM_MATCHES,
         providers: &["Codex", "Gemini"],
         tag: KEEP,

@@ -4,8 +4,8 @@
 //! [`run_composition_body`] is invoked twice across a composition run's
 //! lifetime: once for the external-guard (loop re-entry) path and once for the
 //! owned-guard (single-run / first loop iteration) path. Both share the same
-//! captured state, bundled here in [`CompositionRunCtx`] to keep the enclosing
-//! [`super::execute_composition_request_inner_with_guard`] focused on setup.
+//! captured state, bundled here in [`CompositionRunCtx`] so the setup pipeline
+//! hands provider execution one cohesive context.
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -88,8 +88,7 @@ pub(super) struct CompositionRunCtx<'a> {
 /// Execute a single composition iteration: harness-plan parse, pre-flight
 /// shell approval, dry-run seam, env/prompt output, and the harness loop.
 ///
-/// This is the promoted form of the `run_body` closure that previously lived
-/// inside `execute_composition_request_inner_with_guard`. `guard` and
+/// This is the promoted form of the former inline `run_body` closure. `guard` and
 /// `perf_collector` are passed separately because they are mutable and vary per
 /// call; everything else is bundled in `ctx`.
 #[allow(clippy::too_many_arguments)]
