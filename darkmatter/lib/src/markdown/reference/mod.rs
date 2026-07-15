@@ -524,6 +524,20 @@ impl Markdown {
     ) -> MarkdownResult<validate::ReferenceValidationReport> {
         validate::validate(self, &options).map_err(Into::into)
     }
+
+    /// Validates references against an already-built reference graph.
+    ///
+    /// Callers that have already built a [`ReferenceGraph`] for this document
+    /// (with the same `options.graph`) pass it in to skip a redundant
+    /// `build_reference_graph` (Finding 18). The graph must correspond to this
+    /// document and validation options.
+    pub fn validate_references_with_graph(
+        &self,
+        graph: &ReferenceGraph,
+        options: validate::ReferenceValidationOptions,
+    ) -> MarkdownResult<validate::ReferenceValidationReport> {
+        validate::validate_with_graph(self, &options, graph).map_err(Into::into)
+    }
 }
 
 /// Converts `BlockOptions` to `TransclusionRefOptions`.

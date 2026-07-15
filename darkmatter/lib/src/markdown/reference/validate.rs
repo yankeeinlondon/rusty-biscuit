@@ -11,12 +11,29 @@ use std::time::Duration;
 use serde::Serialize;
 use tracing::{debug, info, instrument, trace};
 
+use std::collections::HashMap;
+use std::path::PathBuf;
+
 use super::errors::ReferenceError;
 use super::types::{
-    ReferenceGraphOptions, ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceTarget,
+    ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceOrigin, ReferenceRecord,
+    ReferenceTarget,
 };
 use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeSource;
+
+/// Per-run memoization of prepared heading slugs, keyed by canonical target
+/// path (Finding 18).
+///
+/// Fragment validation prepares (InlinePre-composes) and extracts headings from
+/// the same document once per `path#fragment` reference and once per graph node.
+/// Every entry is produced from a fresh on-disk `Markdown::try_from`, so keying
+/// by canonical path is byte-identical to recomputing: identical input file →
+/// identical prepared slugs. The document root is deliberately never inserted
+/// here — it is composed from the in-memory `Markdown` (which may carry
+/// `--set`/`--state` overrides a fresh disk load would not), so a self-referential
+/// `path#fragment` still recomputes from disk exactly as before.
+type HeadingSlugCache = HashMap<PathBuf, Vec<String>>;
 
 /// Options for reference validation.
 #[derive(Clone)]
@@ -306,17 +323,33 @@ pub enum ReferenceSeverity {
 }
 
 /// Run validation on a markdown document's references.
+///
+/// Builds the reference graph once and delegates to [`validate_with_graph`].
 #[instrument(skip_all)]
 pub(crate) fn validate(
     md: &Markdown,
     options: &ReferenceValidationOptions,
 ) -> Result<ReferenceValidationReport, ReferenceError> {
+    let graph = super::graph::build_reference_graph(md, &options.graph)
+        .map_err(|e| ReferenceError::Validation(e.to_string()))?;
+    validate_with_graph(md, options, &graph)
+}
+
+/// Run validation against an already-built reference graph (Finding 18).
+///
+/// Callers that already hold a `ReferenceGraph` (e.g. `md graph --validate`,
+/// which builds one to render the tree) pass it straight through instead of
+/// paying a second `build_reference_graph`. The graph must have been built from
+/// the same document and `options.graph`, which is the only supported call
+/// shape today.
+#[instrument(skip_all)]
+pub(crate) fn validate_with_graph(
+    md: &Markdown,
+    options: &ReferenceValidationOptions,
+    graph: &ReferenceGraph,
+) -> Result<ReferenceValidationReport, ReferenceError> {
     info!("validate: starting reference validation");
-    let ref_set = {
-        let graph = super::graph::build_reference_graph(md, &options.graph)
-            .map_err(|e| ReferenceError::Validation(e.to_string()))?;
-        super::graph::flatten_graph(&graph)
-    };
+    let ref_set = super::graph::flatten_graph(graph);
 
     let mut report = ReferenceValidationReport {
         references_scanned: ref_set.len(),
@@ -328,10 +361,20 @@ pub(crate) fn validate(
         "validate: references collected"
     );
 
+    // Prepared-heading slugs are memoized per canonical target path for the
+    // whole run so fragment validation composes each referenced document once.
+    let mut heading_cache: HeadingSlugCache = HashMap::new();
+
     // Collect headings for fragment validation from the composed document.
-    // Uses the graph's prepared content which includes transcluded headings.
+    // Reuses the already-built graph (no second build) and shares the slug
+    // cache with per-reference cross-doc fragment validation below.
     let headings = if options.validate_fragments {
-        Some(collect_composed_heading_slugs(md, &options.graph))
+        Some(collect_composed_heading_slugs(
+            md,
+            &options.graph,
+            graph,
+            &mut heading_cache,
+        ))
     } else {
         None
     };
@@ -374,6 +417,7 @@ pub(crate) fn validate(
                         record,
                         &mut report,
                         &options.graph,
+                        &mut heading_cache,
                     );
                 }
 
@@ -595,37 +639,60 @@ fn collect_prepared_heading_slugs(
 /// This provides the effective heading set after transclusion, so fragment
 /// validation checks against the actual composed heading list. Each node's
 /// headings are extracted from prepared content (after InlinePre).
+///
+/// Takes the already-built `graph` (Finding 18 — no second
+/// `build_reference_graph`) and shares `cache` with per-reference cross-doc
+/// fragment validation so any document referenced both as a graph node and as
+/// a `path#fragment` target composes only once per run.
 fn collect_composed_heading_slugs(
     md: &Markdown,
     graph_options: &super::types::ReferenceGraphOptions,
+    graph: &ReferenceGraph,
+    cache: &mut HeadingSlugCache,
 ) -> Vec<String> {
     let source = md.source().clone().unwrap_or(ComposeSource::Unknown);
 
-    // Build the reference graph to discover all nodes
-    let graph = match super::graph::build_reference_graph(md, graph_options) {
-        Ok(g) => g,
-        Err(_) => return collect_prepared_heading_slugs(md, &source, graph_options),
-    };
-
     let mut all_slugs = Vec::new();
 
-    // Collect headings from the root document (prepared)
+    // Collect headings from the root document (prepared). The root composes
+    // from the in-memory `md`, which may carry overrides, so it is never
+    // cached under its path key (see `HeadingSlugCache`).
     all_slugs.extend(collect_prepared_heading_slugs(md, &source, graph_options));
 
-    // Collect headings from all child nodes (prepared)
+    // Collect headings from all child nodes (prepared, disk-loaded, cached).
     for node in &graph.nodes {
         if let ComposeSource::File(path) = &node.source
             && let Ok(child_md) = Markdown::try_from(path.as_path())
         {
-            all_slugs.extend(collect_prepared_heading_slugs(
+            all_slugs.extend(cached_prepared_heading_slugs(
+                cache,
                 &child_md,
                 &node.source,
+                path,
                 graph_options,
             ));
         }
     }
 
     all_slugs
+}
+
+/// Returns prepared heading slugs for a disk-loaded document, memoized by
+/// canonical path for the run (Finding 18).
+fn cached_prepared_heading_slugs(
+    cache: &mut HeadingSlugCache,
+    md: &Markdown,
+    source: &ComposeSource,
+    path: &std::path::Path,
+    graph_options: &super::types::ReferenceGraphOptions,
+) -> Vec<String> {
+    let key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    if let Some(hit) = cache.get(&key) {
+        return hit.clone();
+    }
+    let slugs = collect_prepared_heading_slugs(md, source, graph_options);
+    cache.insert(key, slugs.clone());
+    slugs
 }
 
 /// Validates a fragment reference against a cross-document target.
@@ -640,6 +707,7 @@ fn validate_cross_doc_fragment(
     record: &ReferenceRecord,
     report: &mut ReferenceValidationReport,
     graph_options: &super::types::ReferenceGraphOptions,
+    cache: &mut HeadingSlugCache,
 ) {
     let ComposeSource::File(base_path) = source else {
         return;
@@ -685,8 +753,9 @@ fn validate_cross_doc_fragment(
     }
 
     if let Ok(target_md) = Markdown::try_from(target_path.as_path()) {
-        let target_source = ComposeSource::File(target_path);
-        let headings = collect_prepared_heading_slugs(&target_md, &target_source, graph_options);
+        let target_source = ComposeSource::File(target_path.clone());
+        let headings =
+            cached_prepared_heading_slugs(cache, &target_md, &target_source, &target_path, graph_options);
         let frag_lower = fragment.to_lowercase();
         if !headings.contains(&frag_lower) {
             report.issues.push(ReferenceIssue {
@@ -1226,5 +1295,50 @@ mod tests {
             .render(&biscuit_terminal::terminal::Terminal::new_forced());
 
         assert!(rendered.is_empty());
+    }
+
+    /// Finding 18: validating against a pre-built graph must be byte-identical
+    /// to the graph-building entry point, including cross-doc fragment checks
+    /// (which route through the per-run heading-slug cache).
+    #[test]
+    fn validate_with_graph_matches_validate_with_fragments() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let target = dir.path().join("other.md");
+        std::fs::write(&target, "# Getting Started\n\nContent.").unwrap();
+
+        let source_path = dir.path().join("source.md");
+        std::fs::write(&source_path, "").unwrap();
+
+        // One present fragment, one missing fragment, and a repeated reference
+        // to the same target so the heading-slug cache is exercised.
+        let md = Markdown::new(
+            "[a](./other.md#getting-started)\n\
+             [b](./other.md#missing)\n\
+             [c](./other.md#getting-started)",
+        )
+        .with_source(ComposeSource::File(source_path));
+
+        let options = ReferenceValidationOptions {
+            validate_fragments: true,
+            ..Default::default()
+        };
+
+        let via_build = validate(&md, &options).unwrap();
+
+        let graph = super::super::graph::build_reference_graph(&md, &options.graph).unwrap();
+        let via_graph = validate_with_graph(&md, &options, &graph).unwrap();
+
+        assert_eq!(via_build.references_scanned, via_graph.references_scanned);
+        assert_eq!(via_build.references_valid, via_graph.references_valid);
+        assert_eq!(via_build.error_count(), via_graph.error_count());
+        assert_eq!(via_build.issues.len(), via_graph.issues.len());
+        // The single missing fragment is reported once by both entry points.
+        assert_eq!(via_graph.error_count(), 1);
+        assert!(
+            via_graph
+                .issues
+                .iter()
+                .any(|i| i.code == ReferenceIssueCode::MissingFragmentTarget)
+        );
     }
 }

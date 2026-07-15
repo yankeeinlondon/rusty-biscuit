@@ -238,10 +238,16 @@ impl FileTree {
         let report = if self.do_validate {
             let mut val_opts = self.validation_options.clone();
             val_opts.graph = self.graph_options.clone();
-            Some(self.md.validate_references(val_opts).map_err(|e| match e {
-                MarkdownError::Reference(re) => FileTreeError::Reference(*re),
-                other => FileTreeError::Markdown(other),
-            })?)
+            // Reuse the graph just built for the tree instead of letting
+            // `validate_references` build a second one (Finding 18).
+            Some(
+                self.md
+                    .validate_references_with_graph(&graph, val_opts)
+                    .map_err(|e| match e {
+                        MarkdownError::Reference(re) => FileTreeError::Reference(*re),
+                        other => FileTreeError::Markdown(other),
+                    })?,
+            )
         } else {
             None
         };
