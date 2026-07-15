@@ -2,6 +2,309 @@
 total_phases: 12
 created: 2026-07-14
 source_review: review.md
+source_files_during_phase_1:
+  - cli/tests/wrap_perf.rs
+  - gen/Cargo.toml
+  - gen/tests/drift.rs
+  - gen/tests/generate_ux.rs
+  - lib/src/composition/error/tests.rs
+  - lib/src/composition/lifecycle/runtime.rs
+docs_updated_during_phase_1:
+  - reviews/2026-07-14-module-assessment/plan.md
+docs_created_during_phase_1:
+  - reviews/2026-07-14-module-assessment/generated-artifact-baseline.json
+  - reviews/2026-07-14-module-assessment/phase-1-baseline.md
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - cli/src/commands/wrap/composition/preflight.rs
+  - cli/src/commands/wrap/harness_orch/loop_control.rs
+  - cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+  - cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs
+  - lib/src/composition/lifecycle/runtime.rs
+  - lib/src/composition/mod.rs
+docs_updated_during_phase_2:
+  - reviews/2026-07-14-module-assessment/plan.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/claudine/architecture.md
+source_files_during_phase_3:
+  - cli/src/commands/wrap/composition/mod.rs
+  - cli/src/commands/wrap/composition/pipeline.rs
+  - cli/src/commands/wrap/composition/runner.rs
+  - cli/tests/dispatch_inventory.rs
+docs_updated_during_phase_3:
+  - docs/providers/dispatch-inventory.json
+  - reviews/2026-07-14-module-assessment/plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/claudine/architecture.md
+source_files_during_phase_4:
+  - cli/src/commands/wrap/harness_orch/loop_control.rs
+docs_updated_during_phase_4:
+  - reviews/2026-07-14-module-assessment/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/claudine/architecture.md
+source_files_during_phase_5:
+  - cli/tests/test_placement.rs
+docs_updated_during_phase_5:
+  - reviews/2026-07-14-module-assessment/plan.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/claudine/architecture.md
+source_files_during_phase_6:
+  - cli/src/commands/compose/prep.rs
+  - cli/src/commands/compose/prep/tests.rs
+  - cli/src/commands/context_render.rs
+  - cli/src/commands/context_render/tests.rs
+  - cli/src/commands/schema_interactive/mod.rs
+  - cli/src/commands/schema_interactive/tests.rs
+  - cli/src/commands/wrap/composition/dry_run.rs
+  - cli/src/commands/wrap/composition/dry_run/tests.rs
+  - cli/src/commands/wrap/composition/pipeline.rs
+  - cli/src/commands/wrap/composition/pipeline/tests.rs
+  - cli/src/commands/wrap/exec/spawn.rs
+  - cli/src/commands/wrap/exec/spawn/tests.rs
+  - cli/src/commands/wrap/exec/termination.rs
+  - cli/src/commands/wrap/exec/termination/tests.rs
+  - cli/src/commands/wrap/exec/timeouts.rs
+  - cli/src/commands/wrap/exec/timeouts/tests.rs
+  - cli/src/commands/wrap/flags.rs
+  - cli/src/commands/wrap/flags/tests.rs
+  - cli/src/commands/wrap/repo_home.rs
+  - cli/src/commands/wrap/repo_home/tests.rs
+  - cli/src/commands/wrap/session_report.rs
+  - cli/src/commands/wrap/session_report/tests.rs
+  - cli/src/commands/wrap/system_prompt.rs
+  - cli/src/commands/wrap/system_prompt/tests.rs
+  - cli/src/completion/bootstrap.rs
+  - cli/src/completion/bootstrap/tests.rs
+  - cli/src/completion/composition/mod.rs
+  - cli/src/completion/composition/tests.rs
+  - cli/src/completion/engine/mod.rs
+  - cli/src/completion/engine/tests.rs
+  - cli/src/completion/scopes.rs
+  - cli/src/completion/scopes/tests.rs
+  - cli/src/completion/setter_value.rs
+  - cli/src/completion/setter_value/tests.rs
+  - cli/src/completion/walker.rs
+  - cli/src/completion/walker/tests.rs
+  - cli/src/output/error_walker.rs
+  - cli/src/output/error_walker/tests.rs
+  - cli/tests/test_placement.rs
+  - contract/src/tests.rs
+  - contract/src/tests/tracing_capture.rs
+  - gen/src/agent_errors_check.rs
+  - gen/src/agent_errors_check/tests.rs
+  - gen/src/emit.rs
+  - gen/src/emit/tests.rs
+  - gen/src/generate.rs
+  - gen/src/generate/tests.rs
+  - gen/src/registry.rs
+  - gen/src/registry/tests.rs
+  - gen/src/vocabulary.rs
+  - gen/src/vocabulary/tests.rs
+  - lib/src/actions/hook_action.rs
+  - lib/src/actions/hook_action/tests.rs
+  - lib/src/composition/closure.rs
+  - lib/src/composition/closure/tests.rs
+  - lib/src/composition/lifecycle/actions.rs
+  - lib/src/composition/lifecycle/actions/tests.rs
+  - lib/src/composition/lifecycle/context.rs
+  - lib/src/composition/lifecycle/context/tests.rs
+  - lib/src/composition/lifecycle/control.rs
+  - lib/src/composition/lifecycle/control/tests.rs
+  - lib/src/composition/lifecycle/runtime.rs
+  - lib/src/composition/lifecycle/runtime/tests.rs
+  - lib/src/composition/looping/actions.rs
+  - lib/src/composition/looping/actions/tests.rs
+  - lib/src/composition/looping/config.rs
+  - lib/src/composition/looping/config/tests.rs
+  - lib/src/composition/preflight.rs
+  - lib/src/composition/preflight/tests.rs
+  - lib/src/composition/prepare.rs
+  - lib/src/composition/prepare/tests.rs
+  - lib/src/composition/resolve.rs
+  - lib/src/composition/resolve/tests.rs
+  - lib/src/composition/select.rs
+  - lib/src/composition/select/tests.rs
+  - lib/src/composition/sequence.rs
+  - lib/src/composition/sequence/tests.rs
+  - lib/src/composition/types.rs
+  - lib/src/composition/types/tests.rs
+  - lib/src/config/claude.rs
+  - lib/src/config/claude/tests.rs
+  - lib/src/config/claudine_config.rs
+  - lib/src/config/claudine_config/tests.rs
+  - lib/src/config/messaging_block.rs
+  - lib/src/config/messaging_block/tests.rs
+  - lib/src/dispatch/expression.rs
+  - lib/src/dispatch/expression/tests.rs
+  - lib/src/dispatch/loader.rs
+  - lib/src/dispatch/loader/tests.rs
+  - lib/src/dispatch/matcher.rs
+  - lib/src/dispatch/matcher/tests.rs
+  - lib/src/dispatch/mod.rs
+  - lib/src/dispatch/runner/mod.rs
+  - lib/src/dispatch/runner/tests.rs
+  - lib/src/dispatch/template.rs
+  - lib/src/dispatch/template/tests.rs
+  - lib/src/dispatch/tests.rs
+  - lib/src/harness/runtime.rs
+  - lib/src/harness/runtime/tests.rs
+  - lib/src/linking/compatibility/mod.rs
+  - lib/src/linking/compatibility/tests.rs
+  - lib/src/linking/skills/portable.rs
+  - lib/src/linking/skills/portable/tests.rs
+  - lib/src/mcp/import.rs
+  - lib/src/mcp/import/tests.rs
+  - lib/src/messaging/config.rs
+  - lib/src/messaging/config/tests.rs
+  - lib/src/messaging/send.rs
+  - lib/src/messaging/send/tests.rs
+  - lib/src/model_catalog/service.rs
+  - lib/src/model_catalog/service/tests.rs
+  - lib/src/permissions/engine.rs
+  - lib/src/permissions/engine/tests.rs
+  - lib/src/permissions/providers/claude.rs
+  - lib/src/permissions/providers/claude/tests.rs
+  - lib/src/permissions/providers/codex.rs
+  - lib/src/permissions/providers/codex/tests.rs
+  - lib/src/permissions/providers/gemini.rs
+  - lib/src/permissions/providers/gemini/tests.rs
+  - lib/src/permissions/providers/qwen.rs
+  - lib/src/permissions/providers/qwen/tests.rs
+  - lib/src/permissions/query.rs
+  - lib/src/permissions/query/tests.rs
+  - lib/src/protect/catalog.rs
+  - lib/src/protect/catalog/tests.rs
+  - lib/src/protect/observe.rs
+  - lib/src/protect/observe/tests.rs
+  - lib/src/protect/service.rs
+  - lib/src/protect/service/tests.rs
+  - lib/src/provider/methods.rs
+  - lib/src/provider/methods/tests.rs
+  - lib/src/render/prompt/system.rs
+  - lib/src/render/prompt/system/tests.rs
+  - lib/src/reporting/ingest.rs
+  - lib/src/reporting/ingest/tests.rs
+  - lib/src/runaway/config.rs
+  - lib/src/runaway/config/tests.rs
+  - lib/src/runaway/detector.rs
+  - lib/src/runaway/detector/tests.rs
+  - lib/src/signals/bespoke.rs
+  - lib/src/signals/bespoke/tests.rs
+  - lib/src/stream/badges.rs
+  - lib/src/stream/badges/tests.rs
+  - lib/src/stream/logs/opencode/events.rs
+  - lib/src/stream/logs/opencode/events/tests.rs
+  - lib/src/stream/progress.rs
+  - lib/src/stream/progress/tests.rs
+  - lib/src/stream/protocol/claude.rs
+  - lib/src/stream/protocol/claude/tests.rs
+  - lib/src/stream/protocol/codex.rs
+  - lib/src/stream/protocol/codex/tests.rs
+  - lib/src/stream/protocol/kimi.rs
+  - lib/src/stream/protocol/kimi/tests.rs
+  - lib/src/stream/protocol/opencode.rs
+  - lib/src/stream/protocol/opencode/tests.rs
+  - lib/src/stream/providers/claude.rs
+  - lib/src/stream/providers/claude/tests.rs
+  - lib/src/stream/providers/codex.rs
+  - lib/src/stream/providers/codex/tests.rs
+  - lib/src/stream/providers/gemini.rs
+  - lib/src/stream/providers/gemini/tests.rs
+  - lib/src/stream/providers/kimi.rs
+  - lib/src/stream/providers/kimi/tests.rs
+  - lib/src/stream/providers/opencode.rs
+  - lib/src/stream/providers/opencode/tests.rs
+  - lib/src/stream/providers/pi.rs
+  - lib/src/stream/providers/pi/tests.rs
+  - lib/src/stream/reporting.rs
+  - lib/src/stream/reporting/tests.rs
+  - lib/src/stream/semantic.rs
+  - lib/src/stream/semantic/tests.rs
+  - lib/src/stream/stderr.rs
+  - lib/src/stream/stderr/tests.rs
+  - lib/src/stream/tool_display.rs
+  - lib/src/stream/tool_display/from_event_tests.rs
+  - lib/src/stream/tool_display/humanize_tests.rs
+  - lib/src/stream/tool_display/summary_tests.rs
+  - lib/src/stream/tool_display/tests.rs
+  - lib/src/system_prompt/prepare.rs
+  - lib/src/system_prompt/prepare/tests.rs
+  - lib/src/system_prompt/resolve.rs
+  - lib/src/system_prompt/resolve/tests.rs
+  - rendezvous/daemon/src/peers.rs
+  - rendezvous/daemon/src/peers/tests.rs
+  - rendezvous/daemon/src/register.rs
+  - rendezvous/daemon/src/register/tests.rs
+  - rendezvous/daemon/src/service.rs
+  - rendezvous/daemon/src/service/tests.rs
+  - rendezvous/daemon/src/sync.rs
+  - rendezvous/daemon/src/sync/tests.rs
+docs_updated_during_phase_6:
+  - docs/providers/dispatch-inventory.json
+  - reviews/2026-07-14-module-assessment/plan.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/claudine/architecture.md
+source_files_during_phase_7:
+  - cli/src/commands/wrap/harness_orch/loop_control/tests.rs
+  - cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs
+  - cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+  - cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs
+  - cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+  - cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+  - cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_evaluation.rs
+  - cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_routing.rs
+  - lib/src/composition/lifecycle/executor/tests.rs
+  - lib/src/composition/lifecycle/executor/tests/action_dispatch.rs
+  - lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+  - lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+  - lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+  - lib/src/composition/lifecycle/executor/tests/mod.rs
+  - lib/src/composition/lifecycle/executor/tests/mutation_visibility.rs
+  - lib/src/composition/lifecycle/tests.rs
+  - lib/src/composition/lifecycle/tests/action_shape_control.rs
+  - lib/src/composition/lifecycle/tests/audio_emission.rs
+  - lib/src/composition/lifecycle/tests/diagnostics.rs
+  - lib/src/composition/lifecycle/tests/guard_runtime.rs
+  - lib/src/composition/lifecycle/tests/mod.rs
+  - lib/src/composition/lifecycle/tests/parse_config.rs
+  - lib/src/composition/lifecycle/tests/validation.rs
+  - lib/src/composition/looping/engine/tests.rs
+  - lib/src/composition/looping/engine/tests/iteration_actions.rs
+  - lib/src/composition/looping/engine/tests/lifecycle_control.rs
+  - lib/src/composition/looping/engine/tests/mod.rs
+  - lib/src/composition/looping/engine/tests/rate_limits.rs
+  - lib/src/composition/looping/engine/tests/seed_state.rs
+  - lib/src/stream/logs/opencode/bridge/tests.rs
+  - lib/src/stream/logs/opencode/bridge/tests/ingest_classification.rs
+  - lib/src/stream/logs/opencode/bridge/tests/mod.rs
+  - lib/src/stream/logs/opencode/bridge/tests/session_lifecycle.rs
+  - lib/src/stream/logs/opencode/bridge/tests/signal_projection.rs
+  - lib/src/stream/logs/opencode/bridge/tests/stalled_generation_progress.rs
+  - lib/src/stream/logs/opencode/bridge/tests/stdout_stderr_coordination.rs
+  - lib/src/stream/logs/opencode/bridge/tests/usage_retry_guards.rs
+  - rendezvous/daemon/src/session_log/tests.rs
+  - rendezvous/daemon/src/session_log/tests/append_rotation.rs
+  - rendezvous/daemon/src/session_log/tests/durability.rs
+  - rendezvous/daemon/src/session_log/tests/mod.rs
+  - rendezvous/daemon/src/session_log/tests/remote_validation.rs
+  - rendezvous/daemon/src/session_log/tests/replace_update.rs
+  - rendezvous/daemon/src/session_log/tests/replay_rehydration.rs
+docs_updated_during_phase_7:
+  - docs/providers/dispatch-inventory.json
+  - reviews/2026-07-14-module-assessment/plan.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
+packages:
+  - claudine
+  - claudine-cli
+  - claudine-contract
+  - claudine-gen
+  - rendezvous-daemon
 ---
 
 # Claudine Module-Assessment Implementation Plan
@@ -65,113 +368,113 @@ render/stream modules solely to reduce line counts.
 Establish a behavior baseline before changing either state machine or the
 cross-platform process layer.
 
-- Add focused characterization cases for lifecycle ordering across
+- [x] Add focused characterization cases for lifecycle ordering across
   `initialize`, `start`, `success`, `failure`, `finalize`, and `loop`, including
   evaluation-error precedence, action errors, terminal-slot redesignation,
   and finalize-once behavior.
-- Pin recovery behavior for `retry`, `resume`, `proxy`, `stop`, `error`, and
+- [x] Pin recovery behavior for `retry`, `resume`, `proxy`, `stop`, `error`, and
   unsupported setup-phase recovery, including attempt budgets, proxy chains,
   session availability, and the `provider_launched` re-entry distinction.
-- Pin composition setup ordering for target selection, launch workspace,
+- [x] Pin composition setup ordering for target selection, launch workspace,
   environment/MCP construction, argv and system-prompt preparation, lifecycle
   setup, initialize routing, and handoff to `run_composition_body`.
-- Pin process semantics for inherited, captured, and semantic-stream modes:
+- [x] Pin process semantics for inherited, captured, and semantic-stream modes:
   normal completion, user interruption, timeout, watchdog termination,
   completion-triggered termination, exit-summary projection, and child reaping.
-- Record byte baselines for every generated provider artifact and stable
+- [x] Record byte baselines for every generated provider artifact and stable
   snapshots for human-facing generator reports and composition error blocks.
-- Capture the current test-placement inventory and `hug god-files --json
+- [x] Capture the current test-placement inventory and `hug god-files --json
   claudine` result as measurement inputs; generated and test-only files must be
   labeled separately from actionable production code.
 
 Acceptance gates:
 
-- All new cases pass against the unrefactored implementation.
-- `just test-library`, `just test-cli`, `just test-gen`, and `just
+- [x] All new cases pass against the unrefactored implementation.
+- [x] `just test-library`, `just test-cli`, `just test-gen`, and `just
   test-rendezvous` pass.
-- `just test-l2` passes on an available headless terminal backend; Windows
+- [x] `just test-l2` passes on an available headless terminal backend; Windows
   completion/Ctrl+C cases are confirmed runnable in the Windows CI job.
 
 ## Phase 2 — Define the provider-neutral lifecycle transition core
 
 Finish the C4 layering work before decomposing the two CLI callers.
 
-- Extend `lib/src/composition/lifecycle/runtime.rs` with the smallest pure
+- [x] Extend `lib/src/composition/lifecycle/runtime.rs` with the smallest pure
   transition vocabulary needed by both preflight and the harness loop. Model
   state inputs and decisions explicitly: lifecycle event/slot, launched state,
   prior/evaluation/action error, control action, available session, attempt and
   proxy budgets, and finalize state.
-- Return typed transition decisions such as continue/re-enter, finalize,
+- [x] Return typed transition decisions such as continue/re-enter, finalize,
   terminal success/failure, proxy handoff, or abort. Keep filesystem access,
   process spawning, terminal output, messaging, and provider-specific command
   construction out of the library.
-- Replace CLI-side “mirror” helpers only where both callers genuinely share the
+- [x] Replace CLI-side “mirror” helpers only where both callers genuinely share the
   transition contract. Retain CLI adapters for executing the pure decision.
-- Add table-driven library tests covering every event/control/error
+- [x] Add table-driven library tests covering every event/control/error
   combination used by composition preflight and the harness run loop.
-- Review and update docs/comments for the changed transition contracts; remove
+- [x] Review and update docs/comments for the changed transition contracts; remove
   prose that still describes one CLI path as mirroring another.
 
 Acceptance gates:
 
-- The library transition matrix is exhaustive and both CLI paths consume it.
-- No dependency from `claudine` to `claudine-cli` or CLI-only crates is added.
-- Existing Phase 1 ordering and recovery tests remain unchanged and green.
-- `just test-library`, `just test-cli`, and `just lint` pass.
+- [x] The library transition matrix is exhaustive and both CLI paths consume it.
+- [x] No dependency from `claudine` to `claudine-cli` or CLI-only crates is added.
+- [x] Existing Phase 1 ordering and recovery tests remain unchanged and green.
+- [x] `just test-library`, `just test-cli`, and `just lint` pass.
 
 ## Phase 3 — Decompose composition request setup and initialize routing
 
 Turn `execute_composition_request_inner_with_guard` into a coordinator without
 changing its public wrappers or `SingleCompositionOutcome` contract.
 
-- Introduce a cohesive composition-attempt state/context that remains intact
+- [x] Introduce a cohesive composition-attempt state/context that remains intact
   across the pipeline instead of becoming a large set of locals.
-- Extract stable preparation phases with explicit inputs and outputs:
+- [x] Extract stable preparation phases with explicit inputs and outputs:
   selection/launch resolution, environment and MCP preparation, argv and
   system-prompt construction, lifecycle runtime construction, initialize
   execution/routing, and provider-run handoff.
-- Use a typed phase result for proceed, completed, blocked, or failed outcomes;
+- [x] Use a typed phase result for proceed, completed, blocked, or failed outcomes;
   route lifecycle transitions through the Phase 2 library core.
-- Keep target selection, command construction, filesystem access, perf
+- [x] Keep target selection, command construction, filesystem access, perf
   collection, dry-run rendering, and provider launch in CLI modules.
-- Preserve `execute_composition_request`, sequence callers, interactive
+- [x] Preserve `execute_composition_request`, sequence callers, interactive
   selection, silent/dry-run behavior, and error enrichment at the render
   boundary.
 
 Acceptance gates:
 
-- The root function reads as ordered phase calls with no duplicated error or
+- [x] The root function reads as ordered phase calls with no duplicated error or
   finalize routing and no immediate context destructuring.
-- Phase functions have focused unit tests, while Phase 1 end-to-end behavior
+- [x] Phase functions have focused unit tests, while Phase 1 end-to-end behavior
   remains byte/sequence equivalent.
-- `just test-cli`, `just test-library`, and `just lint` pass.
+- [x] `just test-cli`, `just test-library`, and `just lint` pass.
 
 ## Phase 4 — Decompose the harness attempt/recovery state machine
 
 Refactor the HIGH-risk `run_harness_loop_inner` after the shared transition
 contract and composition caller have proven the boundary.
 
-- Replace the current loose mutable locals with a `HarnessLoopState` that owns
+- [x] Replace the current loose mutable locals with a `HarnessLoopState` that owns
   attempt count, retry/resume budgets, prompt/session state, proxy tracking,
   cached shell options, lifecycle guard state, and the immutable run context.
-- Extract phases for prompt materialization/preflight, attempt execution,
+- [x] Extract phases for prompt materialization/preflight, attempt execution,
   result classification, lifecycle event execution, terminal recovery,
   requeue/proxy handling, and next-attempt preparation.
-- Make each phase return an explicit loop transition such as retry, resume,
+- [x] Make each phase return an explicit loop transition such as retry, resume,
   proxy, complete, or abort. Apply the Phase 2 provider-neutral decision in a
   CLI adapter rather than re-encoding event-specific gates.
-- Preserve `drive_terminal_recovery` where it remains the single terminal-tail
+- [x] Preserve `drive_terminal_recovery` where it remains the single terminal-tail
   executor; do not create a second recovery abstraction with overlapping
   ownership.
-- Keep process launch and provider command details in the existing CLI
+- [x] Keep process launch and provider command details in the existing CLI
   attempt/profile modules.
 
 Acceptance gates:
 
-- The loop body exposes phase ordering and re-entry points without reading an
+- [x] The loop body exposes phase ordering and re-entry points without reading an
   800-line function, and state ownership is visible from the context type.
-- Retry/resume/proxy/finalize tests cover every transition and budget edge.
-- The Phase 1 harness characterization suite, `just test-cli`, `just
+- [x] Retry/resume/proxy/finalize tests cover every transition and budget edge.
+- [x] The Phase 1 harness characterization suite, `just test-cli`, `just
   test-library`, `just test-l2`, and `just lint` pass.
 
 ## Phase 5 — Build the test-placement analyzer
@@ -179,50 +482,50 @@ Acceptance gates:
 Create an accurate, reusable analyzer before mechanically moving the current
 violations.
 
-- Add a structural test under the Claudine CLI integration-test tooling,
+- [x] Add a structural test under the Claudine CLI integration-test tooling,
   following the existing dispatch-inventory scanner pattern, and scan
   `lib`, `cli`, `contract`, `catalog-types`, `gen`, and
   `rendezvous/{core,client,daemon}`.
-- Centralize the documented thresholds: approximately 800 production lines or
+- [x] Centralize the documented thresholds: approximately 800 production lines or
   300 lines in an inline `mod tests` body. Count production and test bodies
   separately and handle attributes, comments, strings, raw strings, and nested
   braces so diagnostics are stable.
-- Ignore generated files by explicit path/header rules, not by broad directory
+- [x] Ignore generated files by explicit path/header rules, not by broad directory
   exclusions. Report the file, production-line count, test-line count, and
   threshold exceeded.
-- Support a narrow exception table whose entries contain a path and durable
+- [x] Support a narrow exception table whose entries contain a path and durable
   rationale; reject stale exceptions when a file no longer violates a rule.
-- Unit-test the analyzer with portable fixtures. Keep the repository-wide
+- [x] Unit-test the analyzer with portable fixtures. Keep the repository-wide
   assertion in report-only mode until Phase 6 eliminates the current debt, so
   this phase remains green without grandfathering roughly 90 violations.
 
 Acceptance gates:
 
-- Analyzer fixtures cover Unix and Windows newlines and the Rust constructs
+- [x] Analyzer fixtures cover Unix and Windows newlines and the Rust constructs
   above.
-- The report reproduces the review's classes of violation and excludes
+- [x] The report reproduces the review's classes of violation and excludes
   generated provider/signal artifacts.
-- `just test-cli` and `just lint` pass.
+- [x] `just test-cli` and `just lint` pass.
 
 ## Phase 6 — Eliminate inline-test debt and activate the hard gate
 
 Apply the analyzer to the entire package area as a mechanical, behavior-neutral
 migration.
 
-- Move every current threshold-violating inline test module to a sibling
+- [x] Move every current threshold-violating inline test module to a sibling
   `tests.rs` or `tests/mod.rs`, including the cited rendezvous sync/service,
   wrapper spawn/termination, stream-provider, composition/dispatch, and
   generator files.
-- Preserve test names, module visibility, `use super::*`, `cfg` gates, fixtures,
+- [x] Preserve test names, module visibility, `use super::*`, `cfg` gates, fixtures,
   serial annotations, and platform-specific imports. Do not combine these
   moves with production refactors or formatting churn.
-- Review each proposed exception individually. Keep only cases where
+- [x] Review each proposed exception individually. Keep only cases where
   co-location materially clarifies private invariants; record why extraction
   would be worse and require the exception to remain below a separately stated
   ceiling.
-- Switch the Phase 5 repository assertion from report-only to a normal Level 1
+- [x] Switch the Phase 5 repository assertion from report-only to a normal Level 1
   test and remove any temporary inventory/baseline entries.
-- Update the Claudine architecture Test Placement section to identify the
+- [x] Update the Claudine architecture Test Placement section to identify the
   enforcing test and exception policy.
 
 Acceptance gates:
@@ -238,29 +541,29 @@ Acceptance gates:
 Resolve the remaining test-navigation hotspots without claiming a Rust
 compile-unit optimization.
 
-- Divide `composition/lifecycle/tests.rs` into parse/config, validation,
+- [x] Divide `composition/lifecycle/tests.rs` into parse/config, validation,
   action-shape/control, audio/emission, guard/runtime, and diagnostics suites.
-- Divide harness `loop_control/tests.rs` into lifecycle ordering, terminal
+- [x] Divide harness `loop_control/tests.rs` into lifecycle ordering, terminal
   routing, retry/resume, proxy, and requeue suites.
-- Divide lifecycle executor tests into action dispatch, conditions/control,
+- [x] Divide lifecycle executor tests into action dispatch, conditions/control,
   event-time interpolation, mutation visibility, and filesystem/lookup suites.
-- Divide OpenCode bridge tests into ingest/classification, session lifecycle,
+- [x] Divide OpenCode bridge tests into ingest/classification, session lifecycle,
   usage/retry guards, stalled-generation progress, stdout/stderr coordination,
   and signal projection suites.
-- Divide rendezvous session-log tests into append/rotation, durability,
+- [x] Divide rendezvous session-log tests into append/rotation, durability,
   replay/rehydration, remote validation, and replace/update suites.
-- Divide loop-engine tests into seed/state, iteration/actions, rate limits, and
+- [x] Divide loop-engine tests into seed/state, iteration/actions, rate limits, and
   lifecycle/control suites.
-- Put shared fixtures in a small parent `tests/mod.rs`; avoid a new catch-all
+- [x] Put shared fixtures in a small parent `tests/mod.rs`; avoid a new catch-all
   helper module that simply relocates the original hotspot.
 
 Acceptance gates:
 
-- Each test file has one discoverable behavioral responsibility and no copied
+- [x] Each test file has one discoverable behavioral responsibility and no copied
   fixtures or assertions.
-- Test names and coverage remain stable, and the Phase 6 placement guard stays
+- [x] Test names and coverage remain stable, and the Phase 6 placement guard stays
   green.
-- `just test-library`, `just test-cli`, `just test-rendezvous`, and `just lint`
+- [x] `just test-library`, `just test-cli`, `just test-rendezvous`, and `just lint`
   pass.
 
 ## Phase 8 — Give rendezvous an explicit architecture and session-log boundary
