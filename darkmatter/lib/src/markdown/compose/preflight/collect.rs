@@ -361,7 +361,7 @@ fn collect_recursive(
                 edges.push(super::PreflightGraphEdge {
                     directive: directive.clone(),
                     resolved_target: super::PreflightResolvedTarget::File(path),
-                    child,
+                    child: std::sync::Arc::new(child),
                 });
             }
             transclusion::ResolvedTarget::Url { url, .. } => {
@@ -381,7 +381,7 @@ fn collect_recursive(
                 edges.push(super::PreflightGraphEdge {
                     directive: directive.clone(),
                     resolved_target: super::PreflightResolvedTarget::Url(url),
-                    child,
+                    child: std::sync::Arc::new(child),
                 });
             }
         }
@@ -389,8 +389,10 @@ fn collect_recursive(
 
     let refs =
         transclusion::parse_frontmatter_refs(prepared.frontmatter().as_map(), prepared_ctx.clone())?;
-    let mut children: Vec<super::PreflightGraphNode> =
-        edges.iter().map(|e| e.child.clone()).collect();
+    // Refcount bumps, not subtree deep-clones (Finding 16): each entry is the
+    // same `Arc` already held by the corresponding edge.
+    let mut children: Vec<std::sync::Arc<super::PreflightGraphNode>> =
+        edges.iter().map(|e| std::sync::Arc::clone(&e.child)).collect();
     for reference in refs.prologue.iter().chain(refs.epilogue.iter()) {
         if !transclusion::is_url_like(reference) && !transclusion::is_file_like_reference(reference) {
             continue;
@@ -448,7 +450,7 @@ fn collect_recursive(
         // NOT added to `edges` — the transclusion engine treats them as
         // section slots rather than replace-target directives, and
         // resolving them a second time is cheap.
-        children.push(child);
+        children.push(std::sync::Arc::new(child));
     }
 
     let source = match &options.source {
