@@ -77,7 +77,11 @@ impl Markdown {
     ) -> MarkdownResult<()> {
         match operation {
             ComposeOperation::Cleanup => {
-                let original_content = self.content.clone();
+                // Detect whether cleanup changed the body via an xxHash of the
+                // before/after content instead of cloning the whole body and
+                // comparing (F34). A cache-key-strength collision would only
+                // mis-set the advisory `cleanup_changed` report flag.
+                let original_hash = biscuit_hash::xx_hash(&self.content);
                 // Fixed-width reflow must run over canonical unwrapped prose, so a
                 // requested `fixed_width` forces incidental-newline stripping even
                 // under `Preserve`. Otherwise reflow would re-wrap the source's own
@@ -111,7 +115,7 @@ impl Markdown {
                 if let Some(width) = options.fixed_width {
                     self.content = cleanup::reflow_to_width(&self.content, width);
                 }
-                report.cleanup_changed = self.content != original_content;
+                report.cleanup_changed = biscuit_hash::xx_hash(&self.content) != original_hash;
                 Ok(())
             }
             ComposeOperation::Normalization => match inline::normalize::run_stage(self) {

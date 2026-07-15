@@ -186,6 +186,33 @@ struct InternalLinkExtract {
     byte_offset: usize,
 }
 
+/// Byte offsets of every `\n` in `content`, in ascending order.
+///
+/// Precomputed once so [`line_at_offset`] can binary-search instead of
+/// rescanning a growing prefix per parser event.
+fn newline_offset_table(content: &str) -> Vec<usize> {
+    content
+        .bytes()
+        .enumerate()
+        .filter_map(|(i, byte)| (byte == b'\n').then_some(i))
+        .collect()
+}
+
+/// Returns the 1-indexed line for `offset`, byte-identical to
+/// `content[..offset].lines().count() + 1`, using the precomputed
+/// [`newline_offset_table`].
+///
+/// `str::lines` treats a trailing line terminator as *not* starting a new line,
+/// so the count is the number of `\n` before `offset` plus one only when the
+/// prefix is non-empty and does not end on a `\n`. This differs from a plain
+/// newline count when `offset` lands mid-line (e.g. an inline link), which is
+/// why [`crate::markdown::span::line_of_offset`] is not substitutable here.
+fn line_at_offset(newline_offsets: &[usize], content: &str, offset: usize) -> usize {
+    let newlines = newline_offsets.partition_point(|&pos| pos < offset);
+    let trailing = usize::from(offset > 0 && content.as_bytes()[offset - 1] != b'\n');
+    newlines + trailing + 1
+}
+
 /// Extracts headings, code blocks, and internal links from markdown content.
 fn extract_elements(
     content: &str,
@@ -195,6 +222,12 @@ fn extract_elements(
     Vec<InternalLinkExtract>,
 ) {
     let parser = Parser::new(content);
+
+    // Precomputed once so per-event line lookups binary-search instead of
+    // rescanning `content[..offset]`, turning the former O(n²) per-event prefix
+    // scan into O(n log n) while keeping byte-identical line numbers.
+    let newline_offsets = newline_offset_table(content);
+    let line_of = |offset: usize| line_at_offset(&newline_offsets, content, offset);
 
     let mut headings = Vec::new();
     let mut code_blocks = Vec::new();
@@ -208,8 +241,6 @@ fn extract_elements(
     let mut link_text = String::new();
 
     for (event, range) in parser.into_offset_iter() {
-        let line_number = content[..range.start].lines().count() + 1;
-
         match event {
             Event::Start(Tag::Heading { level, .. }) => {
                 current_heading = Some(HeadingCapture {
@@ -229,7 +260,7 @@ fn extract_elements(
                         level: heading_level_to_u8(capture.level),
                         title: capture.title,
                         slug,
-                        start_line: content[..capture.span.start].lines().count() + 1,
+                        start_line: line_of(capture.span.start),
                         span: capture.span,
                         title_span,
                     });
@@ -264,13 +295,14 @@ fn extract_elements(
                     }
                     pulldown_cmark::CodeBlockKind::Indented => (None, String::new()),
                 };
-                current_code_block = Some((lang, info_string, String::new(), line_number));
+                current_code_block =
+                    Some((lang, info_string, String::new(), line_of(range.start)));
             }
             Event::End(TagEnd::CodeBlock) => {
                 if let Some((language, info_string, code_content, start_line)) =
                     current_code_block.take()
                 {
-                    let end_line = line_number;
+                    let end_line = line_of(range.start);
                     code_blocks.push(CodeBlockExtract {
                         language,
                         info_string,
@@ -292,7 +324,7 @@ fn extract_elements(
                     internal_links.push(InternalLinkExtract {
                         target_slug,
                         link_text: std::mem::take(&mut link_text),
-                        line_number,
+                        line_number: line_of(range.start),
                         byte_offset,
                     });
                 }
@@ -854,6 +886,72 @@ See [nonexistent](#nonexistent).
             assert_eq!(record.line, node.line_range.0);
             assert_eq!(record.heading_span.start, node.source_span.0);
         }
+    }
+
+    #[test]
+    fn test_line_at_offset_matches_naive_lines_count() {
+        // The precomputed newline-table + binary search must reproduce the
+        // original `content[..offset].lines().count() + 1` for every offset,
+        // across the divergent cases: empty prefix, mid-line offsets, offsets
+        // landing exactly on a `\n`, CRLF, and offset == len.
+        let cases = [
+            "",
+            "no newlines here",
+            "# One\n\nSee [two](#two).\n\n## Two\n\n```\ncode\n```\n\n### Three\n",
+            "a\r\nb\r\nc",
+            "trailing\n",
+            "\n\n\n",
+        ];
+        for content in cases {
+            let table = newline_offset_table(content);
+            for offset in 0..=content.len() {
+                if !content.is_char_boundary(offset) {
+                    continue;
+                }
+                let expected = content[..offset].lines().count() + 1;
+                assert_eq!(
+                    line_at_offset(&table, content, offset),
+                    expected,
+                    "offset {offset} in {content:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_toc_line_numbers_multi_heading_fixture() {
+        // Integration guard: headings, code blocks, and internal links across a
+        // multi-heading fixture must carry line numbers identical to the naive
+        // per-event formula the rewrite replaced.
+        let content = concat!(
+            "# One\n",              // line 1
+            "\n",                   // line 2
+            "See [two](#two).\n",   // line 3 (internal link, mid-line)
+            "\n",                   // line 4
+            "## Two\n",             // line 5
+            "\n",                   // line 6
+            "```rust\n",            // line 7 (code block)
+            "fn main() {}\n",       // line 8
+            "```\n",                // line 9
+            "\n",                   // line 10
+            "### Three\n",          // line 11
+        );
+        let (headings, code_blocks, internal_links) = extract_elements(content);
+        let naive = |offset: usize| content[..offset].lines().count() + 1;
+
+        assert_eq!(
+            headings.iter().map(|h| h.start_line).collect::<Vec<_>>(),
+            vec![1, 5, 11]
+        );
+        for heading in &headings {
+            assert_eq!(heading.start_line, naive(heading.span.start));
+        }
+
+        assert_eq!(code_blocks.len(), 1);
+        assert_eq!(code_blocks[0].start_line, 7);
+
+        assert_eq!(internal_links.len(), 1);
+        assert_eq!(internal_links[0].line_number, naive(internal_links[0].byte_offset));
     }
 
     #[test]

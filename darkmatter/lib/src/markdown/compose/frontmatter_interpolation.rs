@@ -86,8 +86,7 @@ impl EvaluationLookup for FrontmatterSeedState {
     fn get(&self, path: &str) -> Option<Value> {
         // Reserved `doc` namespace, intercepted before key/ctx/env lookup.
         if doc_namespace::is_doc_namespace(path) {
-            let root = Value::Object(self.data.clone().into_iter().collect());
-            return doc_namespace::resolve_doc_namespace(path, &root);
+            return doc_namespace::resolve_doc_namespace_in_map(path, &self.data);
         }
 
         // ctx.* prefix

@@ -180,8 +180,9 @@ impl EffectiveState {
         // before the bare-name `ctx.*` fallback, so a missing `doc.*` never
         // collapses into `ctx.*`.
         if super::super::expression::doc_namespace::is_doc_namespace(path) {
-            let root = Value::Object(self.data.clone().into_iter().collect());
-            return super::super::expression::doc_namespace::resolve_doc_namespace(path, &root);
+            return super::super::expression::doc_namespace::resolve_doc_namespace_in_map(
+                path, &self.data,
+            );
         }
 
         // Handle special prefixes

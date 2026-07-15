@@ -307,11 +307,36 @@ pub(crate) struct ResolvedTransclusion {
 /// methods were lifted verbatim off `impl Markdown` so behavior is unchanged.
 pub(crate) struct TransclusionEngine<'a> {
     markdown: &'a Markdown,
+    /// Ascending `(heading_start_offset, level)` table over the parent body,
+    /// parsed once and shared across the parallel resolve stage (F15). The
+    /// body is immutable for the engine's lifetime, so this replaces the
+    /// per-directive full re-parse in `find_preceding_heading_level`.
+    heading_starts: std::sync::OnceLock<Vec<(usize, HeadingLevel)>>,
 }
 
 impl<'a> TransclusionEngine<'a> {
     pub(crate) fn new(markdown: &'a Markdown) -> Self {
-        Self { markdown }
+        Self {
+            markdown,
+            heading_starts: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// Nearest preceding heading level before `offset`, using the memoized
+    /// heading table. Byte-identical to [`find_preceding_heading_level`]: both
+    /// return the last heading whose start is strictly before `offset`.
+    fn preceding_heading_level(&self, offset: usize) -> Option<HeadingLevel> {
+        let table = self.heading_starts.get_or_init(|| {
+            let mut table = Vec::new();
+            for (event, range) in Parser::new(&self.markdown.content).into_offset_iter() {
+                if let Event::Start(Tag::Heading { level, .. }) = event {
+                    table.push((range.start, pulldown_to_heading_level(level)));
+                }
+            }
+            table
+        });
+        let idx = table.partition_point(|(start, _)| *start < offset);
+        (idx > 0).then(|| table[idx - 1].1)
     }
 
     /// Records a fetched remote URL body as a closure-hash dependency.
@@ -983,8 +1008,7 @@ impl<'a> TransclusionEngine<'a> {
                 // too. Mirrors the local-file path; a miss falls back to None.
                 child_options.preflight_graph = options
                     .preflight_graph()
-                    .and_then(|graph| graph.child_for_url(&url).cloned())
-                    .map(std::sync::Arc::new);
+                    .and_then(|graph| graph.child_for_url(&url).cloned());
 
                 let child_report = child
                     .run_compose_pipeline_internal(child_options, &mut child_runtime)?;
@@ -998,8 +1022,7 @@ impl<'a> TransclusionEngine<'a> {
                 merged_report.transclusions_applied += 1;
 
                 if let Some((offset, line)) = insertion_context
-                    && let Some(parent_level) =
-                        transclusion::find_preceding_heading_level(&self.markdown.content, offset)
+                    && let Some(parent_level) = self.preceding_heading_level(offset)
                 {
                     let target_level =
                         HeadingLevel::new((parent_level.as_u8() + 1).min(6))
@@ -1367,8 +1390,7 @@ impl<'a> TransclusionEngine<'a> {
                 // child was not in the preflight walk) falls back to None.
                 child_options.preflight_graph = options
                     .preflight_graph()
-                    .and_then(|graph| graph.child_for_source(&path_buf).cloned())
-                    .map(std::sync::Arc::new);
+                    .and_then(|graph| graph.child_for_source(&path_buf).cloned());
 
                 let mut compose_runtime = runtime.clone_for_child();
                 let mut child = compose_runtime.load_markdown(path)?;
@@ -1416,8 +1438,7 @@ impl<'a> TransclusionEngine<'a> {
         }
 
         if let Some((offset, line)) = insertion_context
-            && let Some(parent_level) =
-                transclusion::find_preceding_heading_level(&self.markdown.content, offset)
+            && let Some(parent_level) = self.preceding_heading_level(offset)
         {
             let target_level =
                 HeadingLevel::new((parent_level.as_u8() + 1).min(6))

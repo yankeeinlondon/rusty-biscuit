@@ -288,6 +288,15 @@ pub fn discover_remote_urls_from_expressions(
     content: &str,
     source: &ComposeSource,
 ) -> Vec<DiscoveredRemoteUrl> {
+    // A remote-read URL argument is a string literal that validates as an
+    // `http(s)` URL, so it necessarily contains the substring "http". When the
+    // document has none, no expression can register a URL — skip the full
+    // expression scan/parse the interpolation stage repeats anyway (F33).
+    // Byte-identical: the scan would produce the same empty result.
+    if !content.contains("http") {
+        return Vec::new();
+    }
+
     let source_file = match source {
         ComposeSource::File(p) => Some(p.clone()),
         _ => None,

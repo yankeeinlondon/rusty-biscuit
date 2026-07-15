@@ -194,7 +194,15 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
         }
     }
 
-    let output = convert_literals(&output, scan_mode);
+    // `convert_literals` runs a full expression scan (a pulldown-cmark parse in
+    // MarkdownAware mode) plus a copy. A `{{{ … }}}` literal is impossible
+    // without the `{{{` sequence, so skip that work entirely when it's absent
+    // (F14) — byte-identical: the scan would find no literals either way.
+    let output = if output.contains("{{{") {
+        convert_literals(&output, scan_mode)
+    } else {
+        output
+    };
 
     Ok(InterpolationRewrite {
         output,
