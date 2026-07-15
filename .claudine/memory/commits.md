@@ -108,6 +108,15 @@ do not belong here.
 - Run commands from the inherited worktree root. Do not change to a guessed
   repository path, and do not push commits.
 - In zsh wrappers, avoid special variable names such as `status` and `path`.
+- **Active-file iteration race.** A staged file that the caller is actively
+  editing will drift between `git add`, `git status`, and `git commit`. A
+  dispatch loop (stage → sub-agent → see `MM` → re-stage → re-dispatch) can
+  never catch a stable snapshot while edits arrive faster than the agent
+  overhead. Detect by `stat -f '%Sm' <path>` (mtime in the last few seconds)
+  or by repeated `MM` reports across two dispatches. When the file is being
+  actively iterated and the working tree is a clean superset of staged
+  intent, stage it once and commit directly as the orchestrator in a single
+  shell — do not keep re-dispatching. Reserve sub-agents for stable snapshots.
 
 ## Verification
 
