@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-947af31e798bc8d0
-last_updated: 2026-07-04
+hash: ef46db3751d8e999-df96b361ac99953b
+last_updated: 2026-07-15
 ---
 # Claudine Composition
 
@@ -430,6 +430,20 @@ initialize → start → (success | blocked | failure) → finalize → loop
 Legacy prompts that only declare `start`, `success`, `blocked`, and `failure` continue to behave the same way. See [lifecycle.md](lifecycle.md) for the full lifecycle reference, including stacks, control actions, the `err`/`timing`/`current` globals, and examples.
 
 Each lifecycle property interpolates **when its event fires**, not during the initial compose — Darkmatter defers the seven lifecycle keys from compose-time resolution (so their `{{ … }}` spans survive raw in `effective_frontmatter`) and Claudine re-interpolates each property/action string through Darkmatter just-in-time, against the live document state plus the in-scope late-binding globals. Resolution fails closed before any side effect dispatches. See [lifecycle.md — Binding Time: Early vs Late](lifecycle.md#binding-time-early-vs-late).
+
+### Loop vs lifecycle interpolation
+
+Claudine renders `{{ … }}` templates on two frontmatter surfaces: **loop action values** (`set`/`append`/`prepend`/`merge`, via `looping::actions::render_action_value`) and **lifecycle event text** (via the Darkmatter DM2 substrate `SubtreeCompose`). Both consume the *same* Darkmatter expression core — `parse` / `evaluate` / `ExpressionFinder` / `scalar_string` over an `EvaluationLookup` — so the loop renderer is **not** a second expression engine; it is a loop-specific value renderer sharing that core. A [shared conformance matrix](../../lib/src/composition/interpolation_conformance.rs) pins the overlap: literal/mixed strings, whole-value typed expansion, arrays/objects, the `doc` namespace, functions, string-literal escaping, and malformed-expression fail-closed behavior all resolve **identically** from the same input and state.
+
+Three semantic differences are deliberate and keep the two renderers separate rather than merging the loop path into DM2:
+
+| Concern | Loop action renderer | Lifecycle DM2 (`SubtreeCompose`) |
+|---------|----------------------|-----------------------------------|
+| Mixed string that forms valid JSON (e.g. `"{{a}}{{b}}"` with `a=1, b=2`) | Re-parsed as JSON → `12` (number). See [looping.md](flow-control/looping.md). | Kept as string → `"12"`. |
+| Error on a malformed/invalid template | Contextual `CompositionError::InvalidAction` carrying iteration + action index (`InvalidAction at iteration N, action M of K`) | Generic `MarkdownError::Transform` |
+| Unknown variable root in a mixed string (e.g. `"x={{typo}}"`) | Lenient → resolves empty (`"x="`), matching loop **condition** evaluation | Strict / fail-closed → typed error before any side effect dispatches |
+
+The loop renderer's leniency and JSON re-parse serve state mutation (a loop action writes frontmatter, where an empty/typed result is the natural outcome and mirrors `while`/`until` evaluation), while DM2 strict mode serves side-effect dispatch (a lifecycle message must never reach Discord/TTS/stderr carrying an unresolved reference). Both engines are held to the shared matrix so the overlap cannot silently drift.
 
 ### Loop Execution
 

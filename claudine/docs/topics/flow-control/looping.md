@@ -182,6 +182,8 @@ Templates are also rendered inside arrays and objects — every string leaf is p
 
 The rule of thumb: **a value that is purely a single template span preserves its evaluated type; anything mixing template with literal text becomes a string.** This means `set(retries, {{_loop_count}})` lands as a JSON number you can safely compare arithmetically, while `set(label, "iter-{{_loop_count}}")` lands as the obvious string.
 
+> **Loop vs lifecycle interpolation.** The loop action renderer and the lifecycle event renderer share the same Darkmatter expression core but differ in three deliberate ways — the JSON re-parse above (loop only), loop-contextual error typing, and unknown-root leniency (loop) vs strict fail-closed (lifecycle). See [Composition — Loop vs lifecycle interpolation](../composition.md#loop-vs-lifecycle-interpolation); both engines are held to a [shared conformance matrix](../../../lib/src/composition/interpolation_conformance.rs).
+
 ## Ambient variables
 
 The looping engine injects five read-only **ambient variables** into every iteration's effective state. They are namespaced under the `_loop_` prefix to avoid colliding with user frontmatter properties:
