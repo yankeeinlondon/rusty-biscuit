@@ -36,10 +36,11 @@ pub(crate) fn capture_runtime_context(base_dir: &Path) -> CaptureResult {
 ///
 /// Scans `content` for `ctx.*` references and only captures the required
 /// groups. If no `ctx.*` references are found, only populates datetime
-/// (which is purely local computation with no I/O).
+/// (local computation plus a cheap OS timezone read — no network probe).
 pub(crate) fn capture_runtime_context_for_content(base_dir: &Path, content: &str) -> CaptureResult {
     let mut groups = scan_needed_groups(content);
-    // DateTime is always included (zero-cost local computation)
+    // DateTime is always included: local chrono computation plus a cheap OS
+    // timezone read (`detect_timezone_with_options(false)` — no network probe).
     groups.insert(ContextGroup::DateTime);
     let groups_vec: Vec<ContextGroup> = groups.into_iter().collect();
     capture_runtime_context_for_groups(base_dir, &groups_vec)

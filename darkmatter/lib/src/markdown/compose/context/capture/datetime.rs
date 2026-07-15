@@ -123,7 +123,10 @@ pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
 
     // Timezone: sniff owns abbreviation derivation (handles chrono's
     // %Z offset fallback on macOS via IANA-to-abbreviation mapping).
-    let tz_info = sniff::os::detect_timezone();
+    // `probe_ntp: false` — darkmatter only consumes `timezone`/`timezone_iana`;
+    // `ntp_status` is never surfaced by any `ctx.*` key, so the live NTP probe
+    // (a network round-trip; up to 10s on Linux) must be skipped here.
+    let tz_info = sniff::os::detect_timezone_with_options(false);
     values.insert(
         "timezone".into(),
         tz_info.timezone_abbr.map_or(Value::Null, Value::String),
