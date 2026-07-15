@@ -1,4 +1,12 @@
 //! Loop frontmatter action engine.
+//!
+//! Shares the Darkmatter expression core (`parse`/`evaluate`/`ExpressionFinder`/
+//! `scalar_string`) with the lifecycle DM2 substrate, but keeps a small
+//! loop-specific value renderer for three required semantic differences
+//! (mixed-string JSON re-parse, contextual `InvalidAction` errors, and
+//! unknown-root leniency). The overlap that both engines must preserve is
+//! pinned by `composition::interpolation_conformance`. See
+//! `docs/topics/composition.md` → "Loop vs lifecycle interpolation".
 
 use darkmatter::markdown::compose::expression::{
     EvaluationLookup, ExpressionFinder, evaluate, parse, scalar_string,

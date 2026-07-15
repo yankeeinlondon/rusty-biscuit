@@ -18,6 +18,8 @@ pub mod file_detail;
 pub mod frontmatter_excerpt;
 mod guardrails;
 pub mod hints;
+#[cfg(test)]
+mod interpolation_conformance;
 pub(crate) mod json_util;
 pub mod launch_workspace;
 pub mod lifecycle;
