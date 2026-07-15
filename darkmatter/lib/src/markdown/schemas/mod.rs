@@ -178,11 +178,34 @@ pub fn darkmatter_base_json_schema() -> Value {
 /// [`Self::with_trigger_registry`]. Implicit CWD-based discovery is forbidden —
 /// validation behavior must never depend silently on the process working
 /// directory.
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct DarkmatterSchemas {
     baseline: Option<BaselineSchema>,
     cache: ValidatorCache,
     triggers: Option<triggers::TriggerRegistry>,
+}
+
+/// The process-wide validator cache every [`DarkmatterSchemas`] shares (F8).
+///
+/// Compiling a `jsonschema::Validator` is milliseconds of work, and a single
+/// `md compose` runs schema validation up to twice (a second pass after shell
+/// expansion when trigger schemas are enabled) while a long-running host
+/// (claudine) composes many documents against the same handful of schemas.
+/// Sharing one cache — cloned into each instance — lets those passes reuse
+/// compiled validators instead of recompiling per instance. The cache key folds
+/// in both file-reference anchors (see [`ValidatorCache`]), so clones carrying
+/// different launch-area fallbacks share the map without cross-contamination.
+static SHARED_VALIDATOR_CACHE: std::sync::LazyLock<ValidatorCache> =
+    std::sync::LazyLock::new(ValidatorCache::new);
+
+impl Default for DarkmatterSchemas {
+    fn default() -> Self {
+        Self {
+            baseline: None,
+            cache: SHARED_VALIDATOR_CACHE.clone(),
+            triggers: None,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -1263,7 +1286,7 @@ fn build_dependencies(
     deps
 }
 
-fn positions_for(source: &Markdown) -> PositionMap {
+pub(crate) fn positions_for(source: &Markdown) -> PositionMap {
     // Prefer the original frontmatter text so reported line/column numbers
     // match the source the user is editing. The raw text is the body
     // between the leading `---` markers — its line 1 is the file's line 2
@@ -1341,7 +1364,7 @@ fn base_dir_for(source: &Markdown) -> PathBuf {
     }
 }
 
-fn frontmatter_as_json(source: &Markdown) -> Value {
+pub(crate) fn frontmatter_as_json(source: &Markdown) -> Value {
     let map = source.frontmatter().as_map();
     let mut object = serde_json::Map::with_capacity(map.len());
     for (k, v) in map {
@@ -1461,8 +1484,13 @@ mod tests {
         let md1 = md_with_schema("$schema:\n  x: number\nx: 1\n");
         let md2 = md_with_schema("$schema:\n  x: number\nx: 2\n");
         api.validate(&md1).unwrap();
+        // Measured as a delta, not an absolute count: the cache is now shared
+        // process-wide (F8), so unrelated schemas compiled elsewhere in this
+        // test process may already occupy entries. The invariant is that a
+        // second document sharing md1's schema adds no new entry.
+        let after_first = api.cache().len();
         api.validate(&md2).unwrap();
-        assert_eq!(api.cache().len(), 1);
+        assert_eq!(api.cache().len(), after_first);
     }
 
     #[test]

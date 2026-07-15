@@ -248,6 +248,13 @@ pub struct ComposeOptions {
     /// the same property, the document wins.
     pub(crate) baseline_schema: Option<crate::markdown::schemas::SimplifiedSchema>,
 
+    /// Whether `baseline_schema` is the authored Darkmatter baseline (set via
+    /// [`ComposeOptions::with_darkmatter_baseline_schema`]). When true, schema
+    /// validation reuses the process-cached compiled JSON Schema
+    /// ([`crate::markdown::schemas::darkmatter_base_json_schema`]) instead of
+    /// re-converting the `SimplifiedSchema` per compose (F8/F9).
+    pub(crate) baseline_is_darkmatter_default: bool,
+
     /// Whether file-backed compose validation discovers trigger schemas from
     /// the source file up through its repository boundary.
     pub(crate) trigger_schemas: bool,
@@ -463,6 +470,7 @@ impl ComposeOptions {
             shell_strip_ansi: true,
             env_path_whitelist: Vec::new(),
             baseline_schema: None,
+            baseline_is_darkmatter_default: false,
             trigger_schemas: false,
             remote_read_config: RemoteReadConfig::default(),
             defer_shell_pending_schema_problems: false,
@@ -938,6 +946,9 @@ impl ComposeOptions {
         schema: crate::markdown::schemas::SimplifiedSchema,
     ) -> Self {
         self.baseline_schema = Some(schema);
+        // A caller-supplied baseline is not the cached Darkmatter default, even
+        // if it happens to be structurally equal; clear the fast-path marker.
+        self.baseline_is_darkmatter_default = false;
         self
     }
 
@@ -958,7 +969,11 @@ impl ComposeOptions {
     /// ```
     #[must_use]
     pub fn with_darkmatter_baseline_schema(self) -> Self {
-        self.with_baseline_schema(crate::markdown::schemas::darkmatter_base_schema())
+        let mut opts = self.with_baseline_schema(crate::markdown::schemas::darkmatter_base_schema());
+        // Mark the fast path: schema validation reuses the process-cached
+        // compiled JSON Schema instead of re-converting per compose (F9).
+        opts.baseline_is_darkmatter_default = true;
+        opts
     }
 
     /// Enables repository-scoped trigger-schema discovery for file sources.

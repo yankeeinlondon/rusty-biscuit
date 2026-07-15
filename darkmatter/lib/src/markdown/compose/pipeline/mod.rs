@@ -210,9 +210,15 @@ impl Markdown {
             // `ComposeOptions::defer_shell_pending_schema_problems` so a
             // still-literal `$(...)` value is deferred rather than reported as a
             // final violation here.
+            // Trigger-schema registry shared across both schema-validation
+            // passes: the first pass (here) scans the `schemas/` ancestry from
+            // disk; the post-shell pass below reuses that registry instead of
+            // re-walking it (F8). Matching is re-evaluated against the current
+            // frontmatter in each pass regardless.
+            let mut trigger_registry = None;
             {
                 let sv_start = perf.is_enabled().then(std::time::Instant::now);
-                schema_validation::run(self, &options)?;
+                schema_validation::run_with_registry(self, &options, &mut trigger_registry)?;
                 if let Some(start) = sv_start {
                     perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
                 }
@@ -291,7 +297,7 @@ impl Markdown {
                 // snapshot. Re-assemble after shell expansion and interpolation
                 // pass 2 so concrete values can activate or deactivate payloads.
                 if options.trigger_schemas {
-                    schema_validation::run(self, &options)?;
+                    schema_validation::run_with_registry(self, &options, &mut trigger_registry)?;
                 }
             }
 
