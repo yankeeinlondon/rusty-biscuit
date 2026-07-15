@@ -44,7 +44,7 @@ and a small library of reusable check scripts.
 ## Proving ground
 
 The `agent-errors` topic pilots the pattern
-(`features/2026-07-11-provider-errors-as-data/spec.md`, D10 + P5): seed
+(`features/_completed/2026-07-11-provider-errors-as-data/spec.md`, D10 + P5): seed
 preservation, needle hygiene, provenance coherence, and coverage checks,
 with `max_attempts: 2` resumes. Its B2 (Codex pilot) checkpoint reviews the
 telemetry — how many resumes fired, whether corrections converged, budget

@@ -259,7 +259,7 @@ The boundary between the two:
   and its unit tests move with it unchanged — that is the point of Part 2's
   placement ruling.
 
-The `2026-07-11-provider-errors-as-data` feature is related but orthogonal:
+The completed `2026-07-11-provider-errors-as-data` feature is related but orthogonal:
 it migrates provider error *vocabulary* (the strings behind `error_kind`
 classification) into data. It does not change `err.msg` construction; if it
 later yields per-provider message normalization, that too slots in behind
