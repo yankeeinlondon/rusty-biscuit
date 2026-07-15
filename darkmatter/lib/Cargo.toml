@@ -158,3 +158,11 @@ harness = false
 [[bench]]
 name = "render_pipeline_steps"
 harness = false
+
+[[bench]]
+name = "compose_schema_transclusion"
+harness = false
+
+[[bench]]
+name = "render_code_heavy"
+harness = false
