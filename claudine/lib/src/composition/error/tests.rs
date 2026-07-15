@@ -1434,3 +1434,64 @@ fn file_reference_detail_suggestions_match_rendered_for_stale_directory() {
         "stale-directory suggestion must carry the sibling/leaf relative path: {suggestions:?}"
     );
 }
+
+/// Each error family must reach its own family renderer, not collapse into the
+/// generic `composition failed` catch-all. A mis-routed dispatcher arm would
+/// swap the family-specific header for the generic one, so the header line is a
+/// precise routing witness; the no-escape assertion confirms every family keeps
+/// the `ColorDepth::None` plain-text contract after the split.
+#[test]
+fn phase_11_family_dispatch_routes_to_family_renderers() {
+    use biscuit_terminal::discovery::detection::ColorDepth;
+
+    let term = Terminal {
+        color_depth: ColorDepth::None,
+        ..Terminal::new_optimistic(80)
+    };
+
+    // (error, expected family-specific header line).
+    let cases: Vec<(CompositionError, &str)> = vec![
+        (
+            // lifecycle family
+            CompositionError::LifecycleErrNotAvailable {
+                source_path: PathBuf::from("prompts/plan.md"),
+                property: "start".to_string(),
+                event: "start".to_string(),
+            },
+            "⤫ CompositionError: `err` not available in this event",
+        ),
+        (
+            // schema / frontmatter family
+            CompositionError::SchemaLoad {
+                source_path: PathBuf::from("prompts/plan.md"),
+                message: "no such file".to_string(),
+            },
+            "⤫ CompositionError: schema load failed",
+        ),
+        (
+            // selection / target family
+            CompositionError::AutocompleteNoMatches {
+                query: "foo".to_string(),
+            },
+            "⤫ CompositionError: no autocomplete matches",
+        ),
+        (
+            // sequence / loop family
+            CompositionError::SequenceInteractiveRejected(PathBuf::from("prompts/seq.md")),
+            "⤫ CompositionError: interactive rejected for sequence",
+        ),
+    ];
+
+    for (err, expected_header) in cases {
+        let rendered = err.report_block_error(&term);
+        let header = rendered.lines().next().unwrap_or_default();
+        assert_eq!(
+            header, expected_header,
+            "family renderer routing regressed for {err:?}"
+        );
+        assert!(
+            !rendered.contains('\u{1b}'),
+            "ColorDepth::None output must be escape-free for {err:?}: {rendered:?}"
+        );
+    }
+}
