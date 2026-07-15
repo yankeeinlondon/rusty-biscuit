@@ -1,16 +1,16 @@
 ---
 status: ready for planning and implementation
-reviewed: false
+reviewed: true
 review_iterations: 0
 rulings: Q2 (identity fallback) + Q3 (append at 88/89) ruled by Ken 2026-07-13
 inputs:
-  - ../../docs/schemas/expression-functions.yaml
-  - ../../lib/src/markdown/compose/expression/functions/paths.rs
-  - ../../lib/src/markdown/compose/expression/functions/mod.rs
-  - ../../lib/src/markdown/compose/expression/catalog/mod.rs
+    - ../../docs/schemas/expression-functions.yaml
+    - ../../lib/src/markdown/compose/expression/functions/paths.rs
+    - ../../lib/src/markdown/compose/expression/functions/mod.rs
+    - ../../lib/src/markdown/compose/expression/catalog/mod.rs
 related:
-  - ../_completed/2026-07-10-function-schemas
-  - ../2026-07-12-literal-expression
+    - ../_completed/2026-07-10-function-schemas
+    - ../2026-07-12-literal-expression
 ---
 
 # Expression Functions: `find_first_index` and `find_last_index`
@@ -39,7 +39,7 @@ all of the existing ones are pure string transforms over one path.
 - Authors compose documents that reference "the current review" or "the newest
   draft" of an indexed series (`review-1.md`, `review-2.md`, `review-3.md`).
   Today there is no way to ask "give me the newest one" without hard-coding the
-  suffix. `increment_file_index` produces the *next* name whether or not it
+  suffix. `increment_file_index` produces the _next_ name whether or not it
   exists; these two functions instead resolve to a name that **exists on disk**.
 - The pair rounds out the index-family algebra: `file_index` reads the ordinal,
   `increment`/`decrement` walk it arithmetically, and `find_first_index` /
@@ -51,20 +51,20 @@ all of the existing ones are pure string transforms over one path.
 
 Given a directory containing `foo.md`, `foo-2.md`, `foo-3.md`:
 
-| Call | Result |
-|------|--------|
-| `find_first_index("foo-2.md")` | `foo.md` |
-| `find_last_index("foo-2.md")` | `foo-3.md` |
-| `find_first_index("foo.md")` | `foo.md` |
-| `find_last_index("foo.md")` | `foo-3.md` |
+| Call                           | Result     |
+| ------------------------------ | ---------- |
+| `find_first_index("foo-2.md")` | `foo.md`   |
+| `find_last_index("foo-2.md")`  | `foo-3.md` |
+| `find_first_index("foo.md")`   | `foo.md`   |
+| `find_last_index("foo.md")`    | `foo-3.md` |
 
 Given a directory whose only member of the family is `foo-2.md` (no `foo.md`,
 `foo-1.md`, `foo-3.md`, …):
 
-| Call | Result |
-|------|--------|
+| Call                           | Result     |
+| ------------------------------ | ---------- |
 | `find_first_index("foo-2.md")` | `foo-2.md` |
-| `find_last_index("foo-2.md")` | `foo-2.md` |
+| `find_last_index("foo-2.md")`  | `foo-2.md` |
 
 ### The index family of a file
 
@@ -144,7 +144,7 @@ exists.
   `parent()` is the directory to scan and whose `file_stem`/extension seed the
   family.
 - The result is rendered through `make_portable_relative(&result_path,
-  &ctx.base_dir)` — the same display policy used by `increment_file_index` /
+&ctx.base_dir)` — the same display policy used by `increment_file_index` /
   `decrement_file_index` — so composed Markdown stays portable (repo-root
   relative, base-dir relative, `~`-aliased, or absolute, `/`-separated). The
   directory portion of the input is preserved: the result lives in the same
@@ -156,7 +156,7 @@ exists.
   already does for the path family. A directory scan has no remote analogue.
 - These functions touch only the local filesystem and require **no remote
   runtime**, so they are valid in **every** resolution context — body
-  interpolation *and* the local-only frontmatter passes (both interpolation
+  interpolation _and_ the local-only frontmatter passes (both interpolation
   passes and the `$()` ternary). They behave like `file_exists`'s local branch,
   not like `frontmatter`/`load_markdown` remote reads.
 
@@ -192,41 +192,39 @@ Both examples are **executable** against the existing example fixture directory
 `review-2.md` (and no `review.md`). No fixture additions are needed:
 
 ```yaml
-    - name: find_first_index
-      category: Filesystem
-      order: 88
-      description:
-          Returns the lowest-indexed existing sibling of the file in its
-          directory (the unindexed base sorts first); returns the file itself
-          when it has no indexed siblings.
-      overloads:
-          - parameters:
-                - name: file
-                  type: file
-            returns:
-                type: file
-                fallible: true
-            example:
-                expression: find_first_index("review-2.md")
-                result: review-1.md
-                verification: executable
-    - name: find_last_index
-      category: Filesystem
-      order: 89
-      description:
-          Returns the highest-indexed existing sibling of the file in its
-          directory; returns the file itself when it has no indexed siblings.
-      overloads:
-          - parameters:
-                - name: file
-                  type: file
-            returns:
-                type: file
-                fallible: true
-            example:
-                expression: find_last_index("review-1.md")
-                result: review-2.md
-                verification: executable
+- name: find_first_index
+  category: Filesystem
+  order: 88
+  description: Returns the lowest-indexed existing sibling of the file in its
+      directory (the unindexed base sorts first); returns the file itself
+      when it has no indexed siblings.
+  overloads:
+      - parameters:
+            - name: file
+              type: file
+        returns:
+            type: file
+            fallible: true
+        example:
+            expression: find_first_index("review-2.md")
+            result: review-1.md
+            verification: executable
+- name: find_last_index
+  category: Filesystem
+  order: 89
+  description: Returns the highest-indexed existing sibling of the file in its
+      directory; returns the file itself when it has no indexed siblings.
+  overloads:
+      - parameters:
+            - name: file
+              type: file
+        returns:
+            type: file
+            fallible: true
+        example:
+            expression: find_last_index("review-1.md")
+            result: review-2.md
+            verification: executable
 ```
 
 Family verification against `make_fixture` (`review-1.md`, `review-2.md`
@@ -252,26 +250,26 @@ Registrations" contract).
    `find_first_index_fn` / `find_last_index_fn`, implemented over a shared
    private helper to avoid duplication, e.g.:
 
-   ```text
-   fn find_index_endpoint(name, args, ctx, Endpoint::First | Endpoint::Last)
-       -> Result<Value, ExpressionError>
-   ```
+    ```text
+    fn find_index_endpoint(name, args, ctx, Endpoint::First | Endpoint::Last)
+        -> Result<Value, ExpressionError>
+    ```
 
-   The helper:
-   - `require_args_expr(name, args, 1)?;` and `any_null` → `Value::Null`.
-   - `resolve_path_shape` the argument (rejects remote URLs).
-   - Compute base stem + extension from the resolved basename
-     (`file_stem` / `file_extension`, `indexed_stem_info` to strip the input's
-     own index), and the parent directory.
-   - `std::fs::read_dir(parent)`: for each entry, take its file name, split
-     stem/ext, test family membership (ext equals input ext; stem is the base
-     or an indexed form of the base), and record `(Option<u64> ordinal, name)`.
-   - If any members exist, pick min/max by `(ordinal, name)`; else fall back to
-     the resolved input path.
-   - Return `Value::String(make_portable_relative(&chosen_path, &ctx.base_dir))`.
+    The helper:
+    - `require_args_expr(name, args, 1)?;` and `any_null` → `Value::Null`.
+    - `resolve_path_shape` the argument (rejects remote URLs).
+    - Compute base stem + extension from the resolved basename
+      (`file_stem` / `file_extension`, `indexed_stem_info` to strip the input's
+      own index), and the parent directory.
+    - `std::fs::read_dir(parent)`: for each entry, take its file name, split
+      stem/ext, test family membership (ext equals input ext; stem is the base
+      or an indexed form of the base), and record `(Option<u64> ordinal, name)`.
+    - If any members exist, pick min/max by `(ordinal, name)`; else fall back to
+      the resolved input path.
+    - Return `Value::String(make_portable_relative(&chosen_path, &ctx.base_dir))`.
 
-   Reuse the existing `indexed_stem_info`, `file_stem`, `file_extension`, and
-   `make_portable_relative` helpers; introduce no parallel grammar.
+    Reuse the existing `indexed_stem_info`, `file_stem`, `file_extension`, and
+    `make_portable_relative` helpers; introduce no parallel grammar.
 
 ## Cross-Platform Considerations
 
@@ -333,7 +331,7 @@ Registrations" contract).
 ## Open Questions
 
 1. **Base-first ranking** — the spec ranks the unindexed base (`foo.md`) as the
-   *first* of its family (below `foo-1.md`), matching the worked example.
+   _first_ of its family (below `foo-1.md`), matching the worked example.
    **Ruled** by the prompt's example; recorded here for the review trail.
 2. **Empty-family fallback** — **Ruled by Ken 2026-07-13: return the input
    verbatim** (identity-return), not an error or `null`. Graceful, matches the
