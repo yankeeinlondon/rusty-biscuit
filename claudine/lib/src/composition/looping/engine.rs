@@ -710,33 +710,6 @@ where
     ))
 }
 
-/// Route an `initialize` failure (explicit `error(...)` or unintentional
-/// action error) through `failure` + `finalize` and return the typed loop
-/// failure.
-///
-/// Mirrors the non-loop path at
-/// `wrap/composition/mod.rs::execute_composition_request_inner_with_guard`:
-/// `failure` runs against the action-error context, `finalize` against the
-/// same context re-pointed at `Finalize`. The returned result reports zero
-/// iterations because no provider invocation ran.
-fn route_init_failure(
-    guard: &mut LifecycleRunGuard<'_>,
-    init_ctx: &StackExecutionContext<'_>,
-    prompt_path: &Path,
-    init_outcome: &super::super::lifecycle_executor::LifecycleEventOutcome,
-    reason: String,
-) -> LoopExecutionResult {
-    let action_error = LifecycleErrorInfo::from_action_failure("error", reason.clone());
-    route_init_failure_with(
-        guard,
-        init_ctx,
-        prompt_path,
-        init_outcome,
-        action_error,
-        reason,
-    )
-}
-
 /// Route an `initialize` failure built from an already-typed error snapshot,
 /// preserving the source error's `Diagnostic` facets on the `err` global.
 ///
@@ -755,30 +728,14 @@ fn route_init_failure_typed(
     action_error: LifecycleErrorInfo,
     fallback_reason: String,
 ) -> LoopExecutionResult {
-    route_init_failure_with(
-        guard,
-        init_ctx,
-        prompt_path,
-        init_outcome,
-        action_error,
-        fallback_reason,
-    )
-}
-
-fn route_init_failure_with(
-    guard: &mut LifecycleRunGuard<'_>,
-    init_ctx: &StackExecutionContext<'_>,
-    prompt_path: &Path,
-    init_outcome: &super::super::lifecycle_executor::LifecycleEventOutcome,
-    action_error: LifecycleErrorInfo,
-    reason: String,
-) -> LoopExecutionResult {
+    let mut routed_outcome = init_outcome.clone();
+    routed_outcome.action_error = Some(action_error.clone());
     let result = execute_loop_catch_protocol(
         guard,
         init_ctx,
         LifecycleSignal::Initialize,
-        &action_error,
-        init_outcome.clone(),
+        Some(&action_error),
+        routed_outcome,
     );
     let error = if let (Some(signal), Some(info)) = (
         result.evaluation_error_signal,
@@ -792,7 +749,7 @@ fn route_init_failure_with(
     } else {
         CompositionError::LifecycleInitializeFailed {
             source_path: prompt_path.to_path_buf(),
-            reason,
+            reason: fallback_reason,
         }
     };
     // The returned result reports the initialize-time frontmatter. We clone it
@@ -806,7 +763,7 @@ fn execute_loop_catch_protocol(
     guard: &mut LifecycleRunGuard<'_>,
     origin_ctx: &StackExecutionContext<'_>,
     origin: LifecycleSignal,
-    prior_error: &LifecycleErrorInfo,
+    prior_error: Option<&LifecycleErrorInfo>,
     origin_outcome: super::super::lifecycle_executor::LifecycleEventOutcome,
 ) -> LifecycleCatchResult {
     let mut protocol = LifecycleCatchProtocol::new(
@@ -815,7 +772,7 @@ fn execute_loop_catch_protocol(
             terminal_slot: guard.terminal_signal(),
             finalize_emitted: guard.finalize_emitted(),
         },
-        Some(prior_error.clone()),
+        prior_error.cloned(),
         origin_outcome,
     );
     while let Some(step) = protocol.next_step().cloned() {
@@ -907,7 +864,7 @@ fn run_loop_gate(
             guard,
             &loop_ctx,
             LifecycleSignal::Loop,
-            info,
+            Some(info),
             loop_outcome.clone(),
         );
         let surfaced_signal = result

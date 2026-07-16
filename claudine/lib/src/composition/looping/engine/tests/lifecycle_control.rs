@@ -471,7 +471,7 @@ fn loop_gate_evaluation_error_fails_before_condition_and_mutation() {
 /// guard raises (undefined root) surfaces the FAILURE evaluation error —
 /// not the original `LifecycleInitializeFailed`. Proves the broken path
 /// that previously discarded the failure outcome now threads it through
-/// `catch_evaluation_error`.
+/// the lifecycle catch protocol.
 #[test]
 fn loop_initialize_error_with_failure_raise_surfaces_failure_evaluation_error() {
     let config = counter_loop(3);

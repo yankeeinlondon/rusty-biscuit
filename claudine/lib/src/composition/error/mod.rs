@@ -1,7 +1,7 @@
 //! Composition-specific error types.
 
 use std::ops::Range;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::status::StatusState;
@@ -1584,38 +1584,6 @@ impl CompositionError {
             surface: info.variant.clone(),
             message: info.msg.clone(),
         }
-    }
-
-    /// Surface the evaluation error that halts the run after the catch events
-    /// (`failure` and/or `finalize`) ran for an earlier raise.
-    ///
-    /// Precedence: a raise inside `finalize` beats a raise inside `failure`
-    /// beats the original error — the user sees the *latest* lifecycle crash,
-    /// not the one that triggered the catch. The callers are responsible for
-    /// threading the active error into `finalize` (a `failure` raise becomes
-    /// the `err` carried into `finalize`); this helper only decides which
-    /// outcome surfaces.
-    ///
-    /// `failure_outcome`/`finalize_outcome` are `None` when the corresponding
-    /// catch event did not run (e.g. a terminal-phase catch skips `failure`).
-    pub fn catch_evaluation_error(
-        source_path: &Path,
-        original_event: &str,
-        original_info: &super::lifecycle_context::LifecycleErrorInfo,
-        failure_outcome: Option<&super::lifecycle_executor::LifecycleEventOutcome>,
-        finalize_outcome: Option<&super::lifecycle_executor::LifecycleEventOutcome>,
-    ) -> Self {
-        if let Some(fin) = finalize_outcome
-            && let Some(fin_info) = fin.evaluation_error.as_ref()
-        {
-            return Self::lifecycle_evaluation("finalize", source_path, fin_info);
-        }
-        if let Some(fail) = failure_outcome
-            && let Some(fail_info) = fail.evaluation_error.as_ref()
-        {
-            return Self::lifecycle_evaluation("failure", source_path, fail_info);
-        }
-        Self::lifecycle_evaluation(original_event, source_path, original_info)
     }
 
     /// Mark this evaluation error as already styled-emitted to stderr at its
