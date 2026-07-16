@@ -50,3 +50,8 @@ strum = "0.28"
 
 [dev-dependencies]
 biscuit-hash = { path = "../../biscuit-hash/lib" }
+# Level-2 real-terminal report tests. Neither crate is `claudine`/`claudine-cli`,
+# so the bootstrap rule above still holds.
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
+test-toolkit = { path = "../../tools/test-toolkit" }
+serial_test = "3"
