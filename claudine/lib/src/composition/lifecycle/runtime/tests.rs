@@ -419,6 +419,70 @@ fn transition_error_matrix_covers_every_lifecycle_event() {
     }
 }
 
+/// [`LifecycleCatchProtocol`] and [`decide_lifecycle_transition`] must never
+/// disagree about which origins enter the failure catch: both read the single
+/// `setup_catch_error` predicate. A second eligibility rule regrown in either
+/// place surfaces here as a mismatch rather than as adapters that compensate
+/// with their own branches.
+#[test]
+fn catch_protocol_and_transition_agree_on_setup_catch_eligibility() {
+    let outcomes = [
+        ("clean", LifecycleEventOutcome::default()),
+        ("evaluation", raised("evaluation")),
+        (
+            "action",
+            LifecycleEventOutcome {
+                action_error: Some(LifecycleErrorInfo::from_action_failure("shell", "failed")),
+                ..LifecycleEventOutcome::default()
+            },
+        ),
+        (
+            "explicit",
+            LifecycleEventOutcome {
+                control: Some(StackControl::Error {
+                    reason: Some("refused".to_string()),
+                }),
+                ..LifecycleEventOutcome::default()
+            },
+        ),
+    ];
+
+    for origin in LifecycleSignal::ALL {
+        for (name, outcome) in &outcomes {
+            let decided = matches!(
+                transition(origin, outcome, false, false),
+                LifecycleTransitionDecision::CatchFailure { .. }
+            );
+            let mut protocol = LifecycleCatchProtocol::new(
+                origin,
+                LifecycleCatchState::default(),
+                None,
+                outcome.clone(),
+            );
+            let requested =
+                protocol.next_step().map(|step| step.signal) == Some(LifecycleSignal::Failure);
+            assert_eq!(
+                decided, requested,
+                "{origin:?}/{name}: decide_lifecycle_transition and LifecycleCatchProtocol \
+                 disagree on setup-catch eligibility"
+            );
+            if !requested {
+                continue;
+            }
+            // Every catch the protocol selects must also report the setup error
+            // that selected it: that is the value the composition, loop-engine,
+            // and harness adapters branch on instead of re-deriving eligibility.
+            assert!(protocol.record(LifecycleSignal::Failure, LifecycleEventOutcome::default()));
+            assert!(protocol.record(LifecycleSignal::Finalize, LifecycleEventOutcome::default()));
+            let result = protocol.finish().expect("protocol complete");
+            assert!(
+                result.setup_error.is_some(),
+                "{origin:?}/{name}: catch selected without a reported setup error"
+            );
+        }
+    }
+}
+
 #[test]
 fn transition_control_matrix_covers_preflight_and_harness_controls() {
     let cases = [
