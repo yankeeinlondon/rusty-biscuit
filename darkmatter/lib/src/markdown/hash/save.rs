@@ -24,7 +24,7 @@
 //!   treating the switch as a content change.
 //! - **No stored hash** — write the first baseline without bumping.
 
-use super::compare::{HashComparison, normalize_extras};
+use super::compare::{HashComparison, compare_options, normalize_extras};
 use super::kind::{KindRelation, MdHashKind, select_kind};
 use super::options::MdHashOptions;
 use super::stored::StoredHash;
@@ -69,7 +69,7 @@ impl Markdown {
 
         // `--save` establishes a new baseline, so the written value is always
         // computed under the *current* options (and thus the current ignore-set).
-        let baseline = || StoredHash {
+        let fresh_baseline = || StoredHash {
             kind: selected,
             value: self.compute_hash(selected, options).to_stored_value(),
             ignored: normalize_extras(&options.extra_ignored),
@@ -80,13 +80,36 @@ impl Markdown {
             // detected content change, so leave `last_updated` alone.
             return Ok(SaveDecision {
                 kind: selected,
-                new_stored: Some(baseline()),
+                new_stored: Some(fresh_baseline()),
                 bump_last_updated: false,
                 comparison: None,
             });
         };
 
-        let comparison = self.compare_hash(stored, options)?;
+        // The like-for-like comparison artifact, computed once here and reused
+        // by the baseline below when — and only when — it is the *same*
+        // artifact. `--save` legitimately deals in two different artifacts: the
+        // comparison recomputes under the STORED ignore-set at the STORED kind,
+        // while the new baseline is written under the CURRENT options at the
+        // SELECTED kind. They coincide only when both identities agree, which is
+        // the common "re-save an unchanged policy/kind" case; when they diverge
+        // (a kind change or an ignore-policy change) the baseline must still be
+        // computed separately, so identity is tested rather than assumed.
+        let compare_artifact = self.compute_hash(stored.kind, &compare_options(stored, options));
+        let comparison = self.compare_with_computed(stored, options, &compare_artifact)?;
+
+        let baseline_is_compare_artifact = selected == stored.kind
+            && normalize_extras(&options.extra_ignored) == normalize_extras(&stored.ignored);
+        let baseline = || StoredHash {
+            kind: selected,
+            value: if baseline_is_compare_artifact {
+                compare_artifact.clone().to_stored_value()
+            } else {
+                self.compute_hash(selected, options).to_stored_value()
+            },
+            ignored: normalize_extras(&options.extra_ignored),
+        };
+
         let relation = MdHashKind::relate(stored.kind, selected);
 
         let (new_stored, bump_last_updated) = match relation {
@@ -322,5 +345,196 @@ mod tests {
             .new_stored
             .unwrap();
         assert!(matches!(new_stored.value, StoredHashValue::Flat(_)));
+    }
+}
+
+/// Finding 35.5 regression coverage.
+///
+/// `plan_hash_save` now computes the like-for-like comparison artifact once and
+/// reuses it for the written baseline **only** when both carry the same
+/// `(kind, effective MdHashOptions)` identity. The dangerous failure mode is
+/// conflating the two artifacts `--save` legitimately deals in: the comparison
+/// recomputes under the *stored* ignore-set at the *stored* kind, while the new
+/// baseline is written under the *current* options at the *selected* kind.
+#[cfg(test)]
+mod finding_35_5 {
+    use super::*;
+    use crate::markdown::hash::StoredHashValue;
+
+    fn md(content: &str) -> Markdown {
+        content.into()
+    }
+
+    fn doc() -> Markdown {
+        md("---\ntitle: T\ndraft: true\nnotes: keep\n---\n# H\n\nBody.\n\n## Two\n\nMore.")
+    }
+
+    fn opts_ignoring(extra: &[&str]) -> MdHashOptions {
+        MdHashOptions {
+            extra_ignored: extra.iter().map(|s| s.to_string()).collect(),
+            ..MdHashOptions::default()
+        }
+    }
+
+    fn flat(value: &StoredHashValue) -> String {
+        match value {
+            StoredHashValue::Flat(s) => s.clone(),
+            StoredHashValue::Detailed(_) => panic!("expected a flat stored value"),
+        }
+    }
+
+    /// The identity guard: when the ignore policy changes, the written baseline
+    /// must be computed under the CURRENT policy, never reuse the stored-policy
+    /// comparison artifact. Reusing it here would silently persist a hash
+    /// computed under the OLD ignore-set while recording the NEW `ignored` list —
+    /// a corrupt baseline that reads as unchanged forever after.
+    #[test]
+    fn ignore_policy_change_writes_the_current_policy_baseline() {
+        let doc = doc();
+
+        // Stored under the old policy: nothing extra ignored.
+        let old_opts = opts_ignoring(&[]);
+        let stored = StoredHash {
+            kind: MdHashKind::Simple,
+            value: doc.compute_hash(MdHashKind::Simple, &old_opts).to_stored_value(),
+            ignored: Vec::new(),
+        };
+
+        // Now `draft` is ignored: a different artifact.
+        let new_opts = opts_ignoring(&["draft"]);
+        let decision = doc.plan_hash_save(Some(&stored), &new_opts).unwrap();
+
+        let written = decision
+            .new_stored
+            .as_ref()
+            .expect("an ignore-policy change must rewrite the stored hash");
+
+        let expected_current = doc
+            .compute_hash(MdHashKind::Simple, &new_opts)
+            .to_stored_value();
+        assert_eq!(
+            flat(&written.value),
+            flat(&expected_current),
+            "baseline must be the CURRENT-policy artifact"
+        );
+        assert_ne!(
+            flat(&written.value),
+            flat(&stored.value),
+            "the current-policy artifact must differ from the stored-policy one here, \
+             otherwise this test cannot detect conflation"
+        );
+        assert_eq!(written.ignored, vec!["draft".to_string()]);
+        assert!(
+            !decision.bump_last_updated,
+            "an ignore-policy-only change must not bump last_updated"
+        );
+    }
+
+    /// A kind change is the other divergent identity: the baseline is written at
+    /// the SELECTED kind, not the stored one.
+    #[test]
+    fn kind_change_writes_the_selected_kind_baseline() {
+        let doc = doc();
+        let base = MdHashOptions::default();
+        let stored = StoredHash {
+            kind: MdHashKind::Simple,
+            value: doc.compute_hash(MdHashKind::Simple, &base).to_stored_value(),
+            ignored: Vec::new(),
+        };
+
+        let upgrade = MdHashOptions {
+            forced_kind: Some(MdHashKind::Structured),
+            ..MdHashOptions::default()
+        };
+        let decision = doc.plan_hash_save(Some(&stored), &upgrade).unwrap();
+
+        let written = decision.new_stored.as_ref().expect("kind change rewrites");
+        assert_eq!(written.kind, MdHashKind::Structured);
+        assert_eq!(
+            flat(&written.value),
+            flat(&doc.compute_hash(MdHashKind::Structured, &upgrade).to_stored_value()),
+            "baseline must be computed at the SELECTED kind"
+        );
+        assert_eq!(
+            flat(&written.value).split('-').count(),
+            4,
+            "a structured value carries four components"
+        );
+    }
+
+    /// The shared-identity case the reuse exists for: same kind, same policy,
+    /// changed content. The baseline is the same artifact as the comparison, so
+    /// reusing it must produce exactly what a fresh computation would.
+    #[test]
+    fn same_identity_reuse_matches_a_fresh_computation() {
+        let doc = doc();
+        let opts = MdHashOptions::default();
+
+        // Stored from a DIFFERENT document, so content is changed and a baseline
+        // is actually written.
+        let previous = md("---\ntitle: T\ndraft: true\nnotes: keep\n---\n# H\n\nOld body.");
+        let stored = StoredHash {
+            kind: MdHashKind::Simple,
+            value: previous
+                .compute_hash(MdHashKind::Simple, &opts)
+                .to_stored_value(),
+            ignored: Vec::new(),
+        };
+
+        let decision = doc.plan_hash_save(Some(&stored), &opts).unwrap();
+        let written = decision.new_stored.as_ref().expect("content change rewrites");
+
+        assert_eq!(
+            flat(&written.value),
+            flat(&doc.compute_hash(MdHashKind::Simple, &opts).to_stored_value()),
+            "the reused artifact must equal a freshly computed baseline"
+        );
+        assert!(decision.bump_last_updated);
+    }
+
+    /// Round trip: what `--save` writes must read back as unchanged, and a second
+    /// `--save` must then leave the file untouched. This is the property the
+    /// artifact reuse could break without any single-call assertion noticing.
+    #[test]
+    fn saved_baseline_reads_back_as_unchanged() {
+        for extra in [vec![], vec!["draft"]] {
+            for kind in [
+                MdHashKind::Simple,
+                MdHashKind::Structured,
+                MdHashKind::Detailed,
+                MdHashKind::Fm,
+                MdHashKind::Body,
+            ] {
+                let doc = doc();
+                let opts = MdHashOptions {
+                    forced_kind: Some(kind),
+                    extra_ignored: extra.iter().map(|s| s.to_string()).collect(),
+                    ..MdHashOptions::default()
+                };
+
+                // First save: no stored hash -> first baseline.
+                let first = doc.plan_hash_save(None, &opts).unwrap();
+                let written = first.new_stored.expect("first baseline is written");
+
+                // Read it back: the document must compare as unchanged...
+                let comparison = doc.compare_hash(&written, &opts).unwrap();
+                assert!(
+                    !comparison.frontmatter_changed && !comparison.body_changed,
+                    "{kind:?} with ignored={extra:?}: freshly saved baseline reads as changed"
+                );
+                assert!(
+                    comparison.ignore_policy.is_none(),
+                    "{kind:?} with ignored={extra:?}: saved baseline records a divergent policy"
+                );
+
+                // ...and a second save must leave the file untouched.
+                let second = doc.plan_hash_save(Some(&written), &opts).unwrap();
+                assert!(
+                    second.new_stored.is_none(),
+                    "{kind:?} with ignored={extra:?}: re-saving an unchanged document rewrote it"
+                );
+                assert!(!second.bump_last_updated);
+            }
+        }
     }
 }

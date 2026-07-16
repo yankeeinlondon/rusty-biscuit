@@ -234,6 +234,89 @@ fn test_hash_directory_rejects_structured_kind() {
         .failure();
 }
 
+/// Finding 22 revert (end-to-end): Markdown under directories named
+/// `node_modules`, `target`, and `vendor` is part of the aggregate again. A
+/// tree containing them must not hash the same as a tree without them, and the
+/// invocation succeeds with no diagnostics on stderr.
+#[test]
+fn test_hash_directory_includes_vendored_dirs() {
+    let with_vendored = tempfile::tempdir().unwrap();
+    std::fs::write(
+        with_vendored.path().join("top.md"),
+        "---\ntitle: Top\n---\n# Top\n",
+    )
+    .unwrap();
+    for vendored in ["node_modules", "target", "vendor"] {
+        let sub = with_vendored.path().join(vendored);
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("nested.md"), format!("# Nested in {vendored}\n")).unwrap();
+    }
+
+    let without_vendored = tempfile::tempdir().unwrap();
+    std::fs::write(
+        without_vendored.path().join("top.md"),
+        "---\ntitle: Top\n---\n# Top\n",
+    )
+    .unwrap();
+
+    let with_out = md_cmd()
+        .arg("hash")
+        .arg(with_vendored.path())
+        .output()
+        .unwrap();
+    let without_out = md_cmd()
+        .arg("hash")
+        .arg(without_vendored.path())
+        .output()
+        .unwrap();
+
+    assert!(with_out.status.success(), "hash must exit 0");
+    assert!(
+        with_out.stderr.is_empty(),
+        "no diagnostics expected on stderr: {}",
+        String::from_utf8_lossy(&with_out.stderr),
+    );
+    // Freeze the aggregate shape: `%016x-%016x` (two 16-hex parts) plus newline.
+    let with_stdout = String::from_utf8(with_out.stdout.clone()).unwrap();
+    assert!(
+        predicate::str::is_match(r"^[0-9a-f]{16}-[0-9a-f]{16}\n$")
+            .unwrap()
+            .eval(&with_stdout),
+        "aggregate must be a two-part hash: {with_stdout}",
+    );
+    assert_ne!(
+        with_out.stdout, without_out.stdout,
+        "Markdown under node_modules/target/vendor must contribute to the aggregate",
+    );
+}
+
+/// Content under a vendored directory name hashes identically to the same
+/// content under an ordinary directory name (path affects only sort order, and
+/// both `vendor/x.md` and `zzz/x.md` sort after `a.md`), proving the vendored
+/// file is genuinely hashed rather than skipped.
+#[test]
+fn test_hash_directory_vendored_membership_matches_plain_dir() {
+    let vendored = tempfile::tempdir().unwrap();
+    std::fs::write(vendored.path().join("a.md"), "# A\n").unwrap();
+    std::fs::create_dir(vendored.path().join("vendor")).unwrap();
+    std::fs::write(vendored.path().join("vendor/x.md"), "# X\n").unwrap();
+
+    let plain = tempfile::tempdir().unwrap();
+    std::fs::write(plain.path().join("a.md"), "# A\n").unwrap();
+    std::fs::create_dir(plain.path().join("zzz")).unwrap();
+    std::fs::write(plain.path().join("zzz/x.md"), "# X\n").unwrap();
+
+    let v = md_cmd().arg("hash").arg(vendored.path()).output().unwrap();
+    let p = md_cmd().arg("hash").arg(plain.path()).output().unwrap();
+
+    assert!(v.status.success());
+    assert!(p.status.success());
+    assert_eq!(
+        v.stdout, p.stdout,
+        "vendored-dir content must hash the same as ordinary-dir content",
+    );
+}
+
 /// A single malformed Markdown file must fail the whole directory aggregate
 /// rather than being silently hashed as an empty document. Otherwise a CI /
 /// release check using `md hash <dir>` could pass on a broken file and record
