@@ -25,8 +25,23 @@ fn expect_refusal(result: Result<ServerHandle, ServerError>, must: &str) -> Serv
     }
 }
 
+/// A private runtime directory for the endpoint. `tempfile` creates 0755
+/// directories, which the daemon refuses; the real default resolves into a
+/// private directory, so a fixture has to build one too.
+#[cfg(unix)]
+fn runtime_socket(tmp: &TempDir) -> std::path::PathBuf {
+    use std::os::unix::fs::DirBuilderExt;
+
+    let dir = tmp.path().join("runtime");
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&dir)
+        .expect("create runtime dir");
+    dir.join("daemon.sock")
+}
+
 fn spawn(tmp: &TempDir) -> (ServerHandle, std::path::PathBuf) {
-    let socket = tmp.path().join("daemon.sock");
+    let socket = runtime_socket(tmp);
     let handle = spawn_local_server(LocalEndpoint::UnixSocket(socket.clone()), ephemeral_config(tmp))
         .expect("spawn daemon");
     (handle, socket)
@@ -58,7 +73,7 @@ async fn the_unix_seam_boots_through_the_same_pipeline() {
     let before = shared_boot_count();
 
     let handle = crate::local_transport::spawn_uds_server(
-        tmp.path().join("daemon.sock"),
+        runtime_socket(&tmp),
         ephemeral_config(&tmp),
     )
     .expect("spawn daemon");
@@ -113,12 +128,16 @@ async fn dropping_the_handle_releases_the_endpoint() {
 }
 
 /// A restarted daemon takes its own endpoint back rather than refusing to boot
-/// because the previous run died without unlinking.
+/// because the previous run died without unlinking. What counts as reclaimable
+/// is the transport's call — see `local_transport::unix`'s tests for the full
+/// classification.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_socket_left_by_an_unclean_shutdown_is_reclaimed() {
     let tmp = TempDir::new().expect("tempdir");
-    let socket = tmp.path().join("daemon.sock");
-    std::fs::write(&socket, b"").expect("plant a stale entry");
+    let socket = runtime_socket(&tmp);
+    // A dead listener's socket file, which is what SIGKILL leaves behind.
+    drop(std::os::unix::net::UnixListener::bind(&socket).expect("plant a stale socket"));
 
     let handle = spawn_local_server(
         LocalEndpoint::UnixSocket(socket.clone()),
@@ -170,7 +189,7 @@ async fn a_group_or_world_accessible_data_root_is_rejected() {
 
     let error = expect_refusal(
         spawn_local_server(
-            LocalEndpoint::UnixSocket(tmp.path().join("daemon.sock")),
+            LocalEndpoint::UnixSocket(runtime_socket(&tmp)),
             ephemeral_config(&tmp),
         ),
         "a world-writable data root must be refused",
@@ -209,7 +228,7 @@ async fn an_overridden_data_root_keeps_the_ownership_policy() {
         .without_networking();
     let error = expect_refusal(
         spawn_local_server(
-            LocalEndpoint::UnixSocket(tmp.path().join("daemon.sock")),
+            LocalEndpoint::UnixSocket(runtime_socket(&tmp)),
             config,
         ),
         "an override must not weaken the policy",
@@ -228,7 +247,7 @@ async fn a_private_overridden_data_root_is_accepted() {
         .without_networking();
 
     let handle = spawn_local_server(
-        LocalEndpoint::UnixSocket(tmp.path().join("daemon.sock")),
+        LocalEndpoint::UnixSocket(runtime_socket(&tmp)),
         config,
     )
     .expect("spawn daemon");

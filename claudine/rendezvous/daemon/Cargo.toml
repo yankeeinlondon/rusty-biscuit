@@ -39,8 +39,26 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rcgen = { version = "0.13", default-features = false, features = ["pem", "ring"] }
 mdns-sd = "0.12"
 
+# The current-user DACL shared by the named-pipe endpoint and the data root:
+# SECURITY_ATTRIBUTES and PSECURITY_DESCRIPTOR live in Win32_Security, the SDDL
+# and GetNamedSecurityInfoW conversions in Win32_Security_Authorization,
+# LocalFree in Win32_Foundation, and CreateDirectoryW (which applies the DACL at
+# creation, leaving no permissive window) in Win32_Storage_FileSystem.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+] }
+
 [dev-dependencies]
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 rendezvous-client = { path = "../client" }
+
+# umask(2) has no std wrapper, and the socket-mode test's whole point is that
+# the daemon's mode does not come from the umask.
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"

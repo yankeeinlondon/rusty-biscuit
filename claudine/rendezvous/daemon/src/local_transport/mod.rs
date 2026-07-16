@@ -11,6 +11,8 @@
 
 #[cfg(unix)]
 mod unix;
+#[cfg(windows)]
+mod windows;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -45,9 +47,10 @@ pub fn shared_boot_count() -> u64 {
 /// target cannot speak, [`ServerError::Ownership`] when the data root or the
 /// endpoint's directory is not private to this user,
 /// [`ServerError::EndpointInUse`] when a live daemon already holds the
-/// endpoint, [`ServerError::AccessDenied`] or [`ServerError::Listener`] when
-/// the listener cannot be created, and the subsystem variants when the shared
-/// stack cannot be brought up.
+/// endpoint, [`ServerError::EndpointOccupied`] when something the daemon may
+/// not remove sits at the endpoint, [`ServerError::AccessDenied`] or
+/// [`ServerError::Listener`] when the listener cannot be created, and the
+/// subsystem variants when the shared stack cannot be brought up.
 pub fn spawn_local_server(
     endpoint: LocalEndpoint,
     config: DaemonConfig,
@@ -61,6 +64,10 @@ pub fn spawn_local_server(
     #[cfg(unix)]
     {
         unix::serve(endpoint, prepared)
+    }
+    #[cfg(windows)]
+    {
+        windows::serve(endpoint, prepared)
     }
 }
 

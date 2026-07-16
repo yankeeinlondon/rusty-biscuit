@@ -181,6 +181,19 @@ pub enum ServerError {
         endpoint: String,
     },
 
+    /// Something already sits at the endpoint that the daemon will not remove:
+    /// the wrong kind of entry, or one belonging to another user. Only a socket
+    /// this user owns and nobody is listening on is reclaimable.
+    #[error(
+        "the rendezvous endpoint at {endpoint} is occupied by {found}, which the daemon will not remove"
+    )]
+    EndpointOccupied {
+        /// Lossy rendering of the endpoint, for the message only.
+        endpoint: String,
+        /// What was found there, e.g. `a directory`.
+        found: String,
+    },
+
     /// The OS refused this process access to the endpoint.
     #[error("access denied preparing the rendezvous endpoint at {endpoint}")]
     AccessDenied {

@@ -199,6 +199,94 @@ fn an_existing_group_readable_directory_is_rejected() {
     );
 }
 
+/// Windows has no mode bits, so "private" is a DACL naming one principal. The
+/// descriptor is asserted through its SDDL rendering, which is the only way to
+/// see its contents rather than merely that a pointer is non-null.
+#[cfg(windows)]
+#[test]
+fn the_current_user_descriptor_names_this_account_and_nobody_else() {
+    use windows::Win32::Foundation::{HLOCAL, LocalFree};
+    use windows::Win32::Security::Authorization::{
+        ConvertSecurityDescriptorToStringSecurityDescriptorW, SDDL_REVISION_1,
+    };
+    use windows::Win32::Security::{
+        DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+    };
+    use windows::core::PWSTR;
+
+    let descriptor = current_user_descriptor().expect("build descriptor");
+    let mut text = PWSTR::null();
+    unsafe {
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            PSECURITY_DESCRIPTOR(descriptor.as_ptr()),
+            SDDL_REVISION_1,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            &raw mut text,
+            None,
+        )
+        .expect("render sddl");
+    }
+    let sddl = unsafe { text.to_string() }.expect("sddl is valid UTF-16");
+    let _ = unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
+
+    let sniff::os::StableUserId::WindowsSid(sid) =
+        sniff::os::current_user_id().expect("sid discovery")
+    else {
+        panic!("a Windows host must report a SID");
+    };
+
+    assert!(sddl.contains(&format!("O:{sid}")), "got: {sddl}");
+    assert!(sddl.contains(&format!("(A;;GA;;;{sid})")), "got: {sddl}");
+    assert!(
+        sddl.contains("D:P"),
+        "the DACL must be protected, so no inherited ACE can widen it; got: {sddl}"
+    );
+    // An ACL with no matching ACE denies. One ACE means exactly one principal
+    // is allowed.
+    assert_eq!(
+        sddl.matches("(A;").count(),
+        1,
+        "no principal beyond the current user may be granted access; got: {sddl}"
+    );
+}
+
+/// The directories the daemon creates must come out owned by this account,
+/// whatever the parent container's inheritable ACEs say.
+#[cfg(windows)]
+#[test]
+fn created_directories_are_owned_by_this_account() {
+    let root = temp_root();
+    let target = root.path().join("claudine").join("rendezvous");
+
+    ensure_private_dir(&target).expect("create private dir");
+
+    // `ensure_private_dir` verifies ownership of the target itself, so reaching
+    // here already proves it; the intermediate component is the one worth
+    // re-checking, since nothing else asserts it.
+    assert!(target.is_dir());
+    ensure_private_dir(target.parent().expect("parent"))
+        .expect("intermediate components must belong to this account too");
+}
+
+/// The same policy an override has to pass. A root this account does not own is
+/// a root whose DACL its owner can rewrite at any time.
+#[cfg(windows)]
+#[test]
+fn a_directory_owned_by_another_account_is_rejected() {
+    // `%WINDIR%` is owned by TrustedInstaller/SYSTEM on every supported
+    // Windows, and is the one directory guaranteed to exist and not belong to
+    // the test's account.
+    let Some(windir) = std::env::var_os("WINDIR").map(PathBuf::from) else {
+        panic!("every Windows host sets %WINDIR%");
+    };
+
+    let error = ensure_private_dir(&windir).expect_err("must reject");
+    assert!(
+        matches!(error, PrivateDirError::ForeignAccount { .. }),
+        "got: {error:?}"
+    );
+}
+
 /// A shared ancestor is fine — `/tmp` is one, and so is the user's data
 /// directory. Only the components the daemon creates must be private.
 #[cfg(unix)]
