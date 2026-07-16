@@ -69,6 +69,12 @@ windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_System_Services",
     "Win32_System_Environment",
+    # Stable-user identity (os::user): TOKEN_USER/TokenUser/IsValidSid live in
+    # Win32_Security, ConvertSidToStringSidW in Win32_Security_Authorization,
+    # and GetCurrentProcess/OpenProcessToken in Win32_System_Threading.
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Threading",
 ] }
 winreg = "0.55"
 
