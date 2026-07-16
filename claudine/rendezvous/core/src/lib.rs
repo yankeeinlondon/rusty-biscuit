@@ -12,6 +12,7 @@ pub mod document;
 pub mod envelope;
 pub mod identity;
 pub mod invitation;
+pub mod local_endpoint;
 pub mod repo_identity;
 pub mod session_log;
 pub mod session_status;
@@ -60,6 +61,9 @@ pub use identity::{
     NodeIdentity, NodeIdentityError, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH, verify_signature,
 };
 pub use invitation::{INVITATION_HRP, INVITATION_VERSION, Invitation, InvitationError};
+pub use local_endpoint::{
+    ENDPOINT_ENV_VAR, ENDPOINT_STEM, LocalEndpoint, LocalEndpointError, default_local_endpoint,
+};
 
 pub use session_log::{
     ChunkConfig, ChunkId, ChunkIdParseError, ChunkMetadata, DEFAULT_MAX_BYTES_PER_CHUNK,
