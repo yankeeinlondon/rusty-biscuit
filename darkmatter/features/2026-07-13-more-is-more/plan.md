@@ -297,9 +297,9 @@ Files: `darkmatter/dmls/` (parity tests), `darkmatter/docs/topics/darkmatter-exp
 
 ### 4.3 — Full validation & closure (AC16)
 
-- [ ] `just test` + `just lint` green in **both** `darkmatter/` and `sniff/`.
-- [ ] `cargo check --workspace` (drift guard: new enum variants must not break claudine exhaustive
-      matches or worktree consumers).
+- [ ] `just build` + `just test` + `just lint` green in **both** `darkmatter/`
+      and `sniff/`, plus any downstream package areas selected by impact
+      analysis (including Claudine or Worktree for exhaustive consumers).
 - [ ] Cross-platform compile checks for macOS, Windows, Linux (`--target` checks where the host allows;
       otherwise assert no OS-specific/`cfg` code was introduced — every Git op is pure-Rust `gix`).
 - [ ] Run `detect_changes({scope: "compare", base_ref: "main"})` and confirm only expected symbols/flows changed.
@@ -340,5 +340,6 @@ Phase 1 (sniff foundation)
 - **Rename-aware widening (1.3):** `has_conflicts` answers may change vs the old `Options::default()`
   probe. This is an intended correctness fix — verify existing `remote_refresh` worktree tests are
   updated to the widened expectation, not silently broken.
-- **New enum variant drift (2.2):** `ContextGroup::Git` and any new `SniffError` variant can break
-  exhaustive matches downstream (claudine). The `cargo check --workspace` gate in 4.3 catches this.
+- **New enum variant drift (2.2):** `ContextGroup::Git` and any new `SniffError`
+  variant can break exhaustive matches downstream (Claudine). The scoped
+  downstream build/test/lint matrix in 4.3 catches this.

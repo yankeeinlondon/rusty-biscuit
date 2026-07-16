@@ -400,7 +400,7 @@ identity. Do not introduce ad hoc hashing implementations.
 | F22 directory hash | Library collector tests and end-to-end CLI aggregate/exit-status test |
 | F23/F25 render/cleanup | Snapshot/golden output, headless Browser tests for F23, L2 terminal frames only where applicable, code-heavy render and cleanup benchmarks |
 | F33/F35 residuals | Focused behavior tests and one target/control benchmark per sub-item |
-| Feature closeout | `just test`/`just lint` in every touched area; `just test-l2` only in areas with F2/F3/F21 PTY coverage; Darkmatter `just test-browser` for F23; root recipes for cross-package changes; `cargo check --workspace`; `cargo fmt --check`; `git diff --check` |
+| Feature closeout | `just build`/`just test`/`just lint` in every affected area selected by impact analysis; `just test-l2` only in areas with F2/F3/F21 PTY coverage; Darkmatter `just test-browser` for F23; exact root selectors where supported for cross-package changes; `cargo fmt --check`; `git diff --check` |
 
 No write-mode formatter is authorized. Linux and Windows evidence must be
 recorded before completion; macOS-only success is insufficient for the stated

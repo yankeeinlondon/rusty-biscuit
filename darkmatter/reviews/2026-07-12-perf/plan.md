@@ -169,6 +169,11 @@ documentation:
 
 # Execution Plan: Darkmatter Performance Review (2026-07-12)
 
+> **Verification-scope correction (2026-07-15):** Remaining gates use the
+> dependency-derived package-area scope below. Completed checklist entries that
+> record `cargo check --workspace` are historical evidence only and must not be
+> rerun as closeout instructions.
+
 Derived from [`spec.md`](./spec.md). The spec catalogs **1 critical, 5 high,
 12 medium, 15 low** findings across `darkmatter/lib`, `darkmatter/cli`, and the
 cross-package hot paths in `sniff` and `biscuit-terminal`.
@@ -189,12 +194,13 @@ cross-package hot paths in `sniff` and `biscuit-terminal`.
 
 ### Global validation gates (run at every phase checkpoint)
 
-- `just test` (unit) and `just test-l2` (integration) from `darkmatter/`
-- `just lint` from `darkmatter/`
-- For cross-package phases, also run `just test <pkg>` from repo root for
-  `sniff` and `biscuit-terminal`
-- `cargo check --workspace` — new schema/enum variants have historically
-  drift-broken claudine's exhaustive matches
+- `just build`, `just test` (unit), `just test-l2` (integration), and `just lint`
+  from `darkmatter/`
+- For cross-package phases, run build, test, and lint in every affected package
+  area identified by impact analysis (including `sniff`, `biscuit-terminal`,
+  or `claudine` when applicable)
+- Do not use a workspace-wide Cargo build/check as a drift guard; include the
+  actual downstream exhaustive-match consumers in the scoped gate matrix
 - **Behavior invariant:** `md compose`, `md schema validate`, and render output
   must be byte-identical before/after every performance fix unless the spec
   explicitly notes a semantic change (only Finding 1 changes an observable:

@@ -310,8 +310,9 @@ byte-for-byte and error-for-error compatible:
 - Compose, DMLS, and Claudine schema behavior remains unchanged.
 - Darkmatter `just test`, `just test-l2`, and `just lint` pass.
 - Relevant Claudine and DMLS package tests/checks pass.
-- `cargo check --workspace` passes on the supported host, with Windows and Linux
-  CI compile/test evidence recorded before completion.
+- `just build` passes in every package area selected by impact analysis, with
+  Windows and Linux CI compile/test evidence recorded before completion. Do
+  not replace the scoped gate matrix with a workspace-wide Cargo check.
 
 ## Documentation
 

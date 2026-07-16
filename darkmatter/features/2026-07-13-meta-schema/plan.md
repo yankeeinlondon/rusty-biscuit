@@ -333,10 +333,10 @@ acceptance criterion.
   scope-discipline rules).
 - [ ] Refresh every changed Markdown state hash with Darkmatter's Markdown-aware
   hasher (`md hash <file> --save`), including any skill/doc `hash:` frontmatter.
-- [ ] Run `just test` and `just test-l2` from the Darkmatter package area and
-  `just lint`; then run the workspace `cargo check --workspace` guard because
-  new `SimplifiedType` variants can drift-break exhaustive matches in
-  downstream crates (e.g. Claudine).
+- [ ] Run `just build`, `just test`, `just test-l2`, and `just lint` from the
+  Darkmatter package area, then run build/test/lint in downstream package
+  areas selected by impact analysis (including Claudine when its exhaustive
+  matches are affected). Do not use a workspace-wide Cargo check as a proxy.
 - [ ] Exercise `md schema about` and representative `md schema validate`
   invocations to confirm both types appear and behave as documented.
 - [ ] Run `cargo fmt --check` **read-only** as a diagnostic only (never write).

@@ -11,6 +11,13 @@ review_iterations: 3
 
 # Performance Review: Darkmatter Library and CLI
 
+> **Verification-scope correction (2026-07-15):** This review introduced
+> `cargo check --workspace` as a cross-package closeout gate in commit
+> `64e4b8cb8`. That advice is superseded. Identify affected packages and
+> downstream consumers first, then run build, test, and lint for those package
+> areas. Historical result entries remain evidence of commands already run,
+> not instructions to repeat them.
+
 > **Reader's note (2026-07-14 review):** The original draft identified the
 > right hot paths, but several suggested optimizations silently changed public
 > or side-effect semantics. The reviewed design keeps `sniff::detect_timezone()`
@@ -166,10 +173,10 @@ A finding is complete only when all of the following hold:
   credible regression on unaffected benchmark groups, and a repeatable win
   larger than the harness noise on the target group. Absolute millisecond goals
   in this document are directional because host and terminal latency vary.
-- `just test`, `just test-l2`, and `just lint` pass in each touched package area.
-  Cross-package changes also run the root package recipe for every touched
-  package and `cargo check --workspace`. Read-only formatting checks are
-  permitted; this work must not run write-mode `cargo fmt`.
+- `just build`, `just test`, `just test-l2`, and `just lint` pass in each
+  affected package area. Cross-package changes include downstream consumers
+  identified by impact analysis. Read-only formatting checks are permitted;
+  this work must not run write-mode `cargo fmt`.
 
 ### Measured baseline (release build, macOS, stdout piped)
 

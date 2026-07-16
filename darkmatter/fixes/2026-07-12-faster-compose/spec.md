@@ -256,8 +256,9 @@ this same-source baseline.
 - Run `just test`, `just test-l2`, and `just lint` for Darkmatter.
 - Because the constructor reaches Claudine flows, run the corresponding Claudine
   package tests and checks selected by impact analysis.
-- Run `cargo check --workspace` and the root package recipes for every touched
-  package. If Workstream 2 or 3 changes `sniff`, include its package gates.
+- Run build, test, and lint recipes for every package area selected by impact
+  analysis. If Workstream 2 or 3 changes `sniff`, include its package-area
+  gates; do not replace this scoped matrix with a workspace-wide Cargo check.
 - Establish macOS execution plus Linux and Windows CI compile/test evidence. A
   macOS-only pass cannot close the cross-platform contract.
 
