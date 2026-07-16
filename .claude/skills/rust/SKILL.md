@@ -1,8 +1,8 @@
 ---
 name: rust
 description: Expert knowledge for Rust systems programming — ownership, borrowing, type safety, error handling, async patterns, performance optimization, and 2024-edition improvements. Use when writing or reviewing idiomatic Rust, resolving borrow-checker or lifetime issues, structuring error handling, or optimizing performance.
-last_updated: 2026-06-02T00:00:00Z
-hash: 352b2caf7cdd68a6-c41da21a60db54b6
+last_updated: 2026-07-15
+hash: 352b2caf7cdd68a6-25eab10b5d5ca11c
 ---
 
 # Rust
@@ -166,7 +166,14 @@ The generic advice above is overridden here by rusty-biscuit conventions.
 ### Build, test, format
 
 - Prefer `just` recipes: `just test | lint | build | doctest`. The root `justfile` covers a curated area list (not every workspace member).
-- Never run a bare `cargo build` / `cargo test` at the repo root — scope to a package: `cargo build -p <pkg>`. There are 48 workspace members and the target dir is large.
+- Determine the affected packages and downstream consumers before verification,
+  then run build, test, and lint for that scope. Prefer package-area `just`
+  recipes or exact `-p <pkg>` selectors.
+- Never run `cargo build --workspace`, `cargo check --workspace`, a bare root
+  `cargo build`/`cargo check`/`cargo test`, or unscoped root `just` lifecycle
+  recipes as a routine final gate. There are 48 workspace members and the
+  target directory is large. Workspace-wide runs require an explicitly
+  requested release/CI aggregation task and a documented reason.
 - Tests run under **nextest** with an L1/L2/L3 level taxonomy — see the `rust-testing` skill for `require_level!` and the canonical recipes.
 - **`cargo fmt` is a periodic standalone pass — never run it during implementation or testing.** It produces large, noisy diffs that bury behavior changes.
 

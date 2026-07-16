@@ -4,8 +4,8 @@ description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
   `require_level!` gating, nextest filtersets, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 1acc7c1c76b11142-e4cbc766e6e491e6
-last_updated: 2026-07-13
+hash: 1acc7c1c76b11142-871864c703979286
+last_updated: 2026-07-15
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -86,6 +86,28 @@ Every curated package area defines these 12 recipes:
 | `all`          | `sanity → lint → doctest → test → test-l2 → test-browser`.                                                                                                                                                                                                                                                                                   |
 
 Delegate to shared recipes in `just/devops.just` (e.g. `@just _test my-crate`).
+
+## Scope Verification Gates by Blast Radius
+
+Before running any final build, test, or lint gate:
+
+1. Record the changed packages and package areas.
+2. Use GitNexus upstream impact on changed symbols to identify downstream
+   consumers, then use `sniff repo packages`, `sniff repo package-areas`, and
+   `sniff repo package-dependencies` to map that impact to executable scopes.
+3. Run build, test, and lint for every affected package area. Use its local
+   `just build`, `just test`, and `just lint` recipes, or an exact package
+   selector when the repository provides a narrower supported recipe.
+4. Report the selected scope and commands with the gate results.
+
+Do not use `cargo build --workspace`, `cargo check --workspace`, a bare root
+`cargo build`/`cargo check`/`cargo test`, or an unscoped root `just` lifecycle
+recipe as a generic final safety net. An exposed enum or public API change is a
+reason to include its actual downstream consumers, not all workspace members.
+A workspace-wide run is appropriate only when the user explicitly requests a
+release/CI aggregation task or when a documented repository-wide invariant
+cannot be verified from the dependency-derived scope; record that reason before
+running it.
 
 At the repository root, `just test` delegates to `_test_workspace`. It uses
 Cargo metadata as the package source of truth, runs every workspace package,
