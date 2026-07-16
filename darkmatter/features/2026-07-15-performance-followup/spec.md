@@ -87,7 +87,7 @@ the applicable gates.
 | 10 | Complete | `ctx.*` lookup no longer clones the full context-values map for each access. | No implementation work. |
 | 11 | Open | The frontmatter interpolation fixpoint still repeatedly extracts references and clones maps/values as keys become eligible. | Parse dependency information once, maintain incremental readiness, and avoid rebuilding seed maps while preserving cycles, shell deferral, best-effort propagation, and key-scoped errors. |
 | 12 | Open | Expression functions still receive an owned `Option<ResolutionContext>`, cloning its context for repeated calls. | Add an internal borrowed/shared path while retaining the owned public facade where compatibility requires it. |
-| 13 | Open | Text replacement still scales with document length times rule count and builds a character-index vector. | Implement and benchmark a faster exact matcher or record a requirement-matched no-win result; preserve rule order, overlap, Unicode, and replacement semantics. |
+| 13 | Open | Text replacement still scales with document length times rule count and builds a character-index vector. | Implement and benchmark a faster exact matcher or record a requirement-matched no-win result; preserve descending key-byte-length/ascending lexical precedence, left-to-right non-recursive matching, Unicode boundaries, empty-key handling, and scalar coercion. |
 | 14 | Partial | Literal conversion now skips its scan when `{{{` is absent. | Reduce repeated Markdown-aware scans and full-body copies when interpolation is present; benchmark nested and no-expression cases separately. |
 | 15 | Complete | Parent headings and line offsets are parsed once and queried through memoized/indexed structures. | No implementation work. |
 | 16 | Partial | Some graph/preflight data is shared through `Arc`, but visited documents may still be composed again. | Solve the remaining condition-aware prepared-content duplication without reusing bodies whose output depends on parent state or directive position. |
@@ -132,10 +132,11 @@ Sniff compatibility correction, not a rollback of Darkmatter's speedup.
 
 Acceptance requires:
 
-- an observable internal decision seam proving Darkmatter selects `false`, not
-  a source-text assertion;
-- Sniff tests proving the bare API selects `true` and the configurable API
-  respects both values without making a live NTP request;
+- a Darkmatter-local injectable wrapper or equivalent decision seam proving its
+  production path selects `false`, not a source-text assertion;
+- Sniff-internal tests proving the bare API selects `true` and the configurable
+  API respects both values without making a live NTP request; a dependency's
+  `cfg(test)` instrumentation is not assumed to be visible to Darkmatter tests;
 - no live network dependency in ordinary Darkmatter compose tests;
 - Sniff and Darkmatter L1/lint gates.
 
@@ -255,9 +256,12 @@ Treat these as separate checkpoints even if they share fixtures:
 - **F12:** allow evaluators and expression functions to borrow or cheaply share
   `ResolutionContext`. Preserve public owned-return APIs unless an explicit
   compatibility exception is approved.
-- **F13:** benchmark an exact multi-pattern matcher against the current ordered
-  rules. Reject any design that changes first-rule precedence, overlap,
-  cascading behavior, Unicode indices, or empty-pattern handling.
+- **F13:** benchmark an exact multi-pattern matcher against the current
+  canonical rule order: descending key byte length, then ascending lexical
+  order. Reject any design that changes left-to-right non-overlapping matching,
+  the rule chosen at a shared start position, the fact that replacement output
+  is not rescanned, UTF-8 character-boundary behavior, empty-key omission, or
+  scalar-value coercion.
 - **F14:** combine compatible discovery/emission work and construct output once
   per interpolation depth where practical. Nested interpolation still requires
   semantic fixpoint behavior; it does not authorize rescanning unrelated
@@ -325,10 +329,15 @@ The following remain independently open:
    copying the whole child once per heading.
 3. Store fetched response bodies as `Arc<str>` internally while preserving the
    current owned public facade where required.
-4. Route `::toc-linking` target reads through the run cache so one target is
-   not read independently by graph discovery and composition.
-5. Reuse one document hash computation across `md hash --diff` and `--save`,
-   including explanation output, without changing stored hash semantics.
+4. Route `::toc-linking` target reads through one compose-run-owned source cache
+   so one target is not read independently by graph discovery and composition.
+   Separate graph and transclusion caches of the same type do not satisfy this
+   item; preserve authoritative-read and invalidation behavior.
+5. Within each mutually exclusive `md hash --diff` or `md hash --save`
+   invocation, compute each unique `(kind, effective hash options)` artifact at
+   most once and reuse it across that mode's comparison/planning and explanation
+   output. `--save` may legitimately need separate stored-policy comparison and
+   selected-policy baseline artifacts; do not collapse those distinct semantics.
 6. Make `normalize_body_rhythm` avoid allocating an ANSI-stripped string for
    every output-line check.
 7. Borrow link/image URL and title data through policy application, including
@@ -343,9 +352,10 @@ individual path.
 1. Compose Markdown, validation results, rendered output, graph/CLI JSON,
    diagnostics, and exit status remain byte-for-byte and error-for-error
    compatible.
-2. The existing Finding 29 `Arc<Value>` exception remains the only public Rust
-   API shape change in this follow-up. The opaque graph feature owns its own
-   separately approved compatibility ruling.
+2. This follow-up introduces no new public Rust API shape change. It preserves
+   the previously approved Finding 29 `Arc<Value>` exception and its owned
+   compatibility facade; the opaque graph feature owns its own separately
+   approved compatibility ruling.
 3. The bare Sniff API's full NTP-reporting behavior is restored; Darkmatter's
    explicit local-only call remains.
 4. Directory-hash membership returns to its pre-Finding-22 behavior.
@@ -420,7 +430,8 @@ run for code that cannot vary across platforms.
   feature-local evidence home defined by Architecture Decision A.
 - Link the original review to this active follow-up and to the opaque graph
   feature.
-- Record one disposition and evidence location for every open sub-item.
+- Record one disposition and evidence location for every retained partial,
+  open, or correction item from the audit table, including evidence-only gaps.
 - Document the restored Sniff and directory-hash compatibility behavior.
 - Update public rustdoc and README material only where behavior or supported
   construction changes.
@@ -468,8 +479,10 @@ The derived products retain distinct contracts:
   relevant to the cached artifact, combined with the existing source, effective
   state, context, directive-overlay, and pass-scope dimensions;
 - process-local identity required by a stateful field participates only in
-  run-local reuse. A key that depends on pointer/instance identity must not read
-  or write a persistent cache entry;
+  run-local reuse. The run-local key must distinguish independently constructed
+  stateful instances while remaining stable across clones of the same shared
+  instance. Process-local identity bytes never enter a persistent key, and a
+  key that requires them must not read or write a persistent cache entry;
 - when equivalence cannot be established, reject reuse rather than guessing.
 
 Canonical value encoding is typed and length-delimited, distinguishes `None`
@@ -487,7 +500,7 @@ in the coordinated change.
 
 This feature is complete when:
 
-1. Findings 1–4's compatibility/evidence gaps are closed.
+1. Findings 1–4 and 21's compatibility/evidence gaps are closed.
 2. Findings 7, 11–14, 16, 17, 23, 25, 32, 33, and every remaining Finding 35
    sub-item has an implementation or an allowed evidence-backed disposition.
 3. Finding 22's unapproved membership change is reverted, unless the owner
@@ -496,8 +509,8 @@ This feature is complete when:
    with no duplicated or conflicting implementation here.
 5. Reproducible same-byte benchmark artifacts meet their predeclared
    thresholds and retain raw samples.
-6. Behavioral, L1, L2, lint, workspace, formatting-check, and whitespace gates
-   pass, with Linux and Windows evidence recorded.
+6. Behavioral, L1, requirement-matched L2, lint, workspace, formatting-check,
+   and whitespace gates pass, with Linux and Windows evidence recorded.
 7. The audit table and original review documentation reflect the final honest
    disposition of every finding.
 8. Architecture Decisions A and B are implemented: evidence remains

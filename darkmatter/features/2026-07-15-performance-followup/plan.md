@@ -3,6 +3,7 @@ agent: "claude/"
 total_phases: 11
 created: 2026-07-15
 phase: 1
+source_map_commit: bc1c148f26eae1bba36fc1f926298a52573d83bd
 ---
 
 # Execution Plan — Performance Follow-up
@@ -22,47 +23,54 @@ owned by the linked [Opaque Reference Graph](../2026-07-15-reference-graph/plan.
 feature. This plan only *coordinates* with it on the shared field-classification
 authority (Architecture Decision B / Phase 4).
 
-## Source Map (verified against HEAD)
+## Source Map (verified at `bc1c148f26eae1bba36fc1f926298a52573d83bd`)
+
+Symbol names and paths are authoritative; line numbers are navigation hints at
+the pinned commit and must be refreshed before each implementation phase.
 
 | Concern | Location | Finding |
 |---------|----------|---------|
 | `detect_timezone_with_options(probe_ntp)` / bare `detect_timezone()` (delegates to `false` — must restore `true`) | `sniff/lib/src/os/time.rs:429`, `:508` | 1 |
 | Darkmatter local-only caller (keep `false`) | `darkmatter/lib/src/markdown/compose/context/capture/datetime.rs:129` | 1 |
-| OSC 10 text-color cache; OSC support session cache | `biscuit-terminal/lib/src/discovery/osc_queries/mod.rs:72` (`TEXT_COLOR_CACHE`), `:104`; `.../osc_queries/support.rs:11` | 2 |
+| OSC 10 text-color cache; OSC support session cache | `biscuit-terminal/lib/src/discovery/osc_queries/mod.rs:73` (`TEXT_COLOR_CACHE`), `:105`; `.../osc_queries/support.rs:11` | 2 |
 | macOS color-mode / prose-theme probe | `darkmatter/lib/src/markdown/highlighting/themes.rs:412` `detect_prose_theme`, `:473` `detect_color_mode`; terminal build `biscuit-terminal/lib/src/terminal.rs:51` | 21 |
 | Compose CLI shared terminal `OnceCell` | `darkmatter/cli/src/commands/compose.rs:191` (`term_cell`) | 3 |
 | TOC newline offset table + `partition_point` | `darkmatter/lib/src/markdown/toc/mod.rs:193` `newline_offset_table`, `:210` `line_at_offset` | 4 |
-| Frontmatter interpolation fixpoint; per-iteration ref extract + seed clone | `darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs:362` `interpolate_frontmatter_impl`, `:431` `collect_deferred_key_references`, `:469` `extract_frontmatter_key_refs`, seeds `:405`/`:421`/`:442` | 11 |
+| Frontmatter interpolation fixpoint; per-iteration ref extract + seed clone | `darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs:362` `interpolate_frontmatter_impl`; repeated call sites at `:431`/`:469`/`:559`; helpers `extract_frontmatter_key_refs` at `:871`, `collect_deferred_key_references` at `:964` | 11 |
 | Expression `Option<ResolutionContext>` owned clone | `darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs:19`, `:128` `resolution_context()`; `functions/mod.rs:45` `ContextFn` | 12 |
-| Text `replace:` matcher + char-index vector | `darkmatter/lib/src/markdown/compose/replacement.rs:88` `apply_replacements`, `:90` `build_replacement_rules`, `:96` `scan_and_replace`; stage `inline/replacement.rs:19` | 13 |
-| Literal `{{{` conversion + guard | `darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs:69` `convert_literals`, `:197` guard; `frontmatter_interpolation.rs:217` `convert_frontmatter_literals` | 14 |
-| `options_hash` / `effective_state_hash` / `context_hash` / overlay combine | `darkmatter/lib/src/markdown/compose/cache/hashing.rs:135`/`:87`/`:103`/`:220` | 7,16,AD-B,35 |
+| Text `replace:` matcher + char-index vector | `darkmatter/lib/src/markdown/compose/replacement.rs:88` `apply_replacements`, `:105` `build_replacement_rules`, `:165` `scan_and_replace`; stage `inline/replacement.rs:19` | 13 |
+| Literal `{{{` conversion + guard | `darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs:69` `convert_literals`, `:201` guard; `frontmatter_interpolation.rs:217` `convert_frontmatter_literals` | 14 |
+| `options_hash` / `effective_state_hash` / `context_hash` / overlay hashes | `darkmatter/lib/src/markdown/compose/cache/hashing.rs:141`/`:87`/`:103`/`:150`/`:168` | 7,16,AD-B,35 |
 | `ComposeOptions` owning module | `darkmatter/lib/src/markdown/compose/context/options.rs:44` | AD-B,7,16 |
-| Transclusion reuse + runtime cache options_hash | `.../transclusion/engine.rs:1341`; `.../cache/runtime.rs:72` (used `:761`,`:957`) | 7,16 |
-| Preflight cached-directive reuse | `.../compose/preflight/mod.rs:80` (`canonical_key`) | 7,16 |
-| Shell 10ms polling loops (**two**: `:242` and `:574`) | `darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs:242`, `:574` | 17 |
+| Transclusion key producer + persistent-key consumers | `.../transclusion/engine.rs:1335` (`options_hash` at `:1336`); `.../cache/runtime.rs:68` (`PersistentContext`, consumed by persistent read/write key assembly) | 7,16,AD-B |
+| Preflight cached-directive reuse | `.../compose/preflight/mod.rs:122` (`canonical_key`), `:140` (`child_for_source`) | 7,16 |
+| Shell 10ms polling loops (**two**) | `darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs:245`/`:309`, `:577`/`:634` | 17 |
 | Shell policy snapshot cloned per directive | `.../shell_expansion/mod.rs:188` `shell_runtime.snapshot()`; `.../shell_expansion/types.rs:1060` `ShellExpansionRuntime::snapshot` | 32 |
-| Per-code-block environment/theme resolution | `darkmatter/lib/src/markdown/render_tree/code_renderer.rs:176` `code_theme_from_env`, `:228` resolution chain; render entry points `render_tree/entrypoints.rs:612`, `:771` | 23 |
-| Cleanup two-stage pipeline; placeholder + line passes; reflow | `darkmatter/lib/src/markdown/cleanup/mod.rs:233`; `strip_incidental_newlines` calls; `cleanup/reflow.rs:123` | 25 |
-| Directory-hash vendor exclusion | `darkmatter/lib/src/markdown/fs.rs:8` `SKIPPED_VENDOR_DIRS`, `:24` skip in `read_dir` | 22 |
-| Remote discovery per-expression prefix rescan | `darkmatter/lib/src/markdown/compose/remote.rs:287` `discover_remote_urls_from_expressions`, `:307` loop calling `byte_offset_to_line` | 33 |
-| Heading offsets / releveling | `.../transclusion/engine.rs:59` `find_preceding_heading_level`, `:76` `relevel_with_overflow`, `:310` memoized offset table; `markdown/mod.rs:947` `relevel` | 35.2 |
-| Fetched response body (`String` → `Arc<str>`; `Arc` already imported) | `darkmatter/lib/src/markdown/compose/remote_fetch.rs:38` `Ready { body }` | 35.3 |
-| `::toc-linking` target reads (multiple `read_to_string`) | `darkmatter/lib/src/markdown/compose/toc_linking/mod.rs:148`, `:161`; `parser.rs:141` | 35.4 |
+| Per-code-block environment/theme resolution | `darkmatter/lib/src/markdown/render_tree/code_renderer.rs:176` `code_theme_from_env`, `:231` resolution chain; render entry points `render_tree/entrypoints.rs:612`, `:771` | 23 |
+| Cleanup two-stage pipeline; placeholder + line passes; reflow | `darkmatter/lib/src/markdown/cleanup/mod.rs:214` `cleanup_content_internal`; `strip_incidental_newlines` calls; `cleanup/reflow.rs` | 25 |
+| Directory-hash vendor exclusion | `darkmatter/lib/src/markdown/fs.rs:8` `SKIPPED_VENDOR_DIRS`, `:35` pruning condition | 22 |
+| Remote discovery per-expression prefix rescan | `darkmatter/lib/src/markdown/compose/remote.rs:287` `discover_remote_urls_from_expressions`, `:311` loop calling `byte_offset_to_line` (`:446`) | 33 |
+| Child-heading line lookup / repeated relevel copies | `.../transclusion/engine.rs:76` `relevel_with_overflow`, `:138` reverse replacement loop, `:181` `extract_headings` (`content[..start].lines()` at `:197`) | 35.2 |
+| Fetched response body (`String` → `Arc<str>`; `Arc` already imported) | `darkmatter/lib/src/markdown/compose/remote_fetch.rs:38` `FetchSlot::Ready`, `:447` `get_content` clone; `cache/remote_cache.rs:58` fetch outcome handoff | 35.3 |
+| `::toc-linking` target reads across graph + compose runtimes | `darkmatter/lib/src/markdown/reference/graph.rs:36`/`:49` (`ReferenceAnalysisRuntime` + run-local load), `:487` child load; `.../transclusion/engine.rs:1103`–`:1134` direct read + TOC-heading load | 35.4 |
 | `md hash --diff` / `--save` | `darkmatter/cli/src/commands/hash.rs:33`,`:141` `run_hash_diff`, `:164` `run_hash_save`; lib `plan_hash_save`/`apply_hash_save` | 35.5 |
 | `normalize_body_rhythm` (ANSI-strip per line) | `darkmatter/lib/src/layout/page.rs:1423` (called `:950`) | 35.6 |
-| Link/image URL/title policy application | `.../compose/link_normalization.rs:29` `normalize_links`; `markdown/mod.rs:1016` `build_markdown_image_literal`, `:1039` `escape_markdown_title` | 35.7 |
+| Link/image URL/title policy application | `darkmatter/lib/src/markdown/render_tree/build_context.rs:375` `apply_link_policy`, `:411` `apply_image_policy` | 35.7 |
 | `md delta` command | `darkmatter/cli/src/commands/mod.rs:175`; lib `markdown/delta/mod.rs` | 35 (ctx) |
 
 ### Confirmed constraints from the read-through
 
-- Two independent 10 ms polling loops exist in `executor.rs` (`:242` and
-  `:574`); the Finding 17 fix must replace **both**.
+- Two independent 10 ms polling loops exist in `executor.rs` (`try_wait` at
+  `:245`/`:577`, sleeps at `:309`/`:634`); the Finding 17 fix must replace
+  **both**.
 - `remote_fetch.rs` already imports `Arc`; the Finding-35.3 `Arc<str>` change is
-  localized to `RemoteFetchOutcome::Ready { body }` plus its `Ready.body`
-  consumers.
-- `toc_linking/mod.rs` re-reads targets with `read_to_string` in multiple spots
-  — the candidate for Finding-35.4 run-cache routing.
+  centered on `FetchSlot::Ready { body }`, the owned `get_content` facade, and
+  the `RemoteFetchOutcome` handoff from `cache/remote_cache.rs`.
+- `toc_linking/mod.rs` re-reads targets with `read_to_string` in multiple spots,
+  but its `process_toc_linking` helper is currently test-only. Finding 35.4's
+  production duplication is between `ReferenceAnalysisRuntime::load_markdown`
+  and the transclusion engine's direct source/hash + TOC-heading reads; optimize
+  those paths rather than the legacy helper.
 - The existing `cache::hashing::options_hash` is the incumbent that
   Architecture Decision B must **replace or delegate**, not run parallel to.
 - `magic_paths` and `env_path_whitelist` are ordered vectors whose order can
@@ -83,8 +91,9 @@ honor them or record an explicit disposition.
 - **Compatibility invariants (spec §Compatibility and Correctness Invariants
   1–8):** compose Markdown, validation results, rendered output, graph/CLI JSON,
   diagnostics, and exit status stay byte-for-byte and error-for-error
-  compatible; the Finding 29 `Arc<Value>` exception is the *only* public Rust
-  API shape change; caches include every semantic input and are bounded or
+  compatible; this follow-up introduces no new public Rust API shape change and
+  preserves Finding 29's already-approved ownership exception plus owned
+  compatibility facade; caches include every semantic input and are bounded or
   run-local and concurrency-safe; internal borrowing never weakens an owned
   public facade without an approved exception; all code compiles and behaves on
   macOS, Linux, and Windows.
@@ -122,9 +131,9 @@ honor them or record an explicit disposition.
 ## Preflight — source freshness, ownership, and impact
 
 - [ ] Record the current commit and working-tree state; preserve unrelated
-  changes. Treat the Source Map as a reviewed starting point, not a substitute
-  for confirming each location against the implementation immediately before
-  its phase.
+  changes. Compare it with `source_map_commit`; treat the Source Map as a
+  reviewed starting point, not a substitute for resolving each named symbol and
+  confirming its current role immediately before its phase.
 - [ ] Confirm the linked Opaque Reference Graph prerequisite/ownership boundary
   before touching `ComposeOptions` or cache identity. One feature owns the
   classification landing commit; this plan consumes it.
@@ -148,8 +157,8 @@ larger optimization work builds on top.
 ### Finding 1 — Restore the Sniff timezone compatibility boundary (Work 1)
 - [ ] In `sniff/lib/src/os/time.rs:508`, restore bare `detect_timezone()` to delegate to `detect_timezone_with_options(true)` (full NTP-reporting convenience API). Align its rustdoc.
 - [ ] Keep Darkmatter's explicit `detect_timezone_with_options(false)` call at `capture/datetime.rs:129` unchanged.
-- [ ] Add a narrow internal decision seam (or equivalent test spy) so Sniff tests prove the bare API selects `true` and the configurable API respects both values without making a live NTP request.
-- [ ] Test Darkmatter's call through the same observable seam, proving it selects `false`; do not use a brittle source-text assertion or introduce a live network dependency in ordinary compose tests.
+- [ ] Add a narrow Sniff-internal decision seam (for example, an injected probe function below both public entry points) so Sniff tests prove the bare API selects `true` and the configurable API respects both values without making a live NTP request.
+- [ ] Add a Darkmatter-local injectable wrapper or equivalent seam around its Sniff call and prove the production path selects `false`; do not depend on Sniff's `cfg(test)` instrumentation crossing the crate boundary, use a brittle source-text assertion, or introduce a live network dependency in ordinary compose tests.
 - [ ] Gates: Sniff `just test` + `just lint`; Darkmatter context tests + `just test` + `just lint`. (This is a filesystem/network-adjacent but OS-identical logic change — Windows compile + macOS run + Linux CI sufficient; state so in `results.md`.)
 
 ### Finding 22 — Restore directory-hash membership (Work 8)
@@ -165,7 +174,8 @@ larger optimization work builds on top.
 Bare `sniff::detect_timezone()` reports full NTP status again; Darkmatter compose
 still performs no NTP probe. `md hash <dir>` includes Markdown under
 `node_modules`/`target`/`vendor` exactly as before the perf change. Both areas
-green on `just test` + `just lint`; Linux evidence recorded for F22.
+green on `just test` + `just lint`; macOS, Linux, and Windows behavioral evidence
+recorded for F22.
 
 ---
 
@@ -176,7 +186,7 @@ measured checkpoint consumes. Reconstruct the reproducible historical
 command/TOC closeout that Review 3 rejected for using different, unhashed
 fixture bytes. **Blocks every measured checkpoint** in later phases.
 
-- [ ] Create `darkmatter/features/2026-07-15-performance-followup/results.md` as the disposition + evidence index (one row per open finding/sub-item; disposition, evidence location, and cross-platform classification columns). (AD-A)
+- [ ] Create `darkmatter/features/2026-07-15-performance-followup/results.md` as the disposition + evidence index (one row per retained partial/open/correction finding or sub-item, including evidence-only gaps; disposition, evidence location, and cross-platform classification columns). (AD-A)
 - [ ] Create a sibling `benchmarks/` directory holding the immutable fixture **manifest** as the single authority for fixture identity, plus either committed fixtures or a checked-in **deterministic generator** (record generator version + exact command). (AD-A, Work 3)
 - [ ] Define the manifest schema up front. Each fixture entry records generator version/command, exact byte size + structural counts, Darkmatter frontmatter/body hashes for Markdown, and a `biscuit-hash` xxHash whole-file identity where byte identity is required. Preserve ordered fixture collections. (Work 3)
 - [ ] Keep per-run facts out of the immutable fixture identity: dated run records under `benchmarks/raw/<checkpoint>/<run-id>/` record baseline/candidate commits, commands, release profile, host, environment, TTY mode, warm-up, sample count, statistic/dispersion, thresholds, and raw-result files. `results.md` links each disposition to its run record. Declare the threshold before capturing the baseline. (AD-A, Work 3)
@@ -193,7 +203,8 @@ contract are frozen.
 `results.md`, the fixture manifest, and the Phase-2 fixtures exist and are
 internally consistent (recomputed hashes match recorded ones). The F4 historical
 closeout reproduces on identical bytes and meets its predeclared thresholds,
-with raw samples retained. No production source changed in this phase.
+with raw samples retained. No production behavior changes in this phase; test
+and benchmark-support edits are permitted.
 
 ---
 
@@ -236,8 +247,8 @@ prerequisite and must not implement a competing inventory. **Blocks Phase 5.**
 - [ ] Confirm the owning implementation destructures `ComposeOptions` **with no `..`** and derives both `ReferenceGraphOptionsIdentity` and the compose-cache fingerprint from that one field inventory. No third fingerprint or parallel field list is allowed. (AD-B)
 - [ ] Confirm ordered vectors (`magic_paths`, `env_path_whitelist`, and any other order-sensitive sequences) retain order. Sort only genuinely unordered maps/sets such as `exclude_keys`, `pre_approved_commands`, allowed-host sets, and canonical context/env maps. (AD-B)
 - [ ] Confirm the typed, length-delimited encoding distinguishes field/type boundaries, `None`, and empty values; uses a versioned domain marker; contains no `Debug` encoding; and hashes through `biscuit-hash` xxHash. Add delimiter-collision and `None`/empty regression tests. (AD-B)
-- [ ] Confirm process-local state participates only in run-local reuse. Stateful identity disables persistent reads **and** writes; dropped/recreated instances are unequal; clone-shared `Arc` instances remain equal without increasing strong counts. When equivalence cannot be established, reject reuse. (AD-B)
-- [ ] Replace or delegate `cache::hashing::options_hash` and migrate its call sites (`cache/runtime.rs`, `transclusion/engine.rs`, preflight) under a new cache-key domain/version. Prove a legacy persistent entry cannot be read under the new encoding. (AD-B)
+- [ ] Confirm process-local state participates only in run-local reuse. The run-local key distinguishes independently constructed stateful instances but remains stable across clones of the same `Arc`, without increasing strong counts. Process-local identity bytes never enter a persistent key; when they are required, persistent reads **and** writes are disabled. When equivalence cannot be established, reject reuse. (AD-B)
+- [ ] Replace or delegate `cache::hashing::options_hash` and migrate the direct producer in `transclusion/engine.rs` plus the persistent-key consumers in `cache/runtime.rs` under a new cache-key domain/version. Audit preflight-state participation through the shared classification rather than treating preflight as an `options_hash` call site. Prove a legacy persistent entry cannot be read under the new encoding. (AD-B)
 - [ ] Tests cover equal identities across unordered insertion order; unequal identities across ordered-vector reordering and representative scalar/collection/context/schema/transclusion/remote/shell families; clone stability; fresh-instance inequality; and persistent-cache ineligibility for process-local state. The no-`..` destructure is the field-addition guard.
 
 This phase is sequential with the linked feature's provenance work: the shared
@@ -265,7 +276,7 @@ compose-cache fingerprint).
 - [ ] Preserve condition-aware behavior: do not reuse bodies whose output depends on parent state, directive position, conditions, or lifecycle decisions. (Findings 7/16)
 - [ ] The cache is run-local or bounded; retains no unrelated contexts, graphs, callbacks, or runtimes. Because transclusion composes children **concurrently**, any shared prepared-content cache is **concurrency-safe or partitioned per compose run** — no data race, no lock held across child composition. (Work 4)
 - [ ] **35.1:** compute `effective_state_hash` once per transclusion phase and thread the value through directive cache-key construction. This belongs here because Phase 5 owns that key's assembly and measurement.
-- [ ] **35.4:** route `::toc-linking` graph-discovery and composition reads through the same run-local source cache without broadening persistent reuse. Preserve authoritative-read and invalidation behavior. This belongs here because it is another cross-pass reuse boundary.
+- [ ] **35.4:** route `::toc-linking` graph-discovery and composition reads through the same compose-run-owned source cache without broadening persistent reuse. `ReferenceAnalysisRuntime` currently constructs its own `RunLocalCache`; two caches of the same type do not satisfy this item. Thread one owner through the production graph and transclusion paths, while preserving authoritative-read and invalidation behavior. This belongs here because it is another cross-pass reuse boundary.
 - [ ] Add a compose benchmark comparing immediate pre-change vs candidate on identical manifest fixtures; declare thresholds per the evidence contract.
 - [ ] Record separate target/control dispositions for the general F7/F16 reuse, 35.1 hash hoisting, and 35.4 read reuse so an aggregate result cannot hide a regression.
 - [ ] Verification (matrix F7/F16/F35): reference, preflight, transclusion, `::toc-linking`, condition, lifecycle, source-cache, and cache-identity suites pass. Use deterministic L1 concurrency tests with barriers/timeouts to prove concurrent child progress and lock release; an ordinary child process does not make this L2.
@@ -295,7 +306,7 @@ baseline/candidate comparison.
 - [ ] Add an internal borrowed/shared path for evaluators and expression functions (`resolve_ctx.rs`, `functions/mod.rs::ContextFn`), retaining the owned public facade where compatibility requires it. No public owned-return API change without an approved exception.
 
 ### F13 — Faster exact multi-pattern replacement
-- [ ] Benchmark an exact multi-pattern matcher in `replacement.rs` against the current ordered rules. **Reject** any design changing first-rule precedence, overlap, cascading, Unicode indices, or empty-pattern handling. If no win, record a requirement-matched no-win result and remove speculative code.
+- [ ] Benchmark an exact multi-pattern matcher in `replacement.rs` against the current canonical precedence (descending key byte length, then ascending lexical order). **Reject** any design changing left-to-right non-overlapping matching, the choice at a shared start position, non-recursive replacement output, UTF-8 character-boundary behavior, empty-key omission, or scalar-value coercion. If no win, record a requirement-matched no-win result and remove speculative code.
 
 ### F14 — Reduced literal / interpolation rescans
 - [ ] In `interpolation/rewrite.rs` and the frontmatter literal-conversion path, reduce repeated Markdown-aware scans and full-body copies when interpolation is present; construct output once per interpolation depth where practical. Nested interpolation keeps semantic fixpoint behavior; it does **not** authorize rescanning unrelated protected ranges. Benchmark nested and no-expression cases **separately**.
@@ -321,7 +332,7 @@ OS-divergent — **requires a real non-macOS behavioral run** of the wait
 primitive. Independent of Phases 4–6.
 
 ### F17 — Replace the 10 ms completion polling loops
-- [ ] Replace or avoid **both** independent 10 ms `try_wait`/`sleep` loops in `shell_expansion/executor.rs` (`:242` and `:574`) with a blocking wait primitive or event-driven notification available on all supported OSes. Any platform split is **target-gated and tested**.
+- [ ] Replace or avoid **both** independent 10 ms `try_wait`/`sleep` loops in `shell_expansion/executor.rs` (`try_wait` at `:245`/`:577`) with a blocking wait primitive or event-driven notification available on all supported OSes. Any platform split is **target-gated and tested**.
 - [ ] Preserve concurrent stdout/stderr draining while waiting; do not replace polling with a wait path that can deadlock on a full pipe. Prove unchanged timeout boundaries/granularity, saturated dual-stream capture, descendant/process cleanup, failure/error selection, and source-order execution for both executor variants. Arbitrary directive parallelism remains prohibited.
 
 ### F32 — Snapshot shell policy once per stage
@@ -373,7 +384,7 @@ OS-identical.
 
 Independent of Phases 4–8.
 
-- [ ] Retain the cheap no-HTTP guard in `remote.rs`. For documents that **do** contain remote expressions, replace the per-expression `byte_offset_to_line` prefix rescan (`:307` loop) with **one forward pass** or a shared offset table (reuse the TOC-style `newline_offset_table` approach).
+- [ ] Retain the cheap no-HTTP guard in `remote.rs`. For documents that **do** contain remote expressions, replace the per-expression `byte_offset_to_line` prefix rescan (`:311` loop) with **one forward pass** or a shared offset table (reuse the TOC-style `newline_offset_table` approach).
 - [ ] Verify byte offsets at LF, CRLF, Unicode, start/end-of-file, and multiple expressions on one line.
 - [ ] Benchmark a remote-heavy input (immediate pre-change vs candidate, identical bytes).
 - [ ] Verification (matrix F33): focused behavior tests + one target/control benchmark.
@@ -395,11 +406,11 @@ benchmark may **not** conceal a no-win or regression in an individual path.
 Capture immediate baselines sequentially even where implementation files are
 disjoint.
 
-- [ ] **35.2** Build heading line offsets once and emit releveling spans/output **without copying the whole child once per heading** (`transclusion/engine.rs:59`/`:76`/`:310`; `markdown/mod.rs:947` `relevel`).
-- [ ] **35.3** Store fetched response bodies as `Arc<str>` internally, preserving the owned public facade where required (`remote_fetch.rs:38` `Ready { body }` + `Ready.body` consumers; `Arc` already imported).
-- [ ] **35.5** Within each mutually exclusive `md hash --diff` or `--save` invocation, compute the selected document hash once and pass the resulting artifact through comparison/planning and explanation output. Do not imply that `--diff` and `--save` run together, and do not change stored hash semantics (`cli/commands/hash.rs`; lib `plan_hash_save`/`apply_hash_save`).
+- [ ] **35.2** In `relevel_with_overflow`, compute heading line positions in one forward pass and apply all heading edits with one output construction rather than copying the whole child for every replacement (`transclusion/engine.rs:76`, `:138`, `:181`). Preserve byte-identical output, overflow-warning lines/order, and the unchanged/zero-adjustment fast paths.
+- [ ] **35.3** Store fetched response bodies as `Arc<str>` internally, preserving the owned `get_content` facade where required (`remote_fetch.rs:38` `FetchSlot::Ready`, clone at `:447`, and the `cache/remote_cache.rs` outcome handoff; `Arc` already imported).
+- [ ] **35.5** Within each mutually exclusive `md hash --diff` or `--save` invocation, compute each unique `(kind, effective MdHashOptions)` artifact once and pass it through comparison/planning and explanation output. Preserve `--save`'s legitimate distinction between the stored ignore-policy comparison and the selected current-policy baseline; cache by semantic hash identity rather than assuming one artifact can serve both. Do not change stored hash semantics (`cli/commands/hash.rs`; lib `compare_hash`/`explain_hash_diff`/`plan_hash_save`/`apply_hash_save`).
 - [ ] **35.6** Make `normalize_body_rhythm` avoid allocating an ANSI-stripped string for every output-line check (`layout/page.rs:1423`).
-- [ ] **35.7** Borrow link/image URL + title data through policy application, including the **empty-policy fast path**, while retaining owned public output nodes (`compose/link_normalization.rs:29`; `markdown/mod.rs:1016`/`:1039`).
+- [ ] **35.7** Borrow link/image URL + title data through `render_tree/build_context.rs::apply_link_policy` and `apply_image_policy`, including the **empty-policy fast path**, while retaining owned public `RenderNode` output. Do not redirect this work to compose-time link normalization or Markdown image-literal escaping; those are different paths.
 - [ ] Per sub-item: behavioral tests + one target/control benchmark, each with its own disposition in `results.md` (implementation win or recorded no-win with code removed).
 - [ ] Cross-platform classification per sub-item. Do not preclassify 35.3 as OS-identical until its remote/runtime path is inspected; the other allocation/hashing changes still require confirmation from the actual diff.
 
@@ -419,7 +430,7 @@ owned public facades. Darkmatter `just test` + `just lint` green; run
 
 - [ ] Add a **dated correction/supersession notice** to the old plan/results (`../../reviews/2026-07-12-perf/`), linking to this feature's audit and final dispositions. Do **not** rewrite their original body or checkboxes — they remain the historical `codex/default` record. (AD-A, Documentation Deliverables)
 - [ ] Link the original review to this active follow-up **and** to the opaque graph feature.
-- [ ] Confirm `results.md` records one disposition + evidence location for **every** open sub-item (Findings 7, 11–14, 16, 17, 23, 25, 32, 33, all seven Finding-35 items).
+- [ ] Confirm `results.md` records one disposition + evidence location for every retained partial/open/correction item: Findings 1–4, 7, 11–14, 16, 17, 21–23, 25, 32, 33, and all seven Finding-35 items.
 - [ ] Document the restored Sniff and directory-hash compatibility behavior (rustdoc + README where behavior/supported construction changed).
 - [ ] Update the audit table + `results.md` so every finding reflects its final honest disposition.
 - [ ] Update the darkmatter skill (`.claude/skills/darkmatter/`) if any architecture/workflow changed; regenerate the skill `hash:` with `md hash <file>`.
@@ -430,7 +441,7 @@ owned public facades. Darkmatter `just test` + `just lint` green; run
 - [ ] Run GitNexus `detect_changes({scope: "compare", base_ref: "main"})` before any commit; confirm the blast radius is confined to the expected compose/cache/shell/render/hash/CLI + Sniff-timezone + terminal-OSC scope.
 
 ### Final acceptance (maps to spec Acceptance Criteria 1–8)
-- [ ] Findings 1–4's compatibility/evidence gaps are closed.
+- [ ] Findings 1–4 and 21's compatibility/evidence gaps are closed.
 - [ ] Findings 7, 11–14, 16, 17, 23, 25, 32, 33, and every Finding-35 sub-item has an implementation or an allowed evidence-backed disposition.
 - [ ] Finding 22's membership change is reverted (no unapproved exception).
 - [ ] No Finding 18 correctness work landed here; the opaque graph feature owns it with no duplication/conflict.
