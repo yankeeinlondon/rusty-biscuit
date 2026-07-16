@@ -10,7 +10,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use rendezvous_client::connect;
-use rendezvous_core::socket::default_socket_path;
+use rendezvous_core::socket::{default_socket_path, legacy_local_endpoint};
 use rendezvous_core::{
     AppendEntryRequest, ApprovePeerRequest, ConnectToPeerRequest, CreateInvitationRequest,
     ListChunkEntriesRequest, ListPairingsRequest, ListPeersRequest, ListSessionChunksRequest,
@@ -154,7 +154,7 @@ async fn run() -> Result<(), ClientError> {
     let socket = cli.socket.unwrap_or_else(default_socket_path);
     tracing::debug!(socket = %socket.display(), "connecting to rendezvous-daemon");
 
-    let mut client = connect(socket).await?;
+    let mut client = connect(&legacy_local_endpoint(socket)).await?;
 
     match cli.command {
         Command::Ping { nonce } => {
