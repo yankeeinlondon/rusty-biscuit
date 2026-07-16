@@ -91,6 +91,11 @@ do not belong here.
   parallel structural refactors when the full final history is coherent.
 - Git lock failures are transient contention. Retry the identical commit up to
   five times with a short backoff.
+- In a linked worktree, `.git` is a file and the index lock is under the
+  worktree-specific gitdir, while branch-reference locks are under the shared
+  gitdir. Resolve both with `git rev-parse --git-dir` and `git rev-parse
+  --git-common-dir`; do not infer lock locations from `.git/index.lock` or
+  remove locks manually.
 - Under heavy parallel contention (five or more sub-agents committing
   concurrently against the same worktree), the per-agent retry budget is
   sometimes insufficient: `index.lock` can persist longer than five
