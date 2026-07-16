@@ -400,6 +400,29 @@ pub fn detect_ntp_status() -> NtpStatus {
     NtpStatus::Unknown
 }
 
+// Test-only stand-in for the live NTP probe. `None` (the default) selects
+// production behavior.
+#[cfg(test)]
+thread_local! {
+    static NTP_PROBE_STUB: std::cell::Cell<Option<NtpStatus>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Resolves the NTP synchronization status for [`detect_timezone_with_options`].
+///
+/// This is the crate-internal decision seam sitting below both public entry
+/// points. Production always runs the live [`detect_ntp_status`] probe; in test
+/// builds a thread-local stub can stand in for it, letting Sniff prove that the
+/// bare API selects a probe and the configurable API honors both flag values
+/// without issuing a live NTP request.
+fn run_ntp_probe() -> NtpStatus {
+    #[cfg(test)]
+    if let Some(status) = NTP_PROBE_STUB.with(std::cell::Cell::get) {
+        return status;
+    }
+    detect_ntp_status()
+}
+
 /// Detects timezone and time-related system information, with optional NTP probing.
 ///
 /// When `probe_ntp` is `false`, the `ntp_status` field is set to
@@ -463,7 +486,7 @@ pub fn detect_timezone_with_options(probe_ntp: bool) -> TimeInfo {
     };
 
     let ntp_status = if probe_ntp {
-        detect_ntp_status()
+        run_ntp_probe()
     } else {
         NtpStatus::Unknown
     };
@@ -482,13 +505,11 @@ pub fn detect_timezone_with_options(probe_ntp: bool) -> TimeInfo {
 
 /// Detects timezone and time-related system information.
 ///
-/// Gathers timezone name, UTC offset, and DST status. This is equivalent to
-/// calling [`detect_timezone_with_options`] with `false`: the NTP probe is
-/// **not** run, so `ntp_status` is [`NtpStatus::Unknown`] and the call stays
-/// fast and purely local. A network round-trip is a surprising default for a
-/// "detect timezone" call; opt into it explicitly with
-/// `detect_timezone_with_options(true)` when NTP synchronization state is
-/// actually needed.
+/// This zero-argument convenience API reports the **full** status: it is
+/// equivalent to calling [`detect_timezone_with_options`] with `true`, so it
+/// runs the NTP probe and populates `ntp_status`. The probe can take up to
+/// several seconds; callers that only need local timezone data and want to
+/// avoid the network round-trip should call `detect_timezone_with_options(false)`.
 ///
 /// ## Examples
 ///
@@ -506,20 +527,69 @@ pub fn detect_timezone_with_options(probe_ntp: bool) -> TimeInfo {
 /// A [`TimeInfo`] struct containing all detected time information.
 /// Fields that cannot be detected will have sensible defaults.
 pub fn detect_timezone() -> TimeInfo {
-    detect_timezone_with_options(false)
+    detect_timezone_with_options(true)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Runs `f` with the NTP probe stubbed to `status`, resetting the stub
+    /// afterward so the seam does not leak across tests (nextest isolates each
+    /// test in its own process, but a plain `cargo test` thread pool reuses
+    /// worker threads, so the thread-local is always cleared here).
+    fn with_ntp_stub<R>(status: NtpStatus, f: impl FnOnce() -> R) -> R {
+        NTP_PROBE_STUB.with(|c| c.set(Some(status)));
+        let result = f();
+        NTP_PROBE_STUB.with(|c| c.set(None));
+        result
+    }
+
     // ========================================
     // Timezone tests
     // ========================================
 
+    /// Finding 1 restore: the bare convenience API requests the NTP probe
+    /// (selects `probe_ntp = true`). Proven through the crate-internal stub so
+    /// no live network request is made.
+    #[test]
+    fn bare_detect_timezone_probes_ntp() {
+        let info = with_ntp_stub(NtpStatus::Synchronized, detect_timezone);
+        assert_eq!(
+            info.ntp_status,
+            NtpStatus::Synchronized,
+            "bare detect_timezone() must invoke the NTP probe",
+        );
+    }
+
+    /// The configurable API honors both flag values: `true` invokes the probe,
+    /// `false` skips it and leaves `ntp_status` at [`NtpStatus::Unknown`].
+    #[test]
+    fn detect_timezone_with_options_respects_probe_flag() {
+        let probed = with_ntp_stub(NtpStatus::Synchronized, || {
+            detect_timezone_with_options(true)
+        });
+        assert_eq!(
+            probed.ntp_status,
+            NtpStatus::Synchronized,
+            "probe_ntp = true must invoke the probe",
+        );
+
+        let skipped = with_ntp_stub(NtpStatus::Synchronized, || {
+            detect_timezone_with_options(false)
+        });
+        assert_eq!(
+            skipped.ntp_status,
+            NtpStatus::Unknown,
+            "probe_ntp = false must skip the probe",
+        );
+    }
+
     #[test]
     fn test_detect_timezone_returns_valid_offset() {
-        let info = detect_timezone();
+        // Stub the probe: this test asserts only timezone data, which is
+        // probe-independent, and must not hit the network.
+        let info = with_ntp_stub(NtpStatus::Unknown, detect_timezone);
         // UTC offset should be within reasonable bounds (-12h to +14h)
         assert!(info.utc_offset_seconds >= -12 * 3600);
         assert!(info.utc_offset_seconds <= 14 * 3600);
@@ -527,13 +597,13 @@ mod tests {
 
     #[test]
     fn test_detect_timezone_monotonic_available() {
-        let info = detect_timezone();
+        let info = with_ntp_stub(NtpStatus::Unknown, detect_timezone);
         assert!(info.monotonic_available);
     }
 
     #[test]
     fn test_detect_timezone_has_abbreviation() {
-        let info = detect_timezone();
+        let info = with_ntp_stub(NtpStatus::Unknown, detect_timezone);
         assert!(info.timezone_abbr.is_some());
         let abbr = info.timezone_abbr.unwrap();
         // Abbreviations are typically 2-5 characters

@@ -215,6 +215,13 @@ Detects operating system information across Windows, macOS, Linux, and BSD syste
 5. **Timezone**: System API queries for timezone, offset, DST
 6. **NTP Status**: Platform-specific detection (macOS: `sntp`, Windows: `w32tm`, Linux: `timedatectl`)
 
+**Timezone API cost:** `detect_timezone()` reports the **full** `TimeInfo`,
+which means it runs the NTP probe in step 6 — a network round-trip that can take
+several seconds (up to ~10 s on Linux). Callers that need only local timezone
+data should call `detect_timezone_with_options(false)`, which returns
+immediately with `ntp_status: NtpStatus::Unknown` and spawns no external
+command. Steps 1–5 are identical either way.
+
 **Example:**
 
 ```rust
