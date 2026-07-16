@@ -8,6 +8,7 @@ implemented: true
 description: "A **feature** review of `2026-07-15-reference-graph/spec.md`"
 feature: 2026-07-15-reference-graph/review-2.md
 previous: 2026-07-15-reference-graph/review-1.md
+next: 2026-07-15-reference-graph/review-3.md
 ---
 
 # Review 2 — Reference Graph
