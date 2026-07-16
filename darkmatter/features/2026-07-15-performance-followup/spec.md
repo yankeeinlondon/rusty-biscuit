@@ -132,17 +132,19 @@ Sniff compatibility correction, not a rollback of Darkmatter's speedup.
 
 Acceptance requires:
 
-- a source-path test proving Darkmatter selects `false`;
+- an observable internal decision seam proving Darkmatter selects `false`, not
+  a source-text assertion;
 - Sniff tests proving the bare API selects `true` and the configurable API
-  respects both values;
+  respects both values without making a live NTP request;
 - no live network dependency in ordinary Darkmatter compose tests;
 - Sniff and Darkmatter L1/lint gates.
 
 ### 2. Build Requirement-Matched Terminal Evidence
 
-Findings 2, 3, and 21 share one verification gap. Add a checked-in L2 helper
-that runs under a supported real PTY and can observe OSC requests without
-depending on a user's shell theme.
+Findings 2, 3, and 21 share one verification gap. Extend the checked-in Biscuit
+Terminal `discovery_probe` + test PTY path so it runs under a supported real PTY
+and can observe OSC requests without depending on a user's shell theme. Do not
+add a second generic PTY abstraction.
 
 It must verify:
 
@@ -162,16 +164,26 @@ separately. No Level 3 input-protocol test is required.
 
 The current `baseline.md` and `results.md` demonstrate direction but are not a
 release gate because the before/after fixture bytes differ. Add either committed
-fixtures or a checked-in deterministic generator plus a manifest containing:
+fixtures or a checked-in deterministic generator plus an immutable fixture
+manifest containing:
 
 - generator version and command;
 - exact byte size and structural counts for every fixture;
 - Darkmatter frontmatter/body hash identities for Markdown fixtures;
 - an xxHash whole-file identity through `biscuit-hash` where byte identity is
   required;
-- commands, release profile, host facts, TTY mode, warm-up, sample count, and
-  raw result locations;
-- predeclared improvement and no-regression thresholds.
+
+For each measurement, add a dated run record containing:
+
+- baseline/candidate commits, commands, release profile, host facts, environment,
+  and TTY mode;
+- warm-up, sample count, statistic, dispersion, raw result locations, and
+  predeclared improvement/no-regression thresholds.
+
+The manifest is the authority for immutable fixture identity. Run records are
+the authority for measurement context and link back to the manifest entries
+they consume. A checkpoint-specific fixture must be registered and hashed
+before that checkpoint captures its baseline.
 
 For the historical closeout, build the before and after binaries from the
 pinned commits, then run both against the same immutable fixture directory. The
@@ -374,11 +386,11 @@ identity. Do not introduce ad hoc hashing implementations.
 | F4 closeout | TOC unit/property coverage; identical-fixture micro and CLI results; threshold report |
 | F7/F16 cross-pass reuse | Reference, preflight, transclusion, condition, lifecycle, and cache-identity suites; compose benchmark |
 | F11–F14 interpolation/replacement | Focused units plus compose integration and scale benchmarks |
-| F17/F32 shell | Cross-platform process/policy tests, timeout and cleanup tests, L1/L2 where a real process is required |
+| F17/F32 shell | Cross-platform L1 process/policy tests, timeout/stream-saturation/cleanup tests; L2 only if a real terminal or PTY is required |
 | F22 directory hash | Library collector tests and end-to-end CLI aggregate/exit-status test |
-| F23/F25 render/cleanup | Snapshot/golden output, L2 terminal frames where applicable, code-heavy render and cleanup benchmarks |
+| F23/F25 render/cleanup | Snapshot/golden output, headless Browser tests for F23, L2 terminal frames only where applicable, code-heavy render and cleanup benchmarks |
 | F33/F35 residuals | Focused behavior tests and one target/control benchmark per sub-item |
-| Feature closeout | `just test`, `just test-l2`, and `just lint` in every touched area; root recipes for cross-package changes; `cargo check --workspace`; `cargo fmt --check`; `git diff --check` |
+| Feature closeout | `just test`/`just lint` in every touched area; `just test-l2` only in areas with F2/F3/F21 PTY coverage; Darkmatter `just test-browser` for F23; root recipes for cross-package changes; `cargo check --workspace`; `cargo fmt --check`; `git diff --check` |
 
 No write-mode formatter is authorized. Linux and Windows evidence must be
 recorded before completion; macOS-only success is insufficient for the stated
@@ -418,17 +430,19 @@ run for code that cannot vary across platforms.
 ### Architecture Decision A — Feature-local evidence with focused runners
 
 Create `results.md` beside this specification as the disposition and evidence
-index. Store the fixture manifest and either committed fixtures or the pinned
-deterministic generator in a sibling `benchmarks/` directory. The manifest is
-the single authority for fixture identity across all checkpoints.
+index. Store the immutable fixture manifest and either committed fixtures or the
+pinned deterministic generator in a sibling `benchmarks/` directory. The
+manifest is the single authority for fixture identity across all checkpoints;
+dated run records under `benchmarks/raw/<checkpoint>/<run-id>/` own commands,
+environment, host, samples, dispersion, thresholds, and raw-result locations.
 
 One manifest does not imply one universal runner. Use the existing Criterion
 recipes for library microbenchmarks, a release CLI runner for command-level
-measurements, and the checked-in PTY/L2 helper for interactive terminal
-measurements. Each runner records its commands, raw samples, and environment in
-the feature-local evidence index and consumes the shared manifest wherever it
-uses file fixtures. Do not force CLI or PTY evidence through `just bench`, which
-is a Criterion runner.
+measurements, and the existing Biscuit Terminal probe/PTY path for interactive
+terminal measurements. Each runner writes a dated run record linked from the
+feature-local evidence index and consumes the shared manifest wherever it uses
+file fixtures. Do not force CLI or PTY evidence through `just bench`, which is a
+Criterion runner.
 
 The 2026-07-12 review remains historical evidence. Add only dated
 correction/supersession notices and cross-links there; do not rewrite its body,
@@ -437,7 +451,9 @@ checkboxes, or original measurements.
 ### Architecture Decision B — Shared classification, purpose-specific identities
 
 Define one crate-private, exhaustive `ComposeOptions` field-classification
-authority in the `ComposeOptions` owning module. It destructures
+authority in the `ComposeOptions` owning module. The linked Opaque Reference
+Graph feature owns the single prerequisite landing commit; this feature consumes
+it and must not create a competing inventory. The authority destructures
 `ComposeOptions` without `..` and requires every field to be classified when a
 field is added. Both graph provenance and compose caching derive their own
 identity products from that classification; neither maintains an independent
@@ -456,9 +472,12 @@ The derived products retain distinct contracts:
   or write a persistent cache entry;
 - when equivalence cannot be established, reject reuse rather than guessing.
 
-Canonical value encoding uses field names, type boundaries, sorted unordered
-collections, and a versioned domain marker. It must not use `Debug` output. The
-implementation replaces or delegates the existing
+Canonical value encoding is typed and length-delimited, distinguishes `None`
+from empty values, preserves ordered vectors such as `magic_paths` and
+`env_path_whitelist`, sorts only genuinely unordered collections, and uses a
+versioned domain marker. It must not use `Debug` output. A changed encoding uses
+a new cache-key domain so legacy persistent entries cannot be read under the new
+semantics. The implementation replaces or delegates the existing
 `cache::hashing::options_hash`; it does not add a parallel third options
 fingerprint. Selecting this shared authority requires the linked opaque-graph
 specification and implementation to use the same field-classification contract

@@ -3,7 +3,6 @@ agent: "claude/"
 total_phases: 11
 created: 2026-07-15
 phase: 1
-yolo: "true"
 ---
 
 # Execution Plan — Performance Follow-up
@@ -42,8 +41,8 @@ authority (Architecture Decision B / Phase 4).
 | Transclusion reuse + runtime cache options_hash | `.../transclusion/engine.rs:1341`; `.../cache/runtime.rs:72` (used `:761`,`:957`) | 7,16 |
 | Preflight cached-directive reuse | `.../compose/preflight/mod.rs:80` (`canonical_key`) | 7,16 |
 | Shell 10ms polling loops (**two**: `:242` and `:574`) | `darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs:242`, `:574` | 17 |
-| Shell policy rule clones per directive | `.../shell_expansion/policy.rs:161`/`:234`/`:257`/`:271` `normalize_command` | 32 |
-| Syntect theme per code block; theme set + resolve | `darkmatter/lib/src/markdown/output/code_block.rs:62`/`:84`; `highlighting/themes.rs:377` `THEME_SET`, `:442` `detect_code_theme` | 23 |
+| Shell policy snapshot cloned per directive | `.../shell_expansion/mod.rs:188` `shell_runtime.snapshot()`; `.../shell_expansion/types.rs:1060` `ShellExpansionRuntime::snapshot` | 32 |
+| Per-code-block environment/theme resolution | `darkmatter/lib/src/markdown/render_tree/code_renderer.rs:176` `code_theme_from_env`, `:228` resolution chain; render entry points `render_tree/entrypoints.rs:612`, `:771` | 23 |
 | Cleanup two-stage pipeline; placeholder + line passes; reflow | `darkmatter/lib/src/markdown/cleanup/mod.rs:233`; `strip_incidental_newlines` calls; `cleanup/reflow.rs:123` | 25 |
 | Directory-hash vendor exclusion | `darkmatter/lib/src/markdown/fs.rs:8` `SKIPPED_VENDOR_DIRS`, `:24` skip in `read_dir` | 22 |
 | Remote discovery per-expression prefix rescan | `darkmatter/lib/src/markdown/compose/remote.rs:287` `discover_remote_urls_from_expressions`, `:307` loop calling `byte_offset_to_line` | 33 |
@@ -66,6 +65,13 @@ authority (Architecture Decision B / Phase 4).
   — the candidate for Finding-35.4 run-cache routing.
 - The existing `cache::hashing::options_hash` is the incumbent that
   Architecture Decision B must **replace or delegate**, not run parallel to.
+- `magic_paths` and `env_path_whitelist` are ordered vectors whose order can
+  affect lookup/normalization behavior. They must never be sorted for identity;
+  only genuinely unordered maps/sets are canonicalized by sorting.
+- The existing OSC probe infrastructure already lives in
+  `biscuit-terminal/lib/examples/discovery_probe.rs` and
+  `biscuit-terminal/lib/tests/common/pty.rs`; Finding 2 extends that path rather
+  than creating a second PTY abstraction.
 
 ---
 
@@ -93,6 +99,15 @@ honor them or record an explicit disposition.
 - **Hashing authority:** Darkmatter Markdown-aware hashing (`md hash`) for
   Markdown identities; `biscuit-hash` xxHash for non-Markdown or whole-file
   byte identity. No ad hoc hashing.
+- **Cache-identity encoding:** use a versioned, typed, length-delimited canonical
+  encoder. Preserve ordered collections; sort only genuinely unordered values;
+  distinguish `None` from empty values and field/type boundaries; never join
+  unescaped `Debug`/display strings. A changed encoding uses a new cache-key
+  domain so legacy persistent entries cannot be read under new semantics.
+- **Test-tier contract:** L2 is reserved for behavior requiring a real terminal
+  or PTY and runs only through `just test-l2`; spawning an ordinary child process
+  remains L1. Browser-rendering behavior runs through the headless
+  `just test-browser` tier. Do not add Level 3 host-input coverage.
 - **Cross-platform gate honesty (spec §Verification Matrix):** OS-divergent
   paths (F17 shell wait primitive, the F2/F3/F21 PTY helper, F22 traversal)
   **require** a real non-macOS behavioral run, not just a cross-compile.
@@ -104,35 +119,27 @@ honor them or record an explicit disposition.
 
 ---
 
-## Phase 1 — Evidence infrastructure & command/TOC closeout (AD-A + Finding 4)
+## Preflight — source freshness, ownership, and impact
 
-Establish the feature-local evidence home and the single fixture manifest that
-every later checkpoint consumes. Reconstruct the reproducible historical
-command/TOC closeout that Review 3 rejected for using different, unhashed
-fixture bytes. **Blocks every measured checkpoint** in later phases.
-
-- [ ] Create `darkmatter/features/2026-07-15-performance-followup/results.md` as the disposition + evidence index (one row per open finding/sub-item; disposition, evidence location, and cross-platform classification columns). (AD-A)
-- [ ] Create a sibling `benchmarks/` directory holding the fixture **manifest** as the single authority for fixture identity, plus either committed fixtures or a checked-in **deterministic generator** (record generator version + exact command). (AD-A, Work 3)
-- [ ] Populate the manifest per spec: generator version/command; exact byte size + structural counts for every fixture; Darkmatter frontmatter/body hash identities for Markdown fixtures; `biscuit-hash` xxHash whole-file identity where byte identity is required; commands, release profile, host facts, TTY mode, warm-up, sample count, raw-result locations; predeclared improvement and no-regression thresholds. (Work 3)
-- [ ] Fixture coverage must include at minimum: `md --help`, render, hash, trivial compose, schema/transclusion compose, the three TOC size tiers, and the code-heavy render cases. (Work 3)
-- [ ] Record the three runner contracts in `results.md`: existing Criterion recipes for library microbenchmarks, a release CLI runner for command-level measurement, and (built in Phase 3) the checked-in PTY/L2 helper. Each records commands, raw samples, environment; each consumes the shared manifest for file fixtures. Do **not** force CLI/PTY evidence through `just bench`. (AD-A)
-- [ ] Historical F4 closeout: build the **before** binary from pre-optimization baseline `83aaecc8f` and the **after** binary from audit commit `51c1f16e10ffe825b56987573ba4eabc659c768e`; run both against the **same immutable fixture directory**; record threshold pass/fail. Note in `results.md` that these pins reconstruct the accumulated 2026-07-12 result only — they are **not** the baseline/candidate pair for this follow-up's own changes. (Work 3)
-- [ ] Add TOC unit/property coverage confirming line/span behavior over the manifest fixtures (guards the non-quadratic `line_at_offset` path). (Work 3, verification matrix F4)
-
-**Parallelizable:** manifest authoring, the deterministic generator, and the
-historical before/after binary builds are independent once the `benchmarks/`
-directory layout is agreed. The Criterion and CLI runner contracts can be drafted
-concurrently; the PTY runner contract is finalized in Phase 3.
-
-### Checkpoint 1
-`results.md` and `benchmarks/manifest` exist and are internally consistent
-(recomputed hashes match recorded ones). The F4 historical closeout reproduces
-on identical bytes and meets its predeclared thresholds, with raw samples
-retained. No production source changed yet.
+- [ ] Record the current commit and working-tree state; preserve unrelated
+  changes. Treat the Source Map as a reviewed starting point, not a substitute
+  for confirming each location against the implementation immediately before
+  its phase.
+- [ ] Confirm the linked Opaque Reference Graph prerequisite/ownership boundary
+  before touching `ComposeOptions` or cache identity. One feature owns the
+  classification landing commit; this plan consumes it.
+- [ ] Before editing any function, method, class, or other indexed symbol, run
+  GitNexus upstream `impact` for that symbol and record direct callers,
+  processes, modules, and risk. Warn and stop for owner direction if risk is
+  HIGH or CRITICAL. Documentation/fixture-only changes do not require symbol
+  impact analysis.
+- [ ] Before each measured optimization, confirm its fixture entry, run-record
+  location, target/control operations, threshold, and immediate baseline commit
+  are frozen.
 
 ---
 
-## Phase 2 — Compatibility corrections (Findings 1 & 22)
+## Phase 1 — Compatibility corrections (Findings 1 & 22)
 
 Revert the two forbidden behavior changes. Both are small, independent, and
 high-priority; landing them early re-establishes invariants 3 and 4 before the
@@ -141,20 +148,20 @@ larger optimization work builds on top.
 ### Finding 1 — Restore the Sniff timezone compatibility boundary (Work 1)
 - [ ] In `sniff/lib/src/os/time.rs:508`, restore bare `detect_timezone()` to delegate to `detect_timezone_with_options(true)` (full NTP-reporting convenience API). Align its rustdoc.
 - [ ] Keep Darkmatter's explicit `detect_timezone_with_options(false)` call at `capture/datetime.rs:129` unchanged.
-- [ ] Sniff tests: bare API selects `true`; configurable API respects both `true` and `false`.
-- [ ] Darkmatter source-path test proving Darkmatter selects `false`; confirm no live network dependency in ordinary compose tests.
+- [ ] Add a narrow internal decision seam (or equivalent test spy) so Sniff tests prove the bare API selects `true` and the configurable API respects both values without making a live NTP request.
+- [ ] Test Darkmatter's call through the same observable seam, proving it selects `false`; do not use a brittle source-text assertion or introduce a live network dependency in ordinary compose tests.
 - [ ] Gates: Sniff `just test` + `just lint`; Darkmatter context tests + `just test` + `just lint`. (This is a filesystem/network-adjacent but OS-identical logic change — Windows compile + macOS run + Linux CI sufficient; state so in `results.md`.)
 
 ### Finding 22 — Restore directory-hash membership (Work 8)
 - [ ] Remove the unconditional `node_modules` / `target` / `vendor` exclusion in `darkmatter/lib/src/markdown/fs.rs` (`SKIPPED_VENDOR_DIRS` skip at `:24`) so aggregate membership matches pre-optimization behavior.
 - [ ] Add an **end-to-end CLI** test that freezes the aggregate hash, diagnostics, and exit status for a tree containing directories named `node_modules`/`target`/`vendor`.
 - [ ] Confirm no hash-migration step is needed (the exclusion was never released; any aggregate under it is a private working-tree artifact). Record in `results.md` that a *future* opt-in ignore policy would require owner approval + migration semantics.
-- [ ] Gates: Darkmatter `just test` + `just lint`. F22 traversal/path handling is OS-divergent → **requires a real non-macOS behavioral run** of the CLI aggregate test (Linux at minimum), plus Windows.
+- [ ] Gates: Darkmatter `just test` + `just lint`. F22 traversal/path handling is OS-divergent → record behavioral runs of the CLI aggregate test on macOS, Linux, and Windows.
 
 **Parallelizable:** Finding 1 (Sniff + Darkmatter caller) and Finding 22
 (Darkmatter fs + CLI) touch disjoint code and can proceed concurrently.
 
-### Checkpoint 2
+### Checkpoint 1
 Bare `sniff::detect_timezone()` reports full NTP status again; Darkmatter compose
 still performs no NTP probe. `md hash <dir>` includes Markdown under
 `node_modules`/`target`/`vendor` exactly as before the perf change. Both areas
@@ -162,65 +169,92 @@ green on `just test` + `just lint`; Linux evidence recorded for F22.
 
 ---
 
+## Phase 2 — Evidence infrastructure & command/TOC closeout (AD-A + Finding 4)
+
+Establish the feature-local evidence home and fixture-manifest schema that every
+measured checkpoint consumes. Reconstruct the reproducible historical
+command/TOC closeout that Review 3 rejected for using different, unhashed
+fixture bytes. **Blocks every measured checkpoint** in later phases.
+
+- [ ] Create `darkmatter/features/2026-07-15-performance-followup/results.md` as the disposition + evidence index (one row per open finding/sub-item; disposition, evidence location, and cross-platform classification columns). (AD-A)
+- [ ] Create a sibling `benchmarks/` directory holding the immutable fixture **manifest** as the single authority for fixture identity, plus either committed fixtures or a checked-in **deterministic generator** (record generator version + exact command). (AD-A, Work 3)
+- [ ] Define the manifest schema up front. Each fixture entry records generator version/command, exact byte size + structural counts, Darkmatter frontmatter/body hashes for Markdown, and a `biscuit-hash` xxHash whole-file identity where byte identity is required. Preserve ordered fixture collections. (Work 3)
+- [ ] Keep per-run facts out of the immutable fixture identity: dated run records under `benchmarks/raw/<checkpoint>/<run-id>/` record baseline/candidate commits, commands, release profile, host, environment, TTY mode, warm-up, sample count, statistic/dispersion, thresholds, and raw-result files. `results.md` links each disposition to its run record. Declare the threshold before capturing the baseline. (AD-A, Work 3)
+- [ ] Populate the Phase-2 fixture set with `md --help`, render, hash, trivial compose, schema/transclusion compose, the three TOC size tiers, and code-heavy render cases. Later phases may add checkpoint-specific fixtures only by registering and hashing them **before** that checkpoint's baseline is captured. (Work 3)
+- [ ] Record the three runner contracts in `results.md`: existing Criterion recipes for library microbenchmarks, a release CLI runner for command-level measurement, and the existing Biscuit Terminal probe/PTY path extended in Phase 3. Each records commands, raw samples, environment; each consumes the shared manifest for file fixtures. Do **not** force CLI/PTY evidence through `just bench`. (AD-A)
+- [ ] Historical F4 closeout: create isolated temporary worktrees for the pre-optimization baseline `83aaecc8f` and audit commit `51c1f16e10ffe825b56987573ba4eabc659c768e`; build with the same toolchain/lockfile policy and release profile; run both against the **same immutable fixture directory on the same host**; record threshold pass/fail. These pins reconstruct the accumulated 2026-07-12 result only — they are **not** the baseline/candidate pair for this follow-up's changes. (Work 3)
+- [ ] Add TOC unit/property coverage confirming line/span behavior over the manifest fixtures (guards the non-quadratic `line_at_offset` path). (Work 3, verification matrix F4)
+
+The manifest schema and deterministic generator can be prepared together. Do
+not begin the historical builds until their fixture entries and run-record
+contract are frozen.
+
+### Checkpoint 2
+`results.md`, the fixture manifest, and the Phase-2 fixtures exist and are
+internally consistent (recomputed hashes match recorded ones). The F4 historical
+closeout reproduces on identical bytes and meets its predeclared thresholds,
+with raw samples retained. No production source changed in this phase.
+
+---
+
 ## Phase 3 — Requirement-matched terminal evidence (Findings 2, 3, 21) — Work 2
 
-Build the checked-in L2 PTY helper that observes OSC requests independent of the
-user's shell theme, and the CLI single-detection case. This is the evidence gap
-Review 3 flagged as "wrong level". Depends on the Phase 1 evidence home for
-recording latency artifacts.
+Extend the checked-in Biscuit Terminal probe/PTY path so it observes OSC
+requests independent of the user's shell theme, then add the CLI
+single-detection case. This is the evidence gap Review 3 flagged as "wrong
+level". Depends on the Phase 2 evidence home for recording latency artifacts.
 
-- [ ] Add a checked-in L2 helper that runs under a supported real PTY and can observe OSC requests without depending on a user's shell theme. Unix-only PTY code **target-gated** so Windows continues to compile. (spec Work 2.6)
-- [ ] Verify: two or more `Terminal` constructions in one process emit **one** OSC 10 query (`TEXT_COLOR_CACHE` reuse). (Work 2.1)
-- [ ] Verify the cached response is genuinely reused, not merely equal by coincidence. (Work 2.2)
+- [ ] Extend `biscuit-terminal/lib/examples/discovery_probe.rs` and `biscuit-terminal/lib/tests/common/pty.rs`; do **not** add a second generic PTY abstraction. Put the assertions in a `level2_*` test binary and run them only through `just test-l2`. Unix-only `expectrl`/PTY code is target-gated so Windows compiles and records a clean unsupported/skip disposition. (spec Work 2.6)
+- [ ] Run the cache proof in a dedicated child process so prior `OnceLock` state or test ordering cannot contaminate it. Construct two or more `Terminal` values, manufacture a response only for the first OSC 10 request, and assert exactly one request plus the same cached first response on later constructions. This proves reuse rather than coincidental equality. (Work 2.1/2.2)
 - [ ] Record repeated-construction latency with warm-up, sample count, and dispersion into the feature-local evidence index. (Work 2.3)
-- [ ] Add a CLI case: one `md compose` invocation rendering verbose + performance + warning output performs **one** terminal detection (exercises the `compose.rs:191` `term_cell` `OnceCell`). (Work 2.4)
-- [ ] Verify macOS appearance discovery (`detect_color_mode`/`detect_prose_theme`) does **not** spawn for fully redirected output. (Work 2.5, Finding 21)
+- [ ] Add an isolated CLI probe case: one `md compose` invocation rendering verbose + performance + warning output performs **one** terminal detection (exercises the `compose.rs:191` `term_cell` `OnceCell`). Count the emitted detection/query requests rather than inferring from equal rendered output. (Work 2.4)
+- [ ] Verify macOS appearance discovery (`detect_color_mode`/`detect_prose_theme`) does **not** spawn for fully redirected output. Keep this redirected-process assertion L1; it does not require a PTY. Serialize environment mutation with the repository test guard. (Work 2.5, Finding 21)
 - [ ] Report interactive (PTY) and piped (redirected CLI) measurements **separately**. No Level 3 input-protocol test. (spec Work 2)
 
-**Parallelizable:** the PTY OSC-count helper (biscuit-terminal side) and the CLI
-single-detection case (darkmatter-cli side) are independent once the L2 helper
-skeleton lands.
+The probe protocol lands first. The Biscuit Terminal cache proof and Darkmatter
+CLI case may then use it independently without sharing a process or global
+cache state.
 
 ### Checkpoint 3
 Biscuit Terminal + Darkmatter CLI `just test` / `just test-l2` / `just lint`
 green. The L2 artifact shows one OSC 10 request across N constructions and one
 detection per `md compose`; interactive vs piped latencies recorded separately;
-Windows still compiles (PTY target-gated). Linux L2 evidence recorded.
+Windows still compiles and records the Unix-PTY skip disposition. Linux provides
+the required real non-macOS L2 behavior evidence.
 
 ---
 
-## Phase 4 — Shared `ComposeOptions` classification authority (Architecture Decision B)
+## Phase 4 — Consume the shared `ComposeOptions` classification (Architecture Decision B)
 
-Define the single crate-private, exhaustive field classification that both graph
-provenance and compose caching derive from. **Blocks Phase 5** (cross-pass
-reuse). Requires **coordination with the linked
-[Opaque Reference Graph](../2026-07-15-reference-graph/plan.md) feature**, whose
-`ReferenceGraphOptionsIdentity` must consume this same classification in the
-coordinated change.
+Land Architecture Decision B exactly once. The linked
+[Opaque Reference Graph](../2026-07-15-reference-graph/plan.md) Phase 1 owns the
+crate-private exhaustive classification, the two purpose-specific identity
+products, and the `options_hash` migration. This feature depends on that shared
+prerequisite and must not implement a competing inventory. **Blocks Phase 5.**
 
-- [ ] In the `ComposeOptions` owning module (`compose/context/options.rs`), add a crate-private field-classification authority that destructures `ComposeOptions` **with no `..`** — a new field is a compile error until classified. (AD-B)
-- [ ] Derive `ReferenceGraphOptionsIdentity` from the classification: conservative, fail-closed; may use weak/minimal instance handles for stateful callbacks/runtimes; may include output-irrelevant fields. (Coordinate: the reference-graph feature owns the type; this feature ensures the shared classification is its source.) (AD-B)
-- [ ] Derive the **compose-cache value fingerprint** from the classification: only canonical value semantics relevant to the cached artifact, combined with the existing source, effective-state, context, directive-overlay, and pass-scope dimensions. (AD-B)
-- [ ] Canonical value encoding uses field names, type boundaries, sorted unordered collections (`magic_paths`, `exclude_keys`, `env_path_whitelist`, `pre_approved_commands`, allowed hosts, captured context/env), and a versioned domain marker. It **must not** use `Debug` output. Hash with `biscuit-hash` xxHash. (AD-B)
-- [ ] Process-local identity from a stateful field participates **only** in run-local reuse: a key that depends on pointer/instance identity must never read or write a persistent cache entry. When equivalence cannot be established, **reject reuse**. (AD-B)
-- [ ] Replace or delegate the existing `cache::hashing::options_hash` — do **not** add a parallel third options fingerprint. Update its call sites (`cache/runtime.rs:72`, `transclusion/engine.rs`, preflight). (AD-B)
-- [ ] Unit tests: classification identity equal across unordered-collection insertion orders; unequal across representative option families (scalar, collection, context, schema, transclusion, remote, shell); clone-stable including a set `Arc`-backed stateful field (shared instance equal, fresh instance unequal). The no-`..` destructure is the field-addition guard.
+- [ ] Land or merge the linked feature's shared prerequisite before this feature changes a compose reuse boundary. Record the prerequisite commit in `results.md`.
+- [ ] Confirm the owning implementation destructures `ComposeOptions` **with no `..`** and derives both `ReferenceGraphOptionsIdentity` and the compose-cache fingerprint from that one field inventory. No third fingerprint or parallel field list is allowed. (AD-B)
+- [ ] Confirm ordered vectors (`magic_paths`, `env_path_whitelist`, and any other order-sensitive sequences) retain order. Sort only genuinely unordered maps/sets such as `exclude_keys`, `pre_approved_commands`, allowed-host sets, and canonical context/env maps. (AD-B)
+- [ ] Confirm the typed, length-delimited encoding distinguishes field/type boundaries, `None`, and empty values; uses a versioned domain marker; contains no `Debug` encoding; and hashes through `biscuit-hash` xxHash. Add delimiter-collision and `None`/empty regression tests. (AD-B)
+- [ ] Confirm process-local state participates only in run-local reuse. Stateful identity disables persistent reads **and** writes; dropped/recreated instances are unequal; clone-shared `Arc` instances remain equal without increasing strong counts. When equivalence cannot be established, reject reuse. (AD-B)
+- [ ] Replace or delegate `cache::hashing::options_hash` and migrate its call sites (`cache/runtime.rs`, `transclusion/engine.rs`, preflight) under a new cache-key domain/version. Prove a legacy persistent entry cannot be read under the new encoding. (AD-B)
+- [ ] Tests cover equal identities across unordered insertion order; unequal identities across ordered-vector reordering and representative scalar/collection/context/schema/transclusion/remote/shell families; clone stability; fresh-instance inequality; and persistent-cache ineligibility for process-local state. The no-`..` destructure is the field-addition guard.
 
-**Sequential within phase:** the classification lands first; the two derived
-identity products and the `options_hash` replacement build on it.
-**Parallelizable across features:** the reference-graph feature's consumption of
-the classification proceeds concurrently once the authority signature is agreed.
+This phase is sequential with the linked feature's provenance work: the shared
+prerequisite has one owner and one landing commit. Performance-follow-up work
+begins only after that commit is present.
 
 ### Checkpoint 4
 Darkmatter `just test` + `just lint` green. Exactly one `ComposeOptions` field
 inventory exists (the no-`..` classification); `options_hash` is gone or a thin
-delegate; no `Debug`-based option encoding remains. Existing compose/cache
-behavior byte-identical (no reuse-boundary change yet — identity products are
-in place but Phase 5 wires the new reuse).
+delegate; no `Debug`-based option encoding remains; legacy cache entries cannot
+cross the new domain; and stateful keys cannot touch persistent storage.
+Rendered/diagnostic behavior remains byte-identical, while cache reuse may
+become conservatively narrower by design.
 
 ---
 
-## Phase 5 — Cross-pass compose reuse (Findings 7 & 16) — Work 4
+## Phase 5 — Cross-pass compose reuse (Findings 7, 16, 35.1 & 35.4) — Work 4
 
 Finish the remaining validate/preflight/compose duplication using a cache key
 whose identity contains **every** semantic input. Depends on Phase 4 (AD-B
@@ -230,25 +264,29 @@ compose-cache fingerprint).
 - [ ] Implement reuse in the spec's preferred order, stopping at the first safe level: (1) share parsed source + reference metadata; (2) share context-independent prepared representations; (3) share fully rendered content **only** if a complete semantic identity is demonstrated; (4) otherwise retain recomposition and record a same-fixture **no-win** disposition for narrower candidates. (Work 4)
 - [ ] Preserve condition-aware behavior: do not reuse bodies whose output depends on parent state, directive position, conditions, or lifecycle decisions. (Findings 7/16)
 - [ ] The cache is run-local or bounded; retains no unrelated contexts, graphs, callbacks, or runtimes. Because transclusion composes children **concurrently**, any shared prepared-content cache is **concurrency-safe or partitioned per compose run** — no data race, no lock held across child composition. (Work 4)
+- [ ] **35.1:** compute `effective_state_hash` once per transclusion phase and thread the value through directive cache-key construction. This belongs here because Phase 5 owns that key's assembly and measurement.
+- [ ] **35.4:** route `::toc-linking` graph-discovery and composition reads through the same run-local source cache without broadening persistent reuse. Preserve authoritative-read and invalidation behavior. This belongs here because it is another cross-pass reuse boundary.
 - [ ] Add a compose benchmark comparing immediate pre-change vs candidate on identical manifest fixtures; declare thresholds per the evidence contract.
-- [ ] Verification (matrix F7/F16): reference, preflight, transclusion, condition, lifecycle, and cache-identity suites pass; compose benchmark recorded.
+- [ ] Record separate target/control dispositions for the general F7/F16 reuse, 35.1 hash hoisting, and 35.4 read reuse so an aggregate result cannot hide a regression.
+- [ ] Verification (matrix F7/F16/F35): reference, preflight, transclusion, `::toc-linking`, condition, lifecycle, source-cache, and cache-identity suites pass. Use deterministic L1 concurrency tests with barriers/timeouts to prove concurrent child progress and lock release; an ordinary child process does not make this L2.
 
 ### Checkpoint 5
-Darkmatter `just test` + `just test-l2` + `just lint` green. Compose/validation
-output byte-identical. The reuse-cache benchmark shows a repeatable win **or** a
-recorded no-win disposition with the speculative code removed. No lock is held
-across concurrent child composition (assert via test where a real process is
-involved). This is an OS-identical allocation/caching change → state identity;
-Windows compile + macOS run + Linux CI sufficient (F12-style filesystem reach
-does not apply here).
+Darkmatter `just test` + `just lint` green. Compose/validation output remains
+byte-identical. Each reuse item shows a repeatable win or a recorded no-win
+disposition with speculative code removed. No lock is held across concurrent
+child composition. Classify 35.4 from its filesystem implementation; do not
+categorize the whole phase as OS-identical merely because its cache is
+run-local.
 
 ---
 
 ## Phase 6 — Frontmatter & expression rework (Findings 11–14) — Work 5
 
-Four separate checkpoints sharing a fixture set. Independent of Phase 4/5 and of
-each other's core logic (they touch distinct modules), so the four can be
-implemented in parallel; each closes on its own benchmark.
+Four separate benchmark checkpoints share one fixture set. F12 changes the
+context path used by the interpolation work and lands first. F11 and F14 then
+proceed as coordinated edits because both touch
+`frontmatter_interpolation.rs`; F13 remains independent. Each closes on its own
+baseline/candidate comparison.
 
 ### F11 — Incremental frontmatter interpolation fixpoint
 - [ ] In `frontmatter_interpolation.rs`, extract each templated key's dependencies **once**; maintain unresolved-dependency counts + reverse edges; enqueue newly eligible keys. Avoid rebuilding the full seed map per successful key where mutation can be incremental. Preserve cycles, shell deferral, best-effort propagation, and key-scoped errors.
@@ -260,13 +298,14 @@ implemented in parallel; each closes on its own benchmark.
 - [ ] Benchmark an exact multi-pattern matcher in `replacement.rs` against the current ordered rules. **Reject** any design changing first-rule precedence, overlap, cascading, Unicode indices, or empty-pattern handling. If no win, record a requirement-matched no-win result and remove speculative code.
 
 ### F14 — Reduced literal / interpolation rescans
-- [ ] In `interpolation/rewrite.rs`, reduce repeated Markdown-aware scans and full-body copies when interpolation is present; construct output once per interpolation depth where practical. Nested interpolation keeps semantic fixpoint behavior; it does **not** authorize rescanning unrelated protected ranges. Benchmark nested and no-expression cases **separately**.
+- [ ] In `interpolation/rewrite.rs` and the frontmatter literal-conversion path, reduce repeated Markdown-aware scans and full-body copies when interpolation is present; construct output once per interpolation depth where practical. Nested interpolation keeps semantic fixpoint behavior; it does **not** authorize rescanning unrelated protected ranges. Benchmark nested and no-expression cases **separately**.
 
-- [ ] Shared fixtures (spec Work 5): wide dependency graphs, deep dependency chains, cycles, shell-pending keys, best-effort errors, many replacement rules, Unicode, code fences, literal escapes, multiline indentation, nested interpolation. Register in the manifest.
+- [ ] Before any Phase-6 baseline, register and hash the shared fixtures: wide dependency graphs, deep dependency chains, cycles, shell-pending keys, best-effort errors, many replacement rules, Unicode, code fences, literal escapes, multiline indentation, and nested interpolation. (spec Work 5)
 - [ ] Verification (matrix F11–F14): focused units + compose integration + scale benchmarks per checkpoint. F12 can reach filesystem-backed expression functions → classify its cross-platform gate from the actual changed path, not categorically OS-identical.
 
-**Parallelizable:** F11, F12, F13, F14 are four independent work streams over
-distinct modules; they converge only on the shared fixture manifest entry.
+**Dependency order:** F12 → coordinated F11/F14. F13 may proceed independently
+after the fixture set is frozen. Capture each immediate baseline before its
+code change so one checkpoint cannot contaminate another's comparison.
 
 ### Checkpoint 6
 All four checkpoints have either a threshold-meeting benchmark or a recorded
@@ -283,23 +322,23 @@ primitive. Independent of Phases 4–6.
 
 ### F17 — Replace the 10 ms completion polling loops
 - [ ] Replace or avoid **both** independent 10 ms `try_wait`/`sleep` loops in `shell_expansion/executor.rs` (`:242` and `:574`) with a blocking wait primitive or event-driven notification available on all supported OSes. Any platform split is **target-gated and tested**.
-- [ ] Prove unchanged timeout boundaries, captured output, process cleanup, failure/error selection, and source-order execution. Arbitrary directive parallelism remains prohibited.
+- [ ] Preserve concurrent stdout/stderr draining while waiting; do not replace polling with a wait path that can deadlock on a full pipe. Prove unchanged timeout boundaries/granularity, saturated dual-stream capture, descendant/process cleanup, failure/error selection, and source-order execution for both executor variants. Arbitrary directive parallelism remains prohibited.
 
 ### F32 — Snapshot shell policy once per stage
-- [ ] In `shell_expansion/policy.rs`, take one immutable stage snapshot (or share immutable collections) instead of cloning read-only rule collections per directive. Do **not** hold a policy mutex across command execution.
-- [ ] Tests: all directives in a stage see the intended stable policy; a subsequent stage observes an allowed policy update.
+- [ ] Move snapshot ownership to the stage orchestrator in `shell_expansion/mod.rs` and plumb one `ShellRuntimeSnapshot` from `shell_expansion/types.rs` through directive authorization. The matching helpers in `policy.rs` remain borrowed consumers. Do **not** hold the policy mutex across parsing, approval, or command execution.
+- [ ] Define the visibility contract explicitly: all directives admitted to one stage see its opening immutable policy snapshot; approvals/persistence produced during that stage update the runtime but become policy input only for a subsequent stage. Add tests for both halves of that contract.
 
-- [ ] Verification (matrix F17/F32): cross-platform process/policy tests; timeout + cleanup tests; L1/L2 where a real process is required. Record Linux (and Windows) behavioral evidence for the wait primitive.
+- [ ] Verification (matrix F17/F32): cross-platform L1 process/policy tests plus timeout, stream-saturation, and cleanup tests. An ordinary spawned command is not L2; add/run L2 only if the implementation introduces a real-terminal requirement. Record Linux **and Windows** behavioral evidence for the wait primitive.
 
 **Parallelizable:** F17 (executor wait mechanism) and F32 (policy snapshot) touch
 disjoint files and can proceed concurrently.
 
 ### Checkpoint 7
 Shell directives still execute in source order with identical timeout/output/
-cleanup/failure semantics; no mutex held across execution. Darkmatter `just test`
-+ `just test-l2` + `just lint` green. **Real non-macOS run of the wait primitive
-recorded** (blocking-wait vs event-driven differs by OS); Windows target-gated
-path tested.
+cleanup/failure semantics; no mutex is held across execution. Darkmatter
+`just test` + `just lint` green, plus `just test-l2` only if a terminal-specific
+test was actually added. Real Linux and Windows behavioral runs of the wait
+primitive are recorded.
 
 ---
 
@@ -308,12 +347,13 @@ path tested.
 Independent of Phases 4–7.
 
 ### F23 — Resolve code theme once per render snapshot
-- [ ] Resolve code theme + relevant environment inputs (`detect_code_theme`, color mode) **once at the start of a render** and pass the snapshot to every code block (`output/code_block.rs`), instead of reading per block. Separate render invocations must still observe environment changes allowed by the existing contract.
+- [ ] Introduce a render-scoped theme/environment snapshot at the render-tree entry point and carry it in `TerminalCodeRenderer` (and the corresponding browser options/context) so `code_theme_from_env`, surface mode, and theme selection are resolved once per render. `output/code_block.rs` continues to receive an already-resolved highlighter; it is not the environment-discovery owner. Preserve explicit per-`CodeBlock` theme overrides. Separate direct `CodeBlock`, `DarkmatterPage`, terminal, and browser render invocations must still observe environment changes allowed by the existing contract.
+- [ ] Serialize environment-mutating tests with the repository guard. Add a multi-block assertion proving one snapshot per render and a two-render assertion proving permitted environment changes are observed between renders.
 
 ### F25 — Cleanup pass fusion (profile-gated)
 - [ ] First profile individual cleanup passes (`cleanup/mod.rs`, placeholder + line passes, `reflow.rs`) on representative documents. Combine line passes **only** when ordering and boundary behavior can be made exactly equivalent; preserve exact pass ordering and canonical output. A same-fixture no-win (fusion within noise, or added allocation/complexity without a repeatable end-to-end gain) is an acceptable disposition.
 
-- [ ] Verification (matrix F23/F25): snapshot/golden output; L2 terminal frames where applicable; code-heavy render + cleanup benchmarks over manifest fixtures.
+- [ ] Verification (matrix F23/F25): snapshot/golden output; headless browser computed-style/markup tests for F23; L2 terminal frames only where a real terminal is required; code-heavy render + cleanup benchmarks over manifest fixtures.
 
 **Parallelizable:** F23 (render theme snapshot) and F25 (cleanup profiling) are
 independent.
@@ -322,8 +362,10 @@ independent.
 Terminal + browser render output and cleanup canonical output byte-identical
 (existing snapshots pass untouched). F23 resolves theme once per render; F25 has
 a threshold-meeting fusion or a recorded no-win. Darkmatter `just test` +
-`just test-l2` + `just lint` green. OS-identical → state identity; Windows
-compile + macOS run + Linux CI sufficient.
+`just test-browser` + `just lint` green, plus `just test-l2` only for any
+real-terminal assertion. Classify cross-platform behavior from the final
+environment/terminal implementation rather than predeclaring the phase
+OS-identical.
 
 ---
 
@@ -339,34 +381,37 @@ Independent of Phases 4–8.
 ### Checkpoint 9
 Remote-URL discovery produces identical line positions on all edge cases;
 remote-heavy benchmark meets threshold or records a no-win. Darkmatter
-`just test` + `just lint` green. OS-identical → state identity.
+`just test` + `just lint` green. Record the actual diff's cross-platform
+classification; a pure byte/line scan may use the OS-identical disposition only
+when no filesystem, URL-runtime, or `cfg`-specific path changed.
 
 ---
 
-## Phase 10 — Finding 35 residual sub-items — Work 10
+## Phase 10 — Remaining Finding 35 residual sub-items — Work 10
 
-Seven independent sub-items. Each needs its **own** behavioral tests and
-measurement disposition — a single aggregate benchmark may **not** conceal a
-no-win or regression in an individual path. Independent of Phases 4–9.
+Five residual sub-items remain after 35.1 and 35.4 move into Phase 5. Each needs
+its **own** behavioral tests and measurement disposition — a single aggregate
+benchmark may **not** conceal a no-win or regression in an individual path.
+Capture immediate baselines sequentially even where implementation files are
+disjoint.
 
-- [ ] **35.1** Compute `effective_state_hash` **once per transclusion phase**, not once per `::file` directive (`cache/hashing.rs:87`, consumers in `transclusion/engine.rs`).
 - [ ] **35.2** Build heading line offsets once and emit releveling spans/output **without copying the whole child once per heading** (`transclusion/engine.rs:59`/`:76`/`:310`; `markdown/mod.rs:947` `relevel`).
 - [ ] **35.3** Store fetched response bodies as `Arc<str>` internally, preserving the owned public facade where required (`remote_fetch.rs:38` `Ready { body }` + `Ready.body` consumers; `Arc` already imported).
-- [ ] **35.4** Route `::toc-linking` target reads through the **run cache** so one target is not read independently by graph discovery and composition (`toc_linking/mod.rs:148`/`:161`, `parser.rs:141`).
-- [ ] **35.5** Reuse one document-hash computation across `md hash --diff` and `--save` (incl. explanation output), without changing stored hash semantics (`cli/commands/hash.rs`; lib `plan_hash_save`/`apply_hash_save`).
+- [ ] **35.5** Within each mutually exclusive `md hash --diff` or `--save` invocation, compute the selected document hash once and pass the resulting artifact through comparison/planning and explanation output. Do not imply that `--diff` and `--save` run together, and do not change stored hash semantics (`cli/commands/hash.rs`; lib `plan_hash_save`/`apply_hash_save`).
 - [ ] **35.6** Make `normalize_body_rhythm` avoid allocating an ANSI-stripped string for every output-line check (`layout/page.rs:1423`).
 - [ ] **35.7** Borrow link/image URL + title data through policy application, including the **empty-policy fast path**, while retaining owned public output nodes (`compose/link_normalization.rs:29`; `markdown/mod.rs:1016`/`:1039`).
 - [ ] Per sub-item: behavioral tests + one target/control benchmark, each with its own disposition in `results.md` (implementation win or recorded no-win with code removed).
-- [ ] Cross-platform classification per sub-item (all appear OS-identical — pure alloc/caching/hashing — but confirm from the changed path; 35.3/35.4 touch fetch/fs).
+- [ ] Cross-platform classification per sub-item. Do not preclassify 35.3 as OS-identical until its remote/runtime path is inspected; the other allocation/hashing changes still require confirmation from the actual diff.
 
-**Parallelizable:** all seven sub-items touch disjoint code and can be
-implemented concurrently.
+35.3, 35.5, 35.6, and 35.7 have disjoint primary files; 35.2 follows Phase 5's
+transclusion edits. Even when implementation work is independent, baseline and
+candidate capture remains one checkpoint at a time.
 
 ### Checkpoint 10
 Every sub-item has an individual benchmark disposition (no aggregate masking).
 Compose/CLI output byte-identical; `Arc<str>` and borrowing changes preserve
-owned public facades. Darkmatter `just test` + `just test-l2` + `just lint`
-green.
+owned public facades. Darkmatter `just test` + `just lint` green; run
+`just test-l2` only if a remaining item adds or changes real-terminal behavior.
 
 ---
 
@@ -379,10 +424,10 @@ green.
 - [ ] Update the audit table + `results.md` so every finding reflects its final honest disposition.
 - [ ] Update the darkmatter skill (`.claude/skills/darkmatter/`) if any architecture/workflow changed; regenerate the skill `hash:` with `md hash <file>`.
 - [ ] Update `darkmatter/docs/dependencies.md` (and per-area deps doc) if any crate was added/removed.
-- [ ] **Cumulative closeout run:** run the **complete manifest** against the final feature head so the cumulative result includes every follow-up change (distinct from Phase 1's historical `83aaecc8f`→`51c1f16e…` reconstruction).
-- [ ] **Cross-platform evidence:** record Linux **and** Windows evidence per the targeted gate — real non-macOS behavioral runs for F17, the F2/F3/F21 PTY helper, and F22; Windows-compile + macOS-run + Linux-CI dispositions for the OS-identical findings. macOS-only success is insufficient.
-- [ ] Final gate matrix: `just test`, `just test-l2`, `just lint` in **every touched area**; root recipes for cross-package changes (Sniff + Darkmatter + Biscuit Terminal); `cargo check --workspace`; `cargo fmt --check`; `git diff --check`.
-- [ ] Run GitNexus `impact` on each edited symbol before its change and `detect_changes({scope: "compare", base_ref: "main"})` before any commit; confirm the blast radius is confined to the expected compose/cache/shell/render/hash/CLI + Sniff-timezone + terminal-OSC scope, and report HIGH/CRITICAL risk if surfaced.
+- [ ] **Cumulative closeout run:** run the **complete manifest** against the final feature head so the cumulative result includes every follow-up change (distinct from Phase 2's historical `83aaecc8f`→`51c1f16e…` reconstruction).
+- [ ] **Cross-platform evidence:** record Linux behavior for the Unix PTY helper and Windows compilation + clean skip/unsupported behavior; record Linux **and Windows behavioral runs** for F17's wait primitive and F22's directory/path CLI case; use Windows compile + macOS behavior + ordinary Linux CI only for findings demonstrated OS-identical by their final diff. macOS-only success is insufficient.
+- [ ] Final targeted gate matrix: `just test` + `just lint` in every touched area; `just test-l2` only in Biscuit Terminal/Darkmatter areas containing the F2/F3/F21 PTY tests; Darkmatter `just test-browser` for F23; root `just test` selectors for the touched Sniff, Darkmatter, and Biscuit Terminal packages/areas; `cargo check --workspace`; `cargo fmt --check`; `git diff --check`. Do not invoke L2 directly through Cargo/Nextest.
+- [ ] Run GitNexus `detect_changes({scope: "compare", base_ref: "main"})` before any commit; confirm the blast radius is confined to the expected compose/cache/shell/render/hash/CLI + Sniff-timezone + terminal-OSC scope.
 
 ### Final acceptance (maps to spec Acceptance Criteria 1–8)
 - [ ] Findings 1–4's compatibility/evidence gaps are closed.
@@ -390,6 +435,6 @@ green.
 - [ ] Finding 22's membership change is reverted (no unapproved exception).
 - [ ] No Finding 18 correctness work landed here; the opaque graph feature owns it with no duplication/conflict.
 - [ ] Reproducible same-byte benchmark artifacts meet predeclared thresholds with raw samples retained.
-- [ ] Behavioral, L1, L2, lint, workspace, formatting-check, and whitespace gates pass, with Linux and Windows evidence recorded.
+- [ ] Behavioral, L1, requirement-matched L2, headless Browser, lint, workspace, formatting-check, and whitespace gates pass, with Linux and Windows evidence recorded.
 - [ ] The audit table and original review documentation reflect every finding's final honest disposition.
-- [ ] Architecture Decisions A and B are implemented: evidence is feature-local behind one fixture manifest + focused runners; graph provenance and compose caching derive purpose-specific identities from one exhaustive `ComposeOptions` field classification.
+- [ ] Architecture Decisions A and B are implemented: immutable fixture identity and dated run records remain feature-local behind focused runners; graph provenance and compose caching derive purpose-specific identities from the one exhaustive `ComposeOptions` field classification owned by the linked prerequisite.
