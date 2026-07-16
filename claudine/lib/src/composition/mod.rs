@@ -71,8 +71,9 @@ pub use lifecycle_executor::{
 };
 pub use lifecycle::runtime::{
     IterationSummarySignals, LifecycleTransitionAbort, LifecycleTransitionDecision,
-    LifecycleTransitionError, LifecycleTransitionInput, TerminalRoutingDecision,
-    decide_lifecycle_transition, route_blocked_finalize, route_failure_finalize, route_loop_gate,
+    LifecycleTransitionError, LifecycleTransitionInput, LifecycleCatchExecution,
+    LifecycleCatchProtocol, LifecycleCatchResult, LifecycleCatchState, LifecycleCatchStep,
+    decide_lifecycle_transition,
 };
 pub use looping::{
     extract_control_variables, resolve_fail_fast_from_env, resolve_loop_config,

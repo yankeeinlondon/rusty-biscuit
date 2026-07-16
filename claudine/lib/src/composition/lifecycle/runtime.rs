@@ -96,6 +96,255 @@ pub enum LifecycleTransitionDecision {
     Abort(LifecycleTransitionAbort),
 }
 
+/// How a CLI adapter must execute a lifecycle event requested by the catch protocol.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum LifecycleCatchExecution {
+    /// Execute through the guard's normal exactly-once event recorder.
+    Record,
+    /// Re-designate an occupied blocked terminal slot as failure, then run the
+    /// failure event directly without recording a second terminal event.
+    RedesignateBlockedAsFailure,
+}
+
+/// One provider-neutral effect requested by [`LifecycleCatchProtocol`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct LifecycleCatchStep {
+    /// Lifecycle event the adapter must execute next.
+    pub signal: LifecycleSignal,
+    /// Error exposed to the event as the late-bound `err` global.
+    pub error: Option<super::context::LifecycleErrorInfo>,
+    /// Guard operation required to preserve the single-terminal-slot invariant.
+    pub execution: LifecycleCatchExecution,
+}
+
+/// Completed result of a provider-neutral catch/finalize sequence.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LifecycleCatchResult {
+    /// Highest-precedence event whose expression evaluation failed.
+    pub evaluation_error_signal: Option<LifecycleSignal>,
+    /// Error payload carried by that event.
+    pub evaluation_error: Option<super::context::LifecycleErrorInfo>,
+    /// Setup-phase error that caused the protocol to request `failure`.
+    pub setup_error: Option<super::context::LifecycleErrorInfo>,
+    /// Flow control from the originating event when no evaluation failed.
+    pub control: Option<StackControl>,
+}
+
+/// Guard facts that constrain catch/finalize eligibility.
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+pub struct LifecycleCatchState {
+    /// Event currently occupying the single terminal slot, if any.
+    pub terminal_slot: Option<LifecycleSignal>,
+    /// Whether finalize already fired for the current attempt.
+    pub finalize_emitted: bool,
+}
+
+/// Provider-neutral owner of setup catch routing and exactly-once finalize ordering.
+///
+/// The adapter executes only the requested [`LifecycleCatchStep`] and feeds
+/// its outcome back with [`Self::record`]. This keeps terminal-slot
+/// redesignation, active-error threading, evaluation precedence, and finalize
+/// ordering in the library while process handles and rendering remain in the CLI.
+#[derive(Debug, Clone)]
+pub struct LifecycleCatchProtocol {
+    origin: LifecycleSignal,
+    state: LifecycleCatchState,
+    prior_error: Option<super::context::LifecycleErrorInfo>,
+    origin_outcome: LifecycleEventOutcome,
+    setup_error: Option<super::context::LifecycleErrorInfo>,
+    failure_outcome: Option<LifecycleEventOutcome>,
+    finalize_outcome: Option<LifecycleEventOutcome>,
+    pending: Option<LifecycleCatchStep>,
+}
+
+impl LifecycleCatchProtocol {
+    /// Start routing after the originating event has executed.
+    pub fn new(
+        origin: LifecycleSignal,
+        state: LifecycleCatchState,
+        prior_error: Option<super::context::LifecycleErrorInfo>,
+        origin_outcome: LifecycleEventOutcome,
+    ) -> Self {
+        let setup_error = Self::setup_error(origin, &origin_outcome);
+        let pending = Self::after_origin(
+            origin,
+            state,
+            prior_error.as_ref(),
+            setup_error.as_ref(),
+            &origin_outcome,
+        );
+        Self {
+            origin,
+            state,
+            prior_error,
+            origin_outcome,
+            setup_error,
+            failure_outcome: None,
+            finalize_outcome: None,
+            pending,
+        }
+    }
+
+    fn after_origin(
+        origin: LifecycleSignal,
+        state: LifecycleCatchState,
+        prior_error: Option<&super::context::LifecycleErrorInfo>,
+        setup_error: Option<&super::context::LifecycleErrorInfo>,
+        outcome: &LifecycleEventOutcome,
+    ) -> Option<LifecycleCatchStep> {
+        let evaluation = outcome.evaluation_error.clone();
+        if setup_error.is_some() {
+            return Some(LifecycleCatchStep {
+                signal: LifecycleSignal::Failure,
+                error: setup_error
+                    .cloned()
+                    .or_else(|| prior_error.cloned()),
+                execution: if origin == LifecycleSignal::Blocked
+                    && state.terminal_slot == Some(LifecycleSignal::Blocked)
+                {
+                    LifecycleCatchExecution::RedesignateBlockedAsFailure
+                } else {
+                    LifecycleCatchExecution::Record
+                },
+            });
+        }
+
+        let needs_finalize = matches!(
+            origin,
+            LifecycleSignal::Success | LifecycleSignal::Blocked | LifecycleSignal::Failure
+        ) || (origin == LifecycleSignal::Loop && evaluation.is_some());
+        (needs_finalize && !state.finalize_emitted).then(|| LifecycleCatchStep {
+            signal: LifecycleSignal::Finalize,
+            error: evaluation.or_else(|| prior_error.cloned()),
+            execution: LifecycleCatchExecution::Record,
+        })
+    }
+
+    fn setup_error(
+        origin: LifecycleSignal,
+        outcome: &LifecycleEventOutcome,
+    ) -> Option<super::context::LifecycleErrorInfo> {
+        match setup_catch_error(origin, outcome)? {
+            LifecycleTransitionError::Evaluation => outcome.evaluation_error.clone(),
+            LifecycleTransitionError::Action => outcome.action_error.clone(),
+            LifecycleTransitionError::ExplicitControl => {
+                let Some(StackControl::Error { reason }) = outcome.control.as_ref() else {
+                    unreachable!("explicit-control setup error requires error control");
+                };
+                Some(super::context::LifecycleErrorInfo::from_action_failure(
+                    "error",
+                    reason.clone().unwrap_or_else(|| {
+                        format!("lifecycle {} error", origin.property_name())
+                    }),
+                ))
+            }
+            LifecycleTransitionError::Prior => {
+                unreachable!("prior errors do not start setup catch routing")
+            }
+        }
+    }
+
+    /// Return the next event request, if the protocol is not complete.
+    pub fn next_step(&self) -> Option<&LifecycleCatchStep> {
+        self.pending.as_ref()
+    }
+
+    /// Record the outcome of the currently requested event and advance.
+    ///
+    /// Returns `false` when no step was pending or the supplied signal did not
+    /// match the request, allowing adapters to fail closed on protocol misuse.
+    pub fn record(
+        &mut self,
+        signal: LifecycleSignal,
+        outcome: LifecycleEventOutcome,
+    ) -> bool {
+        let Some(step) = self.pending.take() else {
+            return false;
+        };
+        if step.signal != signal {
+            self.pending = Some(step);
+            return false;
+        }
+        match signal {
+            LifecycleSignal::Failure => {
+                let active_error = outcome
+                    .evaluation_error
+                    .clone()
+                    .or(step.error)
+                    .or_else(|| self.prior_error.clone());
+                self.failure_outcome = Some(outcome);
+                if !self.state.finalize_emitted {
+                    self.pending = Some(LifecycleCatchStep {
+                        signal: LifecycleSignal::Finalize,
+                        error: active_error,
+                        execution: LifecycleCatchExecution::Record,
+                    });
+                }
+            }
+            LifecycleSignal::Finalize => {
+                self.finalize_outcome = Some(outcome);
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// Finish the sequence once no event remains to execute.
+    pub fn finish(self) -> Option<LifecycleCatchResult> {
+        if self.pending.is_some() {
+            return None;
+        }
+        let (evaluation_error_signal, evaluation_error) = if let Some(error) = self
+            .finalize_outcome
+            .as_ref()
+            .and_then(|outcome| outcome.evaluation_error.clone())
+        {
+            (Some(LifecycleSignal::Finalize), Some(error))
+        } else if let Some(error) = self
+            .failure_outcome
+            .as_ref()
+            .and_then(|outcome| outcome.evaluation_error.clone())
+        {
+            (Some(LifecycleSignal::Failure), Some(error))
+        } else if let Some(error) = self.origin_outcome.evaluation_error.clone() {
+            (Some(self.origin), Some(error))
+        } else {
+            (None, None)
+        };
+        let control = evaluation_error_signal
+            .is_none()
+            .then_some(self.origin_outcome.control)
+            .flatten();
+        Some(LifecycleCatchResult {
+            evaluation_error_signal,
+            evaluation_error,
+            setup_error: self.setup_error,
+            control,
+        })
+    }
+}
+
+fn setup_catch_error(
+    event: LifecycleSignal,
+    outcome: &LifecycleEventOutcome,
+) -> Option<LifecycleTransitionError> {
+    if !matches!(
+        event,
+        LifecycleSignal::Initialize | LifecycleSignal::Start | LifecycleSignal::Blocked
+    ) {
+        return None;
+    }
+    if outcome.evaluation_error.is_some() {
+        Some(LifecycleTransitionError::Evaluation)
+    } else if outcome.routes_to_failure(event) {
+        Some(LifecycleTransitionError::Action)
+    } else if matches!(outcome.control, Some(StackControl::Error { .. })) {
+        Some(LifecycleTransitionError::ExplicitControl)
+    } else {
+        None
+    }
+}
+
 /// Decide the next lifecycle transition without performing side effects.
 ///
 /// Evaluation errors take precedence over action and prior errors. Controls
@@ -105,23 +354,17 @@ pub enum LifecycleTransitionDecision {
 pub fn decide_lifecycle_transition(
     input: &LifecycleTransitionInput<'_>,
 ) -> LifecycleTransitionDecision {
+    if let Some(error) = setup_catch_error(input.event, input.outcome) {
+        return LifecycleTransitionDecision::CatchFailure { error };
+    }
     if input.outcome.evaluation_error.is_some() {
         if input.event == LifecycleSignal::Finalize || input.finalize_emitted {
             return LifecycleTransitionDecision::Abort(
                 LifecycleTransitionAbort::EvaluationAfterFinalize,
             );
         }
-        return if matches!(
-            input.event,
-            LifecycleSignal::Initialize | LifecycleSignal::Start | LifecycleSignal::Blocked
-        ) {
-            LifecycleTransitionDecision::CatchFailure {
-                error: LifecycleTransitionError::Evaluation,
-            }
-        } else {
-            LifecycleTransitionDecision::Finalize {
-                error: Some(LifecycleTransitionError::Evaluation),
-            }
+        return LifecycleTransitionDecision::Finalize {
+            error: Some(LifecycleTransitionError::Evaluation),
         };
     }
 
@@ -209,91 +452,6 @@ fn terminal_or_finalize(
             }
         }
     }
-}
-
-/// Pure result of routing a terminal lifecycle event through its catch events.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TerminalRoutingDecision {
-    /// Highest-precedence event whose expression evaluation failed.
-    pub evaluation_error_signal: Option<LifecycleSignal>,
-    /// Flow control surfaced by the originating event when no evaluation failed.
-    pub control: Option<StackControl>,
-}
-
-impl TerminalRoutingDecision {
-    fn new(
-        origin: LifecycleSignal,
-        origin_outcome: &LifecycleEventOutcome,
-        failure_outcome: Option<&LifecycleEventOutcome>,
-        finalize_outcome: Option<&LifecycleEventOutcome>,
-    ) -> Self {
-        let evaluation_error_signal = if finalize_outcome
-            .and_then(|outcome| outcome.evaluation_error.as_ref())
-            .is_some()
-        {
-            Some(LifecycleSignal::Finalize)
-        } else if failure_outcome
-            .and_then(|outcome| outcome.evaluation_error.as_ref())
-            .is_some()
-        {
-            Some(LifecycleSignal::Failure)
-        } else if origin_outcome.evaluation_error.is_some() {
-            Some(origin)
-        } else {
-            None
-        };
-
-        let control = if evaluation_error_signal.is_none() {
-            origin_outcome.control.clone()
-        } else {
-            None
-        };
-
-        Self {
-            evaluation_error_signal,
-            control,
-        }
-    }
-}
-
-/// Route a blocked event and its optional failure/finalize catch outcomes.
-pub fn route_blocked_finalize(
-    blocked_outcome: &LifecycleEventOutcome,
-    failure_outcome: Option<&LifecycleEventOutcome>,
-    finalize_outcome: Option<&LifecycleEventOutcome>,
-) -> TerminalRoutingDecision {
-    TerminalRoutingDecision::new(
-        LifecycleSignal::Blocked,
-        blocked_outcome,
-        failure_outcome,
-        finalize_outcome,
-    )
-}
-
-/// Route a failure event and its finalize catch outcome.
-pub fn route_failure_finalize(
-    failure_outcome: &LifecycleEventOutcome,
-    finalize_outcome: Option<&LifecycleEventOutcome>,
-) -> TerminalRoutingDecision {
-    TerminalRoutingDecision::new(
-        LifecycleSignal::Failure,
-        failure_outcome,
-        None,
-        finalize_outcome,
-    )
-}
-
-/// Route a post-finalize loop gate and its finalize catch outcome.
-pub fn route_loop_gate(
-    loop_outcome: &LifecycleEventOutcome,
-    finalize_outcome: Option<&LifecycleEventOutcome>,
-) -> TerminalRoutingDecision {
-    TerminalRoutingDecision::new(
-        LifecycleSignal::Loop,
-        loop_outcome,
-        None,
-        finalize_outcome,
-    )
 }
 
 /// Iteration-level signals lifted from a structured stream summary.

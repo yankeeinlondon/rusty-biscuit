@@ -10,6 +10,9 @@ use super::super::lifecycle::{LifecycleConfig, LifecycleEmitter, LifecycleRunGua
 use super::super::lifecycle_context::LifecycleErrorInfo;
 use super::super::lifecycle_control::{MAX_PROXY_HOPS, proxy_handoff_allowed, resolve_proxy_target};
 use super::super::lifecycle_executor::{ShellRunner, StackControl, StackExecutionContext};
+use super::super::lifecycle::runtime::{
+    LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchResult, LifecycleCatchState,
+};
 use super::super::prepare::PrepareOptions;
 use super::super::types::{CompositionMode, LoopConfig, OnRateLimit, ResolvedCompositionSource};
 use super::actions::ActionStaging;
@@ -347,36 +350,39 @@ where
         Some(&init_current),
     );
     let init_outcome = guard.execute_event(LifecycleSignal::Initialize, &init_ctx);
-
-    // A late-binding evaluation error on `initialize` (a crashed `when:` guard
-    // or interpolation) routes through `failure` → `finalize` like any other
-    // setup failure and halts the run (Decision #5). Checked before the control
-    // match because an evaluation raise leaves `control` `None`.
-    if let Some(info) = init_outcome.evaluation_error.as_ref() {
-        let failure_outcome =
-            guard.execute_event(LifecycleSignal::Failure, &init_ctx.with_error(info));
-        // If `failure` raised, thread its error (not the original) into
-        // finalize so a `finalize.stack` can branch on the failure raise.
-        let active_err = failure_outcome
-            .evaluation_error
-            .as_ref()
-            .unwrap_or(info);
-        let finalize_outcome = guard.execute_event(
-            LifecycleSignal::Finalize,
-            &init_ctx.with_error(active_err).with_signal(LifecycleSignal::Finalize),
-        );
+    let init_result = execute_loop_catch_protocol(
+        &mut guard,
+        &init_ctx,
+        LifecycleSignal::Initialize,
+        None,
+        init_outcome.clone(),
+    );
+    if let Some(info) = init_result.evaluation_error.as_ref() {
+        let surfaced_signal = init_result
+            .evaluation_error_signal
+            .expect("initialize evaluation error remains terminal");
         return Ok(LoopExecutionResult::failure(
             initial_frontmatter,
             0,
             String::new(),
             0,
-            CompositionError::catch_evaluation_error(
+            CompositionError::lifecycle_evaluation(
+                surfaced_signal.property_name(),
                 prompt_path,
-                "initialize",
                 info,
-                Some(&failure_outcome),
-                Some(&finalize_outcome),
             ),
+        ));
+    }
+    if let Some(setup_error) = init_result.setup_error.as_ref() {
+        return Ok(LoopExecutionResult::failure(
+            initial_frontmatter,
+            0,
+            String::new(),
+            0,
+            CompositionError::LifecycleInitializeFailed {
+                source_path: prompt_path.to_path_buf(),
+                reason: setup_error.msg.clone(),
+            },
         ));
     }
 
@@ -388,7 +394,7 @@ where
     // target and asks the caller to hand off, and `Stop` falls through to the
     // iteration loop. `Retry`/`Resume`/`Defer` are rejected at parse time, so
     // they are defensive fall-throughs here.
-    if let Some(control) = init_outcome.control.clone() {
+    if let Some(control) = init_result.control.clone() {
         match control {
             StackControl::Skip => {
                 info!(
@@ -403,15 +409,7 @@ where
                 ));
             }
             StackControl::Error { reason } => {
-                let msg = reason
-                    .clone()
-                    .unwrap_or_else(|| "lifecycle initialize error".to_string());
-                return Ok(route_init_failure(
-                    &mut guard,
-                    &init_ctx,
-                    prompt_path,
-                    msg,
-                ));
+                unreachable!("the catch protocol consumes initialize error control: {reason:?}");
             }
             StackControl::Proxy { target } => {
                 let resolved = match resolve_proxy_target(
@@ -433,6 +431,7 @@ where
                             &mut guard,
                             &init_ctx,
                             prompt_path,
+                            &init_outcome,
                             LifecycleErrorInfo::from_harness_error(&err),
                             reason,
                         ));
@@ -505,20 +504,6 @@ where
                 // into the iteration loop with the outcome unchanged.
             }
         }
-    }
-
-    if init_outcome.routes_to_failure(LifecycleSignal::Initialize) {
-        let reason = init_outcome
-            .action_error
-            .as_ref()
-            .map(|e| e.msg.clone())
-            .unwrap_or_else(|| "lifecycle initialize failed".to_string());
-        return Ok(route_init_failure(
-            &mut guard,
-            &init_ctx,
-            prompt_path,
-            reason,
-        ));
     }
 
     let mut frontmatter = initial_frontmatter;
@@ -738,10 +723,18 @@ fn route_init_failure(
     guard: &mut LifecycleRunGuard<'_>,
     init_ctx: &StackExecutionContext<'_>,
     prompt_path: &Path,
+    init_outcome: &super::super::lifecycle_executor::LifecycleEventOutcome,
     reason: String,
 ) -> LoopExecutionResult {
     let action_error = LifecycleErrorInfo::from_action_failure("error", reason.clone());
-    route_init_failure_with(guard, init_ctx, prompt_path, action_error, reason)
+    route_init_failure_with(
+        guard,
+        init_ctx,
+        prompt_path,
+        init_outcome,
+        action_error,
+        reason,
+    )
 }
 
 /// Route an `initialize` failure built from an already-typed error snapshot,
@@ -758,42 +751,43 @@ fn route_init_failure_typed(
     guard: &mut LifecycleRunGuard<'_>,
     init_ctx: &StackExecutionContext<'_>,
     prompt_path: &Path,
+    init_outcome: &super::super::lifecycle_executor::LifecycleEventOutcome,
     action_error: LifecycleErrorInfo,
     fallback_reason: String,
 ) -> LoopExecutionResult {
-    route_init_failure_with(guard, init_ctx, prompt_path, action_error, fallback_reason)
+    route_init_failure_with(
+        guard,
+        init_ctx,
+        prompt_path,
+        init_outcome,
+        action_error,
+        fallback_reason,
+    )
 }
 
 fn route_init_failure_with(
     guard: &mut LifecycleRunGuard<'_>,
     init_ctx: &StackExecutionContext<'_>,
     prompt_path: &Path,
+    init_outcome: &super::super::lifecycle_executor::LifecycleEventOutcome,
     action_error: LifecycleErrorInfo,
     reason: String,
 ) -> LoopExecutionResult {
-    let failure_outcome =
-        guard.execute_event(LifecycleSignal::Failure, &init_ctx.with_error(&action_error));
-    // If `failure` raised, thread its error (not the original) into finalize so
-    // a `finalize.stack` can branch on the failure raise.
-    let active_err = failure_outcome
-        .evaluation_error
-        .as_ref()
-        .unwrap_or(&action_error);
-    let finalize_outcome = guard.execute_event(
-        LifecycleSignal::Finalize,
-        &init_ctx.with_error(active_err).with_signal(LifecycleSignal::Finalize),
+    let result = execute_loop_catch_protocol(
+        guard,
+        init_ctx,
+        LifecycleSignal::Initialize,
+        &action_error,
+        init_outcome.clone(),
     );
-    let decision = super::super::route_failure_finalize(&failure_outcome, Some(&finalize_outcome));
-    // A raise inside either catch event (failure or finalize) surfaces as the
-    // typed lifecycle evaluation error (precedence: finalize > failure >
-    // original). Otherwise the explicit `error(...)` reason stands.
-    let error = if decision.evaluation_error_signal.is_some() {
-        CompositionError::catch_evaluation_error(
+    let error = if let (Some(signal), Some(info)) = (
+        result.evaluation_error_signal,
+        result.evaluation_error.as_ref(),
+    ) {
+        CompositionError::lifecycle_evaluation(
+            signal.property_name(),
             prompt_path,
-            "initialize",
-            &action_error,
-            Some(&failure_outcome),
-            Some(&finalize_outcome),
+            info,
         )
     } else {
         CompositionError::LifecycleInitializeFailed {
@@ -806,6 +800,40 @@ fn route_init_failure_with(
     // than take ownership: the caller still holds `init_ctx` across this call,
     // so moving the frontmatter in would conflict with that live borrow.
     LoopExecutionResult::failure(init_ctx.frontmatter.clone(), 0, String::new(), 0, error)
+}
+
+fn execute_loop_catch_protocol(
+    guard: &mut LifecycleRunGuard<'_>,
+    origin_ctx: &StackExecutionContext<'_>,
+    origin: LifecycleSignal,
+    prior_error: &LifecycleErrorInfo,
+    origin_outcome: super::super::lifecycle_executor::LifecycleEventOutcome,
+) -> LifecycleCatchResult {
+    let mut protocol = LifecycleCatchProtocol::new(
+        origin,
+        LifecycleCatchState {
+            terminal_slot: guard.terminal_signal(),
+            finalize_emitted: guard.finalize_emitted(),
+        },
+        Some(prior_error.clone()),
+        origin_outcome,
+    );
+    while let Some(step) = protocol.next_step().cloned() {
+        let event_ctx = origin_ctx.with_signal(step.signal);
+        let event_ctx = match step.error.as_ref() {
+            Some(error) => event_ctx.with_error(error),
+            None => event_ctx,
+        };
+        let outcome = match step.execution {
+            LifecycleCatchExecution::Record => guard.execute_event(step.signal, &event_ctx),
+            LifecycleCatchExecution::RedesignateBlockedAsFailure => {
+                guard.redesignate_terminal_to_failure();
+                guard.run_event_stack(step.signal, &event_ctx)
+            }
+        };
+        assert!(protocol.record(step.signal, outcome));
+    }
+    protocol.finish().expect("loop catch protocol completed")
 }
 
 /// Outcome of the post-finalize loop gate.
@@ -875,24 +903,40 @@ fn run_loop_gate(
     // `finalize.stack` can react, then surfaces the typed evaluation error
     // (precedence: a raise inside `finalize` beats the loop raise).
     if let Some(info) = loop_outcome.evaluation_error.as_ref() {
-        let finalize_outcome = guard.execute_event(
-            LifecycleSignal::Finalize,
-            &loop_ctx.with_error(info).with_signal(LifecycleSignal::Finalize),
+        let result = execute_loop_catch_protocol(
+            guard,
+            &loop_ctx,
+            LifecycleSignal::Loop,
+            info,
+            loop_outcome.clone(),
         );
-        let decision = super::super::route_loop_gate(&loop_outcome, Some(&finalize_outcome));
-        debug_assert!(decision.evaluation_error_signal.is_some());
+        let surfaced_signal = result
+            .evaluation_error_signal
+            .expect("loop evaluation error remains terminal");
+        let surfaced_info = result
+            .evaluation_error
+            .as_ref()
+            .expect("evaluation signal carries error info");
         return Ok(LoopGateOutcome::Fail(
-            CompositionError::catch_evaluation_error(
+            CompositionError::lifecycle_evaluation(
+                surfaced_signal.property_name(),
                 prompt_path,
-                "loop",
-                info,
-                None,
-                Some(&finalize_outcome),
+                surfaced_info,
             ),
         ));
     }
 
-    let decision = super::super::route_loop_gate(&loop_outcome, None);
+    let decision = LifecycleCatchProtocol::new(
+        LifecycleSignal::Loop,
+        LifecycleCatchState {
+            terminal_slot: guard.terminal_signal(),
+            finalize_emitted: guard.finalize_emitted(),
+        },
+        None,
+        loop_outcome,
+    )
+    .finish()
+    .expect("clean loop gate requires no catch event");
 
     // An explicit `error(...)` in the gate stack converts the loop's final
     // outcome to failure and exits — before the condition is evaluated and

@@ -14,101 +14,249 @@ fn raised(message: &str) -> LifecycleEventOutcome {
 }
 
 #[test]
-fn blocked_routing_uses_finalize_failure_origin_precedence() {
-    let blocked = raised("blocked");
-    let failure = raised("failure");
-    let finalize = raised("finalize");
-    assert_eq!(
-        route_blocked_finalize(&blocked, Some(&failure), Some(&finalize))
-            .evaluation_error_signal,
-        Some(LifecycleSignal::Finalize)
-    );
-    assert_eq!(
-        route_blocked_finalize(&blocked, Some(&failure), None).evaluation_error_signal,
-        Some(LifecycleSignal::Failure)
-    );
-    assert_eq!(
-        route_blocked_finalize(&blocked, None, None).evaluation_error_signal,
-        Some(LifecycleSignal::Blocked)
-    );
-}
-
-#[test]
-fn phase_1_terminal_routing_matrix_pins_precedence_and_control() {
-    let control = StackControl::Stop;
-    let clean = LifecycleEventOutcome {
-        control: Some(control.clone()),
-        ..LifecycleEventOutcome::default()
-    };
+fn catch_protocol_origin_matrix_owns_eligibility() {
     let action_error = LifecycleEventOutcome {
-        control: Some(control.clone()),
         action_error: Some(LifecycleErrorInfo::from_action_failure("stdout", "closed")),
         ..LifecycleEventOutcome::default()
     };
-    let failure_raise = raised("failure");
-    let finalize_raise = raised("finalize");
-
     let cases = [
         (
-            "blocked clean",
-            route_blocked_finalize(&clean, None, None),
+            "initialize clean",
+            LifecycleSignal::Initialize,
+            LifecycleCatchState::default(),
+            LifecycleEventOutcome::default(),
             None,
-            Some(control.clone()),
         ),
         (
-            "blocked action error keeps originating control",
-            route_blocked_finalize(&action_error, None, None),
-            None,
-            Some(control.clone()),
-        ),
-        (
-            "failure raise supersedes blocked",
-            route_blocked_finalize(&clean, Some(&failure_raise), None),
+            "initialize evaluation",
+            LifecycleSignal::Initialize,
+            LifecycleCatchState::default(),
+            raised("initialize"),
             Some(LifecycleSignal::Failure),
-            None,
         ),
         (
-            "finalize raise supersedes failure raise",
-            route_blocked_finalize(&clean, Some(&failure_raise), Some(&finalize_raise)),
+            "start action error",
+            LifecycleSignal::Start,
+            LifecycleCatchState::default(),
+            action_error,
+            Some(LifecycleSignal::Failure),
+        ),
+        (
+            "initialize explicit error",
+            LifecycleSignal::Initialize,
+            LifecycleCatchState::default(),
+            LifecycleEventOutcome {
+                control: Some(StackControl::Error {
+                    reason: Some("refused".to_string()),
+                }),
+                ..LifecycleEventOutcome::default()
+            },
+            Some(LifecycleSignal::Failure),
+        ),
+        (
+            "failure evaluation",
+            LifecycleSignal::Failure,
+            LifecycleCatchState {
+                terminal_slot: Some(LifecycleSignal::Failure),
+                finalize_emitted: false,
+            },
+            raised("failure"),
             Some(LifecycleSignal::Finalize),
-            None,
         ),
         (
-            "failure origin clean",
-            route_failure_finalize(&clean, None),
-            None,
-            Some(control.clone()),
-        ),
-        (
-            "failure finalize raise",
-            route_failure_finalize(&clean, Some(&finalize_raise)),
+            "success evaluation",
+            LifecycleSignal::Success,
+            LifecycleCatchState {
+                terminal_slot: Some(LifecycleSignal::Success),
+                finalize_emitted: false,
+            },
+            raised("success"),
             Some(LifecycleSignal::Finalize),
-            None,
         ),
         (
-            "loop origin clean",
-            route_loop_gate(&clean, None),
-            None,
-            Some(control.clone()),
-        ),
-        (
-            "loop finalize raise",
-            route_loop_gate(&clean, Some(&finalize_raise)),
-            Some(LifecycleSignal::Finalize),
+            "post-finalize loop evaluation",
+            LifecycleSignal::Loop,
+            LifecycleCatchState {
+                terminal_slot: Some(LifecycleSignal::Success),
+                finalize_emitted: true,
+            },
+            raised("loop"),
             None,
         ),
     ];
 
-    for (name, actual, expected_signal, expected_control) in cases {
+    for (name, origin, state, outcome, expected) in cases {
+        let protocol = LifecycleCatchProtocol::new(origin, state, None, outcome);
         assert_eq!(
-            actual.evaluation_error_signal, expected_signal,
-            "evaluation-error precedence changed for {name}"
-        );
-        assert_eq!(
-            actual.control, expected_control,
-            "control propagation changed for {name}"
+            protocol.next_step().map(|step| step.signal),
+            expected,
+            "catch eligibility changed for {name}"
         );
     }
+}
+
+#[test]
+fn catch_protocol_origin_matrix_owns_precedence() {
+    let mut initialize = LifecycleCatchProtocol::new(
+        LifecycleSignal::Initialize,
+        LifecycleCatchState::default(),
+        None,
+        raised("initialize"),
+    );
+    assert!(initialize.record(LifecycleSignal::Failure, raised("failure")));
+    assert!(initialize.record(LifecycleSignal::Finalize, LifecycleEventOutcome::default()));
+
+    let mut start = LifecycleCatchProtocol::new(
+        LifecycleSignal::Start,
+        LifecycleCatchState::default(),
+        None,
+        raised("start"),
+    );
+    assert!(start.record(LifecycleSignal::Failure, LifecycleEventOutcome::default()));
+    assert!(start.record(LifecycleSignal::Finalize, raised("finalize")));
+
+    let mut failure = LifecycleCatchProtocol::new(
+        LifecycleSignal::Failure,
+        LifecycleCatchState {
+            terminal_slot: Some(LifecycleSignal::Failure),
+            finalize_emitted: false,
+        },
+        None,
+        raised("failure"),
+    );
+    assert!(failure.record(LifecycleSignal::Finalize, LifecycleEventOutcome::default()));
+
+    let mut success = LifecycleCatchProtocol::new(
+        LifecycleSignal::Success,
+        LifecycleCatchState {
+            terminal_slot: Some(LifecycleSignal::Success),
+            finalize_emitted: false,
+        },
+        None,
+        raised("success"),
+    );
+    assert!(success.record(LifecycleSignal::Finalize, raised("finalize")));
+
+    let loop_gate = LifecycleCatchProtocol::new(
+        LifecycleSignal::Loop,
+        LifecycleCatchState {
+            terminal_slot: Some(LifecycleSignal::Success),
+            finalize_emitted: true,
+        },
+        None,
+        raised("loop"),
+    );
+
+    let cases = [
+        (initialize, LifecycleSignal::Failure),
+        (start, LifecycleSignal::Finalize),
+        (failure, LifecycleSignal::Failure),
+        (success, LifecycleSignal::Finalize),
+        (loop_gate, LifecycleSignal::Loop),
+    ];
+    for (protocol, expected) in cases {
+        let result = protocol.finish().expect("protocol complete");
+        assert_eq!(result.evaluation_error_signal, Some(expected));
+        assert_eq!(result.control, None);
+    }
+}
+
+#[test]
+fn catch_protocol_owns_blocked_failure_finalize_order_and_error_threading() {
+    let blocked = raised("blocked");
+    let mut protocol = LifecycleCatchProtocol::new(
+        LifecycleSignal::Blocked,
+        LifecycleCatchState {
+            terminal_slot: Some(LifecycleSignal::Blocked),
+            finalize_emitted: false,
+        },
+        Some(LifecycleErrorInfo::from_action_failure("preflight", "original")),
+        blocked,
+    );
+    let failure = protocol.next_step().expect("failure requested");
+    assert_eq!(failure.signal, LifecycleSignal::Failure);
+    assert_eq!(
+        failure.execution,
+        LifecycleCatchExecution::RedesignateBlockedAsFailure
+    );
+    assert_eq!(failure.error.as_ref().map(|error| error.msg.as_str()), Some("blocked"));
+
+    assert!(protocol.record(LifecycleSignal::Failure, raised("failure")));
+    let finalize = protocol.next_step().expect("finalize requested");
+    assert_eq!(finalize.signal, LifecycleSignal::Finalize);
+    assert_eq!(finalize.execution, LifecycleCatchExecution::Record);
+    assert_eq!(
+        finalize.error.as_ref().map(|error| error.msg.as_str()),
+        Some("failure")
+    );
+
+    assert!(protocol.record(LifecycleSignal::Finalize, raised("finalize")));
+    let result = protocol.finish().expect("protocol complete");
+    assert_eq!(result.evaluation_error_signal, Some(LifecycleSignal::Finalize));
+    assert_eq!(
+        result.evaluation_error.as_ref().map(|error| error.msg.as_str()),
+        Some("finalize")
+    );
+    assert_eq!(
+        result.setup_error.as_ref().map(|error| error.msg.as_str()),
+        Some("blocked")
+    );
+    assert_eq!(result.control, None);
+}
+
+#[test]
+fn catch_protocol_returns_the_setup_error_that_selected_failure() {
+    let mut protocol = LifecycleCatchProtocol::new(
+        LifecycleSignal::Initialize,
+        LifecycleCatchState::default(),
+        None,
+        LifecycleEventOutcome {
+            control: Some(StackControl::Error {
+                reason: Some("refused".to_string()),
+            }),
+            ..LifecycleEventOutcome::default()
+        },
+    );
+    assert!(protocol.record(
+        LifecycleSignal::Failure,
+        LifecycleEventOutcome::default(),
+    ));
+    assert!(protocol.record(
+        LifecycleSignal::Finalize,
+        LifecycleEventOutcome::default(),
+    ));
+    let result = protocol.finish().expect("protocol complete");
+    assert_eq!(
+        result.setup_error.as_ref().map(|error| error.msg.as_str()),
+        Some("refused")
+    );
+    assert!(matches!(result.control, Some(StackControl::Error { .. })));
+}
+
+#[test]
+fn catch_protocol_finalizes_clean_blocked_without_failure() {
+    let control = StackControl::Stop;
+    let mut protocol = LifecycleCatchProtocol::new(
+        LifecycleSignal::Blocked,
+        LifecycleCatchState {
+            terminal_slot: Some(LifecycleSignal::Blocked),
+            finalize_emitted: false,
+        },
+        Some(LifecycleErrorInfo::from_action_failure("preflight", "original")),
+        LifecycleEventOutcome {
+            control: Some(control.clone()),
+            ..LifecycleEventOutcome::default()
+        },
+    );
+    assert_eq!(
+        protocol.next_step().map(|step| step.signal),
+        Some(LifecycleSignal::Finalize)
+    );
+    assert!(protocol.record(LifecycleSignal::Finalize, LifecycleEventOutcome::default()));
+    let result = protocol.finish().expect("protocol complete");
+    assert_eq!(result.evaluation_error_signal, None);
+    assert_eq!(result.setup_error, None);
+    assert_eq!(result.control, Some(control));
 }
 
 fn transition(
@@ -144,6 +292,12 @@ fn transition_error_matrix_covers_every_lifecycle_event() {
         ..LifecycleEventOutcome::default()
     };
     let evaluation = raised("evaluation");
+    let explicit = LifecycleEventOutcome {
+        control: Some(StackControl::Error {
+            reason: Some("failed".to_string()),
+        }),
+        ..LifecycleEventOutcome::default()
+    };
 
     struct Case {
         event: LifecycleSignal,
@@ -219,6 +373,15 @@ fn transition_error_matrix_covers_every_lifecycle_event() {
             },
         },
         Case {
+            event: LifecycleSignal::Initialize,
+            outcome: "explicit",
+            prior: false,
+            finalized: false,
+            expected: LifecycleTransitionDecision::CatchFailure {
+                error: LifecycleTransitionError::ExplicitControl,
+            },
+        },
+        Case {
             event: LifecycleSignal::Success,
             outcome: "evaluation",
             prior: false,
@@ -243,6 +406,7 @@ fn transition_error_matrix_covers_every_lifecycle_event() {
             "clean" => &clean,
             "action" => &action,
             "evaluation" => &evaluation,
+            "explicit" => &explicit,
             _ => unreachable!(),
         };
         assert_eq!(
