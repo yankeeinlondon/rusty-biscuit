@@ -48,7 +48,6 @@ pub use types::{
     ShellExpansionError, ShellExpansionOptions, ShellExpansionRuntime, ShellPolicyPaths,
     ShellRuleSet, ShellTimeoutBehavior,
 };
-pub(crate) use types::ShellRuntimeSnapshot;
 
 use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::ComposeWarning;
@@ -131,10 +130,8 @@ pub fn execute_directive(
     policy_paths: &ShellPolicyPaths,
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<String, ShellExpansionError> {
-    // A lone directive is its own stage, so it opens its own policy snapshot.
-    let snapshot = shell_runtime.snapshot();
     Ok(
-        execute_directive_detailed(directive, options, policy_paths, &snapshot, shell_runtime)?
+        execute_directive_detailed(directive, options, policy_paths, shell_runtime)?
             .combined_output(),
     )
 }
@@ -145,10 +142,9 @@ pub(crate) fn execute_directive_detailed(
     directive: &ShellDirective,
     options: &ComposeOptions,
     policy_paths: &ShellPolicyPaths,
-    snapshot: &ShellRuntimeSnapshot,
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<DirectiveExecutionResult, ShellExpansionError> {
-    let prepared = prepare_directive(directive, options, policy_paths, snapshot, shell_runtime)?;
+    let prepared = prepare_directive(directive, options, policy_paths, shell_runtime)?;
     execute_prepared_directive(&prepared, options, shell_runtime)
 }
 
@@ -157,29 +153,19 @@ pub(crate) fn execute_directive_detailed(
 ///
 /// ## Notes
 ///
-/// `snapshot` is the **stage-opening** policy view, taken once by the stage
-/// orchestrator via [`ShellExpansionRuntime::snapshot`] and shared by every
-/// directive that stage admits. This fixes the policy each directive is judged
-/// against for the whole stage, which has two consequences worth stating:
+/// Each directive is judged against a policy view taken at its own entry, so a
+/// rule persisted by an approval earlier in the same stage suppresses a later
+/// directive's prompt — the user-observable prompt frequency callers rely on.
+/// The view is an [`Arc`]-shared borrow of the runtime's rule collections
+/// ([`ShellExpansionRuntime::snapshot`]), not a copy of them, so taking it per
+/// directive costs three refcount bumps.
 ///
-/// - Whitelist/blacklist entries *persisted* by an approval earlier in this
-///   stage are written to the runtime but are **not** policy input until a
-///   later stage opens a fresh snapshot. A second directive matching a
-///   just-persisted rule therefore prompts again within the same stage.
-/// - Allow-once approvals are exempt: they are arbitrated live through
-///   [`ShellExpansionRuntime::reserve_allow_once`] against shared runtime
-///   state, not through `snapshot`, so one approval still covers repeats of
-///   that exact command across the rest of the stage (and across concurrent
-///   sibling transclusions).
-///
-/// Taking the snapshot per stage rather than per directive also keeps the
-/// policy mutex out of parsing, approval, and command execution: the lock is
-/// held only for the clone itself.
+/// The policy mutex is held only for those refcount bumps — never across
+/// parsing, approval, or command execution.
 pub(crate) fn prepare_directive(
     directive: &ShellDirective,
     options: &ComposeOptions,
     policy_paths: &ShellPolicyPaths,
-    snapshot: &ShellRuntimeSnapshot,
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<PreparedShellDirective, ShellExpansionError> {
     let (effective, alias_name) = resolve_or_passthrough(directive);
@@ -211,7 +197,7 @@ pub(crate) fn prepare_directive(
         });
     }
 
-    let runtime_snapshot = snapshot;
+    let runtime_snapshot = shell_runtime.snapshot();
 
     // 1. Check built-in blacklist for all commands
     for (exe, args) in executables_with_args(&effective) {
@@ -1435,10 +1421,10 @@ name: world
         assert_eq!(report.shell_expansions_applied, 2);
     }
 
-    /// F32, half 1 of the stage-snapshot visibility contract — a rule persisted
-    /// by an approval in one stage IS policy input for a *subsequent* stage.
-    /// The root body stage persists `prefix echo`; the transcluded child's body
-    /// stage opens a fresh snapshot, sees it, and never prompts.
+    /// F32, half 1 of the policy-visibility contract — a rule persisted by an
+    /// approval in one stage IS policy input for a *subsequent* stage. The root
+    /// body stage persists `prefix echo`; the transcluded child's body stage
+    /// sees it and never prompts.
     #[test]
     fn persisted_whitelist_from_one_stage_is_policy_input_for_the_next_stage() {
         let temp_dir = TempDir::new().unwrap();
@@ -1474,16 +1460,15 @@ name: world
         assert!(composed.content().contains("beta"));
     }
 
-    /// F32, half 2 of the stage-snapshot visibility contract — a rule persisted
-    /// mid-stage is written to the runtime but is NOT policy input for later
-    /// directives in that *same* stage, which are judged against the snapshot
-    /// the stage opened with. Both `echo` directives therefore prompt.
+    /// F32, half 2 of the policy-visibility contract — a rule persisted
+    /// mid-stage IS policy input for later directives in that *same* stage.
+    /// The first `echo` prompts and persists `prefix echo`; the second matches
+    /// that rule and must not prompt.
     ///
-    /// This is a deliberate behavior change from per-directive snapshotting,
-    /// where the second directive would have observed the freshly persisted
-    /// `prefix echo` rule and skipped its prompt.
+    /// This pins the user-observable prompt **frequency**: exactly one approval
+    /// for the pair. Finding 32's rule-set sharing must not change it.
     #[test]
-    fn persistence_mid_stage_is_not_policy_input_for_the_same_stage() {
+    fn persistence_mid_stage_is_policy_input_for_the_same_stage() {
         let temp_dir = TempDir::new().unwrap();
         let content = "::shell echo alpha\n\n::shell echo beta\n";
         let md: Markdown = content.into();
@@ -1503,11 +1488,10 @@ name: world
 
         assert_eq!(
             handler.approvals(),
-            2,
-            "both directives are judged against the stage-opening snapshot, which has no `echo` rule"
+            1,
+            "the second directive must observe the `prefix echo` rule the first one persisted, \
+             and not prompt again"
         );
-        // The persistence itself still happened — it is deferred as *policy
-        // input*, not dropped.
         let whitelist = std::fs::read_to_string(temp_dir.path().join(".darkmatter-shell-whitelist"))
             .unwrap();
         assert!(
@@ -1518,10 +1502,83 @@ name: world
         assert!(composed.content().contains("beta"));
     }
 
-    /// F32 — allow-once approvals are exempt from the stage-snapshot freeze.
-    /// They are arbitrated live through `reserve_allow_once` against shared
-    /// runtime state, so one approval still covers a repeat of that exact
-    /// command later in the SAME stage.
+    /// F32 — an exact-command persist mid-stage likewise suppresses a later
+    /// prompt for that same command, while a *different* command in the same
+    /// stage still prompts. Guards against a fix that preserves the frequency
+    /// count by over-authorizing rather than by refreshing the policy view.
+    #[test]
+    fn exact_persist_mid_stage_suppresses_only_the_same_command() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell --no-cache echo alpha\n\n::shell --no-cache echo alpha\n\n::shell --no-cache printf beta\n";
+        let md: Markdown = content.into();
+
+        let handler = Arc::new(CountingApprovalHandler::new(
+            ShellApprovalDecision::AllowExactPersist,
+        ));
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(handler.clone()),
+                ..Default::default()
+            });
+
+        let (_composed, _report) = md.compose_with(options).unwrap();
+
+        assert_eq!(
+            handler.approvals(),
+            2,
+            "the repeated `echo alpha` must reuse the persisted exact rule, but `printf beta` \
+             must still prompt on its own"
+        );
+    }
+
+    /// F32 — the runtime shares its rule collections with a snapshot by pointer
+    /// instead of deep-copying them, and a write copies-on-write so an
+    /// outstanding snapshot keeps observing the rules it was taken with.
+    ///
+    /// This is the structural bound behind the per-directive snapshot: taking a
+    /// view per directive is affordable only because it copies no rules.
+    #[test]
+    fn snapshot_shares_rule_collections_by_pointer() {
+        let mut runtime = ShellExpansionRuntime::new();
+
+        let first = runtime.snapshot();
+        let second = runtime.snapshot();
+        assert!(
+            Arc::ptr_eq(&first.whitelist, &second.whitelist),
+            "two snapshots of an unchanged runtime must share one whitelist allocation"
+        );
+        assert!(
+            Arc::ptr_eq(&first.user_blacklist, &second.user_blacklist),
+            "two snapshots of an unchanged runtime must share one blacklist allocation"
+        );
+        assert!(
+            Arc::ptr_eq(&first.allow_once, &second.allow_once),
+            "two snapshots of an unchanged runtime must share one allow-once allocation"
+        );
+
+        runtime.persist_whitelist_prefix("echo".to_string());
+
+        let third = runtime.snapshot();
+        assert!(
+            !Arc::ptr_eq(&first.whitelist, &third.whitelist),
+            "persisting a rule must not mutate a snapshot taken before it"
+        );
+        assert!(
+            first.whitelist.entries.is_empty(),
+            "the pre-persist snapshot must still observe the rules it was taken with"
+        );
+        assert!(
+            third.whitelist.matches_prefix("echo"),
+            "a snapshot taken after the persist must observe the new rule"
+        );
+    }
+
+    /// F32 — allow-once approvals are arbitrated live through
+    /// `reserve_allow_once` against shared runtime state rather than through a
+    /// snapshot, so one approval covers a repeat of that exact command later in
+    /// the SAME stage (and across concurrent sibling transclusions).
     #[test]
     fn allow_once_still_dedupes_within_a_single_stage() {
         let temp_dir = TempDir::new().unwrap();
@@ -1544,7 +1601,7 @@ name: world
         assert_eq!(
             handler.approvals(),
             1,
-            "allow-once must not be frozen by the stage snapshot"
+            "one allow-once approval must cover the repeat of that exact command"
         );
         assert_eq!(report.shell_expansions_applied, 2);
         assert_eq!(composed.content().matches("same").count(), 2);

@@ -87,10 +87,6 @@ pub(crate) fn run_shell_blocks_stage(
             source_file: source_file.clone(),
         })?;
 
-    // One policy snapshot opens the stage and is shared by every directive in
-    // it, rather than each directive cloning the rule sets for itself.
-    let snapshot = runtime.snapshot();
-
     let mut replacements = Vec::new();
     let mut report = ComposeReport::new();
 
@@ -128,7 +124,7 @@ pub(crate) fn run_shell_blocks_stage(
                 ctx: ctx.clone(),
             };
 
-            match prepare_directive(&directive, options, &policy_paths, &snapshot, runtime) {
+            match prepare_directive(&directive, options, &policy_paths, runtime) {
                 Ok(p) => prepared.push((p, command.clone())),
                 Err(e) => {
                     return Err(ShellBlockError::Command {

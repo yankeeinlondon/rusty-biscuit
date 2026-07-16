@@ -971,10 +971,15 @@ pub struct ShellExpansionRuntime {
 
 #[derive(Debug, Clone, Default)]
 struct SharedShellExpansionRuntime {
-    allow_once: HashSet<String>,
+    /// The three policy collections below are held behind `Arc` so
+    /// [`ShellExpansionRuntime::snapshot`] is a refcount bump rather than a deep
+    /// copy of every rule — a snapshot is taken once per directive, but rules
+    /// change only on approval. Writers copy-on-write via `Arc::make_mut`, so an
+    /// outstanding snapshot keeps observing the rules it was taken with.
+    allow_once: Arc<HashSet<String>>,
     pending_allow_once: HashSet<String>,
-    whitelist: ShellRuleSet,
-    user_blacklist: ShellRuleSet,
+    whitelist: Arc<ShellRuleSet>,
+    user_blacklist: Arc<ShellRuleSet>,
     policy_paths: Option<ShellPolicyPaths>,
     /// Per-compose memoization of shell command output, keyed by the normalized
     /// command string. Shared across recursive transclusion (same `Arc`), so an
@@ -993,11 +998,19 @@ struct CachedCommandOutput {
     stderr: String,
 }
 
+/// An immutable read-only view of the runtime's policy collections, shared by
+/// pointer with the runtime rather than deep-copied.
+///
+/// ## Notes
+///
+/// Cloning a snapshot costs three refcount bumps. Because writers copy-on-write,
+/// a snapshot is a stable view: rules persisted after it was taken are invisible
+/// to it, and a fresh snapshot is required to observe them.
 #[derive(Debug, Clone)]
 pub(crate) struct ShellRuntimeSnapshot {
-    pub allow_once: HashSet<String>,
-    pub whitelist: ShellRuleSet,
-    pub user_blacklist: ShellRuleSet,
+    pub allow_once: Arc<HashSet<String>>,
+    pub whitelist: Arc<ShellRuleSet>,
+    pub user_blacklist: Arc<ShellRuleSet>,
 }
 
 /// Result of attempting to reserve a normalized command for allow-once
@@ -1051,18 +1064,24 @@ impl ShellExpansionRuntime {
         if shared.policy_paths.is_some() {
             return Ok(());
         }
-        shared.whitelist = super::store::load_ruleset(&paths.whitelist)?;
-        shared.user_blacklist = super::store::load_ruleset(&paths.blacklist)?;
+        shared.whitelist = Arc::new(super::store::load_ruleset(&paths.whitelist)?);
+        shared.user_blacklist = Arc::new(super::store::load_ruleset(&paths.blacklist)?);
         shared.policy_paths = Some(paths.clone());
         Ok(())
     }
 
+    /// Takes an immutable view of the policy collections.
+    ///
+    /// ## Notes
+    ///
+    /// The lock is held only for three `Arc` clones — never across parsing,
+    /// approval, or command execution.
     pub(crate) fn snapshot(&self) -> ShellRuntimeSnapshot {
         let shared = self.shared.lock().unwrap();
         ShellRuntimeSnapshot {
-            allow_once: shared.allow_once.clone(),
-            whitelist: shared.whitelist.clone(),
-            user_blacklist: shared.user_blacklist.clone(),
+            allow_once: Arc::clone(&shared.allow_once),
+            whitelist: Arc::clone(&shared.whitelist),
+            user_blacklist: Arc::clone(&shared.user_blacklist),
         }
     }
 
@@ -1130,7 +1149,7 @@ impl ShellExpansionRuntime {
             let mut shared = self.shared.lock().unwrap();
             shared.pending_allow_once.remove(normalized);
             if approved {
-                shared.allow_once.insert(normalized.to_string());
+                Arc::make_mut(&mut shared.allow_once).insert(normalized.to_string());
             }
         }
         self.reservation_done.notify_all();
@@ -1138,24 +1157,21 @@ impl ShellExpansionRuntime {
 
     pub(crate) fn persist_whitelist_exact(&mut self, normalized: String) {
         let mut shared = self.shared.lock().unwrap();
-        shared
-            .whitelist
+        Arc::make_mut(&mut shared.whitelist)
             .entries
             .push(ShellRuleEntry::Exact(normalized));
     }
 
     pub(crate) fn persist_whitelist_prefix(&mut self, executable: String) {
         let mut shared = self.shared.lock().unwrap();
-        shared
-            .whitelist
+        Arc::make_mut(&mut shared.whitelist)
             .entries
             .push(ShellRuleEntry::Prefix(executable));
     }
 
     pub(crate) fn persist_blacklist_exact(&mut self, normalized: String) {
         let mut shared = self.shared.lock().unwrap();
-        shared
-            .user_blacklist
+        Arc::make_mut(&mut shared.user_blacklist)
             .entries
             .push(ShellRuleEntry::Exact(normalized));
     }

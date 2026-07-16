@@ -36,21 +36,12 @@ pub(crate) fn run_stage(
     let policy_paths = shell_expansion::resolve_policy_paths(&shell_opts, &options.source)?;
     runtime.shell.ensure_loaded(&policy_paths)?;
 
-    // One policy snapshot opens the stage and is shared by every directive in
-    // it, rather than each directive cloning the rule sets for itself.
-    let snapshot = runtime.shell.snapshot();
-
     let mut replacements = Vec::new();
 
     for directive in directives {
         let span_start = perf.is_enabled().then(std::time::Instant::now);
-        let execution = execute_directive_detailed(
-            &directive,
-            options,
-            &policy_paths,
-            &snapshot,
-            &mut runtime.shell,
-        )?;
+        let execution =
+            execute_directive_detailed(&directive, options, &policy_paths, &mut runtime.shell)?;
         if let Some(start) = span_start {
             perf.record_shell_span(ShellCommandSpan {
                 command_display: redact_shell_command(&directive.raw_command),
