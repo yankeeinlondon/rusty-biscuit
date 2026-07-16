@@ -1,12 +1,14 @@
 ---
 total_phases: 8
 created: 2026-07-16
-phase: 2
+phase: 3
 agent: codex/default
 yolo: true
 packages:
     - sniff
     - rendezvous-core
+    - rendezvous-client
+    - claudine-cli
 source_files_during_phase_1:
     - sniff/lib/src/os/user.rs
     - sniff/lib/src/os/mod.rs
@@ -24,6 +26,23 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - claudine/rendezvous/client/src/connector/mod.rs
+    - claudine/rendezvous/client/src/connector/unix.rs
+    - claudine/rendezvous/client/src/connector/windows.rs
+    - claudine/rendezvous/client/src/connector/tests.rs
+    - claudine/rendezvous/client/src/lib.rs
+    - claudine/rendezvous/client/src/main.rs
+    - claudine/rendezvous/core/src/socket.rs
+    - claudine/cli/src/commands/dashboard/mod.rs
+    - claudine/cli/src/commands/dashboard/tests.rs
+    - claudine/cli/src/commands/handle.rs
+    - claudine/cli/src/commands/wrap/session_report.rs
+    - claudine/cli/src/commands/wrap/session_report/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/requeue.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Cross-Platform, Per-User Rendezvous Local IPC — Execution Plan
@@ -180,30 +199,30 @@ client call sites.
 **Goal:** Give all consumers one typed connector with distinguishable failures
 before the server and call sites migrate.
 
-- [ ] Split `rendezvous-client` into `connector/mod.rs`, `connector/unix.rs`,
+- [x] Split `rendezvous-client` into `connector/mod.rs`, `connector/unix.rs`,
   and `connector/windows.rs`; make `connect` accept `LocalEndpoint` (or a
   borrow) and reject a target-incompatible variant explicitly.
-- [ ] Keep the Unix connector on `tokio::net::UnixStream` and retain tonic's
+- [x] Keep the Unix connector on `tokio::net::UnixStream` and retain tonic's
   placeholder URI only as HTTP/2 plumbing, not endpoint identity.
-- [ ] Open Windows pipes directly from `OsStr`/`OsString`; on
+- [x] Open Windows pipes directly from `OsStr`/`OsString`; on
   `ERROR_PIPE_BUSY`, wait/retry against one bounded deadline with deterministic
   backoff and no unbounded sleep.
-- [ ] Expand `ConnectError` so endpoint-not-found, permission-denied,
+- [x] Expand `ConnectError` so endpoint-not-found, permission-denied,
   busy-timeout, incompatible endpoint, and other listener/tonic transport
   failures remain distinguishable; add a private OS-error classifier that
   preserves the original source chain.
-- [ ] Add deterministic unit tests for endpoint dispatch, deadline exhaustion,
+- [x] Add deterministic unit tests for endpoint dispatch, deadline exhaustion,
   retry success, and OS error classification using injected connector/retry
   seams; keep real byte-stream tests for Phase 7.
-- [ ] **Parallelizable:** Implement Unix dispatch and Windows busy/error logic
+- [x] **Parallelizable:** Implement Unix dispatch and Windows busy/error logic
   independently after the shared `connect` and `ConnectError` contracts are
   fixed.
 
 **Validation checkpoint**
 
-- [ ] Run `cargo nextest run -p rendezvous-client --lib` and `cargo check -p
+- [x] Run `cargo nextest run -p rendezvous-client --lib` and `cargo check -p
   rendezvous-client --all-targets`.
-- [ ] Verify no client API accepts a generic `PathBuf` for a Windows named pipe
+- [x] Verify no client API accepts a generic `PathBuf` for a Windows named pipe
   and no production caller needs a `cfg(unix)`/`cfg(windows)` branch.
 
 ## Phase 4 — Extract One Shared Daemon Boot and Ownership Policy
