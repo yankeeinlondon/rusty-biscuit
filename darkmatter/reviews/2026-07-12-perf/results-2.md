@@ -13,6 +13,16 @@ benchmark: "effective_schema_ownership"
 
 # Finding 29 Follow-up — Shared Effective Schemas and Zero-Clone Baselines
 
+> **Still current (2026-07-16).** Unlike this review's other results, the
+> 2026-07-15 audit sustained Finding 29: its same-source A/B comparison is
+> valid, and the public `EffectiveSchema::json_schema` `Value` → `Arc<Value>`
+> ownership exception plus its owned compatibility facade are **approved and
+> preserved** as a standing invariant of
+> [`2026-07-15-performance-followup`](../../features/2026-07-15-performance-followup/spec.md).
+> No follow-up work reopened it. Final dispositions for every other finding are
+> in
+> [`2026-07-15-performance-followup/results.md`](../../features/2026-07-15-performance-followup/results.md).
+
 This follow-up records two consecutive ownership changes:
 
 1. `EffectiveSchema::json_schema` changed from `serde_json::Value` to

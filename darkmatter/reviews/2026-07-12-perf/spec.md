@@ -11,6 +11,24 @@ review_iterations: 3
 
 # Performance Review: Darkmatter Library and CLI
 
+> **Superseded in part (2026-07-16).** All 35 findings below were audited
+> against `51c1f16e10ffe825b56987573ba4eabc659c768e`. Where this review's
+> status and the audit disagree, **the audit wins** — two changes made here were
+> forbidden behavior changes and have since been reverted (Finding 1's
+> `sniff::detect_timezone()` boundary, Finding 22's directory-hash membership),
+> and several findings' evidence was rejected as measured at the wrong level.
+> The body and checkboxes below are preserved unedited as the historical
+> `codex/default` record; they are **not** the current disposition.
+>
+> - Final dispositions + evidence:
+>   [`2026-07-15-performance-followup/results.md`](../../features/2026-07-15-performance-followup/results.md)
+> - Audit table + retained work:
+>   [`2026-07-15-performance-followup/spec.md`](../../features/2026-07-15-performance-followup/spec.md)
+> - **Finding 18** correctness (graph opacity + document/options/mode identity)
+>   is owned exclusively by
+>   [`2026-07-15-reference-graph/`](../../features/2026-07-15-reference-graph/plan.md);
+>   no such work landed under this review.
+
 > **Verification-scope correction (2026-07-15):** This review introduced
 > `cargo check --workspace` as a cross-package closeout gate in commit
 > `64e4b8cb8`. That advice is superseded. Identify affected packages and

@@ -12,6 +12,20 @@ baseline: "./baseline.md"
 
 # Phase 11 Closeout — Darkmatter Performance Review (2026-07-12)
 
+> **Superseded as a gate (2026-07-16).** These numbers show direction but are
+> **not** a release gate: this table and [`baseline.md`](./baseline.md) were
+> captured over *different, unhashed fixture bytes*, so the before/after pair is
+> not comparable (Review 3's rejection). The command/TOC result was
+> reconstructed on identical hashed fixture bytes — same host, same immutable
+> fixture directory, predeclared thresholds, raw samples retained — and it
+> **passes** (`toc_large` 488 ms → 23 ms). See the reconstruction in
+> [`f4-historical-closeout`](../../features/2026-07-15-performance-followup/benchmarks/raw/f4-historical-closeout/run-20260715T232610/summary.md)
+> and the fixture identity authority in
+> [`benchmarks/manifest.yaml`](../../features/2026-07-15-performance-followup/benchmarks/manifest.yaml).
+> Read this file as the historical `codex/default` capture; final dispositions
+> are in
+> [`2026-07-15-performance-followup/results.md`](../../features/2026-07-15-performance-followup/results.md).
+
 After-fix measurements captured on the **same host** as
 [`baseline.md`](./baseline.md), so every number here diffs directly against the
 Phase 1 table. All numbers are from a **release** build of the `darkmatter`

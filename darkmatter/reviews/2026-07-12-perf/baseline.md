@@ -11,6 +11,18 @@ tool: "hyperfine 1.20.0 (--shell=none, stdout+stderr non-TTY)"
 
 # Phase 1 Baseline — Darkmatter Performance Review (2026-07-12)
 
+> **Not reproducible as captured (2026-07-16).** This baseline records fixture
+> *sizes* but not the fixture **bytes or their hashes**, and instructs re-runs to
+> use "any deterministic generator of the same sizes" — so it cannot be paired
+> with [`results.md`](./results.md) as a gate. That hole is closed by the
+> follow-up's immutable fixture manifest
+> ([`benchmarks/manifest.yaml`](../../features/2026-07-15-performance-followup/benchmarks/manifest.yaml):
+> committed bytes + a pinned generator + Darkmatter and xxHash identities) and
+> the same-bytes reconstruction of this commit (`83aaecc8f`) against the audit
+> commit in
+> [`f4-historical-closeout`](../../features/2026-07-15-performance-followup/benchmarks/raw/f4-historical-closeout/run-20260715T232610/summary.md).
+> Preserved unedited as the historical `codex/default` capture.
+
 Reproducible before/after baseline captured on **this host** so every later
 phase has a concrete checkpoint. All numbers are from a **release** build of the
 `darkmatter` branch at commit `83aaecc8f`, run through `hyperfine` with no TTY

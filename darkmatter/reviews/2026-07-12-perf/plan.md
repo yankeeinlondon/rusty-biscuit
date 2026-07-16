@@ -169,6 +169,20 @@ documentation:
 
 # Execution Plan: Darkmatter Performance Review (2026-07-12)
 
+> **Superseded in part (2026-07-16).** A checked box below means the step ran —
+> it does **not** mean the finding closed correctly. An audit of all 35 findings
+> against `51c1f16e10ffe825b56987573ba4eabc659c768e` found two forbidden
+> behavior changes landed here (Findings 1 and 22, both since reverted) and
+> several findings whose evidence was measured at the wrong level. This plan and
+> its checkboxes are preserved unedited as the historical `codex/default`
+> record; the current disposition of every finding lives in
+> [`2026-07-15-performance-followup/results.md`](../../features/2026-07-15-performance-followup/results.md),
+> driven by
+> [its plan](../../features/2026-07-15-performance-followup/plan.md) and
+> [audit table](../../features/2026-07-15-performance-followup/spec.md).
+> Finding 18's correctness half is owned by
+> [`2026-07-15-reference-graph/`](../../features/2026-07-15-reference-graph/plan.md).
+
 > **Verification-scope correction (2026-07-15):** Remaining gates use the
 > dependency-derived package-area scope below. Completed checklist entries that
 > record `cargo check --workspace` are historical evidence only and must not be
