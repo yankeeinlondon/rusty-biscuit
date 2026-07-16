@@ -26,6 +26,26 @@ use tempfile::TempDir;
 use tokio::time::sleep;
 use tonic::transport::Channel;
 
+/// A private directory to hold the endpoint.
+///
+/// `tempfile` creates 0755 directories, which the daemon refuses: the endpoint
+/// directory is the Unix security boundary. The real default resolves into a
+/// private directory, so a fixture has to build one too rather than dropping
+/// the socket straight into the temp root.
+fn runtime_socket(tmp: &TempDir, name: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::DirBuilderExt;
+
+    let dir = tmp.path().join("runtime");
+    if !dir.exists() {
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&dir)
+            .expect("create runtime dir");
+    }
+    dir.join(format!("{name}.sock"))
+}
+
+
 fn networking_config() -> NetworkConfig {
     NetworkConfig {
         quic_bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
@@ -52,7 +72,7 @@ async fn boot_daemon_with(
     name: &str,
     config: DaemonConfig,
 ) -> (ServerHandle, PathBuf) {
-    let socket = tmp.path().join(format!("{name}.sock"));
+    let socket = runtime_socket(tmp, name);
     let handle = spawn_uds_server(socket.clone(), config).expect("spawn daemon");
     wait_until_bound(&socket).await;
     (handle, socket)
