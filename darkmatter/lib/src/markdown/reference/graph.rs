@@ -998,6 +998,9 @@ fn generate_toc_link_references(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markdown::compose::{ComposeContext, ComposeOptions};
+    use crate::markdown::reference::ReferenceGraphMismatchKind;
+    use crate::markdown::reference::validate::ReferenceValidationOptions;
 
     #[test]
     fn single_document_graph() {
@@ -1442,5 +1445,350 @@ mod tests {
         assert_eq!(graph.node_count(), 2);
         let transclusions = graph.root().local_references.transclusions();
         assert_eq!(transclusions.len(), 1);
+    }
+
+    // ── Volatile-context reuse regressions ─────────────────────────────
+    //
+    // The provenance unit tests in `provenance.rs` assert that two option
+    // identities differ. That is necessary but not sufficient: it never shows
+    // the identity delta corresponds to a *real* difference in what the graph
+    // describes. These two build real graphs through `Markdown::reference_graph`
+    // under two contexts, prove the built graphs differ in contents, and then
+    // drive the public `validate_references_with_graph` entry point to show
+    // cross-context reuse is rejected while same-context reuse still succeeds.
+
+    /// Unwraps the typed prebuilt-graph mismatch classification, panicking on
+    /// any other error shape. Mirrors the public integration-test helper so the
+    /// assertion pins the classification rather than message text.
+    fn graph_mismatch_kind(err: &crate::markdown::MarkdownError) -> ReferenceGraphMismatchKind {
+        match err {
+            crate::markdown::MarkdownError::Reference(inner) => match inner.as_ref() {
+                crate::markdown::reference::ReferenceError::ReferenceGraphMismatch(mismatch) => {
+                    mismatch.kind()
+                }
+                other => panic!("expected a graph-mismatch reference error, got: {other}"),
+            },
+            other => panic!("expected a reference error, got: {other}"),
+        }
+    }
+
+    /// Every hyperlink target recorded on the graph's root node, in order.
+    fn root_link_targets(graph: &ReferenceGraph) -> Vec<String> {
+        graph
+            .root()
+            .local_references
+            .hyperlinks()
+            .iter()
+            .map(|record| {
+                record
+                    .target
+                    .raw()
+                    .expect("a link target is never inline")
+                    .to_string()
+            })
+            .collect()
+    }
+
+    /// A reference target produced by `{{ ctx.* }}` interpolation resolves to a
+    /// *different file* under a different context, so the two graphs record
+    /// different link targets. Reusing the first graph to validate the second
+    /// context's request would report on links the request never contained.
+    ///
+    /// `timestamp` is the volatile value here specifically because the
+    /// persistent-cache `context_hash` drops it — this is the case the
+    /// complete graph-context fingerprint exists to catch.
+    #[test]
+    fn prebuilt_graph_rejects_reuse_across_volatile_interpolated_link_target() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root_path = dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            "# Root\n\n[snapshot](./snapshot-{{ ctx.timestamp }}.md)\n",
+        )
+        .unwrap();
+        let md = Markdown::try_from(root_path.as_path()).unwrap();
+
+        let compose_for = |stamp: &str| {
+            ComposeOptions::new_with_context(ComposeContext::fixed_for_testing_with([(
+                "timestamp",
+                serde_json::json!(stamp),
+            )]))
+        };
+        let compose_a = compose_for("1000");
+        let compose_b = compose_for("2000");
+
+        let graph_a = md
+            .reference_graph(ReferenceGraphOptions::with_compose(compose_a.clone()))
+            .unwrap();
+        let graph_b = md
+            .reference_graph(ReferenceGraphOptions::with_compose(compose_b.clone()))
+            .unwrap();
+
+        // The graphs differ in *contents*, not merely in provenance: each root
+        // node recorded the interpolated target its own context produced.
+        assert_eq!(root_link_targets(&graph_a), ["./snapshot-1000.md"]);
+        assert_eq!(root_link_targets(&graph_b), ["./snapshot-2000.md"]);
+        assert_ne!(
+            root_link_targets(&graph_a),
+            root_link_targets(&graph_b),
+            "the volatile context must actually change the resolved link target, \
+             otherwise this fixture no longer exercises cross-context reuse"
+        );
+
+        // Positive control: same-context reuse is accepted, so the rejection
+        // below is attributable to the context delta and not to the graph being
+        // refused unconditionally.
+        let report = md
+            .validate_references_with_graph(
+                &graph_a,
+                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+                    compose_a,
+                )),
+            )
+            .expect("same-context reuse must be accepted");
+        assert_eq!(report.references_scanned, 1);
+
+        // Cross-context reuse is rejected on the options dimension.
+        let err = md
+            .validate_references_with_graph(
+                &graph_a,
+                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+                    compose_b,
+                )),
+            )
+            .unwrap_err();
+        assert_eq!(
+            graph_mismatch_kind(&err),
+            ReferenceGraphMismatchKind::Options
+        );
+    }
+
+    /// A `when=`-conditional transclusion gated on a volatile context value
+    /// materializes a child node under one context and not the other, so the
+    /// two graphs differ in node count and in the dependency manifest. Reusing
+    /// the child-bearing graph for a request whose context excludes the child
+    /// would validate references the request never composed.
+    #[test]
+    fn prebuilt_graph_rejects_reuse_across_volatile_when_controlled_transclusion() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("child.md"),
+            "# Child\n\n[c](https://child.example.com)\n",
+        )
+        .unwrap();
+        let root_path = dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            "# Root\n\n::file child.md when=\"ctx.memory_used > 2000\"\n",
+        )
+        .unwrap();
+        let md = Markdown::try_from(root_path.as_path()).unwrap();
+
+        let compose_for = |memory_used: u64| {
+            ComposeOptions::new_with_context(ComposeContext::fixed_for_testing_with([(
+                "memory_used",
+                serde_json::json!(memory_used),
+            )]))
+        };
+        let compose_excluded = compose_for(1024);
+        let compose_included = compose_for(4096);
+
+        let graph_excluded = md
+            .reference_graph(ReferenceGraphOptions::with_compose(
+                compose_excluded.clone(),
+            ))
+            .unwrap();
+        let graph_included = md
+            .reference_graph(ReferenceGraphOptions::with_compose(
+                compose_included.clone(),
+            ))
+            .unwrap();
+
+        // Contents differ: the condition decided whether the child became a node.
+        assert_eq!(
+            graph_excluded.node_count(),
+            1,
+            "condition false → child is not materialized"
+        );
+        assert_eq!(
+            graph_included.node_count(),
+            2,
+            "condition true → child is materialized"
+        );
+        assert!(
+            graph_excluded.provenance().dependencies().is_empty(),
+            "no child was visited, so nothing enters the dependency manifest"
+        );
+        assert_eq!(
+            graph_included.provenance().dependencies().len(),
+            1,
+            "the visited child records exactly one dependency entry"
+        );
+
+        // Positive control: same-context reuse is accepted for both graphs.
+        for (label, graph, compose) in [
+            ("excluded", &graph_excluded, compose_excluded.clone()),
+            ("included", &graph_included, compose_included.clone()),
+        ] {
+            md.validate_references_with_graph(
+                graph,
+                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+                    compose,
+                )),
+            )
+            .unwrap_or_else(|e| panic!("same-context {label} reuse must be accepted: {e}"));
+        }
+
+        // Cross-context reuse is rejected on the options dimension in both
+        // directions: neither graph describes the other context's document.
+        let err = md
+            .validate_references_with_graph(
+                &graph_included,
+                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+                    compose_excluded,
+                )),
+            )
+            .unwrap_err();
+        assert_eq!(
+            graph_mismatch_kind(&err),
+            ReferenceGraphMismatchKind::Options
+        );
+
+        let err = md
+            .validate_references_with_graph(
+                &graph_excluded,
+                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+                    compose_included,
+                )),
+            )
+            .unwrap_err();
+        assert_eq!(
+            graph_mismatch_kind(&err),
+            ReferenceGraphMismatchKind::Options
+        );
+    }
+
+    // ── Graph non-retention of stateful runtimes (AC6, invariant 7) ─────
+    //
+    // `prebuilt_graph_rejects_recreated_shared_remote_fetch` and the
+    // preflight fresh-instance rejection prove only that a *different* live
+    // instance mismatches — which is true whether the graph held the original
+    // strongly or held only a `Weak` (a distinct allocation mismatches either
+    // way). These two tests own the stateful instance externally so the strong
+    // count is directly observable, then build and drop a *real* graph to prove
+    // the graph captures only a `Weak` and never extends the instance lifetime.
+
+    /// Graph construction captures only a `Weak` identity handle for the shared
+    /// remote-fetch runtime, so building — and dropping — a real graph never
+    /// raises the runtime's strong count, and the runtime is released the
+    /// instant the last *external* strong handle is dropped.
+    #[test]
+    fn graph_build_does_not_retain_remote_fetch_runtime() {
+        use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
+        use biscuit_file::file_reference::fetch::FetchPolicy;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let root_path = dir.path().join("root.md");
+        std::fs::write(&root_path, "# Root\n\n[ok](https://example.com)\n").unwrap();
+        let md = Markdown::try_from(root_path.as_path()).unwrap();
+
+        // Own the runtime externally so its strong count is observable; the
+        // public `with_shared_remote_fetch()` builder hides the `Arc` inside the
+        // options where a graph-level test cannot reach it.
+        let runtime = RemoteFetchRuntime::with_policy(FetchPolicy::deny_all());
+        let weak = runtime.weak_id();
+        let strong_alone = runtime.strong_count();
+        assert_eq!(strong_alone, 1, "the external handle is the only owner");
+
+        let mut compose = ComposeOptions::new();
+        compose.remote_fetch = Some(runtime.clone());
+        assert_eq!(
+            runtime.strong_count(),
+            strong_alone + 1,
+            "the build options hold the second strong reference"
+        );
+
+        let graph = md
+            .reference_graph(ReferenceGraphOptions::with_compose(compose))
+            .unwrap();
+        // Building the graph moved and dropped the build options, and provenance
+        // captured only a `Weak`: the runtime is back to a single owner.
+        assert_eq!(
+            runtime.strong_count(),
+            strong_alone,
+            "graph construction must not retain a strong reference to the runtime"
+        );
+
+        drop(graph);
+        assert_eq!(
+            runtime.strong_count(),
+            strong_alone,
+            "dropping the graph leaves the runtime's strong count at baseline"
+        );
+
+        // Drop-probe: releasing the last external strong handle actually frees
+        // the runtime, proving nothing (least of all the already-dropped graph)
+        // pinned it alive.
+        assert!(weak.is_alive(), "the external handle still keeps it alive");
+        drop(runtime);
+        assert!(
+            !weak.is_alive(),
+            "with no strong owner left the runtime is dropped: the graph held only a Weak"
+        );
+    }
+
+    /// The same graph-level ownership proof for the shared preflight graph: an
+    /// externally owned `Arc<PreflightGraphNode>` makes the strong count
+    /// observable across a real graph build and drop, so non-retention is
+    /// proven rather than inferred from a fresh-instance rejection.
+    #[test]
+    fn graph_build_does_not_retain_preflight_graph() {
+        use crate::markdown::compose::preflight::PreflightGraphNode;
+        use std::sync::Arc;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let root_path = dir.path().join("root.md");
+        std::fs::write(&root_path, "# Root\n\n[ok](https://example.com)\n").unwrap();
+        let md = Markdown::try_from(root_path.as_path()).unwrap();
+
+        // Own the preflight `Arc` externally; the public `with_preflight_graph`
+        // builder moves the node in and wraps it in a private `Arc`.
+        let preflight = Arc::new(PreflightGraphNode::default());
+        let strong_alone = Arc::strong_count(&preflight);
+
+        let mut compose = ComposeOptions::new();
+        compose.preflight_graph = Some(Arc::clone(&preflight));
+        assert_eq!(
+            Arc::strong_count(&preflight),
+            strong_alone + 1,
+            "the build options hold one additional strong reference"
+        );
+
+        let graph = md
+            .reference_graph(ReferenceGraphOptions::with_compose(compose))
+            .unwrap();
+        // Graph construction consumed and dropped the build options and captured
+        // only a `Weak`, so the count is back to the external handle alone.
+        assert_eq!(
+            Arc::strong_count(&preflight),
+            strong_alone,
+            "graph construction must not retain a strong reference to the preflight graph"
+        );
+
+        drop(graph);
+        assert_eq!(
+            Arc::strong_count(&preflight),
+            strong_alone,
+            "dropping the graph leaves the preflight strong count at baseline"
+        );
+
+        // With the graph gone, the external handle is the sole owner; dropping
+        // it frees the node, proving the graph never pinned it.
+        let weak = Arc::downgrade(&preflight);
+        drop(preflight);
+        assert!(
+            weak.upgrade().is_none(),
+            "with no strong owner left the preflight node is dropped: the graph held only a Weak"
+        );
     }
 }

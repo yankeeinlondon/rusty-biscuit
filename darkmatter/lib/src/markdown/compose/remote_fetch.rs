@@ -215,6 +215,15 @@ impl RemoteFetchWeakId {
             _ => false,
         }
     }
+
+    /// Drop-probe: `true` while the referenced runtime allocation is still
+    /// live. Lets a test that has already released its own strong handle prove
+    /// the runtime was actually dropped — i.e. that nothing else (notably a
+    /// graph) retained a strong reference to it.
+    #[cfg(test)]
+    pub(crate) fn is_alive(&self) -> bool {
+        self.0.upgrade().is_some()
+    }
 }
 
 impl RemoteFetchRuntime {
@@ -224,6 +233,16 @@ impl RemoteFetchRuntime {
     /// private `inner` field; it only downgrades the shared allocation.
     pub(crate) fn weak_id(&self) -> RemoteFetchWeakId {
         RemoteFetchWeakId(Arc::downgrade(&self.inner))
+    }
+
+    /// Strong-reference count of the shared runtime allocation.
+    ///
+    /// Test-only observation handle: identity capture and graph ownership only
+    /// ever *downgrade* this `Arc`, so this count lets a graph-level test prove
+    /// that building (and dropping) a graph adds no strong reference.
+    #[cfg(test)]
+    pub(crate) fn strong_count(&self) -> usize {
+        Arc::strong_count(&self.inner)
     }
 
     /// Creates a runtime from the remote-read config with an optional
