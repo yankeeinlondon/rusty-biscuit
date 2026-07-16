@@ -1,11 +1,12 @@
 ---
 total_phases: 8
 created: 2026-07-16
-phase: 1
+phase: 2
 agent: codex/default
 yolo: true
 packages:
     - sniff
+    - rendezvous-core
 source_files_during_phase_1:
     - sniff/lib/src/os/user.rs
     - sniff/lib/src/os/mod.rs
@@ -15,6 +16,14 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1:
     - claudine/fixes/2026-07-13-rendezvous-local-ipc/change-notes.md
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - claudine/rendezvous/core/src/local_endpoint.rs
+    - claudine/rendezvous/core/src/local_endpoint/tests.rs
+    - claudine/rendezvous/core/src/lib.rs
+    - claudine/rendezvous/core/Cargo.toml
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 ---
 
 # Cross-Platform, Per-User Rendezvous Local IPC — Execution Plan
@@ -132,38 +141,38 @@ under which the current process runs.
 **Goal:** Make transport semantics explicit before migrating any server or
 client call sites.
 
-- [ ] Replace `rendezvous-core/src/socket.rs` with
+- [x] Replace `rendezvous-core/src/socket.rs` with
   `rendezvous-core/src/local_endpoint.rs`, export it from `lib.rs`, and define
   `LocalEndpoint::{UnixSocket(PathBuf), WindowsNamedPipe(OsString)}` without an
   ambiguous common path accessor.
-- [ ] Add explicit target-appropriate accessors and a safe display/rendering
+- [x] Add explicit target-appropriate accessors and a safe display/rendering
   projection; preserve the Windows pipe name as `OsString` end to end and never
   use `PathBuf::to_string_lossy()` for transport dispatch.
-- [ ] Define `RENDEZVOUS_ENDPOINT` and typed override parsing/validation; reject
+- [x] Define `RENDEZVOUS_ENDPOINT` and typed override parsing/validation; reject
   an empty, malformed, or target-incompatible endpoint with a distinct error.
-- [ ] Implement `default_local_endpoint() -> Result<LocalEndpoint, _>` using
+- [x] Implement `default_local_endpoint() -> Result<LocalEndpoint, _>` using
   `sniff::os::current_user_id()`: validated
   `$XDG_RUNTIME_DIR/claudine/rendezvous/daemon.sock` on Linux/WSL, a
   UID-qualified private temp fallback on Unix, and a SID-qualified
   `\\.\pipe\claudine-rendezvous-<sid>` name on Windows.
-- [ ] Keep default resolution non-mutating: it may inspect ownership, type,
+- [x] Keep default resolution non-mutating: it may inspect ownership, type,
   symlink status, and mode, but directory creation/removal remains in the
   daemon. Treat an invalid XDG runtime directory as unavailable and use the
   UID-qualified fallback; do not accept an unsafe explicit override.
-- [ ] Add `sniff` as a direct `rendezvous-core` dependency and update dependency
+- [x] Add `sniff` as a direct `rendezvous-core` dependency and update dependency
   declarations without introducing a reverse edge from Sniff into Rendezvous.
-- [ ] Add core tests for enum/accessor behavior, `RENDEZVOUS_ENDPOINT`
+- [x] Add core tests for enum/accessor behavior, `RENDEZVOUS_ENDPOINT`
   precedence, UID/SID-qualified defaults, username-environment independence,
   XDG acceptance/rejection, fallback selection, and target-incompatible
   variants. Serialize environment-mutating tests within each test process.
-- [ ] **Parallelizable:** Pure enum/override tests can proceed alongside the
+- [x] **Parallelizable:** Pure enum/override tests can proceed alongside the
   Unix and Windows default-derivation tests after the public signatures land.
 
 **Validation checkpoint**
 
-- [ ] Run `cargo nextest run -p rendezvous-core` and `cargo check -p
+- [x] Run `cargo nextest run -p rendezvous-core` and `cargo check -p
   rendezvous-core --all-targets`.
-- [ ] Verify `rendezvous-core` contains no directory creation, endpoint removal,
+- [x] Verify `rendezvous-core` contains no directory creation, endpoint removal,
   Unix listener, Windows pipe listener, or lossy pipe-name conversion.
 
 ## Phase 3 — Build the Portable Client Connector
