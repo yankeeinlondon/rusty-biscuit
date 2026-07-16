@@ -3,6 +3,7 @@ status: draft
 reviewed: true
 reviewed_by: claude/default
 reviewed_on: 2026-07-15
+review_iterations: 1
 created: 2026-07-15
 inputs:
   - ../../reviews/2026-07-12-perf/spec.md
@@ -628,8 +629,8 @@ prebuilt validation on small, large, and multi-transclusion fixtures.
 - Focused reference unit and integration tests.
 - Darkmatter `just test`.
 - Darkmatter `just lint`.
-- Workspace build, or the repository's documented narrow fallback when an
-  unrelated generated artifact blocks one workspace member.
+- Darkmatter `just build`; this package-area recipe covers the affected
+  `darkmatter`, `darkmatter-cli`, and `dmls` packages.
 - `git diff --check`.
 - GitNexus `detect_changes()` before commit.
 
