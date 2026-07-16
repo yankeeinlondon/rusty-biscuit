@@ -132,6 +132,16 @@ unscheduled spec; it must not be counted as delivered work in this review.
 
 ### Medium — `validate_references_with_graph` exposes an unchecked public graph/document contract
 
+> **Superseded 2026-07-15 by the Opaque Reference Graph feature**
+> (`darkmatter/features/2026-07-15-reference-graph/`). `ReferenceGraph` became the
+> identity-carrying, builder-produced artifact this finding asked for: its private
+> provenance records document/source/mode/options identity plus a visited-descendant
+> manifest, and `validate_references_with_graph` now rejects any mismatched pairing
+> (including a changed/missing/unreadable descendant) with
+> `ReferenceError::ReferenceGraphMismatch` before flattening. The negative tests for
+> mismatched document content, source path, and graph options ship with that feature.
+> The historical finding below is retained unchanged.
+
 The new public method accepts any `ReferenceGraph` and documents that it "must correspond" to the
 document and options, but it cannot enforce that relationship. A caller can accidentally pair a
 graph from another document or different graph options and receive a successful but incorrect

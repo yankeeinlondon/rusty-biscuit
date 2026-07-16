@@ -100,6 +100,17 @@ draft `2026-07-15-perf-tweaks` feature concerns only additional baseline-schema 
 
 ### Medium — The public prebuilt-graph validation API cannot enforce its correctness contract
 
+> **Superseded 2026-07-15 by the Opaque Reference Graph feature**
+> (`darkmatter/features/2026-07-15-reference-graph/`). `ReferenceGraph` is now an
+> opaque, builder-produced artifact carrying private document/source/mode/options
+> identities plus a visited-descendant dependency manifest.
+> `validate_references_with_graph` verifies all four dimensions and re-reads every
+> visited descendant before flattening, returning
+> `ReferenceError::ReferenceGraphMismatch` on any mismatch — so a graph paired with
+> a different document, source, mode, or options can no longer produce a false
+> success. Negative tests for mismatched body bytes, source, and options ship with
+> that feature. The historical finding below is retained unchanged.
+
 `Markdown::validate_references_with_graph` is public, but its only guard is documentation saying
 that the supplied graph must correspond to the same document and `options.graph`
 (`darkmatter/lib/src/markdown/reference/mod.rs:528-539`). The implementation flattens whatever graph
