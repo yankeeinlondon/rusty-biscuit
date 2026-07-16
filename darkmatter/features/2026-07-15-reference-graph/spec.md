@@ -1,6 +1,8 @@
 ---
 status: draft
-reviewed: false
+reviewed: true
+reviewed_by: claude/default
+reviewed_on: 2026-07-15
 created: 2026-07-15
 inputs:
   - ../../reviews/2026-07-12-perf/spec.md
@@ -65,8 +67,8 @@ but only builder-produced graphs are valid:
 - Public read-only accessors replace direct field access.
 - No public constructor, mutable accessor, parts conversion, `DerefMut`, or
   mutation method will bypass the invariant.
-- Every graph carries private document, source, graph-mode, and options
-  provenance.
+- Every graph carries private root-document, descendant-document, source,
+  graph-mode, and options provenance.
 - Provenance is compact and does not retain a full `Markdown`,
   `ComposeOptions`, context, cache, callback, preflight graph, or remote-fetch
   runtime.
@@ -80,8 +82,9 @@ correct public abstraction.
 
 1. Make it impossible for downstream crates to construct or mutate a
    `ReferenceGraph` outside Darkmatter's builders.
-2. Reject prebuilt graphs produced from different represented document bytes,
-   source identity, graph mode, or graph-affecting options.
+2. Reject prebuilt graphs produced from different represented root or visited
+   descendant document bytes, source identity, graph mode, or graph-affecting
+   options.
 3. Preserve the graph-reuse performance improvement from Finding 18.
 4. Preserve public builder and validation method signatures.
 5. Preserve `ReferenceGraph: Clone`; a clone carries the same immutable data
@@ -133,6 +136,8 @@ pairings:
   resolution;
 - the same document with different compose/reference options;
 - a transclusion-only graph passed to full reference validation;
+- a graph whose root is unchanged but whose stored child references came from
+  a descendant document that has since changed or disappeared;
 - a graph whose public `root` or `nodes` were changed after construction;
 - a manually assembled `ReferenceGraph { root, nodes }`.
 
@@ -149,13 +154,26 @@ The implementation must maintain all of the following:
 3. `Full` graphs contain the reference records required by reference
    validation; `TransclusionOnly` graphs are never accepted by the full
    validation entry point.
-4. A graph may be reused only when its document, source, and options identities
-   match the validation request.
+4. A graph may be reused only when its root document, source, graph mode,
+   options, and descendant-document identities match the validation request and
+   current dependency state.
 5. Cloning a graph preserves its contents and provenance exactly.
 6. Provenance never changes graph presentation or serialization.
 7. Stateful identity tracking does not keep stateful objects alive.
 8. When Darkmatter cannot establish identity, reuse is rejected rather than
    guessed.
+9. Identity is stable across `ComposeOptions::clone()`: a graph built from
+   `options.clone()` still matches `options`, so the Finding 18 reuse path
+   (which clones the same options for both the build and the validation call)
+   is never spuriously rejected.
+10. Provenance identifies every file-backed descendant document materialized as
+    a graph node, not only the root document. Before validation consumes stored
+    child reference records, every descendant source must still exist, be
+    readable, and have the represented-state identity recorded during graph
+    construction.
+11. A changed, missing, or unreadable descendant is a provenance mismatch. The
+    validator rejects the graph before flattening it; selectively re-reading
+    child headings does not make stale stored reference records safe.
 
 ## Target Public API
 
@@ -172,7 +190,7 @@ pub struct ReferenceGraph {
 impl ReferenceGraph {
     pub fn root(&self) -> &ReferenceGraphNode;
     pub fn nodes(&self) -> &[ReferenceGraphNode];
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = &ReferenceGraphNode>;
+    pub fn iter(&self) -> impl Iterator<Item = &ReferenceGraphNode> + '_;
     pub fn node_by_id(&self, id: &str) -> Option<&ReferenceGraphNode>;
     pub fn node_count(&self) -> usize;
     pub fn to_mermaid(&self) -> String;
@@ -184,10 +202,16 @@ impl ReferenceGraph {
 `iter()` yields the root first, followed by `nodes()` in their existing stored
 order. It exists because graph flattening, renderers, file-tree construction,
 and tests repeatedly need this exact traversal. It must not expose a mutable
-iterator.
+iterator. The return type is a plain `impl Iterator`, not
+`ExactSizeIterator`: the natural implementation is
+`std::iter::once(root).chain(nodes.iter())`, and `std::iter::Chain` does not
+implement `ExactSizeIterator`. Callers that need a length already have
+`node_count()`; do not hand-write an `ExactSizeIterator` adapter just to widen
+the bound.
 
-The internal constructor computes provenance itself so no caller can forget or
-mislabel it:
+The internal constructor computes the root, source, mode, and options provenance
+itself, then consumes the dependency manifest produced by the same graph-build
+runtime:
 
 ```rust
 pub(crate) fn from_build(
@@ -196,25 +220,37 @@ pub(crate) fn from_build(
     mode: ReferenceGraphMode,
     root: ReferenceGraphNode,
     nodes: Vec<ReferenceGraphNode>,
+    dependencies: ReferenceDependencyManifest,
 ) -> ReferenceGraph;
 ```
+
+`ReferenceDependencyManifest` is private build output assembled while child
+documents are already loaded. It contains compact identities, not child
+`Markdown` values. Only `reference/graph.rs` production construction may create
+a non-empty manifest. The constructor does not accept separately supplied root
+or options hashes, so those identities cannot be forgotten or mislabeled.
 
 There is no public `new`, `from_parts`, `Default`, deserializer, or mutable
 parts accessor.
 
 ## Graph Views
 
-The current `ReferenceGraphNodeView` has public fields, allowing callers to pair
-a node with an unrelated graph. Replace direct field construction with a
-graph-produced view:
+The current public `ReferenceGraphNodeView` has public fields
+(`node`, `graph`, `follow`), allowing callers to pair a node with an unrelated
+graph. Remove it from the public API and replace direct field construction with
+a graph-produced view rooted at the graph's own root:
 
 ```rust
 let json = serde_json::to_value(graph.view(follow))?;
 ```
 
-`ReferenceGraphView` and any node-view helper keep their fields private. A
-crate-private recursive helper may serialize child nodes. The emitted root JSON
-remains byte-for-byte shape-compatible:
+`graph.view(follow)` is the public replacement: it always serializes from
+`self.root` (the previous `node: &graph.root`) and threads `follow` down the
+tree. `ReferenceGraphView` and any per-node view helper keep their fields
+private, so a view can never be constructed against a foreign graph or node. A
+crate-private recursive helper may serialize child nodes (the old
+`ReferenceGraphNodeView` serialization logic becomes this private helper). The
+emitted root JSON remains byte-for-byte shape-compatible:
 
 - `file`
 - `source`
@@ -234,6 +270,7 @@ struct ReferenceGraphProvenance {
     source: Option<ComposeSource>,
     mode: ReferenceGraphMode,
     options: ReferenceGraphOptionsIdentity,
+    dependencies: ReferenceDependencyManifest,
 }
 
 enum ReferenceGraphMode {
@@ -242,10 +279,10 @@ enum ReferenceGraphMode {
 }
 ```
 
-### Document identity
+### Root document identity
 
-Document identity covers the complete document state observed by graph
-construction:
+The root document identity covers the complete in-memory document state
+observed by graph construction:
 
 - raw frontmatter text when Darkmatter retains it;
 - a canonical frontmatter representation otherwise;
@@ -263,6 +300,49 @@ an ad hoc hasher.
 The identity is a practical in-process correctness guard, not an authentication
 token. Documentation must not call xxHash provenance cryptographically
 unforgeable.
+
+### Descendant dependency identity
+
+Graph construction reads each followed local Markdown document, prepares it,
+and stores its reference records in a graph node. Those records become stale if
+the document changes after graph construction. Provenance therefore includes a
+private manifest entry for every file-backed non-root document materialized as
+a node:
+
+```rust
+struct ReferenceDependencyManifest {
+    documents: Vec<ReferenceDocumentDependency>,
+}
+
+struct ReferenceDocumentDependency {
+    source: ComposeSource,
+    document: ReferenceDocumentIdentity,
+}
+```
+
+Requirements:
+
+1. Capture the identity from the same loaded `Markdown` value used to build the
+   node; do not perform a second construction-time file read.
+2. Hash once per unique resolved descendant source. Repeated insertions of the
+   same document share one manifest entry.
+3. Store entries in deterministic source order so graph clones and diagnostics
+   are stable.
+4. Before flattening the graph, validation reloads each local dependency and
+   compares its represented-state identity. A missing or unreadable dependency
+   is a mismatch, not an empty document.
+5. The validation check uses content identity rather than modification time,
+   size, inode, or another metadata-only shortcut. Metadata may be used only as
+   an optimization that cannot produce a false match.
+6. Dependency verification must not expose hashes or sources in graph JSON.
+7. Remote reference targets that are not materialized as child graph nodes do
+   not enter this manifest. Their reachability remains governed by
+   `ReferenceValidationOptions::validate_remote` and the existing remote-read
+   policy.
+
+This manifest is not a persistent cache contract. It is the minimum state
+needed to prevent public prebuilt validation from mixing stored references from
+an old child document with live filesystem state from a new one.
 
 ### Source identity
 
@@ -293,8 +373,12 @@ untracked graph input.
 
 Requirements:
 
-1. Define one crate-private `ReferenceGraphOptionsIdentity::capture` authority
-   in the `ComposeOptions` owning module.
+1. Define one crate-private, exhaustive `ComposeOptions` field-classification
+   authority in the `ComposeOptions` owning module. Derive
+   `ReferenceGraphOptionsIdentity::capture` from it. The linked performance
+   follow-up's compose-cache identity uses the same classification but derives a
+   purpose-specific value fingerprint; graph comparison and persistent cache
+   identity must not collapse into one undifferentiated product.
 2. Destructure `ComposeOptions` exhaustively without `..` so adding a field
    causes a compile error until its identity treatment is chosen.
 3. Encode ordinary values canonically with field names, type boundaries, and a
@@ -310,6 +394,23 @@ Requirements:
    graphs, or remote-fetch runtimes.
 9. A dropped or recreated stateful instance is not assumed equivalent. Reject
    reuse unless identity is proven.
+10. Identity must survive `ComposeOptions::clone()`. The Finding 18 reuse path
+    clones the same options for the build and the validation call — see
+    `FileTree::ensure_built`, which passes `self.graph_options.clone()` to
+    `reference_graph(...)` and again into the validation options. A graph built
+    from `options.clone()` must therefore satisfy the compatibility check
+    against `options` (and any further clone). Stateful fields consequently
+    share instances through `Arc` (or an equivalent identity-preserving handle)
+    so a clone compares equal by instance identity; a clone that manufactured a
+    fresh stateful instance would reject the legitimate reuse and silently
+    erase Finding 18's win (caught only by the performance gate, not by the
+    correctness tests). This is the load-bearing constraint that lets fail-closed
+    identity coexist with the reuse optimization.
+11. Only `ReferenceGraphOptions` (its wrapped `ComposeOptions`) participates in
+    graph identity. The non-graph `ReferenceValidationOptions` fields
+    (`validate_remote`, `validate_fragments`, `remote_timeout`, `fail_fast`)
+    govern how the flattened set is validated, not how the graph is built, and
+    are excluded from provenance.
 
 Performance-only fields may make identity stricter than necessary in v1. That
 is acceptable. Narrowing the identity later requires a focused audit proving
@@ -326,18 +427,39 @@ document mismatch     -> error
 source mismatch       -> error
 graph mode mismatch   -> error
 options mismatch      -> error
+dependency mismatch   -> error
 all identities match  -> validate using the prebuilt graph
 ```
+
+The request-side identity is drawn from the method's own inputs: `self`
+supplies the live document and source identity, and the compared options are
+`options.graph` — the `ReferenceGraphOptions` nested inside the passed
+`ReferenceValidationOptions`, the same value the graph would have been built
+from. The other `ReferenceValidationOptions` fields do not participate (see
+Options identity requirement 11). Descendant identity is checked independently
+by reloading the graph's private dependency manifest before graph flattening.
 
 Use a structured mismatch reason rather than tests that depend only on an
 arbitrary message substring. The preferred shape is a dedicated
 `ReferenceGraphMismatch` reason carried by a `ReferenceError` variant. Its
 terminal rendering should state which dimension differs and instruct the caller
-to rebuild the graph from the same document and options.
+to rebuild the graph from the same document and options. A dependency mismatch
+also identifies the changed, missing, or unreadable child source without
+exposing its content fingerprint.
 
 The ordinary `validate_references` path remains unchanged conceptually: it
 builds a full graph and immediately validates it, so compatibility is guaranteed
 by construction.
+
+A mismatch is a hard error, not a transparent rebuild. A self-healing fallback
+(silently discard the supplied graph, build a fresh one, validate that) was
+considered and rejected: it would preserve the "always returns a correct report"
+property but hide the caller bug that produced the mismatched pairing, which is
+exactly the class of defect this feature exists to surface (invariant 8, "reuse
+is rejected rather than guessed"). Callers who genuinely want build-and-validate
+in one step already have `validate_references`; `validate_references_with_graph`
+is the explicit opt-in whose entire contract is "I hold a matching graph," so a
+mismatch there is a programming error worth failing loudly on.
 
 ## Compatibility Ruling
 
@@ -377,6 +499,27 @@ dependents, two affected modules (`reference` and `file_tree`), and no indexed
 execution-flow boundary outside them. Text search adds the CLI JSON adapter and
 integration tests that access public fields directly.
 
+Provenance is finalized exactly once per graph, at the single outer
+constructor. `build_graph_inner` (which recurses through `build_node`) already
+assembles the final `root` and `all_nodes` before returning; its terminal
+`Ok(ReferenceGraph { root, nodes })` becomes
+`Ok(ReferenceGraph::from_build(md, options, mode, root, all_nodes,
+dependencies))`.
+
+`build_graph_inner` accepts `ReferenceGraphMode`, not a separate
+`extract_references: bool`. It derives extraction behavior from the mode so the
+stored provenance and graph contents have one source of truth:
+
+```rust
+let extract_references = matches!(mode, ReferenceGraphMode::Full);
+```
+
+The two builders pass `Full` and `TransclusionOnly`, respectively. While
+`build_node` recursively loads child Markdown, the run-local analysis runtime
+records one compact dependency identity per unique resolved child source. The
+outer constructor consumes that finished manifest. Hash once per unique visited
+document, not once per insertion or once per recursive node occurrence.
+
 Migrate these groups:
 
 1. `reference/graph.rs`: internal construction, flattening, graph renderers,
@@ -387,9 +530,26 @@ Migrate these groups:
 5. `darkmatter/cli/src/commands/graph.rs`: JSON view construction.
 6. `darkmatter/lib/tests/reference_integration.rs`: public accessor coverage.
 
-Tests that currently create graph literals must use a real Markdown builder or
-a crate-private builder helper that still computes valid provenance. Do not add
-a `for_test()` provenance escape hatch that fabricates an unrelated identity.
+Tests that currently create graph literals must route through the internal
+constructor. There are two distinct cases, and the ban on fabricated identity
+applies to only one of them:
+
+- **Validation tests** exercise `validate_references_with_graph` and its
+  compatibility check. These must build the graph from a real `Markdown`
+  through the ordinary builders so provenance is genuine. Do not add a
+  `for_test()` escape hatch that fabricates an unrelated identity to force a
+  match — that would defeat the feature under test.
+- **Flatten / model / serialization tests** (the many synthetic-shape graphs in
+  `reference/graph.rs`, `reference/types.rs`, and `reference/file_tree/model.rs`
+  — e.g. two prologues sharing line 0, or hand-authored `child_a`/`child_b`
+  node IDs) assemble node shapes that no single real document produces, and
+  they never call validation. They may hand the pre-built `root` and `nodes` to
+  `from_build` with a placeholder document (`&Markdown::new("")`) and an empty
+  dependency manifest. The recorded provenance is inert for these tests because
+  nothing compares it; this is not a fabricated *match*, so it does not violate
+  the rule above. `from_build` accepting caller-supplied `root`/`nodes` and the
+  private manifest is exactly what makes this possible without a separate
+  public escape hatch.
 
 ## Verification
 
@@ -402,6 +562,14 @@ a `for_test()` provenance escape hatch that fabricates an unrelated identity.
   the same reference shape.
 - Identical content with a different file source is rejected.
 - Identical content with a different URL source is rejected.
+- Editing a visited child document after graph construction is rejected before
+  flattening, even when fragment validation is disabled.
+- Adding a broken reference to a visited child after graph construction cannot
+  produce a successful report from the stale graph.
+- Deleting a visited child or making it unreadable is reported as a dependency
+  mismatch.
+- Reaching one child through multiple insertions produces one dependency entry,
+  and an unchanged child passes validation.
 - Representative scalar, collection, context, schema, transclusion, remote,
   and shell option changes are rejected.
 - A transclusion-only graph is rejected by full reference validation.
@@ -410,6 +578,17 @@ a `for_test()` provenance escape hatch that fabricates an unrelated identity.
   their visible configuration matches.
 - Building and dropping a graph does not increase the final strong count of
   callbacks, preflight graphs, or shared runtimes.
+- A graph built from `options.clone()` passes the compatibility check against
+  the original `options` and against a further clone (invariant 9). This is the
+  guard that the Finding 18 reuse path — which clones the same options for the
+  build and the validation call — is not silently rejected, turning a
+  performance regression that only the benchmark would notice into a hard
+  correctness assertion.
+- A graph built with a progress/side-channel callback attached only to the
+  build options is rejected when validation supplies a *different* instance of
+  that callback, confirming instance-identity comparison (and documenting that
+  attaching such a callback to only one of the two calls forfeits reuse — the
+  accepted v1 conservatism).
 
 ### Accessor and presentation tests
 
@@ -420,6 +599,8 @@ a `for_test()` provenance escape hatch that fabricates an unrelated identity.
 - File-tree terminal output is unchanged.
 - Followed and non-followed JSON graph views are unchanged.
 - JSON contains no provenance, hashes, graph mode, or runtime identities.
+- JSON contains no dependency manifest, child fingerprints, or freshness
+  diagnostics.
 
 ### Compile-time maintenance guard
 
@@ -435,6 +616,8 @@ prebuilt validation on small, large, and multi-transclusion fixtures.
 
 - Prebuilt validation must remain materially faster than rebuilding the graph.
 - Provenance must not retain large objects or introduce superlinear work.
+- Descendant verification hashes each unique visited child at most once per
+  validation call and does not parse or reconstruct the reference graph.
 - A construction regression is unacceptable when it exceeds both 5% and
   100 microseconds at the median on a stable fixture.
 - Record fixture identity, sample count, dispersion, host, and commit/worktree
@@ -459,8 +642,9 @@ Update together with implementation:
 
 - `ReferenceGraph` rustdoc: builder-produced, immutable artifact contract.
 - `Markdown::reference_graph` and `transclusion_graph` rustdoc: recorded mode.
-- `Markdown::validate_references_with_graph` rustdoc: matching provenance and
-  full-mode requirements plus structured mismatch errors.
+- `Markdown::validate_references_with_graph` rustdoc: matching provenance,
+  descendant freshness, and full-mode requirements plus structured mismatch
+  errors.
 - Darkmatter skill: use builders and read-only accessors; provenance is private
   and JSON-invisible.
 - The 2026-07-12 performance review records: move the public graph correctness
@@ -472,16 +656,23 @@ Update together with implementation:
 2. Downstream code can inspect but cannot construct or mutate graph contents.
 3. All graph construction routes through one provenance-computing internal
    constructor.
-4. Full validation rejects mismatched document state, source, graph mode, and
-   options before reading graph contents.
+4. Full validation rejects mismatched root document state, descendant document
+   state, source, graph mode, and options before flattening node contents.
 5. `ComposeOptions` identity is canonical, compact, exhaustive, and does not
    rely on `Debug` output.
 6. Graph ownership does not extend stateful callback/runtime/preflight
    lifetimes.
-7. Direct field and graph-view literal callsites use the supported accessors.
-8. Existing graph, file-tree, Mermaid, DOT, terminal, and JSON behavior is
+7. Each unique visited local child has one compact dependency identity, and
+   changed, missing, or unreadable children reject reuse before flattening.
+8. Graph mode is the sole input controlling reference extraction; no parallel
+   Boolean can disagree with recorded provenance.
+9. Identity is clone-stable: a graph built from `options.clone()` still
+   validates against `options`, so the Finding 18 reuse path is preserved
+   rather than silently rebuilding.
+10. Direct field and graph-view literal callsites use the supported accessors.
+11. Existing graph, file-tree, Mermaid, DOT, terminal, and JSON behavior is
    preserved.
-9. Focused tests, Darkmatter L1, lint, build, whitespace, and GitNexus scope
-   checks pass.
-10. Performance evidence confirms that safe prebuilt validation retains its
+12. Focused tests, Darkmatter L1, lint, build, whitespace, and GitNexus scope
+    checks pass.
+13. Performance evidence confirms that safe prebuilt validation retains its
     intended win without a material graph-construction regression.
