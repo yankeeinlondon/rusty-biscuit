@@ -24,7 +24,7 @@ start:
 success: 
     say: "Phase {{phase}} of the plan in the {{area}} package area, was implemented successfully"
     message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{ctx.area}}, {{ctx.agent}}/{{ctx.model}})"
-    success: "Completed the implementation of {{plan}}"
+    success: "Completed the implementation of {{ link(plan) }} in {{ctx.area}}"
 
     stack:
         - action:

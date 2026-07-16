@@ -1,11 +1,11 @@
 ---
 $schema:
     review: file(required; match(**/*review*.md); eager)
-    template: file(required; match(prompts/*.md,.claudine/prompts/*.md); eager)
+    template: file(match(prompts/*.md,.claudine/prompts/*.md); eager)
     plan: file
 description: Reviews how well the _implementation_ of a certain set of review findings addressed the underlying problems which were raised.
 
-plan: "{{ basename(review) + '/' + }}"
+plan: "{{ basename(review) + '/' + replace(review,'review','plan') }}"
 
 start:
     message: "🥸 reviewing the _implementation_ of the findings in `{{parent_dir(review)}}`"
@@ -17,23 +17,27 @@ success:
 
 ## Context
 
-The review findings found in '{{review}}' were based on the following review template:
+::block when="template"
+The review findings found in '{{review}}' were the result of the following _review_ prompt being run:
 
-- Review Template: {{template}}
+- Prompt: {{template}}
+::end-block
 
-The review _findings_ which came from that review were captured here:
+The review _findings_ were captured here:
 
 - Review Findings: {{review}}
 
+::block when="plan"
 These findings were turned into an implementation plan found here:
 
 - Implementation Plan: {{plan}}
+::end-block
 
 And the findings from the review have now been implemented in the source code.
 
 ## Skills
 
-::block when="{{ has_skill(ctx.area) }}"
+::block when="has_skill(ctx.area)"
 - use the '{{ctx.area}}' agent skill for deep understanding of the functionality and solution approach used in the package area
     - Be aware that having just completed an implementation in this package area, there is some potential for documentation drift having taken place with this agent skill but this should be the exception rather than the rule
     - In general you can trust the information contained in this skill to be accurate and current but where you notice drift take a note of it because part of this task will be to eliminate any documentation drift that may have landed in this agent skill
