@@ -1,5 +1,5 @@
 ---
-hash: ef46db3751d8e999-df96b361ac99953b
+hash: ef46db3751d8e999-4d16a4d593030242
 last_updated: 2026-07-15
 ---
 # Claudine Composition
@@ -284,12 +284,37 @@ highlight).
 
 The block is **TTY-gated**: it is rendered only when stderr is a TTY, and
 withheld in piped / `NO_COLOR` / CI output so frontmatter is never exposed into
-logs. Capture happens at the render boundary — after all control-flow handling —
-so the wrapper never interferes with upstream decisions; the CLI error walker
-renders the deepest typed diagnostic and appends the YAML block after it. The
-motivating case: a `success.message` referencing `{{review-file}}` (hyphen) when
-the variable is `review_file` (underscore) now shows the frontmatter with the
-offending line highlighted, instead of an opaque "interpolation leaked" message.
+logs — unless `FORCE_COLOR=1` overrides the gate. At `ColorDepth::None`,
+`report_block_error` strips escapes for every variant. Capture happens at the
+render boundary — after all control-flow handling — so the wrapper never
+interferes with upstream decisions; the CLI error walker (`output::error_walker`)
+renders the deepest typed diagnostic and appends the YAML block after it
+(`excerpt.render_appendix`). The motivating case: a `success.message` referencing
+`{{review-file}}` (hyphen) when the variable is `review_file` (underscore) now
+shows the frontmatter with the offending line highlighted, instead of an opaque
+"interpolation leaked" message.
+
+**Near-miss frontmatter fences.** A `----`+ delimiter (instead of `---`) is
+detected by Darkmatter as `MarkdownError::FrontmatterFenceMismatch` and mapped by
+Claudine to `CompositionError::FrontmatterParse`; `FrontmatterExcerpt::capture_line`
+captures the matched fence pair and highlights the delimiter line (typically
+line 1).
+
+**Mechanism.** `composition::FrontmatterExcerpt` (module `frontmatter_excerpt`)
+captures the block plus its highlight line;
+`CompositionError::enrich_frontmatter(source, stderr_is_tty)` wraps a
+frontmatter-rooted error in the transparent
+`CompositionError::WithFrontmatter { inner, excerpt }` variant at the render
+boundary, so upstream variant matching is unaffected. This superseded the
+inline-compose mismatch's bespoke verbatim-YAML dump — the `raw_yaml` /
+`stderr_is_tty` fields were removed.
+
+## Prepare-time warnings
+
+Unknown expression functions and unknown `ctx.*` references detected during
+prepare emit non-fatal did-you-mean warnings to stderr, suppressed by `--silent`.
+String literals and code fences do not trigger the `ctx.*` diagnostic because it
+is parsed from the interpolation AST, not a raw text scan.
 
 ## Provider Selection
 

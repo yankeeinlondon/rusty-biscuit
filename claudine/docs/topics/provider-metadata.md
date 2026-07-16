@@ -181,12 +181,11 @@ mechanism.)
   every run.
 - **Governed-site census.** The authoritative count is the length of
   `GUARD_ALLOWLIST` itself — the guard prints a live burn-down summary by tag on
-  every run, so the number is derived rather than frozen in prose. It currently
-  stands at 18 conditional, non-exempt sites, **all `keep`, zero pending
-  migration**: every ws0-prep / ws3-profile / render migration completed in
-  Phases C/D/G. The remainder are genuinely behavioral: Codex/OpenCode wire and
-  stderr-bridge quirks, shadow-HOME mechanics, and Claude's canonical role as the
-  native home for linked skills/commands/agents.
+  every run, so the number is derived rather than frozen in prose. Every
+  remaining site is tagged `keep`; the ws0-prep / ws3-profile / render
+  migrations completed in Phases C/D/G. The remainder are genuinely behavioral:
+  Codex/OpenCode wire and stderr-bridge quirks, shadow-HOME mechanics, and
+  Claude's canonical role as the native home for linked skills/commands/agents.
 
 ### WrapperProfile as a behavior shim
 

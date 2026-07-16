@@ -36,6 +36,7 @@ Behavior:
 - they are mutually exclusive
 - explicit files are resolved as plain paths relative to the launch CWD unless already absolute
 - if an explicit file is selected, standard `system-prompt.md` discovery is skipped
+- direct provider wrappers additionally accept `--edit`, which opens the **user prompt** (not the system prompt) in an external editor before launch; composition entry points do not
 
 Internally these switches map to `claudine::system_prompt::SystemPromptArgs`.
 
