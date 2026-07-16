@@ -3,14 +3,18 @@
 //! Tests composed graph behavior (rec #13) and validation (rec #14)
 //! with real filesystem documents using `tempfile`.
 
-use darkmatter::markdown::Markdown;
+use darkmatter::markdown::{Markdown, MarkdownError};
 use darkmatter::markdown::compose::shell_expansion::{
     ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest,
 };
+use darkmatter::markdown::compose::preflight::PreflightGraphNode;
 use darkmatter::markdown::compose::{ComposeOptions, ComposeSource, ShellExpansionError};
 use darkmatter::markdown::normalize::HeadingLevel;
 use darkmatter::markdown::reference::types::{
     ReferenceGraphOptions, ReferenceKind, ReferenceSyntax, ReferenceTarget,
+};
+use darkmatter::markdown::reference::{
+    DependencyMismatchKind, ReferenceError, ReferenceGraphMismatchKind,
 };
 use darkmatter::markdown::reference::validate::{ReferenceIssueCode, ReferenceValidationOptions};
 use std::sync::Arc;
@@ -31,6 +35,32 @@ fn write_files(dir: &TempDir, files: &[(&str, &str)]) {
 fn load_md(dir: &TempDir, name: &str) -> Markdown {
     let path = dir.path().join(name);
     Markdown::try_from(path.as_path()).unwrap()
+}
+
+/// Unwraps the typed prebuilt-graph mismatch classification from a public
+/// `MarkdownError`, panicking if the error is any other shape.
+fn mismatch_kind(err: &MarkdownError) -> ReferenceGraphMismatchKind {
+    match err {
+        MarkdownError::Reference(inner) => match inner.as_ref() {
+            ReferenceError::ReferenceGraphMismatch(mismatch) => mismatch.kind(),
+            other => panic!("expected a graph-mismatch reference error, got: {other}"),
+        },
+        other => panic!("expected a reference error, got: {other}"),
+    }
+}
+
+/// Asserts a dependency-mismatch child source is the expected file, without
+/// pinning the temp-dir prefix.
+fn assert_child_source(source: &ComposeSource, file_name: &str) {
+    match source {
+        ComposeSource::File(path) => {
+            assert!(
+                path.ends_with(file_name),
+                "expected child source ending in {file_name}, got: {path:?}"
+            );
+        }
+        other => panic!("expected a file child source, got: {other:?}"),
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -270,6 +300,48 @@ fn toc_linking_dependency_and_generated_links_appear_in_composed_references() {
         1,
         "expected generated toc link in composed refs"
     );
+}
+
+/// 35.4: graph-discovery TOC-heading reads route through the run's shared
+/// cache. Two `::toc-linking` directives point at the same multi-heading
+/// target; the synthesized hyperlink references must be produced for every
+/// heading of both directives (byte-identical to a per-directive disk read),
+/// proving the cached read serves repeated discovery correctly.
+#[test]
+fn toc_linking_repeated_target_generates_all_heading_links() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[
+            (
+                "root.md",
+                "::toc-linking child.md\n\n## Divider\n\n::toc-linking child.md\n",
+            ),
+            (
+                "child.md",
+                "## Alpha Section\n\nA.\n\n## Beta Section\n\nB.\n",
+            ),
+        ],
+    );
+
+    let md = load_md(&dir, "root.md");
+    let options = ReferenceGraphOptions::default();
+    let composed = md.composed_references(options).unwrap();
+
+    for anchor in ["child.md#alpha-section", "child.md#beta-section"] {
+        let count = composed
+            .records
+            .iter()
+            .filter(|r| {
+                r.kind == ReferenceKind::Hyperlink
+                    && matches!(&r.target, ReferenceTarget::LocalPath { raw } if raw == anchor)
+            })
+            .count();
+        assert_eq!(
+            count, 2,
+            "expected one generated link to {anchor} per directive (two total)"
+        );
+    }
 }
 
 #[test]
@@ -1191,9 +1263,11 @@ fn prebuilt_graph_rejects_edited_root_body() {
     let err = edited
         .validate_references_with_graph(&graph, ReferenceValidationOptions::default())
         .unwrap_err();
+    assert_eq!(mismatch_kind(&err),ReferenceGraphMismatchKind::Document);
+    // Human-readable diagnostic still names the differing dimension.
     assert!(
         err.to_string().contains("root document"),
-        "expected a document-dimension mismatch, got: {err}"
+        "diagnostic should describe the document dimension, got: {err}"
     );
 }
 
@@ -1214,9 +1288,10 @@ fn prebuilt_graph_rejects_different_source() {
     let err = md_b
         .validate_references_with_graph(&graph, opts)
         .unwrap_err();
+    assert_eq!(mismatch_kind(&err),ReferenceGraphMismatchKind::Source);
     assert!(
         err.to_string().contains("different document source"),
-        "expected a source-dimension mismatch, got: {err}"
+        "diagnostic should describe the source dimension, got: {err}"
     );
 }
 
@@ -1233,9 +1308,10 @@ fn prebuilt_transclusion_only_graph_rejected_by_full_validation() {
     let err = md
         .validate_references_with_graph(&graph, opts)
         .unwrap_err();
+    assert_eq!(mismatch_kind(&err),ReferenceGraphMismatchKind::Mode);
     assert!(
         err.to_string().contains("full reference validation"),
-        "expected a mode-dimension mismatch, got: {err}"
+        "diagnostic should describe the mode dimension, got: {err}"
     );
 }
 
@@ -1259,9 +1335,10 @@ fn prebuilt_graph_rejects_changed_graph_options() {
     let err = md
         .validate_references_with_graph(&graph, val_opts)
         .unwrap_err();
+    assert_eq!(mismatch_kind(&err),ReferenceGraphMismatchKind::Options);
     assert!(
         err.to_string().contains("different reference-graph options"),
-        "expected an options-dimension mismatch, got: {err}"
+        "diagnostic should describe the options dimension, got: {err}"
     );
 }
 
@@ -1288,6 +1365,12 @@ fn prebuilt_graph_rejects_edited_child_before_flatten() {
     let err = md
         .validate_references_with_graph(&graph, opts)
         .unwrap_err();
+    let ReferenceGraphMismatchKind::Dependency { source, kind } = mismatch_kind(&err) else {
+        panic!("expected a dependency-dimension mismatch, got: {:?}", mismatch_kind(&err));
+    };
+    assert_eq!(kind, DependencyMismatchKind::Changed);
+    assert_child_source(&source, "child.md");
+    // Human-readable diagnostic still names the change and the child.
     let msg = err.to_string();
     assert!(msg.contains("changed on disk"), "got: {msg}");
     assert!(msg.contains("child.md"), "names the child source: {msg}");
@@ -1310,6 +1393,11 @@ fn prebuilt_graph_rejects_missing_child() {
     let err = md
         .validate_references_with_graph(&graph, opts)
         .unwrap_err();
+    let ReferenceGraphMismatchKind::Dependency { source, kind } = mismatch_kind(&err) else {
+        panic!("expected a dependency-dimension mismatch, got: {:?}", mismatch_kind(&err));
+    };
+    assert_eq!(kind, DependencyMismatchKind::Missing);
+    assert_child_source(&source, "child.md");
     assert!(err.to_string().contains("missing"), "got: {err}");
 }
 
@@ -1334,6 +1422,11 @@ fn prebuilt_graph_rejects_unreadable_child() {
     let err = md
         .validate_references_with_graph(&graph, opts)
         .unwrap_err();
+    let ReferenceGraphMismatchKind::Dependency { source, kind } = mismatch_kind(&err) else {
+        panic!("expected a dependency-dimension mismatch, got: {:?}", mismatch_kind(&err));
+    };
+    assert_eq!(kind, DependencyMismatchKind::Unreadable);
+    assert_child_source(&source, "child.md");
     assert!(err.to_string().contains("no longer readable"), "got: {err}");
 }
 
@@ -1360,6 +1453,11 @@ fn prebuilt_graph_bypasses_cache_for_descendant_edit() {
     let err = md
         .validate_references_with_graph(&graph, val_opts)
         .unwrap_err();
+    let ReferenceGraphMismatchKind::Dependency { source, kind } = mismatch_kind(&err) else {
+        panic!("expected a dependency-dimension mismatch, got: {:?}", mismatch_kind(&err));
+    };
+    assert_eq!(kind, DependencyMismatchKind::Changed);
+    assert_child_source(&source, "child.md");
     assert!(err.to_string().contains("changed on disk"), "got: {err}");
 }
 
@@ -1437,9 +1535,10 @@ fn prebuilt_graph_rejects_changed_frontmatter() {
     let err = edited
         .validate_references_with_graph(&graph, ReferenceValidationOptions::default())
         .unwrap_err();
+    assert_eq!(mismatch_kind(&err),ReferenceGraphMismatchKind::Document);
     assert!(
         err.to_string().contains("root document"),
-        "expected a document-dimension mismatch, got: {err}"
+        "diagnostic should describe the document dimension, got: {err}"
     );
 }
 
@@ -1460,9 +1559,10 @@ fn prebuilt_graph_rejects_different_url_source() {
     let err = md_b
         .validate_references_with_graph(&graph, ReferenceValidationOptions::default())
         .unwrap_err();
+    assert_eq!(mismatch_kind(&err),ReferenceGraphMismatchKind::Source);
     assert!(
         err.to_string().contains("different document source"),
-        "expected a source-dimension mismatch, got: {err}"
+        "diagnostic should describe the source dimension, got: {err}"
     );
 }
 
@@ -1496,9 +1596,14 @@ fn prebuilt_graph_rejects_representative_option_families() {
         let err = md
             .validate_references_with_graph(&graph, val_opts)
             .unwrap_err();
+        assert_eq!(
+            mismatch_kind(&err),
+            ReferenceGraphMismatchKind::Options,
+            "{family} option change must reject reuse on the options dimension"
+        );
         assert!(
             err.to_string().contains("different reference-graph options"),
-            "{family} option change must reject reuse, got: {err}"
+            "{family} diagnostic should describe the options dimension, got: {err}"
         );
     }
 }
@@ -1545,9 +1650,14 @@ fn prebuilt_graph_rejects_recreated_shell_handler() {
     let err = md
         .validate_references_with_graph(&graph, val_recreated)
         .unwrap_err();
+    assert_eq!(
+        mismatch_kind(&err),
+        ReferenceGraphMismatchKind::Options,
+        "a recreated handler instance must reject reuse on the options dimension"
+    );
     assert!(
         err.to_string().contains("different reference-graph options"),
-        "a recreated handler instance must reject reuse, got: {err}"
+        "diagnostic should describe the options dimension, got: {err}"
     );
 
     // Supplying no handler at validation time is likewise rejected.
@@ -1556,9 +1666,14 @@ fn prebuilt_graph_rejects_recreated_shell_handler() {
     let err = md
         .validate_references_with_graph(&graph, val_absent)
         .unwrap_err();
+    assert_eq!(
+        mismatch_kind(&err),
+        ReferenceGraphMismatchKind::Options,
+        "an absent handler at validation must reject reuse on the options dimension"
+    );
     assert!(
         err.to_string().contains("different reference-graph options"),
-        "an absent handler at validation must reject reuse, got: {err}"
+        "diagnostic should describe the options dimension, got: {err}"
     );
 }
 
@@ -1595,6 +1710,133 @@ fn graph_ownership_does_not_extend_shell_handler_lifetime() {
     drop(graph);
     // Dropping the graph likewise leaves the strong count untouched.
     assert_eq!(Arc::strong_count(&handler), strong_with_opts);
+}
+
+/// A preflight graph is a process-local shared instance, compared by identity
+/// and never by its (output-neutral) contents. A graph built with one preflight
+/// instance is rejected when validation supplies a **different** instance even
+/// when the two carry byte-identical data: `with_preflight_graph` wraps each
+/// node in its own `Arc`, and that `Arc`'s sole owner (the build options) is
+/// released when `reference_graph` returns, so the graph's stored weak handle is
+/// already dead when a fresh preflight is supplied at validation (fail-closed).
+/// Allocator churn between the drop and the fresh instance guards against a
+/// coincidental address reuse masquerading as a match.
+#[test]
+fn prebuilt_graph_rejects_recreated_preflight_graph() {
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[("root.md", "# Root\n\n[ok](https://example.com)\n")]);
+    let md = load_md(&dir, "root.md");
+
+    // Build from one captured base so only the preflight instance differs (the
+    // shared clone carries the same captured context). The build-time preflight
+    // is owned solely by the build options and dropped when the graph returns.
+    let base = ComposeOptions::new();
+    let graph = md
+        .reference_graph(ReferenceGraphOptions::with_compose(
+            base.clone().with_preflight_graph(PreflightGraphNode::default()),
+        ))
+        .unwrap();
+
+    // Allocator churn between the dropped build-time preflight and the fresh one.
+    let _churn: Vec<Box<[u8]>> = (0..64).map(|_| vec![0u8; 128].into_boxed_slice()).collect();
+
+    // A fresh preflight with identical (default) data is a different instance.
+    let val_recreated = ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+        base.with_preflight_graph(PreflightGraphNode::default()),
+    ));
+    let err = md
+        .validate_references_with_graph(&graph, val_recreated)
+        .unwrap_err();
+    assert_eq!(
+        mismatch_kind(&err),
+        ReferenceGraphMismatchKind::Options,
+        "a recreated preflight instance must reject reuse on the options dimension"
+    );
+    assert!(
+        err.to_string().contains("different reference-graph options"),
+        "diagnostic should describe the options dimension, got: {err}"
+    );
+}
+
+/// Graph ownership stores only a `Weak` handle to the preflight graph, so
+/// building and dropping a graph never extends the preflight instance's
+/// lifetime.
+///
+/// `with_preflight_graph` moves the node in and wraps it in an `Arc` the graph
+/// only ever downgrades, so no *public* strong handle to that `Arc` exists to
+/// count here; at the public boundary the load-bearing lifetime evidence is the
+/// expired-weak-handle rejection below (once the build options drop, no
+/// build-time instance survives for validation to match). The explicit
+/// `Arc::strong_count` assertion lives in `options.rs`
+/// (`options_identity_preflight_weak_does_not_extend_lifetime`), where the
+/// crate-internal field grants a strong handle.
+#[test]
+fn graph_ownership_does_not_extend_preflight_graph_lifetime() {
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[("root.md", "# Root\n\n[ok](https://example.com)\n")]);
+    let md = load_md(&dir, "root.md");
+
+    let base = ComposeOptions::new();
+    // The build-time preflight's sole strong reference lives in these build
+    // options and is released when `reference_graph` returns.
+    let graph = md
+        .reference_graph(ReferenceGraphOptions::with_compose(
+            base.clone().with_preflight_graph(PreflightGraphNode::default()),
+        ))
+        .unwrap();
+
+    // Validation supplying a fresh preflight is rejected: the graph retained no
+    // strong reference to keep the build-time instance alive to be matched.
+    let val = ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+        base.with_preflight_graph(PreflightGraphNode::default()),
+    ));
+    let err = md.validate_references_with_graph(&graph, val).unwrap_err();
+    assert_eq!(
+        mismatch_kind(&err),
+        ReferenceGraphMismatchKind::Options,
+        "a graph that pinned the preflight alive could not report an options mismatch here"
+    );
+}
+
+/// The shared remote-fetch runtime is a process-local instance compared by
+/// identity. A graph built with `with_shared_remote_fetch()` is rejected when
+/// validation supplies a **fresh** `with_shared_remote_fetch()` runtime: the
+/// build-time runtime's only owner is the build options, dropped when the graph
+/// is returned, so its weak identity handle is already expired. This exercises
+/// the expired-weak-handle path the two-live-instances identity unit test does
+/// not, and doubles as the drop/lifetime evidence for the shared runtime.
+#[test]
+fn prebuilt_graph_rejects_recreated_shared_remote_fetch() {
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[("root.md", "# Root\n\n[ok](https://example.com)\n")]);
+    let md = load_md(&dir, "root.md");
+
+    // Single captured base so only the runtime instance differs; the build-time
+    // runtime is owned solely by the build options and dropped on return.
+    let base = ComposeOptions::new();
+    let graph = md
+        .reference_graph(ReferenceGraphOptions::with_compose(
+            base.clone().with_shared_remote_fetch(),
+        ))
+        .unwrap();
+
+    // Allocator churn between the dropped build-time runtime and the fresh one.
+    let _churn: Vec<Box<[u8]>> = (0..64).map(|_| vec![0u8; 128].into_boxed_slice()).collect();
+
+    // A fresh shared runtime is a different instance even with identical config.
+    let val = ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+        base.with_shared_remote_fetch(),
+    ));
+    let err = md.validate_references_with_graph(&graph, val).unwrap_err();
+    assert_eq!(
+        mismatch_kind(&err),
+        ReferenceGraphMismatchKind::Options,
+        "a recreated shared remote-fetch runtime must reject reuse on the options dimension"
+    );
+    assert!(
+        err.to_string().contains("different reference-graph options"),
+        "diagnostic should describe the options dimension, got: {err}"
+    );
 }
 
 /// A graph built from `options.clone()` validates against the **original**

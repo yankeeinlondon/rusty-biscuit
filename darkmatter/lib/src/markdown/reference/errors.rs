@@ -3,8 +3,60 @@
 use biscuit_terminal::errors::SourceContext;
 use thiserror::Error;
 
-use super::provenance::{DependencyMismatchKind, ReferenceGraphMismatch};
+use super::provenance::{
+    DependencyMismatchKind as ProvenanceDependencyMismatchKind, ReferenceGraphMismatch,
+};
 use crate::markdown::compose::ComposeSource;
+
+/// Which dimension of a prebuilt reference graph diverged from a validation
+/// request.
+///
+/// Fingerprint-free classification returned by
+/// [`ReferenceGraphMismatchError::kind`] so callers can branch on the differing
+/// dimension without matching on the human-readable diagnostic. A
+/// [`Dependency`](Self::Dependency) mismatch also identifies the changed,
+/// missing, or unreadable child source, but never exposes any content
+/// fingerprint or the private provenance surface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReferenceGraphMismatchKind {
+    /// The root document's represented state differs.
+    Document,
+    /// The document source differs (file, URL, or unknown).
+    Source,
+    /// The graph mode differs (a transclusion-only graph where full reference
+    /// validation requires a full-mode graph).
+    Mode,
+    /// The graph-affecting options differ.
+    Options,
+    /// A visited child dependency changed, is missing, or is unreadable.
+    Dependency {
+        /// The child source, without its content fingerprint.
+        source: ComposeSource,
+        /// How the descendant failed re-verification.
+        kind: DependencyMismatchKind,
+    },
+}
+
+/// How a visited descendant failed prebuilt-graph re-verification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DependencyMismatchKind {
+    /// The descendant still exists and is readable but its content changed.
+    Changed,
+    /// The descendant no longer exists.
+    Missing,
+    /// The descendant exists but could not be read.
+    Unreadable,
+}
+
+impl From<ProvenanceDependencyMismatchKind> for DependencyMismatchKind {
+    fn from(value: ProvenanceDependencyMismatchKind) -> Self {
+        match value {
+            ProvenanceDependencyMismatchKind::Changed => Self::Changed,
+            ProvenanceDependencyMismatchKind::Missing => Self::Missing,
+            ProvenanceDependencyMismatchKind::Unreadable => Self::Unreadable,
+        }
+    }
+}
 
 /// A prebuilt [`ReferenceGraph`] was incompatible with a validation request.
 ///
@@ -25,6 +77,39 @@ impl ReferenceGraphMismatchError {
         Self { reason }
     }
 
+    /// The dimension on which the prebuilt graph diverged from the request.
+    ///
+    /// Fingerprint-free classification for programmatic branching. The private
+    /// mismatch reason (and any content fingerprint it carries) stays hidden;
+    /// the human-readable diagnostic remains available through
+    /// [`Display`](std::fmt::Display).
+    ///
+    /// ## Examples
+    ///
+    /// ```no_run
+    /// use darkmatter::markdown::reference::{ReferenceError, ReferenceGraphMismatchKind};
+    ///
+    /// fn classify(err: &ReferenceError) {
+    ///     if let ReferenceError::ReferenceGraphMismatch(mismatch) = err {
+    ///         assert_eq!(mismatch.kind(), ReferenceGraphMismatchKind::Document);
+    ///     }
+    /// }
+    /// ```
+    pub fn kind(&self) -> ReferenceGraphMismatchKind {
+        match &self.reason {
+            ReferenceGraphMismatch::Document => ReferenceGraphMismatchKind::Document,
+            ReferenceGraphMismatch::Source => ReferenceGraphMismatchKind::Source,
+            ReferenceGraphMismatch::Mode { .. } => ReferenceGraphMismatchKind::Mode,
+            ReferenceGraphMismatch::Options => ReferenceGraphMismatchKind::Options,
+            ReferenceGraphMismatch::Dependency { source, kind } => {
+                ReferenceGraphMismatchKind::Dependency {
+                    source: source.clone(),
+                    kind: DependencyMismatchKind::from(*kind),
+                }
+            }
+        }
+    }
+
     /// One-line description of which dimension differs.
     fn headline(&self) -> String {
         match &self.reason {
@@ -43,13 +128,13 @@ impl ReferenceGraphMismatchError {
             ReferenceGraphMismatch::Dependency { source, kind } => {
                 let name = source_display(source);
                 match kind {
-                    DependencyMismatchKind::Changed => {
+                    ProvenanceDependencyMismatchKind::Changed => {
                         format!("a transcluded child changed on disk: {name}")
                     }
-                    DependencyMismatchKind::Missing => {
+                    ProvenanceDependencyMismatchKind::Missing => {
                         format!("a transcluded child is now missing: {name}")
                     }
-                    DependencyMismatchKind::Unreadable => {
+                    ProvenanceDependencyMismatchKind::Unreadable => {
                         format!("a transcluded child is no longer readable: {name}")
                     }
                 }

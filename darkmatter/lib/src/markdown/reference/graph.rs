@@ -470,7 +470,7 @@ fn build_node(
                 // includes them when follow=true.
                 if extract_references {
                     for mut record in
-                        generate_toc_link_references(&display_target, &path, directive, source)
+                        generate_toc_link_references(&display_target, &path, directive, source, runtime)
                     {
                         record
                             .attributes
@@ -959,8 +959,14 @@ fn generate_toc_link_references(
     path: &std::path::Path,
     directive: &toc_linking::TocLinkingDirective,
     source: &ComposeSource,
+    runtime: &ReferenceAnalysisRuntime,
 ) -> Vec<ReferenceRecord> {
-    let Ok(target_md) = Markdown::try_from(path) else {
+    // 35.4: route the TOC-heading read through the run's shared cache instead
+    // of a second `Markdown::try_from` on the same file. The target is also
+    // loaded (cached) by the follow-mode traversal below, so a single owner
+    // serves both graph-discovery and composition reads. A load failure
+    // reproduces the previous empty-result behavior.
+    let Some(target_md) = runtime.load_markdown(path) else {
         return Vec::new();
     };
 

@@ -14,7 +14,9 @@ pub(crate) mod provenance;
 pub mod types;
 pub mod validate;
 
-pub use errors::ReferenceError;
+pub use errors::{
+    DependencyMismatchKind, ReferenceError, ReferenceGraphMismatchError, ReferenceGraphMismatchKind,
+};
 pub use types::*;
 
 use crate::markdown::Markdown;
