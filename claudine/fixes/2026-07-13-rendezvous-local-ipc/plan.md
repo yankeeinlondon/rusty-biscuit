@@ -1,13 +1,14 @@
 ---
 total_phases: 8
 created: 2026-07-16
-phase: 3
+phase: 4
 agent: codex/default
 yolo: true
 packages:
     - sniff
     - rendezvous-core
     - rendezvous-client
+    - rendezvous-daemon
     - claudine-cli
 source_files_during_phase_1:
     - sniff/lib/src/os/user.rs
@@ -43,6 +44,19 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - claudine/rendezvous/daemon/src/private_dir.rs
+    - claudine/rendezvous/daemon/src/private_dir/tests.rs
+    - claudine/rendezvous/daemon/src/local_transport/mod.rs
+    - claudine/rendezvous/daemon/src/local_transport/unix.rs
+    - claudine/rendezvous/daemon/src/server.rs
+    - claudine/rendezvous/daemon/src/server/tests.rs
+    - claudine/rendezvous/daemon/src/lib.rs
+    - claudine/rendezvous/daemon/src/main.rs
+    - claudine/rendezvous/daemon/Cargo.toml
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 ---
 
 # Cross-Platform, Per-User Rendezvous Local IPC — Execution Plan
@@ -230,38 +244,38 @@ before the server and call sites migrate.
 **Goal:** Separate daemon initialization from transport binding so the Windows
 implementation cannot duplicate the storage/network stack.
 
-- [ ] Refactor `rendezvous-daemon/src/server.rs` into a shared preparation and
+- [x] Refactor `rendezvous-daemon/src/server.rs` into a shared preparation and
   serve pipeline plus `local_transport/mod.rs`; construct storage, projection,
   batcher, node identity, session log, registers, capability refresher, QUIC,
   discovery, peer workers, and `RendezvousService` exactly once.
-- [ ] Introduce `spawn_local_server(LocalEndpoint, DaemonConfig)` as the only
+- [x] Introduce `spawn_local_server(LocalEndpoint, DaemonConfig)` as the only
   production entry point. Retain `spawn_uds_server` only if a Unix-only test
   seam remains materially useful, and keep it out of production call sites.
-- [ ] Change `ServerHandle` to expose `local_endpoint()` and own a
+- [x] Change `ServerHandle` to expose `local_endpoint()` and own a
   transport-specific cleanup token; keep graceful shutdown/drop behavior for
   shared workers while allowing Unix instance-safe cleanup and Windows
   handle-only teardown.
-- [ ] Define typed `ServerError` categories for invalid/incompatible endpoint,
+- [x] Define typed `ServerError` categories for invalid/incompatible endpoint,
   endpoint in use, access denied, ownership violation, listener failure, and
   cleanup failure while preserving existing storage/network error sources.
-- [ ] Add `default_data_dir()` under the user's platform-local data directory
+- [x] Add `default_data_dir()` under the user's platform-local data directory
   (`<local-data-dir>/claudine/rendezvous`) and route both default and
   `--data-dir` roots through the same private-directory validation contract.
-- [ ] Add one reusable daemon-private directory-security helper for the two
+- [x] Add one reusable daemon-private directory-security helper for the two
   justified consumers—the Unix runtime directory and durable data root—rather
   than duplicating owner/type/symlink/mode checks.
-- [ ] Prohibit automatic discovery or import of `<tempdir>/rendezvous-data`;
+- [x] Prohibit automatic discovery or import of `<tempdir>/rendezvous-data`;
   make tests assert that the legacy path is neither selected nor read.
-- [ ] Add test instrumentation or a test-only initialization counter proving
+- [x] Add test instrumentation or a test-only initialization counter proving
   that portable startup initializes shared subsystems once per daemon.
-- [ ] **Parallelizable:** Shared boot extraction and default data-root selection
+- [x] **Parallelizable:** Shared boot extraction and default data-root selection
   can proceed together once the `ServerHandle`/error contracts are agreed.
 
 **Validation checkpoint**
 
-- [ ] Run daemon library tests that do not require a bound local transport and
+- [x] Run daemon library tests that do not require a bound local transport and
   `cargo check -p rendezvous-daemon --all-targets`.
-- [ ] Review platform modules to confirm they receive a prepared service and
+- [x] Review platform modules to confirm they receive a prepared service and
   own only listener, accept, permission, and cleanup logic.
 
 ## Phase 5 — Implement Secure Platform Server Transports
