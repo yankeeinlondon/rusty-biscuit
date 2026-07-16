@@ -1358,6 +1358,17 @@ const CACHE_OPTIONS_DOMAIN: &str = "dm.compose-cache-options.v1";
 /// the two encodings can evolve independently.
 const GRAPH_CONTEXT_DOMAIN: &str = "dm.compose-graph-context.v1";
 
+/// Platform tags for [`GraphIdentityEncoder::path`]. Every path encode writes
+/// exactly one of these before its length-prefixed payload, so a Unix byte
+/// sequence and a Windows wide-unit sequence can never hash alike. The values
+/// are stable wire bytes: change them only alongside a domain-marker bump.
+#[cfg(unix)]
+const PATH_ENCODING_UNIX_BYTES: u8 = 1;
+#[cfg(windows)]
+const PATH_ENCODING_WINDOWS_WIDE: u8 = 2;
+#[cfg(not(any(unix, windows)))]
+const PATH_ENCODING_LOSSY_FALLBACK: u8 = 3;
+
 /// Complete fingerprint of the captured runtime context for the reference-graph
 /// identity.
 ///
@@ -1429,6 +1440,48 @@ impl GraphIdentityEncoder {
     /// Writes a length-prefixed UTF-8 value.
     fn str(&mut self, value: &str) {
         self.segment(value.as_bytes());
+    }
+
+    /// Writes native path data exactly, with no UTF-8 presentation conversion.
+    ///
+    /// `Path::display()` must never reach an identity product: it is lossy. On
+    /// Unix an `OsStr` may hold arbitrary non-UTF-8 bytes, and distinct invalid
+    /// sequences all collapse to U+FFFD, so two paths that select different
+    /// files would share a fingerprint — a false-match that lets prebuilt-graph
+    /// validation accept a graph built from different resolution inputs, and
+    /// lets the compose cache select an unrelated entry.
+    ///
+    /// The leading platform tag keeps the Unix byte encoding and the Windows
+    /// wide-unit encoding in disjoint spaces, so the same fingerprint can never
+    /// be produced by two different platform representations.
+    fn path(&mut self, value: &Path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            self.tag(PATH_ENCODING_UNIX_BYTES);
+            self.segment(value.as_os_str().as_bytes());
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            self.tag(PATH_ENCODING_WINDOWS_WIDE);
+            // Fixed-width little-endian u16 units: exact and self-delimiting
+            // inside the length-prefixed segment.
+            let mut units = Vec::new();
+            for unit in value.as_os_str().encode_wide() {
+                units.extend_from_slice(&unit.to_le_bytes());
+            }
+            self.segment(&units);
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            // No target in this workspace lacks both `OsStrExt`s; this arm only
+            // keeps the encoder compiling on exotic targets. It is the one
+            // lossy representation, so it carries its own tag and can never be
+            // mistaken for an exact one.
+            self.tag(PATH_ENCODING_LOSSY_FALLBACK);
+            self.segment(value.as_os_str().to_string_lossy().as_bytes());
+        }
     }
 
     /// Writes an explicit stable enum discriminant byte.
@@ -1576,7 +1629,7 @@ impl ComposeOptions {
             ComposeSource::Unknown => enc.tag(0),
             ComposeSource::File(p) => {
                 enc.tag(1);
-                enc.str(&p.display().to_string());
+                enc.path(p);
             }
             ComposeSource::Url(u) => {
                 enc.tag(2);
@@ -1626,7 +1679,7 @@ impl ComposeOptions {
         enc.field("magic_paths");
         enc.count(magic_paths.len());
         for (path, position) in magic_paths {
-            enc.str(&path.display().to_string());
+            enc.path(path);
             enc.tag(match position {
                 biscuit_file::PathPosition::Start => 0,
                 biscuit_file::PathPosition::End => 1,
@@ -1644,7 +1697,7 @@ impl ComposeOptions {
         match shell_policy_root {
             Some(p) => {
                 enc.tag(1);
-                enc.str(&p.display().to_string());
+                enc.path(p);
             }
             None => enc.tag(0),
         }
@@ -1652,7 +1705,7 @@ impl ComposeOptions {
         match shell_working_directory {
             Some(p) => {
                 enc.tag(1);
-                enc.str(&p.display().to_string());
+                enc.path(p);
             }
             None => enc.tag(0),
         }
@@ -1715,7 +1768,7 @@ impl ComposeOptions {
         match cache_root {
             Some(p) => {
                 enc.tag(1);
-                enc.str(&p.display().to_string());
+                enc.path(p);
             }
             None => enc.tag(0),
         }
@@ -1825,7 +1878,7 @@ impl ComposeOptions {
         match file_ref_fallback_dir {
             Some(dir) => {
                 enc.tag(1);
-                enc.str(&dir.display().to_string());
+                enc.path(dir);
             }
             None => enc.tag(0),
         }
@@ -1878,7 +1931,7 @@ impl ComposeOptions {
         cenc.field("magic_paths");
         cenc.count(magic_paths.len());
         for (path, position) in magic_paths {
-            cenc.str(&path.display().to_string());
+            cenc.path(path);
             cenc.tag(match position {
                 biscuit_file::PathPosition::Start => 0,
                 biscuit_file::PathPosition::End => 1,
@@ -1937,7 +1990,7 @@ impl ComposeOptions {
         match file_ref_fallback_dir {
             Some(dir) => {
                 cenc.tag(1);
-                cenc.str(&dir.display().to_string());
+                cenc.path(dir);
             }
             None => cenc.tag(0),
         }
@@ -2296,6 +2349,149 @@ mod tests {
         // `external_state: Option<Value>` — None vs Some(empty object).
         let empty_state = fixed_opts().with_external_state(serde_json::json!({}));
         assert_ne!(id(&base), id(&empty_state));
+    }
+
+    /// Two non-UTF-8 Unix paths that `Path::display()` renders identically must
+    /// not share a graph identity. `display()` maps every distinct invalid byte
+    /// sequence to the same U+FFFD, so encoding paths through it let unequal
+    /// `PathBuf`s — which select different files — produce one fingerprint, and
+    /// prebuilt-graph validation would then accept a graph built from different
+    /// resolution inputs.
+    #[cfg(unix)]
+    #[test]
+    fn options_identity_distinguishes_non_utf8_paths_that_display_identically() {
+        let (a, b) = lossy_twin_paths();
+
+        for (label, build) in path_field_builders() {
+            assert_ne!(
+                id(&build(a.clone())),
+                id(&build(b.clone())),
+                "graph identity collided on non-UTF-8 `{label}` paths"
+            );
+        }
+    }
+
+    /// The same guarantee for the compose-cache product: a collision there
+    /// selects an unrelated persistent entry. Only the path fields the cache
+    /// fingerprint actually covers are asserted.
+    #[cfg(unix)]
+    #[test]
+    fn cache_fingerprint_distinguishes_non_utf8_paths_that_display_identically() {
+        let (a, b) = lossy_twin_paths();
+
+        let magic = |p: PathBuf| fixed_opts().with_magic_path(p, biscuit_file::PathPosition::Start);
+        assert_ne!(
+            magic(a.clone()).compose_cache_fingerprint(),
+            magic(b.clone()).compose_cache_fingerprint()
+        );
+
+        let fallback = |p: PathBuf| fixed_opts().with_file_ref_fallback_dir(p);
+        assert_ne!(
+            fallback(a).compose_cache_fingerprint(),
+            fallback(b).compose_cache_fingerprint()
+        );
+    }
+
+    /// Two `PathBuf`s whose `OsStr` bytes differ only in an invalid continuation
+    /// byte. Both render as `"f\u{FFFD}"`, which is exactly the collision the
+    /// exact encoder exists to prevent.
+    #[cfg(unix)]
+    fn lossy_twin_paths() -> (PathBuf, PathBuf) {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let a = PathBuf::from(OsStr::from_bytes(&[0x66, 0x80]));
+        let b = PathBuf::from(OsStr::from_bytes(&[0x66, 0x81]));
+
+        assert_ne!(a, b, "the two paths must be genuinely unequal");
+        assert_eq!(
+            a.display().to_string(),
+            b.display().to_string(),
+            "precondition: `display()` must render both identically, otherwise \
+             this fixture no longer exercises the lossy-encoding collision"
+        );
+        (a, b)
+    }
+
+    /// Every path-valued field that feeds the graph identity, as a builder from
+    /// a path to the options carrying it.
+    #[cfg(unix)]
+    #[allow(clippy::type_complexity)]
+    fn path_field_builders() -> Vec<(&'static str, Box<dyn Fn(PathBuf) -> ComposeOptions>)> {
+        vec![
+            (
+                "magic_paths",
+                Box::new(|p| fixed_opts().with_magic_path(p, biscuit_file::PathPosition::Start))
+                    as Box<dyn Fn(PathBuf) -> ComposeOptions>,
+            ),
+            (
+                "shell_policy_root",
+                Box::new(|p| fixed_opts().with_shell_policy_root(p)),
+            ),
+            (
+                "shell_working_directory",
+                Box::new(|p| fixed_opts().with_shell_working_directory(p)),
+            ),
+            ("cache_root", Box::new(|p| fixed_opts().with_cache_root(p))),
+            (
+                "file_ref_fallback_dir",
+                Box::new(|p| fixed_opts().with_file_ref_fallback_dir(p)),
+            ),
+            (
+                "source_file",
+                Box::new(|p| fixed_opts().with_source_file(p)),
+            ),
+        ]
+    }
+
+    /// Portable separator case: a separator inside one collection element must
+    /// not collide with that separator splitting two elements. The path encoder
+    /// keeps its payload length-prefixed, so element boundaries survive on every
+    /// platform — a naive concatenation would fold both shapes into `a/b`.
+    #[test]
+    fn options_identity_magic_path_separator_does_not_cross_element_boundary() {
+        let merged = fixed_opts().with_magic_path("a/b", biscuit_file::PathPosition::Start);
+        let split = fixed_opts()
+            .with_magic_path("a", biscuit_file::PathPosition::Start)
+            .with_magic_path("b", biscuit_file::PathPosition::Start);
+
+        assert_ne!(id(&merged), id(&split));
+        assert_ne!(
+            merged.compose_cache_fingerprint(),
+            split.compose_cache_fingerprint()
+        );
+    }
+
+    /// The same guarantee across a *field* boundary: one path spanning a
+    /// separator must not collide with its halves landing in two adjacent
+    /// path-valued fields.
+    #[test]
+    fn options_identity_separator_does_not_cross_shell_root_field_boundary() {
+        let merged = fixed_opts().with_shell_policy_root("a/b");
+        let split = fixed_opts()
+            .with_shell_policy_root("a")
+            .with_shell_working_directory("b");
+        assert_ne!(id(&merged), id(&split));
+    }
+
+    /// Path encoding is deterministic, so the Finding 18 reuse guard — which
+    /// validates a graph built from `options.clone()` against `options` — keeps
+    /// matching for path-bearing options.
+    #[test]
+    fn options_identity_path_encoding_is_clone_stable() {
+        let opts = fixed_opts()
+            .with_magic_path("/one", biscuit_file::PathPosition::Start)
+            .with_shell_policy_root("/policy")
+            .with_shell_working_directory("/work")
+            .with_cache_root("/cache")
+            .with_file_ref_fallback_dir("/fallback")
+            .with_source_file("/doc.md");
+
+        assert_eq!(id(&opts), id(&opts.clone()));
+        assert_eq!(
+            opts.compose_cache_fingerprint(),
+            opts.clone().compose_cache_fingerprint()
+        );
     }
 
     #[test]
