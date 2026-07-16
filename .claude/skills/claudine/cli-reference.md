@@ -176,6 +176,8 @@ claudine config
 - A **Test Connection** workflow (press `T` during webhook input) sends a test message without saving the route.
 - Desktop notifications are intentionally absent — they are zero-config and triggered via lifecycle `notify` frontmatter only.
 
+See [Messaging](messaging.md) for the full messaging subsystem — route types, the `redact_webhook_urls` invariants, and per-provider delivery.
+
 ---
 
 ## `claudine providers`

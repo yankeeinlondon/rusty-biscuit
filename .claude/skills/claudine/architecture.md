@@ -35,7 +35,7 @@ claudine/lib/src/
 
 The per-provider modules under `lib/src/provider/<slug>/` split into two halves: `data.rs` is **generated** by `claudine-gen` (crate `claudine/gen`, sharing vocab enums with the leaf `claudine/catalog-types` crate) from roster + facts + research + overrides (regenerate with `claudine providers generate`; drift-checked in CI by the gen crate's drift test / `claudine-gen check`, which also verify the committed `docs/providers/catalog.json` superset), while `behavior.rs` is hand-written. Never edit a `data.rs` by hand — change the owning input file and regenerate.
 
-**Dispatch drift guard (Phase I).** Decentralized `match Provider` / `matches!` / `==` / `!=` dispatch is prevented from regrowing by one site-level guard in `claudine-cli/tests/dispatch_inventory.rs`, covering **both** `lib/src` and `cli/src` (it retired the lib crate's earlier regex `no_unauthorized_match_provider_in_lib` guard). Every conditional, non-exempt dispatch site must be grandfathered in `GUARD_ALLOWLIST` with a tag + reason (all 18 current sites are `keep` — genuinely behavioral wire/shadow-HOME/stderr-bridge quirks and Claude's canonical linking role); a new one fails until migrated to a `ProviderInfo` field/trait or consciously listed. The committed census is `docs/providers/dispatch-inventory.json`.
+**Dispatch drift guard (Phase I).** Decentralized `match Provider` / `matches!` / `==` / `!=` dispatch is prevented from regrowing by one site-level guard in `claudine-cli/tests/dispatch_inventory.rs`, covering **both** `lib/src` and `cli/src` (it retired the lib crate's earlier regex `no_unauthorized_match_provider_in_lib` guard). Every conditional, non-exempt dispatch site must be grandfathered in `GUARD_ALLOWLIST` with a tag + reason (the current sites are all `keep` — genuinely behavioral wire/shadow-HOME/stderr-bridge quirks and Claude's canonical linking role); a new one fails until migrated to a `ProviderInfo` field/trait or consciously listed. The live count is the allowlist length printed by the guard; the committed census is `docs/providers/dispatch-inventory.json`.
 
 ## Event Support Matrix
 
@@ -435,6 +435,15 @@ Other concerns remain split by responsibility:
 Composition execution headers are shared output helpers in
 `cli/src/output/mod.rs`; they do not live in the executor pipeline.
 
+`LifecycleCatchProtocol` in `lib/src/composition/lifecycle/runtime.rs` is the
+single provider-neutral owner of setup catch routing, terminal-slot
+redesignation, finalize eligibility, active-error threading, and evaluation
+error precedence. Every initialize/start/blocked catch and every
+success/failure/loop terminal-evaluation path must consume the protocol's
+requested steps and result. CLI adapters may build event contexts, execute
+effects, and render the selected error; they must not independently reproduce
+failure/finalize ordering or precedence.
+
 ## Harness Attempt Loop
 
 `cli/src/commands/wrap/harness_orch/loop_control.rs` keeps one
@@ -451,12 +460,15 @@ process details remain in `harness_orch/{launch,attempt}.rs`; lifecycle event
 execution remains in `loop_control/lifecycle_events.rs`; and
 `drive_terminal_recovery` in `loop_control/control_dispatch.rs` remains the
 single terminal-tail executor for retry, resume, proxy, and finalize recovery.
+Attempt preparation exposes separate prompt-preparation,
+lifecycle-execution, and retry/proxy-control contracts so each transition can
+mutate only the state family it owns.
 
 ## Test Placement
 
 **Inline tests** (`#[cfg(test)] mod tests { … }`) are the default for small files. Once a file exceeds **~800 production lines** or its test module exceeds **~300 lines**, move tests to a sibling file declared via `#[cfg(test)] mod tests;` at the bottom of the parent. This pattern is already established in `lib/src/provider/`, `cli/…/wrap/composition/`, and `cli/…/wrap/exec/wiring/`.
 
-`claudine-cli/tests/test_placement.rs` enforces this convention as a Level 1 package-area structural test. It scans every source tree in the Claudine family, counts production and private inline-test modules written as `#[cfg(...test...)] mod ... { ... }` separately with a Rust-aware lexer, excludes generated sources only through explicit path/header rules, and rejects stale path-specific exceptions. Visibility-qualified inline modules such as `pub(super) mod test_helpers` are not currently recognized by the analyzer and must not be used to hide co-located tests from the thresholds. Exceptions must be file-specific and explain why co-location materially clarifies a private invariant; stale or rationale-free entries fail the gate. The analyzer does not currently enforce a separate numeric ceiling for exceptions.
+`claudine-cli/tests/test_placement.rs` enforces this convention as a Level 1 package-area structural test. It scans every source tree in the Claudine family, counts production and inline-test modules written as `#[cfg(...test...)] mod ... { ... }` separately with a Rust-aware lexer, excludes generated sources only through explicit path/header rules, and rejects stale path-specific exceptions. Private modules and the supported Rust visibility forms (`pub`, `pub(crate)`, and `pub(super)`) are all recognized and governed by the same thresholds. Exceptions must be file-specific and explain why co-location materially clarifies a private invariant; stale or rationale-free entries fail the gate. The analyzer does not currently enforce a separate numeric ceiling for exceptions.
 
 ## Skill Linking
 
