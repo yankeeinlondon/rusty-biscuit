@@ -73,47 +73,77 @@ the applicable gates.
 
 ## Finding-by-Finding Audit
 
-| Finding | Status | Current implementation | Work retained here |
-|---:|---|---|---|
-| 1 | Partial | Darkmatter explicitly calls `detect_timezone_with_options(false)`, removing its unused NTP request. | Restore bare `sniff::detect_timezone()` to its compatible full-report behavior by delegating to `true`; retain Darkmatter's explicit `false` call. |
-| 2 | Partial | OSC 10 text-color results are process-cached. | Add L2 proof that repeated terminal construction emits one OSC 10 request and record repeated-construction latency. |
-| 3 | Partial | The compose CLI shares a terminal through a per-invocation `OnceCell`. | Add an end-to-end CLI case exercising verbose, performance, and warning-report branches and prove one detection per invocation. |
-| 4 | Partial | TOC line lookup uses an offset table and binary search; compatibility tests cover line/span behavior. | Replace the non-comparable closeout with identical, hashed fixtures, predeclared thresholds, and retained raw samples. |
-| 5 | Complete | Schema validation uses the already resolved effective schema rather than resolving and coercing twice. | No implementation work. Protect in the final benchmark and regression gates. |
-| 6 | Complete | Coercion participates in validator-cache reuse instead of compiling uncached validators per union arm. | No implementation work. |
-| 7 | Partial | Reference-graph reuse and safe preflight target reuse reduce repeated walks. | Design and measure compatible sharing of prepared/interpolated content across validate, preflight, and compose. |
-| 8 | Complete | Validator/coercion/namespace caches are reused with the required identity inputs and bounded behavior. | No implementation work. |
-| 9 | Complete | The built-in baseline schema uses shared process-cached ownership rather than repeated conversion and deep cloning. | No implementation work. |
-| 10 | Complete | `ctx.*` lookup no longer clones the full context-values map for each access. | No implementation work. |
-| 11 | Open | The frontmatter interpolation fixpoint still repeatedly extracts references and clones maps/values as keys become eligible. | Parse dependency information once, maintain incremental readiness, and avoid rebuilding seed maps while preserving cycles, shell deferral, best-effort propagation, and key-scoped errors. |
-| 12 | Open | Expression functions still receive an owned `Option<ResolutionContext>`, cloning its context for repeated calls. | Add an internal borrowed/shared path while retaining the owned public facade where compatibility requires it. |
-| 13 | Open | Text replacement still scales with document length times rule count and builds a character-index vector. | Implement and benchmark a faster exact matcher or record a requirement-matched no-win result; preserve descending key-byte-length/ascending lexical precedence, left-to-right non-recursive matching, Unicode boundaries, empty-key handling, and scalar coercion. |
-| 14 | Partial | Literal conversion now skips its scan when `{{{` is absent. | Reduce repeated Markdown-aware scans and full-body copies when interpolation is present; benchmark nested and no-expression cases separately. |
-| 15 | Complete | Parent headings and line offsets are parsed once and queried through memoized/indexed structures. | No implementation work. |
-| 16 | Partial | Some graph/preflight data is shared through `Arc`, but visited documents may still be composed again. | Solve the remaining condition-aware prepared-content duplication without reusing bodies whose output depends on parent state or directive position. |
-| 17 | Partial | Parallel body-shell execution was correctly rejected because commands must retain source-order side effects. | Replace or avoid the independent 10 ms completion polling loop and prove unchanged timeout, output, and failure semantics. Arbitrary directive parallelism remains prohibited. |
-| 18 | Complete / Separated | Graph construction is reused and fragment slug lookup is memoized. | No performance work. Document/options/mode identity and graph opacity belong exclusively to the linked `ReferenceGraph` feature. |
-| 19 | Complete | Protected-range parsing is gated behind a plausible delimiter scan. | No implementation work. |
-| 20 | Complete | Text events without disclosure directives retain their borrowed/event representation instead of being unconditionally reallocated. | No implementation work. |
-| 21 | Partial | The macOS appearance probe is cached and gated away from non-TTY paths. | Verify it together with Findings 2 and 3 in real-terminal L2 coverage; piped CLI timing is insufficient. |
-| 22 | Open / Correction | Directory hashing now unconditionally excludes `node_modules`, `target`, and `vendor`, changing aggregate membership. | Restore prior membership. A future exclusion policy requires a separately approved compatibility ruling, migration semantics for persisted hashes, and an end-to-end aggregate/exit-status test. |
-| 23 | Partial | Syntect themes are borrowed instead of deep-cloned per code block. | Resolve environment/theme choice once per render snapshot rather than reading it per block; retain dynamic behavior across separate renders. |
-| 24 | Complete | Code-block emission writes directly into the output buffer instead of allocating per-token formatted strings. | No implementation work. |
-| 25 | Partial | Four placeholder replacements are fused into one scan. | Measure and, when beneficial, combine compatible ordered line-based cleanup passes; preserve exact pass ordering and canonical output. |
-| 26 | Complete | Validator cache identity uses the repository's fast hashing path rather than repeated SHA-256 work. | No implementation work. |
-| 27 | Complete | Named-type namespace reads/parses are memoized and `@this` avoids rebuilding equivalent data. | No implementation work. |
-| 28 | Complete | Example target validation and file work reuse the resolution/cache machinery. | No implementation work. |
-| 29 | Complete | Effective schemas use shared `Arc<Value>` ownership; built-in baseline paths avoid deep clones. `results-2.md` contains a same-source A/B comparison. | Preserve the approved public ownership exception and its owned compatibility facade. |
-| 30 | Complete | `doc.*` lookup walks effective state by reference and clones only the selected result. | No implementation work. |
-| 31 | Complete | Variable interpolation stringifies the first lookup result rather than performing the lookup twice. | No implementation work. |
-| 32 | Open | Each shell directive still clones read-only policy rule collections into a snapshot. | Snapshot once per stage or use safe shared read ownership; preserve the policy state seen by the stage and avoid holding locks while executing commands. |
-| 33 | Partial | Remote discovery skips the expensive scan when no HTTP marker exists. | Replace per-expression prefix rescans for line numbers with one forward offset table/pass and measure remote-heavy input. |
-| 34 | Complete | Cleanup change detection no longer clones both full bodies solely to compare them. | No implementation work. |
-| 35 | Partial | The `md delta` full-document clones were removed. | Complete or disposition the seven remaining copy/hash/read sub-items listed below. |
+The **Status** and **Work retained here** columns record the audit as of
+`51c1f16e10ffe825b56987573ba4eabc659c768e` and are the input that scoped this
+feature. **Final** records what actually landed, added at the Phase-11 closeout
+(2026-07-16); it is the honest disposition and it supersedes Status wherever the
+two disagree. Every Final entry's evidence — measurement, thresholds, tests,
+and cross-platform classification — is in
+[`results.md`](./results.md).
+
+| Finding | Status | Current implementation | Work retained here | Final (2026-07-16) |
+|---:|---|---|---|---|
+| 1 | Partial | Darkmatter explicitly calls `detect_timezone_with_options(false)`, removing its unused NTP request. | Restore bare `sniff::detect_timezone()` to its compatible full-report behavior by delegating to `true`; retain Darkmatter's explicit `false` call. | **Corrected.** Bare API delegates to `true` again; Darkmatter keeps `false` via a local seam. |
+| 2 | Partial | OSC 10 text-color results are process-cached. | Add L2 proof that repeated terminal construction emits one OSC 10 request and record repeated-construction latency. | **Verified (L2)** on macOS **and real Linux**. 3 constructions → exactly 1 OSC 10; median 0.970 ms. ⚠ Its gate never ran it — `test-l2` omitted the library package; fixed at closeout. |
+| 3 | Partial | The compose CLI shares a terminal through a per-invocation `OnceCell`. | Add an end-to-end CLI case exercising verbose, performance, and warning-report branches and prove one detection per invocation. | **Verified.** Detections *counted* = 1 across verbose + perf + warning branches. |
+| 4 | Partial | TOC line lookup uses an offset table and binary search; compatibility tests cover line/span behavior. | Replace the non-comparable closeout with identical, hashed fixtures, predeclared thresholds, and retained raw samples. | **Closed.** Reconstructed on identical hashed bytes: `toc_large` 488 → 23 ms. |
+| 5 | Complete | Schema validation uses the already resolved effective schema rather than resolving and coercing twice. | No implementation work. Protect in the final benchmark and regression gates. | **Unchanged**; held by the final gates. |
+| 6 | Complete | Coercion participates in validator-cache reuse instead of compiling uncached validators per union arm. | No implementation work. | **Unchanged.** |
+| 7 | Partial | Reference-graph reuse and safe preflight target reuse reduce repeated walks. | Design and measure compatible sharing of prepared/interpolated content across validate, preflight, and compose. | **No safe broadening remained** — existing reuse already at the spec's level 3 (full semantic identity, single-flight). Nothing added, so nothing to remove. |
+| 8 | Complete | Validator/coercion/namespace caches are reused with the required identity inputs and bounded behavior. | No implementation work. | **Unchanged.** |
+| 9 | Complete | The built-in baseline schema uses shared process-cached ownership rather than repeated conversion and deep cloning. | No implementation work. | **Unchanged.** |
+| 10 | Complete | `ctx.*` lookup no longer clones the full context-values map for each access. | No implementation work. | **Unchanged.** |
+| 11 | Open | The frontmatter interpolation fixpoint still repeatedly extracts references and clones maps/values as keys become eligible. | Parse dependency information once, maintain incremental readiness, and avoid rebuilding seed maps while preserving cycles, shell deferral, best-effort propagation, and key-scoped errors. | **Implemented**, byte-identical. `O(sweeps×keys)` re-parse + `O(keys²)` cloning → `O(keys+edges)`. Below the whole-pipeline measurement floor; retained as a structural work-reduction. |
+| 12 | Open | Expression functions still receive an owned `Option<ResolutionContext>`, cloning its context for repeated calls. | Add an internal borrowed/shared path while retaining the owned public facade where compatibility requires it. | **Implemented**, byte-identical. Defaulted `resolution_context_ref` borrow path; owned public method unchanged. Strictly-fewer-clones, not separately measurable. |
+| 13 | Open | Text replacement still scales with document length times rule count and builds a character-index vector. | Implement and benchmark a faster exact matcher or record a requirement-matched no-win result; preserve descending key-byte-length/ascending lexical precedence, left-to-right non-recursive matching, Unicode boundaries, empty-key handling, and scalar coercion. | **Implemented — measured win ≈27×** (2.371 ms → 0.087 ms). Aho–Corasick `LeftmostLongest`; every precedence rule preserved. |
+| 14 | Partial | Literal conversion now skips its scan when `{{{` is absent. | Reduce repeated Markdown-aware scans and full-body copies when interpolation is present; benchmark nested and no-expression cases separately. | **Implemented — measured win ≈104× on skipped work** (240.1 µs → 2.3 µs) for `{{`-free bodies. Nested/rescan path untouched. |
+| 15 | Complete | Parent headings and line offsets are parsed once and queried through memoized/indexed structures. | No implementation work. | **Unchanged.** |
+| 16 | Partial | Some graph/preflight data is shared through `Arc`, but visited documents may still be composed again. | Solve the remaining condition-aware prepared-content duplication without reusing bodies whose output depends on parent state or directive position. | **No safe broadening remained** (see Finding 7). Parent state / directive position / conditions already yield distinct keys. |
+| 17 | Partial | Parallel body-shell execution was correctly rejected because commands must retain source-order side effects. | Replace or avoid the independent 10 ms completion polling loop and prove unchanged timeout, output, and failure semantics. Arbitrary directive parallelism remains prohibited. | **Implemented.** Both loops → one blocking `wait_with_timeout`. ⚠ **Linux + Windows behavioral runs OPEN** (macOS-only host). |
+| 18 | Complete / Separated | Graph construction is reused and fragment slug lookup is memoized. | No performance work. Document/options/mode identity and graph opacity belong exclusively to the linked `ReferenceGraph` feature. | **Separated — nothing landed here.** Only the shared field classification is *consumed*, from that feature's commit `a8e5e98d9`. |
+| 19 | Complete | Protected-range parsing is gated behind a plausible delimiter scan. | No implementation work. | **Unchanged.** |
+| 20 | Complete | Text events without disclosure directives retain their borrowed/event representation instead of being unconditionally reallocated. | No implementation work. | **Unchanged.** |
+| 21 | Partial | The macOS appearance probe is cached and gated away from non-TTY paths. | Verify it together with Findings 2 and 3 in real-terminal L2 coverage; piped CLI timing is insufficient. | **Verified.** PATH-shim sentinel proves no `defaults` fork on redirected output. |
+| 22 | Open / Correction | Directory hashing now unconditionally excludes `node_modules`, `target`, and `vendor`, changing aggregate membership. | Restore prior membership. A future exclusion policy requires a separately approved compatibility ruling, migration semantics for persisted hashes, and an end-to-end aggregate/exit-status test. | **Reverted.** Only dot-prefixed dirs pruned; no migration needed (never released). ⚠ **Linux + Windows behavioral runs OPEN**. |
+| 23 | Partial | Syntect themes are borrowed instead of deep-cloned per code block. | Resolve environment/theme choice once per render snapshot rather than reading it per block; retain dynamic behavior across separate renders. | **Implemented — contract met, no measurable win** (≈0.1 % net vs a control that moved the same). Retained as plan-mandated, byte-identical; honest claim recorded. |
+| 24 | Complete | Code-block emission writes directly into the output buffer instead of allocating per-token formatted strings. | No implementation work. | **Unchanged.** |
+| 25 | Partial | Four placeholder replacements are fused into one scan. | Measure and, when beneficial, combine compatible ordered line-based cleanup passes; preserve exact pass ordering and canonical output. | **No-win — profiled, not implemented.** Ceiling <7 % of cleanup ≈0.5 % of compose, below σ; exact equivalence unavailable; `cleanup_content_internal` impact HIGH. No code written or retained. |
+| 26 | Complete | Validator cache identity uses the repository's fast hashing path rather than repeated SHA-256 work. | No implementation work. | **Unchanged.** |
+| 27 | Complete | Named-type namespace reads/parses are memoized and `@this` avoids rebuilding equivalent data. | No implementation work. | **Unchanged.** |
+| 28 | Complete | Example target validation and file work reuse the resolution/cache machinery. | No implementation work. | **Unchanged.** |
+| 29 | Complete | Effective schemas use shared `Arc<Value>` ownership; built-in baseline paths avoid deep clones. `results-2.md` contains a same-source A/B comparison. | Preserve the approved public ownership exception and its owned compatibility facade. | **Preserved.** Ownership exception + owned facade intact; not reopened. |
+| 30 | Complete | `doc.*` lookup walks effective state by reference and clones only the selected result. | No implementation work. | **Unchanged.** |
+| 31 | Complete | Variable interpolation stringifies the first lookup result rather than performing the lookup twice. | No implementation work. | **Unchanged.** |
+| 32 | Open | Each shell directive still clones read-only policy rule collections into a snapshot. | Snapshot once per stage or use safe shared read ownership; preserve the policy state seen by the stage and avoid holding locks while executing commands. | **Implemented**, snapshot hoisted to the 3 stage orchestrators. ⚠ Carries a **deliberate prompt-frequency change** (mid-stage persist no longer suppresses a later same-stage prompt) flagged for owner acceptance. |
+| 33 | Partial | Remote discovery skips the expensive scan when no HTTP marker exists. | Replace per-expression prefix rescans for line numbers with one forward offset table/pass and measure remote-heavy input. | **Implemented — measured win −82.5 %** (2.394 ms → 419.95 µs) vs a ≥30 % floor; ≈−78 % after discounting build drift. Guard retained. |
+| 34 | Complete | Cleanup change detection no longer clones both full bodies solely to compare them. | No implementation work. | **Unchanged.** |
+| 35 | Partial | The `md delta` full-document clones were removed. | Complete or disposition the seven remaining copy/hash/read sub-items listed below. | **All 7 dispositioned:** 35.1/35.2/35.4/35.5/35.6/35.7 implemented (35.2 −98.8 %, 35.6 −91.1 %, 35.5 −18.0 % CLI); **35.3 no-win → reverted** (net pessimization). |
 
 Audit totals are 17 complete findings, 13 partial findings, and 5 open or
 correction findings. Finding 18 is counted as complete for its performance
 portion and separated for its correctness portion.
+
+### Final totals (2026-07-16 closeout)
+
+Of the 18 findings carrying retained work (1–4, 7, 11–14, 16, 17, 21–23, 25, 32,
+33, and 35's seven sub-items):
+
+- **11 implemented with a measured or structural win** — 1, 11, 12, 13, 14, 17,
+  23, 32, 33, and 35.1/35.2/35.4/35.5/35.6/35.7.
+- **5 closed as verification/evidence** — 2, 3, 4, 21, and Finding 18's
+  separation boundary.
+- **3 closed as an evidence-backed no-win or no-op**, per the standing contract
+  — 25 (profiled, not implemented), 35.3 (implemented, measured, **reverted**),
+  and 7/16 (existing reuse already safe; no speculative code added).
+- **1 reverted as a forbidden behavior change** — 22.
+- **Cross-platform evidence** — Finding 2's Linux L2 gap is **closed** (its PTY
+  tests pass under a real Linux kernel), and Windows **compilation** including
+  target-gated test code is evidenced for all four packages. Windows
+  **behavioral** runs for 17's wait primitive and 22's directory CLI case remain
+  **open** — a cross-compile is not a behavioral run and no Windows host is
+  reachable. See *Open at closeout* in [`results.md`](./results.md).
+- **1 deliberate behavior change awaiting owner acceptance** — 32's mid-stage
+  prompt frequency.
 
 ## Required Work
 
