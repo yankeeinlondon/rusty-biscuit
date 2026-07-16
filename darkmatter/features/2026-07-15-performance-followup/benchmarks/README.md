@@ -101,9 +101,60 @@ writes a dated run record recording:
 - exact commands and build profile (release);
 - host facts, environment, and TTY mode (interactive vs piped);
 - warm-up count, sample count, statistic, and dispersion;
+- tool versions (`rustc`, `cargo`, `criterion`, `hyperfine`) and host load;
 - the predeclared minimum repeatable win and maximum permitted control
   regression (declared **before** the baseline is captured);
-- raw result files (retained, not just summaries).
+- raw result files (retained, not just summaries) — see *Raw samples* below.
+
+### Raw samples (mandatory)
+
+"Raw result files" means the **per-observation vectors**, not Criterion's
+derived statistics. Retaining `estimates.json` is **not** sufficient and was
+rejected by review-1: it carries only `mean` / `median` / `slope` / `std_dev`,
+from which nothing can be recomputed or independently checked.
+
+- **Criterion:** retain `target/criterion/<bench>/new/sample.json` as
+  `<bench>-sample.json` (or `<bench>-{baseline,candidate}-sample.json`). It holds
+  parallel `iters` / `times` vectors; per-iteration time is `times[i]/iters[i]`.
+- **Hyperfine:** retain the `--export-json` file (its `times` array is already
+  per-run).
+- **Any other harness:** retain the individual observations, not a median.
+
+`recompute.ts` beside this file regenerates mean / median / std dev / min / max
+/ bootstrap 95 % CI from a run record's retained vectors:
+
+```
+bun recompute.ts raw/<checkpoint>/<run-id>
+```
+
+Every statistic quoted in a `summary.md` must be reproducible by that command
+from the vectors committed next to it.
+
+### Harnesses are retained, not deleted
+
+A benchmark harness that carries a **pinned baseline copy** of a replaced
+algorithm must be committed and kept (see `f13_scan_and_replace` in
+`darkmatter/lib/benches/phase6_interpolation.rs`), gated by an in-process
+equivalence assertion so the pinned copy cannot drift from what it represents.
+
+Deleting the harness after capture — the Phase-8 "temporary in-crate harness"
+precedent — is what left Findings 25, 35.3, 35.5, 35.6 and 35.7 with
+unrecoverable observations and no way to reproduce their claims. Do not repeat
+it. Measuring a private function is not a reason to delete the harness; a bench
+target is test-tier code and adds no public API.
+
+### Cross-run comparison requires a drift bracket
+
+This host is shared. Identical unmodified code has been observed drifting
+**+50 %** across runs under load (Phase 10), and a cross-run F33 comparison
+under load ~29–30 manufactured a systematic-looking **−19 %** shift across
+*every* benchmark in the binary that vanished at load ~8.
+
+Prefer sampling baseline and candidate **interleaved in one process** (pinned
+baseline). Where that is impossible (the baseline is a whole private function),
+**bracket** the baseline with a candidate run on each side, record the observed
+drift, and record the host load average per run. A delta smaller than the
+measured bracket drift is not a result.
 
 `../results.md` links each disposition to its run record. Interactive (PTY) and
 piped (redirected CLI) measurements are reported separately.
