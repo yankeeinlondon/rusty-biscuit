@@ -1421,10 +1421,20 @@ impl DarkmatterPage {
 /// background fill — a code-block or page padding row (`\x1b[48…`) is content,
 /// not blank, and is preserved.
 fn normalize_body_rhythm(body: &str) -> String {
-    use biscuit_terminal::prelude::strip_escape_codes;
+    use biscuit_terminal::discovery::eval::ANSI_ESCAPE_RE;
 
-    let is_blank =
-        |line: &str| strip_escape_codes(line).trim().is_empty() && !line.contains("\x1b[48");
+    // Driving the canonical regex directly rather than through
+    // `strip_escape_codes`: that helper takes `Into<String>`, so it allocated
+    // twice for every output line (an owned copy of the line, then the regex
+    // output). `replace_all` over a `&str` yields a `Cow` that borrows when the
+    // line carries no escape code, so an escape-free line allocates nothing.
+    //
+    // The background-fill test also moves first: a filled row is content
+    // whatever its glyphs, so deciding it up front skips the regex entirely.
+    // Both operands are pure, so reordering the `&&` preserves the result.
+    let is_blank = |line: &str| {
+        !line.contains("\x1b[48") && ANSI_ESCAPE_RE.replace_all(line, "").trim().is_empty()
+    };
 
     let mut out: Vec<&str> = Vec::new();
     let mut prev_blank = false;

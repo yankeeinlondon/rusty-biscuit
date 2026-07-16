@@ -3155,3 +3155,158 @@
         .expect("no features resolve cleanly");
         assert!(assets.is_empty(), "no features → no injected assets");
     }
+
+/// Finding 35.6 regression coverage.
+///
+/// `normalize_body_rhythm`'s blank-line predicate stopped routing through
+/// `strip_escape_codes` (which takes `Into<String>` and so allocated an owned
+/// copy of every output line plus the regex output) and now drives the same
+/// canonical regex directly over a borrowed `&str`. The background-fill test
+/// also moved ahead of the strip. Both are pure performance changes, so the
+/// contract is exact equality with the previous predicate.
+mod finding_35_6 {
+    use super::super::normalize_body_rhythm;
+
+    /// The pre-optimization predicate, verbatim.
+    fn naive_is_blank(line: &str) -> bool {
+        use biscuit_terminal::prelude::strip_escape_codes;
+        strip_escape_codes(line).trim().is_empty() && !line.contains("\x1b[48")
+    }
+
+    /// The pre-optimization `normalize_body_rhythm`, verbatim apart from calling
+    /// the naive predicate.
+    fn naive_normalize(body: &str) -> String {
+        let mut out: Vec<&str> = Vec::new();
+        let mut prev_blank = false;
+        for line in body.lines() {
+            let blank = naive_is_blank(line);
+            if blank && prev_blank {
+                continue;
+            }
+            out.push(line);
+            prev_blank = blank;
+        }
+        while out.last().is_some_and(|l| naive_is_blank(l)) {
+            out.pop();
+        }
+
+        let mut normalized = out.join("\n");
+        if !normalized.is_empty() {
+            normalized.push('\n');
+        }
+        normalized
+    }
+
+    /// Line shapes spanning the predicate's decision space: escape-free blanks
+    /// and non-blanks, SGR-colored text, background fills (the `\x1b[48` rows
+    /// that count as content), OSC 8 hyperlinks, and reset-only rows.
+    fn lines() -> Vec<&'static str> {
+        vec![
+            "",
+            "   ",
+            "\t",
+            "plain text",
+            "  indented text  ",
+            // SGR-colored visible text.
+            "\x1b[31mred text\x1b[0m",
+            // SGR sequences around nothing visible: strips to empty -> blank.
+            "\x1b[31m\x1b[0m",
+            "\x1b[1m   \x1b[0m",
+            // Reset only.
+            "\x1b[0m",
+            // Background fill with no glyphs: content, never blank.
+            "\x1b[48;2;30;30;30m    \x1b[0m",
+            // Background fill with glyphs.
+            "\x1b[48;5;236m\x1b[38;5;250mcode\x1b[0m",
+            // 256-color foreground, no background.
+            "\x1b[38;5;250mfg only\x1b[0m",
+            // OSC 8 hyperlink with BEL terminator.
+            "\x1b]8;;https://example.com\x07link\x1b]8;;\x07",
+            // OSC 8 hyperlink with ST terminator.
+            "\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\",
+            // OSC 8 wrapper around whitespace only.
+            "\x1b]8;;https://example.com\x07 \x1b]8;;\x07",
+            // Unicode glyphs.
+            "é — ünïcödé",
+            "\x1b[32mé — ünïcödé\x1b[0m",
+            // Box drawing / padding rows.
+            "│                    │",
+            "\x1b[48;2;0;0;0m\x1b[38;2;255;255;255m│\x1b[0m",
+        ]
+    }
+
+    #[test]
+    fn blank_predicate_matches_the_pre_optimization_predicate() {
+        for line in lines() {
+            let expected = naive_is_blank(line);
+            // Exercised through the public behavior: a lone line is dropped
+            // entirely when blank (trailing blanks are stripped) and kept when
+            // it is content.
+            let normalized = normalize_body_rhythm(line);
+            let treated_as_blank = normalized.is_empty();
+            assert_eq!(
+                treated_as_blank, expected,
+                "blank classification changed for {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn normalization_matches_the_pre_optimization_algorithm() {
+        let all = lines();
+
+        // Every adjacent pair, so blank-run collapsing and trailing-blank
+        // stripping are exercised across the whole decision space.
+        for a in &all {
+            for b in &all {
+                let body = format!("{a}\n{b}\n");
+                assert_eq!(
+                    normalize_body_rhythm(&body),
+                    naive_normalize(&body),
+                    "normalization differs for {a:?} then {b:?}"
+                );
+            }
+        }
+
+        // A realistic decorated body: prose, a blank run, a filled code panel,
+        // and trailing blanks.
+        let body = concat!(
+            "\x1b[1mTitle\x1b[0m\n",
+            "\n",
+            "\n",
+            "\n",
+            "\x1b[31mprose\x1b[0m\n",
+            "\x1b[48;2;30;30;30m    \x1b[0m\n",
+            "\x1b[48;5;236mcode line\x1b[0m\n",
+            "\x1b[48;2;30;30;30m    \x1b[0m\n",
+            "\n",
+            "tail\n",
+            "\n",
+            "\n",
+        );
+        assert_eq!(normalize_body_rhythm(body), naive_normalize(body));
+    }
+
+    /// Pins the two behaviors the predicate exists for, independently of the
+    /// oracle: interior blank runs collapse to one, and a background-filled row
+    /// with no glyphs survives as content.
+    #[test]
+    fn collapses_blank_runs_but_keeps_background_filled_rows() {
+        let body = "a\n\n\n\nb\n";
+        assert_eq!(normalize_body_rhythm(body), "a\n\nb\n");
+
+        let filled = "a\n\x1b[48;2;30;30;30m    \x1b[0m\n\x1b[48;2;30;30;30m    \x1b[0m\nb\n";
+        assert_eq!(
+            normalize_body_rhythm(filled),
+            filled,
+            "consecutive background-fill rows are content, not a blank run"
+        );
+    }
+
+    #[test]
+    fn strips_trailing_blank_lines() {
+        assert_eq!(normalize_body_rhythm("a\n\n\n"), "a\n");
+        assert_eq!(normalize_body_rhythm("\n\n\n"), "");
+        assert_eq!(normalize_body_rhythm(""), "");
+    }
+}
