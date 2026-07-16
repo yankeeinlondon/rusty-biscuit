@@ -148,8 +148,7 @@ fn run_hash_diff(
         std::process::exit(2);
     };
 
-    let comparison = md.compare_hash(stored, options)?;
-    let explanation = md.explain_hash_diff(stored, options)?;
+    let (comparison, explanation) = md.diff_hash(stored, options)?;
     println!("{}", explanation.render());
 
     if comparison.frontmatter_changed || comparison.body_changed {
@@ -171,7 +170,7 @@ fn run_hash_save(
         .filter(|p| p.to_str() != Some("-"))
         .ok_or_else(|| eyre!("--save requires an input file path (stdin is not supported)"))?;
 
-    let decision = md.plan_hash_save(stored, options)?;
+    let (decision, explanation) = md.plan_hash_save_explained(stored, options)?;
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
     if let Some(written) = md.apply_hash_save(&decision, options, &today) {
@@ -180,11 +179,10 @@ fn run_hash_save(
             .wrap_err_with(|| format!("Failed to write hash to {:?}", resolved))?;
     }
 
-    match stored {
-        Some(stored) => {
-            let explanation = md.explain_hash_diff(stored, options)?;
-            println!("{}", explanation.render());
-        }
+    // The explanation describes the in-memory document against its *previous*
+    // stored hash, so computing it before the write above does not change it.
+    match explanation {
+        Some(explanation) => println!("{}", explanation.render()),
         None => {
             println!(
                 "No stored hash found; wrote initial {} baseline",

@@ -25,6 +25,8 @@
 //! - **No stored hash** — write the first baseline without bumping.
 
 use super::compare::{HashComparison, compare_options, normalize_extras};
+use super::compute::ComputedHash;
+use super::explain::HashExplanation;
 use super::kind::{KindRelation, MdHashKind, select_kind};
 use super::options::MdHashOptions;
 use super::stored::StoredHash;
@@ -65,6 +67,47 @@ impl Markdown {
         stored: Option<&StoredHash>,
         options: &MdHashOptions,
     ) -> MarkdownResult<SaveDecision> {
+        Ok(self.plan_hash_save_artifact(stored, options)?.0)
+    }
+
+    /// [`Self::plan_hash_save`] plus the explanation `md hash --save` prints,
+    /// both derived from the one like-for-like artifact the planning already
+    /// computes. The explanation is `None` exactly when `stored` is `None`:
+    /// a first baseline has nothing to compare against.
+    ///
+    /// Composing [`Self::plan_hash_save`] with [`Self::explain_hash_diff`]
+    /// instead hashes the document a second time under the same stored-policy
+    /// identity, since neither can see the other's artifact.
+    ///
+    /// ## Errors
+    ///
+    /// Propagates [`MarkdownError::MalformedStoredHash`] from
+    /// [`Self::compare_hash`] when a stored flat value is malformed.
+    ///
+    /// [`MarkdownError::MalformedStoredHash`]: crate::markdown::MarkdownError::MalformedStoredHash
+    pub fn plan_hash_save_explained(
+        &self,
+        stored: Option<&StoredHash>,
+        options: &MdHashOptions,
+    ) -> MarkdownResult<(SaveDecision, Option<HashExplanation>)> {
+        let (decision, artifact) = self.plan_hash_save_artifact(stored, options)?;
+        let explanation = match (stored, &artifact) {
+            (Some(stored), Some(computed)) => {
+                Some(self.diff_with_computed(stored, options, computed)?.1)
+            }
+            _ => None,
+        };
+        Ok((decision, explanation))
+    }
+
+    /// The planning core, also yielding the like-for-like comparison artifact it
+    /// computed so an explanation can reuse it. The artifact is `None` when
+    /// there was no stored hash to compare against.
+    fn plan_hash_save_artifact(
+        &self,
+        stored: Option<&StoredHash>,
+        options: &MdHashOptions,
+    ) -> MarkdownResult<(SaveDecision, Option<ComputedHash>)> {
         let selected = select_kind(stored.map(|s| s.kind), options.forced_kind);
 
         // `--save` establishes a new baseline, so the written value is always
@@ -78,12 +121,15 @@ impl Markdown {
         let Some(stored) = stored else {
             // First baseline: record the hash, but a first write is not a
             // detected content change, so leave `last_updated` alone.
-            return Ok(SaveDecision {
-                kind: selected,
-                new_stored: Some(fresh_baseline()),
-                bump_last_updated: false,
-                comparison: None,
-            });
+            return Ok((
+                SaveDecision {
+                    kind: selected,
+                    new_stored: Some(fresh_baseline()),
+                    bump_last_updated: false,
+                    comparison: None,
+                },
+                None,
+            ));
         };
 
         // The like-for-like comparison artifact, computed once here and reused
@@ -147,12 +193,15 @@ impl Markdown {
             }
         };
 
-        Ok(SaveDecision {
-            kind: selected,
-            new_stored,
-            bump_last_updated,
-            comparison: Some(comparison),
-        })
+        Ok((
+            SaveDecision {
+                kind: selected,
+                new_stored,
+                bump_last_updated,
+                comparison: Some(comparison),
+            },
+            Some(compare_artifact),
+        ))
     }
 }
 
@@ -358,6 +407,7 @@ mod tests {
 /// baseline is written under the *current* options at the *selected* kind.
 #[cfg(test)]
 mod finding_35_5 {
+    use super::super::compute::probe;
     use super::*;
     use crate::markdown::hash::StoredHashValue;
 
@@ -534,6 +584,81 @@ mod finding_35_5 {
                     "{kind:?} with ignored={extra:?}: re-saving an unchanged document rewrote it"
                 );
                 assert!(!second.bump_last_updated);
+            }
+        }
+    }
+
+    /// The structural bound for `--save`: the two artifacts it legitimately
+    /// needs are the stored-policy comparison and the current-policy baseline.
+    /// When those identities coincide there is only one, and planning plus
+    /// explanation together must not exceed that count.
+    ///
+    /// Routing the CLI through `plan_hash_save` and then `explain_hash_diff`
+    /// hashed the stored-policy artifact a second time;
+    /// [`Markdown::plan_hash_save_explained`] is the seam that shares it.
+    #[test]
+    fn save_computes_one_artifact_per_distinct_identity() {
+        let doc = doc();
+
+        // Same kind, same policy, changed content: one shared identity.
+        let opts = MdHashOptions::default();
+        let previous = md("---\ntitle: T\ndraft: true\nnotes: keep\n---\n# H\n\nOld body.");
+        let stored = StoredHash {
+            kind: MdHashKind::Simple,
+            value: previous
+                .compute_hash(MdHashKind::Simple, &opts)
+                .to_stored_value(),
+            ignored: Vec::new(),
+        };
+        let (result, calls) = probe::count_calls(|| doc.plan_hash_save_explained(Some(&stored), &opts));
+        result.expect("plan succeeds");
+        assert_eq!(
+            calls, 1,
+            "same kind and policy is ONE artifact for planning, baseline, and explanation",
+        );
+
+        // Divergent identity: the stored-policy comparison and the
+        // current-policy baseline are genuinely different artifacts, so two is
+        // the floor here — collapsing them would corrupt the baseline.
+        let new_policy = opts_ignoring(&["draft"]);
+        let (result, calls) =
+            probe::count_calls(|| doc.plan_hash_save_explained(Some(&stored), &new_policy));
+        result.expect("plan succeeds");
+        assert_eq!(
+            calls, 2,
+            "an ignore-policy change keeps its two distinct artifacts, and adds no third",
+        );
+
+        // No stored hash: only the first baseline, and nothing to explain.
+        let (result, calls) = probe::count_calls(|| doc.plan_hash_save_explained(None, &opts));
+        let (_, explanation) = result.expect("plan succeeds");
+        assert!(explanation.is_none(), "a first baseline has nothing to compare against");
+        assert_eq!(calls, 1, "a first baseline is a single artifact");
+    }
+
+    /// `plan_hash_save_explained` must agree with the two operations the CLI
+    /// previously composed, so `--save` output stays byte-identical.
+    #[test]
+    fn save_explanation_matches_the_separate_operations() {
+        let doc = doc();
+        for opts in [MdHashOptions::default(), opts_ignoring(&["draft"])] {
+            for kind in [MdHashKind::Simple, MdHashKind::Structured, MdHashKind::Detailed] {
+                let previous = md("---\ntitle: T\ndraft: true\nnotes: keep\n---\n# H\n\nOld body.");
+                let stored = StoredHash {
+                    kind,
+                    value: previous.compute_hash(kind, &opts).to_stored_value(),
+                    ignored: normalize_extras(&opts.extra_ignored),
+                };
+
+                let (decision, explanation) =
+                    doc.plan_hash_save_explained(Some(&stored), &opts).unwrap();
+
+                assert_eq!(decision, doc.plan_hash_save(Some(&stored), &opts).unwrap());
+                assert_eq!(
+                    explanation.expect("a stored hash yields an explanation").render(),
+                    doc.explain_hash_diff(&stored, &opts).unwrap().render(),
+                    "{kind:?}: --save explanation drifted",
+                );
             }
         }
     }

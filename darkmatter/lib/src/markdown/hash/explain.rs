@@ -451,16 +451,73 @@ impl Markdown {
         stored: &StoredHash,
         options: &MdHashOptions,
     ) -> MarkdownResult<HashExplanation> {
-        // One artifact, computed once, shared by the comparison and (for the
-        // `detailed` kind) the per-section alignment below. Both need exactly
-        // `compute_hash(stored.kind, compare_options(..))`: `detailed_body` is
-        // only reachable through `ComparisonDetail::Detailed`, which only arises
-        // when `stored.kind == Detailed`, so the two artifacts are provably the
-        // same one. Previously each recomputed it independently, hashing a
-        // `detailed` document three times per `--diff`.
-        let computed = self.compute_hash(stored.kind, &compare_options(stored, options));
-        let comparison = self.compare_with_computed(stored, options, &computed)?;
+        Ok(self.diff_hash(stored, options)?.1)
+    }
 
+    /// The comparison **and** the explanation for one `md hash --diff`, derived
+    /// from a single computed artifact.
+    ///
+    /// [`Self::compare_hash`] and [`Self::explain_hash_diff`] each compute the
+    /// like-for-like artifact for themselves, so a caller that needs both — the
+    /// explanation to print, the comparison to decide an exit status — hashes
+    /// the document twice. This computes it once and returns both products,
+    /// which are identical to those of the two-call path.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::Markdown;
+    /// use darkmatter::markdown::hash::{MdHashKind, MdHashOptions, StoredHash};
+    ///
+    /// let original: Markdown = "---\ntitle: T\n---\n# H\n\nBody.".into();
+    /// let opts = MdHashOptions::default();
+    /// let stored = StoredHash {
+    ///     kind: MdHashKind::Simple,
+    ///     value: original.compute_hash(MdHashKind::Simple, &opts).to_stored_value(),
+    ///     ignored: Vec::new(),
+    /// };
+    ///
+    /// let edited: Markdown = "---\ntitle: T\n---\n# H\n\nNew body.".into();
+    /// let (comparison, explanation) = edited.diff_hash(&stored, &opts).unwrap();
+    /// assert!(comparison.body_changed);
+    /// assert_eq!(
+    ///     explanation.render(),
+    ///     "Frontmatter remains unchanged, but body has changed",
+    /// );
+    /// ```
+    ///
+    /// ## Errors
+    ///
+    /// Propagates [`MarkdownError::MalformedStoredHash`] from
+    /// [`Self::compare_hash`] when a stored value is malformed for its kind.
+    ///
+    /// [`MarkdownError::MalformedStoredHash`]: crate::markdown::MarkdownError::MalformedStoredHash
+    pub fn diff_hash(
+        &self,
+        stored: &StoredHash,
+        options: &MdHashOptions,
+    ) -> MarkdownResult<(HashComparison, HashExplanation)> {
+        let computed = self.compute_hash(stored.kind, &compare_options(stored, options));
+        self.diff_with_computed(stored, options, &computed)
+    }
+
+    /// [`Self::diff_hash`] against an already-computed artifact.
+    ///
+    /// `computed` **must** be `compute_hash(stored.kind, compare_options(stored,
+    /// options))`. `--save` holds exactly that artifact from its planning step
+    /// and uses this to explain without recomputing it.
+    pub(super) fn diff_with_computed(
+        &self,
+        stored: &StoredHash,
+        options: &MdHashOptions,
+        computed: &ComputedHash,
+    ) -> MarkdownResult<(HashComparison, HashExplanation)> {
+        let comparison = self.compare_with_computed(stored, options, computed)?;
+
+        // The detailed per-section alignment needs the same artifact the
+        // comparison used: `detailed_body` is only reachable through
+        // `ComparisonDetail::Detailed`, which only arises when
+        // `stored.kind == Detailed`, so they are provably the same artifact.
         let body = match comparison.detail {
             ComparisonDetail::Coarse => coarse_body(stored.kind, &comparison),
             ComparisonDetail::Structured {
@@ -474,14 +531,15 @@ impl Markdown {
                 fm_keys_changed, ..
             } => ExplanationBody::Detailed {
                 frontmatter: FmConcern::from_signals(comparison.frontmatter_changed, fm_keys_changed),
-                body: Self::detailed_body(stored, options, &computed)?,
+                body: Self::detailed_body(stored, options, computed)?,
             },
         };
 
-        Ok(HashExplanation {
+        let explanation = HashExplanation {
             body,
-            ignore_policy: comparison.ignore_policy,
-        })
+            ignore_policy: comparison.ignore_policy.clone(),
+        };
+        Ok((comparison, explanation))
     }
 
     /// Aligns the like-for-like detailed artifact against the stored detailed
@@ -1102,5 +1160,167 @@ mod tests {
             keys: "1".repeat(16),
         };
         assert_eq!(pair.fm.len(), 16);
+    }
+}
+
+/// Finding 35.5 (review-1) regression coverage for `md hash --diff`.
+///
+/// The CLI needs two products per `--diff`: the explanation to print and the
+/// comparison to drive the exit status. Reaching for `compare_hash` and
+/// `explain_hash_diff` computed the same `(stored kind, stored ignore-set)`
+/// artifact twice. [`Markdown::diff_hash`] computes it once and returns both.
+#[cfg(test)]
+mod finding_35_5_diff {
+    use super::super::compute::probe;
+    use super::*;
+
+    const ALL_KINDS: [MdHashKind; 5] = [
+        MdHashKind::Fm,
+        MdHashKind::Body,
+        MdHashKind::Simple,
+        MdHashKind::Structured,
+        MdHashKind::Detailed,
+    ];
+
+    fn md(content: &str) -> Markdown {
+        content.into()
+    }
+
+    /// `(original, edited)` pairs spanning unchanged, frontmatter-only,
+    /// body-only, both, and structural edits — so every explanation shape and
+    /// both exit statuses are exercised.
+    fn edit_pairs() -> Vec<(Markdown, Markdown)> {
+        let original = "---\ntitle: T\ndraft: true\n---\nLead.\n\n# Intro\n\nA.\n\n## Setup\n\nB.";
+        vec![
+            (md(original), md(original)),
+            (
+                md(original),
+                md("---\ntitle: Changed\ndraft: true\n---\nLead.\n\n# Intro\n\nA.\n\n## Setup\n\nB."),
+            ),
+            (
+                md(original),
+                md("---\ntitle: T\ndraft: true\n---\nLead.\n\n# Intro\n\nA.\n\n## Setup\n\nB rewritten."),
+            ),
+            (
+                md(original),
+                md("---\ntitle: Changed\nextra: k\n---\nNew lead.\n\n# Intro\n\nA.\n\n# Setup\n\nB rewritten."),
+            ),
+        ]
+    }
+
+    fn stored_at(doc: &Markdown, kind: MdHashKind, opts: &MdHashOptions) -> StoredHash {
+        StoredHash {
+            kind,
+            value: doc.compute_hash(kind, opts).to_stored_value(),
+            ignored: super::super::compare::normalize_extras(&opts.extra_ignored),
+        }
+    }
+
+    /// The structural bound the spec sets: one `(kind, effective options)`
+    /// artifact per `--diff`, computed at most once. Observed through a call
+    /// counter rather than a timer — a duplicate that happens to be fast is
+    /// still a duplicate.
+    #[test]
+    fn diff_hash_computes_the_artifact_exactly_once() {
+        let opts = MdHashOptions::default();
+        for kind in ALL_KINDS {
+            for (original, edited) in edit_pairs() {
+                let stored = stored_at(&original, kind, &opts);
+
+                let (result, calls) = probe::count_calls(|| edited.diff_hash(&stored, &opts));
+                result.expect("diff succeeds");
+
+                assert_eq!(
+                    calls, 1,
+                    "{kind:?}: --diff must compute its artifact exactly once, computed {calls}",
+                );
+            }
+        }
+    }
+
+    /// Sensitivity check for the counter above: the two-call path `diff_hash`
+    /// replaces really does compute the artifact twice. Without this, a counter
+    /// that silently stopped counting would let the bound test pass vacuously.
+    #[test]
+    fn the_replaced_two_call_path_computed_it_twice() {
+        let opts = MdHashOptions::default();
+        let doc = md("---\ntitle: T\n---\n# H\n\nBody.");
+        let stored = stored_at(&doc, MdHashKind::Simple, &opts);
+
+        let (_, calls) = probe::count_calls(|| {
+            let comparison = doc.compare_hash(&stored, &opts).unwrap();
+            let explanation = doc.explain_hash_diff(&stored, &opts).unwrap();
+            (comparison, explanation)
+        });
+        assert_eq!(calls, 2, "the pre-fix CLI path hashed the document twice");
+    }
+
+    /// Byte-identical products: `diff_hash` must return exactly what the two
+    /// public operations return on their own, for every kind and edit shape.
+    /// The rendered explanation text itself is pinned to literal expected
+    /// strings by the `tests` module above.
+    #[test]
+    fn diff_hash_matches_the_separate_operations() {
+        let opts = MdHashOptions::default();
+        for kind in ALL_KINDS {
+            for (original, edited) in edit_pairs() {
+                let stored = stored_at(&original, kind, &opts);
+
+                let (comparison, explanation) = edited.diff_hash(&stored, &opts).unwrap();
+
+                assert_eq!(
+                    comparison,
+                    edited.compare_hash(&stored, &opts).unwrap(),
+                    "{kind:?}: comparison drifted from compare_hash",
+                );
+                assert_eq!(
+                    explanation.render(),
+                    edited.explain_hash_diff(&stored, &opts).unwrap().render(),
+                    "{kind:?}: rendered explanation drifted from explain_hash_diff",
+                );
+            }
+        }
+    }
+
+    /// The ignore-policy advisory rides on *both* products, not just whichever
+    /// one happened to consume it: the explanation used to take the comparison's
+    /// advisory by move.
+    #[test]
+    fn advisory_survives_on_both_products() {
+        let doc = md("---\ntitle: T\ndraft: true\n---\n# H\n\nBody.");
+        let stored = stored_at(&doc, MdHashKind::Simple, &MdHashOptions::default());
+        let opts = MdHashOptions {
+            extra_ignored: vec!["draft".to_string()],
+            ..MdHashOptions::default()
+        };
+
+        let (comparison, explanation) = doc.diff_hash(&stored, &opts).unwrap();
+        assert!(comparison.ignore_policy.is_some());
+        assert_eq!(
+            explanation.render(),
+            "No semantic changes detected\nIgnore policy changed: now also ignoring [draft]; previously []",
+        );
+        assert!(
+            !comparison.frontmatter_changed && !comparison.body_changed,
+            "an ignore-policy change is never a content change",
+        );
+    }
+
+    /// A malformed stored value must still fail, and fail before printing —
+    /// `diff_hash` derives the comparison first, exactly as the CLI's
+    /// compare-then-explain ordering did.
+    #[test]
+    fn malformed_stored_value_still_errors() {
+        let doc = md("# H\n\nBody.");
+        let stored = StoredHash {
+            kind: MdHashKind::Structured,
+            value: StoredHashValue::Flat("aaaa-bbbb".to_string()),
+            ignored: Vec::new(),
+        };
+        let err = doc.diff_hash(&stored, &MdHashOptions::default()).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::markdown::MarkdownError::MalformedStoredHash { .. }
+        ));
     }
 }

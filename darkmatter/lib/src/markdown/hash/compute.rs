@@ -148,6 +148,9 @@ impl Markdown {
     /// assert!(matches!(computed, ComputedHash::Simple { .. }));
     /// ```
     pub fn compute_hash(&self, kind: MdHashKind, options: &MdHashOptions) -> ComputedHash {
+        #[cfg(test)]
+        probe::record();
+
         let ignore = options.ignore_set();
         let filtered = filtered_frontmatter(self, &ignore);
         let strict = options.strict;
@@ -171,6 +174,33 @@ impl Markdown {
                 ComputedHash::Detailed(compute_detailed(self, &filtered, strict))
             }
         }
+    }
+}
+
+/// Counts [`Markdown::compute_hash`] calls so tests can police the spec's
+/// at-most-one-artifact-per-`(kind, effective options)` bound structurally.
+///
+/// The bound is a structural property, not a performance one: a timing
+/// measurement cannot distinguish "computed once" from "computed twice, cheaply".
+/// The counter is thread-local so tests sharing a process stay independent.
+#[cfg(test)]
+pub(super) mod probe {
+    use std::cell::Cell;
+
+    thread_local! {
+        static COMPUTE_CALLS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub(super) fn record() {
+        COMPUTE_CALLS.with(|calls| calls.set(calls.get() + 1));
+    }
+
+    /// Runs `body`, returning its value alongside the number of `compute_hash`
+    /// calls it made.
+    pub(in crate::markdown::hash) fn count_calls<T>(body: impl FnOnce() -> T) -> (T, usize) {
+        let start = COMPUTE_CALLS.with(Cell::get);
+        let value = body();
+        (value, COMPUTE_CALLS.with(Cell::get) - start)
     }
 }
 
