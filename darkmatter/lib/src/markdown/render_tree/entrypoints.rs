@@ -35,10 +35,11 @@ use biscuit_terminal::render_tree::{
     ImagePlaceholder, TerminalRenderContext, TerminalRenderOptions, render_terminal_document,
 };
 use biscuit_terminal::terminal::Terminal;
+use renderable::browser::feature::{FeatureContext, FeatureResolver, PageFeature};
 use renderable::tree::{
-    BrowserRenderOptions, Diagnostic, Document, GraphicsMode, MarkdownDialect, MarkdownRenderOptions,
-    RawHtmlPolicy, RenderStrictness, SourceDescriptor, TerminalMermaidMode,
-    render_browser_document_html, render_markdown_document,
+    BrowserMermaidMode, BrowserRenderOptions, Diagnostic, Document, GraphicsMode, MarkdownDialect,
+    MarkdownRenderOptions, RawHtmlPolicy, RenderStrictness, SourceDescriptor, TerminalMermaidMode,
+    render_browser_document_body, render_browser_document_html, render_markdown_document,
 };
 
 use renderable::tree::{NodeKind, RenderNode};
@@ -204,6 +205,110 @@ pub(crate) fn render_tree_html_with_context(
     let rendered = render_browser_document_html(&doc, &browser_opts)?;
     Ok(PipelineResult::new(
         rendered.output,
+        fold_diagnostics,
+        rendered.diagnostics,
+    ))
+}
+
+/// A browser render for Darkmatter's full-page path, keeping the standalone
+/// document, the embeddable body fragment, and the requested page features
+/// separate so the caller can place feature assets **inside** an embeddable
+/// wrapper rather than in the document `<head>`.
+///
+/// See [`render_tree_html_page_body`].
+pub(crate) struct BrowserPageRender {
+    /// The standalone full document (`<!DOCTYPE html>…`), for the no-wrapper
+    /// path where the page frame adds nothing so the output stands alone.
+    pub document: String,
+    /// The document's inner `<head>` content (charset / viewport / title /
+    /// design-token `:root` block / `.code-block` panel stylesheet), with no
+    /// deferred feature assets. The decorated standalone-document path reuses
+    /// this as the real `<head>` payload — wrapping [`body`](Self::body) in a
+    /// frame while the head keeps its charset/tokens/panel CSS — rather than
+    /// emitting an empty `<head>`.
+    pub head: String,
+    /// The `<body>` inner HTML fragment — no `<!DOCTYPE>`/`<html>`/`<head>`/
+    /// `<body>` — for embedding inside the `<div class="darkmatter-page">`
+    /// wrapper.
+    pub body: String,
+    /// The rolled-up page-level `<style>`/`<script>` assets (design-token
+    /// `:root` block, `.code-block` panel stylesheet, component styles) the
+    /// wrapper embeds inline before the body so the fragment is self-contained.
+    /// Empty when the render produced none.
+    pub assets: String,
+    /// The deduplicated features the components requested, in first-seen order.
+    pub features: Vec<PageFeature>,
+}
+
+/// Renders a [`Markdown`] to browser HTML for
+/// [`DarkmatterPage::render_to_browser`](crate::layout::DarkmatterPage::render_to_browser),
+/// **collecting** requested features instead of injecting them into `<head>`.
+///
+/// This is the feature-aware, body-only companion to
+/// [`render_tree_html_with_context`]. Two things differ from the standalone
+/// [`Markdown::as_html`](crate::markdown::Markdown::as_html) path:
+///
+/// 1. **Interactive Mermaid is the default.** A bare `mermaid` fence lowers to
+///    the interactive `<pre class="mermaid">` container (requesting
+///    [`PageFeature::MermaidDiagram`]); [`MermaidMode::Image`] stays an explicit
+///    static-SVG opt-in and [`MermaidMode::Text`] an explicit code opt-in. The
+///    supplied `graphics_mode` still caps the result — [`GraphicsMode::Off`]
+///    renders code and [`GraphicsMode::Vector`] caps Interactive to static SVG —
+///    so a caller who disables graphics keeps the side-effect-free code form.
+/// 2. **Features are deferred.** [`BrowserRenderOptions::defer_feature_injection`]
+///    is set, so the collected features are returned in
+///    [`BrowserPageRender::features`] and **no** assets are written to `<head>`;
+///    the caller resolves them through `resolver`/`feature_context` and injects
+///    inline `<style>`/`<script>` into the page wrapper (spec "Body-only
+///    renders").
+///
+/// The render is produced through the body-fragment path
+/// ([`render_browser_document_body`]) so [`BrowserPageRender::body`] is the
+/// `<body>` inner HTML with no document scaffold, ready to embed inside the
+/// page wrapper. [`BrowserPageRender::document`] carries the standalone
+/// full-document form for the no-wrapper path where the page frame adds nothing.
+///
+/// ## Errors
+///
+/// Returns [`MarkdownError::InvalidLineRange`](crate::markdown::MarkdownError::InvalidLineRange)
+/// for a malformed fenced code-block directive, or
+/// [`MarkdownError::RenderTree`](crate::markdown::MarkdownError::RenderTree)
+/// wrapping a fatal browser render error.
+pub(crate) fn render_tree_html_page_body(
+    md: &Markdown,
+    options: &HtmlOptions,
+    build_ctx: &super::build_context::TreeBuildContext,
+    resolver: Rc<dyn FeatureResolver>,
+    feature_context: FeatureContext,
+    graphics_mode: GraphicsMode,
+) -> crate::markdown::MarkdownResult<PipelineResult<BrowserPageRender>> {
+    let (doc, fold_diagnostics) = to_render_document_with_context(md, build_ctx)?;
+    validate_code_directives(&doc.root)?;
+
+    let mut browser_opts = browser_options_from_html_options(options);
+    // Darkmatter's full-page browser default is interactive Mermaid; explicit
+    // Image / Text choices keep their static-SVG / code opt-in shapes.
+    browser_opts.mermaid_mode = match options.mermaid_mode {
+        crate::markdown::output::terminal::MermaidMode::Off => BrowserMermaidMode::Interactive,
+        crate::markdown::output::terminal::MermaidMode::Image => BrowserMermaidMode::StaticSvg,
+        crate::markdown::output::terminal::MermaidMode::Text => BrowserMermaidMode::Code,
+    };
+    browser_opts.graphics_mode = graphics_mode;
+    browser_opts.feature_resolver = resolver;
+    browser_opts.feature_context = feature_context;
+    // The page owns feature placement (body-only wrapper), so collect the
+    // requests without resolving/injecting them into `<head>`.
+    browser_opts.defer_feature_injection = true;
+
+    let rendered = render_browser_document_body(&doc, &browser_opts)?;
+    Ok(PipelineResult::new(
+        BrowserPageRender {
+            document: rendered.output.document,
+            head: rendered.output.head,
+            body: rendered.output.body,
+            assets: rendered.output.assets,
+            features: rendered.features,
+        },
         fold_diagnostics,
         rendered.diagnostics,
     ))

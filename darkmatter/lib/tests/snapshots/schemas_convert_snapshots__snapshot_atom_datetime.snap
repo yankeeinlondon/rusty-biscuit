@@ -13,7 +13,7 @@ expression: "convert_atom(\"datetime\")"
           "type": "null"
         },
         {
-          "format": "date-time",
+          "format": "darkmatter-datetime",
           "type": "string"
         }
       ]

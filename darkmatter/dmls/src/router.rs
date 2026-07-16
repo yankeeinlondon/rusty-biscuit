@@ -13,7 +13,7 @@
 //! decode positions until the encoding is negotiated (Helix) are safe by
 //! construction.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -30,6 +30,7 @@ use lsp_types::request::{
     CodeActionRequest, Completion, DocumentHighlightRequest, DocumentLinkRequest,
     DocumentSymbolRequest, FoldingRangeRequest, Formatting, GotoDefinition, HoverRequest,
     PrepareRenameRequest, References, RegisterCapability, Rename, Request as _,
+    SemanticTokensFullRequest, SemanticTokensRangeRequest, SemanticTokensRefresh,
     WillRenameFiles, WorkDoneProgressCreate, WorkspaceSymbolRequest,
 };
 use lsp_types::{
@@ -40,7 +41,8 @@ use lsp_types::{
     DocumentSymbolResponse, FileChangeType, FoldingRangeParams, GotoDefinitionParams,
     GotoDefinitionResponse, HoverParams, InitializeParams, InitializeResult, NumberOrString,
     ProgressParams, ProgressParamsValue, ReferenceParams, RegistrationParams, RenameFilesParams,
-    RenameParams, ServerInfo, TextDocumentPositionParams, Uri, WorkDoneProgress,
+    RenameParams, SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult,
+    SemanticTokensResult, ServerInfo, TextDocumentPositionParams, Uri, WorkDoneProgress,
     WorkDoneProgressBegin, WorkDoneProgressCreateParams, WorkDoneProgressEnd,
     WorkDoneProgressReport, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
@@ -297,6 +299,29 @@ impl ServerState {
         for uri in self.documents.open_uris() {
             self.refresh_diagnostics(&uri);
         }
+        let mut trigger_transitions = HashMap::new();
+        for transition in self.overlay.take_trigger_diagnostic_transitions() {
+            trigger_transitions.insert(transition.path, transition.error);
+        }
+        for (path, error) in trigger_transitions {
+            let Some(uri) = crate::workspace::file_path_to_uri(&path) else {
+                continue;
+            };
+            // Open-buffer diagnostics are versioned and derive from the
+            // authoritative in-memory text. Recompute them after every scan
+            // has settled because a later document can move or clear trigger
+            // failure ownership after the envelope's first refresh.
+            if self.documents.is_open(&uri) {
+                self.refresh_diagnostics(&uri);
+                continue;
+            }
+            let diagnostics = error
+                .as_deref()
+                .map(crate::diagnostics::frontmatter::trigger_load_diagnostic)
+                .into_iter()
+                .collect();
+            self.diagnostics.publish(uri, None, diagnostics);
+        }
     }
 
     /// The filesystem paths of all currently open buffers (buffer authoritative
@@ -350,13 +375,22 @@ impl ServerState {
     /// re-assembles on the diagnostics refresh by construction. Nothing runs
     /// when the effective config is unchanged, and the expensive re-discovery
     /// runs only when the `workspace` section actually changed.
-    fn reload_config(&mut self, settings: serde_json::Value) {
+    ///
+    /// ## Returns
+    ///
+    /// `true` when a token-affecting change occurred and the client honors
+    /// `workspace/semanticTokens/refresh`, so the caller (which owns the
+    /// connection) sends the refresh. The new config already applies to every
+    /// later request regardless of this signal.
+    fn reload_config(&mut self, settings: serde_json::Value) -> bool {
         let before = self.config.effective().clone();
         self.config.apply_client_settings(settings);
         let after = self.config.effective();
         if *after == before {
-            return;
+            return false;
         }
+        let refresh_semantic_tokens =
+            should_request_semantic_tokens_refresh(&self.profile, &before, after);
 
         let wiki_roots = (after.wiki.wiki_root != before.wiki.wiki_root).then(|| {
             crate::workspace::resolve_wiki_roots(&self.roots, after.wiki.wiki_root.as_deref())
@@ -380,6 +414,7 @@ impl ServerState {
             }
         }
         self.refresh_all_diagnostics();
+        refresh_semantic_tokens
     }
 
     /// Applies a coalesced on-disk change: read + re-index, or drop.
@@ -517,11 +552,64 @@ impl CancelLedger {
     }
 }
 
+/// Tracks outstanding server-initiated `workspace/semanticTokens/refresh`
+/// requests.
+///
+/// Each send gets a unique id (`dmls/semantic-tokens-refresh/<n>`) so two
+/// config changes in flight before the first response do not collide on one
+/// id and make the client's responses ambiguous. The loop retires responses by
+/// id and logs a client rejection.
+#[derive(Debug, Default)]
+struct RefreshLedger {
+    next: u64,
+    outstanding: HashSet<RequestId>,
+}
+
+impl RefreshLedger {
+    const PREFIX: &'static str = "dmls/semantic-tokens-refresh";
+
+    /// Allocates a unique refresh request id and records it as outstanding.
+    fn issue(&mut self) -> RequestId {
+        let id = RequestId::from(format!("{}/{}", Self::PREFIX, self.next));
+        self.next += 1;
+        self.outstanding.insert(id.clone());
+        id
+    }
+
+    /// Consumes a client response addressed to a refresh request.
+    ///
+    /// A matching outstanding id is retired; a carried error is logged at
+    /// `warn` (a client refusing the refresh must surface, but must not fail
+    /// the loop), a success is retired quietly at `debug`.
+    ///
+    /// ## Returns
+    ///
+    /// `true` when the response matched a tracked refresh id (now retired);
+    /// `false` when the id is not a refresh request the caller should keep its
+    /// existing handling for.
+    fn consume(&mut self, response: &Response) -> bool {
+        if !self.outstanding.remove(&response.id) {
+            return false;
+        }
+        match &response.error {
+            Some(error) => tracing::warn!(
+                id = %response.id,
+                code = error.code,
+                "client rejected semantic-tokens refresh: {}",
+                error.message
+            ),
+            None => tracing::debug!(id = %response.id, "semantic-tokens refresh acknowledged"),
+        }
+        true
+    }
+}
+
 /// The dispatch loop.
 pub struct Router {
     connection: Connection,
     state: ServerState,
     cancelled: CancelLedger,
+    refresh: RefreshLedger,
 }
 
 impl Router {
@@ -531,6 +619,7 @@ impl Router {
             connection,
             state,
             cancelled: CancelLedger::default(),
+            refresh: RefreshLedger::default(),
         }
     }
 
@@ -556,7 +645,11 @@ impl Router {
                     self.handle_notification(notification);
                 }
                 Message::Response(response) => {
-                    tracing::debug!(id = %response.id, "ignoring client response");
+                    // Retire an outstanding refresh (logging a client rejection);
+                    // an untracked id keeps the original ignore behavior.
+                    if !self.refresh.consume(&response) {
+                        tracing::debug!(id = %response.id, "ignoring client response");
+                    }
                 }
             }
         }
@@ -599,6 +692,8 @@ impl Router {
             DocumentHighlightRequest::METHOD => self.document_highlight(id, request.params),
             FoldingRangeRequest::METHOD => self.folding_range(id, request.params),
             HoverRequest::METHOD => self.hover(id, request.params),
+            SemanticTokensFullRequest::METHOD => self.semantic_tokens_full(id, request.params),
+            SemanticTokensRangeRequest::METHOD => self.semantic_tokens_range(id, request.params),
             Completion::METHOD => self.completion(id, request.params),
             CodeActionRequest::METHOD => self.code_action(id, request.params),
             Formatting::METHOD => self.formatting(id, request.params),
@@ -731,6 +826,37 @@ impl Router {
             })
             .flatten();
         Response::new_ok(id, hover)
+    }
+
+    fn semantic_tokens_full(&self, id: RequestId, params: serde_json::Value) -> Response {
+        let Ok(params) = serde_json::from_value::<SemanticTokensParams>(params) else {
+            return invalid_params(id);
+        };
+        // A missing document answers `null` (no tokens), the same empty-result
+        // convention neighboring providers use for an unknown document.
+        let result = self
+            .state
+            .with_document(&params.text_document.uri, |ctx| {
+                SemanticTokensResult::Tokens(crate::providers::semantic_tokens::semantic_tokens_full(
+                    ctx,
+                ))
+            });
+        Response::new_ok(id, result)
+    }
+
+    fn semantic_tokens_range(&self, id: RequestId, params: serde_json::Value) -> Response {
+        let Ok(params) = serde_json::from_value::<SemanticTokensRangeParams>(params) else {
+            return invalid_params(id);
+        };
+        let range = params.range;
+        let result = self
+            .state
+            .with_document(&params.text_document.uri, |ctx| {
+                SemanticTokensRangeResult::Tokens(
+                    crate::providers::semantic_tokens::semantic_tokens_range(ctx, range),
+                )
+            });
+        Response::new_ok(id, result)
     }
 
     fn completion(&self, id: RequestId, params: serde_json::Value) -> Response {
@@ -888,9 +1014,11 @@ impl Router {
                 // here — a `ClientWatched` client gets that from
                 // `didChangeWatchedFiles`, so it skips the scan.
                 tracing::debug!(uri = params.text_document.uri.as_str(), "didSave");
-                if self.state.watch_mode == WatchMode::ServerRescan
-                    && self.state.rescan_workspace()
-                {
+                if self.state.watch_mode == WatchMode::ServerRescan {
+                    self.state.rescan_workspace();
+                    // Schema-root YAML is intentionally outside Markdown
+                    // workspace discovery, but a save is also the watcher-less
+                    // trigger-registry rescan boundary.
                     self.state.refresh_all_diagnostics();
                 }
             }
@@ -901,7 +1029,9 @@ impl Router {
                     return;
                 };
                 tracing::debug!("didChangeConfiguration");
-                self.state.reload_config(params.settings);
+                if self.state.reload_config(params.settings) {
+                    self.send_semantic_tokens_refresh();
+                }
             }
             DidChangeWatchedFiles::METHOD => {
                 let Some(params) =
@@ -980,6 +1110,13 @@ impl Router {
             tracing::warn!("failed to send response: {error}");
         }
     }
+
+    /// Requests `workspace/semanticTokens/refresh` with a freshly allocated,
+    /// unique id, tracked as outstanding until the client responds.
+    fn send_semantic_tokens_refresh(&mut self) {
+        let id = self.refresh.issue();
+        send_refresh_request(&self.connection.sender, id);
+    }
 }
 
 /// Builds an `InvalidParams` error response for a malformed request payload.
@@ -989,6 +1126,44 @@ fn invalid_params(id: RequestId) -> Response {
         ErrorCode::InvalidParams as i32,
         "malformed request params".to_string(),
     )
+}
+
+/// Whether a config change affects the semantic-token stream.
+///
+/// Only two knobs change the emitted tokens: the `semantic_tokens.enable`
+/// master switch and `wiki.enable` (which gates the F4 wiki family). Any other
+/// config change leaves the token stream identical, so no refresh is warranted.
+fn semantic_tokens_refresh_needed(before: &crate::DmlsConfig, after: &crate::DmlsConfig) -> bool {
+    before.semantic_tokens != after.semantic_tokens || before.wiki.enable != after.wiki.enable
+}
+
+/// Whether the server should send `workspace/semanticTokens/refresh` after a
+/// config change: the change must be token-affecting **and** the client must
+/// honor the refresh request. An incapable client still gets the new config on
+/// its next full/range request — it just is not proactively nudged.
+fn should_request_semantic_tokens_refresh(
+    profile: &ClientProfile,
+    before: &crate::DmlsConfig,
+    after: &crate::DmlsConfig,
+) -> bool {
+    profile.supports_semantic_tokens_refresh && semantic_tokens_refresh_needed(before, after)
+}
+
+/// Sends a `workspace/semanticTokens/refresh` request under a pre-allocated id.
+///
+/// The client's response is retired later by the loop via [`RefreshLedger`]; a
+/// send failure (the client is gone) is logged rather than propagated, so a
+/// token-config change never fails the `didChangeConfiguration` notification
+/// that triggered it.
+fn send_refresh_request(sender: &Sender<Message>, id: RequestId) {
+    let request = Request::new(
+        id,
+        SemanticTokensRefresh::METHOD.to_string(),
+        serde_json::Value::Null,
+    );
+    if let Err(error) = sender.send(Message::Request(request)) {
+        tracing::warn!("failed to request semantic-tokens refresh: {error}");
+    }
 }
 
 /// Deserializes notification params, logging (not crashing) on mismatch.
@@ -1032,5 +1207,123 @@ mod tests {
         ledger.record(RequestId::from("42".to_string()));
         assert!(!ledger.take(&RequestId::from(42)));
         assert!(ledger.take(&RequestId::from("42".to_string())));
+    }
+
+    /// A client profile whose only interesting bit is refresh support.
+    fn profile_with_refresh(refresh: bool) -> ClientProfile {
+        let caps = if refresh {
+            serde_json::json!({ "workspace": { "semanticTokens": { "refreshSupport": true } } })
+        } else {
+            serde_json::json!({})
+        };
+        let params: InitializeParams =
+            serde_json::from_value(serde_json::json!({ "capabilities": caps })).unwrap();
+        ClientProfile::from_initialize(&params, crate::source_map::PositionEncoding::Utf16)
+    }
+
+    #[test]
+    fn test_semantic_tokens_refresh_needed_detects_token_knobs() {
+        let base = crate::DmlsConfig::default();
+
+        let mut enable_off = base.clone();
+        enable_off.semantic_tokens.enable = false;
+        assert!(semantic_tokens_refresh_needed(&base, &enable_off));
+
+        let mut wiki_off = base.clone();
+        wiki_off.wiki.enable = false;
+        assert!(semantic_tokens_refresh_needed(&base, &wiki_off));
+
+        // A non-token change is not token-affecting.
+        let mut debounce = base.clone();
+        debounce.diagnostics.debounce_ms = 999;
+        assert!(!semantic_tokens_refresh_needed(&base, &debounce));
+
+        assert!(!semantic_tokens_refresh_needed(&base, &base));
+    }
+
+    #[test]
+    fn test_should_request_refresh_gated_on_capability() {
+        let before = crate::DmlsConfig::default();
+        let mut after = before.clone();
+        after.semantic_tokens.enable = false;
+
+        // Capable client + token-affecting change → send refresh.
+        let capable = profile_with_refresh(true);
+        assert!(should_request_semantic_tokens_refresh(
+            &capable, &before, &after
+        ));
+
+        // Incapable client: config still applies to later requests, but no
+        // proactive refresh is sent.
+        let incapable = profile_with_refresh(false);
+        assert!(!should_request_semantic_tokens_refresh(
+            &incapable, &before, &after
+        ));
+
+        // Capable client + no token-affecting change → nothing to refresh.
+        assert!(!should_request_semantic_tokens_refresh(
+            &capable, &before, &before
+        ));
+    }
+
+    #[test]
+    fn test_send_refresh_request_isolates_failure() {
+        let (sender, receiver) = crossbeam_channel::unbounded::<Message>();
+        // The client is gone: the send fails and is swallowed rather than
+        // panicking or failing the notification.
+        drop(receiver);
+        send_refresh_request(
+            &sender,
+            RequestId::from("dmls/semantic-tokens-refresh/0".to_string()),
+        );
+    }
+
+    #[test]
+    fn test_refresh_ledger_issues_distinct_tracked_ids() {
+        let mut ledger = RefreshLedger::default();
+        let first = ledger.issue();
+        let second = ledger.issue();
+        // Two sends before any response must not collide on one id, or the
+        // client's responses become ambiguous.
+        assert_ne!(first, second);
+        assert!(ledger.outstanding.contains(&first));
+        assert!(ledger.outstanding.contains(&second));
+        assert_eq!(ledger.outstanding.len(), 2);
+    }
+
+    #[test]
+    fn test_refresh_ledger_consumes_error_response() {
+        let mut ledger = RefreshLedger::default();
+        let id = ledger.issue();
+        let response = Response::new_err(
+            id.clone(),
+            ErrorCode::InternalError as i32,
+            "client refused refresh".to_string(),
+        );
+        // A rejection is consumed (and logged) without failing the loop, and
+        // the id is retired from tracking.
+        assert!(ledger.consume(&response));
+        assert!(!ledger.outstanding.contains(&id));
+    }
+
+    #[test]
+    fn test_refresh_ledger_consumes_success_response() {
+        let mut ledger = RefreshLedger::default();
+        let id = ledger.issue();
+        let response = Response::new_ok(id.clone(), serde_json::Value::Null);
+        assert!(ledger.consume(&response));
+        assert!(!ledger.outstanding.contains(&id));
+    }
+
+    #[test]
+    fn test_refresh_ledger_ignores_unrelated_response() {
+        let mut ledger = RefreshLedger::default();
+        let tracked = ledger.issue();
+        let response = Response::new_ok(RequestId::from(999), serde_json::Value::Null);
+        // An unrelated id is not a refresh response: the caller keeps its own
+        // handling and the outstanding set is undisturbed.
+        assert!(!ledger.consume(&response));
+        assert!(ledger.outstanding.contains(&tracked));
+        assert_eq!(ledger.outstanding.len(), 1);
     }
 }

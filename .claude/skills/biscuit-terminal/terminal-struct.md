@@ -54,6 +54,7 @@ pub struct Terminal {
     // Fixed dimensions (for testing or explicit overrides)
     pub fixed_width: Option<u32>,
     pub fixed_height: Option<u32>,
+    pub tab_width: usize,          // terminfo init_tabs, default 8
 }
 ```
 
@@ -67,6 +68,7 @@ let term = Terminal::new();
 // Terminal dimensions (recalculated on each call, or fixed if set via builder)
 let width = term.width();   // Returns 80 if detection fails
 let height = term.height(); // Returns 24 if detection fails
+let tab_width = term.tab_width; // Detected once, defaults to 8
 
 // Color mode (light/dark) - static method
 let mode = Terminal::color_mode();
@@ -83,13 +85,14 @@ let term = Terminal::builder()
     .color_depth(ColorDepth::TrueColor)
     .width(120)   // Fixed width (overrides dynamic detection)
     .height(40)   // Fixed height (overrides dynamic detection)
+    .tab_width(4) // Explicit horizontal-tab interval
     .build();
 ```
 
 Available builder methods:
 - `app()`, `supports_italic()`, `image_support()`, `underline_support()`
 - `osc_link_support()`, `is_tty()`, `color_depth()`, `is_ci()`, `is_nerd_font()`
-- `width()`, `height()` (fixed dimensions)
+- `width()`, `height()` (fixed dimensions), `tab_width()`
 
 ## Key Enums
 

@@ -1,6 +1,6 @@
 //! Behavior-trait implementations for the Goose provider.
 
-use crate::adapters::ProviderAdapter;
+use crate::hook_adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
 use crate::provider::behavior::{
     AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
@@ -26,7 +26,7 @@ impl McpBehavior for GooseProvider {
 }
 impl AdapterBehavior for GooseProvider {
     fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
-        &crate::adapters::GOOSE_ADAPTER
+        &crate::hook_adapters::GOOSE_ADAPTER
     }
 }
 impl ConfiguratorBehavior for GooseProvider {

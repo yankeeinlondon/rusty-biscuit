@@ -1,3 +1,4 @@
+
 ---
 area: "{{ ctx.area }}"
 scope: "{{ctx.area == 'root' ? 'package' : 'package area' }}"
@@ -18,7 +19,34 @@ mode: "append"
 ::block when="area == 'biscuit-tui'"
 - use the 'tui' and 'biscuit-tui' skills
 - use the 'cli' skills too when working with 'biscuit-tui-cli'
+- all scripts used in hook events or resources for slash commands/prompts should be saved to `.claudine/scripts`
+    - prefer Typescript (executed by tsx or bun) over other language choices
+    - bash script is an ok alternative where it's a better fit
 ::end-block
+::block when="has_command(gitnexus)"
+- **IMPORTANT:** never add gitnexus indexing information to CLAUDE.md or AGENTS.md
+::end-block
+
+
+::block when="ctx.area == claudine || ctx.area == darkmatter"
+## Kind Formalism
+
+We are in the process of being more "formal" with the use of _kinded_ YAML or Markdown documents. A _kinded_ document
+is any document that defines the `kind` property at the root level of it's structured data. By doing so it declares
+formally what kind of document it is. This declaration then has strong tie-in to the Darkmatter schema support that
+both Claudine and Darkmatter use.
+
+Kind catalog:
+
+- `schema` - define a **SimpleSchema** schema
+- `schema-trigger` - a declared way of pattern matching a document and apply a schema to it when the pattern matches
+- `sequence` - a sequence definition in Claudine
+- `group` - a schema for defining a task group for use in Claudine sequences
+- `task` - a task definition
+
+More to come.
+::end-block
+
 
 ## Best Practices
 

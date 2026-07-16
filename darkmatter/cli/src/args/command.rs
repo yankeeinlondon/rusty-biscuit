@@ -165,6 +165,10 @@ pub enum Command {
         #[arg(long)]
         no_baseline_schema: bool,
 
+        /// Disable trigger discovery and bare-name schema-root lookup
+        #[arg(long)]
+        no_trigger_schemas: bool,
+
         /// Global shell command timeout in seconds (default: 10)
         #[arg(long, value_name = "SECONDS")]
         timeout: Option<u64>,

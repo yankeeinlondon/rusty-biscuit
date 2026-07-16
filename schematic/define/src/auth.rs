@@ -51,6 +51,7 @@ use crate::oauth::OAuth2Config;
 ///
 /// let auth = AuthStrategy::ApiKey {
 ///     header: "X-API-Key".to_string(),
+///     value_prefix: None,
 /// };
 /// // Credential env vars are set on RestApi::env_auth
 /// ```
@@ -97,6 +98,14 @@ pub enum AuthStrategy {
     ApiKey {
         /// Header name (e.g., "X-API-Key", "Api-Key").
         header: String,
+
+        /// Optional prefix prepended to the credential value before it is sent.
+        ///
+        /// Lets a definition require only the bare secret in the environment
+        /// while still emitting a scheme-qualified header value. Gitea sets
+        /// this to `"token "` so `Authorization: token <pat>` is produced from
+        /// a bare `GITEA_TOKEN`.
+        value_prefix: Option<String>,
     },
 
     /// Basic authentication (username:password).
@@ -189,6 +198,15 @@ pub enum AuthMethod {
     ApiKey {
         /// Header name (e.g. `X-API-Key`).
         header: String,
+        /// Optional prefix prepended to the credential value before it is sent.
+        value_prefix: Option<String>,
+    },
+    /// Explicit API key sent in a query parameter or cookie.
+    ApiKeyParam {
+        /// Parameter name (e.g. `api_key`).
+        name: String,
+        /// Where the API key is sent.
+        location: ApiKeyLocation,
     },
     /// Explicit HTTP basic auth credentials.
     Basic,
@@ -213,6 +231,15 @@ pub enum EnvAuthStrategy {
     ApiKey {
         /// Header name (e.g. `X-API-Key`).
         header: String,
+        /// Optional prefix prepended to the credential value before it is sent.
+        value_prefix: Option<String>,
+    },
+    /// Parameter-based API key fallback (query string or cookie).
+    ApiKeyParam {
+        /// Parameter name (e.g. `api_key`).
+        name: String,
+        /// Where the API key is sent.
+        location: ApiKeyLocation,
     },
     /// Basic auth fallback from [`crate::EnvMapping::basic_user`] and
     /// [`crate::EnvMapping::basic_pass`].
@@ -247,12 +274,17 @@ impl AuthPolicy {
                     header: header.clone(),
                 }),
             },
-            AuthStrategy::ApiKey { header } => Self {
+            AuthStrategy::ApiKey {
+                header,
+                value_prefix,
+            } => Self {
                 explicit: vec![AuthMethod::ApiKey {
                     header: header.clone(),
+                    value_prefix: value_prefix.clone(),
                 }],
                 env_fallback: Some(EnvAuthStrategy::ApiKey {
                     header: header.clone(),
+                    value_prefix: value_prefix.clone(),
                 }),
             },
             AuthStrategy::Basic => Self {
@@ -263,7 +295,16 @@ impl AuthPolicy {
                 explicit: vec![AuthMethod::OAuth2(config.clone())],
                 env_fallback: None,
             },
-            AuthStrategy::ApiKeyParam { .. } => Self::default(),
+            AuthStrategy::ApiKeyParam { name, location } => Self {
+                explicit: vec![AuthMethod::ApiKeyParam {
+                    name: name.clone(),
+                    location: *location,
+                }],
+                env_fallback: Some(EnvAuthStrategy::ApiKeyParam {
+                    name: name.clone(),
+                    location: *location,
+                }),
+            },
         }
     }
 
@@ -331,6 +372,7 @@ pub enum ApiKeyLocation {
 ///
 /// let strategy = UpdateStrategy::ChangeTo(AuthStrategy::ApiKey {
 ///     header: "X-API-Key".to_string(),
+///     value_prefix: None,
 /// });
 ///
 /// let result = match strategy {
@@ -376,17 +418,64 @@ mod tests {
     fn auth_policy_from_api_key_strategy_supports_explicit_and_env_fallback() {
         let policy = AuthPolicy::from_auth_strategy(&AuthStrategy::ApiKey {
             header: "X-API-Key".to_string(),
+            value_prefix: None,
         });
         assert_eq!(
             policy.explicit,
             vec![AuthMethod::ApiKey {
                 header: "X-API-Key".to_string(),
+                value_prefix: None,
             }]
         );
         assert_eq!(
             policy.env_fallback,
             Some(EnvAuthStrategy::ApiKey {
                 header: "X-API-Key".to_string(),
+                value_prefix: None,
+            })
+        );
+    }
+
+    #[test]
+    fn auth_policy_from_api_key_strategy_carries_value_prefix() {
+        let policy = AuthPolicy::from_auth_strategy(&AuthStrategy::ApiKey {
+            header: "Authorization".to_string(),
+            value_prefix: Some("token ".to_string()),
+        });
+        assert_eq!(
+            policy.explicit,
+            vec![AuthMethod::ApiKey {
+                header: "Authorization".to_string(),
+                value_prefix: Some("token ".to_string()),
+            }]
+        );
+        assert_eq!(
+            policy.env_fallback,
+            Some(EnvAuthStrategy::ApiKey {
+                header: "Authorization".to_string(),
+                value_prefix: Some("token ".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn auth_policy_from_api_key_param_strategy_is_non_empty() {
+        let policy = AuthPolicy::from_auth_strategy(&AuthStrategy::ApiKeyParam {
+            name: "api_key".to_string(),
+            location: ApiKeyLocation::Query,
+        });
+        assert_eq!(
+            policy.explicit,
+            vec![AuthMethod::ApiKeyParam {
+                name: "api_key".to_string(),
+                location: ApiKeyLocation::Query,
+            }]
+        );
+        assert_eq!(
+            policy.env_fallback,
+            Some(EnvAuthStrategy::ApiKeyParam {
+                name: "api_key".to_string(),
+                location: ApiKeyLocation::Query,
             })
         );
     }
@@ -521,6 +610,7 @@ mod tests {
         let current = AuthStrategy::BearerToken { header: None };
         let new_auth = AuthStrategy::ApiKey {
             header: "X-API-Key".to_string(),
+            value_prefix: None,
         };
         let strategy = UpdateStrategy::ChangeTo(new_auth.clone());
 

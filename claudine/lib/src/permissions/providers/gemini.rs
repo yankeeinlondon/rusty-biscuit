@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
@@ -481,7 +480,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
             pattern: "*".to_owned(),
             effect: PolicyEffect::Allow,
             provenance: CanonicalRuleProvenance::approximate(
-                first_source_id(native),
+                super::common::first_source_id(native, "gemini-derived"),
                 "approval mode",
                 "Gemini read operations are modeled as broadly allowed.",
             ),
@@ -493,7 +492,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
                 _ => PolicyEffect::Ask,
             },
             provenance: CanonicalRuleProvenance::approximate(
-                first_source_id(native),
+                super::common::first_source_id(native, "gemini-derived"),
                 "approval mode",
                 "Gemini write operations are modeled from approval mode.",
             ),
@@ -505,7 +504,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
                 _ => PolicyEffect::Ask,
             },
             provenance: CanonicalRuleProvenance::approximate(
-                first_source_id(native),
+                super::common::first_source_id(native, "gemini-derived"),
                 "approval mode",
                 "Gemini shell execution is modeled from approval mode when no explicit policy rule matches.",
             ),
@@ -617,7 +616,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
                     fidelity: MappingFidelity::Exact,
                 })
             },
-            one_shot_plan: build_one_shot_plan(change),
+            one_shot_plan: build_one_shot_plan(change)?,
             warnings: Vec::new(),
             supported: true,
         })
@@ -806,7 +805,7 @@ fn choose_targets(
     }
 }
 
-fn build_one_shot_plan(change: &PolicyChange) -> Option<OneShotMutationPlan> {
+fn build_one_shot_plan(change: &PolicyChange) -> Result<Option<OneShotMutationPlan>> {
     let mut argv = Vec::new();
     for operation in &change.operations {
         match operation {
@@ -830,22 +829,13 @@ fn build_one_shot_plan(change: &PolicyChange) -> Option<OneShotMutationPlan> {
                 argv.push("--allowed-tools".to_owned());
                 argv.push(raw.clone());
             }
-            _ => return None,
+            _ => return Ok(None),
         }
     }
-    Some(OneShotMutationPlan {
+    Ok(Some(super::common::one_shot_plan(
         argv,
-        env: BTreeMap::new(),
-        fidelity: MappingFidelity::Approximate,
-    })
-}
-
-fn first_source_id(native: &NativeEffectivePolicy) -> String {
-    native
-        .sources
-        .first()
-        .map(|source| source.id.clone())
-        .unwrap_or_else(|| "gemini-derived".to_owned())
+        MappingFidelity::Approximate,
+    )))
 }
 
 fn has_cli(cli: &GeminiCliOverrides) -> bool {

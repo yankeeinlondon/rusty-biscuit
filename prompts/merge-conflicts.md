@@ -1,11 +1,21 @@
 ---
 operation: "merge-conflict"
+conflicts: {{ ctx.merge_conflicts || null }}
+
+initialize: 
+    stack:
+        when: "!conflicts"
+        action:
+            - info: |-
+                There are **no** merge conflicts in this branch! If you want to "predict" what files will be conflict when you _do_
+                merge then execute the `conflict-forecast.md` instead.
+            - stop
 ---
 ## Context
 
 You are in the **{{ctx.branch}}** of the **{{ctx.repo}}** repo. A merge has recently been performed and there are the following merge conflicts:
 
-{{ctx.merge_conflicts}}
+{{ conflicts }}
 
 ## File Type Tips
 
@@ -20,6 +30,6 @@ You are in the **{{ctx.branch}}** of the **{{ctx.repo}}** repo. A merge has rece
 
 ## Task
 
-- Create a plan for resolving these conflicts. 
+- Create a plan for resolving these conflicts.
 - When the plan is ready, execute the plan. 
 - Once the plan has been completed summarize the conflicts and how they were resolved.

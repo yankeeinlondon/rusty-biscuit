@@ -62,6 +62,28 @@ service Rendezvous {
     // state vectors and push missing deltas in both directions. The
     // RPC completes only after the protocol terminates (or fails).
     rpc SyncWithPeer(SyncWithPeerRequest) returns (SyncWithPeerResponse);
+
+    // Enumerate host-capability registers known to this daemon: its
+    // own plus the synced replica of every mesh peer's.
+    rpc ListHostCapabilities(ListHostCapabilitiesRequest) returns (ListHostCapabilitiesResponse);
+
+    // Enumerate checked-out-repos registers known to this daemon: its
+    // own plus the synced replica of every mesh peer's. This is the
+    // scheduler's "which hosts already have this repo, and how fresh"
+    // read path.
+    rpc ListHostRepos(ListHostReposRequest) returns (ListHostReposResponse);
+
+    // Report a session lifecycle transition on THIS host. Producers
+    // (the Claudine wrapper today, the process monitor later) call this
+    // on start / meaningful status change / end — transitions, never
+    // heartbeats: every call writes this host's sessions-active
+    // register, which replicates to every mesh peer.
+    rpc ReportSessionEvent(ReportSessionEventRequest) returns (ReportSessionEventResponse);
+
+    // Enumerate the active-session registers known to this daemon: its
+    // own plus the synced replica of every mesh peer's. This is the
+    // dashboard's NOW-view read path.
+    rpc ListActiveSessions(ListActiveSessionsRequest) returns (ListActiveSessionsResponse);
 }
 
 message PingRequest {
@@ -88,6 +110,10 @@ message StatusResponse {
     int64 uptime_seconds = 2;
     // Daemon start time in milliseconds since the Unix epoch.
     int64 started_at_unix_ms = 3;
+    // Hex-encoded public key of THIS daemon's node. Lets a reader
+    // (e.g. the dashboard) tell its own registers — always fresh —
+    // apart from synced replicas of mesh peers.
+    string node_id = 4;
 }
 
 // Generic session-log entry. Mirrors `rendezvous_core::session_log::Entry`.
@@ -215,10 +241,20 @@ message PeerInfo {
     // Current connection state.
     PeerConnectionState state = 4;
     // Last observation timestamp, in milliseconds since the Unix epoch.
+    // Bumped by mDNS re-announcements and connection-state changes —
+    // a reachability signal, NOT proof that data actually synced.
     int64 last_seen_unix_ms = 5;
     // If the most recent connection attempt failed, this carries a
     // short human-readable description of the failure.
     string last_error = 6;
+    // Timestamp of the most recent SUCCESSFUL direct-sync round with
+    // this peer, in milliseconds since the Unix epoch (0 = never
+    // synced). This is the honest freshness clock for the peer's
+    // synced register replicas: unlike `last_seen_unix_ms` it does not
+    // advance on mDNS chatter, so a peer that stays discoverable while
+    // its sync fails reads stale. The dashboard's 60s staleness
+    // threshold keys off this field.
+    int64 last_synced_unix_ms = 7;
 }
 
 message CreateInvitationRequest {
@@ -327,6 +363,143 @@ message SyncWithPeerResponse {
     repeated SyncChunkOutcome chunks = 4;
 }
 
+message ListHostCapabilitiesRequest {}
+
+// One host's capability register as currently known to this daemon.
+message HostCapability {
+    // Document path (`capability/{node_id}`).
+    string document_id = 1;
+    // Hex-encoded node the register describes (also its single writer).
+    string owner_node_id = 2;
+    // Current field values as a JSON object string. JSON keeps the
+    // wire stable while the capability schema evolves — readers ignore
+    // unknown fields and treat missing fields as "unknown".
+    string fields_json = 3;
+}
+
+message ListHostCapabilitiesResponse {
+    repeated HostCapability hosts = 1;
+}
+
+message ListHostReposRequest {}
+
+// One host's checked-out-repos register as currently known to this
+// daemon.
+message HostRepos {
+    // Document path (`repos/{node_id}`).
+    string document_id = 1;
+    // Hex-encoded node the register describes (also its single writer).
+    string owner_node_id = 2;
+    // Current map of canonical repo id → HEAD commit hash, as a JSON
+    // object string.
+    string repos_json = 3;
+}
+
+message ListHostReposResponse {
+    repeated HostRepos hosts = 1;
+}
+
+// Kind of session lifecycle transition being reported.
+enum SessionEventKind {
+    SESSION_EVENT_KIND_UNSPECIFIED = 0;
+    // A session started: creates the register entry (stamping
+    // started_at) and merges `details_json` into it.
+    SESSION_EVENT_KIND_STARTED = 1;
+    // A session's attributes changed (e.g. status flipped to
+    // waiting-on-user): merges `details_json` over the existing entry.
+    // Reported for transitions the dashboard should see, not as a
+    // heartbeat.
+    SESSION_EVENT_KIND_UPDATED = 2;
+    // A session ended: removes the register entry (the register holds
+    // only LIVE sessions; history belongs to the session log).
+    SESSION_EVENT_KIND_ENDED = 3;
+}
+
+// The displayable state of a session, ordered by intervention strength.
+// The daemon folds one of these per producer into the effective status.
+enum SessionStatusState {
+    SESSION_STATUS_STATE_UNSPECIFIED = 0;
+    ACTIVE = 1;
+    IDLE = 2;
+    WAITING_ON_USER = 3;
+}
+
+// Which producer authored a status contribution — its slot key in the
+// entry. `PERMISSION_HOOK` and `IDLE_HOOK` are distinct even though both
+// originate from `claudine handle`.
+enum StatusProducer {
+    STATUS_PRODUCER_UNSPECIFIED = 0;
+    LIFECYCLE = 1;
+    SINK = 2;
+    IDLE_HOOK = 3;
+    PROCESS_MONITOR = 4;
+    PERMISSION_HOOK = 5;
+}
+
+// Why the producer believes the state — surfaced to the UI for honesty.
+enum SessionStatusBasis {
+    SESSION_STATUS_BASIS_UNSPECIFIED = 0;
+    SESSION_STATUS_BASIS_LIFECYCLE = 1;
+    PERMISSION_ASK = 2;
+    INTERACTIVE_TURN_COMPLETE = 3;
+    PROCESS_HEURISTIC = 4;
+}
+
+// One producer's opinion about a session's displayed status. The daemon
+// stores it in the producer's slot (revision-guarded, last-writer-wins
+// per slot) and recomputes the effective status from every live slot.
+message StatusContribution {
+    SessionStatusState state = 1;
+    StatusProducer producer = 2;
+    SessionStatusBasis basis = 3;
+    // Producer-captured unix-ns wall clock. The daemon rejects any
+    // contribution whose revision <= the stored slot revision.
+    int64 revision = 4;
+}
+
+message ReportSessionEventRequest {
+    // Producer-scoped session identifier (whatever identifier the
+    // producer natively has; correlation across producers happens
+    // downstream, per the logging-refactor rulings).
+    string session_id = 1;
+    SessionEventKind kind = 2;
+    // DESCRIPTIVE session attributes only (agent, model, repo,
+    // interactive, pid, permission_signal, ...) as a JSON object string.
+    // Merged over the existing entry; ignored for ENDED. The status
+    // opinion moved to the typed `status` field; the daemon owns and
+    // strips started_at_unix_ms / updated_at_unix_ms / status /
+    // status_basis / status_producer / status_slots.
+    string details_json = 3;
+    // Present when this event carries a status opinion (a producer's
+    // slot contribution). Absent for pure descriptive updates.
+    StatusContribution status = 4;
+}
+
+message ReportSessionEventResponse {
+    // Number of sessions active on this host after applying the event.
+    uint64 active_count = 1;
+}
+
+message ListActiveSessionsRequest {}
+
+// One host's active-session register as currently known to this daemon.
+message HostActiveSessions {
+    // Document path (`sessions-active/{node_id}`).
+    string document_id = 1;
+    // Hex-encoded node the register describes (also its single writer).
+    string owner_node_id = 2;
+    // session_id → entry-object map as a JSON object string. Entries
+    // carry the reported attributes plus daemon-stamped
+    // started_at_unix_ms / updated_at_unix_ms (consumers judge
+    // staleness from the latter; a crashed producer never reports its
+    // end).
+    string sessions_json = 3;
+}
+
+message ListActiveSessionsResponse {
+    repeated HostActiveSessions hosts = 1;
+}
+
 // ---------------------------------------------------------------------
 // Direct-sync wire protocol (transported over QUIC bidirectional streams,
 // length-prefixed with a big-endian u32 per frame).
@@ -349,7 +522,7 @@ message SignedEnvelopeWire {
   // Chunk path this envelope is bound to (e.g.
   // "session/shared/s1/part/0").
   string document_id = 6;
-  // Payload kind: 0 = snapshot, 1 = delta.
+  // Payload kind: 0 = snapshot, 1 = delta, 2 = snapshot-replace.
   int32 payload_kind = 7;
 }
 
@@ -385,6 +558,14 @@ message SyncDelta {
     // `true` if `envelope.payload` is a full Loro snapshot (peer had
     // no prior state); `false` if it is an incremental update bundle.
     bool is_snapshot = 3;
+    // `true` when the snapshot must REPLACE the receiver's replica
+    // wholesale: the sender's document was re-based (history
+    // compacted) past the receiver's advertised version, so no delta
+    // can connect and merging does not converge. Implies
+    // `is_snapshot`. The flag is authenticated via the envelope's
+    // `payload_kind` (2 = snapshot-replace), which is covered by the
+    // signature.
+    bool replace = 4;
 }
 
 // Closing frame in the sync phase. Tells the peer no more deltas are

@@ -28,7 +28,6 @@
 //!   [`SemanticEvent::ProviderExtension`].
 
 use serde_json::{Map, Value};
-use tracing::debug;
 
 use super::parser::{SemanticStreamParser, StreamParseError};
 use super::protocol::pi::{
@@ -76,11 +75,7 @@ impl<S: SemanticEventSink> PiSemanticStreamParser<S> {
     }
 
     fn base_extra(&self, raw_kind: &str) -> Map<String, Value> {
-        let mut m = Map::new();
-        m.insert("provider".into(), Value::from("pi"));
-        m.insert("line_num".into(), Value::from(self.line_num));
-        m.insert("raw_kind".into(), Value::from(raw_kind));
-        m
+        super::common::base_extra(Provider::Pi, self.line_num, raw_kind)
     }
 
     fn handle_session(&mut self, session: PiSession, raw_kind: &str) {
@@ -282,26 +277,11 @@ impl<S: SemanticEventSink> PiSemanticStreamParser<S> {
     }
 
     fn emit_provider_extension(&mut self, kind: &str, payload: Value) {
-        debug!(
-            provider = "pi",
-            event_type = %kind,
-            "pi parser falling back to provider extension for unknown event type"
-        );
-        self.sink
-            .on_semantic_event(SemanticEvent::ProviderExtension {
-                provider: Provider::Pi,
-                kind: kind.to_string(),
-                payload,
-            });
+        super::common::emit_provider_extension(&mut self.sink, Provider::Pi, kind, payload);
     }
 
     fn emit_malformed_warning(&mut self, err: &str) {
-        let mut extra = self.base_extra("malformed_json");
-        extra.insert("line_num".into(), Value::from(self.line_num));
-        self.sink.on_semantic_event(SemanticEvent::Warning {
-            message: format!("Malformed JSON on line {}: {err}", self.line_num),
-            extra: Value::Object(extra),
-        });
+        super::common::emit_malformed_warning(&mut self.sink, Provider::Pi, self.line_num, err);
     }
 }
 
@@ -379,33 +359,24 @@ impl<S: SemanticEventSink> SemanticStreamParser for PiSemanticStreamParser<S> {
             self.provider_status.as_deref(),
         );
         let has_usage = self.token_usage.input.is_some() || self.token_usage.output.is_some();
-        let mut summary = StreamExecutionSummary {
-            provider: Provider::Pi,
-            session_id: self.session_id,
-            model: self.model,
-            assistant_text: self.assistant_text,
-            provider_status: self.provider_status,
-            exit_code,
-            is_error: self.is_error,
-            error_kind: self.error_kind,
-            error_message: self.error_message,
-            duration_ms: None,
-            duration_api_ms: None,
-            num_turns: (self.num_turns > 0).then_some(self.num_turns),
-            token_usage: has_usage.then_some(self.token_usage),
-            cost_usd: (self.cost_usd > 0.0).then_some(self.cost_usd),
-            tool_calls: (self.tool_calls > 0).then_some(self.tool_calls),
-            permission_prompts: None,
-            user_input_prompts: None,
-            rate_limit: None,
-            context_usage: None,
-            badges: Vec::new(),
-            raw_summary: None,
-            stderr_text: None,
-            stderr_diagnostics: None,
-        };
-        summary.badges = crate::stream::badges::derive_badges(&summary, Provider::Pi);
-        summary
+        super::common::finish_summary(
+            Provider::Pi,
+            StreamExecutionSummary {
+                session_id: self.session_id,
+                model: self.model,
+                assistant_text: self.assistant_text,
+                provider_status: self.provider_status,
+                exit_code,
+                is_error: self.is_error,
+                error_kind: self.error_kind,
+                error_message: self.error_message,
+                num_turns: (self.num_turns > 0).then_some(self.num_turns),
+                token_usage: has_usage.then_some(self.token_usage),
+                cost_usd: (self.cost_usd > 0.0).then_some(self.cost_usd),
+                tool_calls: (self.tool_calls > 0).then_some(self.tool_calls),
+                ..Default::default()
+            },
+        )
     }
 }
 
@@ -416,32 +387,12 @@ impl<S: SemanticEventSink> SemanticStreamParser for PiSemanticStreamParser<S> {
 /// structured category, so classification is text-based (mirroring OpenCode's
 /// message-fallback path).
 fn classify_error(message: &str) -> SemanticErrorKind {
-    let lower = message.to_ascii_lowercase();
-    if lower.contains("rate limit")
-        || lower.contains("quota")
-        || lower.contains("billing")
-        || lower.contains("out of credits")
-        || lower.contains("overloaded")
-        || lower.contains("503")
-        || lower.contains("api error")
-        || lower.contains("api timeout")
-    {
-        return SemanticErrorKind::ApiRemote;
-    }
-    if lower.contains("api key")
-        || lower.contains("authentication")
-        || lower.contains("no api key")
-        || lower.contains("not authorized")
-        || lower.contains("no models available")
-        || lower.contains("model not found")
-        || lower.contains("invalid model")
-    {
-        return SemanticErrorKind::Configuration;
-    }
-    if lower.contains("abort") || lower.contains("cancel") || lower.contains("interrupt") {
-        return SemanticErrorKind::Interrupted;
-    }
-    SemanticErrorKind::AgentNative
+    super::common::classify_error_by_keywords(
+        super::vocabulary::error_keywords(Provider::Pi),
+        None,
+        None,
+        Some(message),
+    )
 }
 
 /// Stable snake_case label for a [`SemanticErrorKind`], carried in the summary's

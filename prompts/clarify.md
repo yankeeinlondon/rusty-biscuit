@@ -2,8 +2,10 @@
 description: |-
     Runs an interactive session to clarify the passed in spec or design file.
 $schema:
-    spec: file(required; match(**/*spec*.md); eager) -> pass in a specification file for clarification
-    # - design: file(required; match(**/*design*.md)) -> pass in a design document for clarification
+    - spec: file(required; match(**/*spec*.md); eager) -> pass in a specification file for clarification
+      doc: file
+    - design: file(required; match(**/*design*.md)) -> pass in a design document for clarification
+      doc: file
 doc: "{{spec || design}}"
 interactive: true
 initialize:

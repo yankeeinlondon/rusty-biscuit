@@ -708,7 +708,14 @@ mod tests {
     #[test]
     fn snapshot_plain_rendering() {
         let report = snapshot_report();
-        let term = Terminal::builder().is_tty(false).width(80).build();
+        // Pin color depth so the styled snapshot is byte-identical on every host.
+        // Left unset, build() falls back to env-detected depth (TrueColor under a
+        // dev COLORTERM, None under CI's TERM=dumb), which made this snapshot drift.
+        let term = Terminal::builder()
+            .is_tty(false)
+            .width(80)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::TrueColor)
+            .build();
         let text = render_text(&report, &term);
         insta::assert_snapshot!(text);
     }

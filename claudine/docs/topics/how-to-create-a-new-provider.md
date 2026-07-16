@@ -28,6 +28,7 @@ Before writing any code, gather metadata about the new provider. The research pr
 | **Hooks** | `docs/research/hooks/{file}.md` | Hook event names, config file format, hook registration mechanism |
 | **CLI Information** | `docs/research/usage/{file}.md` | Entrypoints, output formats, YOLO/auto-approve, reasoning controls, ACP support |
 | **Usage Metrics** | `docs/research/usage/{file}.md` | Billing model, usage dashboard, stream protocol, session log paths |
+| **Agent Errors** | `docs/research/agent-errors/{file}.md` | Ordered structured-stream error kinds/messages/codes with per-item provenance |
 
 Each research file writes its structured findings into **Markdown frontmatter**. The frontmatter schema is the single source of truth for the next phase.
 
@@ -42,6 +43,17 @@ Each research file writes its structured findings into **Markdown frontmatter**.
 - Does it support MCP, skills, or ACP?
 - How does it accept prompts in interactive vs non-interactive mode?
 - What CLI flags control YOLO/auto-approve, reasoning, and model selection?
+- Which structured error discriminators, messages, and numeric codes are safe
+  inputs to the existing case-insensitive substring classifier?
+
+If the provider has a structured stream parser, author and validate its
+`agent-errors` research document before wiring the parser. Do not add an
+`ERROR_KEYWORDS` constant or an `error_vocabulary` facts key. Generation
+projects the provenance-bearing research objects into
+`lib/src/stream/providers/vocabulary.rs`; bucket and item order are runtime
+precedence. A provider without a parser keeps an explicit empty runtime table
+until parser onboarding makes the researched records executable and adds
+classifier fixtures.
 
 ---
 

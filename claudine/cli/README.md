@@ -43,6 +43,11 @@ Show a compact provider capability matrix with:
 - `Agent` support (custom agent/subagent definitions)
 - `Hooks` count (how many native hook events Claudine can attach to)
 
+`claudine providers agent-errors check <slug> [--findings <path>]` runs the
+deterministic research gate and writes an explicit outcome report. Fleet
+lifecycle documents use this trusted CLI surface instead of invoking the
+globally blacklisted `cargo` executable directly.
+
 ### `claudine signals [check]`
 
 Inspect the compiled signal-detection tables. Bare `claudine signals` prints a per-provider summary (record/extraction counts, bespoke count, per-source breakdown) for all nine corpora, including the dormant kilo/pi tables.

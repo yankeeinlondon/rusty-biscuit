@@ -5,6 +5,7 @@ pub mod compose;
 pub mod config_tui;
 pub mod context;
 pub mod context_render;
+pub mod dashboard;
 pub mod errors;
 pub mod exec_prep;
 pub mod handle;

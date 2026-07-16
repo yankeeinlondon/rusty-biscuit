@@ -28,10 +28,10 @@ flowchart LR
         R1["Rule 1 — provider boolean rewrite<br/><i>composition subcommands only</i>"]
         R2["Rule 2 — fuzzy --provider value"]
         R4["Rule 4 — --help / -h hoist<br/><i>composition subcommands only</i>"]
-        R3["Rule 3 — -- separator insertion<br/><i>composition subcommands only</i>"]
-        R1 --> R2 --> R4 --> R3
+        R1 --> R2 --> R4
     end
-    B --> C["--plain pre-scan<br/>(sets NO_COLOR)"]
+    B --> PP["partition_composition_tail<br/>(Claudine argv + provider tail)"]
+    PP --> C["--plain pre-scan<br/>(sets NO_COLOR)"]
     C --> D["parse_cli_from"]
     subgraph D["parse_cli_from"]
         direction TB
@@ -53,7 +53,7 @@ therefore never pre-parses.
 ## Pre-parsing stage
 
 `argv::normalize` is the single entry point above `clap`. It accepts
-the raw `Vec<OsString>` from `std::env::args_os()`, applies four rewrite
+the raw `Vec<OsString>` from `std::env::args_os()`, applies three rewrite
 rules in a fixed order, and returns the rewritten vector:
 
 | Rule | Purpose | Gated on |
@@ -61,13 +61,14 @@ rules in a fixed order, and returns the rewritten vector:
 | **Rule 1** | `--claude` / `--codex` / `--gemini` / `--goose` / `--kimi` / `--opencode` / `--qwen` → `--provider <slug>` | `compose`, `inline-compose`, `sequence` |
 | **Rule 2** | Fuzzy canonicalization of `--provider <value>` and `--provider=<value>` via `Provider::fuzzy_match_cli_name` | Any subcommand (flag-driven) |
 | **Rule 4** | Hoist a trailing `--help` / `-h` to argv position 1 so the root custom help handler fires | `compose`, `inline-compose`, `sequence` |
-| **Rule 3** | Insert a single `--` separator before the first `key=value` setter that follows an interleaved flag after a previously seen positional | `compose`, `inline-compose`, `sequence` |
 
-Rule 4 runs **before** Rule 3 so `--help` is lifted out of the trailing
-setter region before the `--` separator lands. If Rule 3 ran first, it
-would bury `--help` inside clap's trailing raw-value bucket and the
-downstream positional parser would misclassify it as a second file
-reference.
+**Retired: Rule 3.** A former Rule 3 inserted a synthetic `--` separator to
+protect trailing setters. It was removed when composition gained
+provider-argument forwarding (a synthetic `--` collided with an authored `--`
+boundary). Its job — plus forwarding the agent tail — now belongs to the
+post-normalization ownership partition, `argv::partition_composition_tail`,
+described in [argv-normalization.md](./argv-normalization.md#provider-argument-partition).
+Rule 4 still runs so `--help` is hoisted before the partition sees it.
 
 For the token-level semantics of each rule — including every pass-through
 guarantee and the full corner-case matrix — see
@@ -137,9 +138,10 @@ Several properties of the clap surface shape the pre-parser's rules:
   `--help` / `-h` into the root handler on those subcommands.
 - `ComposeArgs`, `InlineComposeArgs`, and `SequenceArgs` each expose a
   greedy multi-value positional (`#[arg(num_args = 1..)]`) that collects
-  files plus `key=value` setters in any order. That positional is what
-  makes trailing `--help` get absorbed as a value. Rule 3 fixes that
-  without disabling help recognition.
+  files plus `key=value` setters in any order. The ownership partition
+  removes the agent tail before clap sees it, so this positional only ever
+  receives the file and Claudine setters; Rule 4 handles the trailing
+  `--help` case separately.
 - The seven provider booleans on `SharedComposeArgs` are retained only
   as clap help entries and shell-completion hints. Rule 1 rewrites them
   before clap sees them, so `explicit_provider()` reads a single field
@@ -234,22 +236,19 @@ untouched" unit test. Without that, the pre-parser can silently start
 rewriting inputs it should leave alone. This contract is documented in
 the `argv.rs` module docs and is the first thing to check in review.
 
-### 3. Keep `COMPOSITION_FLAGS_WITH_VALUE` in lockstep with the clap surface
+### 3. Derive the owned-flag surface from clap, never a hand-maintained list
 
-Rule 3 classifies tokens as flag / flag-with-value / positional /
-setter. A value-bearing flag whose value is mistaken for a positional
-will fire Rule 3 in the wrong place, so the
-`COMPOSITION_FLAGS_WITH_VALUE` table in `argv.rs` must mirror the clap
-`#[arg(...)]` surface of `SharedComposeArgs` and `SequenceArgs`.
+The ownership partition must know which composition-argv tokens Claudine owns
+(and whether each consumes a value) to decide where the agent tail begins and
+which flags to reclaim from it. `OwnedFlags::for_composition` in
+`argv/partition.rs` derives that surface by introspecting the root `Cli`
+globals plus the `ComposeArgs`/`SequenceArgs` clap definitions — never a
+second hand-maintained constant.
 
-The drift-detection test
-`composition_flags_with_value_matches_clap_surface` iterates
-`ComposeArgs::augment_args(...)` and `SequenceArgs::augment_args(...)`
-at test time and asserts that every value-bearing clap flag is present
-in the constant. When you add a new value-bearing composition flag,
-extend the constant and run `cargo test -p claudine-cli argv::tests` —
-the test turns drift into a compile-green test failure instead of a
-silent bug.
+The drift-detection test `owned_surface_is_derived_from_clap_and_non_empty`
+asserts the derived surface is populated and contains representative value and
+boolean flags, so a refactor that breaks the derivation surfaces as a test
+failure instead of a silent forwarding bug.
 
 ### 4. Gate rules narrowly
 
@@ -324,12 +323,12 @@ greedy-positional + `--help` interaction).
 
 ## Testing
 
-- **Unit tests** live in `argv.rs` under `#[cfg(test)] mod tests` and
-  cover every rewrite rule, each boolean-to-slug mapping, every
-  pass-through guarantee, and a dense Rule 3 corner-case matrix. They
-  include a drift-detection test that iterates the clap surface to
-  verify `COMPOSITION_FLAGS_WITH_VALUE` mirrors every value-bearing
-  flag.
+- **Unit tests** live in the `argv` module (`mod.rs` and `partition.rs`)
+  under `#[cfg(test)] mod tests` and cover every rewrite rule, each
+  boolean-to-slug mapping, every pass-through guarantee, and the ownership
+  partition (implicit/explicit tails, owned-flag reclaim, ordering errors,
+  setter-vs-tail classification). They include a drift-detection test that
+  iterates the clap surface to verify the derived owned-flag surface.
 - **Integration tests** live in
   [`claudine/cli/tests/argv_normalization.rs`](../../cli/tests/argv_normalization.rs)
   and drive the compiled `claudine` binary end-to-end through the

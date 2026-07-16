@@ -10,8 +10,8 @@ use color_eyre::eyre::{Result, eyre};
 use super::flags::WrapperArgs;
 use super::profile::{self, WrapperProfile};
 use super::{
-    McpRuntimeInfo, StructuredCodexOutput, env, exec, flags, harness_orch, structured_verbosity,
-    system_prompt, wrapper_exec,
+    McpRuntimeInfo, StructuredCodexOutput, env, exec, flags, harness_orch, session_report,
+    structured_verbosity, system_prompt, wrapper_exec,
 };
 use crate::log;
 
@@ -451,6 +451,8 @@ pub(crate) fn run_execution_stage(
             prompt_tail: Vec::new(),
             next_prompt_override: None,
             next_resume_session_id: None,
+            // Direct-wrapper passthrough runs carry no compose params.
+            rematerialize: Default::default(),
         };
 
         let mut harness_base_args = child_args.to_vec();
@@ -507,6 +509,7 @@ pub(crate) fn run_execution_stage(
             stream_verbosity != Verbosity::Silent,
             stream_verbosity,
             detail_requested,
+            stream_verbosity == Verbosity::Silent,
             env_context,
             dispatch_context,
             Some(initial_materialized),
@@ -520,6 +523,17 @@ pub(crate) fn run_execution_stage(
         }
         Ok((harness_code, None))
     } else if use_structured {
+        // Presence bracket for the direct structured-stream path (the
+        // harness path above reports per attempt inside
+        // `execute_harness_attempt`).
+        let session_presence = session_report::SessionPresence::started(
+            provider,
+            args.model.as_deref(),
+            !effective_non_interactive,
+            env_context,
+            &env_plan.env,
+        );
+        let status_reporter = session_presence.status_reporter();
         wrapper_exec::run_structured_stream_session(
             args,
             provider,
@@ -540,8 +554,16 @@ pub(crate) fn run_execution_stage(
             term,
             wrapper_span,
             perf_collector,
+            status_reporter,
         )
     } else {
+        let _session_presence = session_report::SessionPresence::started(
+            provider,
+            args.model.as_deref(),
+            !effective_non_interactive,
+            env_context,
+            &env_plan.env,
+        );
         let mut _spawned = false;
         let result = exec::run_child(
             binary_path,

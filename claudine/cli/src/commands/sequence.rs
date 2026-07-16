@@ -310,6 +310,8 @@ mod tests {
             perf: false,
             max_iterations: None,
             on_rate_limit: None,
+            provider_args: Vec::new(),
+            provider_args_explicit: false,
         }
     }
 

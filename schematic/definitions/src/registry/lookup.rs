@@ -7,19 +7,22 @@ use super::SchemaRegistry;
 
 /// Returns the OpenAPI schema registry for the specified API.
 ///
-/// This function provides a central lookup for all available API schema registries.
-/// OpenAI and Samsung Smart TV currently have complete registries with
-/// `JsonSchema` derives on their REST response types.
+/// Central dispatch from a kebab-case API key to that API's
+/// [`SchemaRegistry`]. Every API defined in this crate is wired up here; the
+/// accepted keys are exactly the arms of the match below (`"anthropic"`,
+/// `"bitbucket"`, `"elevenlabs"`, `"artificial-analysis-data"`,
+/// `"artificial-analysis-critpt"`, `"emqx-basic"`, `"emqx-bearer"`,
+/// `"eversolo"`, `"gitea"`, `"github"`, `"gitlab"`, `"huggingface"`,
+/// `"lmstudio"`, `"ollama-native"`, `"ollama-openai"`, `"openai"`,
+/// `"samsung-smart-tv"`, and `"unfolded-circle-core-rest"`).
 ///
-/// ## Arguments
-///
-/// * `api_name` - The name of the API (case-insensitive). Supported values:
-///   - `"openai"` - OpenAI Models API registry
-///   - `"samsung-smart-tv"` - Samsung Smart TV REST registry
+/// The lookup is case-insensitive: `api_name` is lowercased before matching.
+/// Use [`registry_key_for`] to translate a `RestApi::name` (e.g.
+/// `"OllamaNative"`) into the key this function expects.
 ///
 /// ## Returns
 ///
-/// `Some(SchemaRegistry)` if the API has a complete schema registry, `None` otherwise.
+/// `Some(SchemaRegistry)` for a known API key; `None` for any unrecognized key.
 ///
 /// ## Examples
 ///

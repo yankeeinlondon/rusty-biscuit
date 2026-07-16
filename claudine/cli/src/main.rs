@@ -35,6 +35,23 @@ fn wrapper_command(
     }
 }
 
+/// Attach the pre-clap agent tail ([`argv::partition_composition_tail`]) to
+/// the composition command's shared args. A no-op for every other command and
+/// when the tail is empty.
+fn inject_provider_tail(cli: &mut Cli, tail: argv::ProviderArgs) {
+    let Some(command) = cli.command.as_mut() else {
+        return;
+    };
+    let shared = match command {
+        Commands::Compose(args) => &mut args.shared,
+        Commands::InlineCompose(args) => &mut args.shared,
+        Commands::Sequence(args) => &mut args.shared,
+        _ => return,
+    };
+    shared.provider_args = tail.args;
+    shared.provider_args_explicit = tail.explicit;
+}
+
 /// Check if the Claudine config file exists and is valid. If not (missing or
 /// old-format that was backed up), run the initialization process so a
 /// config is available for the command about to run.
@@ -211,7 +228,13 @@ fn run() -> Result<()> {
     let perf_bootstrap = perf::scan_perf_bootstrap(&raw_argv);
 
     let arg_parse_start = std::time::Instant::now();
-    let argv: Vec<OsString> = argv::normalize(raw_argv);
+    let normalized: Vec<OsString> = argv::normalize(raw_argv);
+
+    // Ownership partition (replaces the retired Rule 3): split composition argv
+    // into the Claudine argv handed to clap and the agent tail forwarded to the
+    // provider. Non-composition argv passes through unchanged with an empty tail.
+    let (argv, provider_tail) = argv::partition_composition_tail(normalized)
+        .map_err(|e| color_eyre::eyre::eyre!("{e}"))?;
 
     // Pre-scan the normalized argv for --plain so clap's ANSI styling is
     // disabled before parsing. Uses the same token stream the parse will see.
@@ -232,6 +255,7 @@ fn run() -> Result<()> {
         .build()?;
     runtime.block_on(async_main(
         argv,
+        provider_tail,
         perf_bootstrap,
         arg_parse_start,
         process_start,
@@ -240,11 +264,15 @@ fn run() -> Result<()> {
 
 async fn async_main(
     argv: Vec<OsString>,
+    provider_tail: argv::ProviderArgs,
     perf_bootstrap: perf::PerfBootstrap,
     arg_parse_start: std::time::Instant,
     process_start: std::time::Instant,
 ) -> Result<()> {
-    let cli = parse_cli_from(&argv);
+    let mut cli = parse_cli_from(&argv);
+    // Attach the partitioned agent tail to the composition command. The tail is
+    // captured before clap and never reconstructed from clap matches or argv.
+    inject_provider_tail(&mut cli, provider_tail);
     let perf_arg_parsing = arg_parse_start.elapsed();
     log::set_plain(cli.plain);
 
@@ -358,6 +386,7 @@ async fn async_main(
         Commands::Sequence(args) => {
             commands::sequence::run_sequence(args, cli.verbose, startup_timings)
         }
+        Commands::Dashboard(args) => commands::dashboard::run(args).await,
         Commands::Context(args) => commands::context::run(args),
         Commands::Errors(args) => commands::errors::run(args),
     }

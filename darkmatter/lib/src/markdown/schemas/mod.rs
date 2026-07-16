@@ -53,12 +53,14 @@ pub mod about;
 pub mod coerce;
 pub mod completion;
 pub mod detect;
+pub mod discriminant;
 pub mod errors;
 pub mod example;
 pub mod format;
 pub mod resolve;
 pub mod rewrite;
 pub mod simplified;
+pub mod triggers;
 pub mod validate;
 
 use std::{
@@ -73,21 +75,33 @@ use serde_json::Value;
 use crate::markdown::{Markdown, compose::ComposeSource};
 
 pub use about::{
-    CoercionRuleDescriptor, InlineObjectRuleDescriptor, SchemaConstraintDescriptor, SchemaShapeDescriptor,
-    SchemaTypeDescriptor, ValidationBehaviorDescriptor, coercion_rule_descriptors,
+    CoercionRuleDescriptor, InlineObjectRuleDescriptor, MatchSafeConstraintDescriptor,
+    SchemaConstraintDescriptor, SchemaShapeDescriptor, SchemaTypeDescriptor,
+    TriggerGrammarDescriptor, ValidationBehaviorDescriptor, coercion_rule_descriptors,
     inline_object_rule_descriptors, schema_constraint_descriptors, schema_shape_descriptors,
-    schema_type_descriptors, validation_behavior_descriptors,
+    schema_type_descriptors, validation_behavior_descriptors, match_safe_constraint_descriptors,
+    trigger_grammar_descriptors,
 };
 pub use completion::{CompletionKind, CompletionSuggestion};
 pub use detect::{DetectOptions, detect_from_document, detect_schema, schema_to_yaml};
+pub use discriminant::select_literal_discriminant_arm;
 pub use errors::SchemaError;
 pub use rewrite::NormalizationOutcome;
 pub use simplified::{
-    Constraint, DRAFT_2020_12, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
-    SimplifiedType, SuggestionItem, SuggestionLintProblem, SuggestionLintReason, SuggestionQuery,
-    TypeExpr, lint_suggestions, suggestions_for_path,
+    Constraint, DRAFT_2020_12, DecodedScalar, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
+    SimplifiedSchema, SimplifiedType, SuggestionItem, SuggestionLintProblem, SuggestionLintReason,
+    SuggestionQuery, TypeExpr, decode_scalar, decode_scalar_at, lint_suggestions,
+    suggestions_for_def, suggestions_for_path,
     StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
     parse_yaml_schema, to_json_schema,
+};
+pub use triggers::{
+    LoadedTrigger, MatchArms, MatchExpr, PathGlobs, ShadowedFile, TriggerEnvelope,
+    TriggerArmTrace, TriggerEvaluation, TriggerRegistry, TriggerTrace, TriggerTraceEntry,
+    evaluate_registry, matched_triggers, normalize_path,
+    normalize_relative_path, parse_trigger_envelope, parse_trigger_envelope_from_str,
+    trace_registry,
+    schema_roots, scan,
 };
 pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
 
@@ -155,18 +169,36 @@ pub fn darkmatter_base_json_schema() -> Value {
 
 /// Top-level entry point for the schemas subsystem.
 ///
-/// Holds optional baseline schema configuration and the process-wide
-/// validator cache so repeated validations against the same effective
-/// schema reuse the compiled `jsonschema::Validator`.
+/// Holds optional baseline schema configuration, optional trigger-schema
+/// configuration, and the process-wide validator cache so repeated validations
+/// against the same effective schema reuse the compiled `jsonschema::Validator`.
+///
+/// [`DarkmatterSchemas::new`] is deterministic and **never** scans disk.
+/// Trigger-schema discovery is opt-in via [`Self::with_trigger_discovery`] or
+/// [`Self::with_trigger_registry`]. Implicit CWD-based discovery is forbidden —
+/// validation behavior must never depend silently on the process working
+/// directory.
 #[derive(Default, Clone)]
 pub struct DarkmatterSchemas {
     baseline: Option<BaselineSchema>,
     cache: ValidatorCache,
+    triggers: Option<triggers::TriggerRegistry>,
 }
 
 #[derive(Clone)]
 struct BaselineSchema {
     json_schema: Value,
+}
+
+/// A resolved trigger payload layer, ready to merge into the effective schema.
+#[derive(Clone)]
+struct TriggerLayer {
+    /// The trigger envelope file path (for origin attribution + dependency).
+    source: PathBuf,
+    /// The resolved payload JSON Schema (guaranteed simple-object).
+    json_schema: Value,
+    /// Payload dependency edges (referenced files + imports + examples).
+    dependencies: Vec<PathBuf>,
 }
 
 impl DarkmatterSchemas {
@@ -258,31 +290,126 @@ impl DarkmatterSchemas {
         Ok(())
     }
 
-    /// Builds the effective schema for a Markdown document. Reads its
-    /// `$schema` frontmatter (if any), resolves it, and merges the baseline.
+    /// Enables trigger-schema discovery by scanning from `document_path`'s
+    /// directory up through `boundary` (inclusive).
     ///
-    /// When `$schema` is absent and a baseline is configured, the baseline
-    /// is returned as-is. When both are absent, returns `Ok(None)`.
+    /// The scan is performed eagerly at configuration time. Every `schemas/`
+    /// directory on the ancestor walk is a schema root, nearest first; trigger
+    /// envelopes are loaded transactionally (one malformed trigger aborts the
+    /// whole scan). The resulting [`triggers::TriggerRegistry`] is stored and
+    /// consumed by [`Self::effective_for`].
+    ///
+    /// [`DarkmatterSchemas::new`] never scans disk — discovery is opt-in via
+    /// this method or [`Self::with_trigger_registry`]. Implicit CWD-based
+    /// discovery is forbidden.
     ///
     /// ## Errors
     ///
-    /// Propagates [`SchemaError`] from parsing, resolution, conversion, or
-    /// validator construction.
+    /// Propagates [`SchemaError::TriggerLoad`] when a trigger file in a
+    /// discovered root claims the `kind: trigger-schema` envelope but is
+    /// malformed (bad envelope, bad match grammar, vacuous arm).
+    pub fn with_trigger_discovery(
+        self,
+        document_path: impl AsRef<Path>,
+        boundary: impl AsRef<Path>,
+    ) -> Result<Self, SchemaError> {
+        let registry = triggers::scan(document_path.as_ref(), boundary.as_ref())?;
+        Ok(self.with_trigger_registry(registry))
+    }
+
+    /// Attaches a prebuilt trigger registry (e.g. one cached per boundary by
+    /// DMLS, or constructed programmatically by a test).
+    ///
+    /// [`DarkmatterSchemas::new`] never scans disk — discovery is opt-in.
+    /// Implicit CWD-based discovery is forbidden; a caller must explicitly
+    /// supply a document path + boundary (via [`Self::with_trigger_discovery`])
+    /// or a prebuilt registry.
+    #[must_use]
+    pub fn with_trigger_registry(mut self, registry: triggers::TriggerRegistry) -> Self {
+        self.triggers = Some(registry);
+        self
+    }
+
+    /// Returns the configured trigger registry, when present.
+    pub fn trigger_registry(&self) -> Option<&triggers::TriggerRegistry> {
+        self.triggers.as_ref()
+    }
+
+    /// Builds the effective schema for a Markdown document.
+    ///
+    /// Reads the document's `$schema` frontmatter (if any), resolves it, and
+    /// merges the layers in precedence order:
+    ///
+    /// 1. The caller-configured baseline (if any).
+    /// 2. Matching trigger-schema payloads — nearest root first,
+    ///    filename-lexicographic within a root (the registry's built-in order).
+    ///    Shadowing is applied before matching (a shadowed file is never in the
+    ///    registry).
+    /// 3. The document `$schema` (always wins on conflict).
+    ///
+    /// When `$schema` is absent, no baseline is configured, and no triggers
+    /// match, returns `Ok(None)`.
+    ///
+    /// ## Errors
+    ///
+    /// Propagates [`SchemaError`] from parsing, resolution, conversion,
+    /// validator construction, trigger-payload resolution, or cycle detection.
     pub fn effective_for(&self, source: &Markdown) -> Result<Option<EffectiveSchema>, SchemaError> {
         let base_dir = base_dir_for(source);
         let frontmatter = source.frontmatter().as_map();
         let schema_value = frontmatter.get("$schema");
 
+        // Schema roots from the trigger registry feed bare-name $schema
+        // resolution (Phase 3 context).
+        let trigger_roots: &[PathBuf] = self
+            .triggers
+            .as_ref()
+            .map(|reg| reg.roots.as_slice())
+            .unwrap_or(&[]);
+
+        // Resolve the document $schema with schema-root context.
         let resolved = match schema_value {
-            Some(value) => Some(resolve::resolve_schema(value, &base_dir)?),
+            Some(value) => {
+                let r = resolve::resolve_schema_with_roots(value, &base_dir, trigger_roots)?;
+                // The document must not directly reference a trigger-schema
+                // file — triggers activate by placement and match, never by
+                // reference.
+                triggers::assemble::check_document_schema_not_trigger(&r.referenced_files)?;
+                Some(r)
+            }
             None => None,
         };
 
-        let merged_json = match (&resolved, &self.baseline) {
-            (Some(r), Some(b)) => resolve::merge_baseline(&b.json_schema, r.json_schema.clone())?,
-            (Some(r), None) => r.json_schema.clone(),
-            (None, Some(b)) => b.json_schema.clone(),
-            (None, None) => return Ok(None),
+        // Trigger matching + payload resolution.
+        let trigger_layers = self.resolve_trigger_layers(source)?;
+
+        // Build the merged schema: baseline → triggers → document.
+        let mut base_layers: Vec<Value> = Vec::new();
+        if let Some(b) = &self.baseline {
+            base_layers.push(b.json_schema.clone());
+        }
+        for layer in &trigger_layers {
+            base_layers.push(layer.json_schema.clone());
+        }
+        let doc_json = resolved.as_ref().map(|r| r.json_schema.clone());
+
+        let merged_json = match (base_layers.is_empty(), doc_json) {
+            (true, None) => return Ok(None),
+            (true, Some(doc)) => doc,
+            (false, None) => {
+                let mut acc = base_layers.remove(0);
+                for layer in base_layers {
+                    acc = resolve::merge_baseline(&acc, layer)?;
+                }
+                acc
+            }
+            (false, Some(doc)) => {
+                let mut acc = base_layers.remove(0);
+                for layer in base_layers {
+                    acc = resolve::merge_baseline(&acc, layer)?;
+                }
+                resolve::merge_baseline(&acc, doc)?
+            }
         };
 
         // Anchor `format: darkmatter-file` value resolution document-first
@@ -290,24 +417,13 @@ impl DarkmatterSchemas {
         // the same order the expression path uses for `file_exists`/`frontmatter`.
         let validator = self.cache.validator_for(&merged_json, Some(&base_dir))?;
         let arm_validators = build_arm_validators(&merged_json, &self.cache, &base_dir)?;
-        let origins = build_origin_map(resolved.as_ref(), &merged_json);
-        // Read the import/example dependency edges before the `resolved` value is
-        // consumed by the `.and_then(|r| r.simplified)` move below.
-        let dependencies = resolved
-            .as_ref()
-            .map(|r| {
-                let mut deps: Vec<PathBuf> = r
-                    .imports
-                    .iter()
-                    .chain(r.examples.iter())
-                    .chain(r.referenced_files.iter())
-                    .cloned()
-                    .collect();
-                deps.sort();
-                deps.dedup();
-                deps
-            })
-            .unwrap_or_default();
+        let origins = build_origin_map_with_triggers(
+            resolved.as_ref(),
+            &trigger_layers,
+            self.baseline.is_some(),
+            &merged_json,
+        );
+        let dependencies = build_dependencies(resolved.as_ref(), &trigger_layers);
         Ok(Some(EffectiveSchema {
             simplified: resolved.and_then(|r| r.simplified),
             json_schema: merged_json,
@@ -318,6 +434,64 @@ impl DarkmatterSchemas {
             file_ref_fallback_dir: self.cache.file_ref_fallback_dir().map(Path::to_path_buf),
             dependencies,
         }))
+    }
+
+    /// Matches the configured trigger registry against the document and
+    /// resolves each matching payload. Returns the ordered trigger layers
+    /// (nearest root first). Empty when no registry is configured or no
+    /// triggers match.
+    fn resolve_trigger_layers(
+        &self,
+        source: &Markdown,
+    ) -> Result<Vec<TriggerLayer>, SchemaError> {
+        let Some(registry) = &self.triggers else {
+            return Ok(Vec::new());
+        };
+        if registry.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Normalized boundary-relative path for `$path` matching.
+        let normalized_path = match source.source() {
+            Some(ComposeSource::File(p)) => {
+                triggers::normalize_path(p, &registry.boundary).unwrap_or_default()
+            }
+            _ => String::new(),
+        };
+
+        // Frontmatter snapshot for matching (strip the `$schema` control key).
+        let fm_json = frontmatter_as_json(source);
+
+        // Registries built by `scan` carry pre-resolved payloads; programmatically
+        // constructed registries do not and fall back to on-demand resolution.
+        let pre_resolved = !registry.payloads.is_empty();
+
+        let evaluations =
+            triggers::assemble::evaluate_registry(registry, &fm_json, &normalized_path);
+        let mut layers = Vec::with_capacity(
+            evaluations.iter().filter(|eval| eval.matched).count(),
+        );
+        for (idx, eval) in evaluations.into_iter().enumerate() {
+            if !eval.matched {
+                continue;
+            }
+            let (json_schema, dependencies) = if pre_resolved {
+                let payload = &registry.payloads[idx];
+                (payload.json_schema.clone(), payload.dependencies.clone())
+            } else {
+                let payload = triggers::assemble::resolve_trigger_payload(
+                    eval.trigger,
+                    &registry.roots,
+                )?;
+                (payload.json_schema, payload.dependencies)
+            };
+            layers.push(TriggerLayer {
+                source: eval.trigger.source.clone(),
+                json_schema,
+                dependencies,
+            });
+        }
+        Ok(layers)
     }
 
     /// Validates a document's frontmatter, returning a [`ValidationReport`].
@@ -446,18 +620,49 @@ impl EffectiveSchema {
             fallback: self.file_ref_fallback_dir.as_deref(),
         };
         let mut problems = match &self.arm_validators {
-            Some(arms) => validate::collect_root_union_problems_with_anchors(
-                arms,
-                &coerced.value,
-                positions,
-                anchors,
-            ),
-            None => validate::collect_problems_with_anchors(
-                &self.validator,
-                &coerced.value,
-                positions,
-                anchors,
-            ),
+            // Root `anyOf` union. When a shared literal discriminant selects a
+            // single arm, report only that arm's problems; otherwise fall back
+            // to the closest-matching-arm report (byte-identical to before).
+            Some(arms) => {
+                match self
+                    .json_schema
+                    .get("anyOf")
+                    .and_then(Value::as_array)
+                    .and_then(|root_arms| {
+                        discriminant::select_literal_discriminant_arm(root_arms, &coerced.value)
+                    }) {
+                    Some(idx) => validate::collect_arm_problems_with_anchors(
+                        &arms[idx],
+                        &coerced.value,
+                        positions,
+                        anchors,
+                        idx,
+                    ),
+                    None => validate::collect_root_union_problems_with_anchors(
+                        arms,
+                        &coerced.value,
+                        positions,
+                        anchors,
+                    ),
+                }
+            }
+            // Ordinary object schema. Narrow any discriminated property-level
+            // union to its selected arm; unrelated properties are untouched.
+            None => {
+                let problems = validate::collect_problems_with_anchors(
+                    &self.validator,
+                    &coerced.value,
+                    positions,
+                    anchors,
+                );
+                validate::narrow_property_union_problems(
+                    &self.json_schema,
+                    &coerced.value,
+                    positions,
+                    anchors,
+                    problems,
+                )
+            }
         };
         // Enrich each problem with its declared property description (Decision
         // #2). Whitespace-only descriptions (#8) and descriptions identical to
@@ -858,6 +1063,9 @@ pub enum SchemaOriginKind {
     ReferencedFile,
     /// The configured baseline schema.
     Baseline,
+    /// A matching trigger-schema payload layered between the baseline and the
+    /// document `$schema`.
+    Trigger,
 }
 
 /// The origin of one effective-schema property.
@@ -891,6 +1099,14 @@ impl SchemaOrigin {
     pub fn referenced_file(path: impl Into<PathBuf>) -> Self {
         Self {
             kind: SchemaOriginKind::ReferencedFile,
+            uri: Some(path.into()),
+        }
+    }
+
+    /// A trigger-schema-payload origin carrying the envelope file path.
+    pub fn trigger(path: impl Into<PathBuf>) -> Self {
+        Self {
+            kind: SchemaOriginKind::Trigger,
             uri: Some(path.into()),
         }
     }
@@ -978,11 +1194,21 @@ fn value_contains_marker(value: &Value, marker: &str) -> bool {
 
 /// Builds the per-top-level-property origin map for an effective schema.
 ///
-/// A property present in the resolved *document* schema is attributed to that
-/// schema's origin (inline document, or the referenced file); every other
-/// merged property came from the baseline. Root-union schemas (no top-level
-/// `properties`) yield an empty map — per-arm provenance is not modelled in v1.
-fn build_origin_map(resolved: Option<&resolve::ResolvedSchema>, merged: &Value) -> SchemaOriginMap {
+/// Attribution precedence (mirrors the merge order — later layers win):
+/// 1. A property present in the resolved **document** schema → document /
+///    referenced-file origin.
+/// 2. A property present in a **trigger payload** → trigger origin (last
+///    trigger in the ordered list wins, since later layers override).
+/// 3. Everything else → baseline origin.
+///
+/// Root-union schemas (no top-level `properties`) yield an empty map — per-arm
+/// provenance is not modelled in v1.
+fn build_origin_map_with_triggers(
+    resolved: Option<&resolve::ResolvedSchema>,
+    trigger_layers: &[TriggerLayer],
+    _has_baseline: bool,
+    merged: &Value,
+) -> SchemaOriginMap {
     let mut out = SchemaOriginMap::new();
     let Some(props) = merged.get("properties").and_then(Value::as_object) else {
         return out;
@@ -992,15 +1218,49 @@ fn build_origin_map(resolved: Option<&resolve::ResolvedSchema>, merged: &Value) 
         .and_then(|s| s.get("properties"))
         .and_then(Value::as_object);
     for key in props.keys() {
-        let origin = match doc_props {
-            Some(doc) if doc.contains_key(key) => resolved
+        let origin = if doc_props.is_some_and(|doc| doc.contains_key(key)) {
+            // Document schema contributed this property.
+            resolved
                 .map(|r| r.origin.clone())
-                .unwrap_or_else(SchemaOrigin::document),
-            _ => SchemaOrigin::baseline(),
+                .unwrap_or_else(SchemaOrigin::document)
+        } else {
+            // Check trigger payloads in reverse order — the last trigger that
+            // declares the property won the merge slot.
+            let from_trigger = trigger_layers.iter().rev().find_map(|layer| {
+                layer
+                    .json_schema
+                    .get("properties")
+                    .and_then(Value::as_object)
+                    .is_some_and(|p| p.contains_key(key))
+                    .then(|| SchemaOrigin::trigger(layer.source.clone()))
+            });
+            from_trigger.unwrap_or_else(SchemaOrigin::baseline)
         };
         out.insert(key.clone(), origin);
     }
     out
+}
+
+/// Collects all dependency edges for an effective schema: the document
+/// `$schema`'s imports + examples + referenced files, plus each trigger's
+/// envelope source + payload dependencies. Sorted and deduplicated.
+fn build_dependencies(
+    resolved: Option<&resolve::ResolvedSchema>,
+    trigger_layers: &[TriggerLayer],
+) -> Vec<PathBuf> {
+    let mut deps: Vec<PathBuf> = Vec::new();
+    if let Some(r) = resolved {
+        deps.extend(r.imports.iter().cloned());
+        deps.extend(r.examples.iter().cloned());
+        deps.extend(r.referenced_files.iter().cloned());
+    }
+    for layer in trigger_layers {
+        deps.push(layer.source.clone());
+        deps.extend(layer.dependencies.iter().cloned());
+    }
+    deps.sort();
+    deps.dedup();
+    deps
 }
 
 fn positions_for(source: &Markdown) -> PositionMap {
@@ -2194,5 +2454,681 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(effective.dependencies().is_empty());
+    }
+}
+
+/// Phase 4 — effective-schema assembly integration tests.
+///
+/// These tests exercise the full [`DarkmatterSchemas::effective_for`] assembly
+/// with trigger schemas: precedence (baseline → triggers → document),
+/// shadowing-before-matching, non-mergeable payload rejection, envelope/payload
+/// cycle detection, origin attribution, and complete dependency collection.
+#[cfg(test)]
+mod phase4_trigger_assembly {
+    use super::*;
+    use crate::markdown::Markdown;
+    use std::fs;
+    use tempfile::TempDir;
+
+    /// Extracts the error from a `Result<Option<EffectiveSchema>, _>` without
+    /// requiring `EffectiveSchema: Debug`.
+    fn unwrap_effective_err(
+        result: Result<Option<EffectiveSchema>, SchemaError>,
+    ) -> SchemaError {
+        match result {
+            Err(e) => e,
+            Ok(_) => panic!("expected an error but got Ok"),
+        }
+    }
+
+    fn repo_fixture() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".git")).unwrap();
+        dir
+    }
+
+    fn write(path: &Path, content: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, content).unwrap();
+    }
+
+    /// Loads a Markdown document from a file path so it carries a real
+    /// `ComposeSource::File` (needed for trigger path normalization).
+    fn md_from_file(path: &Path) -> Markdown {
+        Markdown::try_from(path).unwrap()
+    }
+
+    /// A Claudine-shaped trigger: activates on `prompt: string(required)`,
+    /// layers a payload declaring `model: string(required)`.
+    const CLAUDINE_TRIGGER: &str = "kind: trigger-schema\n\
+        match:\n  prompt: string(required)\n\
+        $schema: claudine.yaml\n";
+    const CLAUDINE_PAYLOAD: &str = "$schema:\n  model: 'string(required)'\n";
+
+    // ── Precedence: baseline → triggers → document ──────────────────────
+
+    #[test]
+    fn trigger_layers_between_baseline_and_document() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        write(&root.join("schemas/claudine.trigger.yaml"), CLAUDINE_TRIGGER);
+        write(&root.join("schemas/claudine.yaml"), CLAUDINE_PAYLOAD);
+
+        // Document matches the trigger (`prompt` present) and has its own
+        // `$schema` declaring `title`.
+        let doc_path = root.join("doc.md");
+        write(
+            &doc_path,
+            "---\n\
+             $schema:\n  title: 'string(required)'\n\
+             prompt: hello\n\
+             ---\nbody\n",
+        );
+
+        let baseline = SimplifiedSchema::Single(SchemaShape {
+            properties: {
+                let mut m = indexmap::IndexMap::new();
+                m.insert(
+                    "owner".into(),
+                    PropertyDef::Single(PropertyAtom {
+                        ty: TypeExpr::Primitive(SimplifiedType::String),
+                        is_array: false,
+                        constraints: vec![],
+                        array_constraints: vec![],
+                        description: None,
+                    }),
+                );
+                m
+            },
+            ..Default::default()
+        });
+        let api = DarkmatterSchemas::new()
+            .with_baseline(baseline)
+            .unwrap()
+            .with_trigger_discovery(&doc_path, root)
+            .unwrap();
+
+        let effective = api.effective_for(&md_from_file(&doc_path))
+            .unwrap()
+            .unwrap();
+        let props = effective.json_schema["properties"].as_object().unwrap();
+        // Baseline property present.
+        assert!(props.contains_key("owner"), "baseline `owner` must survive: {props:?}");
+        // Trigger payload property present.
+        assert!(props.contains_key("model"), "trigger `model` must be layered: {props:?}");
+        // Document schema property present.
+        assert!(props.contains_key("title"), "document `title` must be present: {props:?}");
+    }
+
+    #[test]
+    fn document_schema_wins_over_trigger_on_conflict() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        write(&root.join("schemas/claudine.trigger.yaml"), CLAUDINE_TRIGGER);
+        // Payload declares `title` as a number.
+        write(
+            &root.join("schemas/claudine.yaml"),
+            "$schema:\n  title: 'number(required)'\n",
+        );
+
+        let doc_path = root.join("doc.md");
+        // Document also declares `title` (as string) — document wins.
+        write(
+            &doc_path,
+            "---\n\
+             $schema:\n  title: 'string(required)'\n\
+             prompt: hello\n\
+             title: hello\n\
+             ---\nbody\n",
+        );
+
+        let api = DarkmatterSchemas::new()
+            .with_trigger_discovery(&doc_path, root)
+            .unwrap();
+
+        let effective = api.effective_for(&md_from_file(&doc_path))
+            .unwrap()
+            .unwrap();
+        // Document's `title` (string) wins over trigger's `title` (number).
+        let title = &effective.json_schema["properties"]["title"];
+        // The document made `title` a required string; the trigger's number
+        // definition is fully replaced.
+        assert!(
+            title.get("anyOf").is_some() || title.get("type").is_some(),
+            "document `title` must override trigger: {title}"
+        );
+        // Validating with a string title should pass.
+        let report = api.validate(&md_from_file(&doc_path)).unwrap();
+        assert!(report.valid, "string title should validate against document-wins schema: {:?}", report.problems);
+    }
+
+    #[test]
+    fn trigger_activates_and_merges_without_document_schema() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        write(&root.join("schemas/claudine.trigger.yaml"), CLAUDINE_TRIGGER);
+        write(&root.join("schemas/claudine.yaml"), CLAUDINE_PAYLOAD);
+
+        // Document matches the trigger but has no `$schema` of its own.
+        let doc_path = root.join("doc.md");
+        write(
+            &doc_path,
+            "---\n\
+             prompt: hello\n\
+             model: gpt-4\n\
+             ---\nbody\n",
+        );
+
+        let api = DarkmatterSchemas::new()
+            .with_trigger_discovery(&doc_path, root)
+            .unwrap();
+
+        let effective = api.effective_for(&md_from_file(&doc_path))
+            .unwrap()
+            .unwrap();
+        let props = effective.json_schema["properties"].as_object().unwrap();
+        assert!(
+            props.contains_key("model"),
+            "trigger payload `model` must be present even without document $schema"
+        );
+    }
+
+    #[test]
+    fn trigger_does_not_activate_on_non_matching_document() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        write(&root.join("schemas/claudine.trigger.yaml"), CLAUDINE_TRIGGER);
+        write(&root.join("schemas/claudine.yaml"), CLAUDINE_PAYLOAD);
+
+        // Document does NOT have `prompt` — trigger does not activate.
+        let doc_path = root.join("doc.md");
+        write(
+            &doc_path,
+            "---\n\
+             title: hello\n\
+             ---\nbody\n",
+        );
+
+        let api = DarkmatterSchemas::new()
+            .with_trigger_discovery(&doc_path, root)
+            .unwrap();
+
+        // No $schema, no matching trigger → None.
+        let effective = api.effective_for(&md_from_file(&doc_path)).unwrap();
+        assert!(effective.is_none(), "non-matching document should yield no effective schema");
+    }
+
+    // ── Shadowing before matching ───────────────────────────────────────
+
+    #[test]
+    fn shadowing_applied_before_matching() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("pkg/schemas")).unwrap();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+
+        // Near root: matches on `prompt`.
+        write(
+            &root.join("pkg/schemas/claudine.trigger.yaml"),
+            CLAUDINE_TRIGGER,
+        );
+        write(&root.join("pkg/schemas/claudine.yaml"), CLAUDINE_PAYLOAD);
+
+        // Far root (shadowed): matches on `title` — should NEVER activate.
+        write(
+            &root.join("schemas/claudine.trigger.yaml"),
+            "kind: trigger-schema\nmatch:\n  title: string(required)\n$schema: other.yaml\n",
+        );
+        write(
+            &root.join("schemas/other.yaml"),
+            "$schema:\n  shadowed_prop: 'string(required)'\n",
+        );
+
+        let doc_path = root.join("pkg/sub/doc.md");
+        write(
+            &doc_path,
+            "---\n\
+             prompt: hello\n\
+             model: gpt-4\n\
+             ---\nbody\n",
+        );
+
+        let api = DarkmatterSchemas::new()
+            .with_trigger_discovery(&doc_path, root)
+            .unwrap();
+
+        let effective = api.effective_for(&md_from_file(&doc_path))
+            .unwrap()
+            .unwrap();
+        let props = effective.json_schema["properties"].as_object().unwrap();
+        assert!(
+            props.contains_key("model"),
+            "near trigger payload must activate: {props:?}"
+        );
+        assert!(
+            !props.contains_key("shadowed_prop"),
+            "shadowed far trigger must NOT activate: {props:?}"
+        );
+    }
+
+    // ── Non-mergeable payload rejection ─────────────────────────────────
+
+    #[test]
+    fn non_mergeable_root_union_payload_rejected() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        write(
+            &root.join("schemas/bad.trigger.yaml"),
+            "kind: trigger-schema\n\
+             match:\n  prompt: string(required)\n\
+             $schema:\n  - a: string(required)\n  - b: string(required)\n",
+        );
+
+        let doc_path = root.join("doc.md");
+        write(&doc_path, "---\nprompt: hello\n---\nbody\n");
+
+        let err = DarkmatterSchemas::new()
+            .with_trigger_discovery(&doc_path, root)
+            .err()
+            .expect("non-mergeable payload must fail at scan time");
+        assert!(
+            matches!(err, SchemaError::TriggerLoad { ref source, .. }
+                if matches!(**source, SchemaError::TriggerPayloadNotMergeable { .. })),
+            "root union payload must be rejected at scan time: {err:?}"
+        );
+    }
+
+    // ── Envelope + payload resolve without self-reference ───────────────
+
+    #[test]
+    fn claudine_shaped_fixture_resolves_cleanly() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        write(&root.join("schemas/claudine.trigger.yaml"), CLAUDINE_TRIGGER);
+        write(&root.join("schemas/claudine.yaml"), CLAUDINE_PAYLOAD);
+
+        let doc_path = root.join("doc.md");
+        write(
+            &doc_path,
+            "---\n\
+             prompt: hello\n\
+             model: gpt-4\n\
+             ---\nbody\n",
+        );
+
+        let api = DarkmatterSchemas::new()
+            .with_trigger_discovery(&doc_path, root)
+            .unwrap();
+
+        let report = api.validate(&md_from_file(&doc_path)).unwrap();
+        assert!(
+            report.valid,
+            "claudine-shaped fixture must validate: {:?}",
+            report.problems
+        );
+    }
+
+    // ── Direct and indirect cycles ──────────────────────────────────────
+
+    #[test]
+    fn direct_payload_self_reference_cycle_fails() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        write(
+            &root.join("schemas/self.trigger.yaml"),
+            "kind: trigger-schema\n\
+             match:\n  prompt: string(required)\n\
+             $schema: self.trigger.yaml\n",
+        );
+
+        let doc_path = root.join("doc.md");
+        write(&doc_path, "---\nprompt: hello\n---\nbody\n");
+
+        let err = DarkmatterSchemas::new()
+            .with_trigger_discovery(&doc_path, root)
+            .err()
+            .expect("self-referencing payload must fail at scan time");
+        assert!(
+            matches!(err, SchemaError::TriggerLoad { ref source, .. }
+                if matches!(**source, SchemaError::TriggerPayloadCycle { .. })),
+            "self-referencing payload must fail at scan time: {err:?}"
+        );
+    }
+
+    #[test]
+    fn payload_referencing_another_trigger_fails() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        // a.trigger.yaml's payload references b.trigger.yaml (a trigger file).
+        write(
+            &root.join("schemas/a.trigger.yaml"),
+            "kind: trigger-schema\n\
+             match:\n  prompt: string(required)\n\
+             $schema: b.trigger.yaml\n",
+        );
+        write(
+            &root.join("schemas/b.trigger.yaml"),
+            CLAUDINE_TRIGGER,
+        );
+        write(&root.join("schemas/claudine.yaml"), CLAUDINE_PAYLOAD);
+
+        let doc_path = root.join("doc.md");
+        write(&doc_path, "---\nprompt: hello\n---\nbody\n");
+
+        let err = DarkmatterSchemas::new()
+            .with_trigger_discovery(&doc_path, root)
+            .err()
+            .expect("payload referencing a trigger must fail at scan time");
+        assert!(
+            matches!(err, SchemaError::TriggerLoad { ref source, .. }
+                if matches!(**source, SchemaError::TriggerPayloadCycle { .. })),
+            "payload referencing another trigger must fail at scan time: {err:?}"
+        );
+    }
+
+    // ── Document $schema referencing a trigger file ─────────────────────
+
+    #[test]
+    fn document_schema_referencing_trigger_file_fails() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        write(&root.join("schemas/claudine.trigger.yaml"), CLAUDINE_TRIGGER);
+        write(&root.join("schemas/claudine.yaml"), CLAUDINE_PAYLOAD);
+
+        // Document directly references the trigger envelope as its $schema.
+        let doc_path = root.join("doc.md");
+        write(
+            &doc_path,
+            "---\n\
+             $schema: ./schemas/claudine.trigger.yaml\n\
+             ---\nbody\n",
+        );
+
+        let api = DarkmatterSchemas::new()
+            .with_trigger_discovery(&doc_path, root)
+            .unwrap();
+
+        let err = unwrap_effective_err(api.effective_for(&md_from_file(&doc_path)));
+        match err {
+            SchemaError::TriggerSchemaReferenced { suggestion, .. } => {
+                assert!(
+                    suggestion.contains("claudine.yaml"),
+                    "error should suggest the payload: {suggestion}"
+                );
+            }
+            other => panic!("expected TriggerSchemaReferenced, got {other:?}"),
+        }
+    }
+
+    // ── Origin attribution ──────────────────────────────────────────────
+
+    #[test]
+    fn origins_attribute_trigger_properties() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        write(&root.join("schemas/claudine.trigger.yaml"), CLAUDINE_TRIGGER);
+        write(&root.join("schemas/claudine.yaml"), CLAUDINE_PAYLOAD);
+
+        let doc_path = root.join("doc.md");
+        write(
+            &doc_path,
+            "---\n\
+             $schema:\n  title: 'string(required)'\n\
+             prompt: hello\n\
+             title: hi\n\
+             ---\nbody\n",
+        );
+
+        let api = DarkmatterSchemas::new()
+            .with_trigger_discovery(&doc_path, root)
+            .unwrap();
+
+        let effective = api.effective_for(&md_from_file(&doc_path))
+            .unwrap()
+            .unwrap();
+        // `title` came from the document $schema.
+        assert_eq!(
+            effective.origins.get("title").map(|o| o.kind),
+            Some(SchemaOriginKind::Document),
+            "title origin must be Document"
+        );
+        // `model` came from the trigger payload.
+        let model_origin = effective.origins.get("model");
+        assert!(
+            model_origin.is_some(),
+            "model must have an origin entry"
+        );
+        assert_eq!(
+            model_origin.map(|o| o.kind),
+            Some(SchemaOriginKind::Trigger),
+            "model origin must be Trigger"
+        );
+        let trigger_uri = model_origin.and_then(|o| o.uri.as_ref());
+        assert!(
+            trigger_uri.is_some_and(|u| u.to_string_lossy().contains("claudine.trigger.yaml")),
+            "trigger origin must point at the envelope file: {trigger_uri:?}"
+        );
+    }
+
+    // ── Complete dependency collection ──────────────────────────────────
+
+    #[test]
+    fn dependencies_include_trigger_envelope_and_payload() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        write(&root.join("schemas/claudine.trigger.yaml"), CLAUDINE_TRIGGER);
+        write(&root.join("schemas/claudine.yaml"), CLAUDINE_PAYLOAD);
+
+        let doc_path = root.join("doc.md");
+        write(
+            &doc_path,
+            "---\n\
+             $schema: ./local.yaml\n\
+             prompt: hello\n\
+             ---\nbody\n",
+        );
+        write(
+            &root.join("local.yaml"),
+            "$schema:\n  doc_prop: 'string(required)'\n",
+        );
+
+        let api = DarkmatterSchemas::new()
+            .with_trigger_discovery(&doc_path, root)
+            .unwrap();
+
+        let effective = api.effective_for(&md_from_file(&doc_path))
+            .unwrap()
+            .unwrap();
+        let deps = effective.dependencies();
+
+        // The trigger envelope file.
+        let has_envelope = deps.iter().any(|d| d
+            .to_string_lossy()
+            .contains("claudine.trigger.yaml"));
+        assert!(has_envelope, "dependencies must include the trigger envelope: {deps:?}");
+
+        // The payload file.
+        let has_payload = deps
+            .iter()
+            .any(|d| d.to_string_lossy().contains("claudine.yaml") && !d.to_string_lossy().contains(".trigger"));
+        assert!(has_payload, "dependencies must include the payload file: {deps:?}");
+
+        // The document's own $schema file.
+        let has_doc_schema = deps
+            .iter()
+            .any(|d| d.to_string_lossy().contains("local.yaml"));
+        assert!(has_doc_schema, "dependencies must include the document $schema: {deps:?}");
+    }
+
+    // ── with_trigger_registry (prebuilt) ────────────────────────────────
+
+    #[test]
+    fn prebuilt_registry_works() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        write(&root.join("schemas/claudine.trigger.yaml"), CLAUDINE_TRIGGER);
+        write(&root.join("schemas/claudine.yaml"), CLAUDINE_PAYLOAD);
+
+        let doc_path = root.join("doc.md");
+        write(
+            &doc_path,
+            "---\n\
+             prompt: hello\n\
+             model: gpt-4\n\
+             ---\nbody\n",
+        );
+
+        // Build the registry separately (simulating DMLS per-boundary caching).
+        let registry = triggers::scan(&doc_path, root).unwrap();
+        let api = DarkmatterSchemas::new().with_trigger_registry(registry);
+
+        let effective = api.effective_for(&md_from_file(&doc_path))
+            .unwrap()
+            .unwrap();
+        let props = effective.json_schema["properties"].as_object().unwrap();
+        assert!(
+            props.contains_key("model"),
+            "prebuilt registry must activate trigger: {props:?}"
+        );
+    }
+
+    // ── new() never scans disk ──────────────────────────────────────────
+
+    #[test]
+    fn new_never_scans_disk() {
+        // Even with trigger files on disk, new() + effective_for does not
+        // discover them.
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        write(&root.join("schemas/claudine.trigger.yaml"), CLAUDINE_TRIGGER);
+        write(&root.join("schemas/claudine.yaml"), CLAUDINE_PAYLOAD);
+
+        let doc_path = root.join("doc.md");
+        write(
+            &doc_path,
+            "---\n\
+             prompt: hello\n\
+             ---\nbody\n",
+        );
+
+        let api = DarkmatterSchemas::new();
+        // No trigger discovery → no effective schema (no $schema, no baseline).
+        let effective = api.effective_for(&md_from_file(&doc_path)).unwrap();
+        assert!(
+            effective.is_none(),
+            "new() must not discover triggers implicitly"
+        );
+    }
+
+    // ── Bare-name resolution through trigger roots ──────────────────────
+
+    #[test]
+    fn document_schema_bare_name_resolves_via_trigger_roots() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        write(&root.join("schemas/claudine.trigger.yaml"), CLAUDINE_TRIGGER);
+        write(&root.join("schemas/claudine.yaml"), CLAUDINE_PAYLOAD);
+
+        // Document uses bare-name $schema (no path) — resolves via schema roots.
+        let doc_path = root.join("doc.md");
+        write(
+            &doc_path,
+            "---\n\
+             $schema: claudine.yaml\n\
+             model: gpt-4\n\
+             ---\nbody\n",
+        );
+
+        let api = DarkmatterSchemas::new()
+            .with_trigger_discovery(&doc_path, root)
+            .unwrap();
+
+        let effective = api.effective_for(&md_from_file(&doc_path))
+            .unwrap()
+            .unwrap();
+        let props = effective.json_schema["properties"].as_object().unwrap();
+        assert!(
+            props.contains_key("model"),
+            "bare-name $schema must resolve via trigger schema roots: {props:?}"
+        );
+    }
+
+    // ── Programmatic baseline not double-applied ───────────────────────
+
+    #[test]
+    fn programmatic_baseline_not_re_applied_by_identical_trigger() {
+        // The Checkpoint 4 contract: a programmatically supplied baseline
+        // must not be re-applied by a trigger that resolves to the same schema.
+        // The merge is idempotent on property keys, so the trigger layer wins
+        // and the baseline's identical definition is replaced (not duplicated).
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        write(&root.join("schemas/claudine.trigger.yaml"), CLAUDINE_TRIGGER);
+        write(&root.join("schemas/claudine.yaml"), CLAUDINE_PAYLOAD);
+
+        let doc_path = root.join("doc.md");
+        write(
+            &doc_path,
+            "---\n\
+             prompt: hello\n\
+             model: gpt-4\n\
+             ---\nbody\n",
+        );
+
+        // Baseline declares the same `model` property.
+        let baseline = SimplifiedSchema::Single(SchemaShape {
+            properties: {
+                let mut m = indexmap::IndexMap::new();
+                m.insert(
+                    "model".into(),
+                    PropertyDef::Single(PropertyAtom {
+                        ty: TypeExpr::Primitive(SimplifiedType::String),
+                        is_array: false,
+                        constraints: vec![Constraint::Required],
+                        array_constraints: vec![],
+                        description: None,
+                    }),
+                );
+                m
+            },
+            ..Default::default()
+        });
+        let api = DarkmatterSchemas::new()
+            .with_baseline(baseline)
+            .unwrap()
+            .with_trigger_discovery(&doc_path, root)
+            .unwrap();
+
+        let effective = api.effective_for(&md_from_file(&doc_path))
+            .unwrap()
+            .unwrap();
+        let props = effective.json_schema["properties"].as_object().unwrap();
+        // `model` appears once (not duplicated).
+        assert!(props.contains_key("model"));
+        assert_eq!(
+            props.keys().filter(|k| *k == "model").count(),
+            1,
+            "property must not be duplicated"
+        );
+        // Validates — model is supplied.
+        let report = api.validate(&md_from_file(&doc_path)).unwrap();
+        assert!(report.valid, "expected valid: {:?}", report.problems);
     }
 }

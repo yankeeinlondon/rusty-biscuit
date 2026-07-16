@@ -8,7 +8,6 @@
 //! `PWSTR` strings to Rust `String` values with automatic memory cleanup.
 
 use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize};
-use windows::core::HRESULT;
 
 /// HRESULT for "COM already initialized with a different threading model".
 const RPC_E_CHANGED_MODE: i32 = -2147417850_i32; // 0x80010106
@@ -106,9 +105,11 @@ impl ComGuard {
     /// Returns [`ComInitError`] if COM initialization fails for a reason
     /// other than `RPC_E_CHANGED_MODE`.
     pub fn new() -> Result<Self, ComInitError> {
+        // `CoInitializeEx` returns the raw `HRESULT` directly (not a `Result`)
+        // because `S_FALSE` and `RPC_E_CHANGED_MODE` are meaningful non-error
+        // outcomes we must classify ourselves rather than treat as failures.
         let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-        let raw_hr = hr.map_err(|e| e.code()).unwrap_or(HRESULT(0));
-        let kind = ComInitKind::from_hresult(raw_hr.0)?;
+        let kind = ComInitKind::from_hresult(hr.0)?;
         Ok(Self {
             should_uninit: kind.should_uninit(),
         })

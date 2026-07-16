@@ -55,6 +55,7 @@ fn full_fixture() -> Fixture {
     for topic in [
         "acp",
         "agent-cli",
+        "agent-errors",
         "agent-logging",
         "agent-models",
         "model-config",
@@ -69,6 +70,7 @@ fn full_fixture() -> Fixture {
     copy_dir("docs/research/signals");
     copy_file("lib/src/signals/generated.rs");
     copy_file("lib/src/model_catalog/families_generated.rs");
+    copy_file("lib/src/stream/providers/vocabulary.rs");
     for slug in claudine_gen::provider_slugs() {
         copy_file(&format!("lib/src/provider/{slug}/data.rs"));
     }

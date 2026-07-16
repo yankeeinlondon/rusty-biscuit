@@ -1,6 +1,10 @@
 ---
 features:
   - 2026-07-04-dmls
+  - 2026-07-09-suggest-constraint
+  - 2026-07-10-interpolation-literal
+  - 2026-07-10-schema-triggers
+  - 2026-07-11-semantic-tokens
 ---
 # DMLS Features
 
@@ -82,10 +86,14 @@ Schema-aware editing inside a document's YAML frontmatter block, driven by
 Darkmatter's **SimplifiedSchema**:
 
 - **Effective schema** — the Darkmatter base schema, plus any configured
-  extension schemas whose globs match the file, plus the document's own
-  `$schema`, merged with compose precedence.
+  extension schemas whose globs match the file, plus repository-scoped
+  **trigger schemas** (content-triggered envelopes discovered under `schemas/`
+  roots within the workspace boundary — watched for changes, with last-good
+  retention and a file-level diagnostic on a malformed envelope), plus the
+  document's own `$schema`, merged with compose precedence.
 - **Completion** — schema keys (required keys marked), enum values, boolish
-  scaffolds, `file(...)` paths, and `style.*` keys.
+  scaffolds, `file(...)` paths, `style.*` keys, and advisory `suggest(...)`
+  value candidates (including block-sequence items).
 - **Hover** — a key's type, constraints, default, and `->` description, plus
   annotations for generated `ctx.*` keys.
 - **Navigation** — go-to-definition and document links for `$schema` and
@@ -94,7 +102,8 @@ Darkmatter's **SimplifiedSchema**:
   document symbols.
 - **Diagnostics** — precise key/value ranges for YAML parse errors, type
   mismatches, constraint violations, missing required keys, unknown keys,
-  invalid file references, and `style.*` problems.
+  invalid file references, invalid `suggest(...)` candidates, malformed
+  standalone schema envelopes, and `style.*` problems.
 
 Claudine (and any other tool) activates as **pure configuration**: point a
 `[schema.extensions.*]` entry at a schema file and a set of globs. There is no
@@ -114,13 +123,49 @@ Intelligence for Darkmatter's composition DSL — all **read-only**:
   broken-path diagnostics, and **cycle detection** (with the cycle ancestry
   reported).
 - **Interpolation** (`{{ }}`) — completion (frontmatter keys, `ctx.*`,
-  functions), hover showing the resolved static value, variable → frontmatter-key
-  definition, and malformed / unknown-identifier diagnostics.
+  functions), hover showing the resolved static value (falling back to the
+  effective-schema property description for a declared-but-unset key),
+  variable → frontmatter-key definition, and malformed / unknown-identifier
+  diagnostics (a schema-declared property counts as known).
+- **Interpolation literals** (`{{{ … }}}`) — recognized as inert: hover shows
+  the composed `{{ … }}` output with an inertness note, the content produces
+  no interpolation diagnostics, and a quick-fix can wrap a spurious malformed
+  interpolation into a literal.
 - **Shell awareness** — `::shell` and frontmatter `$()` values hover with an
   approved / denied / unknown policy verdict, and denied built-ins raise a
   `darkmatter.security.*` diagnostic. Nothing is ever executed.
 - **Fenced-code languages** — unknown fence languages are flagged with a
   nearest-match suggestion.
+
+### Semantic tokens
+
+Server-emitted LSP semantic tokens let a theme *de-emphasize Darkmatter
+machinery* so prose stands out — the one LSP mechanism that lets the server
+influence styling without per-editor grammar forks. Tokens **classify**, they
+never style; the theme decides the colors, and each editor guide ships a copyable
+styling recipe.
+
+- **Interpolations** — the whole `{{ … }}` span is `macro.interpolation`;
+  `{{{ literal }}}` adds `inert`.
+- **Directives** — the twelve `::` keywords are `macro.directive`; the three
+  structural closers (`::end-block`, `::details`, `::end-disclosure`) add
+  `closer`. Structured targets are `string.directive`, option keys/values
+  `property.directive` / `string.directive`. Unknown directives, `::shell`
+  payloads, and disclosure summary prose get no token.
+- **Wiki links** — brackets and `#`/`|` separators are `macro.wiki`; the
+  path/heading/alias segments are `string.wiki`, rendered link-like rather than
+  muted (identical for resolved and unresolved targets).
+- **Correctness** — tokens never overlap and are strictly ordered in both UTF-8
+  and UTF-16; multi-line spans split per line; fenced-code content yields no
+  tokens; overlapping constructs follow a fixed precedence (interpolation > wiki
+  > directive), so `when="{{ x }}"` is an interpolation inside a directive.
+- **Endpoints** — `textDocument/semanticTokens/full` and `…/range` (a range
+  response is exactly the full response intersected and clipped). Delta is
+  deferred.
+- **Gating & config** — advertised only to clients that support semantic tokens
+  (Helix is naturally excluded and unaffected). The `[semantic_tokens] enable`
+  master switch (default on) toggles emission live; `wiki.enable = false`
+  suppresses only the wiki family. See each editor guide for the styling recipe.
 
 ### Editing
 
@@ -135,8 +180,9 @@ Refactoring and formatting that respect workspace-wide references:
   on any conflict — never a partial rename. (Requires client file-operation
   support; see the matrix below.)
 - **Code actions** (diagnostic-driven): create the missing file / wiki note,
-  add a missing required schema key, migrate a deprecated `style:` key, and
-  close an unclosed `::block`.
+  add a missing required schema key, migrate a deprecated `style:` key,
+  close an unclosed `::block`, and wrap a malformed `{{ … }}` in an
+  interpolation literal (`{{{ … }}}`).
 - **Formatting** — whole-document formatting that is byte-equivalent to the
   `md clean` cleanup sequence, with optional reflow to a fixed width.
 
@@ -165,6 +211,7 @@ Legend: ✅ full · ⚠️ supported with a caveat (see notes) · ❌ not availa
 | File rename (link rewriting) | ✅ | ✅ | ❌ | ✅ |
 | Code actions (v1 set) | ✅ | ✅ | ✅ | ✅ |
 | Whole-document formatting | ✅ | ✅ | ✅ | ✅ |
+| Semantic tokens (de-emphasis) | ✅ | ⚠️ | ✅ | ❌ |
 | Folding | ✅ | ✅ | ⚠️ | ⚠️ |
 | Rename-preview change annotations | ✅ | ⚠️ | ✅ | ⚠️ |
 | Client-side file watching | ✅ | ✅ | ⚠️ | ✅ |
@@ -182,6 +229,13 @@ Legend: ✅ full · ⚠️ supported with a caveat (see notes) · ❌ not availa
   wire folds through `vim.lsp.foldexpr()`.
 - **Folding (Helix).** Helix does not advertise LSP folding ranges and uses its
   own tree-sitter folding instead; `dmls` gates LSP folding off for Helix.
+- **Semantic tokens (Zed).** Zed ships semantic tokens **disabled by default**;
+  enable them per language with `"semantic_tokens": "combined"` (or `"full"`).
+  Colors come from the active theme via the recipe in the Zed guide.
+- **Semantic tokens (Helix).** Helix's LSP client does not advertise
+  semantic-token support, so `dmls` does not offer the provider to Helix
+  (capability-gated off); Helix keeps its tree-sitter Markdown highlighting
+  unchanged and loses nothing. VS Code and Neovim classify tokens with no opt-in.
 - **Change annotations.** Rename-preview grouping via `ChangeAnnotation`s is
   applied only where advertised (VS Code, Neovim). For Zed and Helix, `dmls`
   puts the explanation in explicit code-action titles instead, so nothing is
@@ -205,4 +259,5 @@ For the full, source-cited capability matrix behind these gates, see
   serves as the editor root marker), layered under LSP
   `workspace/configuration` and reloadable without a restart. Keys cover wiki
   behavior, baseline schema extensions, strict schema/style modes, shell-policy
-  discovery, code-action categories, formatting, and diagnostics debounce.
+  discovery, code-action categories, formatting, semantic tokens
+  (`[semantic_tokens] enable`), and diagnostics debounce.

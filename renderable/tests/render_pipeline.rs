@@ -33,7 +33,7 @@ fn page_render_emits_doctype_charset_and_title() {
         .finalize();
     let mut page = HtmlPage::from(body);
     page.set_title("My Page");
-    let html = page.render();
+    let html = page.render().expect("render");
     assert!(html.starts_with("<!DOCTYPE html><html><head><meta charset=\"utf-8\">"));
     assert!(html.contains("<title>My Page</title>"));
     assert!(html.contains(r#"<h1 class="heading">Welcome</h1>"#));
@@ -48,7 +48,7 @@ fn title_falls_back_to_first_h1() {
         ))
         .finalize();
     let page = HtmlPage::from(body);
-    assert!(page.render().contains("<title>Derived Title</title>"));
+    assert!(page.render().expect("render").contains("<title>Derived Title</title>"));
 }
 
 #[test]
@@ -88,7 +88,7 @@ fn external_stylesheet_emits_a_link_not_inline_style() {
         external_stylesheet: Some(RelativeAssetPath::new("assets/page.css").unwrap()),
         ..PageOptions::default()
     });
-    let html = page.render();
+    let html = page.render().expect("render");
     assert!(html.contains(r#"<link rel="stylesheet" href="assets/page.css">"#));
     assert!(!html.contains("<style>"));
 }
@@ -113,7 +113,7 @@ fn nested_component_aux_state_rolls_up_to_page() {
         .define_as_block_tag(BlockTag::Span, "child")
         .with_stylesheet(ComponentStylesheet::new("child").add("label", CssStyle::new()))
         .add_metadata_keypair(MicrodataKey::Description, "child description")
-        .add_feature(PageFeature::DarkMode)
+        .add_feature(PageFeature::Popover)
         .finalize();
 
     let parent = BrowserFragment::new()
@@ -126,9 +126,9 @@ fn nested_component_aux_state_rolls_up_to_page() {
     // Stylesheet rollup: the nested component's scoped rule appears.
     assert!(page.stylesheet().contains(".child .label"));
     // Metadata rollup: the nested description reaches the page <head>.
-    assert!(page.render().contains("child description"));
+    assert!(page.render().expect("render").contains("child description"));
     // Feature rollup through the nested component.
-    assert!(page.features().contains(&PageFeature::DarkMode));
+    assert!(page.features().contains(&PageFeature::Popover));
 }
 
 /// Regression guard for the Phase 4 rollup-hygiene refactor: `HtmlPage::render`
@@ -152,7 +152,7 @@ fn html_page_render_rolls_up_every_composition_channel() {
         .define_as_block_tag(BlockTag::Span, "child")
         .with_stylesheet(ComponentStylesheet::new("child").add("label", CssStyle::new()))
         .add_metadata_keypair(MicrodataKey::Description, "child description")
-        .add_feature(PageFeature::DarkMode)
+        .add_feature(PageFeature::Popover)
         .finalize();
     let parent = BrowserFragment::new()
         .define_as_block_tag(BlockTag::Div, "parent")
@@ -171,7 +171,7 @@ fn html_page_render_rolls_up_every_composition_channel() {
         ..PageOptions::default()
     });
 
-    let html = page.render();
+    let html = page.render().expect("render");
 
     // Page metadata (title) reached <head>.
     assert!(html.contains("<title>Rollup Page</title>"), "{html}");
@@ -191,7 +191,7 @@ fn html_page_render_rolls_up_every_composition_channel() {
     // Page-feature rollup is observed through the dedicated accessor, which
     // shares the same recursive fragment walk.
     assert!(
-        page.features().contains(&PageFeature::DarkMode),
+        page.features().contains(&PageFeature::Popover),
         "page feature rollup"
     );
 }
@@ -318,7 +318,7 @@ fn external_code_emits_a_script_src() {
         external_code: Some(RelativeAssetPath::new("assets/app.js").unwrap()),
         ..PageOptions::default()
     });
-    let html = page.render();
+    let html = page.render().expect("render");
     assert!(
         html.contains(r#"<script src="assets/app.js" defer></script>"#),
         "{html}"
@@ -340,13 +340,13 @@ fn component_metadata_is_first_write_wins_and_page_overrides() {
     let mut page = HtmlPage::from_fragments(vec![first, second]);
 
     // The earlier component wins a component-vs-component conflict.
-    let html = page.render();
+    let html = page.render().expect("render");
     assert!(html.contains("first description"), "{html}");
     assert!(!html.contains("second description"), "{html}");
 
     // Page-level metadata overrides any component value.
     page.add_metadata(MicrodataKey::Description, "page description");
-    let html = page.render();
+    let html = page.render().expect("render");
     assert!(html.contains("page description"), "{html}");
     assert!(!html.contains("first description"), "{html}");
 }
@@ -387,7 +387,7 @@ fn render_html_page_returns_a_page_with_options_applied() {
 
     // No options: a plain page.
     let page = Dummy.render_html_page(None);
-    assert!(page.render().contains("<p>x</p>"));
+    assert!(page.render().expect("render").contains("<p>x</p>"));
 
     // Valid options apply; the operation is infallible because
     // RelativeAssetPath already guaranteed the path is relative.
@@ -395,7 +395,7 @@ fn render_html_page_returns_a_page_with_options_applied() {
         external_stylesheet: Some(RelativeAssetPath::new("assets/page.css").unwrap()),
         ..PageOptions::default()
     }));
-    assert!(page.render().contains(r#"href="assets/page.css""#));
+    assert!(page.render().expect("render").contains(r#"href="assets/page.css""#));
 }
 
 #[test]

@@ -10,7 +10,7 @@
 //! OpenCode-style bridge plugin using Kilo's `@kilocode/plugin` package.
 //! Native MCP is not wired yet; see the M-Kilo graduation report.
 
-use crate::adapters::ProviderAdapter;
+use crate::hook_adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
 use crate::provider::behavior::{
     AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
@@ -50,7 +50,7 @@ impl AdapterBehavior for KiloProvider {
     fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
         // Kilo emits OpenCode-shaped events; the OpenCode adapter parses them
         // unchanged. A dedicated Kilo adapter would be pure duplication.
-        &crate::adapters::OPENCODE_ADAPTER
+        &crate::hook_adapters::OPENCODE_ADAPTER
     }
 }
 impl ConfiguratorBehavior for KiloProvider {

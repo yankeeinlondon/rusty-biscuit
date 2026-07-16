@@ -21,7 +21,7 @@
 use std::path::PathBuf;
 
 use biscuit_terminal::errors::SourceContext;
-use claudine::adapters::AdapterError;
+use claudine::hook_adapters::AdapterError;
 use claudine::composition::{CompositionError, MissingProperty};
 use claudine::diagnostics::{Diagnostic, code_spec};
 use claudine::error::ClaudineError;

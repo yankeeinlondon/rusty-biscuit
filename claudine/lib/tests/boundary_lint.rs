@@ -7,7 +7,7 @@
 //!
 //! 1. `composition/closure.rs` flattened the typed `ClaudineError` from
 //!    `atomic_write` into `CompositionError::AtomicWriteFailed(String)`.
-//! 2. `composition/lifecycle_control.rs::resolve_proxy_target` flattened the
+//! 2. `composition/lifecycle/control.rs::resolve_proxy_target` flattened the
 //!    typed `HarnessError` from `resolve_harness_path` via `map_err(|e|
 //!    e.to_string())`.
 //!
@@ -19,7 +19,7 @@
 //!
 //! Scope is deliberately limited to these two named sites. The feature spec
 //! permits some legacy `String` error variants during migration, and other
-//! sites (e.g. `lifecycle_executor.rs`) still legitimately use
+//! sites (e.g. `lifecycle/executor.rs`) still legitimately use
 //! `map_err(|e| e.to_string())` and are out of scope for this finding. A
 //! repo-wide ban would false-positive on those, so the guard matches the exact
 //! converted constructions only.
@@ -54,13 +54,13 @@ fn closure_does_not_flatten_atomic_write_error() {
 
 #[test]
 fn resolve_proxy_target_does_not_flatten_harness_error() {
-    let src = read_source("src/composition/lifecycle_control.rs");
+    let src = read_source("src/composition/lifecycle/control.rs");
 
     // `resolve_proxy_target` must propagate the typed `HarnessError` from
     // `resolve_harness_path` with `?`, not flatten it with `.to_string()`.
     assert!(
         !src.contains("resolve_harness_path(target, &ctx).map_err(|e| e.to_string())"),
-        "lifecycle_control.rs reintroduced flattening the `resolve_harness_path` \
+        "lifecycle/control.rs reintroduced flattening the `resolve_harness_path` \
          error to a string instead of propagating the typed HarnessError \
          (integrated-design §10)"
     );

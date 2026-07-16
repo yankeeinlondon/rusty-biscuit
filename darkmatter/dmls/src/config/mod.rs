@@ -199,6 +199,21 @@ pub struct SymbolsConfig {
     pub frontmatter: bool,
 }
 
+/// Semantic-token behavior.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SemanticTokensConfig {
+    /// Master switch for semantic-token emission. When `false`, full and range
+    /// requests return an empty stream (F1/F2/F4 all suppressed).
+    pub enable: bool,
+}
+
+impl Default for SemanticTokensConfig {
+    fn default() -> Self {
+        Self { enable: true }
+    }
+}
+
 /// Diagnostics scheduling.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -235,6 +250,8 @@ pub struct DmlsConfig {
     pub formatting: FormattingConfig,
     /// Document-symbol behavior.
     pub symbols: SymbolsConfig,
+    /// Semantic-token behavior.
+    pub semantic_tokens: SemanticTokensConfig,
     /// Diagnostics scheduling.
     pub diagnostics: DiagnosticsConfig,
 }
@@ -423,6 +440,7 @@ mod tests {
         assert!(!config.schema.strict);
         assert!(!config.style.strict);
         assert!(config.hints.inlay);
+        assert!(config.semantic_tokens.enable);
         assert_eq!(config.diagnostics.debounce_ms, 200);
         assert_eq!(config.formatting.cleanup, CleanupVariant::Default);
         assert_eq!(config.formatting.fixed_width, None);
@@ -462,6 +480,9 @@ mod tests {
             [hints]
             inlay = false
 
+            [semantic_tokens]
+            enable = false
+
             [code_actions.categories]
             "create-missing-file" = false
 
@@ -494,6 +515,7 @@ mod tests {
             Some(PathBuf::from(".darkmatter/policy.toml"))
         );
         assert!(!config.hints.inlay);
+        assert!(!config.semantic_tokens.enable);
         assert_eq!(
             config.code_actions.categories.get("create-missing-file"),
             Some(&false)
@@ -554,6 +576,47 @@ mod tests {
         // Clearing the overlay restores the file layer.
         state.apply_client_settings(serde_json::Value::Null);
         assert_eq!(state.effective().diagnostics.debounce_ms, 150);
+    }
+
+    #[test]
+    fn test_semantic_tokens_defaults_enabled() {
+        let config: DmlsConfig = toml::from_str("").unwrap();
+        assert!(config.semantic_tokens.enable);
+    }
+
+    #[test]
+    fn test_semantic_tokens_explicit_false() {
+        let config: DmlsConfig =
+            toml::from_str("[semantic_tokens]\nenable = false\n").unwrap();
+        assert!(!config.semantic_tokens.enable);
+    }
+
+    #[test]
+    fn test_semantic_tokens_partial_overlay_update() {
+        // A `workspace/configuration` overlay flips the master switch off while
+        // leaving the rest of the config at its file/default values.
+        let mut state = ConfigState::load(Vec::new(), None);
+        assert!(state.effective().semantic_tokens.enable);
+        state.apply_client_settings(json!({
+            "dmls": { "semantic_tokens": { "enable": false } }
+        }));
+        assert!(!state.effective().semantic_tokens.enable);
+        // Unrelated sections are untouched by the partial update.
+        assert!(state.effective().wiki.enable);
+        // Clearing the overlay restores the default-enabled state.
+        state.apply_client_settings(serde_json::Value::Null);
+        assert!(state.effective().semantic_tokens.enable);
+    }
+
+    #[test]
+    fn test_semantic_tokens_malformed_value_keeps_previous() {
+        // A non-boolean `enable` fails to deserialize the overlay, so the last
+        // good (default-enabled) config survives rather than wedging the server.
+        let mut state = ConfigState::load(Vec::new(), None);
+        state.apply_client_settings(json!({
+            "dmls": { "semantic_tokens": { "enable": "yes-please" } }
+        }));
+        assert!(state.effective().semantic_tokens.enable);
     }
 
     #[test]

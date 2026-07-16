@@ -1,14 +1,14 @@
 # Mermaid Rendering
 
-Darkmatter provides a `Mermaid` struct for representing diagrams with theming, then renders them to HTML (client-side via mermaid.js) or delegates terminal rendering to `biscuit-terminal`.
+Darkmatter provides a `Mermaid` struct for representing diagrams with theming and terminal delegation. Browser Mermaid delivery is owned by `DarkmatterFeatureResolver` (`feature.rs`), which the render-tree browser pipeline invokes through the shared `FeatureResolver` seam — client-side interactive Mermaid is injected as a page feature, not by a per-diagram HTML method.
 
 ## Module Structure
 
 | File | Purpose |
 |------|---------|
-| `mod.rs` | `Mermaid` struct, builder API, `render_for_html()`, `render_for_terminal()` |
+| `mod.rs` | `Mermaid` struct, builder API, `detect_diagram_type()`, `render_for_terminal()` |
 | `theme.rs` | `MermaidTheme` struct, JSON parsing, built-in theme presets |
-| `render_html.rs` | `MermaidHtml` output struct, CSS variable generation, diagram type detection |
+| `feature.rs` | `DarkmatterFeatureResolver`: the inline ESM bootstrap and its `themeVariables` palette — a script-only bundle, the single owner of Mermaid browser assets (no CSS; Mermaid does not read CSS custom properties) |
 | `render_terminal.rs` | Thin wrapper delegating to `biscuit_terminal::components::mermaid` |
 
 ## Mermaid Struct
@@ -22,8 +22,12 @@ Builder-pattern API for creating themed diagrams:
 - `.use_syntect_theme(theme_pair)` - resolve theme from a syntect `ThemePair`
 - `.hash()` - XXH64 hash of the normalized instructions
 - `.alt_text()` - accessibility text (explicit title or auto-detected diagram type)
-- `.render_for_html()` - returns `MermaidHtml { head, body }`
 - `.render_for_terminal()` - delegates to `biscuit-terminal`
+
+Browser output is produced by the render-tree pipeline, not by a method on
+`Mermaid`: a `lang="mermaid"` fence rendered through Darkmatter's full-page
+browser path emits an interactive `<pre class="mermaid">` element and the
+`DarkmatterFeatureResolver` injects the shared CSS + ESM bootstrap once per page.
 
 ## MermaidTheme
 
@@ -39,10 +43,22 @@ The `mermaid_theme_for_syntect(theme_pair, color_mode)` function maps a syntect 
 
 ## Browser Rendering
 
-When targeting the browser, `render_for_html()` produces a `MermaidHtml` with separate `head` and `body` content:
+Browser Mermaid is a page **feature** resolved by `DarkmatterFeatureResolver`
+(`feature.rs`) — the single owner of Mermaid browser assets:
 
-- **Head**: mermaid.js v11 ESM import from CDN (`cdn.jsdelivr.net`), icon pack registration, CSS variables for light/dark mode via `prefers-color-scheme`
-- **Body**: `<pre class="mermaid">` element with HTML-escaped instructions, ARIA attributes (`role="img"`, `aria-label`), optional `title` attribute
+- **Body**: the render-tree browser writer emits `<pre class="mermaid">` with the
+  HTML-escaped diagram source and requests `PageFeature::MermaidDiagram`.
+- **Injected assets** (once per page, deduplicated): CSS variables for light/dark
+  mode via `prefers-color-scheme`, plus an inline `<script type="module">`
+  bootstrap that dynamically imports the exact `MERMAID_VERSION` from
+  `cdn.jsdelivr.net` (primary) and retries the identical version from
+  `unpkg.com` (fallback), initializing only `.mermaid` elements. A total load
+  failure logs one `console.error` and leaves the readable source visible.
+
+Delivery requires network access and a Content Security Policy permitting both
+CDN origins and inline modules. Interactive Mermaid is Darkmatter's full-page
+browser default; the low-level `renderable` browser renderer keeps
+`BrowserMermaidMode::Code`, and terminal output stays code by default.
 
 ### CSS Variables
 
@@ -74,7 +90,7 @@ This module re-exports `MermaidRenderError` from `biscuit-terminal` for API comp
 
 ## Icon Packs
 
-Both HTML and terminal rendering enable these icon packs (loaded from unpkg CDN):
+Terminal rendering enables these icon packs (loaded from unpkg CDN):
 
 - `@iconify-json/fa7-brands` - Font Awesome 7 brand icons
 - `@iconify-json/lucide` - Lucide icons

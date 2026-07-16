@@ -22,18 +22,18 @@ Legacy prompts that only configure `start`, `success`, `blocked`, and `failure` 
 
 Every frontmatter property of a lifecycle event interpolates **when that event fires**, not during the initial compose. This is what lets a lifecycle message report the state at the moment it runs — including the runtime globals (`err`, `timing`, `current`) that do not exist at compose time. So `failure.message: "❌️  {{err.code}}"` renders the real error's code, and a `failure` stack `message: "❌️  {{err.code}}"` does too.
 
-The variables a lifecycle `{{ … }}` span can read fall into two groups:
+The variables a lifecycle `{{{ … }}}` span can read fall into two groups:
 
 - **Early-binding** (resolvable before the run): `doc.*` (frontmatter), `ctx.*`, `env.*`, and read-side functions (`parent_dir`, `dirname`, `frontmatter`, `file_exists`, …).
 - **Late-binding** (only exists at event-time): `err` (in `blocked`/`failure`/optional-error `finalize`), `timing`, `current`.
 
 A lifecycle property's interpolation resolves against the union of both, at event-time. Bare frontmatter references (`{{phase}}`, `{{artifact.path}}`) read the **current** effective document state at the moment the event fires — not a copy captured at the initial compose — so a `set_frontmatter` side effect that mutates `phase` between loop iterations is visible to the next iteration's lifecycle message.
 
-This is the consistent rule used everywhere else: a value is literal text and `{{ … }}` is how you opt into the expression engine. The document body and ordinary (non-lifecycle) frontmatter keys still interpolate at compose-time and are unchanged.
+This is the consistent rule used everywhere else: a value is literal text and `{{{ … }}}` is how you opt into the expression engine. The document body and ordinary (non-lifecycle) frontmatter keys still interpolate at compose-time and are unchanged.
 
 ## When Lifecycle Properties Interpolate
 
-Lifecycle strings keep their authored `{{ … }}` spans through the prepare stage — Darkmatter defers the seven lifecycle keys from compose-time resolution — and Claudine re-interpolates each property/action string through Darkmatter (the same composition engine, no second interpolator) just-in-time, immediately before it is used:
+Lifecycle strings keep their authored `{{{ … }}}` spans through the prepare stage — Darkmatter defers the seven lifecycle keys from compose-time resolution — and Claudine re-interpolates each property/action string through Darkmatter (the same composition engine, no second interpolator) just-in-time, immediately before it is used:
 
 - **Communication and action bodies** (`say`, `message`, `notify`, `stderr`, `info`, side-effect args, …) resolve at the instant the event fires, against the live document state plus the in-scope late-binding globals. Resolution is **just-in-time**, not a single snapshot: a `set_frontmatter` run by stack action #1 is visible to action #2 in the same event's stack.
 - **Resolution fails closed.** A malformed expression, an unknown function, an unknown root (a typo), or a late-binding global used outside its legal event fails the event with a typed error *before any side effect is dispatched* — a lifecycle string never silently renders empty for these cases. A *known* surface (a declared frontmatter key, `ctx`/`env`/`doc`, or an in-scope late-binding global) that resolves to `null`/empty still renders empty, as today. To tolerate an *unknown* optional name, opt in with explicit fallback syntax: `{{ maybe || '' }}`.
@@ -96,7 +96,7 @@ Actions run in order. The first lifecycle control action (`skip`, `stop`, `error
 
 An action is written in one of exactly two forms — **positional** or **key/value**. Both follow a single evaluation rule:
 
-> **Every value in a lifecycle action is literal text. Use `{{ … }}` to inject a variable or expression. The only expression-evaluated keys in the entire lifecycle surface are the boolean predicates `when`, `until`, and `while`.**
+> **Every value in a lifecycle action is literal text. Use `{{{ … }}}` to inject a variable or expression. The only expression-evaluated keys in the entire lifecycle surface are the boolean predicates `when`, `until`, and `while`.**
 
 **Positional** — an object whose single key is a known verb; the value carries the argument(s):
 
@@ -150,7 +150,7 @@ A value whose trimmed content is exactly one `{{ expr }}` span resolves to the e
 
 #### Object-valued arguments
 
-Some side-effect verbs take an object argument (`merge_frontmatter`, `append_jsonl`, key/value `http_post`). Direct nested YAML maps are **not** accepted inside action values. Place the object in frontmatter or context and pass it through a whole-value `{{ … }}` span:
+Some side-effect verbs take an object argument (`merge_frontmatter`, `append_jsonl`, key/value `http_post`). Direct nested YAML maps are **not** accepted inside action values. Place the object in frontmatter or context and pass it through a whole-value `{{{ … }}}` span:
 
 ```yaml
 payload:
@@ -248,7 +248,7 @@ start:
 
 ### `no_error`
 
-The `no_error` flag can be set on any action category. When `true`, an unintentional side-effect **dispatch** failure is logged but does not stop the stack or change the composition outcome. Its scope is the side-effect layer only: an expression-layer evaluation error (a crashed `when:` guard or a `{{ … }}` interpolation that raised) always halts and is never suppressed by `no_error`.
+The `no_error` flag can be set on any action category. When `true`, an unintentional side-effect **dispatch** failure is logged but does not stop the stack or change the composition outcome. Its scope is the side-effect layer only: an expression-layer evaluation error (a crashed `when:` guard or a `{{{ … }}}` interpolation that raised) always halts and is never suppressed by `no_error`.
 
 ```yaml
 start:
@@ -397,7 +397,7 @@ failure:
 
 ### Positional actions with interpolation
 
-Action values are literal text; `{{ … }}` interpolates a value:
+Action values are literal text; `{{{ … }}}` interpolates a value:
 
 ```yaml
 ---
@@ -582,7 +582,7 @@ start:
 
 ### `LifecycleInterpolationLeak`
 
-Because lifecycle strings are interpolated at event-time (see [When Lifecycle Properties Interpolate](#when-lifecycle-properties-interpolate)), their authored `{{ … }}` spans are **not** prepare-time leaks — they are deferred by design. This guard runs **after** the event-time resolution, immediately before dispatch: a side-effect string that still contains a `{{ … }}` span at that point (e.g. a frontmatter value that is itself raw template text) is a typed error and the side effect is not sent. For non-lifecycle surfaces the guard still runs at prepare time.
+Because lifecycle strings are interpolated at event-time (see [When Lifecycle Properties Interpolate](#when-lifecycle-properties-interpolate)), their authored `{{{ … }}}` spans are **not** prepare-time leaks — they are deferred by design. This guard runs **after** the event-time resolution, immediately before dispatch: a side-effect string that still contains a `{{{ … }}}` span at that point (e.g. a frontmatter value that is itself raw template text) is a typed error and the side effect is not sent. For non-lifecycle surfaces the guard still runs at prepare time.
 
 ### `LifecycleUndefinedVariable`
 
@@ -595,7 +595,7 @@ success:
 
 ### `LifecycleErrNotAvailable`
 
-`err` is referenced in an event that never carries an error (`initialize`, `start`, `success`, `loop`). The scan walks the `{{ … }}` spans inside communication/action strings **and** the whole `when:` expression, and rejects at parse time. `timing`/`current` are allowed everywhere; `doc.err` remains the escape hatch.
+`err` is referenced in an event that never carries an error (`initialize`, `start`, `success`, `loop`). The scan walks the `{{{ … }}}` spans inside communication/action strings **and** the whole `when:` expression, and rejects at parse time. `timing`/`current` are allowed everywhere; `doc.err` remains the escape hatch.
 
 ```yaml
 start:

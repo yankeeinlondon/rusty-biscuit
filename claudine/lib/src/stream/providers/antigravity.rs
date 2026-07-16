@@ -209,34 +209,23 @@ impl<S: SemanticEventSink> SemanticStreamParser for AntigravitySemanticStreamPar
             this.num_turns,
             this.provider_status.as_deref(),
         );
-
-        let mut summary = StreamExecutionSummary {
-            provider: Provider::Antigravity,
-            session_id: this.session_id,
-            model: this.model,
-            assistant_text: this.assistant_text,
-            provider_status: this.provider_status,
-            exit_code,
-            is_error: this.is_error,
-            error_kind: this.error_kind,
-            error_message: this.error_message,
-            duration_ms: this.duration_ms,
-            duration_api_ms: None,
-            num_turns: (this.num_turns > 0).then_some(this.num_turns),
-            token_usage: this.has_usage.then_some(this.token_usage),
-            cost_usd: None,
-            tool_calls: None,
-            permission_prompts: None,
-            user_input_prompts: None,
-            rate_limit: None,
-            context_usage: None,
-            badges: Vec::new(),
-            raw_summary: None,
-            stderr_text: None,
-            stderr_diagnostics: None,
-        };
-        summary.badges = crate::stream::badges::derive_badges(&summary, Provider::Antigravity);
-        summary
+        super::common::finish_summary(
+            Provider::Antigravity,
+            StreamExecutionSummary {
+                session_id: this.session_id,
+                model: this.model,
+                assistant_text: this.assistant_text,
+                provider_status: this.provider_status,
+                exit_code,
+                is_error: this.is_error,
+                error_kind: this.error_kind,
+                error_message: this.error_message,
+                duration_ms: this.duration_ms,
+                num_turns: (this.num_turns > 0).then_some(this.num_turns),
+                token_usage: this.has_usage.then_some(this.token_usage),
+                ..Default::default()
+            },
+        )
     }
 }
 
@@ -263,32 +252,12 @@ fn parse_envelope(raw: &str) -> Option<AntigravityEnvelope> {
 /// state), so classification is text-based — mirroring the Pi/OpenCode path,
 /// with an auth branch for the keyring/OAuth failure modes agy surfaces.
 fn classify_error(message: &str) -> SemanticErrorKind {
-    let lower = message.to_ascii_lowercase();
-    if lower.contains("sign in")
-        || lower.contains("sign-in")
-        || lower.contains("not logged in")
-        || lower.contains("authentication failed")
-        || lower.contains("authentication")
-        || lower.contains("unauthorized")
-        || lower.contains("401")
-        || lower.contains("403")
-    {
-        return SemanticErrorKind::Configuration;
-    }
-    if lower.contains("rate limit")
-        || lower.contains("quota")
-        || lower.contains("exhausted")
-        || lower.contains("out of credits")
-        || lower.contains("overloaded")
-        || lower.contains("503")
-        || lower.contains("resource_exhausted")
-    {
-        return SemanticErrorKind::ApiRemote;
-    }
-    if lower.contains("abort") || lower.contains("cancel") || lower.contains("interrupt") {
-        return SemanticErrorKind::Interrupted;
-    }
-    SemanticErrorKind::AgentNative
+    super::common::classify_error_by_keywords(
+        super::vocabulary::error_keywords(Provider::Antigravity),
+        None,
+        None,
+        Some(message),
+    )
 }
 
 #[cfg(test)]

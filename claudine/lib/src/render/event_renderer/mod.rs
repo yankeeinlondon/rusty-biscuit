@@ -16,6 +16,7 @@
 //! against [`SemanticEvent`]'s `strum::VariantNames`.
 
 mod error_block;
+mod helpers;
 mod provider_extension;
 mod tool_use;
 
@@ -32,6 +33,8 @@ use crate::stream::stderr::Verbosity;
 use crate::stream::tool_display::{ToolCallDisplay, ToolStatus};
 
 pub use error_block::error_kind_presentation;
+pub(crate) use helpers::escape_prose;
+use helpers::subagent_description;
 pub use tool_use::{pending_matches_tool_call, strip_progress_verb};
 
 /// One rendered STDERR emission — the string plus the event class that decides
@@ -431,32 +434,6 @@ impl EventRenderer {
         status.layout_mut().word_wrap = status.layout().word_wrap.clone().with_hanging_indent(4);
         status.render(terminal)
     }
-}
-
-fn subagent_description(arrow: char, name: &Option<String>) -> String {
-    let name_part = name.as_deref().unwrap_or("(subagent)");
-    format!("{arrow} {name_part}")
-}
-
-/// Escape user-controlled text so it can be safely interpolated into
-/// biscuit-terminal prose markup without being parsed as tags / tokens.
-///
-/// Biscuit-terminal's `Prose` parser recognises backslash escapes for `<`,
-/// `>`, `{`, and `\`; escaping those four characters is sufficient to
-/// prevent arbitrary user strings (commands, paths, URLs, raw JSON) from
-/// being interpreted as markup.
-pub(crate) fn escape_prose(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for ch in input.chars() {
-        match ch {
-            '\\' | '<' | '>' | '{' => {
-                out.push('\\');
-                out.push(ch);
-            }
-            other => out.push(other),
-        }
-    }
-    out
 }
 
 #[cfg(test)]

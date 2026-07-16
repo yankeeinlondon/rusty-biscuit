@@ -47,6 +47,7 @@ pub fn run_validate(
     schema: Option<&Path>,
     format: SchemaValidateFormat,
     quiet: bool,
+    no_trigger_schemas: bool,
 ) -> Result<()> {
     let terminal = Terminal::default();
 
@@ -78,7 +79,7 @@ pub fn run_validate(
     let mut any_validation_failure = false;
 
     for file in &files {
-        let outcome = validate_one(&api, file, &assignments);
+        let outcome = validate_one(&api, file, &assignments, no_trigger_schemas);
         match &outcome {
             FileOutcome::Validated { report_valid, .. } if !report_valid => {
                 any_validation_failure = true;
@@ -122,17 +123,38 @@ fn load_api(schema: Option<&Path>) -> Result<DarkmatterSchemas, SchemaError> {
 
 /// Validates a single file, capturing parse/schema failures separately so the
 /// caller can map them to the spec's exit codes.
-fn validate_one(api: &DarkmatterSchemas, file: &Path, assignments: &[Assignment]) -> FileOutcome {
-    let mut md = match Markdown::try_from(file) {
+fn validate_one(
+    api: &DarkmatterSchemas,
+    file: &Path,
+    assignments: &[Assignment],
+    no_trigger_schemas: bool,
+) -> FileOutcome {
+    let discovery_path = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let mut md = match Markdown::try_from(discovery_path.as_path()) {
         Ok(md) => md,
         Err(err) => return FileOutcome::ParseError(err.to_string()),
     };
 
+    let api = if no_trigger_schemas {
+        api.clone()
+    } else if let Some(boundary) =
+        darkmatter::markdown::compose::find_git_root_from(&discovery_path)
+    {
+        match api
+            .clone()
+            .with_trigger_discovery(&discovery_path, boundary)
+        {
+            Ok(api) => api,
+            Err(err) => return FileOutcome::SchemaError(Box::new(err)),
+        }
+    } else {
+        api.clone()
+    };
+
     if !assignments.is_empty() {
-        // Build the effective schema first so assignment RHS values can be
-        // coerced to the declared property type. `effective_for` only reads
-        // `$schema` (and the configured baseline), so it is unaffected by
-        // the assignments we are about to apply.
+        // Build the pre-assignment effective schema solely to coerce assignment
+        // RHS values to declared property types. Validation resolves again
+        // below because assignments may change trigger activation.
         let effective = match api.effective_for(&md) {
             Ok(effective) => effective,
             Err(err) => return FileOutcome::SchemaError(Box::new(err)),
@@ -145,7 +167,12 @@ fn validate_one(api: &DarkmatterSchemas, file: &Path, assignments: &[Assignment]
     }
 
     let schema_label = schema_label_from(&md);
-    let no_schema = md.frontmatter().as_map().get("$schema").is_none();
+    // Resolve again after assignments: assignments may change which trigger
+    // arms match, so the pre-assignment schema is only valid for coercion.
+    let no_schema = match api.effective_for(&md) {
+        Ok(effective) => effective.is_none(),
+        Err(err) => return FileOutcome::SchemaError(Box::new(err)),
+    };
 
     match api.validate(&md) {
         Ok(report) => FileOutcome::Validated {

@@ -66,6 +66,30 @@ enum Command {
         /// catalog.json is always checked against the full scope.
         slug: Option<String>,
     },
+    /// Deterministic validate-and-resume gate for the `agent-errors` research
+    /// topic (spec D10). Its subcommands are the mechanical half of the fleet
+    /// lifecycle: the fleet `success` stack runs `check`, then branches on the
+    /// explicit outcome report status.
+    AgentErrors {
+        #[command(subcommand)]
+        command: AgentErrorsCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum AgentErrorsCommand {
+    /// Check one provider's `agent-errors/<slug>.md` research document against
+    /// its facts seed, writing an explicit Markdown outcome report. Input and
+    /// schema failures are reported as `gate_error`; report persistence errors
+    /// exit non-zero so lifecycle processing cannot consume stale state.
+    Check {
+        /// Provider slug (the research document stem).
+        slug: String,
+        /// Outcome-report path (default:
+        /// `docs/research/agent-errors/.findings/<slug>.md`).
+        #[arg(long)]
+        findings: Option<PathBuf>,
+    },
 }
 
 /// `Some(slug)` → a one-element list; `None` → every wired provider.
@@ -184,6 +208,27 @@ fn run(area: Option<PathBuf>, command: Command) -> Result<ExitCode, GenError> {
                     );
                 }
             }
+            match claudine_gen::check_vocabulary(&area)? {
+                CheckOutcome::Clean => {
+                    println!(
+                        "stream vocabulary.rs: clean (inputs match the committed tables)"
+                    );
+                }
+                CheckOutcome::Drift { details } => {
+                    drifted = true;
+                    println!(
+                        "stream vocabulary.rs: DRIFT — regenerate with `claudine-gen generate`:"
+                    );
+                    print_capped_diff(&details, "  ");
+                }
+                CheckOutcome::MissingCommitted { path } => {
+                    drifted = true;
+                    println!(
+                        "stream vocabulary.rs missing at {} — run `claudine-gen generate`",
+                        path.display()
+                    );
+                }
+            }
             let family_count = claudine_gen::compiled_family_keys(&generations).len();
             match claudine_gen::check_families(&area, &generations)? {
                 CheckOutcome::Clean => {
@@ -224,6 +269,41 @@ fn run(area: Option<PathBuf>, command: Command) -> Result<ExitCode, GenError> {
             } else {
                 ExitCode::SUCCESS
             })
+        }
+        Command::AgentErrors { command } => {
+            let area = resolve_area(area)?;
+            match command {
+                AgentErrorsCommand::Check { slug, findings } => {
+                    let findings_path = findings
+                        .unwrap_or_else(|| claudine_gen::default_findings_path(&area, &slug));
+                    let report = claudine_gen::check_agent_errors(&area, &slug, &findings_path)?;
+                    match report.status {
+                        claudine_gen::GateStatus::Clean => {
+                            println!("{slug}: agent-errors research clean (explicit outcome)");
+                        }
+                        claudine_gen::GateStatus::Findings => {
+                            println!(
+                                "{slug}: {} deterministic finding(s) written to {}",
+                                report.findings.len(),
+                                findings_path.display()
+                            );
+                            for finding in &report.findings {
+                                println!("  {}", finding.detail);
+                            }
+                        }
+                        claudine_gen::GateStatus::GateError => {
+                            println!(
+                                "{slug}: deterministic gate error written to {}: {}",
+                                findings_path.display(),
+                                report.error.as_deref().unwrap_or("unknown gate error")
+                            );
+                        }
+                    }
+                    // Every persisted outcome exits zero so the fleet can
+                    // branch on its typed status. Persistence errors propagate.
+                    Ok(ExitCode::SUCCESS)
+                }
+            }
         }
     }
 }
@@ -272,6 +352,7 @@ fn run_generate(
     // always rebuilt, written through the same per-file confirmation flow.
     let signals = claudine_gen::build_signals(area)?;
     let families = claudine_gen::build_families(area, &generations)?;
+    let vocabulary = claudine_gen::build_vocabulary(area)?;
     println!(
         "families: {} family keys compiled from expected-offering joins",
         claudine_gen::compiled_family_keys(&generations).len()
@@ -306,6 +387,7 @@ fn run_generate(
         &generations,
         &signals,
         &families,
+        &vocabulary,
         &mut decide,
     )?;
 

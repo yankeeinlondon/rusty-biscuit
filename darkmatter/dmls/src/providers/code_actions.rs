@@ -29,6 +29,7 @@ use crate::config::DmlsConfig;
 use crate::diagnostics::codes::code;
 use crate::graph::{DocumentId, LinkTarget, NodeId, WorkspaceGraph, normalize_join};
 use crate::overlay::FrontmatterAst;
+use crate::overlay::expressions;
 use crate::workspace::file_path_to_uri;
 
 /// Config category slug for a code action; an action is offered unless its
@@ -38,6 +39,7 @@ mod category {
     pub const ADD_KEY: &str = "add-missing-key";
     pub const MIGRATE_STYLE: &str = "migrate-deprecated-style";
     pub const CLOSE_BLOCK: &str = "close-directive-block";
+    pub const WRAP_LITERAL: &str = "wrap-in-interpolation-literal";
 }
 
 /// Code actions for the current document, driven by the request-context
@@ -69,6 +71,11 @@ pub fn code_actions(ctx: &DocumentContext, diagnostics: &[Diagnostic]) -> Vec<Co
             }
             code::DIRECTIVE_UNCLOSED_BLOCK if enabled(ctx.config, category::CLOSE_BLOCK) => {
                 close_unclosed_block(ctx, diag)
+            }
+            code::EXPRESSION_MALFORMED
+                if enabled(ctx.config, category::WRAP_LITERAL) =>
+            {
+                wrap_in_interpolation_literal(ctx, diag)
             }
             _ => None,
         };
@@ -204,7 +211,17 @@ fn add_missing_required_keys(ctx: &DocumentContext, diagnostics: &[Diagnostic]) 
     }
     let insert_offset = root_insertion_offset(ast)?;
     let position = ctx.source_map.byte_to_lsp(insert_offset)?;
-    let new_text: String = keys.iter().map(|key| format!("\n{key}: ")).collect();
+    // A key the schema types as a single `literal(x)` is inserted with its
+    // correct-by-construction value (YAML-quoted where required) instead of an
+    // empty scaffold.
+    let shape = crate::providers::frontmatter::known_shape(ctx);
+    let new_text: String = keys
+        .iter()
+        .map(|key| match literal_scaffold(&shape, key) {
+            Some(value) => format!("\n{key}: {value}"),
+            None => format!("\n{key}: "),
+        })
+        .collect();
     let related: Vec<Diagnostic> = diagnostics
         .iter()
         .filter(|diag| string_code(diag) == Some(code::SCHEMA_MISSING_REQUIRED))
@@ -230,6 +247,14 @@ fn add_missing_required_keys(ctx: &DocumentContext, diagnostics: &[Diagnostic]) 
         edit: Some(builder.build(ctx.profile)),
         ..Default::default()
     })
+}
+
+/// The YAML value text to seed a missing required top-level `key` with when the
+/// schema types it as a single `literal(x)`, else `None` (an empty scaffold).
+fn literal_scaffold(shape: &darkmatter::markdown::schemas::SchemaShape, key: &str) -> Option<String> {
+    let def = crate::providers::frontmatter::def_at_path(shape, &[key])?;
+    let value = crate::providers::frontmatter::sole_literal_value(def)?;
+    Some(crate::providers::frontmatter::yaml_scalar_literal(value))
 }
 
 /// The byte offset to insert a new top-level key at: just past the last
@@ -308,6 +333,33 @@ fn close_unclosed_block(ctx: &DocumentContext, diag: &Diagnostic) -> Option<Code
     );
     Some(CodeAction {
         title: "Close block with `::end-block`".to_string(),
+        kind: Some(CodeActionKind::QUICKFIX),
+        diagnostics: Some(vec![diag.clone()]),
+        edit: Some(builder.build(ctx.profile)),
+        ..Default::default()
+    })
+}
+
+// ── wrap an interpolation in a literal ──
+
+/// A quick-fix that wraps the malformed `{{ … }}` span in triple braces so it
+/// becomes an inert interpolation literal (`{{{ … }}}`).
+fn wrap_in_interpolation_literal(ctx: &DocumentContext, diag: &Diagnostic) -> Option<CodeAction> {
+    let offset = ctx.source_map.lsp_to_byte(diag.range.start)?;
+    let body_base = super::dsl::body_base(ctx.text);
+    let interpolation = expressions::interpolation_at(ctx.text, body_base, offset)?;
+    let range = ctx.source_map.byte_range_to_lsp(interpolation.outer.clone())?;
+    let new_text = format!("{{{}}}", &ctx.text[interpolation.outer]);
+    let mut builder = EditBuilder::new();
+    builder.edit(
+        ctx.uri.clone(),
+        TextEdit {
+            range,
+            new_text,
+        },
+    );
+    Some(CodeAction {
+        title: "Wrap in interpolation literal".to_string(),
         kind: Some(CodeActionKind::QUICKFIX),
         diagnostics: Some(vec![diag.clone()]),
         edit: Some(builder.build(ctx.profile)),
@@ -403,6 +455,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_literal_scaffold_inserts_value_with_yaml_quoting() {
+        use darkmatter::markdown::schemas::{
+            Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType,
+        };
+
+        let literal = |value: serde_json::Value| {
+            let mut atom = PropertyAtom::bare(SimplifiedType::Literal);
+            atom.constraints.push(Constraint::LiteralValue(value));
+            PropertyDef::Single(atom)
+        };
+
+        let mut shape = SchemaShape::new();
+        shape.properties.insert("kind".into(), literal(serde_json::json!("created")));
+        // A string literal that looks numeric must be YAML-quoted.
+        shape.properties.insert("tag".into(), literal(serde_json::json!("2")));
+        shape
+            .properties
+            .insert("title".into(), PropertyDef::Single(PropertyAtom::bare(SimplifiedType::String)));
+
+        assert_eq!(literal_scaffold(&shape, "kind").as_deref(), Some("created"));
+        assert_eq!(literal_scaffold(&shape, "tag").as_deref(), Some("'2'"));
+        // A non-literal required key still gets an empty scaffold (None here).
+        assert!(literal_scaffold(&shape, "title").is_none());
+    }
+
+    #[test]
     fn test_is_creatable_filename_rejects_windows_invalid() {
         assert!(is_creatable_filename(std::path::Path::new("/w/note.md")));
         assert!(!is_creatable_filename(std::path::Path::new("/w/no:te.md")));
@@ -438,5 +516,94 @@ mod tests {
         let text = "# Doc\n::block when=\"x\"\nbody\n";
         let offset = text.find("::block").unwrap();
         assert_eq!(line_at(text, offset), "::block when=\"x\"");
+    }
+
+    #[test]
+    #[allow(clippy::mutable_key_type)]
+    fn test_wrap_in_interpolation_literal_offers_quick_fix() {
+        use std::collections::BTreeMap;
+        use std::path::Path;
+        use std::sync::Arc;
+
+        use lsp_types::{NumberOrString, Uri};
+
+        use crate::capabilities::{ClientProfile, HoverMediaProfile};
+        use crate::graph::WorkspaceGraph;
+        use crate::source_map::{PositionEncoding, SourceMap};
+
+        let text = "See {{ > invalid }} text.\n";
+        let uri: Uri = "file:///t.md".parse().unwrap();
+        let path = Path::new("/t.md");
+        let source_map =
+            SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text));
+        let graph = WorkspaceGraph::build_with_roots(&BTreeMap::new(), 0, &[]);
+        let config = DmlsConfig::default();
+        let profile = ClientProfile {
+            client_name: None,
+            client_version: None,
+            position_encoding: PositionEncoding::Utf16,
+            supports_resource_operations: false,
+            supports_change_annotations: false,
+            supports_code_action_resolve: false,
+            supports_completion_resolve: false,
+            resolve_provides_text_edit: false,
+            supports_snippets: false,
+            client_watches_files: false,
+            needs_watch_fallback: false,
+            supports_file_operations: false,
+            supports_workspace_configuration: false,
+            supports_semantic_tokens: false,
+            supports_semantic_tokens_refresh: false,
+            supports_folding: false,
+            folding_line_only: false,
+            supports_selection_range: false,
+            supports_linked_editing: false,
+            supports_work_done_progress: false,
+            hover_media: HoverMediaProfile::default(),
+            helix_one_char_selection_is_empty: false,
+        };
+
+        let ctx = DocumentContext {
+            uri: &uri,
+            path,
+            text,
+            source_map: &source_map,
+            graph: &graph,
+            doc_id: None,
+            config: &config,
+            profile: &profile,
+            overlay: None,
+        };
+
+        let diagnostics = crate::providers::dsl::diagnostics(&ctx);
+        let malformed = diagnostics
+            .iter()
+            .find(|d| {
+                matches!(
+                    &d.code,
+                    Some(NumberOrString::String(s)) if s == code::EXPRESSION_MALFORMED
+                )
+            })
+            .expect("malformed expression diagnostic")
+            .clone();
+
+        let actions = code_actions(&ctx, &[malformed]);
+        let action = actions
+            .iter()
+            .find_map(|a| match a {
+                CodeActionOrCommand::CodeAction(a)
+                    if a.title == "Wrap in interpolation literal" =>
+                {
+                    Some(a)
+                }
+                _ => None,
+            })
+            .expect("wrap action");
+
+        let edit = action.edit.as_ref().expect("edit");
+        let changes = edit.changes.as_ref().expect("changes");
+        let uri_edits = changes.get(&uri).expect("uri edits");
+        assert_eq!(uri_edits.len(), 1);
+        assert_eq!(uri_edits[0].new_text, "{{{ > invalid }}}");
     }
 }

@@ -13,42 +13,28 @@ vary by bridge extension; the server command is simply:
 dmls
 ```
 
-## Option B — thin extension
+## Option B — the shipped `vscode-dmls` extension (recommended)
 
-The most reliable path is a small extension that starts the server with
-`vscode-languageclient`. This is the whole activation:
+The repo ships a thin client extension at
+[`../../vscode-dmls/`](../../vscode-dmls/) (`vscode-languageclient` over stdio,
+no language logic). One recipe packages and installs it:
 
-```ts
-import * as vscode from 'vscode';
-import {
-  LanguageClient,
-  LanguageClientOptions,
-  ServerOptions,
-} from 'vscode-languageclient/node';
-
-let client: LanguageClient;
-
-export function activate(context: vscode.ExtensionContext) {
-  const serverOptions: ServerOptions = {
-    command: 'dmls',
-    args: [],
-  };
-
-  const clientOptions: LanguageClientOptions = {
-    documentSelector: [{ scheme: 'file', language: 'markdown' }],
-    synchronize: {
-      fileEvents: vscode.workspace.createFileSystemWatcher('**/*.{md,markdown,mdown,mkdn}'),
-    },
-  };
-
-  client = new LanguageClient('dmls', 'Darkmatter Language Server', serverOptions, clientOptions);
-  context.subscriptions.push(client.start());
-}
-
-export function deactivate(): Thenable<void> | undefined {
-  return client?.stop();
-}
+```bash
+# from darkmatter/ — npm install, vsce package, code --install-extension
+just install-vscode-package
 ```
+
+Then reload an open window (**Developer: Reload Window**) and open a Markdown
+file. Settings:
+
+- `dmls.server.path` — absolute path to the binary (set this if VS Code was
+  launched from the GUI and cannot see your shell `PATH`; usually
+  `~/.cargo/bin/dmls`).
+- `dmls.server.args` — extra server arguments (e.g. `--log-level debug`).
+
+For extension development, open `vscode-dmls/` and press **F5** to run it in
+an Extension Development Host instead of installing. See
+[vscode-dmls/README.md](../../vscode-dmls/README.md) for details.
 
 ## What you get
 
@@ -63,6 +49,51 @@ export function deactivate(): Thenable<void> | undefined {
 - File + heading rename with workspace-wide reference updates
   (`workspace/willRenameFiles` supported), the v1 code-action set, and
   whole-document formatting.
+- Semantic tokens classifying interpolations, directives/closers, and wiki
+  links for theme-driven de-emphasis (see below).
+
+## Semantic tokens (de-emphasize Darkmatter machinery)
+
+VS Code enables LSP semantic tokens by default (no opt-in), so once `dmls` is
+attached, interpolations, directive lines, and wiki links are classified and
+ready to style. Semantic tokens **merge over** the Markdown grammar, and token
+colors **cannot carry alpha** — "dim" is a *muted foreground*, not transparency.
+Add copyable rules to your `settings.json` and tune the palette to your theme:
+
+```json
+{
+  "editor.semanticTokenColorCustomizations": {
+    "enabled": true,
+    "rules": {
+      "*.interpolation": { "foreground": "#7d8590" },
+      "*.directive": { "foreground": "#7d8590" },
+      "*.closer": { "foreground": "#6e7681" },
+      "macro.wiki": { "foreground": "#7d8590" },
+      "string.wiki": { "foreground": "#539bf5" }
+    }
+  }
+}
+```
+
+The custom modifiers (`interpolation`, `directive`, `closer`, `wiki`) are the
+targeting surface; `*.interpolation` matches every token type carrying that
+modifier. `macro.wiki` mutes the `[[ ]]` brackets and `#`/`|` separators while
+`string.wiki` keeps the inner path/heading/alias text link-like. `{{{ literal }}}`
+spans additionally carry `inert` (`*.inert`) if you want to fade them harder.
+The server-side master switch is `[semantic_tokens] enable = false` in
+`.dmls.toml`; `wiki.enable = false` suppresses only the wiki tokens.
+
+Scope the rules to Markdown if a language-wide rule is too broad:
+
+```json
+{
+  "editor.semanticTokenColorCustomizations": {
+    "[Default Dark Modern]": {
+      "rules": { "*.directive": { "foreground": "#7d8590" } }
+    }
+  }
+}
+```
 
 ## Notes
 

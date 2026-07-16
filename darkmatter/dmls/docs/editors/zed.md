@@ -13,11 +13,27 @@ the packaging steps.
 
 ## Install as a dev extension
 
-1. Build/install `dmls` so it is on your `PATH` (or configure `binary.path` in
-   the extension settings once wired).
+1. Build/install `dmls` so it is on your `PATH` (from `darkmatter/`:
+   `just install-dmls`), or configure `binary.path` in the extension settings.
 2. In Zed: **command palette → `zed: install dev extension`**, and select the
-   `zed-dmls` directory.
-3. Open a Markdown file; Zed launches `dmls` for it.
+   `zed-dmls` directory **itself** — the one containing `extension.toml`
+   (`darkmatter/dmls/zed-dmls/`). Selecting a parent directory (`dmls/`, the
+   repo root) fails with *"No extension manifest found for extension
+   \<dirname\>"*.
+3. Open a Markdown file; Zed launches `dmls` for it. Check
+   the language-server status menu (bottom bar) — `dmls` should be listed and
+   green.
+
+Zed compiles the extension itself (Rust → wasm32-wasip2) during install, and
+registers the dev extension as a **symlink** to the directory you selected —
+if that checkout moves or a worktree is deleted, reinstall from the new
+location. To pick up extension-source changes later, use the rebuild action on
+the Extensions page (`zed: extensions`); to pick up a new `dmls` binary, just
+restart the server (`editor: restart language server`) or Zed.
+
+If Zed starts with **no** language servers for the project at all (dmls *and*
+codebook/YAML missing or stuck "waiting"), that is usually not the extension —
+see the [shell env-capture note in Troubleshooting](README.md#troubleshooting).
 
 ## Minimal extension shape
 
@@ -62,6 +78,45 @@ impl zed::Extension for DmlsExtension {
 zed::register_extension!(DmlsExtension);
 ```
 
+## Semantic tokens (de-emphasize Darkmatter machinery)
+
+`dmls` emits semantic tokens so a theme can dim interpolations (`{{ … }}`),
+directive lines (`::file`, `::block`, …), and wiki-link brackets while letting
+wiki inner text read link-like. Zed ships semantic tokens **disabled by
+default**, so this is opt-in per language in `settings.json`:
+
+```json
+{
+  "languages": {
+    "Markdown": { "semantic_tokens": "combined" }
+  }
+}
+```
+
+`"combined"` layers DMLS tokens over Zed's Markdown grammar highlighting;
+`"full"` uses the server tokens alone. Colors come from the **active theme**, not
+the extension — see [zed-dmls/README.md](../../zed-dmls/README.md#semantic-token-styling)
+for the recommended `experimental.theme_overrides` recipe (muted machinery vs.
+link-like wiki text). Server-side, semantic tokens are on by default and can be
+switched off with `[semantic_tokens] enable = false` in `.dmls.toml`.
+
+### Smoke example
+
+In a Markdown file, with the opt-in above:
+
+```md
+Deploy {{ project.name }} to {{ env.STAGE }}.
+
+::file ./intro.md
+
+See [[architecture#overview]] for the design.
+```
+
+Each `{{ … }}` span, the `::file` keyword and its `./intro.md` target, and the
+`[[ ]]` brackets/`#` separator should render muted; `architecture` and `overview`
+should read link-like. A `{{{ literal }}}` carries the extra `inert` modifier
+for themes that fade it further.
+
 ## Client quirks that affect `dmls`
 
 - **Never resolve `completionItem.textEdit`.** Zed intentionally does not resolve
@@ -76,4 +131,5 @@ zed::register_extension!(DmlsExtension);
 
 Navigation, diagnostics, completion, hover, frontmatter schema intelligence,
 directive/transclusion/interpolation intelligence, read-only shell-policy hover,
-heading + file rename, the v1 code-action set, and whole-document formatting.
+heading + file rename, the v1 code-action set, whole-document formatting, and
+semantic tokens (opt-in, see above).

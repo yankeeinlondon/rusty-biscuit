@@ -6,8 +6,8 @@ targets, in support order:
 
 | Editor | Guide | Integration path |
 |--------|-------|------------------|
-| VS Code | [vscode.md](./vscode.md) | Generic LSP config or thin extension |
-| Zed | [zed.md](./zed.md) | Thin WASM extension launching native `dmls` |
+| VS Code | [vscode.md](./vscode.md) | Shipped `vscode-dmls` extension (`just install-vscode-package`) or generic LSP bridge |
+| Zed | [zed.md](./zed.md) | Shipped `zed-dmls` dev extension launching native `dmls` |
 | Neovim | [neovim.md](./neovim.md) | Built-in LSP client (0.10+) |
 | Helix | [helix.md](./helix.md) | `languages.toml` registration |
 
@@ -16,7 +16,8 @@ targets, in support order:
 1. Build and install the binary so it is on your `PATH`:
 
    ```bash
-   cargo install --path darkmatter/dmls
+   just install-dmls                          # from darkmatter/ (canonical)
+   cargo install --path darkmatter/dmls      # equivalent, from the repo root
    # or, from a release archive, drop `dmls` (dmls.exe on Windows) on PATH
    ```
 
@@ -97,3 +98,34 @@ Highlights that affect setup:
   is unavailable there in v1.
 - **Folding.** Neovim requests line-only folding; `dmls` emits line-safe ranges
   everywhere so this needs no per-editor tuning.
+
+## Troubleshooting
+
+**`dmls` runs in a terminal but the editor can't find it.** GUI-launched
+editors (Dock, Spotlight, Finder) do not inherit your shell's `PATH`. Configure
+the absolute binary path instead — usually `~/.cargo/bin/dmls`. Both shipped
+extensions expose a setting for this (`dmls.server.path` in VS Code;
+`binary.path` in Zed's LSP settings).
+
+**Server list is empty, or servers sit in a "waiting" state after editor
+restart (Zed).** Zed captures each project's environment by running your login
+shell headlessly (`$SHELL -l -i -c … --printenv` with pipes, no TTY). If your
+shell init blocks in that context — e.g. completion loaders that spawn CLIs, or
+anything that probes the terminal — Zed never finishes project setup and starts
+**no** language servers for the project (not just `dmls`). Check for wedged
+capture shells with `pgrep -fl printenv`; long-lived entries mean your shell
+init is the problem. Guard interactive-only init (completions, prompt tooling)
+behind a TTY test such as `[ -t 0 ] || [ -t 1 ]`.
+
+**Where the logs are.** `dmls` logs to stderr (or `--log-file <path>`); stdout
+is LSP framing only.
+
+- VS Code: **Output → "Darkmatter Language Server"**.
+- Zed: command palette → `dev: open language server logs`; editor-side errors
+  land in `~/Library/Logs/Zed/Zed.log` (macOS).
+- Any editor: add `--log-level debug --log-file /tmp/dmls.log` to the server
+  arguments for a standalone trace.
+
+**Probe the server by hand.** `dmls --version` proves the binary runs;
+`dmls --bench-index <dir>` proves it can index a workspace (stage timings and
+graph counts) without any editor involved.

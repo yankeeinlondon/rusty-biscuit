@@ -1117,7 +1117,7 @@ mod tests {
     fn html_page_includes_fragment() {
         let block = StatusBlock::new(StatusState::Info).body("Body");
         let page = BrowserRenderable::render_html_page(&block, None);
-        let html = page.render();
+        let html = page.render().expect("render");
         assert!(html.contains("<html"));
         assert!(html.contains("<body>"));
         assert!(html.contains("<blockquote"));

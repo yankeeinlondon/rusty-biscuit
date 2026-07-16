@@ -26,6 +26,7 @@ use lsp_types::{
 };
 
 use super::DocumentContext;
+use super::frontmatter;
 use super::location::line_range;
 use crate::diagnostics::codes::{code, source};
 use crate::graph::normalize_join;
@@ -178,63 +179,41 @@ struct CompletionCandidate {
 
 /// Candidates matching `partial` (prefix-based, case-sensitive): top-level
 /// frontmatter keys, fully qualified `ctx.*` variables, and expression
-/// functions — every field derived from the one catalog descriptor.
+/// functions. Lowers the shared [`expressions::completion_candidates`] neutral
+/// model — the single authority shared with the Expression-typed frontmatter
+/// value surface — onto this provider's LSP candidate shape.
 fn interpolation_candidates(
     partial: &str,
     frontmatter_keys: &[String],
 ) -> Vec<CompletionCandidate> {
-    let mut items = Vec::new();
-
-    for key in frontmatter_keys {
-        if key.starts_with(partial) {
-            items.push(CompletionCandidate {
-                label: key.clone(),
-                new_text: key.clone(),
-                kind: CompletionItemKind::FIELD,
-                detail: Some("frontmatter key".to_string()),
-                documentation: None,
-            });
-        }
-    }
-
-    for descriptor in expressions::context_descriptors() {
-        let label = format!("ctx.{}", descriptor.name);
-        if label.starts_with(partial) {
-            items.push(CompletionCandidate {
-                new_text: label.clone(),
-                label,
-                kind: CompletionItemKind::VARIABLE,
-                detail: Some(descriptor.display_type.to_string()),
-                documentation: Some(descriptor.description.to_string()),
-            });
-        }
-    }
-
-    for descriptor in expressions::function_descriptors() {
-        let signature = descriptor.signature;
-        let name = signature.split('(').next().unwrap_or(signature);
-        if name.starts_with(partial) {
-            items.push(CompletionCandidate {
-                label: signature.to_string(),
-                new_text: name.to_string(),
-                kind: CompletionItemKind::FUNCTION,
-                detail: Some(descriptor.typed_signature()),
-                documentation: Some(descriptor.description.to_string()),
-            });
-        }
-    }
-
-    items
+    expressions::completion_candidates(partial, frontmatter_keys)
+        .into_iter()
+        .map(|candidate| CompletionCandidate {
+            label: candidate.label,
+            new_text: candidate.insert_text,
+            kind: match candidate.kind {
+                expressions::ExprCompletionKind::FrontmatterKey => CompletionItemKind::FIELD,
+                expressions::ExprCompletionKind::ContextVariable => CompletionItemKind::VARIABLE,
+                expressions::ExprCompletionKind::Function => CompletionItemKind::FUNCTION,
+            },
+            detail: candidate.detail,
+            documentation: candidate.documentation,
+        })
+        .collect()
 }
 
 // ── Hover ─────────────────────────────────────────────────────────────────
 
-/// Hover for a directive, interpolation, or frontmatter `$()` value.
+/// Hover for a directive, interpolation, frontmatter `$()` value, or
+/// interpolation literal.
 pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     if let Some(hover) = directive_hover(ctx, offset) {
         return Some(hover);
     }
     if let Some(hover) = shell_block_hover(ctx, offset) {
+        return Some(hover);
+    }
+    if let Some(hover) = literal_hover(ctx, offset) {
         return Some(hover);
     }
     if let Some(hover) = interpolation_hover(ctx, offset) {
@@ -279,66 +258,75 @@ fn interpolation_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     let body_base = body_base(ctx.text);
     let interpolation = expressions::interpolation_at(ctx.text, body_base, offset)?;
     let expr_offset = offset.saturating_sub(interpolation.inner.start);
-    let value = interpolation_hover_markdown(&interpolation.text, expr_offset, |name| {
-        frontmatter_scalar(ctx, name)
-    });
+    let value = interpolation_hover_markdown(
+        &interpolation.text,
+        expr_offset,
+        |name| frontmatter_scalar(ctx, name),
+        |name| schema_property_hover(ctx, name),
+    );
     Some(markup_hover(ctx, interpolation.outer.clone(), value))
 }
 
-/// The Markdown body of an interpolation hover. Pure (no [`DocumentContext`])
-/// so the D2/D5 classification is unit-testable; `expr_offset` is the cursor's
-/// byte offset into `expression`.
-///
-/// The D2 classification rule: only an explicitly `ctx.`-qualified root
-/// receives context-variable metadata — a bare identifier is a frontmatter
-/// variable even when its name matches a known `ctx.*` tail, and an unknown
-/// `ctx.<name>` keeps the generic hover without borrowing a similarly named
-/// bare key's value. Nothing here evaluates the expression or reads `ctx.*`.
+/// Hover on a `{{{ … }}}` interpolation literal: identifies the span and shows
+/// the composed output (`{{ content }}`) with a note that the content is inert.
+fn literal_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
+    let body_base = body_base(ctx.text);
+    let literal = expressions::literal_at(ctx.text, body_base, offset)?;
+    Some(markup_hover(
+        ctx,
+        literal.outer.clone(),
+        literal_hover_markdown(&literal.content),
+    ))
+}
+
+/// Pure Markdown body for a literal hover.
+fn literal_hover_markdown(content: &str) -> String {
+    let mut composed = String::new();
+    composed.push_str("{{");
+    composed.push_str(content);
+    composed.push_str("}}");
+    let longest_backtick_run = composed
+        .split(|character| character != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or(0);
+    let fence = "`".repeat(longest_backtick_run.saturating_add(1).max(1));
+    let rendered = if composed.contains('\n') || composed.contains('\r') {
+        let fence = if fence.len() < 3 {
+            "```".to_string()
+        } else {
+            fence
+        };
+        format!("{fence}\n{composed}\n{fence}")
+    } else {
+        format!("{fence}{composed}{fence}")
+    };
+    format!(
+        "**Interpolation literal**\n\n{rendered}\n\nThe content is rendered as literal `{{{{ … }}}}` text and is not interpolated."
+    )
+}
+
+/// The Markdown body of an interpolation hover — the shared
+/// [`expressions::hover_markdown`] authority so a body `{{ }}` interpolation and
+/// an Expression-typed frontmatter value render byte-identical hovers.
 fn interpolation_hover_markdown(
     expression: &str,
     expr_offset: usize,
     frontmatter_scalar: impl Fn(&str) -> Option<String>,
+    schema_property: impl Fn(&str) -> Option<String>,
 ) -> String {
-    let parsed = expressions::parse(expression);
-    let mut value = match &parsed {
-        Ok(expr) => format!("**Expression**\n\n`{}`", expr.erase()),
-        Err(_) => format!("**Expression** (unparsed)\n\n`{expression}`"),
-    };
-    let Ok(expr) = parsed else {
-        return value;
-    };
+    expressions::hover_markdown(expression, expr_offset, frontmatter_scalar, schema_property)
+}
 
-    // D5: a cursor on a known function-name identifier wins.
-    if let Some(name) = expressions::function_call_at(&expr, expression, expr_offset)
-        && let Some(descriptor) = expressions::function_descriptor(name)
-    {
-        value.push_str(&format!("\n\n{}", expressions::format_function_block(descriptor)));
-        return value;
-    }
-
-    // Resolve the identifier against the sub-expression under the cursor (e.g.
-    // a `ctx.packages` argument inside a call) rather than the top-level
-    // expression, so an argument's ctx/frontmatter hover is not shadowed by
-    // the enclosing call.
-    let Some(sub_expr) = expressions::expression_at(&expr, expr_offset) else {
-        return value;
-    };
-    let Some(name) = expressions::root_identifier(sub_expr) else {
-        return value;
-    };
-    if let Some(tail) = name.strip_prefix("ctx.") {
-        if let Some(descriptor) = expressions::ctx_descriptor(tail) {
-            value.push_str(&format!(
-                "\n\n{}\n\nThe `ctx` variable is evaluated at _compose_ time (rather than now).",
-                expressions::format_ctx_hover_block(descriptor)
-            ));
-        }
-    } else if let Some(scalar) = frontmatter_scalar(&name) {
-        value.push_str(&format!("\n\nStatic value: `{scalar}` (from frontmatter `{name}`)"));
-    } else if let Some(descriptor) = expressions::function_descriptor(&name) {
-        value.push_str(&format!("\n\nFunction: {}", descriptor.description));
-    }
-    value
+/// The effective-schema hover details for a bare interpolation identifier that
+/// names a declared top-level property (set or unset). Reuses the frontmatter
+/// provider's renderer, but without its `**`key`**` heading: the interpolation
+/// hover already shows the identifier in its `**Expression**` header, so the
+/// heading-less details avoid repeating the property name.
+fn schema_property_hover(ctx: &DocumentContext, name: &str) -> Option<String> {
+    let shape = frontmatter::known_shape(ctx);
+    let def = frontmatter::def_at_path(&shape, &[name])?;
+    frontmatter::schema_hover_details(def)
 }
 
 /// Hover on a frontmatter `$(...)` value: the parsed command and policy verdict.
@@ -708,7 +696,9 @@ fn expression_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
                         DiagnosticSeverity::INFORMATION,
                         code::EXPRESSION_UNKNOWN_IDENTIFIER,
                         source::COMPOSE,
-                        format!("`{name}` matches no frontmatter key, `ctx.*`, `env.*`, or function"),
+                        format!(
+                            "`{name}` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function"
+                        ),
                     ));
                 }
             }
@@ -857,7 +847,7 @@ fn levenshtein(a: &str, b: &str) -> usize {
 }
 
 /// The document byte offset where the body begins (after any frontmatter block).
-fn body_base(text: &str) -> usize {
+pub(crate) fn body_base(text: &str) -> usize {
     match extract_frontmatter_block(text) {
         Ok(Some(extraction)) => extraction.body_span.start,
         _ => 0,
@@ -893,17 +883,23 @@ fn frontmatter_scalar(ctx: &DocumentContext, dotted: &str) -> Option<String> {
 /// known); on a frontmatter-less document every bare identifier could be a
 /// `--set` value, so none is flagged. Namespaced roots (`ctx.*`, `env.*`,
 /// `doc.*`) and expression functions are always known.
+///
+/// A property the effective schema **declares** counts as known even when the
+/// document leaves it unset: schema-declared properties (including required
+/// ones) are the caller-supplied parameters a document interpolates, validated
+/// against the merged state at compose time — not unknown identifiers.
 fn is_unknown_identifier(ctx: &DocumentContext, name: &str) -> bool {
-    if matches!(name, "ctx" | "env" | "doc") || name.contains('.') {
-        return false;
-    }
-    if expressions::function_description(name).is_some() {
-        return false;
-    }
+    // Only fires when the document has frontmatter (so the intended variable set
+    // is known); on a frontmatter-less document every bare identifier could be a
+    // `--set` value, so none is flagged.
     let Some(ast) = ctx.overlay.and_then(|overlay| overlay.ast.as_ref()) else {
         return false;
     };
-    ast.entry_by_dotted(name).is_none()
+    expressions::is_unknown_root(
+        name,
+        |name| ast.entry_by_dotted(name).is_some(),
+        |name| frontmatter::known_shape(ctx).properties.contains_key(name),
+    )
 }
 
 /// The document spans of top-level `prologue`/`epilogue` frontmatter values.
@@ -1094,6 +1090,17 @@ fn diagnostic(
 mod tests {
     use super::*;
 
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use lsp_types::{Position, Uri};
+
+    use crate::capabilities::{ClientProfile, HoverMediaProfile};
+    use crate::config::DmlsConfig;
+    use crate::graph::WorkspaceGraph;
+    use crate::providers::ProviderRegistry;
+    use crate::source_map::PositionEncoding;
+
     #[test]
     fn shell_block_commands_enumerates_body_lines() {
         let text = "# Doc\n\n::shell-block\nrm -rf /tmp/x\necho hi\n::end-block\n";
@@ -1127,11 +1134,16 @@ mod tests {
         None
     }
 
+    /// A schema lookup that declares no properties.
+    fn no_schema(_: &str) -> Option<String> {
+        None
+    }
+
     #[test]
     fn ctx_hover_shares_catalog_block_and_appends_compose_note() {
         let descriptor = expressions::ctx_descriptor("packages").unwrap();
         let block = expressions::format_ctx_hover_block(descriptor);
-        let markdown = interpolation_hover_markdown("ctx.packages", 0, no_frontmatter);
+        let markdown = interpolation_hover_markdown("ctx.packages", 0, no_frontmatter, no_schema);
         // The catalog-backed block is the shared formatter's output verbatim —
         // the same bytes the frontmatter `ctx_hover` renders.
         assert!(markdown.contains(&block));
@@ -1146,15 +1158,18 @@ mod tests {
     fn bare_identifier_matching_ctx_tail_is_frontmatter_not_context() {
         // `today` is a known `ctx.*` tail, but a bare `{{ today }}` is a
         // frontmatter variable (D2 classification rule).
-        let markdown = interpolation_hover_markdown("today", 0, |name| {
-            (name == "today").then(|| "2026-07-09".to_string())
-        });
+        let markdown = interpolation_hover_markdown(
+            "today",
+            0,
+            |name| (name == "today").then(|| "2026-07-09".to_string()),
+            no_schema,
+        );
         assert!(markdown.contains("Static value: `2026-07-09` (from frontmatter `today`)"));
         assert!(!markdown.contains("Darkmatter-owned"));
         assert!(!markdown.contains("_compose_ time"));
         // Without a matching frontmatter key it still borrows nothing from the
         // ctx catalog.
-        let markdown = interpolation_hover_markdown("today", 0, no_frontmatter);
+        let markdown = interpolation_hover_markdown("today", 0, no_frontmatter, no_schema);
         assert!(!markdown.contains("Darkmatter-owned"));
         assert!(!markdown.contains("_compose_ time"));
     }
@@ -1163,9 +1178,12 @@ mod tests {
     fn unknown_ctx_name_keeps_generic_hover() {
         // An unknown `ctx.<name>` keeps the generic expression hover and does
         // not borrow a similarly named bare frontmatter key's value.
-        let markdown = interpolation_hover_markdown("ctx.nope", 0, |name| {
-            (name == "nope").then(|| "shadow".to_string())
-        });
+        let markdown = interpolation_hover_markdown(
+            "ctx.nope",
+            0,
+            |name| (name == "nope").then(|| "shadow".to_string()),
+            no_schema,
+        );
         assert!(markdown.starts_with("**Expression**"));
         assert!(!markdown.contains("Darkmatter-owned"));
         assert!(!markdown.contains("_compose_ time"));
@@ -1176,15 +1194,15 @@ mod tests {
     fn function_call_hover_renders_catalog_block() {
         // A formatting function.
         let as_csv = expressions::function_descriptor("as_csv").unwrap();
-        let markdown = interpolation_hover_markdown("as_csv(items)", 2, no_frontmatter);
+        let markdown = interpolation_hover_markdown("as_csv(items)", 2, no_frontmatter, no_schema);
         assert!(markdown.contains(&expressions::format_function_block(as_csv)));
         // A pre-existing function; its fallible typed signature carries `| error`.
-        let markdown = interpolation_hover_markdown("length(items)", 3, no_frontmatter);
+        let markdown = interpolation_hover_markdown("length(items)", 3, no_frontmatter, no_schema);
         let length = expressions::function_descriptor("length").unwrap();
         assert!(markdown.contains(&length.typed_signature()));
         assert!(markdown.contains("| error"));
         // An unknown function keeps the generic parsed-expression hover.
-        let markdown = interpolation_hover_markdown("mystery(items)", 3, no_frontmatter);
+        let markdown = interpolation_hover_markdown("mystery(items)", 3, no_frontmatter, no_schema);
         assert!(markdown.starts_with("**Expression**"));
         assert!(!markdown.contains("**`mystery"));
     }
@@ -1193,11 +1211,11 @@ mod tests {
     fn function_call_hover_resolves_deepest_call_under_cursor() {
         let source = "as_csv(length(items))";
         let inner = source.find("length").unwrap() + 1;
-        let markdown = interpolation_hover_markdown(source, inner, no_frontmatter);
+        let markdown = interpolation_hover_markdown(source, inner, no_frontmatter, no_schema);
         let length = expressions::function_descriptor("length").unwrap();
         assert!(markdown.contains(&length.typed_signature()));
         // On the outer name the outer call answers.
-        let markdown = interpolation_hover_markdown(source, 1, no_frontmatter);
+        let markdown = interpolation_hover_markdown(source, 1, no_frontmatter, no_schema);
         let as_csv = expressions::function_descriptor("as_csv").unwrap();
         assert!(markdown.contains(&as_csv.typed_signature()));
     }
@@ -1206,7 +1224,7 @@ mod tests {
     fn function_identifier_hover_shows_catalog_block() {
         // Offset 1 is on `s` in the `as_csv` name identifier.
         let as_csv = expressions::function_descriptor("as_csv").unwrap();
-        let markdown = interpolation_hover_markdown("as_csv(ctx.packages)", 1, no_frontmatter);
+        let markdown = interpolation_hover_markdown("as_csv(ctx.packages)", 1, no_frontmatter, no_schema);
         assert!(markdown.contains(&expressions::format_function_block(as_csv)));
         let packages = expressions::ctx_descriptor("packages").unwrap();
         assert!(!markdown.contains(&expressions::format_ctx_hover_block(packages)));
@@ -1217,7 +1235,7 @@ mod tests {
     fn ctx_variable_inside_function_call_shows_ctx_hover() {
         // Offset 8 is on `t` in `ctx` — the argument, not the name.
         let packages = expressions::ctx_descriptor("packages").unwrap();
-        let markdown = interpolation_hover_markdown("as_csv(ctx.packages)", 8, no_frontmatter);
+        let markdown = interpolation_hover_markdown("as_csv(ctx.packages)", 8, no_frontmatter, no_schema);
         assert!(markdown.contains(&expressions::format_ctx_hover_block(packages)));
         assert!(markdown.contains("_compose_ time"));
         let as_csv = expressions::function_descriptor("as_csv").unwrap();
@@ -1239,7 +1257,7 @@ mod tests {
         let block = expressions::format_ctx_hover_block(packages);
 
         // Offset 5 lands on `a` inside `packages` — within the ctx-rooted base.
-        let markdown = interpolation_hover_markdown("ctx.packages[0]", 5, no_frontmatter);
+        let markdown = interpolation_hover_markdown("ctx.packages[0]", 5, no_frontmatter, no_schema);
         assert!(markdown.contains(&block), "catalog block on base: {markdown}");
         assert!(markdown.contains("string[]"), "rendered array type: {markdown}");
         assert!(markdown.contains("_compose_ time"), "compose-time note: {markdown}");
@@ -1249,7 +1267,7 @@ mod tests {
         // Index construct rather than the `ctx.packages` text — still resolves to
         // the ctx-rooted expression, confirming the Index-rooted expression is
         // handled end-to-end at the bracket offset.
-        let markdown = interpolation_hover_markdown("ctx.packages[0]", 12, no_frontmatter);
+        let markdown = interpolation_hover_markdown("ctx.packages[0]", 12, no_frontmatter, no_schema);
         assert!(markdown.contains(&block), "catalog block on `[`: {markdown}");
         assert!(markdown.contains("_compose_ time"), "compose-time note on `[`: {markdown}");
     }
@@ -1265,7 +1283,7 @@ mod tests {
 
         // Cursor on the `ctx.packages` base (offset 5 on `a`): the catalog block
         // and compose-time note surface.
-        let markdown = interpolation_hover_markdown("ctx.packages[0].first", 5, no_frontmatter);
+        let markdown = interpolation_hover_markdown("ctx.packages[0].first", 5, no_frontmatter, no_schema);
         assert!(markdown.contains(&block), "catalog block on base: {markdown}");
         assert!(markdown.contains("string[]"), "rendered array type: {markdown}");
         assert!(markdown.contains("_compose_ time"), "compose-time note: {markdown}");
@@ -1275,7 +1293,7 @@ mod tests {
         // `root_identifier` must recurse MemberAccess -> Index -> Variable to
         // reach `ctx.packages`. This is the genuine root-recursion proof through
         // both member-access and index nodes.
-        let markdown = interpolation_hover_markdown("ctx.packages[0].first", 17, no_frontmatter);
+        let markdown = interpolation_hover_markdown("ctx.packages[0].first", 17, no_frontmatter, no_schema);
         assert!(markdown.contains(&block), "catalog block on member name: {markdown}");
         assert!(markdown.contains("_compose_ time"), "compose-time note on member name: {markdown}");
     }
@@ -1283,9 +1301,12 @@ mod tests {
     #[test]
     fn frontmatter_variable_inside_function_call_shows_static_value() {
         // Offset 7 is on `i` in `title` — the argument, not the name.
-        let markdown = interpolation_hover_markdown("upper(title)", 7, |name| {
-            (name == "title").then(|| "Guide".to_string())
-        });
+        let markdown = interpolation_hover_markdown(
+            "upper(title)",
+            7,
+            |name| (name == "title").then(|| "Guide".to_string()),
+            no_schema,
+        );
         assert!(markdown.contains("Static value: `Guide`"));
         let upper = expressions::function_descriptor("upper").unwrap();
         assert!(
@@ -1295,12 +1316,44 @@ mod tests {
     }
 
     #[test]
+    fn bare_identifier_uses_schema_block_when_unset_in_frontmatter() {
+        // A schema-declared property with no static frontmatter value falls back
+        // to the effective-schema block (type/constraints/description) — the
+        // common "caller-supplied parameter" case where the property is declared
+        // in `$schema` but never set in the document's own frontmatter.
+        let markdown = interpolation_hover_markdown(
+            "spec",
+            0,
+            no_frontmatter,
+            |name| (name == "spec").then(|| "Type: **file**\n\nRequired".to_string()),
+        );
+        assert!(markdown.starts_with("**Expression**"));
+        assert!(markdown.contains("Type: **file**"), "schema block present: {markdown}");
+        // The schema details carry no `**`spec`**` heading, so the name renders
+        // once (in the `**Expression**` header), never twice.
+        assert!(!markdown.contains("**`spec`**"), "no duplicated name heading: {markdown}");
+    }
+
+    #[test]
+    fn static_frontmatter_value_wins_over_schema_block() {
+        // A set frontmatter value takes precedence over the schema block.
+        let markdown = interpolation_hover_markdown(
+            "spec",
+            0,
+            |name| (name == "spec").then(|| "draft.md".to_string()),
+            |_| Some("Type: **file**".to_string()),
+        );
+        assert!(markdown.contains("Static value: `draft.md`"));
+        assert!(!markdown.contains("Type: **file**"), "schema block suppressed: {markdown}");
+    }
+
+    #[test]
     fn parentheses_and_commas_show_no_function_hover() {
         let as_csv = expressions::function_descriptor("as_csv").unwrap();
         let block = expressions::format_function_block(as_csv);
         // Offset 6 = `(`, offset 8 = `,`, offset 11 = `)` in `as_csv(a, b)`.
         for (label, offset) in [("(", 6), (",", 8), (")", 11)] {
-            let markdown = interpolation_hover_markdown("as_csv(a, b)", offset, no_frontmatter);
+            let markdown = interpolation_hover_markdown("as_csv(a, b)", offset, no_frontmatter, no_schema);
             assert!(
                 markdown.starts_with("**Expression**"),
                 "cursor on {label} keeps the generic hover: {markdown}"
@@ -1396,6 +1449,179 @@ mod tests {
     }
 
     #[test]
+    fn literal_provider_diagnostics_and_hover_respect_utf16_and_body_boundary() {
+        let text = "---\nexample: '{{{ frontmatter }}}'\n---\n\n😀 See {{{ > invalid }}} here.\n";
+        let uri: Uri = "file:///literal.md".parse().unwrap();
+        let path = Path::new("/literal.md");
+        let source_map = SourceMap::new(
+            uri.clone(),
+            7,
+            PositionEncoding::Utf16,
+            Arc::from(text),
+        );
+        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1);
+        let config = DmlsConfig::default();
+        let profile = ClientProfile {
+            client_name: None,
+            client_version: None,
+            position_encoding: PositionEncoding::Utf16,
+            supports_resource_operations: false,
+            supports_change_annotations: false,
+            supports_code_action_resolve: false,
+            supports_completion_resolve: false,
+            resolve_provides_text_edit: false,
+            supports_snippets: false,
+            client_watches_files: false,
+            needs_watch_fallback: false,
+            supports_file_operations: false,
+            supports_workspace_configuration: false,
+            supports_semantic_tokens: false,
+            supports_semantic_tokens_refresh: false,
+            supports_folding: false,
+            folding_line_only: false,
+            supports_selection_range: false,
+            supports_linked_editing: false,
+            supports_work_done_progress: false,
+            hover_media: HoverMediaProfile::default(),
+            helix_one_char_selection_is_empty: false,
+        };
+        let ctx = DocumentContext {
+            uri: &uri,
+            path,
+            text,
+            source_map: &source_map,
+            graph: &graph,
+            doc_id: None,
+            config: &config,
+            profile: &profile,
+            overlay: None,
+        };
+        let registry = ProviderRegistry::with_substrate();
+
+        let diagnostics = registry.diagnostics(&ctx);
+        assert!(
+            diagnostics.iter().all(|diagnostic| !matches!(
+                &diagnostic.code,
+                Some(NumberOrString::String(code)) if code.starts_with("dm.expression.")
+            )),
+            "literal produced expression diagnostics: {diagnostics:#?}"
+        );
+
+        let frontmatter_cursor = text.find("frontmatter").unwrap();
+        assert!(
+            crate::providers::dsl::hover(&ctx, frontmatter_cursor).is_none(),
+            "DSL literal hover must not cross the frontmatter/body boundary"
+        );
+
+        let literal_start = text.find("{{{ > invalid }}}").unwrap();
+        let cursor = source_map
+            .lsp_to_byte(Position::new(4, 13))
+            .expect("UTF-16 cursor inside the body literal");
+        let hover = registry.hover(&ctx, cursor).expect("literal hover");
+        assert_eq!(
+            hover.range,
+            source_map.byte_range_to_lsp(literal_start..literal_start + "{{{ > invalid }}}".len())
+        );
+        assert_eq!(hover.range.unwrap().start, Position::new(4, 7));
+        match hover.contents {
+            HoverContents::Markup(MarkupContent { kind, value }) => {
+                assert_eq!(kind, MarkupKind::Markdown);
+                assert!(value.contains("**Interpolation literal**"));
+                assert!(value.contains("`{{ > invalid }}`"));
+                assert!(value.contains("not interpolated"));
+            }
+            other => panic!("literal hover must use Markdown markup, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn literal_provider_hover_safely_preserves_backticks_multiline_and_unicode() {
+        let text = "Backticks: {{{ use `x` and ``y`` }}}\n\nMultiline: {{{ first\nsecond }}}\n\nUnicode: {{{ café 😀 東京 }}}\n";
+        let uri: Uri = "file:///literal-content.md".parse().unwrap();
+        let path = Path::new("/literal-content.md");
+        let source_map = SourceMap::new(
+            uri.clone(),
+            8,
+            PositionEncoding::Utf16,
+            Arc::from(text),
+        );
+        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1);
+        let config = DmlsConfig::default();
+        let profile = ClientProfile {
+            client_name: None,
+            client_version: None,
+            position_encoding: PositionEncoding::Utf16,
+            supports_resource_operations: false,
+            supports_change_annotations: false,
+            supports_code_action_resolve: false,
+            supports_completion_resolve: false,
+            resolve_provides_text_edit: false,
+            supports_snippets: false,
+            client_watches_files: false,
+            needs_watch_fallback: false,
+            supports_file_operations: false,
+            supports_workspace_configuration: false,
+            supports_semantic_tokens: false,
+            supports_semantic_tokens_refresh: false,
+            supports_folding: false,
+            folding_line_only: false,
+            supports_selection_range: false,
+            supports_linked_editing: false,
+            supports_work_done_progress: false,
+            hover_media: HoverMediaProfile::default(),
+            helix_one_char_selection_is_empty: false,
+        };
+        let ctx = DocumentContext {
+            uri: &uri,
+            path,
+            text,
+            source_map: &source_map,
+            graph: &graph,
+            doc_id: None,
+            config: &config,
+            profile: &profile,
+            overlay: None,
+        };
+        let registry = ProviderRegistry::with_substrate();
+        let hover_value = |literal: &str| {
+            let cursor = text.find(literal).unwrap() + 3;
+            let hover = registry.hover(&ctx, cursor).expect("literal hover");
+            match hover.contents {
+                HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value,
+                }) => value,
+                other => panic!("literal hover must use Markdown markup, got {other:?}"),
+            }
+        };
+
+        let backticks = hover_value("{{{ use `x` and ``y`` }}}");
+        assert!(backticks.contains("```{{ use `x` and ``y`` }}```"));
+
+        let multiline = hover_value("{{{ first\nsecond }}}");
+        assert!(multiline.contains("```\n{{ first\nsecond }}\n```"));
+
+        let unicode = hover_value("{{{ café 😀 東京 }}}");
+        assert!(unicode.contains("`{{ café 😀 東京 }}`"));
+    }
+
+    #[test]
+    fn literal_hover_markdown_identifies_span_and_composed_output() {
+        let markdown = literal_hover_markdown(" name ");
+        assert!(markdown.contains("**Interpolation literal**"));
+        assert!(markdown.contains("`{{ name }}`"));
+        assert!(markdown.contains("not interpolated"));
+    }
+
+    #[test]
+    fn literal_hover_markdown_preserves_content_with_inner_expression() {
+        let markdown = literal_hover_markdown(" {{ x }} ");
+        assert!(markdown.contains("**Interpolation literal**"));
+        assert!(markdown.contains("`{{ {{ x }} }}`"));
+        assert!(markdown.contains("not interpolated"));
+    }
+
+    #[test]
     fn text_edit_item_carries_eager_edit_and_markdown_documentation() {
         use crate::source_map::PositionEncoding;
         let text = "hello {{ ctx.pa";
@@ -1435,4 +1661,3 @@ mod tests {
         assert_eq!(item.detail.as_deref(), Some("string[]"));
     }
 }
-

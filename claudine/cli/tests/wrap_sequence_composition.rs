@@ -60,6 +60,94 @@ fn sequence_composition_dry_run_for_every_provider() {
     }
 }
 
+/// Sequence preflight must audit lifecycle shell commands for every step
+/// before the first provider starts. A built-in-blacklisted command cannot be
+/// widened by YOLO and must fail before the step status or provider launch.
+#[cfg(unix)]
+#[test]
+fn sequence_preflight_rejects_blacklisted_lifecycle_shell_before_launch() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let sentinel = workspace.path().join("provider-ran.flag");
+    write_executable(
+        &path_dir.join("goose"),
+        &format!("#!/bin/sh\n: > '{}'\nexit 0\n", sentinel.display()),
+    );
+
+    let compose_file = workspace.path().join("compose.md");
+    fs::write(
+        &compose_file,
+        "---\nsequence:\n  - step_one\nsuccess:\n  stack:\n    - action:\n        - action: shell\n          command: cargo metadata\n---\nSEQUENCE_BODY\n",
+    )
+    .unwrap();
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["sequence", "compose.md", "--goose", "--yolo"])
+        .output()
+        .unwrap();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(!output.status.success(), "blacklisted command must fail");
+    assert!(
+        stderr.contains("cargo metadata") && stderr.contains("blacklisted"),
+        "failure must identify the lifecycle command; stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("[1/1]"),
+        "failure must occur during fleet-wide preflight; stderr:\n{stderr}"
+    );
+    assert!(!sentinel.exists(), "provider must not launch");
+}
+
+/// The sequence-level YOLO flag applies to lifecycle commands during the
+/// fleet-wide preflight, allowing a non-blacklisted command without a TTY.
+#[cfg(unix)]
+#[test]
+fn sequence_yolo_approves_lifecycle_shell_during_preflight() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+    let lifecycle_marker = workspace.path().join("lifecycle-ran.flag");
+    let compose_file = workspace.path().join("compose.md");
+    fs::write(
+        &compose_file,
+        format!(
+            "---\nsequence:\n  - step_one\nsuccess:\n  stack:\n    - action:\n        - action: shell\n          command: touch '{}'\n---\nSEQUENCE_BODY\n",
+            lifecycle_marker.display()
+        ),
+    )
+    .unwrap();
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["sequence", "compose.md", "--goose", "--yolo"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "YOLO lifecycle run must succeed; stderr:\n{}",
+        strip_ansi(&String::from_utf8_lossy(&output.stderr))
+    );
+    assert!(
+        lifecycle_marker.exists(),
+        "approved lifecycle command must execute"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Phase 5 — sequence dry-run (dividers, concatenation, fail-fast)
 // ---------------------------------------------------------------------------

@@ -591,7 +591,8 @@ fn level2_lifecycle_failure_stack_observes_err_payload() {
             .iter()
             .any(|l| l.starts_with("err-msg=") && l.contains("agent exited with error code 99")),
         "err.msg must reach the failure stack and include the provider exit code \
-         (message is `agent exited with error code 99 (attempt 1)`); \
+         (fallback message is `agent exited with error code 99`, no attempt \
+         suffix at attempt 1); \
          events.log was {lines:?}; pane:\n{pane}"
     );
 }

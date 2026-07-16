@@ -1128,10 +1128,12 @@ title: Test
     }
 
     /// A structured link directive must lower to real HTML attributes through
-    /// the tree-backed `as_html` (review-2 finding 2): `class`, `target`,
-    /// `data-prompt`, and `data-*` must survive, and the raw directive must not
-    /// leak as a `title="…"` attribute. No frontmatter hyperlink style is
-    /// configured, proving the lowering is unconditional.
+    /// the tree-backed `as_html` (review-2 finding 2): `class`, `target`, and
+    /// `data-*` must survive, and the raw directive must not leak as a
+    /// `title="…"` attribute. No frontmatter hyperlink style is configured,
+    /// proving the lowering is unconditional. Since Phase 4 the `prompt`
+    /// directive is consumed into the accessible popover structure rather than
+    /// emitted as a `data-prompt` transport attribute.
     #[test]
     fn as_html_preserves_structured_link_metadata() {
         let md: Markdown = r#"[Read docs](https://example.com "class='btn' target='_blank' prompt='Read docs' data-id='42'")"#.into();
@@ -1142,11 +1144,17 @@ title: Test
         assert!(html.contains(r#"href="https://example.com""#), "html={html}");
         assert!(html.contains(r#"class="btn""#), "class lost; html={html}");
         assert!(html.contains(r#"target="_blank""#), "target lost; html={html}");
-        assert!(
-            html.contains(r#"data-prompt="Read docs""#),
-            "prompt lost; html={html}"
-        );
         assert!(html.contains(r#"data-id="42""#), "data-* lost; html={html}");
+        // The prompt is consumed into the popover markup, not re-emitted as the
+        // internal `data-prompt` transport.
+        assert!(
+            !html.contains("data-prompt="),
+            "internal prompt transport leaked; html={html}"
+        );
+        assert!(
+            html.contains(r#"popover="hint""#) && html.contains("Read docs"),
+            "prompt lost from popover markup; html={html}"
+        );
         assert!(
             !html.contains("title="),
             "raw structured directive leaked as title; html={html}"

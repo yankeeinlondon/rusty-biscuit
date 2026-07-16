@@ -711,7 +711,7 @@ components:
         let result = OpenApiImport::new(source).build().unwrap();
 
         match result.api.auth {
-            crate::auth::AuthStrategy::ApiKey { header } => {
+            crate::auth::AuthStrategy::ApiKey { header, .. } => {
                 assert_eq!(header, "X-API-Key");
             }
             _ => panic!("Expected ApiKey auth"),
@@ -1090,5 +1090,157 @@ paths: {}
         let _api = &result.api;
         let _models = &result.models;
         let _diagnostics = &result.diagnostics;
+    }
+
+    // ========== schema/field name sanitization + deconfliction ==========
+
+    fn model_names(result: &super::OpenApiImportResult) -> Vec<String> {
+        result
+            .models
+            .types
+            .iter()
+            .map(|m| match m {
+                crate::models::ModelDef::Struct(s) => s.name.clone(),
+                crate::models::ModelDef::Enum(e) => e.name.clone(),
+                crate::models::ModelDef::Alias(a) => a.name.clone(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn build_deconflicts_schema_names_that_sanitize_identically() {
+        let yaml = r#"
+openapi: "3.0.0"
+info:
+  title: Test
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    user-name:
+      type: object
+      properties:
+        label:
+          type: string
+    user_name:
+      type: object
+      properties:
+        code:
+          type: string
+    container:
+      type: object
+      properties:
+        a:
+          $ref: '#/components/schemas/user-name'
+        b:
+          $ref: '#/components/schemas/user_name'
+"#;
+        let result = OpenApiImport::new(OpenApiSource::yaml(yaml)).build().unwrap();
+        let names = model_names(&result);
+        assert!(names.contains(&"UserName".to_string()), "names: {names:?}");
+        assert!(names.contains(&"UserName2".to_string()), "names: {names:?}");
+
+        let container = result
+            .models
+            .types
+            .iter()
+            .find_map(|m| match m {
+                crate::models::ModelDef::Struct(s) if s.name == "Container" => Some(s),
+                _ => None,
+            })
+            .expect("Container model");
+        let field_a = container.fields.iter().find(|f| f.name == "a").unwrap();
+        let field_b = container.fields.iter().find(|f| f.name == "b").unwrap();
+        // The two refs must resolve to the two distinct deconflicted models,
+        // not both collapse onto one.
+        assert_eq!(
+            field_a.field_type,
+            crate::models::TypeRef::Named("UserName".to_string())
+        );
+        assert_eq!(
+            field_b.field_type,
+            crate::models::TypeRef::Named("UserName2".to_string())
+        );
+    }
+
+    #[test]
+    fn build_deconflicts_enum_variants_that_sanitize_identically() {
+        let yaml = r#"
+openapi: "3.0.0"
+info:
+  title: Test
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    status:
+      type: string
+      enum:
+        - active
+        - Active
+"#;
+        let result = OpenApiImport::new(OpenApiSource::yaml(yaml)).build().unwrap();
+        let status = result
+            .models
+            .types
+            .iter()
+            .find_map(|m| match m {
+                crate::models::ModelDef::Enum(e) if e.name == "Status" => Some(e),
+                _ => None,
+            })
+            .expect("Status enum");
+
+        assert_eq!(status.variants.len(), 2);
+        assert_ne!(status.variants[0].name, status.variants[1].name);
+        let values: Vec<Option<&str>> =
+            status.variants.iter().map(|v| v.value.as_deref()).collect();
+        assert!(values.contains(&Some("active")), "values: {values:?}");
+        assert!(values.contains(&Some("Active")), "values: {values:?}");
+    }
+
+    #[test]
+    fn build_sanitizes_reserved_and_invalid_field_names() {
+        let yaml = r#"
+openapi: "3.0.0"
+info:
+  title: Test
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    thing:
+      type: object
+      properties:
+        type:
+          type: string
+        self:
+          type: string
+        "2fa":
+          type: string
+        "":
+          type: string
+"#;
+        let result = OpenApiImport::new(OpenApiSource::yaml(yaml)).build().unwrap();
+        let thing = result
+            .models
+            .types
+            .iter()
+            .find_map(|m| match m {
+                crate::models::ModelDef::Struct(s) if s.name == "Thing" => Some(s),
+                _ => None,
+            })
+            .expect("Thing model");
+
+        let by_rename = |wire: &str| {
+            thing
+                .fields
+                .iter()
+                .find(|f| f.serde_rename.as_deref() == Some(wire))
+                .unwrap_or_else(|| panic!("no field renamed to {wire:?}"))
+        };
+        assert_eq!(by_rename("type").name, "type_");
+        assert_eq!(by_rename("self").name, "self_");
+        assert_eq!(by_rename("2fa").name, "_2fa");
+        assert_eq!(by_rename("").name, "field");
     }
 }

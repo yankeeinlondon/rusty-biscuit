@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::adapters::ProviderAdapter;
+use crate::hook_adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
 use crate::error::Result;
 use crate::mcp::export::ExportServer;
@@ -86,7 +86,7 @@ impl AdapterBehavior for OpenCodeProvider {
     }
 
     fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
-        &crate::adapters::OPENCODE_ADAPTER
+        &crate::hook_adapters::OPENCODE_ADAPTER
     }
 }
 impl ConfiguratorBehavior for OpenCodeProvider {

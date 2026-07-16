@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::adapters::ProviderAdapter;
+use crate::hook_adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
 use crate::error::Result;
 use crate::mcp::export::ExportServer;
@@ -93,7 +93,7 @@ impl AdapterBehavior for GeminiProvider {
     }
 
     fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
-        &crate::adapters::GEMINI_ADAPTER
+        &crate::hook_adapters::GEMINI_ADAPTER
     }
 }
 impl ConfiguratorBehavior for GeminiProvider {

@@ -12,6 +12,13 @@
 use darkmatter::markdown::span::SourceSpan;
 
 /// One `[[…]]` occurrence found in the source.
+///
+/// Every `*_span` is a byte range into the scanned source, derived from the
+/// scan offsets — never reconstructed from the unescaped `target`/`heading`/
+/// `alias` strings (whose lengths differ from the source when escapes are
+/// present). The separator spans (`hash_span`, `pipe_span`) each cover the
+/// single `#` / `|` byte, so a consumer can token the structural separators
+/// distinctly from the surrounding segments.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScannedWikiLink {
     /// Byte span of the whole link including the `[[` and `]]` delimiters.
@@ -19,8 +26,17 @@ pub struct ScannedWikiLink {
     /// Byte span of the file-target text (before any `#`/`|`). Zero-width and
     /// anchored just after `[[` for a headings-only `[[#heading]]` link.
     pub target_span: SourceSpan,
+    /// Byte span of the present `#` heading separator (one byte), when the link
+    /// had a `#`.
+    pub hash_span: Option<SourceSpan>,
     /// Byte span of the heading text (after `#`), when present.
     pub heading_span: Option<SourceSpan>,
+    /// Byte span of the present `|` alias separator (one byte), when the link
+    /// had a `|`.
+    pub pipe_span: Option<SourceSpan>,
+    /// Byte span of the alias text (after `|`), when present. May be zero-width
+    /// for an empty alias (`[[a|]]`).
+    pub alias_span: Option<SourceSpan>,
     /// Unescaped file-target text (may be empty).
     pub target: String,
     /// Unescaped heading text, when the link had a `#`.
@@ -140,21 +156,40 @@ fn parse_link(line: &str, open: usize, embed: bool) -> Option<(usize, ScannedWik
     let inner = &line[inner_start..close];
     let after = close + 2;
 
-    // Split alias, then heading, at the first unescaped `|` / `#`.
-    let (before_alias, alias) = match find_unescaped(inner, b'|') {
-        Some(position) => (&inner[..position], Some(&inner[position + 1..])),
-        None => (inner, None),
+    // Split alias, then heading, at the first unescaped `|` / `#`. Positions are
+    // byte offsets into `inner`; the separators occupy one byte each.
+    let (before_alias, alias, pipe_pos) = match find_unescaped(inner, b'|') {
+        Some(position) => (&inner[..position], Some(&inner[position + 1..]), Some(position)),
+        None => (inner, None, None),
     };
-    let (target_part, heading_part) = match find_unescaped(before_alias, b'#') {
-        Some(position) => (&before_alias[..position], Some(&before_alias[position + 1..])),
-        None => (before_alias, None),
+    let (target_part, heading_part, hash_pos) = match find_unescaped(before_alias, b'#') {
+        Some(position) => (
+            &before_alias[..position],
+            Some(&before_alias[position + 1..]),
+            Some(position),
+        ),
+        None => (before_alias, None, None),
     };
 
     let target_span = inner_start..inner_start + target_part.len();
+    let hash_span = hash_pos.map(|position| {
+        let at = inner_start + position;
+        at..at + 1
+    });
     let heading_span = heading_part.map(|heading| {
         // The heading text starts one byte after the `#`.
         let start = inner_start + target_part.len() + 1;
         start..start + heading.len()
+    });
+    let pipe_span = pipe_pos.map(|position| {
+        let at = inner_start + position;
+        at..at + 1
+    });
+    let alias_span = alias.map(|alias| {
+        // The alias text starts one byte after the `|`; `pipe_pos` is `Some`
+        // exactly when `alias` is.
+        let start = inner_start + pipe_pos.expect("pipe present when alias present") + 1;
+        start..start + alias.len()
     });
     // A block reference `#^…` is a v1-unsupported form.
     let block_ref = heading_part.is_some_and(|heading| heading.starts_with('^'));
@@ -162,7 +197,10 @@ fn parse_link(line: &str, open: usize, embed: bool) -> Option<(usize, ScannedWik
     let link = ScannedWikiLink {
         span: open..after,
         target_span,
+        hash_span,
         heading_span,
+        pipe_span,
+        alias_span,
         target: unescape(target_part),
         heading: heading_part.map(unescape),
         alias: alias.map(unescape),
@@ -174,11 +212,13 @@ fn parse_link(line: &str, open: usize, embed: bool) -> Option<(usize, ScannedWik
 
 /// Shifts a link's line-relative spans into body coordinates.
 fn shift_spans(link: &mut ScannedWikiLink, base: usize) {
-    link.span = base + link.span.start..base + link.span.end;
-    link.target_span = base + link.target_span.start..base + link.target_span.end;
-    if let Some(span) = link.heading_span.take() {
-        link.heading_span = Some(base + span.start..base + span.end);
-    }
+    let shift = |span: SourceSpan| base + span.start..base + span.end;
+    link.span = shift(link.span.clone());
+    link.target_span = shift(link.target_span.clone());
+    link.hash_span = link.hash_span.take().map(shift);
+    link.heading_span = link.heading_span.take().map(shift);
+    link.pipe_span = link.pipe_span.take().map(shift);
+    link.alias_span = link.alias_span.take().map(shift);
 }
 
 /// The byte index of the first `delimiter` in `text` that is not backslash-
@@ -293,5 +333,82 @@ mod tests {
     fn test_line_numbers() {
         let links = scan("first\n[[here]]\n");
         assert_eq!(links[0].line, 2);
+    }
+
+    #[test]
+    fn test_separator_and_alias_spans() {
+        let body = "[[doc#H|Alias]]\n";
+        let link = &scan(body)[0];
+        assert_eq!(&body[link.target_span.clone()], "doc");
+        assert_eq!(&body[link.hash_span.clone().unwrap()], "#");
+        assert_eq!(&body[link.heading_span.clone().unwrap()], "H");
+        assert_eq!(&body[link.pipe_span.clone().unwrap()], "|");
+        assert_eq!(&body[link.alias_span.clone().unwrap()], "Alias");
+    }
+
+    #[test]
+    fn test_plain_target_has_no_separator_or_alias_spans() {
+        let link = &scan("[[a]]\n")[0];
+        assert!(link.hash_span.is_none());
+        assert!(link.heading_span.is_none());
+        assert!(link.pipe_span.is_none());
+        assert!(link.alias_span.is_none());
+    }
+
+    #[test]
+    fn test_spans_are_source_derived_not_reconstructed_from_unescaped() {
+        // The escaped source slices are longer than the unescaped values, so a
+        // span reconstructed from `target`/`alias` lengths would be wrong.
+        let body = r"[[a\#b#H|Al\|ias]]" .to_string() + "\n";
+        let link = &scan(&body)[0];
+        assert_eq!(link.target, "a#b");
+        assert_eq!(&body[link.target_span.clone()], r"a\#b");
+        assert_eq!(link.heading.as_deref(), Some("H"));
+        assert_eq!(&body[link.heading_span.clone().unwrap()], "H");
+        assert_eq!(link.alias.as_deref(), Some("Al|ias"));
+        assert_eq!(&body[link.alias_span.clone().unwrap()], r"Al\|ias");
+    }
+
+    #[test]
+    fn test_empty_alias_span_is_zero_width() {
+        let body = "[[a|]]\n";
+        let link = &scan(body)[0];
+        assert_eq!(link.alias.as_deref(), Some(""));
+        let alias_span = link.alias_span.clone().unwrap();
+        assert!(alias_span.is_empty(), "empty alias is a zero-width span");
+        assert_eq!(&body[link.pipe_span.clone().unwrap()], "|");
+    }
+
+    #[test]
+    fn test_headings_only_link_spans() {
+        let body = "[[#Local]]\n";
+        let link = &scan(body)[0];
+        assert!(link.target_span.is_empty());
+        assert_eq!(&body[link.hash_span.clone().unwrap()], "#");
+        assert_eq!(&body[link.heading_span.clone().unwrap()], "Local");
+        assert!(link.pipe_span.is_none());
+        assert!(link.alias_span.is_none());
+    }
+
+    #[test]
+    fn test_recognized_but_unsupported_form_keeps_spans() {
+        // A block-ref `#^…` is recognized-but-invalid: spans are still emitted so
+        // it tokens like any other wiki link; the diagnostic owns validity.
+        let body = "[[doc#^block]]\n";
+        let link = &scan(body)[0];
+        assert!(link.unsupported);
+        assert_eq!(&body[link.hash_span.clone().unwrap()], "#");
+        assert_eq!(&body[link.heading_span.clone().unwrap()], "^block");
+    }
+
+    #[test]
+    fn test_embed_spans_are_body_relative() {
+        // The embed marker `!` precedes `[[`; the link span still starts at `[[`.
+        let body = "text ![[embed|A]]\n";
+        let link = &scan(body)[0];
+        assert!(link.unsupported);
+        assert_eq!(&body[link.span.clone()], "[[embed|A]]");
+        assert_eq!(&body[link.pipe_span.clone().unwrap()], "|");
+        assert_eq!(&body[link.alias_span.clone().unwrap()], "A");
     }
 }

@@ -12,7 +12,7 @@
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::schemas::{
     PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason,
-    ValidationOptions, ValidationProblem, ValidationProblemCode,
+    ValidationOptions, ValidationProblem, ValidationProblemCode, ValidationReport,
 };
 use darkmatter::style::{self, StyleWarningKind};
 use lsp_types::{
@@ -54,8 +54,17 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
         }
         SchemaOutcome::Ready(Some(bundle)) => {
             if let Some(ast) = overlay.ast.as_deref() {
-                schema_problem_diagnostics(ctx, ast, bundle, &mut out);
+                // One effective-schema validation drives both the generic schema
+                // problems and the expression pass, which reads it to decide
+                // whether a union as a whole rejects a malformed-expression value.
+                let report = bundle.effective.validate_with_options(
+                    &bundle.frontmatter_json,
+                    &PositionMap::new(),
+                    &ValidationOptions::default(),
+                );
+                schema_problem_diagnostics(ctx, ast, bundle, &report, &mut out);
                 style_diagnostics(ctx, ast, &mut out);
+                expression_diagnostics(ctx, ast, &report, &mut out);
             }
         }
         SchemaOutcome::Ready(None) => {}
@@ -63,7 +72,30 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
 
     suggestion_diagnostics(ctx, &overlay.suggestions, &mut out);
 
+    if let SuggestionState::TriggerError(error) = &overlay.suggestions {
+        out.push(diagnostic(
+            ctx.source_map
+                .byte_range_to_lsp(0..ctx.text.len())
+                .unwrap_or_else(zero_range),
+            DiagnosticSeverity::ERROR,
+            source::SCHEMA,
+            code::SCHEMA_PREPARE,
+            error.to_string(),
+        ));
+    }
+
     out
+}
+
+/// Builds the file-level diagnostic for a failed trigger-registry scan.
+pub fn trigger_load_diagnostic(error: &SchemaError) -> Diagnostic {
+    diagnostic(
+        zero_range(),
+        DiagnosticSeverity::ERROR,
+        source::SCHEMA,
+        code::SCHEMA_PREPARE,
+        error.to_string(),
+    )
 }
 
 /// A schema resolution/preparation failure, ranged at `$schema` (or the block).
@@ -91,18 +123,33 @@ fn schema_problem_diagnostics(
     ctx: &DocumentContext,
     ast: &FrontmatterAst,
     bundle: &SchemaBundle,
+    report: &ValidationReport,
     out: &mut Vec<Diagnostic>,
 ) {
-    let report = bundle.effective.validate_with_options(
-        &bundle.frontmatter_json,
-        &PositionMap::new(),
-        &ValidationOptions::default(),
-    );
+    // Expression-typed scalar values are owned by the expression pass:
+    // `dm.expression.malformed` replaces the generic format-constraint problem,
+    // and a native boolean/number is coerced at compose time, so its type
+    // mismatch is not a real editor error. Both are suppressed here; every
+    // unrelated problem (including a genuine mapping/sequence type mismatch,
+    // which is not a scalar and never enters this set) is retained.
+    let expression_values =
+        crate::providers::frontmatter::expression_values(ctx, ast);
+    let expression_pointers: std::collections::HashSet<&str> = expression_values
+        .iter()
+        .map(|value| value.entry.pointer.as_str())
+        .collect();
 
     for problem in &report.problems {
         let Some((code_value, severity)) = classify(problem.code, ctx.config.schema.strict) else {
             continue;
         };
+        if matches!(
+            problem.code,
+            ValidationProblemCode::TypeMismatch | ValidationProblemCode::ConstraintViolation
+        ) && expression_pointers.contains(problem.path.as_str())
+        {
+            continue;
+        }
         let Some(range) = problem_range(ast, ctx.source_map, problem) else {
             continue;
         };
@@ -141,6 +188,89 @@ fn problem_range(ast: &FrontmatterAst, sm: &SourceMap, problem: &ValidationProbl
         _ => ast.value_range(&problem.path),
     };
     sm.byte_range_to_lsp(span)
+}
+
+/// Expression-typed frontmatter value diagnostics: `dm.expression.malformed`
+/// for a value the expression grammar rejects, and
+/// `dm.expression.unknown_identifier` for a bare root that names nothing DMLS
+/// can resolve. Both carry source `darkmatter.frontmatter`; ranges are projected
+/// through the shared YAML-scalar mapper so YAML quotes are excluded.
+///
+/// `expression_values` includes any property with *any* Expression union arm, so
+/// a value the Expression arm rejects but a sibling Enum/String arm accepts must
+/// not be flagged malformed. The effective-schema `report` is the arbiter: a
+/// value whose pointer carries a real validation problem is rejected by every
+/// arm (the union fails), so the dedicated `malformed` diagnostic is emitted;
+/// otherwise an alternate arm accepts it and the diagnostic is suppressed.
+fn expression_diagnostics(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    report: &ValidationReport,
+    out: &mut Vec<Diagnostic>,
+) {
+    let union_rejected: std::collections::HashSet<&str> =
+        report.problems.iter().map(|problem| problem.path.as_str()).collect();
+
+    for value in crate::providers::frontmatter::expression_values(ctx, ast) {
+        let expression = value.expression();
+        match crate::overlay::expressions::parse_condition(expression) {
+            Err(error) => {
+                if !union_rejected.contains(value.entry.pointer.as_str()) {
+                    // A non-Expression arm validly accepts this value, so the
+                    // union validates — a malformed-expression warning would be a
+                    // false positive.
+                    continue;
+                }
+                let at = error.position.min(expression.len());
+                let span = value
+                    .project(at..expression.len())
+                    .filter(|span| span.start < span.end)
+                    .unwrap_or_else(|| value.expression_span());
+                if let Some(range) = ctx.source_map.byte_range_to_lsp(span) {
+                    out.push(diagnostic(
+                        range,
+                        DiagnosticSeverity::WARNING,
+                        source::FRONTMATTER,
+                        code::EXPRESSION_MALFORMED,
+                        format!("malformed expression: {}", error.message),
+                    ));
+                }
+            }
+            Ok(parsed) => {
+                let Some(name) = crate::overlay::expressions::root_identifier(&parsed) else {
+                    continue;
+                };
+                if !expression_root_is_unknown(ctx, ast, &name) {
+                    continue;
+                }
+                if let Some(range) = ctx.source_map.byte_range_to_lsp(value.expression_span()) {
+                    out.push(diagnostic(
+                        range,
+                        DiagnosticSeverity::INFORMATION,
+                        source::FRONTMATTER,
+                        code::EXPRESSION_UNKNOWN_IDENTIFIER,
+                        format!(
+                            "`{name}` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function"
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+}
+
+/// Whether a bare expression root resolves to nothing DMLS can name, reusing the
+/// same authority as the body-interpolation diagnostic.
+fn expression_root_is_unknown(ctx: &DocumentContext, ast: &FrontmatterAst, name: &str) -> bool {
+    crate::overlay::expressions::is_unknown_root(
+        name,
+        |name| ast.entry_by_dotted(name).is_some(),
+        |name| {
+            crate::providers::frontmatter::known_shape(ctx)
+                .properties
+                .contains_key(name)
+        },
+    )
 }
 
 /// `relatedInformation` pointing at a problem's schema origin, when it is a
@@ -220,7 +350,7 @@ fn suggestion_diagnostics(
     out: &mut Vec<Diagnostic>,
 ) {
     match suggestions {
-        SuggestionState::Inactive => {}
+        SuggestionState::Inactive | SuggestionState::TriggerError(_) => {}
         SuggestionState::Inline(problems) => {
             for problem in problems {
                 out.push(suggestion_warning(ctx, problem));
@@ -370,6 +500,385 @@ fn zero_range() -> Range {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    use lsp_types::{InitializeParams, NumberOrString, Uri};
+
+    use crate::capabilities::ClientProfile;
+    use crate::config::DmlsConfig;
+    use crate::graph::WorkspaceGraph;
+    use crate::overlay::OverlayState;
+    use crate::source_map::PositionEncoding;
+
+    /// Builds a real overlay-backed context for `text`, runs `diagnostics`, and
+    /// hands the diagnostics to `f`.
+    fn diagnostics_for<R>(text: &str, f: impl FnOnce(&[Diagnostic]) -> R) -> R {
+        let path = Path::new("/w/doc.md");
+        let uri: Uri = "file:///w/doc.md".parse().unwrap();
+        let config = DmlsConfig::default();
+        let roots = [PathBuf::from("/w")];
+        let state = OverlayState::default();
+        let overlay = state.for_document(&uri, text, path, &config, &roots);
+        let source_map = SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text));
+        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1);
+        let profile = ClientProfile::from_initialize(&InitializeParams::default(), PositionEncoding::Utf16);
+        let ctx = DocumentContext {
+            uri: &uri,
+            path,
+            text,
+            source_map: &source_map,
+            graph: &graph,
+            doc_id: None,
+            config: &config,
+            profile: &profile,
+            overlay: overlay.as_ref(),
+        };
+        f(&diagnostics(&ctx))
+    }
+
+    fn expression_doc(value_line: &str) -> String {
+        format!("---\n$schema:\n  when: expression\n{value_line}\n---\n\nbody\n")
+    }
+
+    fn code_of(diagnostic: &Diagnostic) -> Option<&str> {
+        match &diagnostic.code {
+            Some(NumberOrString::String(code)) => Some(code.as_str()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn malformed_expression_value_emits_one_frontmatter_diagnostic_and_no_schema_duplicate() {
+        // A quoted, malformed expression: one `dm.expression.malformed` under
+        // source `darkmatter.frontmatter`, and the generic `dm.schema.constraint`
+        // that the format failure would raise is suppressed.
+        let text = expression_doc("when: '1 +'");
+        diagnostics_for(&text, |diagnostics| {
+            let malformed: Vec<&Diagnostic> = diagnostics
+                .iter()
+                .filter(|diagnostic| code_of(diagnostic) == Some(code::EXPRESSION_MALFORMED))
+                .collect();
+            assert_eq!(malformed.len(), 1, "exactly one malformed diagnostic: {diagnostics:#?}");
+            assert_eq!(malformed[0].source.as_deref(), Some(source::FRONTMATTER));
+            assert!(
+                diagnostics
+                    .iter()
+                    .all(|diagnostic| code_of(diagnostic) != Some(code::SCHEMA_CONSTRAINT)),
+                "the generic format constraint must be suppressed: {diagnostics:#?}"
+            );
+            // The range excludes the YAML quotes: it sits inside `'1 +'`.
+            let value_start = text.find("'1 +'").unwrap();
+            let range = malformed[0].range;
+            let quote_pos = crate::source_map::SourceMap::new(
+                "file:///w/doc.md".parse().unwrap(),
+                1,
+                PositionEncoding::Utf16,
+                Arc::from(text.as_str()),
+            )
+            .byte_to_lsp(value_start)
+            .unwrap();
+            assert!(
+                range.start.character > quote_pos.character,
+                "range must start past the opening quote"
+            );
+        });
+    }
+
+    #[test]
+    fn unknown_expression_root_is_informational_frontmatter_diagnostic() {
+        let text = expression_doc("when: mystery");
+        diagnostics_for(&text, |diagnostics| {
+            let unknown: Vec<&Diagnostic> = diagnostics
+                .iter()
+                .filter(|diagnostic| code_of(diagnostic) == Some(code::EXPRESSION_UNKNOWN_IDENTIFIER))
+                .collect();
+            assert_eq!(unknown.len(), 1, "{diagnostics:#?}");
+            assert_eq!(unknown[0].source.as_deref(), Some(source::FRONTMATTER));
+            assert_eq!(unknown[0].severity, Some(DiagnosticSeverity::INFORMATION));
+        });
+    }
+
+    #[test]
+    fn native_scalar_coercion_produces_no_expression_false_diagnostics() {
+        // A native boolean is coerced to a canonical expression string at compose
+        // time, so `when: true` is valid — no type mismatch, no malformed, no
+        // unknown-identifier squiggle.
+        let text = expression_doc("when: true");
+        diagnostics_for(&text, |diagnostics| {
+            assert!(
+                diagnostics.iter().all(|diagnostic| {
+                    let code = code_of(diagnostic);
+                    code != Some(code::SCHEMA_TYPE_MISMATCH)
+                        && code != Some(code::EXPRESSION_MALFORMED)
+                        && code != Some(code::EXPRESSION_UNKNOWN_IDENTIFIER)
+                }),
+                "native scalar must not produce false diagnostics: {diagnostics:#?}"
+            );
+        });
+        // A native number likewise coerces cleanly.
+        let text = expression_doc("when: 42");
+        diagnostics_for(&text, |diagnostics| {
+            assert!(
+                diagnostics.iter().all(|diagnostic| code_of(diagnostic) != Some(code::SCHEMA_TYPE_MISMATCH)),
+                "native number must not produce a type mismatch: {diagnostics:#?}"
+            );
+        });
+    }
+
+    #[test]
+    fn mapping_value_on_expression_property_stays_a_type_mismatch() {
+        // A non-scalar value is not an expression; the schema type mismatch is
+        // retained rather than swallowed by the expression pass.
+        let text = "---\n$schema:\n  when: expression\nwhen:\n  nested: 1\n---\n\nbody\n";
+        diagnostics_for(text, |diagnostics| {
+            // The non-scalar value is not in the suppressed expression set, so its
+            // schema failure (a type/constraint problem) is retained, not swallowed.
+            assert!(
+                diagnostics.iter().any(|diagnostic| {
+                    matches!(
+                        code_of(diagnostic),
+                        Some(code::SCHEMA_TYPE_MISMATCH | code::SCHEMA_CONSTRAINT)
+                    )
+                }),
+                "a mapping on an expression property must stay a schema error: {diagnostics:#?}"
+            );
+        });
+    }
+
+    #[test]
+    fn valid_expression_value_produces_no_diagnostics() {
+        let text = expression_doc("when: ctx.today");
+        diagnostics_for(&text, |diagnostics| {
+            assert!(
+                diagnostics.iter().all(|diagnostic| {
+                    let code = code_of(diagnostic);
+                    code != Some(code::EXPRESSION_MALFORMED)
+                        && code != Some(code::EXPRESSION_UNKNOWN_IDENTIFIER)
+                        && code != Some(code::SCHEMA_CONSTRAINT)
+                        && code != Some(code::SCHEMA_TYPE_MISMATCH)
+                }),
+                "a valid expression must be clean: {diagnostics:#?}"
+            );
+        });
+    }
+
+    #[test]
+    fn condition_dialect_and_expression_is_not_malformed() {
+        // The `expression` schema format validates with `parse_condition`, which
+        // accepts `&&`; the spec's own example must not be diagnosed malformed.
+        let text = expression_doc(r#"when: 'is_agent() && os == "macos"'"#);
+        diagnostics_for(&text, |diagnostics| {
+            assert!(
+                diagnostics.iter().all(|diagnostic| {
+                    let code = code_of(diagnostic);
+                    code != Some(code::EXPRESSION_MALFORMED)
+                        && code != Some(code::SCHEMA_CONSTRAINT)
+                }),
+                "a condition-dialect `&&` expression must not be malformed: {diagnostics:#?}"
+            );
+        });
+    }
+
+    #[test]
+    fn condition_dialect_or_expression_is_not_malformed() {
+        let text = expression_doc(r#"when: 'os == "macos" || os == "linux"'"#);
+        diagnostics_for(&text, |diagnostics| {
+            assert!(
+                diagnostics.iter().all(|diagnostic| {
+                    let code = code_of(diagnostic);
+                    code != Some(code::EXPRESSION_MALFORMED)
+                        && code != Some(code::SCHEMA_CONSTRAINT)
+                }),
+                "a condition-dialect `||` expression must not be malformed: {diagnostics:#?}"
+            );
+        });
+    }
+
+    /// A discriminated inline-object union document whose `change` property is
+    /// tagged by a shared literal `kind`.
+    fn discriminated_union_doc(change_body: &str) -> String {
+        format!(
+            concat!(
+                "---\n",
+                "$schema:\n",
+                "  change:\n",
+                "    - \"{{ kind: literal(created), path: string }}\"\n",
+                "    - \"{{ kind: literal(deleted), reason: string }}\"\n",
+                "change:\n",
+                "{change_body}",
+                "---\n\nbody\n",
+            ),
+            change_body = change_body,
+        )
+    }
+
+    #[test]
+    fn discriminated_union_narrows_unknown_key_to_selected_arm() {
+        // `kind: created` selects the created arm (only `path`), so `reason` is
+        // an unknown key — the library's shared discriminant selector (Phase 4)
+        // narrows the `anyOf` report and DMLS inherits it.
+        let text = discriminated_union_doc("  kind: created\n  reason: oops\n");
+        diagnostics_for(&text, |diagnostics| {
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| code_of(diagnostic) == Some(code::SCHEMA_UNKNOWN_KEY)),
+                "reason is unknown under the created arm: {diagnostics:#?}"
+            );
+        });
+
+        // Switching the discriminant to `deleted` selects the arm that declares
+        // `reason`, so no unknown-key diagnostic remains.
+        let text = discriminated_union_doc("  kind: deleted\n  reason: gone\n");
+        diagnostics_for(&text, |diagnostics| {
+            assert!(
+                diagnostics
+                    .iter()
+                    .all(|diagnostic| code_of(diagnostic) != Some(code::SCHEMA_UNKNOWN_KEY)),
+                "reason is valid under the deleted arm: {diagnostics:#?}"
+            );
+        });
+    }
+
+    /// A `change` union whose two arms type `when` divergently (string vs
+    /// expression) under a shared literal `kind` discriminant. `deleted_first`
+    /// swaps arm order so a test can select the expression arm from either
+    /// position; `change_body` is the authored `change:` mapping.
+    fn expression_arm_union_doc(deleted_first: bool, change_body: &str) -> String {
+        let created = r#"    - "{ kind: literal(created), when: string }""#;
+        let deleted = r#"    - "{ kind: literal(deleted), when: expression }""#;
+        let (first, second) = if deleted_first { (deleted, created) } else { (created, deleted) };
+        format!("---\n$schema:\n  change:\n{first}\n{second}\nchange:\n{change_body}---\n\nbody\n")
+    }
+
+    #[test]
+    fn malformed_selected_arm_expression_value_emits_malformed_diagnostic() {
+        // With `kind: deleted`, the deleted arm's `when: expression` governs, so a
+        // malformed value there emits `dm.expression.malformed`. The value
+        // resolver must select the nested arm from either position.
+        for deleted_first in [false, true] {
+            let text = expression_arm_union_doc(deleted_first, "  kind: deleted\n  when: '1 +'\n");
+            diagnostics_for(&text, |diagnostics| {
+                assert!(
+                    diagnostics
+                        .iter()
+                        .any(|diagnostic| code_of(diagnostic) == Some(code::EXPRESSION_MALFORMED)),
+                    "malformed selected-arm expression emits dm.expression.malformed (deleted_first={deleted_first}): {diagnostics:#?}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn malformed_value_under_non_selected_arm_type_emits_no_expression_diagnostic() {
+        // With `kind: created`, `when` is a string, so `'1 +'` is a valid value
+        // and no expression diagnostic fires — the sibling deleted arm's
+        // `expression` type must not leak into the selected created arm.
+        for deleted_first in [false, true] {
+            let text = expression_arm_union_doc(deleted_first, "  kind: created\n  when: '1 +'\n");
+            diagnostics_for(&text, |diagnostics| {
+                assert!(
+                    diagnostics
+                        .iter()
+                        .all(|diagnostic| code_of(diagnostic) != Some(code::EXPRESSION_MALFORMED)),
+                    "no expression diagnostic for a string-typed selected arm (deleted_first={deleted_first}): {diagnostics:#?}"
+                );
+            });
+        }
+    }
+
+    /// A top-level `when` property typed as a **mixed union** of an `expression`
+    /// arm and one other `arm`, in both arm orders (`expression_first`).
+    fn mixed_expression_union_doc(expression_first: bool, arm: &str, value_line: &str) -> String {
+        let expr = "    - expression".to_string();
+        let other = format!("    - \"{arm}\"");
+        let (first, second) = if expression_first { (expr, other) } else { (other, expr) };
+        format!("---\n$schema:\n  when:\n{first}\n{second}\n{value_line}\n---\n\nbody\n")
+    }
+
+    #[test]
+    fn alternate_valid_enum_arm_suppresses_malformed_expression() {
+        // `'1 +'` is malformed as an expression but is a valid member of the enum
+        // arm, so the union validates and no `dm.expression.malformed` fires.
+        for expression_first in [false, true] {
+            let text =
+                mixed_expression_union_doc(expression_first, "enum('1 +', foo)", "when: '1 +'");
+            diagnostics_for(&text, |diagnostics| {
+                assert!(
+                    diagnostics
+                        .iter()
+                        .all(|diagnostic| code_of(diagnostic) != Some(code::EXPRESSION_MALFORMED)),
+                    "enum arm accepts the value; no malformed warning (expression_first={expression_first}): {diagnostics:#?}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn alternate_valid_string_arm_suppresses_malformed_expression() {
+        // A `string` arm accepts any scalar, so a value the expression arm rejects
+        // is still union-valid — no malformed diagnostic.
+        for expression_first in [false, true] {
+            let text = mixed_expression_union_doc(expression_first, "string", "when: '1 +'");
+            diagnostics_for(&text, |diagnostics| {
+                assert!(
+                    diagnostics
+                        .iter()
+                        .all(|diagnostic| code_of(diagnostic) != Some(code::EXPRESSION_MALFORMED)),
+                    "string arm accepts the value; no malformed warning (expression_first={expression_first}): {diagnostics:#?}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn value_invalid_under_every_arm_emits_one_malformed_and_no_duplicate() {
+        // `'1 +'` is rejected by both the expression arm and the enum arm, so the
+        // union fails: exactly one dedicated `dm.expression.malformed`, with the
+        // generic format constraint suppressed (no duplicate).
+        for expression_first in [false, true] {
+            let text =
+                mixed_expression_union_doc(expression_first, "enum(foo, bar)", "when: '1 +'");
+            diagnostics_for(&text, |diagnostics| {
+                let malformed = diagnostics
+                    .iter()
+                    .filter(|diagnostic| code_of(diagnostic) == Some(code::EXPRESSION_MALFORMED))
+                    .count();
+                assert_eq!(
+                    malformed, 1,
+                    "exactly one malformed diagnostic (expression_first={expression_first}): {diagnostics:#?}"
+                );
+                assert!(
+                    diagnostics
+                        .iter()
+                        .all(|diagnostic| code_of(diagnostic) != Some(code::SCHEMA_CONSTRAINT)),
+                    "the generic format constraint must be suppressed (expression_first={expression_first}): {diagnostics:#?}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn valid_expression_under_mixed_union_is_clean() {
+        // A value that parses cleanly is valid under the expression arm; no
+        // expression diagnostic fires regardless of the sibling arm.
+        for expression_first in [false, true] {
+            let text = mixed_expression_union_doc(expression_first, "string", "when: ctx.today");
+            diagnostics_for(&text, |diagnostics| {
+                assert!(
+                    diagnostics.iter().all(|diagnostic| {
+                        let code = code_of(diagnostic);
+                        code != Some(code::EXPRESSION_MALFORMED)
+                            && code != Some(code::EXPRESSION_UNKNOWN_IDENTIFIER)
+                    }),
+                    "a valid expression under a mixed union is clean (expression_first={expression_first}): {diagnostics:#?}"
+                );
+            });
+        }
+    }
 
     #[test]
     fn missing_required_is_off_by_default_and_error_in_strict() {

@@ -19,7 +19,7 @@ pub use error::HarnessError;
 pub use model::*;
 pub use parse::{has_harness_properties, parse_harness_plan};
 pub use resolve::{HarnessResolutionContext, resolve_harness_path};
-pub use runtime::{build_attempt_outcome, classify_failure};
+pub use runtime::{build_attempt_outcome, classify_failure, failure_message};
 pub use shell::{
     ShellApprovalOptions, execute_approved_command, validate_and_approve_command,
     validate_and_approve_command_parts,

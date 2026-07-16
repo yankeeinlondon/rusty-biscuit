@@ -65,6 +65,10 @@ pub(crate) struct DryRunRender {
     /// as interpolated at event-time so their raw `{{ }}` spans in the
     /// frontmatter block read as intentional, not as unresolved-variable bugs.
     pub deferred_lifecycle_keys: Vec<String>,
+    /// Forwarded provider-argument tail, already run through the sensitive-arg
+    /// redaction policy, so a `--dry-run` can audit the proposed launch without
+    /// exposing secret values. Empty when no tail was forwarded.
+    pub provider_args: Vec<String>,
 }
 
 impl DryRunRender {
@@ -130,6 +134,7 @@ impl DryRunRender {
             area,
             document_path: request.prepared.resolved_path.clone(),
             deferred_lifecycle_keys: request.prepared.deferred_lifecycle_keys.clone(),
+            provider_args: crate::commands::wrap::env::redact_sensitive_args(&request.provider_args),
         }
     }
 }
@@ -282,6 +287,14 @@ pub(crate) fn render_metadata_table(render: &DryRunRender, term: &Terminal) -> S
         table.add_row(vec!["Area".into(), area.clone().into()]);
     }
 
+    // Provider args: the forwarded (redacted) agent tail, shown so a dry-run
+    // can audit exactly what would reach the child. Only when non-empty.
+    if !render.provider_args.is_empty() {
+        let joined = render.provider_args.join(" ");
+        let cell = Prose::new(format!("<dim>{joined}</dim>")).render(term);
+        table.add_row(vec!["Provider args".into(), cell.into()]);
+    }
+
     // Deferred: lifecycle event keys left raw in the frontmatter block above
     // because they interpolate at event-time, not during compose (C5). Only
     // shown when at least one such key is present, so a reader sees that a raw
@@ -351,6 +364,7 @@ mod tests {
             area: area.map(str::to_string),
             document_path: PathBuf::from("/tmp/doc.md"),
             deferred_lifecycle_keys: Vec::new(),
+            provider_args: Vec::new(),
         }
     }
 
@@ -429,6 +443,24 @@ mod tests {
         let plain = plain_table(&render);
         assert!(plain.contains("Area"));
         assert!(plain.contains("claudine"));
+    }
+
+    #[test]
+    fn table_omits_provider_args_when_empty() {
+        let render = render_with(Some("doc"), None, AgentResolutionState::NoAgent, None, false, None);
+        let plain = plain_table(&render);
+        assert!(!plain.contains("Provider args"));
+    }
+
+    #[test]
+    fn table_shows_redacted_provider_args_when_present() {
+        let mut render =
+            render_with(Some("doc"), None, AgentResolutionState::NoAgent, None, false, None);
+        render.provider_args = vec!["-c".to_string(), "model_reasoning_effort=low".to_string()];
+        let plain = plain_table(&render);
+        let value = plain_row_value(&plain, "Provider args").expect("Provider args row should exist");
+        assert!(value.contains("-c"));
+        assert!(value.contains("model_reasoning_effort=low"));
     }
 
     #[test]

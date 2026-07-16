@@ -284,6 +284,12 @@ pub fn diff_lines(committed: &str, generated: &str) -> Vec<String> {
 /// Source-collision gate over the human-owned input files.
 fn check_collisions(inputs: &ProviderInputs) -> Result<(), GenError> {
     for key in inputs.facts.keys() {
+        // The error vocabulary is owned by the standalone vocabulary loader
+        // (spec D2/D3), not the general mapping registry, so it has no registry
+        // entry by design — skip it here rather than reject it as unknown.
+        if key == crate::vocabulary::FACTS_KEY {
+            continue;
+        }
         match entry_for(key) {
             None => return Err(GenError::UnknownFactsKey { key: key.clone() }),
             Some(entry) if !matches!(entry.source, DeclaredSource::Facts { .. }) => {

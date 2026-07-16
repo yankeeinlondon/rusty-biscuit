@@ -120,6 +120,30 @@ pub fn report_lifecycle_recovery(message: &str, term: &Terminal) {
     emit_status(&escaped, StatusState::Warning, term);
 }
 
+/// Emit an INFO status announcing a flow-control `proxy` hand-off to `target`.
+///
+/// Fired once per hand-off — from an `initialize` stack or a recovery
+/// (`blocked`/`failure`/`finalize`) stack — at the point the harness loop
+/// adopts the target document, so the operator sees *why* the running prompt
+/// changed before the target's own lifecycle and prompt render.
+pub fn report_proxy_handoff(target: &Path, term: &Terminal) {
+    let path_display = target.display().to_string();
+    let filename = target
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path_display.clone());
+    let filename_escaped = prose_escape(&filename);
+    let abs_escaped = prose_escape(&path_display);
+    emit_status(
+        &format!(
+            "flow control redirected to \
+             <blue-500><a href=\"{abs_escaped}\">{filename_escaped}</a></blue-500>"
+        ),
+        StatusState::Info,
+        term,
+    );
+}
+
 /// Emit the prompt frontmatter property status.
 ///
 /// Reports success when `prompt` exists and is a non-empty string,

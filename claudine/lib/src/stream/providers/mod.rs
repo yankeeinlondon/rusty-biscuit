@@ -1,11 +1,18 @@
 pub mod antigravity;
 pub mod claude;
+mod common;
 pub mod codex;
 pub mod gemini;
 pub mod kimi;
 pub mod opencode;
 pub mod pi;
 pub mod qwen;
+/// Generated per-provider error-classification vocabulary (`claudine-gen`).
+/// Every parser's `classify_error*` consults [`vocabulary::error_keywords`]
+/// for its runtime provider identity.
+mod vocabulary;
+#[cfg(test)]
+mod vocabulary_tests;
 
 // Re-exports so the moved parser files can keep their original `super::`
 // references without modification.  `super` inside `providers/{name}.rs`
@@ -44,14 +51,20 @@ pub fn for_provider(
         Provider::OpenCode => Box::new(opencode::OpenCodeSemanticStreamParser::new(
             sink,
             config.model,
-        )),
+            Provider::OpenCode,
+        )
+        .expect("OpenCode parser accepts the OpenCode identity")),
         Provider::QwenCode => Box::new(qwen::QwenSemanticStreamParser::new(sink)),
         // Kilo Code is an OpenCode fork; its `--format json` stream is
-        // OpenCode-shaped NDJSON, parsed by the OpenCode parser unchanged.
+        // OpenCode-shaped NDJSON, parsed by the OpenCode parser unchanged —
+        // but stamped with Kilo identity so it selects Kilo's own error
+        // vocabulary rather than OpenCode's.
         Provider::Kilo => Box::new(opencode::OpenCodeSemanticStreamParser::new(
             sink,
             config.model,
-        )),
+            Provider::Kilo,
+        )
+        .expect("OpenCode parser accepts the Kilo identity")),
         // Pi is a bespoke provider with its own `--mode json` NDJSON format.
         Provider::Pi => Box::new(pi::PiSemanticStreamParser::new(sink, config.model)),
         // Antigravity's `--output-format json` print mode emits ONE buffered

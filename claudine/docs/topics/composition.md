@@ -44,6 +44,31 @@ parsing fails, so `count=3`, `enabled=true`, `tags=["a","b"]`, and
 Inline setters override matching keys from `--set`. For `sequence`, reserved
 per-step overlay keys still win over both `--set` and shorthand setters.
 
+### Provider Argument Forwarding
+
+Any CLI switch Claudine does not own is forwarded to the underlying agent,
+mirroring the direct-wrapper contract. The first non-Claudine switch **after
+the composition file** starts an agent tail; every token from there is passed
+through verbatim:
+
+```sh
+# `-c model_reasoning_effort=low` is forwarded to Codex; the setter-shaped
+# value is NOT applied as a frontmatter override.
+claudine sequence fleet.md --codex -c model_reasoning_effort=low
+```
+
+No `--` is required. An explicit `--` after the file still works and forwards
+its tail opaquely (no Claudine flag is extracted from it). Claudine-owned flags
+always win before a `--` — a colliding native switch (e.g. Codex's own `-m`)
+must be placed after `--`. The composition file must come first: an unowned
+switch (or a `--`) before the file is an error with ordering guidance.
+
+A generic INFO status names the forwarded switches (values redacted); `--dry-run`
+shows the forwarded tail in its metadata table so a launch can be audited.
+Because unknown switches are always forwarded, a genuinely invalid one may be
+rejected by the agent at startup. See the mechanism in
+[argv-normalization.md → Provider-argument partition](argv-normalization.md#provider-argument-partition).
+
 ### Shell Completion
 
 Dynamic completion fires at markdown-expecting argument positions on all

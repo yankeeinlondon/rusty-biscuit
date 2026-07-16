@@ -287,3 +287,11 @@ supports_interactive_inline_closure: false
 model_required_in_non_tty: false
 platform_kind: vendor_platform
 unmapped_native_events: []
+# Ordered error-classification vocabulary (Phase A seed, transcribed verbatim
+# from lib/src/stream/providers/kimi.rs). Kimi classifies on JSON-RPC numeric
+# codes first (exact match, checked before the message branch), then on the
+# free-form message. `kind_buckets` is omitted (Kimi has no structured error
+# kind). `code_buckets` carries the complete explicit numeric mapping from
+# classify_jsonrpc_error; the numeric values mirror the wire-protocol
+# constants in lib/src/stream/protocol/kimi.rs (KimiJsonRpcError). Unknown
+# codes fall through to the message branch.

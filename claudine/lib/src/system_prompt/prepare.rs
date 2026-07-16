@@ -89,7 +89,7 @@ fn effective_mode(source: &SystemPromptSource, composed: &Markdown) -> SystemPro
 fn compose_prompt_markdown(
     source: &SystemPromptSource,
     raw_text: &str,
-    shared_ctx: Option<&ComposeContext>,
+    shared_ctx: Option<&SharedComposeContext>,
     shell_cwd: Option<&std::path::Path>,
 ) -> Result<Markdown, crate::error::ClaudineError> {
     let md: Markdown = raw_text.into();
@@ -113,7 +113,7 @@ fn compose_prompt_markdown(
     // (e.g. system-prompt + non-interactive appendix), it can pass it
     // through `shared_ctx` so the per-call capture is skipped.
     let ctx = match shared_ctx {
-        Some(c) => c.clone(),
+        Some(c) => c.runtime.clone(),
         None => {
             let base_dir = match source_path(source).and_then(|p| p.parent()) {
                 Some(parent) => parent.to_path_buf(),
@@ -122,7 +122,7 @@ fn compose_prompt_markdown(
             ComposeContext::capture_for_content(&base_dir, raw_text)
         }
     };
-    let options = match source_path(source) {
+    let mut options = match source_path(source) {
         Some(path) => crate::composition::bind_agent_workspace(
             ComposeOptions::new_with_context(ctx),
             path,
@@ -130,6 +130,9 @@ fn compose_prompt_markdown(
         ),
         None => ComposeOptions::new_with_context(ctx),
     };
+    if let Some(state) = shared_ctx.and_then(|shared| shared.external_state.as_ref()) {
+        options = options.with_external_state(state.clone());
+    }
 
     // Attach the baseline schema for discovered `system-prompt.md` files
     // only — explicit flags carry their own mode and the non-interactive
@@ -160,19 +163,73 @@ fn merge_prompt_sections(base: &str, appendix: &str) -> String {
     }
 }
 
-/// Capture a single `ComposeContext` covering every text body that the
+struct SharedComposeContext {
+    runtime: ComposeContext,
+    external_state: Option<serde_json::Value>,
+}
+
+fn mask_ctx_key(content: &str, key: &str) -> String {
+    let needle = format!("ctx.{key}");
+    let replacement = format!("ctx.__claudine_known_{key}");
+    let mut masked = String::with_capacity(content.len());
+    let mut cursor = 0;
+
+    for (start, _) in content.match_indices(&needle) {
+        let end = start + needle.len();
+        if content[end..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphanumeric() || c == '_')
+        {
+            continue;
+        }
+        masked.push_str(&content[cursor..start]);
+        masked.push_str(&replacement);
+        cursor = end;
+    }
+    masked.push_str(&content[cursor..]);
+    masked
+}
+
+fn references_ctx_key(content: &str, key: &str) -> bool {
+    let needle = format!("ctx.{key}");
+    content.match_indices(&needle).any(|(start, _)| {
+        let end = start + needle.len();
+        !content[end..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphanumeric() || c == '_')
+    })
+}
+
+fn detect_os_name() -> Option<String> {
+    use sniff::os::OsType;
+
+    match sniff::os::detect_os_type() {
+        OsType::Windows => Some("Windows".to_string()),
+        OsType::MacOS => Some("macOS".to_string()),
+        OsType::Linux => Some("Linux".to_string()),
+        _ => None,
+    }
+}
+
+/// Capture shared composition state covering every text body that the
 /// caller will compose this session.
 ///
 /// Scans the union of all bodies for `ctx.*` references via
 /// [`ComposeContext::capture_for_content`] so each runtime-context
 /// group (Repo, OS, Hardware, etc.) is captured at most once even when
 /// the system prompt and the non-interactive appendix together
-/// reference fields from several groups.
+/// reference fields from several groups. At a known monorepo root, the
+/// already-resolved `area` is supplied as external state so Repo capture
+/// is omitted when no other Repo field is referenced. An OS-name-only
+/// reference similarly uses Sniff's OS-type probe instead of the full OS
+/// group, whose package-manager inventory is unnecessary for `ctx.os`.
 fn build_shared_compose_context(
     primary: Option<(&SystemPromptSource, &str)>,
     appendix_candidates: Option<&[(&SystemPromptSource, &str)]>,
     launch_context: &crate::system_prompt::context::LaunchContext,
-) -> ComposeContext {
+) -> SharedComposeContext {
     let mut combined = String::new();
     if let Some((_, text)) = primary {
         combined.push_str(text);
@@ -199,11 +256,54 @@ fn build_shared_compose_context(
         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
     };
 
-    let mut ctx = ComposeContext::capture_for_content(&base_dir, &combined);
-    if let Some(ref agent) = launch_context.agent {
-        ctx.env_mut().insert("AGENT".to_string(), agent.clone());
+    // Mask only exact keys whose values are supplied below; similarly named
+    // keys retain Darkmatter's normal capture.
+    let known_area = launch_context
+        .repo_root
+        .as_ref()
+        .filter(|root| {
+            launch_context.cwd == **root
+                && launch_context.package_area_root.as_ref() == Some(*root)
+        })
+        .map(|_| "root");
+    let known_os = (references_ctx_key(&combined, "os")
+        && !["os_distro", "os_package_manager", "os_version"]
+            .iter()
+            .any(|key| references_ctx_key(&combined, key)))
+    .then(detect_os_name)
+    .flatten();
+
+    let mut capture_content = combined;
+    if known_area.is_some() {
+        capture_content = mask_ctx_key(&capture_content, "area");
     }
-    ctx
+    if known_os.is_some() {
+        capture_content = mask_ctx_key(&capture_content, "os");
+    }
+
+    let mut runtime = ComposeContext::capture_for_content(&base_dir, &capture_content);
+    if let Some(ref agent) = launch_context.agent {
+        runtime
+            .env_mut()
+            .insert("AGENT".to_string(), agent.clone());
+    }
+    let mut known_context = serde_json::Map::new();
+    if let Some(area) = known_area {
+        known_context.insert("area".to_string(), serde_json::Value::String(area.to_string()));
+    }
+    if let Some(os) = known_os {
+        known_context.insert("os".to_string(), serde_json::Value::String(os));
+    }
+    let external_state = (!known_context.is_empty()).then(|| {
+        let mut state = serde_json::Map::new();
+        state.insert("ctx".to_string(), serde_json::Value::Object(known_context));
+        serde_json::Value::Object(state)
+    });
+
+    SharedComposeContext {
+        runtime,
+        external_state,
+    }
 }
 
 /// Internal variant of [`prepare_system_prompt`] that accepts a
@@ -212,7 +312,7 @@ fn build_shared_compose_context(
 fn prepare_system_prompt_with_ctx(
     source: SystemPromptSource,
     raw_text: &str,
-    shared_ctx: Option<&ComposeContext>,
+    shared_ctx: Option<&SharedComposeContext>,
     shell_cwd: Option<&std::path::Path>,
 ) -> Result<ResolvedSystemPrompt, crate::error::ClaudineError> {
     let composed_md = compose_prompt_markdown(&source, raw_text, shared_ctx, shell_cwd)?;
@@ -234,7 +334,7 @@ fn prepare_system_prompt_with_ctx(
 /// already-resolved candidate list and an optional shared context.
 fn prepare_non_interactive_appendix_from(
     candidates: Vec<(SystemPromptSource, String)>,
-    shared_ctx: Option<&ComposeContext>,
+    shared_ctx: Option<&SharedComposeContext>,
     shell_cwd: Option<&std::path::Path>,
 ) -> Result<PreparedNonInteractiveAppendix, crate::error::ClaudineError> {
     for (source, raw_text) in candidates {
@@ -404,6 +504,45 @@ mod tests {
         }
         std::fs::write(&path, content).unwrap();
         path
+    }
+
+    #[test]
+    fn shared_context_reuses_known_root_area_without_repo_capture() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+        let source = SystemPromptSource::ExplicitFile {
+            path: write_temp_file(tmp.path(), "prompt.md", "{{ ctx.area }} / {{ ctx.os }}"),
+            mode: SystemPromptMode::Append,
+        };
+        let context = LaunchContext {
+            cwd: root.clone(),
+            repo_root: Some(root.clone()),
+            package_area_root: Some(root),
+            package_root: None,
+            agent: None,
+        };
+
+        let shared = build_shared_compose_context(
+            Some((&source, "{{ ctx.area }} / {{ ctx.os }}")),
+            None,
+            &context,
+        );
+        assert!(shared.runtime.get("repo").is_none());
+        assert!(shared.runtime.get("os").is_none());
+
+        let result = prepare_system_prompt_with_ctx(
+            source,
+            "{{ ctx.area }} / {{ ctx.os }}",
+            Some(&shared),
+            None,
+        )
+        .unwrap();
+        match result {
+            ResolvedSystemPrompt::Ready(prepared) => {
+                assert!(prepared.composed_markdown.starts_with("root / "));
+            }
+            other => panic!("Expected Ready, got {other:?}"),
+        }
     }
 
     #[test]

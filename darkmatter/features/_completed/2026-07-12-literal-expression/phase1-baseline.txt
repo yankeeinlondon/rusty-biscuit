@@ -1,0 +1,51 @@
+# Phase 1 Baseline Capture — pre-change `md schema validate` output
+# Generated 2026-07-13T04:12:59Z on darkmatter branch, commit 958dd0dac
+# Purpose: byte-identical union-failure diagnostics for schemas WITHOUT literal discriminants (spec AC #8).
+
+===== CASE: property_union_invalid (pretty) =====
+- [31m✗[0m [3m[2mthe document[0m[0m [34m[darkmatter/lib/tests/fixtures/validate/property_union_invalid/doc.md](file:///Users/ken/.claudine/worktrees/rusty-biscuit/darkmatter/darkmatter/lib/tests/fixtures/validate/property_union_invalid/doc.md)[0m [3m[2mfailed schema validation:[0m[0m
+    - [7mcount[0m ["a","b"] is not valid under any of the schemas listed in the 'anyOf' keyword [2m(at line 6 of frontmatter)[0m
+        [2ma union type of: number | string[0m
+
+===== CASE: property_union_invalid (json) =====
+{"file":"darkmatter/lib/tests/fixtures/validate/property_union_invalid/doc.md","problems":[{"arm_index":null,"column":1,"description":"a union type of: number | string","kind":"invalid","line":6,"message":"[\"a\",\"b\"] is not valid under any of the schemas listed in the 'anyOf' keyword","path":"/count","property":null}],"schema":null,"valid":false}
+
+===== CASE: property_union_valid (pretty) =====
+- [32m✔[0m [3m[2mthe document[0m[0m [34m[darkmatter/lib/tests/fixtures/validate/property_union_valid/doc.md](file:///Users/ken/.claudine/worktrees/rusty-biscuit/darkmatter/darkmatter/lib/tests/fixtures/validate/property_union_valid/doc.md)[0m [3m[2mhas a schema definition and is valid.[0m[0m
+
+===== CASE: property_union_valid (json) =====
+{"file":"darkmatter/lib/tests/fixtures/validate/property_union_valid/doc.md","problems":[],"schema":null,"valid":true}
+
+===== CASE: root_union (pretty) =====
+- [32m✔[0m [3m[2mthe document[0m[0m [34m[darkmatter/lib/tests/fixtures/validate/root_union/doc.md](file:///Users/ken/.claudine/worktrees/rusty-biscuit/darkmatter/darkmatter/lib/tests/fixtures/validate/root_union/doc.md)[0m [3m[2mhas a schema definition and is valid.[0m[0m
+
+===== CASE: root_union (json) =====
+{"file":"darkmatter/lib/tests/fixtures/validate/root_union/doc.md","problems":[],"schema":null,"valid":true}
+
+===== CASE: root_union_none_match (pretty) =====
+- [31m✗[0m [3m[2mthe document[0m[0m [34m[darkmatter/lib/tests/fixtures/validate/root_union_none_match/doc.md](file:///Users/ken/.claudine/worktrees/rusty-biscuit/darkmatter/darkmatter/lib/tests/fixtures/validate/root_union_none_match/doc.md)[0m [3m[2mfailed schema validation:[0m[0m
+    - arm[0]: [7mtitle[0m is a required property
+
+===== CASE: root_union_none_match (json) =====
+{"file":"darkmatter/lib/tests/fixtures/validate/root_union_none_match/doc.md","problems":[{"arm_index":0,"column":null,"description":null,"kind":"missing","line":null,"message":"\"title\" is a required property","path":"","property":"title"}],"schema":null,"valid":false}
+
+===== CASE: root_union_fileref (pretty) =====
+- [32m✔[0m [3m[2mthe document[0m[0m [34m[darkmatter/lib/tests/fixtures/validate/root_union_fileref/doc.md](file:///Users/ken/.claudine/worktrees/rusty-biscuit/darkmatter/darkmatter/lib/tests/fixtures/validate/root_union_fileref/doc.md)[0m [3m[2mhas a schema definition and is valid.[0m[0m
+
+===== CASE: root_union_fileref (json) =====
+{"file":"darkmatter/lib/tests/fixtures/validate/root_union_fileref/doc.md","problems":[],"schema":null,"valid":true}
+
+===== CASE: missing_required (pretty) =====
+- [31m✗[0m [3m[2mthe document[0m[0m [34m[darkmatter/lib/tests/fixtures/validate/missing_required/doc.md](file:///Users/ken/.claudine/worktrees/rusty-biscuit/darkmatter/darkmatter/lib/tests/fixtures/validate/missing_required/doc.md)[0m [3m[2mfailed schema validation:[0m[0m
+    - [7mtitle[0m is a required property
+
+===== CASE: missing_required (json) =====
+{"file":"darkmatter/lib/tests/fixtures/validate/missing_required/doc.md","problems":[{"arm_index":null,"column":null,"description":null,"kind":"missing","line":null,"message":"\"title\" is a required property","path":"","property":"title"}],"schema":"./schema.yaml","valid":false}
+
+===== CASE: enum_member_invalid (pretty) =====
+- [31m✗[0m [3m[2mthe document[0m[0m [34m[darkmatter/lib/tests/fixtures/validate/enum_member_invalid/doc.md](file:///Users/ken/.claudine/worktrees/rusty-biscuit/darkmatter/darkmatter/lib/tests/fixtures/validate/enum_member_invalid/doc.md)[0m [3m[2mfailed schema validation:[0m[0m
+    - [7mstatus[0m "orange" is not one of "draft", "published" or "archived" [2m(at line 4 of frontmatter)[0m
+
+===== CASE: enum_member_invalid (json) =====
+{"file":"darkmatter/lib/tests/fixtures/validate/enum_member_invalid/doc.md","problems":[{"arm_index":null,"column":1,"description":null,"kind":"invalid","line":4,"message":"\"orange\" is not one of \"draft\", \"published\" or \"archived\"","path":"/status","property":null}],"schema":null,"valid":false}
+

@@ -109,3 +109,4 @@ cargo run -p unchained-ai-gen -- --dry-run
 - [Providers and Models](./providers-and-models.md) - Provider registry, model enums, metadata, client adaptors
 - [Model Generator](./model-generator.md) - gen-models CLI, models.dev integration, enum generation
 - [Agent Services](./agent-services.md) - Platform detection, PTY runner, cap limit parsing, CLI usage
+- [Rig](./rig/SKILL.md) - The `rig-core` framework that underpins the `rigging` module — type-safe agents, tool calling, agentic loops, embeddings, vector-store/RAG integration, and custom providers. Reach for this when working with the provider registry, rig tools, or building agent/RAG pipelines on top of rig.

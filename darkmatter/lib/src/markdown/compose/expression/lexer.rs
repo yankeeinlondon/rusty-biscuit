@@ -48,6 +48,29 @@ pub struct ExpressionLocation {
     pub expression: String,
 }
 
+/// Location of an interpolation literal (`{{{ ... }}}`) in content.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterpolationLiteral {
+    /// Byte offset of the first `{` in the source.
+    pub start: usize,
+
+    /// Byte offset after the last `}` in the source.
+    pub end: usize,
+
+    /// The literal content between `{{{` and `}}}`, preserved verbatim.
+    pub content: String,
+}
+
+/// Result of scanning content for interpolation expressions and literals.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpressionScanResult {
+    /// Interpolation expressions found in the content.
+    pub expressions: Vec<ExpressionLocation>,
+
+    /// Interpolation literals found in the content.
+    pub literals: Vec<InterpolationLiteral>,
+}
+
 /// Finds interpolation expressions in markdown content.
 ///
 /// This finder scans content for `{{ ... }}` patterns while respecting
@@ -93,68 +116,138 @@ impl<'a> ExpressionFinder<'a> {
     /// Returns a vector of `ExpressionLocation` for each `{{ ... }}` pattern
     /// found outside of code regions.
     pub fn find_all(&self) -> Vec<ExpressionLocation> {
-        let mut locations = Vec::new();
+        self.scan().expressions
+    }
+
+    /// Scans content for both interpolation expressions and interpolation
+    /// literals (`{{{ ... }}}`).
+    ///
+    /// This is the primary scanning entry point. `find_all()` and
+    /// `find_all_plain()` are convenience wrappers that return only the
+    /// expression locations.
+    pub fn scan(&self) -> ExpressionScanResult {
+        let mut expressions = Vec::new();
+        let mut literals = Vec::new();
         let mut pos = 0;
         let bytes = self.content.as_bytes();
+        let len = bytes.len();
 
-        while pos < bytes.len().saturating_sub(3) {
+        while pos < len.saturating_sub(3) {
+            // Check for literal opener before regular expression opener.
+            // A literal opener is exactly three consecutive `{` characters.
+            if bytes[pos] == b'{'
+                && pos + 1 < len
+                && bytes[pos + 1] == b'{'
+                && pos + 2 < len
+                && bytes[pos + 2] == b'{'
+                && (pos + 3 >= len || bytes[pos + 3] != b'{')
+            {
+                if self.is_in_code_region(pos) {
+                    pos += 1;
+                    continue;
+                }
+
+                // Find the first subsequent }}}.
+                let start = pos;
+                let mut close_pos = pos + 3;
+                let mut found_close = false;
+                while close_pos + 2 < len {
+                    if bytes[close_pos] == b'}'
+                        && bytes[close_pos + 1] == b'}'
+                        && bytes[close_pos + 2] == b'}'
+                    {
+                        let end = close_pos + 3;
+                        let content = self.content[start + 3..close_pos].to_string();
+                        literals.push(InterpolationLiteral { start, end, content });
+                        pos = end;
+                        found_close = true;
+                        break;
+                    }
+                    close_pos += 1;
+                }
+
+                if !found_close {
+                    // Unclosed {{{ - fall back to legacy {{ scanning at the
+                    // same byte position to preserve existing behavior.
+                    let (expr, next_pos) = self.scan_legacy_expression(start);
+                    if let Some(expr) = expr {
+                        expressions.push(expr);
+                    }
+                    pos = next_pos;
+                }
+                continue;
+            }
+
             // Look for opening {{
-            if bytes[pos] == b'{' && pos + 1 < bytes.len() && bytes[pos + 1] == b'{' {
-                // Check if we're in a code region
+            if bytes[pos] == b'{' && pos + 1 < len && bytes[pos + 1] == b'{' {
                 if self.is_in_code_region(pos) {
                     pos += 2;
                     continue;
                 }
 
-                // Find the closing }}
                 let start = pos;
-                pos += 2; // Skip past {{
+                let (expr, next_pos) = self.scan_legacy_expression(start);
+                if let Some(expr) = expr {
+                    expressions.push(expr);
+                }
+                pos = next_pos;
+                continue;
+            }
 
-                let mut depth = 1;
-                let mut found_close = false;
+            pos += 1;
+        }
 
-                while pos < bytes.len().saturating_sub(1) {
-                    if bytes[pos] == b'{' && bytes[pos + 1] == b'{' {
-                        depth += 1;
-                        pos += 2;
-                    } else if bytes[pos] == b'}' && bytes[pos + 1] == b'}' {
-                        depth -= 1;
-                        if depth == 0 {
-                            let end = pos + 2;
-                            // Extract expression content (between {{ and }})
-                            let expr_start = start + 2;
-                            let expr_end = pos;
-                            if expr_start < expr_end {
-                                let expression = self.content[expr_start..expr_end].trim();
-                                if !expression.is_empty() {
-                                    locations.push(ExpressionLocation {
-                                        start,
-                                        end,
-                                        expression: expression.to_string(),
-                                    });
-                                }
-                            }
-                            pos = end;
-                            found_close = true;
-                            break;
+        debug!(
+            expression_count = expressions.len(),
+            literal_count = literals.len(),
+            "interpolation: scan complete"
+        );
+        ExpressionScanResult { expressions, literals }
+    }
+
+    /// Scans a legacy `{{ ... }}` expression starting at `start`.
+    ///
+    /// Returns the discovered expression (if any) and the position at which
+    /// scanning should continue.
+    fn scan_legacy_expression(&self, start: usize) -> (Option<ExpressionLocation>, usize) {
+        let bytes = self.content.as_bytes();
+        let len = bytes.len();
+        let mut pos = start + 2; // Skip past {{
+        let mut depth = 1;
+
+        while pos + 1 < len {
+            if bytes[pos] == b'{' && bytes[pos + 1] == b'{' {
+                depth += 1;
+                pos += 2;
+            } else if bytes[pos] == b'}' && bytes[pos + 1] == b'}' {
+                depth -= 1;
+                if depth == 0 {
+                    let end = pos + 2;
+                    let expr_start = start + 2;
+                    let expr_end = pos;
+                    if expr_start < expr_end {
+                        let expression = self.content[expr_start..expr_end].trim();
+                        if !expression.is_empty() {
+                            return (
+                                Some(ExpressionLocation {
+                                    start,
+                                    end,
+                                    expression: expression.to_string(),
+                                }),
+                                end,
+                            );
                         }
-                        pos += 2;
-                    } else {
-                        pos += 1;
                     }
+                    return (None, end);
                 }
-
-                if !found_close {
-                    // Unclosed {{ - skip it
-                    pos = start + 2;
-                }
+                pos += 2;
             } else {
                 pos += 1;
             }
         }
 
-        debug!(count = locations.len(), "interpolation: found expressions");
-        locations
+        // Unclosed {{ - skip it
+        (None, start + 2)
     }
 
     /// Checks if a position is within a code region.
@@ -171,6 +264,16 @@ impl<'a> ExpressionFinder<'a> {
             code_regions: vec![],
         };
         finder.find_all()
+    }
+
+    /// Scans content for both interpolation expressions and literals with
+    /// no code-region exclusions.
+    pub fn scan_plain(input: &'a str) -> ExpressionScanResult {
+        let finder = Self {
+            content: input,
+            code_regions: vec![],
+        };
+        finder.scan()
     }
 
     /// Finds fenced and indented code-block regions in content.
@@ -975,6 +1078,118 @@ After code {{ end }}."#;
 
             assert_eq!(exprs.len(), 1);
             assert_eq!(exprs[0].expression, r#"color || "unknown""#);
+        }
+    }
+
+    mod interpolation_literal {
+        use super::*;
+
+        #[test]
+        fn finds_simple_literal() {
+            let content = "Hello {{{ name }}}!";
+            let finder = ExpressionFinder::new(content);
+            let result = finder.scan();
+
+            assert_eq!(result.expressions.len(), 0);
+            assert_eq!(result.literals.len(), 1);
+            assert_eq!(result.literals[0].content, " name ");
+            assert_eq!(result.literals[0].start, 6);
+            assert_eq!(result.literals[0].end, 18);
+        }
+
+        #[test]
+        fn finds_literal_inside_inline_code() {
+            let content = "Code: `{{{ also_this }}}`";
+            let finder = ExpressionFinder::new(content);
+            let result = finder.scan();
+
+            assert_eq!(result.expressions.len(), 0);
+            assert_eq!(result.literals.len(), 1);
+            assert_eq!(result.literals[0].content, " also_this ");
+        }
+
+        #[test]
+        fn skips_literal_inside_fenced_code_block() {
+            let content = r#"Hello {{{ name }}}!
+
+```rust
+let x = {{{ variable }}};
+```
+
+And {{ another }}."#;
+            let finder = ExpressionFinder::new(content);
+            let result = finder.scan();
+
+            assert_eq!(result.expressions.len(), 1);
+            assert_eq!(result.expressions[0].expression, "another");
+            assert_eq!(result.literals.len(), 1);
+            assert_eq!(result.literals[0].content, " name ");
+        }
+
+        #[test]
+        fn recognizes_tight_and_empty_literals() {
+            for (content, expected) in [("{{{x}}}", "x"), ("{{{}}}", ""), ("{{{ }}}", " ")] {
+                let finder = ExpressionFinder::new(content);
+                let result = finder.scan();
+
+                assert_eq!(result.literals.len(), 1, "for {content:?}");
+                assert_eq!(result.literals[0].content, expected, "for {content:?}");
+                assert_eq!(result.expressions.len(), 0, "for {content:?}");
+            }
+        }
+
+        #[test]
+        fn handles_adjacent_expression_and_literal() {
+            let content = "{{ a }}{{{ b }}}";
+            let finder = ExpressionFinder::new(content);
+            let result = finder.scan();
+
+            assert_eq!(result.expressions.len(), 1);
+            assert_eq!(result.expressions[0].expression, "a");
+            assert_eq!(result.literals.len(), 1);
+            assert_eq!(result.literals[0].content, " b ");
+        }
+
+        #[test]
+        fn four_brace_opener_preserves_legacy_behavior() {
+            let content = "{{{{ x }}}}";
+            let finder = ExpressionFinder::new(content);
+            let result = finder.scan();
+
+            assert_eq!(result.literals.len(), 0);
+            assert_eq!(result.expressions.len(), 1);
+            assert_eq!(result.expressions[0].expression, "{{ x }}");
+        }
+
+        #[test]
+        fn unclosed_literal_opener_preserves_legacy_behavior() {
+            let content = "{{{ x }}";
+            let finder = ExpressionFinder::new(content);
+            let result = finder.scan();
+
+            assert_eq!(result.literals.len(), 0);
+            assert_eq!(result.expressions.len(), 1);
+            assert_eq!(result.expressions[0].expression, "{ x");
+        }
+
+        #[test]
+        fn literal_containing_expression_is_inert() {
+            let content = "{{{ {{ x }} }}}";
+            let finder = ExpressionFinder::new(content);
+            let result = finder.scan();
+
+            assert_eq!(result.expressions.len(), 0);
+            assert_eq!(result.literals.len(), 1);
+            assert_eq!(result.literals[0].content, " {{ x }} ");
+        }
+
+        #[test]
+        fn find_all_drops_literals() {
+            let content = "Only {{{ literal }}} content";
+            let finder = ExpressionFinder::new(content);
+            let exprs = finder.find_all();
+
+            assert!(exprs.is_empty());
         }
     }
 

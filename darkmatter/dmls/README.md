@@ -31,13 +31,53 @@ criterion 7).
 |-------|--------------|
 | **0 — Markdown baseline** | go-to-definition, references/backlinks, document + workspace symbols, document links, folding, hover, path/anchor/fence-language completion, broken-link/anchor and duplicate-heading diagnostics. |
 | **1 — Wiki links** | `[[target]]` / `[[target#heading]]` / `[[target\|alias]]` completion, definition, references, hover, and the full `wiki.*` diagnostic taxonomy (case-sensitive matching, basename/path-suffix/root-relative resolution, ambiguity + portability collisions). |
-| **2 — Frontmatter intelligence** | effective-schema (base + configured extensions + document `$schema`) diagnostics with precise key/value ranges, key/enum/`file(...)`/`style.*` completion, type/constraint/`->`-description hover, `$schema`/`file(...)` navigation, frontmatter folding + symbols. Claudine activates as **pure config** (globs → baseline schema), no server-side special cases. |
+| **2 — Frontmatter intelligence** | effective-schema (base + configured extensions + repository-scoped trigger schemas + document `$schema`) diagnostics with precise key/value ranges, key/enum/`file(...)`/`style.*`/`suggest(...)` completion, type/constraint/`->`-description hover, `$schema`/`file(...)` navigation, frontmatter folding + symbols. Claudine activates as **pure config** (globs → baseline schema), no server-side special cases. |
 | **3 — Darkmatter DSL** | directive (`::file`/`::code`/`::shell`/`::block`/disclosure …) name/option completion, hover, folding, and diagnostics; transclusion links + definition + cycle detection + broken-path; interpolation (`{{ }}`) completion/hover/definition + malformed/unknown diagnostics; read-only shell-policy hover + `darkmatter.security.*`; fenced-language diagnostics. |
 | **Editing** | file + heading rename with workspace-wide reference updates (refusing ambiguous/unsafe edits atomically), the v1 code-action set, and `Markdown::cleanup`-backed formatting (byte-equivalent to `md clean`). |
+| **Semantic tokens** | LSP semantic tokens classifying interpolations (`macro.interpolation`, `+inert` literals), directive keywords/closers (`macro.directive`, `+closer`), targets/options (`string`/`property.directive`), and wiki frames/segments (`macro.wiki` / `string.wiki`) for theme-driven de-emphasis. `full` + `range`, non-overlapping in UTF-8/UTF-16, fence-excluded, capability-gated, `[semantic_tokens] enable` master switch. |
 
 For exact v1 scope and out-of-scope items see
 [spec.md](../features/2026-07-04-dmls/spec.md); for architecture see
 [design.md](../features/2026-07-04-dmls/design.md).
+
+## Installation
+
+Every editor integration boils down to the same thing: a native `dmls`
+binary the editor can launch over stdio, plus (for VS Code and Zed) a thin
+shipped extension that starts it.
+
+**1. Install the binary** (any one of these):
+
+```bash
+# from the darkmatter/ package area — the canonical repo recipe
+just install-dmls
+
+# equivalent, from the repo root
+cargo install --path darkmatter/dmls --force
+```
+
+Or, without a checkout: extract a release archive (see
+[Packaging](#packaging)) and put `dmls` (`dmls.exe` on Windows) on `PATH`.
+
+**2. Verify it runs:**
+
+```bash
+dmls --version
+```
+
+**3. Wire up your editor** — see [`docs/editors/`](docs/editors/):
+
+| Editor | Install path |
+|--------|-------------|
+| VS Code | `just install-vscode-package` (packages + installs the shipped [`vscode-dmls/`](vscode-dmls/) extension) |
+| Zed | Install [`zed-dmls/`](zed-dmls/) as a dev extension ([guide](docs/editors/zed.md)) |
+| Neovim | Built-in LSP config only ([guide](docs/editors/neovim.md)) |
+| Helix | `languages.toml` entry only ([guide](docs/editors/helix.md)) |
+
+GUI editors do not always inherit your shell's `PATH`; if the editor cannot
+find `dmls`, point it at the absolute path (usually `~/.cargo/bin/dmls`) —
+both shipped extensions expose a binary-path setting. More failure modes are
+covered in the [editor-setup troubleshooting section](docs/editors/README.md#troubleshooting).
 
 ## Architecture
 
@@ -74,7 +114,8 @@ Logs go to stderr or `--log-file` only; stdout is reserved for LSP framing.
 `.dmls.toml` at the workspace root (also the editor root marker), layered under
 LSP `workspace/configuration` and reloadable without restart. Keys cover wiki
 behavior, baseline schema extensions, strict schema/style modes, shell policy
-discovery, code-action categories, formatting, and diagnostics debounce. See
+discovery, code-action categories, formatting, semantic tokens
+(`[semantic_tokens] enable`), and diagnostics debounce. See
 [spec.md](../features/2026-07-04-dmls/spec.md) § Configuration.
 
 ## Editor setup
@@ -97,11 +138,16 @@ against. CI wires the full per-target build.
 From the `darkmatter/` package area:
 
 ```
-just test        # L1 (unit) across lib, cli, dmls
-just test-l2     # L2 in-memory LSP-session integration tests
+just test        # L1 (unit + in-process LSP-session) across lib, cli, dmls
+just test-l2     # L2 real-editor tests (Neovim + tmux; skip cleanly if absent)
 just lint
 ```
 
-Testing follows `.claude/skills/rust-testing/SKILL.md` (nextest, L1 default, L2
-gated where real resources are involved — DMLS L2 is in-memory, so it stays
-ungated).
+Testing follows `.claude/skills/rust-testing/SKILL.md` (nextest, L1 default).
+The in-process JSON-RPC session tests (`tests/lsp_session.rs`) are L1. The L2
+tier (`tests/level2_editor_neovim.rs`) drives Neovim's real LSP client against
+the built `dmls` binary — headless token-decode probes plus a tmux-rendered
+SGR capture — and skips cleanly when `nvim`/`tmux` are missing
+(`BISCUIT_TEST_LEVEL_REQUIRED=2` hard-fails instead). The remaining manual
+editor verification lives in
+[`docs/editors/smoke-checklist.md`](docs/editors/smoke-checklist.md).

@@ -39,7 +39,8 @@
   and `claudine-gen` depend on it; `strum`'s variant-name introspection backs
   the generator's schema↔catalog enum-subset gate.
 - `claudine-gen` (`claudine/gen`) depends on `darkmatter` (frontmatter parsing
-  plus SimplifiedSchema sidecar validation), `serde`/`serde_json`/
+  plus SimplifiedSchema sidecar validation), `biscuit-file` (file-reference
+  resolution for empirical research fixtures), `serde`/`serde_json`/
   `serde_yaml_ng`, `clap`, `thiserror`, and `regex` (generate-time
   compilation check for `match_op: regex` signal-detection records) — and
   deliberately NOT on the `claudine` library or CLI (bootstrap rule: a broken

@@ -29,7 +29,7 @@ use crate::{
 use renderable::layout::Width;
 
 pub use super::cell::TableCellContent;
-use super::cell::pad_cell;
+use super::cell::{expand_tabs_with_width, pad_cell};
 pub use super::column::TableColumn;
 use super::types::{Currency, TableStyle, VerticalAlign};
 use super::width::{MeasuredColumn, TableWidthError, TableWidthMeasurements, TableWidthPlan};
@@ -170,6 +170,35 @@ impl Table {
     pub fn with_columns(mut self, columns: Vec<TableColumn>) -> Self {
         self.columns = columns;
         self
+    }
+
+    /// Expand header and text-cell tabs using a terminal column interval.
+    pub(crate) fn expand_tabs_in_place(&mut self, tab_width: usize) {
+        for column in &mut self.columns {
+            if let std::borrow::Cow::Owned(header) =
+                expand_tabs_with_width(&column.header, tab_width)
+            {
+                column.header = header;
+            }
+        }
+        for row in &mut self.data {
+            for cell in row {
+                if let TableCellContent::Text(content) = cell
+                    && let std::borrow::Cow::Owned(expanded) =
+                        expand_tabs_with_width(content, tab_width)
+                {
+                    *content = expanded;
+                }
+            }
+        }
+    }
+
+    pub(crate) fn columns(&self) -> &[TableColumn] {
+        &self.columns
+    }
+
+    pub(crate) fn data(&self) -> &[Vec<TableCellContent>] {
+        &self.data
     }
 
     /// Add a row of data.
@@ -342,6 +371,15 @@ impl Table {
     pub fn plan_widths(&self, terminal_width: u32) -> Result<TableWidthPlan, TableWidthError> {
         let available_render_width = self.available_render_width(terminal_width) as usize;
         self.plan_widths_for_render_width(available_render_width)
+    }
+
+    /// Produce the width plan using the supplied terminal's tab interval.
+    pub fn plan_widths_for_terminal(
+        &self,
+        term: &Terminal,
+    ) -> Result<TableWidthPlan, TableWidthError> {
+        let (table, _) = self.prepare_for_terminal(term);
+        table.plan_widths(term.width())
     }
 
     /// Return whether this table would need wrapping or truncation at the given width.
@@ -1696,6 +1734,14 @@ impl Table {
         resolved
     }
 
+    /// Resolve terminal-specific cell content before measuring or rendering.
+    fn prepare_for_terminal(&self, term: &Terminal) -> (Table, usize) {
+        let mut table = self.clone();
+        let resolved = Self::resolve_prose_cells_in_place(&mut table, term);
+        table.expand_tabs_in_place(term.tab_width);
+        (table, resolved)
+    }
+
     /// Renders via the sanctioned bespoke escape hatch.
     ///
     /// Retained as a `#[doc(hidden)]` surface because [`Table`] supports the
@@ -1728,8 +1774,7 @@ impl Table {
     /// left to re-resolve.
     #[doc(hidden)]
     pub fn render_bespoke_instrumented(&self, term: &Terminal) -> (String, usize) {
-        let mut table = self.clone();
-        let resolved = Self::resolve_prose_cells_in_place(&mut table, term);
+        let (table, resolved) = self.prepare_for_terminal(term);
         let width = term.width();
         let (stripe_bg, stripe_fg) =
             table.resolve_stripe_escapes(&term.color_mode(), term.color_depth);
@@ -2966,6 +3011,87 @@ mod tests {
             TableCellContent::Text("hello".to_string()).to_string(),
             "hello"
         );
+        assert_eq!(
+            TableCellContent::Text("a\tb".to_string()).to_string(),
+            "a\tb"
+        );
+    }
+
+    #[test]
+    fn test_expand_tabs_uses_table_local_stops() {
+        assert_eq!(expand_tabs_with_width("\t", 4), "    ");
+        assert_eq!(expand_tabs_with_width("a\tb", 4), "a   b");
+        assert_eq!(expand_tabs_with_width("abcd\tb", 4), "abcd    b");
+        assert_eq!(expand_tabs_with_width("a\tb\n12\t3", 4), "a   b\n12  3");
+        assert_eq!(
+            expand_tabs_with_width("\x1b[31ma\x1b[0m\tb", 4),
+            "\x1b[31ma\x1b[0m   b"
+        );
+    }
+
+    fn assert_table_uses_tab_width(term: &Terminal, expected_tab_width: usize) {
+        assert_eq!(term.tab_width, expected_tab_width);
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("Key\tValue")])
+            .with_data(vec![vec!["1\t2\t3".into()]]);
+
+        let plan = table
+            .plan_widths_for_terminal(term)
+            .expect("tabbed table width plan");
+        let expected_width = ["Key\tValue", "1\t2\t3"]
+            .into_iter()
+            .map(|content| {
+                visible_width(&expand_tabs_with_width(content, expected_tab_width)) as usize
+            })
+            .max()
+            .expect("tabbed test content");
+        assert_eq!(plan.content_widths(), vec![expected_width]);
+
+        let expanded_data = expand_tabs_with_width("1\t2\t3", expected_tab_width);
+        let output = table.render(term);
+        assert!(!output.contains('\t'), "table output retained a raw tab: {output:?}");
+        assert!(output.contains(expanded_data.as_ref()));
+        let widths: Vec<u32> = output.lines().map(visible_width).collect();
+        assert!(
+            widths.windows(2).all(|pair| pair[0] == pair[1]),
+            "table borders diverged after tab expansion: {widths:?}\n{output}",
+        );
+    }
+
+    #[test]
+    fn test_table_uses_detected_terminal_tab_width() {
+        let mut term = Terminal::new();
+        term.fixed_width = Some(80);
+        let detected_tab_width = term.tab_width;
+        assert!(detected_tab_width > 0);
+        assert_table_uses_tab_width(&term, detected_tab_width);
+    }
+
+    #[test]
+    fn test_table_uses_four_column_tab_override() {
+        let term = Terminal::builder().width(80).tab_width(4).build();
+        assert_table_uses_tab_width(&term, 4);
+    }
+
+    #[test]
+    fn test_table_uses_eight_column_tab_override() {
+        let term = Terminal::builder().width(80).tab_width(8).build();
+        assert_table_uses_tab_width(&term, 8);
+    }
+
+    #[test]
+    fn test_cursor_positioned_table_expands_tabs() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("Value")])
+            .with_data(vec![vec!["1\t2\t3".into()]])
+            .prefer_cursor_alignment();
+        let mut term = Terminal::new_optimistic(80);
+        term.is_tty = true;
+        term.tab_width = 4;
+
+        let output = table.render_bespoke(&term);
+        assert!(!output.contains('\t'), "cursor-positioned output retained a raw tab");
+        assert!(output.contains("1   2   3"));
     }
 
     #[test]

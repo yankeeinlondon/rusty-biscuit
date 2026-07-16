@@ -60,8 +60,8 @@ semantic event.
 ## Signal → Classification → SemanticEvent
 
 The table below is the authoritative mapping from stderr log lines (as
-classified by [`classify_lifecycle`](../../../claudine/lib/src/stream/logs/opencode/errors.rs))
-to the semantic events emitted by [`OpenCodeLogBridge`](../../../claudine/lib/src/stream/logs/opencode/reasoning.rs).
+classified by [`classify_lifecycle`](../../../claudine/lib/src/stream/logs/opencode/classify/llm.rs))
+to the semantic events emitted by [`OpenCodeLogBridge`](../../../claudine/lib/src/stream/logs/opencode/bridge/mod.rs).
 
 | Stderr line shape | `LogClassification` variant | `SemanticEvent` emitted | Notes |
 |---|---|---|---|
@@ -78,7 +78,7 @@ to the semantic events emitted by [`OpenCodeLogBridge`](../../../claudine/lib/sr
 Failure-shaped lines (`ProviderLimit`, `MalformedAsset`, `ApiFailure`,
 `AuthFailure`, `UncaughtError`) continue to route through their existing
 `Warning` / `Error` handlers and are documented in
-[`reasoning.rs`](../../../claudine/lib/src/stream/logs/opencode/reasoning.rs).
+[`bridge/mod.rs`](../../../claudine/lib/src/stream/logs/opencode/bridge/mod.rs).
 
 ## Failure Classifications
 
@@ -243,8 +243,9 @@ NDJSON omits it.
 
 - [`claudine/cli/src/commands/wrap/profile/opencode.rs`](../../../claudine/cli/src/commands/wrap/profile/opencode.rs) — argv configuration (`--print-logs --log-level INFO`).
 - [`claudine/lib/src/stream/logs/opencode/events.rs`](../../../claudine/lib/src/stream/logs/opencode/events.rs) — JSONL header / body parser and `LogClassification` enum.
-- [`claudine/lib/src/stream/logs/opencode/errors.rs`](../../../claudine/lib/src/stream/logs/opencode/errors.rs) — `classify` / `classify_lifecycle` / failure classifiers.
-- [`claudine/lib/src/stream/logs/opencode/reasoning.rs`](../../../claudine/lib/src/stream/logs/opencode/reasoning.rs) — `OpenCodeLogBridge` and `merge_stderr_state_into_summary`.
+- [`claudine/lib/src/stream/logs/opencode/classify/mod.rs`](../../../claudine/lib/src/stream/logs/opencode/classify/mod.rs) — `classify` / `classify_raw` / failure classifiers and `merge_rate_limit`.
+- [`claudine/lib/src/stream/logs/opencode/bridge/mod.rs`](../../../claudine/lib/src/stream/logs/opencode/bridge/mod.rs) — `OpenCodeLogBridge` (stderr bridge).
+- [`claudine/lib/src/stream/logs/opencode/state.rs`](../../../claudine/lib/src/stream/logs/opencode/state.rs) — `SharedStderrState` and `merge_stderr_state_into_summary`.
 - [`claudine/lib/src/stream/providers/opencode.rs`](../../../claudine/lib/src/stream/providers/opencode.rs) — NDJSON parser; no longer synthesizes `SubagentStart`/`SubagentStop` from `task` tool_use.
 - [`timeouts.md`](timeouts.md) — `step_timeout`, byte heartbeat, per-step grace.
 - [`claudine/docs/research/agent-cli/opencode.md`](../../../claudine/docs/research/agent-cli/opencode.md) — research source for the stderr schema.

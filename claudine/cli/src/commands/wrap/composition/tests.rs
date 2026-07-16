@@ -99,6 +99,7 @@ fn load_selection_config_returns_both_favorite_and_overrides() {
     use claudine::config::claudine_config::{
         DetailedModelOverride, ModelOverrideMode, ProviderModelOverride,
     };
+    use std::collections::HashMap;
 
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path();
@@ -163,6 +164,7 @@ fn catalog_initialized_with_config_overrides() {
     use claudine::config::claudine_config::{
         DetailedModelOverride, ModelOverrideMode, ProviderModelOverride,
     };
+    use std::collections::HashMap;
 
     let mut overrides = HashMap::new();
     overrides.insert(

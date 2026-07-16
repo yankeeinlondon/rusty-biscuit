@@ -14,10 +14,11 @@ use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
+use darkmatter::markdown::compose::find_git_root_from;
 use darkmatter::markdown::schemas::resolve::{merge_baseline, resolve_schema};
 use darkmatter::markdown::schemas::{
     DarkmatterSchemas, EffectiveSchema, SchemaError, SchemaShape, SimplifiedSchema,
-    darkmatter_base_json_schema,
+    darkmatter_base_json_schema, triggers::TriggerRegistry,
 };
 use globset::{Glob, GlobSetBuilder};
 use serde_json::Value;
@@ -69,6 +70,7 @@ pub fn assemble(
     document_text: &str,
     config: &DmlsConfig,
     workspace_roots: &[PathBuf],
+    trigger_registry: Option<TriggerRegistry>,
 ) -> Result<Option<SchemaBundle>, SchemaError> {
     let combined = combined_baseline(doc_path, config, workspace_roots)?;
 
@@ -79,6 +81,9 @@ pub fn assemble(
     }
 
     let mut schemas = DarkmatterSchemas::new().with_baseline_json_schema(combined.baseline)?;
+    if let Some(registry) = trigger_registry {
+        schemas = schemas.with_trigger_registry(registry);
+    }
     if let Some(dir) = doc_path.parent() {
         schemas = schemas.with_file_ref_fallback_dir(dir.to_path_buf());
     }
@@ -91,6 +96,24 @@ pub fn assemble(
             extension_dependencies: combined.dependencies,
         })),
         None => Ok(None),
+    }
+}
+
+/// Selects the trigger-discovery boundary for a document.
+///
+/// The nearest containing workspace folder is authoritative. When the document
+/// is inside a Git repository whose root is at or below that folder, the
+/// repository root narrows the boundary. Documents outside all workspace
+/// folders intentionally return `None` and never discover triggers.
+pub fn trigger_boundary(doc_path: &Path, workspace_roots: &[PathBuf]) -> Option<PathBuf> {
+    let workspace = workspace_roots
+        .iter()
+        .filter(|root| doc_path.starts_with(root))
+        .max_by_key(|root| root.components().count())?;
+    let start = doc_path.parent().unwrap_or(doc_path);
+    match find_git_root_from(start) {
+        Some(repo) if repo.starts_with(workspace) => Some(repo),
+        _ => Some(workspace.clone()),
     }
 }
 
@@ -236,6 +259,7 @@ mod tests {
             "---\ntitle: Hello\n---\n\nbody\n",
             &DmlsConfig::default(),
             &[PathBuf::from("/w")],
+            None,
         )
         .expect("assembles")
         .expect("has frontmatter");
@@ -252,6 +276,7 @@ mod tests {
             "# Just a body\n",
             &DmlsConfig::default(),
             &[PathBuf::from("/w")],
+            None,
         )
         .expect("assembles");
         assert!(bundle.is_none());
@@ -267,6 +292,7 @@ mod tests {
             "---\ntitle: A\n---\n\nbody\n",
             &config,
             &[PathBuf::from("/w")],
+            None,
         );
         // Outside `.claude/**`: extension never loaded, assembly succeeds.
         assert!(outside.is_ok());

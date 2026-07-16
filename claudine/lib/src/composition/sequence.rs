@@ -12,6 +12,7 @@ use biscuit_file::FileReference;
 use regex::Regex;
 
 use super::error::{CompositionError, SequenceLoadCause};
+use super::json_util::json_type_name;
 use super::types::{SequencePlan, SequenceSource, SequenceStep, SequenceStepOverlay};
 
 /// Matches `{{key}}` and `{{key || default}}` placeholder patterns.
@@ -363,17 +364,6 @@ fn render_simple_template(
             }
         })
         .into_owned()
-}
-
-fn json_type_name(value: &serde_json::Value) -> &'static str {
-    match value {
-        serde_json::Value::Null => "null",
-        serde_json::Value::Bool(_) => "boolean",
-        serde_json::Value::Number(_) => "number",
-        serde_json::Value::String(_) => "string",
-        serde_json::Value::Array(_) => "array",
-        serde_json::Value::Object(_) => "object",
-    }
 }
 
 #[cfg(test)]

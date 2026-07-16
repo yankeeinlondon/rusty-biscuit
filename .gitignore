@@ -80,3 +80,5 @@ trace/*
 **/test-*timing.jsonl
 .claudine/tmp/
 **/tmp-stream*
+# do not add gitnexus cache
+.gitnexus/*

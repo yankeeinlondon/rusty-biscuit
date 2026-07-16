@@ -27,8 +27,11 @@ pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
     let yesterday_utc = today_utc - chrono::Duration::days(1);
     let tomorrow_utc = today_utc + chrono::Duration::days(1);
 
-    // Legacy fields
-    let now_str = now_local.format("%Y-%m-%dT%H:%M:%S").to_string();
+    // Legacy fields. `now` carries the host's zone offset (`%:z` → `+01:00`)
+    // so the local timestamp is unambiguous — a bare local datetime cannot be
+    // resolved to a real instant, and `now_utc` already signals its zone via
+    // the trailing `Z`.
+    let now_str = now_local.format("%Y-%m-%dT%H:%M:%S%:z").to_string();
     let utc_str = now_utc.format("%Y-%m-%dT%H:%M:%SZ").to_string();
     let today_str = today.format("%Y-%m-%d").to_string();
     let yesterday_str = yesterday.format("%Y-%m-%d").to_string();
@@ -284,6 +287,21 @@ mod tests {
         assert!(values.contains_key("season"));
         assert!(values.contains_key("timestamp"));
         assert!(values.contains_key("timestamp_ms"));
+    }
+
+    /// Regression: `now` must carry the host zone offset (`+HH:MM` / `-HH:MM`)
+    /// so the local timestamp is an unambiguous, RFC-3339-parseable instant
+    /// rather than a bare local datetime.
+    #[test]
+    fn now_carries_zone_offset() {
+        let mut values = Map::new();
+        populate_datetime(&mut values);
+
+        let now = values.get("now").and_then(Value::as_str).unwrap();
+        assert!(
+            chrono::DateTime::parse_from_rfc3339(now).is_ok(),
+            "`now` must be an offset-bearing RFC 3339 datetime, got `{now}`"
+        );
     }
 
     /// Regression: documented backward-compatible aliases (`utc`, `dow`,

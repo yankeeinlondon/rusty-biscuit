@@ -1,5 +1,4 @@
 pub mod actions;
-pub mod adapters;
 pub mod badges;
 pub mod composition;
 pub mod config;
@@ -8,6 +7,7 @@ pub mod dispatch;
 pub mod error;
 pub mod events;
 pub mod harness;
+pub mod hook_adapters;
 pub mod interrupt;
 pub mod linking;
 pub mod mcp;

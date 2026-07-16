@@ -1,8 +1,8 @@
 ---
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Kilo, Pi, Antigravity), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
-last_updated: 2026-07-10
-hash: 65dc854540ca152c-c49d5b636b77ef04
+last_updated: 2026-07-14
+hash: 65dc854540ca152c-032486619ccbd812
 ---
 
 ## Overview
@@ -27,13 +27,13 @@ Nineteen modules plus the shared error type and the flat `provider_id` leaf (the
 | Module | Responsibility |
 |--------|----------------|
 | `actions` | Hook action types and responses |
-| `adapters` | Provider-specific event parsers |
 | `badges` | Styled terminal badge constants |
 | `composition` | Markdown frontmatter composition (direct/inline/sequence) plus the loop engine |
 | `config` | Agent detection, hook registration, atomic writes, backups |
 | `dispatch` | Event processing pipeline, templates, matchers, expression bridge |
 | `events` | The normalized 16-event lifecycle model |
 | `harness` | Shell audit, timeouts, runtime attempt classification, speech helpers, and kept lifecycle recovery infrastructure (no validation/handler DSL — see [Validations and Handlers → Lifecycle Stacks](validations-and-handlers.md)) |
+| `hook_adapters` | Native hook request/response adapters (parse provider hook payloads; distinct from `stream/providers` stdout NDJSON parsers) |
 | `linking` | Cross-provider resource sync with portability classification |
 | `mcp` | Catalog, defaults, provider-state, import/export, runtime injectors |
 | `messaging` | Outbound routes (Discord/Slack/Signal/WhatsApp); desktop notifications are separate and zero-config |
@@ -94,8 +94,9 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | `claudine config` | TUI for managing configuration, including messenger routes |
 | `claudine sync [--dry-run] [--provider] [--fix]` | Re-apply hook registrations |
 | `claudine uninstall [--keep-config]` | Remove hooks from all agents |
-| `claudine providers` | Provider capability matrix (skill/slash/agent/hooks) |
+| `claudine providers` | Provider capability matrix, catalog generation, and deterministic `agent-errors` research checks |
 | `claudine logs [today\|week\|month\|sessions\|tools\|errors\|repos\|trends\|drift\|sync]` | Reporting and sync for Claudine JSONL logs |
+| `claudine dashboard [--local]` | Mesh NOW view: live sessions across rendezvous hosts, with per-host staleness and the needs-human-intervention signal (reads the rendezvous daemon) |
 | `claudine completions <shell>` | Generate shell completions |
 | `claudine context [--values\|--expressions\|--side-effects]` | Show Darkmatter context variables, expression engine, and side-effect capabilities |
 | `claudine` *(no subcommand)* | Render rich grouped help |
@@ -211,6 +212,14 @@ roster, with structured facts in frontmatter validated by a `_schema.yaml` sidec
 - `agent-logging/` — log surfaces, per-site time semantics (unit/zone), record types
 - `agent-models/` — out-of-box models, selection mechanisms, precedence, dynamic listing
 - `agent-permissions/` — permission CLI params, config files, YOLO, PolicyEngine fit
+- `agent-errors/` — ordered structured-stream error vocabularies with
+  per-needle provenance; generation projects these research records into
+  `lib/src/stream/providers/vocabulary.rs`. Immutable Phase-A baselines under
+  `agent-errors/_seeds/` let the deterministic gate detect removals, re-kinds,
+  and reorders after facts graduation. New parser-backed providers must research
+  this topic rather than add keyword constants or facts seeds. The 2026-07-14
+  live roster converged in ten clean first attempts; its 55 accepted additions
+  are locked by generated-row, precedence, exact-code, and near-miss tests.
 - `model-config/` — user-side model extension (cloud + local) across all 9 roster
   providers: config files/formats, API standards spoken (`api_standards`), local-runner
   integration paths framed as API-standard bridging

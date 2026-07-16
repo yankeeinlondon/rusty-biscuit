@@ -2,9 +2,10 @@ use std::path::{Path, PathBuf};
 
 use crate::discovery::config_paths::get_terminal_config_path;
 use crate::discovery::detection::{
-    ColorDepth, ColorMode, Connection, ImageSupport, TerminalApp, UnderlineSupport, color_depth,
-    color_mode, detect_connection, get_terminal_app, image_support, is_tty, italics_support,
-    osc8_link_support, terminal_height, terminal_width, underline_support,
+    ColorDepth, ColorMode, Connection, DEFAULT_TAB_WIDTH, ImageSupport, TerminalApp,
+    UnderlineSupport, color_depth, color_mode, detect_connection, get_terminal_app, image_support,
+    is_tty, italics_support, osc8_link_support, tab_width, terminal_height, terminal_width,
+    underline_support,
 };
 use crate::discovery::fonts::{
     CellSize, FontLigature, cell_size, detect_nerd_font, font_ligatures, font_name, font_size,
@@ -67,6 +68,7 @@ fn new_terminal() -> Terminal {
         locale: TerminalLocale::default(),
         fixed_width: None,
         fixed_height: None,
+        tab_width: tab_width(),
         // Keep live terminal queries lazy. Eager CSI 14t probing here leaks
         // raw tty responses into normal CLI rendering paths before a caller
         // has asked for image or geometry-aware output.
@@ -80,6 +82,7 @@ fn new_terminal() -> Terminal {
         app = ?terminal.app,
         image_support = ?terminal.image_support,
         color_depth = ?terminal.color_depth,
+        tab_width = terminal.tab_width,
         is_tty = terminal.is_tty,
         is_ci = terminal.is_ci,
         os = ?terminal.os,
@@ -242,6 +245,12 @@ pub struct Terminal {
     /// When `None`, height is queried dynamically via `terminal_height()`.
     pub fixed_height: Option<u32>,
 
+    /// Horizontal-tab interval in terminal columns.
+    ///
+    /// Detection uses terminfo's `init_tabs` capability and falls back to the
+    /// standard eight-column interval. The value must be greater than zero.
+    pub tab_width: usize,
+
     /// Cached cell size in pixels. When `Some`, `cell_size()` returns this value
     /// instead of querying the terminal via CSI 14t. This starts as `None` for
     /// normal detection so ordinary rendering does not perform live `/dev/tty`
@@ -297,6 +306,7 @@ impl From<&Terminal> for Terminal {
             locale: value.locale.clone(),
             fixed_width: value.fixed_width,
             fixed_height: value.fixed_height,
+            tab_width: value.tab_width,
             cell_size: value.cell_size,
             supports_unicode: value.supports_unicode,
         }
@@ -442,6 +452,7 @@ impl Terminal {
             locale: TerminalLocale::default(),
             fixed_width: Some(width),
             fixed_height: None,
+            tab_width: DEFAULT_TAB_WIDTH,
             cell_size: None,
             supports_unicode: true,
         }
@@ -595,6 +606,7 @@ pub struct TerminalBuilder {
     is_nerd_font: Option<Option<bool>>,
     fixed_width: Option<u32>,
     fixed_height: Option<u32>,
+    tab_width: Option<usize>,
     cell_size: Option<CellSize>,
     supports_unicode: Option<bool>,
 }
@@ -684,6 +696,18 @@ impl TerminalBuilder {
         self
     }
 
+    /// Set the horizontal-tab interval in terminal columns.
+    ///
+    /// ## Panics
+    ///
+    /// Panics when `value` is zero because tab stops require a positive
+    /// interval.
+    pub fn tab_width(mut self, value: usize) -> Self {
+        assert!(value > 0, "terminal tab width must be greater than zero");
+        self.tab_width = Some(value);
+        self
+    }
+
     /// Set the cell size in pixels.
     ///
     /// When set, `Terminal::cell_size()` returns this value instead of
@@ -721,6 +745,7 @@ impl TerminalBuilder {
             is_nerd_font: self.is_nerd_font.unwrap_or(detected.is_nerd_font),
             fixed_width: self.fixed_width,
             fixed_height: self.fixed_height,
+            tab_width: self.tab_width.unwrap_or(detected.tab_width),
             // Fields that aren't overridable via builder (OS/system detection)
             os: detected.os,
             distro: detected.distro,
@@ -777,6 +802,7 @@ mod tests {
         let _in_monorepo = term.in_monorepo;
         let _repo_root = &term.repo_root;
         let _package_root = &term.package_root;
+        assert!(term.tab_width > 0);
     }
 
     #[test]
@@ -868,6 +894,12 @@ mod tests {
     }
 
     #[test]
+    fn test_terminal_builder_overrides_tab_width() {
+        let term = Terminal::builder().tab_width(4).build();
+        assert_eq!(term.tab_width, 4);
+    }
+
+    #[test]
     fn test_terminal_builder_overrides_multiple_fields() {
         let term = Terminal::builder()
             .is_tty(true)
@@ -910,6 +942,7 @@ mod tests {
         let term = Terminal::new_optimistic(80);
         assert_eq!(term.width(), 80);
         assert_eq!(term.fixed_width, Some(80));
+        assert_eq!(term.tab_width, DEFAULT_TAB_WIDTH);
 
         let term = Terminal::new_optimistic(120);
         assert_eq!(term.width(), 120);

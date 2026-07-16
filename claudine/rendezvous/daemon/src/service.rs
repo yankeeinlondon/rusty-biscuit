@@ -25,6 +25,7 @@ use tonic::{Request, Response, Status};
 
 use crate::peers::PeerRegistry;
 use crate::projection::Projection;
+use crate::register::RegisterStore;
 use crate::session_log::SessionLogManager;
 use crate::storage::Storage;
 use crate::sync::{SyncError, SyncService};
@@ -38,6 +39,7 @@ pub struct RendezvousService {
     identity: Arc<NodeIdentity>,
     storage: Storage,
     sync_service: SyncService,
+    registers: RegisterStore,
     peers: Option<PeerRegistry>,
     quic_local_addr: Option<SocketAddr>,
 }
@@ -64,6 +66,7 @@ impl RendezvousService {
         identity: Arc<NodeIdentity>,
         storage: Storage,
         sync_service: SyncService,
+        registers: RegisterStore,
     ) -> Self {
         let started_at = Instant::now();
         let started_at_unix_ms = unix_now_ms();
@@ -75,6 +78,7 @@ impl RendezvousService {
             identity,
             storage,
             sync_service,
+            registers,
             peers: None,
             quic_local_addr: None,
         }
@@ -117,6 +121,7 @@ impl Rendezvous for RendezvousService {
             daemon_version: DAEMON_VERSION.to_string(),
             uptime_seconds,
             started_at_unix_ms: self.started_at_unix_ms,
+            node_id: self.identity.node_id(),
         }))
     }
 
@@ -369,6 +374,7 @@ impl Rendezvous for RendezvousService {
             .sync_initiator(&connection, &node_id)
             .await
             .map_err(map_sync_error)?;
+        peers.record_sync_success(&node_id);
         let chunks = outcome
             .chunks
             .iter()
@@ -415,6 +421,315 @@ impl Rendezvous for RendezvousService {
             .collect();
         Ok(Response::new(QueryProjectionResponse { rows: proto_rows }))
     }
+
+    async fn list_host_capabilities(
+        &self,
+        _request: Request<rendezvous_core::ListHostCapabilitiesRequest>,
+    ) -> Result<Response<rendezvous_core::ListHostCapabilitiesResponse>, Status> {
+        let registers = self.registers.clone();
+        let hosts = tokio::task::spawn_blocking(move || {
+            let docs = registers.list_documents()?;
+            let mut hosts = Vec::with_capacity(docs.len());
+            for doc in docs {
+                // Only capability registers surface on this RPC; other
+                // register domains will get their own read surfaces.
+                if !matches!(doc, rendezvous_core::DocumentId::Capability { .. }) {
+                    continue;
+                }
+                let Some(fields) = registers.deep_value(&doc)? else {
+                    continue;
+                };
+                hosts.push(rendezvous_core::HostCapability {
+                    document_id: doc.as_path(),
+                    owner_node_id: doc.owner_node_id().to_string(),
+                    fields_json: fields.to_string(),
+                });
+            }
+            Ok::<_, crate::register::RegisterError>(hosts)
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(internal)?;
+        Ok(Response::new(rendezvous_core::ListHostCapabilitiesResponse { hosts }))
+    }
+
+    async fn list_host_repos(
+        &self,
+        _request: Request<rendezvous_core::ListHostReposRequest>,
+    ) -> Result<Response<rendezvous_core::ListHostReposResponse>, Status> {
+        let registers = self.registers.clone();
+        let hosts = tokio::task::spawn_blocking(move || {
+            let docs = registers.list_documents()?;
+            let mut hosts = Vec::with_capacity(docs.len());
+            for doc in docs {
+                if !matches!(doc, rendezvous_core::DocumentId::Repos { .. }) {
+                    continue;
+                }
+                let Some(repos) = registers.deep_value(&doc)? else {
+                    continue;
+                };
+                hosts.push(rendezvous_core::HostRepos {
+                    document_id: doc.as_path(),
+                    owner_node_id: doc.owner_node_id().to_string(),
+                    repos_json: repos.to_string(),
+                });
+            }
+            Ok::<_, crate::register::RegisterError>(hosts)
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(internal)?;
+        Ok(Response::new(rendezvous_core::ListHostReposResponse { hosts }))
+    }
+
+    async fn report_session_event(
+        &self,
+        request: Request<rendezvous_core::ReportSessionEventRequest>,
+    ) -> Result<Response<rendezvous_core::ReportSessionEventResponse>, Status> {
+        let body = request.into_inner();
+        if body.session_id.is_empty() {
+            return Err(Status::invalid_argument("session_id must not be empty"));
+        }
+        let kind = rendezvous_core::SessionEventKind::try_from(body.kind)
+            .map_err(|_| Status::invalid_argument("unknown session event kind"))?;
+        if kind == rendezvous_core::SessionEventKind::Unspecified {
+            return Err(Status::invalid_argument("session event kind must be specified"));
+        }
+        let details = match parse_optional_json(&body.details_json) {
+            Ok(Some(serde_json::Value::Object(map))) => map,
+            Ok(Some(_)) => {
+                return Err(Status::invalid_argument("details_json must be a JSON object"));
+            }
+            Ok(None) => serde_json::Map::new(),
+            Err(err) => {
+                return Err(Status::invalid_argument(format!(
+                    "details_json is not valid JSON: {err}"
+                )));
+            }
+        };
+
+        let status = body.status.as_ref().and_then(status_from_proto);
+
+        let registers = self.registers.clone();
+        let session_id = body.session_id;
+        let active_count = tokio::task::spawn_blocking(move || {
+            apply_session_event(&registers, &session_id, kind, details, status)
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(internal)?;
+        Ok(Response::new(rendezvous_core::ReportSessionEventResponse { active_count }))
+    }
+
+    async fn list_active_sessions(
+        &self,
+        _request: Request<rendezvous_core::ListActiveSessionsRequest>,
+    ) -> Result<Response<rendezvous_core::ListActiveSessionsResponse>, Status> {
+        let registers = self.registers.clone();
+        let hosts = tokio::task::spawn_blocking(move || {
+            let docs = registers.list_documents()?;
+            let mut hosts = Vec::with_capacity(docs.len());
+            for doc in docs {
+                if !matches!(doc, rendezvous_core::DocumentId::SessionsActive { .. }) {
+                    continue;
+                }
+                let Some(raw) = registers.deep_value(&doc)? else {
+                    continue;
+                };
+                hosts.push(rendezvous_core::HostActiveSessions {
+                    document_id: doc.as_path(),
+                    owner_node_id: doc.owner_node_id().to_string(),
+                    sessions_json: inflate_session_entries(&raw).to_string(),
+                });
+            }
+            Ok::<_, crate::register::RegisterError>(hosts)
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(internal)?;
+        Ok(Response::new(rendezvous_core::ListActiveSessionsResponse { hosts }))
+    }
+}
+
+/// Register-entry keys the daemon owns exclusively. Producer
+/// `details_json` payloads that try to set any of them are stripped
+/// before merge — the daemon stamps clocks and the reducer writes the
+/// projected status/slots. Without this, an UPDATED payload could
+/// overwrite `started_at_unix_ms` or forge a `status`.
+const DAEMON_OWNED_KEYS: &[&str] = &[
+    "started_at_unix_ms",
+    "updated_at_unix_ms",
+    "status",
+    "status_basis",
+    "status_producer",
+    "status_slots",
+];
+
+/// Translate a wire [`rendezvous_core::proto::StatusContribution`] into
+/// the typed core model. Returns `None` when the producer is unspecified
+/// (there is no slot to write it to).
+fn status_from_proto(
+    proto: &rendezvous_core::proto::StatusContribution,
+) -> Option<rendezvous_core::session_status::StatusContribution> {
+    use rendezvous_core::session_status::{Basis, ProducerId, SessionState, StatusContribution};
+    use rendezvous_core::{SessionStatusBasis, SessionStatusState, StatusProducer};
+
+    let producer = match StatusProducer::try_from(proto.producer).ok()? {
+        StatusProducer::Lifecycle => ProducerId::Lifecycle,
+        StatusProducer::Sink => ProducerId::Sink,
+        StatusProducer::PermissionHook => ProducerId::PermissionHook,
+        StatusProducer::IdleHook => ProducerId::IdleHook,
+        StatusProducer::ProcessMonitor => ProducerId::ProcessMonitor,
+        StatusProducer::Unspecified => return None,
+    };
+    let state = match SessionStatusState::try_from(proto.state)
+        .unwrap_or(SessionStatusState::Unspecified)
+    {
+        SessionStatusState::Active => SessionState::Active,
+        SessionStatusState::Idle => SessionState::Idle,
+        SessionStatusState::WaitingOnUser => SessionState::WaitingOnUser,
+        SessionStatusState::Unspecified => SessionState::Unknown,
+    };
+    let basis = match SessionStatusBasis::try_from(proto.basis)
+        .unwrap_or(SessionStatusBasis::Unspecified)
+    {
+        SessionStatusBasis::PermissionAsk => Basis::PermissionAsk,
+        SessionStatusBasis::InteractiveTurnComplete => Basis::InteractiveTurnComplete,
+        SessionStatusBasis::ProcessHeuristic => Basis::ProcessHeuristic,
+        SessionStatusBasis::Lifecycle => Basis::Lifecycle,
+        SessionStatusBasis::Unspecified => Basis::Unknown,
+    };
+    Some(StatusContribution {
+        state,
+        producer,
+        basis,
+        revision: proto.revision,
+    })
+}
+
+/// Apply one session transition to the local sessions-active register.
+///
+/// Register fields are flat scalars, so each session's entry is stored
+/// as a JSON-encoded string keyed by session id. STARTED/UPDATED merge
+/// the DESCRIPTIVE `details` over the existing entry (reserved keys
+/// stripped), fold the optional `status` contribution into the entry's
+/// per-producer `status_slots` under a revision guard, and project the
+/// backward-compatible `status` / `status_basis` / `status_producer`
+/// fields via the reducer. ENDED removes the key (all slots). Returns the
+/// post-event active count.
+fn apply_session_event(
+    registers: &crate::register::RegisterStore,
+    session_id: &str,
+    kind: rendezvous_core::SessionEventKind,
+    details: serde_json::Map<String, serde_json::Value>,
+    status: Option<rendezvous_core::session_status::StatusContribution>,
+) -> Result<u64, crate::register::RegisterError> {
+    use rendezvous_core::SessionEventKind as Kind;
+    use rendezvous_core::session_status;
+    let doc = registers.local_sessions_active_id();
+    let now = unix_now_ms();
+
+    // One atomic read-modify-write: the closure sees the authoritative
+    // current session map and returns the complete desired map, so no
+    // concurrent transition can interleave between the read and the write
+    // (UPDATE-after-END resurrection and START/END lost-update both
+    // vanish — the closure's `contains_key` / removal share ONE critical
+    // section with any racing transition).
+    let (_changed, count) = registers.mutate_local_fields(&doc, |current| {
+        let mut next = current.clone();
+        match kind {
+            Kind::Ended => {
+                next.remove(session_id);
+            }
+            Kind::Started | Kind::Updated => {
+                let existing = next
+                    .get(session_id)
+                    .and_then(|e| e.as_str())
+                    .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                    .and_then(|v| match v {
+                        serde_json::Value::Object(map) => Some(map),
+                        _ => None,
+                    });
+
+                // UPDATED merges over an EXISTING live session and never
+                // creates one: only STARTED brings a session into being.
+                // Because the absence check now lives in the same held
+                // lock as any concurrent END, a late fire-and-forget
+                // status UPDATE cannot resurrect a phantom entry.
+                if kind == Kind::Updated && existing.is_none() {
+                    // Nothing to update; leave the register untouched.
+                } else {
+                    let mut entry = existing.unwrap_or_default();
+                    // Merge DESCRIPTIVE attributes only; a payload that
+                    // tries to set a daemon-owned key is ignored so it
+                    // cannot forge clocks or status.
+                    for (k, v) in &details {
+                        if DAEMON_OWNED_KEYS.contains(&k.as_str()) {
+                            continue;
+                        }
+                        entry.insert(k.clone(), v.clone());
+                    }
+                    // The daemon owns the clocks: producers cannot be
+                    // trusted to agree on wall time, and consumers judge
+                    // staleness from updated_at.
+                    if kind == Kind::Started || !entry.contains_key("started_at_unix_ms") {
+                        entry.insert("started_at_unix_ms".into(), serde_json::json!(now));
+                    }
+                    entry.insert("updated_at_unix_ms".into(), serde_json::json!(now));
+
+                    // Fold this event's optional status opinion into the
+                    // per-producer slots (revision-guarded), then project
+                    // the reducer output as the backward-compatible flat
+                    // status fields the dashboard reads.
+                    let mut slots = entry
+                        .get("status_slots")
+                        .map(session_status::slots_from_json)
+                        .unwrap_or_default();
+                    if let Some(contribution) = status {
+                        session_status::apply_contribution(&mut slots, contribution);
+                    }
+                    let effective = session_status::effective(&slots);
+                    entry.insert("status_slots".into(), session_status::slots_to_json(&slots));
+                    entry.insert("status".into(), serde_json::json!(effective.state.as_wire()));
+                    entry
+                        .insert("status_basis".into(), serde_json::json!(effective.basis.as_wire()));
+                    entry.insert(
+                        "status_producer".into(),
+                        serde_json::json!(effective.producer.as_slug()),
+                    );
+
+                    next.insert(
+                        session_id.to_string(),
+                        serde_json::Value::String(serde_json::Value::Object(entry).to_string()),
+                    );
+                }
+            }
+            Kind::Unspecified => unreachable!("rejected at the RPC boundary"),
+        }
+        let count = next.len() as u64;
+        Ok((next, count))
+    })?;
+    Ok(count)
+}
+
+/// The register stores each session entry as a JSON-encoded string
+/// (register fields are flat scalars); re-inflate them into real
+/// objects so RPC consumers get one clean nested JSON document.
+fn inflate_session_entries(raw: &serde_json::Value) -> serde_json::Value {
+    let serde_json::Value::Object(map) = raw else {
+        return serde_json::Value::Object(serde_json::Map::new());
+    };
+    let inflated: serde_json::Map<String, serde_json::Value> = map
+        .iter()
+        .map(|(session_id, entry)| {
+            let value = entry
+                .as_str()
+                .and_then(|raw| serde_json::from_str(raw).ok())
+                .unwrap_or_else(|| entry.clone());
+            (session_id.clone(), value)
+        })
+        .collect();
+    serde_json::Value::Object(inflated)
 }
 
 fn parse_optional_json(raw: &str) -> Result<Option<serde_json::Value>, serde_json::Error> {
@@ -504,8 +819,14 @@ mod tests {
             Arc::clone(&identity),
         )
         .expect("mgr");
+        let registers = crate::register::RegisterStore::new(
+            storage.clone(),
+            Arc::clone(&identity),
+        )
+        .expect("registers");
         let sync_service = SyncService::new(
             session_log.clone(),
+            registers.clone(),
             storage.clone(),
             Arc::clone(&identity),
         );
@@ -515,6 +836,7 @@ mod tests {
             identity,
             storage,
             sync_service,
+            registers,
         );
         Harness {
             service,
@@ -537,6 +859,21 @@ mod tests {
         assert_eq!(body.nonce, "abc-123");
         assert_eq!(body.daemon_version, DAEMON_VERSION);
         assert!(body.timestamp_unix_ms > 0);
+    }
+
+    #[tokio::test]
+    async fn status_reports_the_local_node_id() {
+        let h = harness();
+        let body = h
+            .service
+            .status(Request::new(StatusRequest {}))
+            .await
+            .expect("status ok")
+            .into_inner();
+        // The dashboard uses this to tell its own registers (always
+        // fresh) apart from synced peer replicas.
+        assert_eq!(body.node_id, h.service.identity.node_id());
+        assert!(!body.node_id.is_empty());
     }
 
     #[tokio::test]
@@ -565,5 +902,562 @@ mod tests {
             .into_inner();
         assert_eq!(listed.entries.len(), 1);
         assert_eq!(listed.entries[0].message, "hello");
+    }
+
+    #[tokio::test]
+    async fn session_events_drive_the_active_register() {
+        let h = harness();
+
+        // START carries descriptive attrs + the typed LIFECYCLE Active
+        // slot (the wrapper's initial contribution). The daemon projects
+        // status:"active" from that slot.
+        let response = h
+            .service
+            .report_session_event(Request::new(rendezvous_core::ReportSessionEventRequest {
+                session_id: "sess-1".into(),
+                kind: rendezvous_core::SessionEventKind::Started as i32,
+                details_json: r#"{"agent":"claude"}"#.into(),
+                status: Some(proto_status(
+                    rendezvous_core::SessionStatusState::Active,
+                    rendezvous_core::StatusProducer::Lifecycle,
+                    rendezvous_core::SessionStatusBasis::Lifecycle,
+                    1,
+                )),
+            }))
+            .await
+            .expect("start")
+            .into_inner();
+        assert_eq!(response.active_count, 1);
+
+        // UPDATE routes a typed SINK waiting_on_user opinion into the
+        // sink slot; the reducer projects it as the flat status fields.
+        h.service
+            .report_session_event(Request::new(rendezvous_core::ReportSessionEventRequest {
+                session_id: "sess-1".into(),
+                kind: rendezvous_core::SessionEventKind::Updated as i32,
+                details_json: String::new(),
+                status: Some(proto_status(
+                    rendezvous_core::SessionStatusState::WaitingOnUser,
+                    rendezvous_core::StatusProducer::Sink,
+                    rendezvous_core::SessionStatusBasis::PermissionAsk,
+                    2,
+                )),
+            }))
+            .await
+            .expect("update");
+
+        let hosts = h
+            .service
+            .list_active_sessions(Request::new(rendezvous_core::ListActiveSessionsRequest {}))
+            .await
+            .expect("list")
+            .into_inner()
+            .hosts;
+        assert_eq!(hosts.len(), 1);
+        let sessions: serde_json::Value =
+            serde_json::from_str(&hosts[0].sessions_json).expect("sessions json");
+        let entry = &sessions["sess-1"];
+        assert_eq!(entry["agent"], serde_json::json!("claude"));
+        assert_eq!(entry["status"], serde_json::json!("waiting_on_user"));
+        assert_eq!(entry["status_basis"], serde_json::json!("permission_ask"));
+        assert_eq!(entry["status_producer"], serde_json::json!("sink"));
+        assert!(entry["started_at_unix_ms"].is_i64(), "entry: {entry}");
+        assert!(entry["updated_at_unix_ms"].is_i64(), "entry: {entry}");
+
+        // END removes the entry — the register holds only live sessions.
+        let response = h
+            .service
+            .report_session_event(Request::new(rendezvous_core::ReportSessionEventRequest {
+                session_id: "sess-1".into(),
+                kind: rendezvous_core::SessionEventKind::Ended as i32,
+                details_json: String::new(),
+                status: None,
+            }))
+            .await
+            .expect("end")
+            .into_inner();
+        assert_eq!(response.active_count, 0);
+
+        // Ending an unknown session is a harmless no-op.
+        let response = h
+            .service
+            .report_session_event(Request::new(rendezvous_core::ReportSessionEventRequest {
+                session_id: "never-started".into(),
+                kind: rendezvous_core::SessionEventKind::Ended as i32,
+                details_json: String::new(),
+                status: None,
+            }))
+            .await
+            .expect("end unknown")
+            .into_inner();
+        assert_eq!(response.active_count, 0);
+    }
+
+    #[tokio::test]
+    async fn updated_on_missing_session_does_not_resurrect_it() {
+        let h = harness();
+
+        // An UPDATE for a session that was never STARTED (or already
+        // ENDED) must not create an entry — otherwise a late,
+        // fire-and-forget status report could race a completed ENDED
+        // and leave a phantom live session in the register.
+        let response = h
+            .service
+            .report_session_event(Request::new(rendezvous_core::ReportSessionEventRequest {
+                session_id: "ghost".into(),
+                kind: rendezvous_core::SessionEventKind::Updated as i32,
+                details_json: String::new(),
+                status: Some(proto_status(
+                    rendezvous_core::SessionStatusState::WaitingOnUser,
+                    rendezvous_core::StatusProducer::Sink,
+                    rendezvous_core::SessionStatusBasis::PermissionAsk,
+                    1,
+                )),
+            }))
+            .await
+            .expect("update missing")
+            .into_inner();
+        assert_eq!(response.active_count, 0, "UPDATE must not create a session");
+
+        let hosts = h
+            .service
+            .list_active_sessions(Request::new(rendezvous_core::ListActiveSessionsRequest {}))
+            .await
+            .expect("list")
+            .into_inner()
+            .hosts;
+        let empty = hosts.is_empty()
+            || serde_json::from_str::<serde_json::Value>(&hosts[0].sessions_json)
+                .expect("sessions json")
+                .as_object()
+                .is_some_and(serde_json::Map::is_empty);
+        assert!(empty, "register must hold no sessions: {hosts:?}");
+    }
+
+    /// Build a bare `RegisterStore` for the sync barrier tests: they
+    /// exercise `apply_session_event` directly (the daemon runs it in
+    /// `spawn_blocking`) so they need no gRPC service.
+    fn register_store() -> (crate::register::RegisterStore, TempDir) {
+        let tmp = TempDir::new().expect("tempdir");
+        let storage = Storage::open(tmp.path().join("registers.redb")).expect("storage");
+        let identity = Arc::new(NodeIdentity::from_seed([7u8; 32]));
+        let store = crate::register::RegisterStore::new(storage, identity).expect("store");
+        (store, tmp)
+    }
+
+    fn proto_status(
+        state: rendezvous_core::SessionStatusState,
+        producer: rendezvous_core::StatusProducer,
+        basis: rendezvous_core::SessionStatusBasis,
+        revision: i64,
+    ) -> rendezvous_core::proto::StatusContribution {
+        rendezvous_core::proto::StatusContribution {
+            state: state as i32,
+            producer: producer as i32,
+            basis: basis as i32,
+            revision,
+        }
+    }
+
+    fn details(pairs: &[(&str, &str)]) -> serde_json::Map<String, serde_json::Value> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), serde_json::json!(v)))
+            .collect()
+    }
+
+    fn session_present(store: &crate::register::RegisterStore, id: &str) -> bool {
+        store
+            .deep_value(&store.local_sessions_active_id())
+            .expect("read")
+            .and_then(|v| v.as_object().map(|m| m.contains_key(id)))
+            .unwrap_or(false)
+    }
+
+    // Barrier: START-A committed, then UPDATE-A and END-A released
+    // simultaneously. Under the atomic primitive the absence check and
+    // the removal share one held lock, so neither interleaving can
+    // resurrect A. Repeated to prove causality, not luck; each round
+    // uses a fresh id so leftover state never masks a resurrection.
+    #[test]
+    fn concurrent_update_and_end_never_resurrect() {
+        use rendezvous_core::SessionEventKind as Kind;
+        use std::sync::Barrier;
+        let (store, _tmp) = register_store();
+        for round in 0..100 {
+            let id = format!("A-{round}");
+            apply_session_event(&store, &id, Kind::Started, details(&[("agent", "claude")]), None)
+                .expect("start A");
+
+            let barrier = Arc::new(Barrier::new(2));
+            let s1 = store.clone();
+            let b1 = Arc::clone(&barrier);
+            let id1 = id.clone();
+            let upd = std::thread::spawn(move || {
+                b1.wait();
+                let _ = apply_session_event(
+                    &s1,
+                    &id1,
+                    Kind::Updated,
+                    details(&[("model", "opus")]),
+                    None,
+                );
+            });
+            let s2 = store.clone();
+            let b2 = Arc::clone(&barrier);
+            let id2 = id.clone();
+            let end = std::thread::spawn(move || {
+                b2.wait();
+                let _ = apply_session_event(&s2, &id2, Kind::Ended, serde_json::Map::new(), None);
+            });
+            upd.join().expect("upd join");
+            end.join().expect("end join");
+
+            assert!(
+                !session_present(&store, &id),
+                "UPDATE racing END resurrected session {id}",
+            );
+        }
+    }
+
+    // Barrier: START-A committed, then END-A and START-B released
+    // simultaneously. END recomputes the map from the live register, so
+    // START-B is never lost and A is always removed.
+    #[test]
+    fn concurrent_end_and_start_new_session_no_lost_update() {
+        use rendezvous_core::SessionEventKind as Kind;
+        use std::sync::Barrier;
+        let (store, _tmp) = register_store();
+        for round in 0..100 {
+            let a = format!("A-{round}");
+            let b = format!("B-{round}");
+            apply_session_event(&store, &a, Kind::Started, details(&[("agent", "a")]), None)
+                .expect("start A");
+
+            let barrier = Arc::new(Barrier::new(2));
+            let s1 = store.clone();
+            let b1 = Arc::clone(&barrier);
+            let a1 = a.clone();
+            let end = std::thread::spawn(move || {
+                b1.wait();
+                let _ = apply_session_event(&s1, &a1, Kind::Ended, serde_json::Map::new(), None);
+            });
+            let s2 = store.clone();
+            let b2 = Arc::clone(&barrier);
+            let b_start = b.clone();
+            let start_b = std::thread::spawn(move || {
+                b2.wait();
+                let _ = apply_session_event(
+                    &s2,
+                    &b_start,
+                    Kind::Started,
+                    details(&[("agent", "b")]),
+                    None,
+                );
+            });
+            end.join().expect("end join");
+            start_b.join().expect("start B join");
+
+            assert!(session_present(&store, &b), "START-B was lost to END-A");
+            assert!(!session_present(&store, &a), "END-A did not remove A");
+        }
+    }
+
+    fn core_status(
+        state: rendezvous_core::session_status::SessionState,
+        producer: rendezvous_core::session_status::ProducerId,
+        basis: rendezvous_core::session_status::Basis,
+        revision: i64,
+    ) -> rendezvous_core::session_status::StatusContribution {
+        rendezvous_core::session_status::StatusContribution {
+            state,
+            producer,
+            basis,
+            revision,
+        }
+    }
+
+    /// Read a projected field out of a session's stored entry.
+    fn entry_field(
+        store: &crate::register::RegisterStore,
+        id: &str,
+        field: &str,
+    ) -> Option<serde_json::Value> {
+        store
+            .deep_value(&store.local_sessions_active_id())
+            .ok()
+            .flatten()
+            .and_then(|v| v.get(id).and_then(|e| e.as_str()).map(str::to_string))
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+            .and_then(|entry| entry.get(field).cloned())
+    }
+
+    // Finding 2: a late, reordered same-producer update carries the
+    // LOWER revision and is rejected, so the causally-latest opinion
+    // wins. Repeated ×50 to prove it is causal, not lucky.
+    #[test]
+    fn reordered_same_producer_updates_are_causal() {
+        use rendezvous_core::SessionEventKind as Kind;
+        use rendezvous_core::session_status::{Basis, ProducerId, SessionState};
+        let (store, _tmp) = register_store();
+        for round in 0..50 {
+            let id = format!("s-{round}");
+            apply_session_event(
+                &store,
+                &id,
+                Kind::Started,
+                details(&[("agent", "claude")]),
+                Some(core_status(
+                    SessionState::Active,
+                    ProducerId::Lifecycle,
+                    Basis::Lifecycle,
+                    1,
+                )),
+            )
+            .expect("start");
+            // The sink emits waiting_on_user then active in program order.
+            apply_session_event(
+                &store,
+                &id,
+                Kind::Updated,
+                serde_json::Map::new(),
+                Some(core_status(
+                    SessionState::WaitingOnUser,
+                    ProducerId::Sink,
+                    Basis::PermissionAsk,
+                    10,
+                )),
+            )
+            .expect("waiting");
+            apply_session_event(
+                &store,
+                &id,
+                Kind::Updated,
+                serde_json::Map::new(),
+                Some(core_status(SessionState::Active, ProducerId::Sink, Basis::Lifecycle, 20)),
+            )
+            .expect("active");
+            // The late detached task re-delivers the stale waiting@10.
+            apply_session_event(
+                &store,
+                &id,
+                Kind::Updated,
+                serde_json::Map::new(),
+                Some(core_status(
+                    SessionState::WaitingOnUser,
+                    ProducerId::Sink,
+                    Basis::PermissionAsk,
+                    10,
+                )),
+            )
+            .expect("late waiting");
+
+            assert_eq!(
+                entry_field(&store, &id, "status"),
+                Some(serde_json::json!("active")),
+                "reordered stale waiting_on_user must not win (round {round})",
+            );
+        }
+    }
+
+    // Finding 4: a weaker idle from a DIFFERENT producer, arriving with a
+    // higher revision, must not lower a live waiting_on_user. Revisions
+    // are incomparable across producers; precedence decides.
+    #[test]
+    fn cross_producer_precedence_keeps_strongest() {
+        use rendezvous_core::SessionEventKind as Kind;
+        use rendezvous_core::session_status::{Basis, ProducerId, SessionState};
+        let (store, _tmp) = register_store();
+        apply_session_event(
+            &store,
+            "s",
+            Kind::Started,
+            details(&[("agent", "claude")]),
+            Some(core_status(SessionState::Active, ProducerId::Lifecycle, Basis::Lifecycle, 1)),
+        )
+        .expect("start");
+        apply_session_event(
+            &store,
+            "s",
+            Kind::Updated,
+            serde_json::Map::new(),
+            Some(core_status(
+                SessionState::WaitingOnUser,
+                ProducerId::Sink,
+                Basis::PermissionAsk,
+                10,
+            )),
+        )
+        .expect("sink waiting");
+        // Idle hook fires later (higher revision) but is a weaker state.
+        apply_session_event(
+            &store,
+            "s",
+            Kind::Updated,
+            serde_json::Map::new(),
+            Some(core_status(
+                SessionState::Idle,
+                ProducerId::IdleHook,
+                Basis::InteractiveTurnComplete,
+                999,
+            )),
+        )
+        .expect("idle hook");
+
+        assert_eq!(
+            entry_field(&store, "s", "status"),
+            Some(serde_json::json!("waiting_on_user")),
+        );
+        assert_eq!(
+            entry_field(&store, "s", "status_producer"),
+            Some(serde_json::json!("sink")),
+        );
+    }
+
+    // Phase 4: the hook (PermissionHook) and the fallback sink both
+    // report waiting_on_user for one session. Two slots are recorded and
+    // the effective status is a single waiting_on_user — redundant, never
+    // conflicting.
+    #[test]
+    fn two_producers_waiting_records_both_slots() {
+        use rendezvous_core::SessionEventKind as Kind;
+        use rendezvous_core::session_status::{self, Basis, ProducerId, SessionState};
+        let (store, _tmp) = register_store();
+        apply_session_event(
+            &store,
+            "s",
+            Kind::Started,
+            details(&[("agent", "claude")]),
+            Some(core_status(SessionState::Active, ProducerId::Lifecycle, Basis::Lifecycle, 1)),
+        )
+        .expect("start");
+        apply_session_event(
+            &store,
+            "s",
+            Kind::Updated,
+            serde_json::Map::new(),
+            Some(core_status(
+                SessionState::WaitingOnUser,
+                ProducerId::PermissionHook,
+                Basis::PermissionAsk,
+                10,
+            )),
+        )
+        .expect("hook waiting");
+        apply_session_event(
+            &store,
+            "s",
+            Kind::Updated,
+            serde_json::Map::new(),
+            Some(core_status(
+                SessionState::WaitingOnUser,
+                ProducerId::Sink,
+                Basis::PermissionAsk,
+                11,
+            )),
+        )
+        .expect("sink waiting");
+
+        assert_eq!(
+            entry_field(&store, "s", "status"),
+            Some(serde_json::json!("waiting_on_user")),
+        );
+        let slots = entry_field(&store, "s", "status_slots").expect("slots present");
+        let parsed = session_status::slots_from_json(&slots);
+        assert!(parsed.contains_key(&ProducerId::PermissionHook));
+        assert!(parsed.contains_key(&ProducerId::Sink));
+        assert!(parsed.contains_key(&ProducerId::Lifecycle));
+    }
+
+    // The daemon owns clocks + status: a payload that tries to set
+    // reserved keys via details_json is stripped before merge.
+    #[test]
+    fn reserved_keys_in_details_are_ignored() {
+        use rendezvous_core::SessionEventKind as Kind;
+        use rendezvous_core::session_status::{Basis, ProducerId, SessionState};
+        let (store, _tmp) = register_store();
+        let mut forged = serde_json::Map::new();
+        forged.insert("agent".into(), serde_json::json!("claude"));
+        forged.insert("started_at_unix_ms".into(), serde_json::json!(999));
+        forged.insert("status".into(), serde_json::json!("hacked"));
+        apply_session_event(
+            &store,
+            "s",
+            Kind::Started,
+            forged,
+            Some(core_status(SessionState::Active, ProducerId::Lifecycle, Basis::Lifecycle, 1)),
+        )
+        .expect("start");
+
+        assert_eq!(entry_field(&store, "s", "agent"), Some(serde_json::json!("claude")));
+        assert_ne!(
+            entry_field(&store, "s", "started_at_unix_ms"),
+            Some(serde_json::json!(999)),
+            "producer must not forge the daemon-owned clock",
+        );
+        assert_eq!(
+            entry_field(&store, "s", "status"),
+            Some(serde_json::json!("active")),
+            "producer must not forge status; reducer is authoritative",
+        );
+    }
+
+    // STARTED with the LIFECYCLE Active slot projects the backward-
+    // compatible status:"active" the dashboard reads.
+    #[test]
+    fn started_projects_active_from_lifecycle_slot() {
+        use rendezvous_core::SessionEventKind as Kind;
+        use rendezvous_core::session_status::{Basis, ProducerId, SessionState};
+        let (store, _tmp) = register_store();
+        apply_session_event(
+            &store,
+            "s",
+            Kind::Started,
+            details(&[("agent", "claude")]),
+            Some(core_status(SessionState::Active, ProducerId::Lifecycle, Basis::Lifecycle, 1)),
+        )
+        .expect("start");
+        assert_eq!(entry_field(&store, "s", "status"), Some(serde_json::json!("active")));
+        assert_eq!(
+            entry_field(&store, "s", "status_producer"),
+            Some(serde_json::json!("lifecycle")),
+        );
+    }
+
+    #[tokio::test]
+    async fn session_event_validation_rejects_bad_input() {
+        let h = harness();
+        let empty_id = h
+            .service
+            .report_session_event(Request::new(rendezvous_core::ReportSessionEventRequest {
+                session_id: String::new(),
+                kind: rendezvous_core::SessionEventKind::Started as i32,
+                details_json: String::new(),
+                status: None,
+            }))
+            .await;
+        assert!(empty_id.is_err());
+
+        let bad_details = h
+            .service
+            .report_session_event(Request::new(rendezvous_core::ReportSessionEventRequest {
+                session_id: "sess-2".into(),
+                kind: rendezvous_core::SessionEventKind::Started as i32,
+                details_json: "[1,2,3]".into(),
+                status: None,
+            }))
+            .await;
+        assert!(bad_details.is_err(), "non-object details must be rejected");
+
+        let unspecified = h
+            .service
+            .report_session_event(Request::new(rendezvous_core::ReportSessionEventRequest {
+                session_id: "sess-3".into(),
+                kind: rendezvous_core::SessionEventKind::Unspecified as i32,
+                details_json: String::new(),
+                status: None,
+            }))
+            .await;
+        assert!(unspecified.is_err());
     }
 }

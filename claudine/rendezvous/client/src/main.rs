@@ -172,8 +172,11 @@ async fn run() -> Result<(), ClientError> {
         Command::Status => {
             let response = client.status(StatusRequest {}).await?.into_inner();
             println!(
-                "status daemon_version={} uptime_seconds={} started_at_unix_ms={}",
-                response.daemon_version, response.uptime_seconds, response.started_at_unix_ms,
+                "status daemon_version={} uptime_seconds={} started_at_unix_ms={} node_id={}",
+                response.daemon_version,
+                response.uptime_seconds,
+                response.started_at_unix_ms,
+                response.node_id,
             );
         }
         Command::AppendEntry {
@@ -288,12 +291,13 @@ async fn run() -> Result<(), ClientError> {
                 .into_inner();
             for peer in response.peers {
                 println!(
-                    "node_id={} socket_addr={} state={} source={} last_seen_unix_ms={} last_error={}",
+                    "node_id={} socket_addr={} state={} source={} last_seen_unix_ms={} last_synced_unix_ms={} last_error={}",
                     peer.node_id,
                     peer.socket_addr,
                     peer.state,
                     peer.source,
                     peer.last_seen_unix_ms,
+                    peer.last_synced_unix_ms,
                     peer.last_error,
                 );
             }

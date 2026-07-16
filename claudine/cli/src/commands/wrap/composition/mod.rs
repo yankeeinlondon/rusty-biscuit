@@ -6,10 +6,8 @@
 //! effective (composed) frontmatter, structured streaming, and inline
 //! closure.
 
-use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::status::{Status, StatusState};
@@ -24,12 +22,11 @@ use claudine::composition::lifecycle_executor::{
 };
 use claudine::composition::{
     AgentResolutionState, CompositionClosurePlan, CompositionError, CompositionExecutionRequest,
-    CompositionMode, InlineClosurePlan, ModelResolutionReason, ResolvedExecutionTarget,
-    SelectionReason, SessionInteractivitySource, agent_state_breakdown, build_installed_snapshot,
-    build_picker_plan, classify_agent_resolution, invalid_agent_message,
-    resolve_target_non_tty_with_catalog,
+    CompositionMode, InlineClosurePlan, IterationSummarySignals, ModelResolutionReason,
+    ResolvedExecutionTarget, SelectionReason, SessionInteractivitySource, agent_state_breakdown,
+    build_installed_snapshot, build_picker_plan, classify_agent_resolution,
+    invalid_agent_message, resolve_target_non_tty_with_catalog, route_blocked_finalize,
 };
-use claudine::config::claudine_config::ProviderModelOverride;
 use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use claudine::stream::stderr::Verbosity;
 use color_eyre::eyre::{Result, eyre};
@@ -48,11 +45,19 @@ use super::exec::switch_process_cwd;
 use crate::log;
 
 pub(crate) mod dry_run;
+pub(crate) mod launch;
+mod preflight;
 pub(crate) mod prep_context;
+mod provider_args;
+pub(crate) mod runner;
+pub(crate) mod selection;
 pub(crate) mod target;
 pub(crate) mod timeouts;
 
 pub(crate) use prep_context::CompositionPrepContext;
+pub(crate) use selection::{
+    SelectionConfig, load_selection_config, load_selection_config_for_repo,
+};
 pub(crate) use target::{
     agent_prompt_message, composition_dispatch_context, eagerly_resolve_target,
     install_agent_env_for_composition, refresh_for_model_validation, resolve_execution_target,
@@ -65,316 +70,16 @@ pub(crate) use timeouts::{
 #[cfg(test)]
 pub(crate) use target::{picker_scope_for_state, resolve_live_target_with_tty};
 
-/// W0 instrumentation counter: increments every time
-/// [`select_launch_workspace`] falls back to the legacy
-/// `env::resolve_launch_workspace_context` call.
-///
-/// The fallback path performs a fresh `detect_git` + `detect_repo`
-/// filesystem scan, which is exactly the redundancy W0 was designed to
-/// remove. The counter is process-global so a regression test can
-/// observe it across whatever spawn / fixture machinery the test uses
-/// without having to thread an injectable counter through the entire
-/// composition request type. Tests reset it via
-/// [`reset_launch_workspace_fallbacks_for_tests`].
-static LAUNCH_WORKSPACE_FALLBACK_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-/// Choose the launch workspace context for the executor.
-///
-/// Returns the precomputed `prep` value when present (the W0 hot path).
-/// Falls back to the legacy `env::resolve_launch_workspace_context` walk
-/// only for library callers that don't thread a `CompositionPrepContext`
-/// (none in the production CLI).
-///
-/// The fallback branch increments [`LAUNCH_WORKSPACE_FALLBACK_COUNT`] so
-/// regression tests can prove the production hot path stays on the
-/// no-walk branch even after future refactors.
-pub(crate) fn select_launch_workspace(
-    prep: Option<&env::LaunchWorkspaceContext>,
-    launch_cwd: &Path,
-    source_repo_root: Option<&Path>,
-) -> env::LaunchWorkspaceContext {
-    if let Some(p) = prep {
-        return p.clone();
-    }
-    LAUNCH_WORKSPACE_FALLBACK_COUNT.fetch_add(1, Ordering::SeqCst);
-    env::resolve_launch_workspace_context(launch_cwd, source_repo_root)
-}
-
-/// Test-only: snapshot of the fallback counter.
 #[cfg(test)]
-pub(crate) fn launch_workspace_fallback_count_for_tests() -> usize {
-    LAUNCH_WORKSPACE_FALLBACK_COUNT.load(Ordering::SeqCst)
-}
-
-/// Test-only: reset the fallback counter so an isolated test can
-/// observe a clean baseline.
-#[cfg(test)]
-pub(crate) fn reset_launch_workspace_fallbacks_for_tests() {
-    LAUNCH_WORKSPACE_FALLBACK_COUNT.store(0, Ordering::SeqCst);
-}
-
-/// Enforce the `--repo` legacy hard-fail contract when prep-time
-/// launch-context detection failed.
-///
-/// `CompositionPrepContext` runs a single shared `sniff::detect_with_plan`
-/// scan and falls back to a default `LaunchContext` on failure so best-
-/// effort consumers can keep going. `--repo` is not a best-effort
-/// consumer: it requires real repo detection. When the prep scan failed
-/// **and** `--repo` is set, surface the captured sniff error as a hard
-/// run abort, matching the behavior of the legacy non-prep path that
-/// called `LaunchContext::from_cwd` directly.
-fn enforce_repo_launch_detection(
-    repo: bool,
-    prep_launch_detection_error: Option<&str>,
-) -> Result<()> {
-    if repo && let Some(error) = prep_launch_detection_error {
-        return Err(eyre!(
-            "--repo requires startup repo detection, but launch-context detection failed: {error}"
-        ));
-    }
-    Ok(())
-}
-
-/// Outcome of running the pre-flight `blocked` + `finalize` lifecycle events.
-///
-/// `Control` carries the blocked stack's flow-control action (if any) for the
-/// caller to dispatch. `EvaluationError` carries a typed
-/// [`CompositionError::LifecycleEvaluationError`] raised by the `blocked` or
-/// `finalize` stack itself — it takes precedence over the original pre-flight
-/// failure because a lifecycle expression crash is the actionable cause.
-#[derive(Debug)]
-enum PreflightBlockedOutcome {
-    /// No evaluation error; the blocked stack's flow-control action (if any).
-    Control(Option<StackControl>),
-    /// A late-binding evaluation error raised in `blocked` (routed through
-    /// failure + finalize with the evaluation error as `err`) or in `finalize`
-    /// (surfaced without re-entering finalize).
-    EvaluationError(CompositionError),
-}
-
-/// Run the `blocked` and `finalize` lifecycle events (top-level
-/// communication **and** typed stack) for a composition preflight failure.
-///
-/// The spec requires a blocked iteration to reach `blocked` then `finalize`,
-/// each firing both its top-level communication surface and its typed stack
-/// (`spec.md:436`, `spec.md:650`, `spec.md:652`). Pre-flight failures
-/// (harness-plan parse, shell-approval denial, dry-run pre-check) used to
-/// call [`LifecycleRunGuard::emit_blocked_or_failure`], which only fires the
-/// legacy top-level subset (`stderr`/`message`/`notify`/audio) and skips both
-/// the typed stacks and `finalize`. That left documents relying on
-/// `blocked.stack` / `finalize.stack` side effects (e.g.
-/// `{append_line: ["events.log", "blocked"]}`) without either marker.
-///
-/// This helper mirrors the [`StackExecutionContext`] pattern the
-/// `initialize` event uses (see `init_ctx` in
-/// [`execute_composition_request_inner_with_guard`]): the context borrows
-/// the *local* `emitter`/`settings`/etc. — not the guard — so
-/// [`LifecycleRunGuard::execute_event`] can take `&mut guard` without a
-/// borrow conflict. `execute_event` records the emission and runs the
-/// top-level + stack in one call, and sets `terminal_emitted = true` so the
-/// guard's `Drop` safety-net cannot double-emit.
-///
-/// `err_info` should faithfully describe which preflight failed
-/// (e.g. `from_action_failure("harness_plan", msg)`) so a user-authored
-/// `blocked.stack` can reference `{{ err.msg }}` meaningfully.
-///
-/// A late-binding evaluation error raised by the `blocked` or `finalize`
-/// stack (a crashed `when:` guard, an unknown root under DM2 strict mode)
-/// takes precedence over the original pre-flight failure: it is routed
-/// through `failure` + `finalize` carrying the evaluation error as `err`
-/// (when raised by `blocked`) and returned as a typed
-/// [`CompositionError::LifecycleEvaluationError`] so the caller halts
-/// non-zero on the actionable cause. A raise inside `finalize` itself is
-/// surfaced without re-entering `finalize` (the re-entry guard from
-/// Decision #3 / `handle_terminal_evaluation_error`).
-/// Decide which evaluation error surfaces after a pre-flight `blocked` catch
-/// ran its `failure`/`finalize` events, keeping the "already emitted to stderr"
-/// bookkeeping correct (Decision #2).
-///
-/// Mirrors `harness_orch::loop_control::surface_catch_evaluation_error` but
-/// returns a [`CompositionError`] (the pre-flight outcome carries one, not a
-/// `Report`): the original `blocked` raise was already emitted as `early`; if a
-/// catch event raised a newer crash, that one is emitted now (no further
-/// lifecycle events fire) and marked emitted, else `early` surfaces unchanged.
-fn surface_preflight_catch_error(
-    source_path: &Path,
-    failure_outcome: Option<&LifecycleEventOutcome>,
-    finalize_outcome: Option<&LifecycleEventOutcome>,
-    early: CompositionError,
-    term: &Terminal,
-) -> CompositionError {
-    if let Some(fin_info) = finalize_outcome.and_then(|o| o.evaluation_error.as_ref()) {
-        crate::output::error_walker::emit_lifecycle_evaluation_error_early(
-            source_path,
-            "finalize",
-            fin_info,
-            term,
-        )
-    } else if let Some(fail_info) = failure_outcome.and_then(|o| o.evaluation_error.as_ref()) {
-        crate::output::error_walker::emit_lifecycle_evaluation_error_early(
-            source_path,
-            "failure",
-            fail_info,
-            term,
-        )
-    } else {
-        early
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn emit_preflight_blocked_and_finalize(
-    guard: &mut LifecycleRunGuard<'_>,
-    effect_engine: &EffectEngine,
-    emitter: &dyn LifecycleEmitter,
-    settings: &claudine::events::GlobalSettings,
-    messaging: &claudine::messaging::RuntimeMessagingSettings,
-    term: &Terminal,
-    source_path: &Path,
-    repo_root: Option<&Path>,
-    base_dir: Option<&Path>,
-    ctx_base_dir: Option<&Path>,
-    prepared_context: Option<&darkmatter::markdown::compose::ComposeContext>,
-    frontmatter: &serde_json::Map<String, serde_json::Value>,
-    document_start: std::time::Instant,
-    err_info: claudine::composition::LifecycleErrorInfo,
-) -> PreflightBlockedOutcome {
-    let timing = claudine::composition::LifecycleTiming::from_instants(
-        document_start,
-        None,
-        std::time::Instant::now(),
-    );
-    // `current.ctx.*` follows the launch area like event-time `ctx.*` capture.
-    let current_anchor = ctx_base_dir.or(base_dir).unwrap_or(source_path);
-    let current =
-        claudine::composition::LifecycleCurrent::capture_at_event(current_anchor);
-
-    let blocked_ctx = StackExecutionContext {
-        signal: LifecycleSignal::Blocked,
-        frontmatter,
-        // Single pre-flight `blocked` event — no later event shares this state.
-        live_frontmatter: None,
-        err: Some(&err_info),
-        timing: Some(&timing),
-        current: Some(&current),
-        base_dir,
-        ctx_base_dir,
-        prepared_context,
-        effect_engine,
-        shell_runner: &SystemShellRunner,
-        emitter,
-        term,
-        source_path,
-        repo_root,
-        messaging,
-        settings,
-    };
-    let blocked_outcome = guard.execute_event(LifecycleSignal::Blocked, &blocked_ctx);
-
-    // A late-binding evaluation error on `blocked` (a crashed `when:` guard or
-    // interpolation) routes through `failure` + `finalize` carrying the
-    // evaluation error as `err`, then surfaces the typed run failure
-    // (Decision #5). `blocked` already took the terminal slot, so we
-    // redesignate it to `Failure` (mirroring the `error()`-downgrade path in
-    // `execute_terminal_event`) and run the failure stack directly via
-    // `run_event_stack` (which bypasses the already-recorded slot). The
-    // subsequent `execute_event(Finalize)` still works because
-    // `terminal_emitted` remains true and `finalize_emitted` is unset.
-    if let Some(eval_info) = blocked_outcome.evaluation_error.as_ref() {
-        // Surface the original `blocked` crash to stderr before the
-        // `failure`/`finalize` catch events fire (Decision #2).
-        let early = crate::output::error_walker::emit_lifecycle_evaluation_error_early(
-            source_path,
-            "blocked",
-            eval_info,
-            term,
-        );
-        guard.redesignate_terminal_to_failure();
-        let failure_ctx = blocked_ctx.with_signal(LifecycleSignal::Failure);
-        let failure_ctx = failure_ctx.with_error(eval_info);
-        let failure_outcome = guard.run_event_stack(LifecycleSignal::Failure, &failure_ctx);
-        // If `failure` raised, thread its error (not the original) into
-        // finalize so a `finalize.stack` can branch on the failure raise.
-        let active_err = failure_outcome
-            .evaluation_error
-            .as_ref()
-            .unwrap_or(eval_info);
-        let finalize_ctx = blocked_ctx.with_signal(LifecycleSignal::Finalize);
-        let finalize_ctx = finalize_ctx.with_error(active_err);
-        let finalize_outcome = guard.execute_event(LifecycleSignal::Finalize, &finalize_ctx);
-        return PreflightBlockedOutcome::EvaluationError(surface_preflight_catch_error(
-            source_path,
-            Some(&failure_outcome),
-            Some(&finalize_outcome),
-            early,
-            term,
-        ));
-    }
-
-    // No evaluation error on `blocked`: run `finalize` with the original
-    // pre-flight `err`. `with_signal` borrows `blocked_ctx` by shared
-    // reference, which does not conflict with the `&mut guard` `execute_event`
-    // requires because the guard and the context borrow from disjoint locals
-    // (emitter/settings/... passed in as arguments, not pulled out of the
-    // guard).
-    let finalize_ctx = blocked_ctx.with_signal(LifecycleSignal::Finalize);
-    let finalize_outcome = guard.execute_event(LifecycleSignal::Finalize, &finalize_ctx);
-
-    // A raise inside `finalize` itself halts without re-entering `finalize`
-    // (the re-entry guard). Surface it to stderr at the point of error.
-    if let Some(eval_info) = finalize_outcome.evaluation_error.as_ref() {
-        let early = crate::output::error_walker::emit_lifecycle_evaluation_error_early(
-            source_path,
-            "finalize",
-            eval_info,
-            term,
-        );
-        return PreflightBlockedOutcome::EvaluationError(early);
-    }
-
-    // Surface the blocked stack's flow-control action (if any) so the caller
-    // can dispatch it. At the compose pre-flight layer the provider has not
-    // launched and there is no run-loop to re-enter, so the caller maps
-    // `resume` → `ResumeWithoutSession` and `retry`/`requeue`/`proxy` → a
-    // typed setup-phase-deferred error rather than silently dropping the
-    // control.
-    PreflightBlockedOutcome::Control(blocked_outcome.control)
-}
-
-/// Translate a compose pre-flight `blocked` stack's surfaced flow-control action
-/// into the error that should replace the generic blocked error.
-///
-/// At this layer the provider has not launched and there is no run-loop to
-/// re-enter, so `resume` reports `ResumeWithoutSession` and `retry`/`requeue`/
-/// `proxy` report the typed setup-phase-deferred error (a `blocked`-proxy is
-/// decided mid-pre-flight, so it needs the same re-entry a `retry` would).
-/// Returns `None` for `stop`/`error`/no-control, leaving the original blocked
-/// error in place.
-fn preflight_blocked_control_error(
-    control: Option<StackControl>,
-    source_path: &Path,
-) -> Option<CompositionError> {
-    match control? {
-        StackControl::Resume { .. } => Some(CompositionError::LifecycleResumeWithoutSession {
-            source_path: source_path.to_path_buf(),
-        }),
-        StackControl::Retry { .. } => Some(setup_phase_deferred("blocked", "retry", source_path)),
-        StackControl::Defer { .. } => Some(CompositionError::LifecycleDeferNotImplemented {
-            source_path: source_path.to_path_buf(),
-        }),
-        StackControl::Proxy { .. } => Some(setup_phase_deferred("blocked", "proxy", source_path)),
-        StackControl::Stop | StackControl::Skip | StackControl::Error { .. } => None,
-    }
-}
-
-/// Build the typed setup-phase-deferred-recovery error.
-fn setup_phase_deferred(event: &str, action: &str, source_path: &Path) -> CompositionError {
-    CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
-        source_path: source_path.to_path_buf(),
-        event: event.to_string(),
-        action: action.to_string(),
-    }
-}
+pub(crate) use launch::{
+    launch_workspace_fallback_count_for_tests, reset_launch_workspace_fallbacks_for_tests,
+};
+pub(crate) use launch::select_launch_workspace;
+use launch::enforce_repo_launch_detection;
+use preflight::{
+    PreflightBlockedOutcome, emit_preflight_blocked_and_finalize, preflight_blocked_control_error,
+    setup_phase_deferred, surface_preflight_catch_error,
+};
 
 /// Result of executing a single composition step through the wrapper pipeline.
 pub(crate) struct SingleCompositionOutcome {
@@ -397,126 +102,6 @@ pub(crate) struct SingleCompositionOutcome {
     /// Used by the loop engine to apply `fail_fast` semantics and to sequence
     /// the post-`finalize` loop gate.
     pub terminal_signal: Option<LifecycleSignal>,
-}
-
-/// Iteration-level signals lifted from the per-iteration
-/// [`claudine::stream::summary::StreamExecutionSummary`] so the
-/// `compose --loop` orchestrator can drive rate-limit-aware iteration and
-/// build [`claudine::composition::CompositionError::LoopIterationFailed`]
-/// with an honest cause.
-#[derive(Debug, Default, Clone)]
-pub(crate) struct IterationSummarySignals {
-    /// Rate-limit trailer observed during the iteration. May be present on
-    /// both successful and failed iterations.
-    pub rate_limit: Option<claudine::stream::summary::RateLimitInfo>,
-    /// Structured `error_kind` (e.g. `step_timeout`, `wall_clock_timeout`,
-    /// `usage_limit_reached`). Mirrors the JSONL session_end row's
-    /// `extra.exit_reason`.
-    pub exit_reason: Option<String>,
-    /// Human-readable failure detail from the iteration's summary, when
-    /// present (e.g. "no stream activity for 30m; terminating due to
-    /// step_timeout").
-    pub error_message: Option<String>,
-    /// Resolved provider identifier (e.g. `"k2p6"`) from the iteration's
-    /// summary, when known. Carried into [`CompositionError::LoopRateLimited`]
-    /// for honest attribution.
-    pub provider_id: Option<String>,
-    /// Resolved model identifier (e.g. `"kimi-for-coding"`) from the
-    /// iteration's summary, when known.
-    pub model_id: Option<String>,
-}
-
-impl IterationSummarySignals {
-    /// Extract the loop-relevant fields from a fully-built
-    /// [`claudine::stream::summary::StreamExecutionSummary`].
-    pub fn from_summary(summary: &claudine::stream::summary::StreamExecutionSummary) -> Self {
-        Self {
-            rate_limit: summary.rate_limit.clone(),
-            exit_reason: summary.error_kind.clone(),
-            error_message: summary.error_message.clone(),
-            // Use the Provider enum's display form (e.g. "opencode"). The
-            // finer-grained AI-SDK provider (e.g. "k2p6") typically lives
-            // inside `rate_limit.message`.
-            provider_id: Some(summary.provider.to_string()),
-            model_id: summary.model.clone(),
-        }
-    }
-
-    /// Migration bridge (E5): prefer the signal-engine projection of the
-    /// run's rate-limit posture over the parser-computed value, field by
-    /// field. Projected fields win when present; parser fields fill the
-    /// gaps — notably the parser's rendered `message`, which the
-    /// projection deliberately does not synthesize. The parser computation
-    /// stays authoritative for lib/mid-stream consumers this wave; full
-    /// retirement waits until the engine path has soaked.
-    pub fn apply_projected_rate_limit(
-        &mut self,
-        projected: Option<claudine::stream::summary::RateLimitInfo>,
-    ) {
-        let Some(projected) = projected else {
-            return;
-        };
-        let parser = self.rate_limit.take().unwrap_or_default();
-        self.rate_limit = Some(claudine::stream::summary::RateLimitInfo {
-            is_throttled: projected.is_throttled.or(parser.is_throttled),
-            retry_after_ms: projected.retry_after_ms.or(parser.retry_after_ms),
-            message: projected.message.or(parser.message),
-            reset_at: projected.reset_at.or(parser.reset_at),
-        });
-    }
-}
-
-/// Render the one-line execution header for a composition run.
-///
-/// Shared by the up-front emit in `compose` / `inline-compose` (which
-/// resolves the agent eagerly so the line appears immediately) and the
-/// in-pipeline emit for callers that did not pre-render it.
-///
-/// Returns `false` without emitting when `provider` has no wrapper
-/// profile, so the caller leaves the header to the executor rather than
-/// silently dropping it.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn emit_execution_header(
-    provider: Provider,
-    yolo: bool,
-    session_interactive: bool,
-    detail_requested: bool,
-    repo: bool,
-    is_inline: bool,
-    sequence: bool,
-    operation: Option<&str>,
-    file_ref: &str,
-    package_context: Option<claudine::composition::PackageContext>,
-    term: &Terminal,
-) -> bool {
-    let Some(profile) = profile::profile_for_provider(provider) else {
-        return false;
-    };
-    let compose_display = if is_inline {
-        crate::output::ComposeDisplay::InlineCompose
-    } else {
-        crate::output::ComposeDisplay::Compose
-    };
-    let header_env_plan = env::EnvPlan {
-        package_context,
-        ..Default::default()
-    };
-    crate::output::log_wrapper_header(
-        profile,
-        yolo,
-        !session_interactive,
-        session_interactive,
-        detail_requested,
-        repo,
-        Some(&compose_display),
-        sequence,
-        operation,
-        None, // no inline prompt text for compose
-        Some(file_ref),
-        &header_env_plan,
-        term,
-    );
-    true
 }
 
 /// Execute a composition request through the wrapper-grade pipeline.
@@ -731,7 +316,7 @@ fn execute_composition_request_inner_with_guard(
     // corner (agent only known after resolution here) and sequence steps.
 
     if !silent && !request.header_emitted {
-        emit_execution_header(
+        crate::output::emit_execution_header(
             provider,
             request.yolo,
             request.session_interactive,
@@ -910,7 +495,21 @@ fn execute_composition_request_inner_with_guard(
         }
     }
 
-    let mut child_args = Vec::new();
+    // Seed the child argv with the forwarded provider tail, at the same base
+    // position as direct-wrapper passthrough — ahead of Claudine's entrypoint,
+    // model, transport, system-prompt, MCP, and prompt-delivery injections
+    // (`apply_entrypoint` inserts the entrypoint subcommand at index 0, so a
+    // tail-first base still lands after it, exactly like the wrapper). Announce
+    // it once per distinct (provider, tail) before launch.
+    provider_args::announce_forwarded_tail(
+        provider,
+        &request.provider_args,
+        request.provider_args_explicit,
+        silent,
+        quiet,
+        &term,
+    );
+    let mut child_args = request.provider_args.clone();
 
     // -- Yolo ----------------------------------------------------------------
 
@@ -1277,7 +876,7 @@ fn execute_composition_request_inner_with_guard(
 
     // --- Lifecycle notification setup ------------------------------------
     // Constructed up here (rather than just before the guard) so the
-    // `run_body` closure below can capture these by reference and route
+    // `run_composition_body` call below can capture these by reference and route
     // composition-preflight failures through the stack-aware event runner
     // (`emit_preflight_blocked_and_finalize`). Pre-flight failures must fire
     // `blocked.stack` + `finalize.stack`, which requires the same emitter /
@@ -1344,393 +943,55 @@ fn execute_composition_request_inner_with_guard(
 
     // Common execution body used both when the caller provides an external
     // lifecycle guard (loop re-entry) and when this function owns the guard
-    // (single-run / first loop iteration). The closure captures the prep
-    // state by reference; it is only invoked while this stack frame lives.
-    let run_body = |
-        guard: &mut claudine::composition::LifecycleRunGuard<'_>,
-        skip_preflight: bool,
-        proxy_source: Option<&Path>,
-    | -> Result<SingleCompositionOutcome> {
-        // Composed frontmatter / source-derived base dir, reused by every
-        // composition-preflight failure path so the blocked+finalize stacks
-        // see the same `frontmatter` and `base_dir` namespaces the
-        // post-closure `initialize` event does.
-        let fm_map = request.prepared.effective_frontmatter.as_object();
-        let empty_frontmatter = serde_json::Map::new();
-        let frontmatter = fm_map.unwrap_or(&empty_frontmatter);
-        let base_dir = request
-            .prepared
-            .resolved_path
-            .parent()
-            .or(effective_repo_root);
-        // Validate that the harness plan can be parsed before proceeding.
-        let plan = claudine::harness::parse_harness_plan(
-            &request.prepared.effective_frontmatter,
-            &request.prepared.resolved_path,
-        )
-        .map_err(|e| {
-            // Route through the stack-aware runner so `blocked.stack` and
-            // `finalize.stack` fire (spec.md:436/650/652), not just the
-            // legacy top-level surface.
-            let preflight_outcome = emit_preflight_blocked_and_finalize(
-                guard,
-                &lifecycle_effect_engine,
-                &emitter,
-                &lifecycle_settings,
-                &lifecycle_messaging,
-                &term,
-                &request.prepared.resolved_path,
-                effective_repo_root,
-                base_dir,
-                Some(launch_workspace.launch_cwd.as_path()),
-                Some(&lifecycle_context),
-                frontmatter,
-                document_start,
-                claudine::composition::LifecycleErrorInfo::from_action_failure(
-                    "harness_plan",
-                    e.to_string(),
-                ),
-            );
-            match preflight_outcome {
-                PreflightBlockedOutcome::EvaluationError(ce) => ce.into(),
-                PreflightBlockedOutcome::Control(control) => {
-                    match preflight_blocked_control_error(
-                        control,
-                        &request.prepared.resolved_path,
-                    ) {
-                        Some(ce) => ce.into(),
-                        None => eyre!("{e}"),
-                    }
-                }
-            }
-        })?;
-
-        // The parsed harness plan is used only for shell-command audit and
-        // timeout configuration; there are no longer pre/post validation
-        // checks that need an effective-plan transform.
-
-        // ── Pre-flight shell approval for harness commands ───────────
-        if !skip_preflight {
-            let _harness_preflight = claudine::composition::resolve_shell_approvals(
-                None, // template commands already approved during compose
-                None,
-                &shell_options,
-                Some(&request.prepared.lifecycle),
-                Some(&request.prepared.resolved_path),
-            )
-            .map_err(|e| {
-                // Shell-audit denial (or any other shell-approval failure)
-                // is a composition-preflight blocked path: route through
-                // the stack-aware runner so `blocked.stack` and
-                // `finalize.stack` fire.
-                let preflight_outcome = emit_preflight_blocked_and_finalize(
-                    guard,
-                    &lifecycle_effect_engine,
-                    &emitter,
-                    &lifecycle_settings,
-                    &lifecycle_messaging,
-                    &term,
-                    &request.prepared.resolved_path,
-                    effective_repo_root,
-                    base_dir,
-                    Some(launch_workspace.launch_cwd.as_path()),
-                    Some(&lifecycle_context),
-                    frontmatter,
-                    document_start,
-                    claudine::composition::LifecycleErrorInfo::from_action_failure(
-                        "shell_approval",
-                        e.to_string(),
-                    ),
-                );
-                match preflight_outcome {
-                    PreflightBlockedOutcome::EvaluationError(ce) => ce.into(),
-                    PreflightBlockedOutcome::Control(control) => {
-                        match preflight_blocked_control_error(
-                            control,
-                            &request.prepared.resolved_path,
-                        ) {
-                            Some(ce) => ce.into(),
-                            None => eyre!("{e}"),
-                        }
-                    }
-                }
-            })?;
-
-            // Emit the preflight-complete indicator for direct compose and
-            // inline-compose runs. This must sit *before* the dry-run seam below:
-            // dry-run returns early, so a completion message placed after it would
-            // never render for dry-run — leaving the "Starting pre-flight checks"
-            // spinner without its matching "complete" line. Sequence runs handle
-            // their own preflight messaging in the orchestrator
-            // (`wrap::sequence::execute_sequence`) and must not re-emit per step.
-            if !request.sequence && !silent && !quiet {
-                let compose_label = if is_inline {
-                    "inline composition"
-                } else {
-                    "composition"
-                };
-                let status = Status::from_prose(format!(
-                    "<b>Preflight:</b> shell commands approved for this {compose_label}"
-                ))
-                .state(StatusState::Info);
-                log::message(&status.render(&term));
-            }
-        }
-
-        // --dry-run seam: the full composition pipeline (compose, real shell
-        // expansion, shell approval, harness pre-checks) has now run. Stop here —
-        // before any provider launches — and emit the composed artifacts:
-        //   - the composed body → stdout (the data product; pipeable/redirectable)
-        //   - the finalized frontmatter (highlighted YAML) → stderr
-        //   - a metadata table → stderr (after the frontmatter)
-        // `--quiet` / `--silent` do not suppress this render: the dry-run output
-        // *is* the command's purpose.
-        if request.dry_run {
-            // Dry-run never launches the provider or mutates the source.
-            // Pre-check validation has been removed; only timeout parsing
-            // and shell-command audit run during composition preflight.
-            let render = dry_run::DryRunRender::from_request(&request);
-
-            crate::log::data(&render.body);
-            crate::log::message(&dry_run::render_hr(&term));
-            crate::log::message(&dry_run::render_frontmatter_heading(&term));
-            crate::log::message("");
-            crate::log::message(&dry_run::render_frontmatter(&render.frontmatter, &term));
-            crate::log::message(&dry_run::render_metadata_table(&render, &term));
-
-            if let Some(collector) = perf_collector.as_mut() {
-                collector.set_dry_run();
-            }
-            let outcome = SingleCompositionOutcome {
-                exit_code: 0,
-                provider,
-                agent_perf: None,
-                // Dry-run never produces a per-iteration summary.
-                iteration_signals: None,
-                terminal_signal: None,
-            };
-            // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
-            // The perf report is always emitted to stderr when requested.
-            if let Some(collector) = perf_collector {
-                crate::perf::emit_report(&collector.into_report());
-            }
-            return Ok(outcome);
-        }
-
-        // Plan is validated; the harness loop re-parses from the materialized
-        // frontmatter, so the live path no longer needs this copy.
-        drop(plan);
-
-        // -- Preflight output (env details + prompt block) ---------------------
-        // The execution header was already emitted (up front by compose /
-        // inline-compose, or above for callers that did not pre-render). Now
-        // emit the env details and prompt block with the full env_plan.
-
-        // Detect the environment from the source repo root when available so
-        // that git/repo metadata reflects the composition source, not the
-        // caller's CWD (which may be in a different repo entirely).
-        //
-        // Phase 4 (2026-05-09-slow-prep): `detect_environment_fast` is still on
-        // the critical path after Phases 1–2, but its direct cost is minimal
-        // (~8 ms for git summary + repo structure). The `compose_prep.environment`
-        // span added in Phase 3 makes this cost visible in traces. Making the
-        // context truly lazy would require invasive changes to LiveSemanticSink,
-        // DispatchRuntimeContext, and the wire-session path because the context is
-        // consumed synchronously before the child spawns. Per the spec, when lazy
-        // creation is too invasive we instrument and defer deeper work.
-        let env_detect_root = effective_repo_root.unwrap_or(&launch_cwd);
-        let env_context = {
-            let _span = tracing::info_span!("compose_prep.environment").entered();
-            // Phase fix (2026-05-09-slow-prep): reuse the cached
-            // `EnvironmentContext` when the prep-time sniff already covers the
-            // requested env_detect_root. The cached scan was rooted at the
-            // launch CWD, but sniff walks up to find the enclosing git/repo
-            // root, so the resulting env_context is equivalent to one rooted
-            // at `env_detect_root` whenever:
-            //   1. env_detect_root == launch_cwd (trivial), OR
-            //   2. launch_cwd is a subdirectory of env_detect_root AND the
-            //      cached env_context's git repo_root or repo root matches
-            //      env_detect_root (the common monorepo-subdir case).
-            // When neither holds (e.g. `--repo` pins a different root or the
-            // source lives in an unrelated repo), fall back to a fresh scan.
-            let cached_matches = request.prep_env_context.as_ref().is_some_and(|prep| {
-                if env_detect_root == launch_cwd.as_path() {
-                    return true;
-                }
-                if !launch_cwd.starts_with(env_detect_root) {
-                    return false;
-                }
-                let git_root_match = prep
-                    .git
-                    .as_ref()
-                    .map(|g| g.repo_root.as_path() == env_detect_root)
-                    .unwrap_or(false);
-                let repo_root_match = prep
-                    .repo
-                    .as_ref()
-                    .map(|r| r.root.as_path() == env_detect_root)
-                    .unwrap_or(false);
-                git_root_match || repo_root_match
-            });
-            if cached_matches {
-                request
-                    .prep_env_context
-                    .as_ref()
-                    .expect("cached_matches implies Some")
-                    .clone()
-            } else {
-                claudine::events::detect_environment_fast(env_detect_root)
-            }
-        };
-
-        if !silent {
-            if !quiet && (request.session_interactive || detail_requested) {
-                crate::output::log_wrapper_env_details(&env_plan, None, &term, verbose);
-            }
-
-            let scope_for_report = effective_repo_root.unwrap_or(&launch_cwd);
-            crate::output::log_system_prompt_with_scope(
-                &effective_sp,
-                detail_requested,
-                silent,
-                quiet,
-                Some(scope_for_report),
-                &term,
-            );
-
-            if matches!(
-                effective_sp,
-                claudine::system_prompt::ResolvedSystemPrompt::Ready(_)
-            ) && effective_non_interactive
-            {
-                crate::log::message("");
-            }
-
-            if effective_non_interactive {
-                crate::output::log_compose_prompt(
-                    &request.prepared.prompt,
-                    detail_requested,
-                    silent,
-                    quiet,
-                    &term,
-                );
-            }
-
-            if !quiet {
-                crate::log::message("");
-            }
-        }
-
-        drop(_span);
-
-        let _span = tracing::info_span!("composition_execute").entered();
-
-        // -- Execution --------------------------------------------------------
-
-        let dispatch_context = composition_dispatch_context(&request, &target);
-
-        let harness_mode = if is_inline {
-            HarnessPromptMode::Inline
-        } else {
-            HarnessPromptMode::Compose
-        };
-
-        // When an `initialize` Proxy redirected to a different document, the
-        // harness loop re-materializes (re-composes frontmatter + body) from
-        // `source_path` each attempt, so swapping the path here runs the
-        // target document — its body, frontmatter, harness pre-checks, and
-        // its `start`/`success`/`failure`/`finalize` lifecycle. Seed
-        // `initial_materialized = None` so the loop composes the target rather
-        // than reusing the proxying document's prepared prompt.
-        let (effective_source, effective_ref, seed_materialized) = match proxy_source {
-            Some(target) => (
-                target.to_path_buf(),
-                target.display().to_string(),
-                None,
-            ),
-            None => (
-                request.prepared.resolved_path.clone(),
-                request.file_ref.clone(),
-                Some(materialized_harness_prompt_from_prepared(&request.prepared)),
-            ),
-        };
-
-        let mut prompt_state = HarnessPromptState {
-            mode: harness_mode,
-            source_path: effective_source,
-            original_ref: effective_ref,
-            base_prompt: None,
-            overlay: indexmap::IndexMap::new(),
-            prompt_tail: Vec::new(),
-            next_prompt_override: None,
-            next_resume_session_id: None,
-        };
-
-        let mut harness_base_args = args_before_prompt.clone();
-        if !use_structured {
-            profile.prepare_captured_output(&mut harness_base_args);
-        }
-
-        let (exit_code, harness_perf, harness_signals) = run_harness_loop(
-            provider,
-            profile,
-            binary_path.as_path(),
-            child_cwd,
-            effective_non_interactive,
-            request.timeout.clone(),
-            request.step_timeout.clone(),
-            request.stall_timeout.clone(),
-            &harness_base_args,
-            &env_plan.env,
-            &mut prompt_state,
-            effective_repo_root,
-            shell_options.clone(),
-            use_structured,
-            structured_codex_output.as_ref(),
-            stdout_noise,
-            stderr_noise,
-            profile.suppress_structured_stderr_on_success(),
-            show_checks,
-            stream_verbosity,
-            detail_requested,
-            &env_context,
-            &dispatch_context,
-            seed_materialized,
-            &term,
-            guard,
-            proxy_source,
-            true,
-        )?;
-        if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
-            collector.set_agent_perf(perf);
-        }
-        let terminal_signal = guard.terminal_signal();
-        let outcome = SingleCompositionOutcome {
-            exit_code,
-            provider,
-            agent_perf: perf_collector
-                .as_ref()
-                .and_then(|c| c.agent_perf())
-                .or(harness_perf),
-            // The harness loop now surfaces the terminal attempt's iteration
-            // signals, so `compose --loop` receives the same rate-limit /
-            // exit_reason pickup for every composition document.
-            iteration_signals: harness_signals,
-            terminal_signal,
-        };
-        // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
-        // The perf report is always emitted to stderr when requested.
-        if let Some(collector) = perf_collector {
-            crate::perf::emit_report(&collector.into_report());
-        }
-        Ok(outcome)
+    // (single-run / first loop iteration). The shared, read-only state is
+    // bundled in `CompositionRunCtx`; the mutable `guard` and
+    // `perf_collector` vary per call and are passed explicitly.
+    let ctx = runner::CompositionRunCtx {
+        request: &request,
+        target: &target,
+        provider,
+        effective_repo_root,
+        launch_workspace: &launch_workspace,
+        launch_cwd: &launch_cwd,
+        binary_path: &binary_path,
+        lifecycle_effect_engine: &lifecycle_effect_engine,
+        emitter: &emitter,
+        lifecycle_settings: &lifecycle_settings,
+        lifecycle_messaging: &lifecycle_messaging,
+        lifecycle_context: &lifecycle_context,
+        term: &term,
+        document_start,
+        shell_options: &shell_options,
+        silent,
+        quiet,
+        is_inline,
+        profile,
+        effective_non_interactive,
+        args_before_prompt: &args_before_prompt,
+        child_cwd,
+        use_structured,
+        structured_codex_output: &structured_codex_output,
+        stdout_noise,
+        stderr_noise,
+        show_checks,
+        stream_verbosity,
+        detail_requested,
+        env_plan: &env_plan,
+        effective_sp: &effective_sp,
+        verbose,
     };
 
     // When the caller passes an external guard (loop re-entry), it has already
     // emitted `initialize` and owns the lifecycle runtime context. Run only
     // the per-iteration body and return.
     if let Some(guard) = external_guard {
-        return run_body(guard, skip_preflight, None);
+        return runner::run_composition_body(
+            &ctx,
+            guard,
+            &mut perf_collector,
+            skip_preflight,
+            None,
+        );
     }
 
     // Bundle the shared lifecycle bindings (constructed above the closure)
@@ -1829,7 +1090,7 @@ fn execute_composition_request_inner_with_guard(
         .into());
     }
     // Set by an `initialize` Proxy control: the resolved target document the
-    // run is handed off to. Threaded into `run_body` so the harness loop
+    // run is handed off to. Threaded into `run_composition_body` so the harness loop
     // re-composes and runs the target instead of the original document.
     let mut init_proxy_target: Option<std::path::PathBuf> = None;
     if let Some(ref control) = init_outcome.control {
@@ -1899,7 +1160,7 @@ fn execute_composition_request_inner_with_guard(
             StackControl::Proxy { target } => {
                 // Hand off to the target document. Resolve the reference
                 // (`@repo/…`, relative, or absolute) against the source so
-                // `run_body` runs the target via the harness loop's
+                // `run_composition_body` runs the target via the harness loop's
                 // re-materialize path. The harness loop resets the lifecycle
                 // guard and re-emits the target's own `initialize` before its
                 // pre-flight / start / terminal / finalize lifecycle runs.
@@ -2000,37 +1261,13 @@ fn execute_composition_request_inner_with_guard(
         return Err(eyre!("lifecycle initialize failed"));
     }
 
-    run_body(&mut guard, false, init_proxy_target.as_deref())
-}
-
-// -- Config loading -------------------------------------------------------
-
-pub(crate) struct SelectionConfig {
-    pub favorite: Option<Provider>,
-    #[allow(dead_code)]
-    pub model_overrides: HashMap<Provider, ProviderModelOverride>,
-}
-
-pub(crate) fn load_selection_config(cwd: &Path) -> Option<SelectionConfig> {
-    let repo_root = sniff::filesystem::git::detect_git(cwd, false, 1)
-        .ok()
-        .flatten()
-        .map(|info| info.repo_root);
-    load_selection_config_for_repo(repo_root.as_deref())
-}
-
-/// Load selection config against a pre-detected repo root.
-///
-/// Skips the internal `sniff::filesystem::git::detect_git` call that
-/// [`load_selection_config`] performs, so callers that already discovered
-/// the source repo root (typically via [`CompositionPrepContext`]) avoid a
-/// redundant filesystem walk on the compose hot path.
-pub(crate) fn load_selection_config_for_repo(repo_root: Option<&Path>) -> Option<SelectionConfig> {
-    let config = claudine::dispatch::loader::load_claudine_config(None, repo_root).ok()?;
-    Some(SelectionConfig {
-        favorite: config.preferred_agent,
-        model_overrides: config.models,
-    })
+    runner::run_composition_body(
+        &ctx,
+        &mut guard,
+        &mut perf_collector,
+        false,
+        init_proxy_target.as_deref(),
+    )
 }
 
 #[cfg(test)]

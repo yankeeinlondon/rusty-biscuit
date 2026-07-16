@@ -287,3 +287,7 @@ unmapped_native_events:
 - native_event: BeforeToolSelection
   description: Filters which tools the model may choose before any concrete tool call exists; returns toolConfig {mode, allowedFunctionNames}.
   remediation: Register a command hook for BeforeToolSelection directly in Gemini settings (hooksConfig); Claudine cannot dispatch this phase.
+# Ordered error-classification vocabulary (Phase A seed, transcribed verbatim
+# from lib/src/stream/providers/gemini.rs::ERROR_KEYWORDS). Sequence order IS
+# the cascade order; Gemini checks Configuration before ApiRemote in the kind
+# branch, and runs a "late ApiRemote" second pass after Interrupted.

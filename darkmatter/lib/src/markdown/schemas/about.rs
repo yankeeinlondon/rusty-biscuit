@@ -35,15 +35,15 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
     },
     SchemaTypeDescriptor {
         keyword: "datetime",
-        description: "ISO-8601 datetime.",
+        description: "ISO-8601 datetime; the timezone offset is optional.",
         accepted_constraints: "default, required",
-        json_schema_effect: "{ \"type\": \"string\", \"format\": \"date-time\" }",
+        json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-datetime\" }",
     },
     SchemaTypeDescriptor {
         keyword: "time",
         description: "Time of day with optional timezone.",
         accepted_constraints: "default, required",
-        json_schema_effect: "{ \"type\": \"string\", \"format\": \"time\" }",
+        json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-time\" }",
     },
     SchemaTypeDescriptor {
         keyword: "number",
@@ -98,6 +98,18 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         description: "RFC 5322 addr-spec.",
         accepted_constraints: "default, required",
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"email\" }",
+    },
+    SchemaTypeDescriptor {
+        keyword: "literal",
+        description: "The value must equal exactly one scalar of any scalar type. Bare `true`/`false` types as boolean, a bare numberlike token as number, and quoted or any other bare token as string. Replaces the single-member enum and makes discriminated unions first-class. Coerces a document value to the literal's scalar type (`\"2\"` against `literal(2)` → `2`); string literals never coerce.",
+        accepted_constraints: "<value>; default; required",
+        json_schema_effect: "{ \"const\": <value> } with the value's lexed type, wrapped by the optional-nullable wrapper; `literal(x)[]` places the `const` under `items`",
+    },
+    SchemaTypeDescriptor {
+        keyword: "expression",
+        description: "A string that must parse under the Darkmatter expression grammar. Parse-only and never evaluated — the third content-format string type alongside `yaml` and `json`. Native boolean/number values coerce to their string forms (`true` → `\"true\"`); mappings and sequences are type mismatches.",
+        accepted_constraints: "default, required, generated",
+        json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-expression\" }",
     },
     SchemaTypeDescriptor {
         keyword: "any",
@@ -203,6 +215,16 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         argument_arity: "1+",
         description: "Lists the allowed values. At least one member is required.",
         json_schema_effect: "enum list of supplied members",
+    },
+    // ── literal ────────────────────────────────────────────────────────
+    SchemaConstraintDescriptor {
+        name: "<value>",
+        keyword: "<value>",
+        form: "literal(value)",
+        target_types: "literal",
+        argument_arity: "1",
+        description: "The single scalar value the property must equal. Typed like YAML: bare `true`/`false` → boolean, bare numberlike → number, quoted or any other bare token → string. Exactly one value; use `enum(...)` for a set.",
+        json_schema_effect: "const set to the typed value",
     },
     // ── file ───────────────────────────────────────────────────────────
     SchemaConstraintDescriptor {
@@ -452,6 +474,79 @@ pub fn validation_behavior_descriptors() -> &'static [ValidationBehaviorDescript
     VALIDATION_BEHAVIOR_DESCRIPTORS
 }
 
+/// Trigger-schema grammar forms, in display order.
+pub const TRIGGER_GRAMMAR_DESCRIPTORS: &[TriggerGrammarDescriptor] = &[
+    TriggerGrammarDescriptor {
+        name: "Envelope",
+        form: "kind: trigger-schema",
+        description: "Claims a discovered YAML file as a trigger envelope; `$schema` is its merge-compatible object-schema payload.",
+    },
+    TriggerGrammarDescriptor {
+        name: "Property condition",
+        form: "property: type-expr",
+        description: "A bare expression is an optional guard; `required` makes it a presence gate. Present values must satisfy the type and match-safe constraints.",
+    },
+    TriggerGrammarDescriptor {
+        name: "$path",
+        form: "$path: glob | [glob, ...]",
+        description: "Matches the case-sensitive, boundary-relative path with `/` separators. Basename globs match in any directory and `!` patterns exclude.",
+    },
+    TriggerGrammarDescriptor {
+        name: "all",
+        form: "all: [condition, ...]",
+        description: "Matches when every child condition matches.",
+    },
+    TriggerGrammarDescriptor {
+        name: "any",
+        form: "any: [condition, ...]",
+        description: "Matches when at least one child condition matches.",
+    },
+    TriggerGrammarDescriptor {
+        name: "none",
+        form: "none: [condition, ...]",
+        description: "Matches when no child condition matches.",
+    },
+    TriggerGrammarDescriptor {
+        name: "min-match",
+        form: "min-match: { count: N, of: [condition, ...] }",
+        description: "Matches when at least N of the child conditions match.",
+    },
+    TriggerGrammarDescriptor {
+        name: "Outer OR arms",
+        form: "match: [arm, ...]",
+        description: "A mapping is one arm; a sequence of arm mappings is OR'd. Mixing property and structural keys in one mapping is invalid.",
+    },
+    TriggerGrammarDescriptor {
+        name: "Vacuous-arm lint",
+        form: "each arm requires a positive gate",
+        description: "Every satisfiable arm must require presence through `required` or `$path`, outside `none`; an arm that could match every document is rejected.",
+    },
+];
+
+/// Returns trigger-schema grammar descriptors in display order.
+pub fn trigger_grammar_descriptors() -> &'static [TriggerGrammarDescriptor] {
+    TRIGGER_GRAMMAR_DESCRIPTORS
+}
+
+/// Constraints accepted by trigger property conditions.
+pub const MATCH_SAFE_CONSTRAINT_DESCRIPTORS: &[MatchSafeConstraintDescriptor] = &[
+    MatchSafeConstraintDescriptor { keyword: "required", description: "Requires the property to be present." },
+    MatchSafeConstraintDescriptor { keyword: "<members>", description: "Restricts `enum` to literal members." },
+    MatchSafeConstraintDescriptor { keyword: "pattern", description: "Matches a string against a regular expression." },
+    MatchSafeConstraintDescriptor { keyword: "min", description: "Checks a minimum value, length, or item count." },
+    MatchSafeConstraintDescriptor { keyword: "max", description: "Checks a maximum value, length, or item count." },
+    MatchSafeConstraintDescriptor { keyword: "integer", description: "Requires an integral numeric value." },
+    MatchSafeConstraintDescriptor { keyword: "not-empty", description: "Requires non-whitespace string content." },
+    MatchSafeConstraintDescriptor { keyword: "unique", description: "Requires distinct array items." },
+    MatchSafeConstraintDescriptor { keyword: "min-keys", description: "Checks a minimum object key count." },
+    MatchSafeConstraintDescriptor { keyword: "max-keys", description: "Checks a maximum object key count." },
+];
+
+/// Returns the constraint subset accepted in trigger matches.
+pub fn match_safe_constraint_descriptors() -> &'static [MatchSafeConstraintDescriptor] {
+    MATCH_SAFE_CONSTRAINT_DESCRIPTORS
+}
+
 // ── Descriptor types ────────────────────────────────────────────────────
 
 /// Descriptor for a single schema-language type keyword.
@@ -536,6 +631,26 @@ pub struct ValidationBehaviorDescriptor {
     pub description: &'static str,
 }
 
+/// Descriptor for one trigger-schema grammar form.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TriggerGrammarDescriptor {
+    /// Author-facing name of the grammar form.
+    pub name: &'static str,
+    /// Concise YAML surface form.
+    pub form: &'static str,
+    /// Semantics and relevant restrictions.
+    pub description: &'static str,
+}
+
+/// Descriptor for one constraint accepted in trigger matching.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchSafeConstraintDescriptor {
+    /// Canonical constraint keyword.
+    pub keyword: &'static str,
+    /// Match-time behavior.
+    pub description: &'static str,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -569,6 +684,8 @@ mod tests {
             SimplifiedType::Enum,
             SimplifiedType::Url,
             SimplifiedType::Email,
+            SimplifiedType::Literal,
+            SimplifiedType::Expression,
             SimplifiedType::Any,
         ] {
             implemented.insert(ty.as_keyword());
@@ -625,6 +742,7 @@ mod tests {
             Constraint::Pattern(String::new()),
             Constraint::Suggest(Vec::new()),
             Constraint::Members(Vec::new()),
+            Constraint::LiteralValue(serde_json::Value::Null),
             Constraint::Eager,
             Constraint::Match(Vec::new()),
             Constraint::Scheme(Vec::new()),
@@ -753,6 +871,60 @@ mod tests {
         let _ = inline_object_rule_descriptors();
         let _ = coercion_rule_descriptors();
         let _ = validation_behavior_descriptors();
+        let _ = trigger_grammar_descriptors();
+        let _ = match_safe_constraint_descriptors();
+    }
+
+    #[test]
+    fn trigger_combinator_descriptor_set_matches_grammar() {
+        use crate::markdown::schemas::triggers::grammar::{COMBINATOR_KEYS, PATH_KEY};
+
+        let described: HashSet<&str> = TRIGGER_GRAMMAR_DESCRIPTORS
+            .iter()
+            .filter_map(|descriptor| {
+                COMBINATOR_KEYS.contains(&descriptor.name).then_some(descriptor.name)
+            })
+            .collect();
+        assert_eq!(described, COMBINATOR_KEYS.iter().copied().collect());
+        assert!(TRIGGER_GRAMMAR_DESCRIPTORS.iter().any(|d| d.name == PATH_KEY));
+    }
+
+    #[test]
+    fn match_safe_constraint_descriptor_set_matches_implementation() {
+        use crate::markdown::schemas::triggers::grammar::is_match_safe_constraint;
+
+        let constraints = [
+            Constraint::Required,
+            Constraint::Default(serde_json::Value::Null),
+            Constraint::Generated,
+            Constraint::Min(0.0),
+            Constraint::Max(0.0),
+            Constraint::Integer,
+            Constraint::MinLen(0),
+            Constraint::MaxLen(0),
+            Constraint::NotEmpty,
+            Constraint::Pattern(String::new()),
+            Constraint::Suggest(Vec::new()),
+            Constraint::Members(Vec::new()),
+            Constraint::Eager,
+            Constraint::Match(Vec::new()),
+            Constraint::Scheme(Vec::new()),
+            Constraint::Unique,
+            Constraint::MinItems(0),
+            Constraint::MaxItems(0),
+            Constraint::MinKeys(0),
+            Constraint::MaxKeys(0),
+        ];
+        let implemented: HashSet<&str> = constraints
+            .iter()
+            .filter(|constraint| is_match_safe_constraint(constraint))
+            .map(Constraint::keyword)
+            .collect();
+        let described: HashSet<&str> = MATCH_SAFE_CONSTRAINT_DESCRIPTORS
+            .iter()
+            .map(|descriptor| descriptor.keyword)
+            .collect();
+        assert_eq!(described, implemented);
     }
 
     /// Descriptor examples in the shape catalog parse to a

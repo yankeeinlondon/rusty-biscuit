@@ -1,6 +1,6 @@
 ---
 lessons_learned: "@.claudine/memory/commits.md"
-timeout: 15m
+timeout: 20m
 step_timeout: 12m
 show_system_prompt: false
 operation: commit

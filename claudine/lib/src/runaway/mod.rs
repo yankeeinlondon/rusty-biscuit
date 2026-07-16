@@ -37,7 +37,7 @@ pub use patterns::{CompiledExitExpressions, ExitExpressionInput, PatternKind};
 /// variant; the CLI's `trip_to_early_termination` converts between the two
 /// so this module never imports the termination-channel types.
 ///
-/// [`EarlyTermination`]: crate::stream::logs::opencode::reasoning::EarlyTermination
+/// [`EarlyTermination`]: crate::stream::logs::opencode::bridge::EarlyTermination
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Trip {
     /// A user-authored exit-expression matched a completed line. Carries

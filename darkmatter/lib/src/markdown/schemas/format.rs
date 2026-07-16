@@ -88,6 +88,70 @@ pub const DARKMATTER_YAML_FORMAT: &str = "darkmatter-yaml";
 /// D). The value must parse as strict JSON; YAML-only syntax is rejected.
 pub const DARKMATTER_JSON_FORMAT: &str = "darkmatter-json";
 
+/// Format name registered for the `expression` content-format string type
+/// (feature `2026-07-12-literal-expression`). The value must parse under the
+/// Darkmatter expression grammar and is **never evaluated** — validation is
+/// pure `parse_condition(value).is_ok()`. Condition mode accepts a parse
+/// superset of the value dialect (`&&` added, `||` re-lowered), so a string
+/// valid in either dialect passes.
+pub const DARKMATTER_EXPRESSION_FORMAT: &str = "darkmatter-expression";
+
+/// Format name registered for the `datetime` SimplifiedSchema type.
+///
+/// Emitted in place of JSON Schema's built-in `date-time` format, whose RFC
+/// 3339 grammar **requires** a zone offset and so rejects the offset-less local
+/// datetimes ISO 8601 permits (e.g. `2026-07-10T15:05:34`). This validator
+/// accepts both offset-bearing and offset-less ISO 8601 datetimes while still
+/// range-checking the value via `chrono` (so `2026-13-99T00:00:00` is rejected),
+/// keeping validation consistent with the offset-optional detection grammar in
+/// [`super::detect`].
+pub const DARKMATTER_DATETIME_FORMAT: &str = "darkmatter-datetime";
+
+/// Format name registered for the `time` SimplifiedSchema type.
+///
+/// Sibling of [`DARKMATTER_DATETIME_FORMAT`] for the `time` type, whose
+/// documented contract is "time of day with **optional** timezone" — a promise
+/// the built-in RFC 3339 `time` format (offset required) breaks.
+pub const DARKMATTER_TIME_FORMAT: &str = "darkmatter-time";
+
+/// Accepts an ISO 8601 datetime with an **optional** zone offset.
+///
+/// Offset-bearing values are validated as RFC 3339 (a strict ISO 8601 profile);
+/// offset-less values are validated as a naive local datetime. Both paths parse
+/// through `chrono`, so out-of-range components are rejected.
+fn valid_iso8601_datetime(value: &str) -> bool {
+    if chrono::DateTime::parse_from_rfc3339(value).is_ok() {
+        return true;
+    }
+    const NAIVE_FORMATS: &[&str] = &[
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S%.f",
+        "%Y-%m-%d %H:%M",
+    ];
+    NAIVE_FORMATS
+        .iter()
+        .any(|fmt| chrono::NaiveDateTime::parse_from_str(value, fmt).is_ok())
+}
+
+/// Accepts an ISO 8601 time-of-day with an **optional** zone offset.
+///
+/// Offset-less values parse as a naive time; an offset-bearing value is
+/// validated by attaching a sentinel date and reusing
+/// [`valid_iso8601_datetime`].
+fn valid_iso8601_time(value: &str) -> bool {
+    const NAIVE_FORMATS: &[&str] = &["%H:%M:%S", "%H:%M:%S%.f", "%H:%M"];
+    if NAIVE_FORMATS
+        .iter()
+        .any(|fmt| chrono::NaiveTime::parse_from_str(value, fmt).is_ok())
+    {
+        return true;
+    }
+    valid_iso8601_datetime(&format!("2000-01-01T{value}"))
+}
+
 /// Registers the `darkmatter-file` format on a `ValidationOptions` builder.
 ///
 /// `base_dir`, when `Some`, is the prompt document directory and is tried
@@ -142,6 +206,28 @@ pub fn register_darkmatter_formats(
             // syntax (e.g. `title: Foo`) is rejected.
             serde_json::from_str::<Value>(value).is_ok()
         })
+        // The `expression` content-format string type. Parse-only and
+        // side-effect-free: `parse_condition` never evaluates functions, shell,
+        // I/O, or context. Condition mode is the either-dialect superset (§Q2),
+        // so a value valid in either expression dialect validates here.
+        .with_format(DARKMATTER_EXPRESSION_FORMAT, |value: &str| {
+            // A value still holding an unresolved `$(...)` shell expression or
+            // `{{ ... }}` template is pending, not a final expression: defer
+            // rather than eager-fail the parse. This mirrors the pending-value
+            // deferral the compose/validation layers apply to every content
+            // string, and neither marker is part of expression syntax, so the
+            // guard never masks a genuinely malformed expression.
+            if value.contains("$(") || value.contains("{{") {
+                return true;
+            }
+            crate::markdown::compose::expression::parse_condition(value).is_ok()
+        })
+        // ISO 8601 date/time types with an optional zone offset (the built-in
+        // `date-time` / `time` formats require one; see the const docs).
+        .with_format(DARKMATTER_DATETIME_FORMAT, |value: &str| {
+            valid_iso8601_datetime(value)
+        })
+        .with_format(DARKMATTER_TIME_FORMAT, |value: &str| valid_iso8601_time(value))
 }
 
 /// Validates a string by parsing it as a `FileReference` and confirming the
@@ -371,6 +457,31 @@ mod tests {
 
     fn temp_dir() -> tempfile::TempDir {
         tempfile::tempdir().expect("create temp dir")
+    }
+
+    #[test]
+    fn iso8601_datetime_accepts_offset_optional_and_rejects_garbage() {
+        // Offset-less local datetime — valid ISO 8601, rejected by RFC 3339.
+        assert!(valid_iso8601_datetime("2026-07-10T15:05:34"));
+        assert!(valid_iso8601_datetime("2026-07-10T15:05"));
+        // Offset-bearing forms.
+        assert!(valid_iso8601_datetime("2026-07-10T15:05:34Z"));
+        assert!(valid_iso8601_datetime("2026-07-10T15:05:34+01:00"));
+        assert!(valid_iso8601_datetime("2026-07-10T15:05:34.123Z"));
+        // Range-checked: impossible components are rejected, not merely matched.
+        assert!(!valid_iso8601_datetime("2026-13-99T25:61:61"));
+        assert!(!valid_iso8601_datetime("not-a-datetime"));
+        assert!(!valid_iso8601_datetime("2026-07-10"));
+    }
+
+    #[test]
+    fn iso8601_time_accepts_offset_optional_and_rejects_garbage() {
+        assert!(valid_iso8601_time("15:05:34"));
+        assert!(valid_iso8601_time("15:05"));
+        assert!(valid_iso8601_time("15:05:34Z"));
+        assert!(valid_iso8601_time("15:05:34+01:00"));
+        assert!(!valid_iso8601_time("25:61:61"));
+        assert!(!valid_iso8601_time("noon"));
     }
 
     #[test]

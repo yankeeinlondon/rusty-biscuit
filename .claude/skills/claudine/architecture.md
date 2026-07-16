@@ -7,19 +7,29 @@ Deep technical documentation for Claudine's event model, provider adapters, disp
 ```
 claudine/lib/src/
 ├── actions/      → Hook action types and response model
-├── adapters/     → Provider-specific event parsers (ProviderAdapter trait)
 ├── badges/       → Styled terminal badge constants (YOLO, Non-Interactive, Interactive, etc.)
 ├── composition/  → Markdown frontmatter composition (inline and chained prompt pipelines)
+│   ├── lifecycle/ → Lifecycle config/types, parsing, validation, actions, context, control, execution, and provider-neutral runtime routing
+│   ├── looping/   → Loop configuration, action DSL, condition evaluation, and execution orchestration (looping/{engine,types,seed,config,dsl,actions,expression}.rs — engine holds only execution/routing/gate logic; types holds the option/context/output/result value types; seed holds loop-seed construction)
+│   └── schema/    → Schema-aware preparation, error translation, problem classification, and status reporting
 ├── config/       → Agent detection, hook registration, atomic writes, backups
-├── dispatch/     → Event processing pipeline (loader, template, matcher, runner)
+├── dispatch/     → Event processing pipeline
+│   ├── logging.rs        → Event metadata preparation and JSONL logging
+│   ├── protect_bridge.rs → Protect observations mapped into hook responses
+│   └── wrapper_flags.rs  → Wrapper environment flags and repository root extraction
 ├── events/       → Normalized event model and types (16 events, 10 providers)
+├── hook_adapters/ → Native hook request/response adapters (ProviderAdapter trait) — parse provider hook payloads; distinct from stream/providers (stdout NDJSON parsers)
 ├── linking/      → Cross-provider skill synchronization (4 resource types) with portability classification
 ├── mcp/          → MCP catalog, defaults, import/export, session, and injection
 ├── permissions/  → Provider-agnostic PolicyEngine for permission queries and mutation planning
+│   └── providers/common.rs → Format-agnostic helpers shared across provider backends (first_source_id, one_shot_plan constructor)
 ├── render/       → Functional render components (FinalMessage, AgentPrompt/SystemPrompt, EventRenderer + DISPATCH table, MetricsReport, StreamRenderable/AssistantStream); consume data + policy (DisplayPolicy), never `match provider`
 ├── reporting/    → JSONL-to-SQLite reporting index, sync, and typed queries
 ├── services/     → Cross-provider runtime policy services (ProtectService)
 ├── stream/       → Structured stream parsing for 8 providers (Kilo reuses OpenCode's) + summary/reporting
+│   ├── logs/opencode/bridge/   → Stderr bridge: ingest dispatch, session tracking, stall guard, signals, formatting
+│   ├── logs/opencode/classify/ → Error classification: asset, LLM, session, text utilities
+│   └── logs/opencode/state.rs  → Shared stderr state and summary merge
 └── error.rs      → ClaudineError enum
 ```
 
@@ -234,6 +244,9 @@ The core event processing pipeline runs in 6 steps:
 
 ### Dispatch Sub-modules
 
+- `logging` — Event metadata preparation, compact tool-detail rendering, and daily JSONL event logging
+- `protect_bridge` — Protect observation evaluation and blocked-decision translation into hook responses
+- `wrapper_flags` — Wrapper environment flag and runtime repository-root extraction
 - `loader` — Config file discovery, loading, merge logic, runtime compilation (matchers + mappers), and config save/validation
 - `template` — `{{placeholder}}` Handlebars-style interpolation engine with 28 variables across 5 categories (legacy `{placeholder}` single-brace syntax is deprecated with warnings)
 - `matcher` — Regex-based event filtering against tool name, notification type, or error
@@ -382,6 +395,7 @@ So when rendered prompt output shows wrong wrapping, spurious newlines, lines bl
 
 ### Infrastructure
 
+- `providers/common` — shared parser skeleton the per-provider parsers delegate to: `base_extra`/`base_extra_parts` payload bases, `emit_provider_extension` + `emit_malformed_warning` fallbacks, `finish_summary` (stamps `provider` + derived badges onto a `..Default::default()`-built summary), and the `ErrorKeywords` classifier shape + `classify_error_by_keywords` cascade. The ordered tables live in generated `providers/vocabulary.rs`, projected from the schema-validated `docs/research/agent-errors/<slug>.md` frontmatter; evidence stays in research while bucket/item order survives as the runtime precedence contract. Immutable `docs/research/agent-errors/_seeds/<slug>.yaml` baselines preserve pre-graduation row identity for deterministic removal/re-kind/reorder checks. `providers/vocabulary_tests.rs` locks accepted research additions, precedence, exact numeric codes, and representative near misses. Provider files keep thin delegating methods plus their genuinely provider-specific typed dispatch.
 - `parser` — `StreamParser` trait and `StreamEventSink` callback interface for coarse event handling (session start, turn lifecycle, tool events)
 - `summary` — `StreamExecutionSummary` struct: provider-agnostic metadata (session ID, model, tokens, cost, duration, tool calls, rate limits, context usage)
 - `token_usage` — `NormalizedTokenUsage` with input/output/total/cache_read fields
@@ -399,6 +413,24 @@ Markdown frontmatter-based composition pipelines for delivering prompts to provi
 
 - **Inline composition** (`--frontmatter-prompt`): reads frontmatter `prompt` field as input, replaces document body with provider output
 - **Chained composition** (`--compose`): composes full document as prompt without file mutation
+
+The CLI executor under `cli/src/commands/wrap/composition/` keeps the entry and
+setup pipeline in `mod.rs`, with incidental concerns split by responsibility:
+
+- `selection.rs` — favorite-provider and model-override configuration loading
+- `launch.rs` — launch-workspace selection and `--repo` detection enforcement
+- `preflight.rs` — blocked/finalize lifecycle routing before provider launch
+- `runner.rs` — the named per-iteration `run_composition_body` runner and its
+  `CompositionRunCtx`
+- `dry_run.rs`, `prep_context.rs`, `target.rs`, and `timeouts.rs` — rendering,
+  shared discovery context, execution-target resolution, and timeout resolution
+
+Composition execution headers are shared output helpers in
+`cli/src/output/mod.rs`; they do not live in the executor pipeline.
+
+## Test Placement
+
+**Inline tests** (`#[cfg(test)] mod tests { … }`) are the default for small files. Once a file exceeds **~800 production lines** or its test module exceeds **~300 lines**, move tests to a sibling file declared via `#[cfg(test)] mod tests;` at the bottom of the parent. This pattern is already established in `lib/src/provider/`, `cli/…/wrap/composition/`, and `cli/…/wrap/exec/wiring/`.
 
 ## Skill Linking
 

@@ -276,7 +276,7 @@ impl ComposeContext {
     pub fn fixed_for_testing() -> Self {
         let mut values = serde_json::Map::new();
         let fields = [
-            ("now", "2024-06-15T10:30:00"),
+            ("now", "2024-06-15T10:30:00-07:00"),
             ("now_utc", "2024-06-15T17:30:00Z"),
             ("today", "2024-06-15"),
             ("yesterday", "2024-06-14"),

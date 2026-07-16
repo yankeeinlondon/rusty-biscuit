@@ -57,9 +57,10 @@ pub use error::{RenderError, RenderStrictness, Rendered};
 pub use graphics::horizontal_rule_svg;
 pub use node::{ColumnAlign, HeadingDepth, HeadingDepthError, NodeKind, RenderNode};
 pub use render::{
-    BrowserRenderOptions, CodeRenderer, MarkdownDialect, MarkdownRenderOptions,
-    MarkdownStyleOptions, RawHtmlPolicy, render_browser_document, render_browser_document_html,
-    render_browser_node, render_markdown_document, render_markdown_node,
+    BrowserDocumentBody, BrowserRenderOptions, CodeRenderer, MarkdownDialect,
+    MarkdownRenderOptions, MarkdownStyleOptions, RawHtmlPolicy, render_browser_document,
+    render_browser_document_body, render_browser_document_html, render_browser_node,
+    render_markdown_document, render_markdown_node,
 };
 
 /// The graphics fidelity tier a renderer should use.

@@ -405,6 +405,157 @@ fn run_provider_in_tmux_for(staged: &Staged, provider_flag: &str, done_marker: &
     pane
 }
 
+/// Like [`run_in_tmux_for`] but appends caller `--set` positionals (e.g.
+/// `spec=spec.md`) to the compose invocation. Used to prove those params
+/// survive a `proxy` hand-off into the target document's re-materialization.
+fn run_proxy_in_tmux_with_set(staged: &Staged, setters: &str, done_marker: &str) -> String {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+
+    let session = format!("biscuit_l2_lcctl_set_{}_{seq}", std::process::id());
+    let shell = biscuit_test_harness::detect_shell();
+    let spawned = std::process::Command::new("tmux")
+        .args([
+            "new-session",
+            "-d",
+            "-s",
+            &session,
+            "-x",
+            "200",
+            "-y",
+            "60",
+            &format!("{shell} -l"),
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(spawned, "failed to spawn tmux session");
+
+    let mut harness = TmuxHarness::attach(&session);
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+
+    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let sentinel = format!("L2_CTL_DONE_{seq}");
+    let env_prefix = format!(
+        "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
+        home = staged.workspace.path().display(),
+        path = augmented_path(&staged.bin_dir).to_string_lossy(),
+    );
+    let cmd = format!(
+        "cd {ws} && {env_prefix}{claudine} compose --goose {md} {setters} ; echo {sentinel}",
+        ws = staged.workspace.path().display(),
+        md = staged.md_file.display(),
+    );
+    harness
+        .send_command_with_env(&cmd, &[])
+        .expect("send compose command");
+
+    let deadline = Instant::now() + Duration::from_secs(40);
+    while Instant::now() < deadline {
+        if event_lines(staged).iter().any(|l| l == done_marker) {
+            std::thread::sleep(Duration::from_millis(150));
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    let pane = harness.capture().map(|f| f.plain).unwrap_or_default();
+    kill_session_by_name(&session);
+    pane
+}
+
+/// Like [`run_in_tmux_for`] but blocks until the `echo`-ed sentinel appears in
+/// the captured pane (i.e. the compose command has exited, success or error),
+/// then returns the pane. Used to assert on error output that writes nothing to
+/// `events.log`.
+fn run_compose_await_exit(staged: &Staged) -> String {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+
+    let session = format!("biscuit_l2_lcctl_exit_{}_{seq}", std::process::id());
+    let shell = biscuit_test_harness::detect_shell();
+    let spawned = std::process::Command::new("tmux")
+        .args([
+            "new-session", "-d", "-s", &session, "-x", "200", "-y", "60",
+            &format!("{shell} -l"),
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(spawned, "failed to spawn tmux session");
+
+    let mut harness = TmuxHarness::attach(&session);
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+
+    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let sentinel = format!("L2_CTL_EXIT_{seq}");
+    let env_prefix = format!(
+        "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
+        home = staged.workspace.path().display(),
+        path = augmented_path(&staged.bin_dir).to_string_lossy(),
+    );
+    let cmd = format!(
+        "cd {ws} && {env_prefix}{claudine} compose --goose {md} ; echo {sentinel}",
+        ws = staged.workspace.path().display(),
+        md = staged.md_file.display(),
+    );
+    harness
+        .send_command_with_env(&cmd, &[])
+        .expect("send compose command");
+
+    let deadline = Instant::now() + Duration::from_secs(40);
+    let mut pane = String::new();
+    while Instant::now() < deadline {
+        pane = harness.capture().map(|f| f.plain).unwrap_or_default();
+        // The sentinel is echoed only after compose exits; ignore the command
+        // line itself (which also contains the literal token) by requiring it on
+        // its own output line.
+        if pane.lines().any(|l| l.trim() == sentinel) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    kill_session_by_name(&session);
+    pane
+}
+
+/// A proxy target whose body fails to compose (a bad `::file` transclusion)
+/// must surface a *styled* error block, not a crude single-line `Error: …`.
+/// Regression for the harness loop flattening the typed `BlockError` with
+/// `eyre!("{e}")` on the re-materialization path.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_initialize_proxy_compose_error_renders_styled_block() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let source_doc = "---\ninitialize:\n  stack:\n    \
+         - action: {proxy: '@target.md'}\n---\nsource body\n";
+    // `::file` a non-existent partial: transclusion fails during the target's
+    // re-materialization inside the harness loop.
+    let target_doc = "---\ntitle: proxy target\n---\n::file _no_such_partial.md\n";
+    let staged = stage_proxy_pair(source_doc, target_doc, true);
+
+    let pane = run_compose_await_exit(&staged);
+
+    // The styled `BlockError` renders the type name as its title (e.g.
+    // "⤫ TransclusionError: …") inside a `┃`-bordered box. The crude fallback
+    // (`log::error(report.to_string())`) prints a single un-bordered
+    // "Error: Transclusion error: …" line instead — so the block title plus a
+    // border glyph together prove the typed error survived to the walker.
+    assert!(
+        pane.contains("TransclusionError"),
+        "the compose error must render as a typed block (not a crude line); pane:\n{pane}"
+    );
+    assert!(
+        pane.contains('┃'),
+        "the compose error must render inside a styled `┃`-bordered block; pane:\n{pane}"
+    );
+    assert!(
+        !pane.contains("Error: Transclusion error"),
+        "the crude single-line fallback must not be used; pane:\n{pane}"
+    );
+}
+
 /// Retry from `failure`: `{retry: 2}` re-invokes the provider, so it runs 3 times
 /// (original + 2 retries), `failure` fires each attempt, the budget exhausts,
 /// then `finalize` fires exactly once.
@@ -1017,6 +1168,140 @@ fn level2_lifecycle_initialize_proxy_runs_target_initialize() {
     assert!(
         !lines.iter().any(|l| l == "source-finalize"),
         "the source finalize must not fire after handing off via proxy; got {lines:?}; pane:\n{pane}"
+    );
+}
+
+/// Regression: a `proxy` hand-off must forward the caller's `--set` params and
+/// launch-area file-ref anchor into the target's re-materialization. Both
+/// documents declare `$schema: spec: file(required;eager)`, and the caller
+/// passes `spec=spec.md`. Before the fix the target re-composed without the
+/// `spec` override (and without the launch-area fallback dir), so its schema
+/// validation failed — the run never reached the target's `success`.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_initialize_proxy_forwards_set_params_to_target_schema() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let source_doc = "---\n$schema:\n    spec: file(required;eager)\ninitialize:\n  stack:\n    \
+         - action: {proxy: '@target.md'}\n---\nsource body\n";
+    let target_doc = "---\n$schema:\n    spec: file(required;eager)\nsuccess:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'target-success']}\n---\ntarget body\n";
+    let staged = stage_proxy_pair(source_doc, target_doc, true);
+    // The `file(required;eager)` param resolves against the launch area (the
+    // workspace we `cd` into), exercising the forwarded `file_ref_fallback_dir`.
+    fs::write(staged.workspace.path().join("spec.md"), "---\nimplemented: true\n---\nspec\n")
+        .unwrap();
+
+    let pane = run_proxy_in_tmux_with_set(&staged, "spec=spec.md", "target-success");
+
+    let lines = event_lines(&staged);
+    assert!(
+        lines.iter().any(|l| l == "target-success"),
+        "the target's success must fire — the forwarded `spec` param must satisfy its \
+         `$schema` after the proxy re-materialization; got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        !pane.contains("did not satisfy the schema"),
+        "no schema-validation failure must surface for the proxy target; pane:\n{pane}"
+    );
+}
+
+/// An `initialize` proxy hand-off must (a) announce the redirect with an INFO
+/// line and (b) preview the *target* document's body as the agent prompt — not
+/// the proxying source's body, which never reaches the agent.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_initialize_proxy_reports_redirect_and_target_prompt() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let source_doc = "---\ninitialize:\n  stack:\n    \
+         - action: {proxy: '@target.md'}\nsuccess:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'source-success']}\n---\nSOURCEBODYMARKER\n";
+    let target_doc = "---\nsuccess:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'target-success']}\n---\nTARGETBODYMARKER\n";
+    let staged = stage_proxy_pair(source_doc, target_doc, true);
+
+    let pane = run_in_tmux_for(&staged, "target-success");
+
+    assert!(
+        pane.contains("flow control redirected"),
+        "an INFO line must announce the proxy hand-off; pane:\n{pane}"
+    );
+    assert!(
+        pane.contains("TARGETBODYMARKER"),
+        "the agent prompt must preview the proxied target's body; pane:\n{pane}"
+    );
+    assert!(
+        !pane.contains("SOURCEBODYMARKER"),
+        "the proxying source's body must not be previewed (it never runs); pane:\n{pane}"
+    );
+}
+
+/// A proxied target's composed body must keep its authored line structure. The
+/// re-materialization path must set `IncidentalNewlineMode::Preserve` (as
+/// `prepare_direct` does); otherwise incidental single newlines are stripped and
+/// an author's block-quoted list collapses onto one line in the agent prompt.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_initialize_proxy_target_preserves_line_structure() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let source_doc = "---\ninitialize:\n  stack:\n    \
+         - action: {proxy: '@target.md'}\n---\nsource body\n";
+    // A block-quoted unordered list: each item must stay on its own line.
+    let target_doc = "---\nsuccess:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'target-done']}\n---\n\
+         > - ALPHAITEM\n> - BETAITEM\n> - GAMMAITEM\n";
+    let staged = stage_proxy_pair(source_doc, target_doc, true);
+
+    let pane = run_in_tmux_for(&staged, "target-done");
+
+    // Each list item renders on its own line, so no single rendered line holds
+    // both the first and last item (the collapsed form is
+    // "- ALPHAITEM - BETAITEM - GAMMAITEM" on one line).
+    let collapsed = pane
+        .lines()
+        .any(|l| l.contains("ALPHAITEM") && l.contains("GAMMAITEM"));
+    assert!(
+        !collapsed,
+        "the block-quoted list must keep each item on its own line (line structure \
+         preserved on re-materialization); pane:\n{pane}"
+    );
+    assert!(
+        pane.contains("ALPHAITEM") && pane.contains("GAMMAITEM"),
+        "the agent-prompt preview must show the proxied target's list; pane:\n{pane}"
+    );
+}
+
+/// A proxied target's lifecycle events must resolve `ctx.*` groups the
+/// proxying *source* never referenced. The composition-start `ctx.*` snapshot is
+/// demand-driven for the source, so it omits e.g. `ctx.os`; after a proxy the
+/// guard drops that snapshot and the executor re-captures per expression. The
+/// source references no `ctx.*`; the target's `success` stack references
+/// `{{ctx.os}}`, which must render non-empty.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_initialize_proxy_target_resolves_ctx_not_in_source() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let source_doc = "---\ninitialize:\n  stack:\n    \
+         - action: {proxy: '@target.md'}\n---\nsource body\n";
+    let target_doc = "---\nsuccess:\n  stack:\n    - action:\n        \
+         - {append_line: ['events.log', 'osmarker=[{{ctx.os}}]']}\n        \
+         - {append_line: ['events.log', 'target-done']}\n---\ntarget body\n";
+    let staged = stage_proxy_pair(source_doc, target_doc, true);
+
+    let pane = run_in_tmux_for(&staged, "target-done");
+
+    let lines = event_lines(&staged);
+    let marker = lines
+        .iter()
+        .find(|l| l.starts_with("osmarker="))
+        .unwrap_or_else(|| panic!("target success stack must run; got {lines:?}; pane:\n{pane}"));
+    assert_ne!(
+        marker, "osmarker=[]",
+        "`ctx.os` must resolve in the proxied target even though the source \
+         never referenced it (demand-driven snapshot re-capture); got `{marker}`; pane:\n{pane}"
     );
 }
 

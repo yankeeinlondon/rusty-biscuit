@@ -3,6 +3,8 @@
 // Each module implements `ProviderPolicyBackend` for one provider.
 // Backends are registered with `PolicyEngine` during construction.
 
+pub(crate) mod common;
+
 pub mod claude;
 pub mod codex;
 pub mod gemini;

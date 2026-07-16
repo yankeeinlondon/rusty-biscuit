@@ -40,11 +40,11 @@ use crate::commands::schema_interactive::{
     resolve_interactive_options,
 };
 use crate::commands::wrap::composition::{
-    CompositionPrepContext, eagerly_resolve_target, emit_execution_header,
-    execute_composition_request, execute_composition_attempt,
-    install_agent_env_for_composition,
+    CompositionPrepContext, eagerly_resolve_target, execute_composition_request,
+    execute_composition_attempt, install_agent_env_for_composition,
 };
 use crate::commands::wrap::wrap_terminal;
+use crate::output::emit_execution_header;
 
 /// Enrich a `color_eyre::Report` with a frontmatter excerpt when its root
 /// cause is a frontmatter-rooted [`CompositionError`].
@@ -664,6 +664,8 @@ fn build_execution_request(
         prep_env_context: Some(prep_context.env_context.clone()),
         prep_launch_detection_error: prep_context.launch_detection_error.clone(),
         header_emitted,
+        provider_args: shared.provider_args.clone(),
+        provider_args_explicit: shared.provider_args_explicit,
     }
 }
 
@@ -873,6 +875,8 @@ mod tests {
             perf: false,
             max_iterations: None,
             on_rate_limit: None,
+            provider_args: Vec::new(),
+            provider_args_explicit: false,
         }
     }
 

@@ -7,14 +7,19 @@
 //! ## Modules
 //!
 //! - [`theme`] - Mermaid theme color schemes and JSON parsing
-//! - [`render_html`] - HTML rendering with accessibility features
+//! - [`feature`] - Darkmatter's browser [`FeatureResolver`], the single owner of
+//!   the inline ESM bootstrap (a script-only bundle; the palette rides Mermaid
+//!   `themeVariables`, not CSS)
 //! - [`render_terminal`] - Terminal rendering via local mmdc CLI
 
-pub mod render_html;
+pub mod feature;
 pub mod render_terminal;
 pub mod theme;
 
-pub use render_html::MermaidHtml;
+pub use feature::{
+    DarkmatterFeatureResolver, MERMAID_CDN_FALLBACK_ORIGIN, MERMAID_CDN_PRIMARY_ORIGIN,
+    MERMAID_VERSION,
+};
 pub use render_terminal::MermaidRenderError;
 pub use theme::{
     DEFAULT_DARK_THEME, DEFAULT_LIGHT_THEME, MermaidTheme, MermaidThemeError, NEUTRAL_THEME,
@@ -256,72 +261,8 @@ impl Mermaid {
         if let Some(title) = &self.title {
             title.clone()
         } else {
-            render_html::detect_diagram_type(&self.instructions).to_string()
+            detect_diagram_type(&self.instructions).to_string()
         }
-    }
-
-    /// Renders the diagram for HTML output.
-    ///
-    /// Returns a `MermaidHtml` struct with separate head and body sections.
-    /// The head contains:
-    /// - Mermaid.js ESM module import from CDN
-    /// - CSS variables for theme colors (light/dark via prefers-color-scheme)
-    ///
-    /// The body contains:
-    /// - `<pre class="mermaid">` element with diagram instructions
-    /// - ARIA attributes: `role="img"`, `aria-label` with alt text
-    /// - Optional `title` attribute if title is set
-    ///
-    /// ## Examples
-    ///
-    /// ```rust
-    /// use darkmatter::mermaid::Mermaid;
-    ///
-    /// let diagram = Mermaid::new("flowchart LR\n    A --> B")
-    ///     .with_title("My Flowchart");
-    /// let html = diagram.render_for_html();
-    ///
-    /// // Embed in HTML document
-    /// println!("<html><head>{}</head><body>{}</body></html>", html.head, html.body);
-    /// ```
-    pub fn render_for_html(&self) -> MermaidHtml {
-        use html_escape::encode_text;
-
-        let light_theme = self.theme(ColorMode::Light);
-        let dark_theme = self.theme(ColorMode::Dark);
-
-        // Generate head content
-        let css_vars = render_html::generate_css_variables(light_theme, dark_theme);
-        let head = format!(
-            r#"{css_vars}
-<script type="module">
-  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
-  mermaid.registerIconPacks([
-    {{ name: 'fa7-brands', loader: () => fetch('https://unpkg.com/@iconify-json/fa7-brands@1/icons.json').then(r => r.json()) }},
-    {{ name: 'lucide', loader: () => fetch('https://unpkg.com/@iconify-json/lucide@1/icons.json').then(r => r.json()) }},
-    {{ name: 'carbon', loader: () => fetch('https://unpkg.com/@iconify-json/carbon@1/icons.json').then(r => r.json()) }},
-    {{ name: 'system-uicons', loader: () => fetch('https://unpkg.com/@iconify-json/system-uicons@1/icons.json').then(r => r.json()) }}
-  ]);
-  mermaid.initialize({{ startOnLoad: true }});
-</script>"#
-        );
-
-        // Generate body content
-        let alt = self.alt_text();
-        let escaped_alt = encode_text(&alt);
-        let escaped_instructions = encode_text(&self.instructions);
-
-        let title_attr = if let Some(title) = &self.title {
-            format!(r#" title="{}""#, encode_text(title))
-        } else {
-            String::new()
-        };
-
-        let body = format!(
-            r#"<pre class="mermaid" role="img" aria-label="{escaped_alt}"{title_attr}>{escaped_instructions}</pre>"#
-        );
-
-        MermaidHtml::new(head, body)
     }
 
     /// Renders the diagram to the terminal using the local mmdc CLI.
@@ -364,6 +305,51 @@ impl Mermaid {
     /// handling the fallback (e.g., rendering as a syntax-highlighted code block).
     pub fn render_for_terminal(&self) -> Result<(), MermaidRenderError> {
         render_terminal::render_for_terminal(&self.instructions)
+    }
+}
+
+/// Detects the diagram type from the first line of instructions.
+///
+/// ## Returns
+///
+/// A human-readable description of the diagram type, used as alt text when no
+/// explicit [`Mermaid::with_title`] is set.
+///
+/// ## Examples
+///
+/// ```rust
+/// use darkmatter::mermaid::detect_diagram_type;
+/// assert_eq!(detect_diagram_type("flowchart LR"), "Flowchart diagram");
+/// assert_eq!(detect_diagram_type("sequenceDiagram"), "Sequence diagram");
+/// assert_eq!(detect_diagram_type("unknown"), "Mermaid diagram");
+/// ```
+pub fn detect_diagram_type(instructions: &str) -> &'static str {
+    let first_line = instructions.lines().next().unwrap_or("").trim();
+
+    if first_line.starts_with("flowchart") || first_line.starts_with("graph") {
+        "Flowchart diagram"
+    } else if first_line.starts_with("sequenceDiagram") {
+        "Sequence diagram"
+    } else if first_line.starts_with("classDiagram") {
+        "Class diagram"
+    } else if first_line.starts_with("stateDiagram") {
+        "State diagram"
+    } else if first_line.starts_with("erDiagram") {
+        "Entity relationship diagram"
+    } else if first_line.starts_with("pie") {
+        "Pie chart"
+    } else if first_line.starts_with("gantt") {
+        "Gantt chart"
+    } else if first_line.starts_with("journey") {
+        "User journey diagram"
+    } else if first_line.starts_with("gitGraph") || first_line.starts_with("gitgraph") {
+        "Git graph diagram"
+    } else if first_line.starts_with("mindmap") {
+        "Mind map diagram"
+    } else if first_line.starts_with("timeline") {
+        "Timeline diagram"
+    } else {
+        "Mermaid diagram"
     }
 }
 
@@ -539,54 +525,24 @@ mod tests {
     }
 
     #[test]
-    fn test_render_html_contains_mermaid_esm() {
-        let diagram = Mermaid::new("flowchart LR\n    A --> B");
-        let html = diagram.render_for_html();
-        assert!(html.head.contains("https://cdn.jsdelivr.net/npm/mermaid"));
-        assert!(html.head.contains("type=\"module\""));
-    }
-
-    #[test]
-    fn test_render_html_has_aria_attributes() {
-        let diagram = Mermaid::new("flowchart LR\n    A --> B");
-        let html = diagram.render_for_html();
-        assert!(html.body.contains(r#"role="img""#));
-        assert!(html.body.contains(r#"aria-label=""#));
-    }
-
-    #[test]
-    fn test_render_html_escapes_instructions() {
-        let diagram = Mermaid::new("flowchart LR\n    A[\"<script>alert('xss')</script>\"] --> B");
-        let html = diagram.render_for_html();
-        // Should escape the HTML entities
-        assert!(html.body.contains("&lt;script&gt;"));
-        assert!(html.body.contains("&lt;/script&gt;"));
-        // Should not contain raw script tags
-        assert!(!html.body.contains("<script>alert"));
-    }
-
-    #[test]
-    fn test_render_html_escapes_title() {
-        let diagram =
-            Mermaid::new("flowchart LR\n    A --> B").with_title("<script>alert('xss')</script>");
-        let html = diagram.render_for_html();
-        // Should escape the title attribute
-        assert!(html.body.contains("&lt;script&gt;"));
-        // Should not contain raw script tags
-        assert!(!html.body.contains("title=\"<script>"));
-    }
-
-    #[test]
-    fn test_html_head_snapshot() {
-        let diagram = Mermaid::new("flowchart LR\n    A --> B").with_title("Test Flowchart");
-        let html = diagram.render_for_html();
-        insta::assert_snapshot!(html.head);
-    }
-
-    #[test]
-    fn test_html_body_snapshot() {
-        let diagram = Mermaid::new("flowchart LR\n    A --> B").with_title("Test Flowchart");
-        let html = diagram.render_for_html();
-        insta::assert_snapshot!(html.body);
+    fn detect_diagram_type_covers_known_and_unknown_types() {
+        assert_eq!(detect_diagram_type("flowchart LR"), "Flowchart diagram");
+        assert_eq!(detect_diagram_type("graph LR"), "Flowchart diagram");
+        assert_eq!(detect_diagram_type("sequenceDiagram"), "Sequence diagram");
+        assert_eq!(detect_diagram_type("classDiagram"), "Class diagram");
+        assert_eq!(detect_diagram_type("stateDiagram"), "State diagram");
+        assert_eq!(
+            detect_diagram_type("erDiagram"),
+            "Entity relationship diagram"
+        );
+        assert_eq!(detect_diagram_type("pie"), "Pie chart");
+        assert_eq!(detect_diagram_type("gantt"), "Gantt chart");
+        assert_eq!(detect_diagram_type("journey"), "User journey diagram");
+        assert_eq!(detect_diagram_type("gitGraph"), "Git graph diagram");
+        assert_eq!(detect_diagram_type("gitgraph"), "Git graph diagram");
+        assert_eq!(detect_diagram_type("mindmap"), "Mind map diagram");
+        assert_eq!(detect_diagram_type("timeline"), "Timeline diagram");
+        assert_eq!(detect_diagram_type("unknown"), "Mermaid diagram");
+        assert_eq!(detect_diagram_type(""), "Mermaid diagram");
     }
 }

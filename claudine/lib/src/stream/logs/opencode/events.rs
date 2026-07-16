@@ -239,7 +239,7 @@ impl LogClassification {
                 vec![
                     (
                         "asset_type",
-                        Some(json!(super::errors::asset_type_as_str(*asset_type))),
+                        Some(json!(super::classify::asset_type_as_str(*asset_type))),
                     ),
                     ("path", path.as_ref().map(|p| json!(p))),
                     ("error", Some(json!(error))),

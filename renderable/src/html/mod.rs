@@ -1,9 +1,10 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::{
     browser::{
         PageOptions, RelativeAssetPath,
-        feature::PageFeature,
+        feature::{DefaultFeatureResolver, FeatureContext, FeatureResolver, PageFeature},
         fragment::{BrowserFragment, ComposableNode, Ready},
     },
     html::tag::{BlockTag, link::LinkTag, meta::MetaTag},
@@ -51,6 +52,21 @@ pub struct HtmlPage {
     external_stylesheet: Option<RelativeAssetPath>,
     /// Inline-vs-external JS choice. `Some(path)` → external `<script src>`.
     external_code: Option<RelativeAssetPath>,
+    /// Resolves requested [`PageFeature`]s to their assets. Defaults to
+    /// [`DefaultFeatureResolver`]; Darkmatter installs its own. Consumed by
+    /// [`resolved_feature_head`](HtmlPage::resolved_feature_head) when
+    /// [`render`](HtmlPage::render) assembles the page `<head>`.
+    feature_resolver: Rc<dyn FeatureResolver>,
+    /// Renderable-owned context threaded into feature resolution.
+    feature_context: FeatureContext,
+    /// Memoized [`resolved_feature_head`](HtmlPage::resolved_feature_head)
+    /// output. `render_browser_document` resolves eagerly to surface unresolved
+    /// features at its fallible entry point; caching the result lets the final
+    /// [`render`](HtmlPage::render) reuse it so a possibly-impure
+    /// [`FeatureResolver`] runs exactly once per feature per page. Cleared by
+    /// every `&mut self` method that changes the resolver, context, or fragment
+    /// set (the resolution inputs).
+    resolved_head_cache: std::cell::RefCell<Option<String>>,
 }
 
 impl Default for HtmlPage {
@@ -66,6 +82,9 @@ impl Default for HtmlPage {
             css_variables: None,
             external_stylesheet: None,
             external_code: None,
+            feature_resolver: Rc::new(DefaultFeatureResolver),
+            feature_context: FeatureContext::default(),
+            resolved_head_cache: std::cell::RefCell::new(None),
         }
     }
 }
@@ -91,6 +110,7 @@ impl HtmlPage {
     /// Append a fragment to the page body.
     pub fn add_fragment(&mut self, fragment: BrowserFragment<Ready>) -> &mut HtmlPage {
         self.fragments.push(fragment);
+        self.invalidate_resolved_head_cache();
         self
     }
 
@@ -121,6 +141,74 @@ impl HtmlPage {
     pub fn add_script_block(&mut self, code_block: impl Into<String>) -> &mut HtmlPage {
         self.script_blocks.push(code_block.into());
         self
+    }
+
+    /// Install the feature resolver used to turn requested
+    /// [`PageFeature`]s into assets. Defaults to [`DefaultFeatureResolver`].
+    pub fn set_feature_resolver(&mut self, resolver: Rc<dyn FeatureResolver>) -> &mut HtmlPage {
+        self.feature_resolver = resolver;
+        self.invalidate_resolved_head_cache();
+        self
+    }
+
+    /// Install the renderable-owned [`FeatureContext`] threaded into feature
+    /// resolution.
+    pub fn set_feature_context(&mut self, context: FeatureContext) -> &mut HtmlPage {
+        self.feature_context = context;
+        self.invalidate_resolved_head_cache();
+        self
+    }
+
+    /// Drops any memoized [`resolved_feature_head`](HtmlPage::resolved_feature_head)
+    /// output so the next resolution reflects changed inputs. Called by every
+    /// `&mut self` method that touches a resolution input (resolver, context, or
+    /// fragment set).
+    fn invalidate_resolved_head_cache(&mut self) {
+        *self.resolved_head_cache.borrow_mut() = None;
+    }
+
+    /// Resolves this page's rolled-up [`features`](HtmlPage::features) through
+    /// the installed [`FeatureResolver`] for the Browser target and serializes
+    /// the resulting `<head>` assets for [`render`](HtmlPage::render) to append.
+    ///
+    /// Assets are emitted in first-seen feature order, after the page's authored
+    /// links / styles / scripts, so a no-feature page yields an empty string and
+    /// is byte-for-byte unchanged. This is the single feature-injection point for
+    /// the fragment/`HtmlPage` browser path; the streaming full-document
+    /// assembler resolves its own accumulated features directly.
+    ///
+    /// ## Errors
+    ///
+    /// - [`FeatureResolveError::UnresolvedFeature`] when a requested browser
+    ///   feature has no assets under the installed resolver. Dropping a browser
+    ///   dependency silently is forbidden.
+    ///
+    /// [`FeatureResolveError::UnresolvedFeature`]: crate::browser::feature::FeatureResolveError::UnresolvedFeature
+    pub(crate) fn resolved_feature_head(
+        &self,
+    ) -> Result<String, crate::browser::feature::FeatureResolveError> {
+        // Memoized so an eager caller (`render_browser_document`) and the final
+        // `render` share one resolution — a `FeatureResolver` is not required to
+        // be pure, so double invocation could do redundant work or diverge. The
+        // cache holds the serialized head (including the empty-features result)
+        // and is cleared whenever a resolution input changes.
+        if let Some(cached) = self.resolved_head_cache.borrow().as_ref() {
+            return Ok(cached.clone());
+        }
+        let features = self.features();
+        let head = if features.is_empty() {
+            String::new()
+        } else {
+            let resolved = crate::browser::feature::resolve_features(
+                &features,
+                self.feature_resolver.as_ref(),
+                crate::target::RenderTarget::Browser,
+                &self.feature_context,
+            )?;
+            crate::browser::feature::serialize_features_head(&resolved)
+        };
+        *self.resolved_head_cache.borrow_mut() = Some(head.clone());
+        Ok(head)
     }
 
     /// Apply a [`PageOptions`] to this page in place.
@@ -268,16 +356,44 @@ impl HtmlPage {
         self.script_blocks.join("\n\n")
     }
 
-    /// Renders the page to a complete HTML string. Pure — no I/O.
-    pub fn render(&self) -> String {
+    /// Renders the page to a complete HTML string, resolving and injecting the
+    /// page's requested browser [`features`](HtmlPage::features) into `<head>`.
+    /// Pure — no I/O.
+    ///
+    /// Feature assets are resolved through the installed [`FeatureResolver`] and
+    /// appended after the page's authored links / styles / scripts, so a
+    /// no-feature page is byte-for-byte unchanged and cannot fail.
+    ///
+    /// ## Errors
+    ///
+    /// - [`FeatureResolveError::UnresolvedFeature`] when a requested browser
+    ///   feature has no assets under the installed [`FeatureResolver`]. Dropping a
+    ///   declared browser dependency silently is forbidden.
+    ///
+    /// [`FeatureResolveError::UnresolvedFeature`]: crate::browser::feature::FeatureResolveError::UnresolvedFeature
+    pub fn render(&self) -> Result<String, crate::browser::feature::FeatureResolveError> {
         let head = self.render_head(self.first_h1_text().as_deref());
-        let body: String = self.fragments.iter().map(|f| f.render()).collect();
-        format!("<!DOCTYPE html><html><head>{head}</head><body>{body}</body></html>")
+        let feature_head = self.resolved_feature_head()?;
+        // One allocator threaded across every fragment so prompted-link popover
+        // ids stay document-unique even when the fragments were rendered
+        // independently and composed here (spec criterion 7).
+        let mut popover_ids = crate::browser::fragment::PopoverIdAllocator::default();
+        let body: String = self
+            .fragments
+            .iter()
+            .map(|f| f.render_with(&mut popover_ids))
+            .collect();
+        Ok(format!(
+            "<!DOCTYPE html><html><head>{head}{feature_head}</head><body>{body}</body></html>"
+        ))
     }
 
     /// Builds the page `<head>` contents (everything between `<head>` and
     /// `</head>`), in the fixed order: charset, viewport, title, microdata
-    /// meta tags, deduped links, stylesheet, script blocks.
+    /// meta tags, deduped links, stylesheet, then script blocks. Resolved
+    /// feature assets are appended by [`render`](HtmlPage::render) after this
+    /// authored head, so both the fragment path and the streaming full-document
+    /// path ([`render_browser_document_html`]) place them identically.
     ///
     /// `fallback_title` supplies the `<title>` when no `Title` microdata key is
     /// present; [`render`](HtmlPage::render) passes [`first_h1_text`] so the
@@ -411,6 +527,11 @@ fn collect_component_fragments<'a>(
         ComposableNode::Component(child) => collect_fragments(child, out),
         ComposableNode::BlockTag(block) => {
             for child in &block.content.children {
+                collect_component_fragments(child, out);
+            }
+        }
+        ComposableNode::Popover(popover) => {
+            for child in &popover.anchor_children {
                 collect_component_fragments(child, out);
             }
         }

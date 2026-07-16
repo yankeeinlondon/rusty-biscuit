@@ -2,7 +2,7 @@ use openapiv3::{ReferenceOr, Schema};
 use std::collections::HashSet;
 
 use super::super::diagnostics::OpenApiDiagnostic;
-use super::super::naming::{sanitize_rust_ident, to_snake_case};
+use super::super::naming::{deconflict_name, sanitize_rust_field_ident, sanitize_rust_ident};
 use super::super::resolver::RefResolver;
 use crate::models::{
     EnumDef, EnumVariant, FieldDef, ModelCatalog, ModelDef, PrimitiveType, StructDef, TypeAlias,
@@ -22,6 +22,13 @@ pub fn map_all_schemas(
     reserved_names: &HashSet<String>,
 ) -> SchemaMapResult {
     let mut types = Vec::new();
+    // Final Rust name for every source schema, keyed by its ORIGINAL wire name.
+    // Keying by the original (not the sanitized) name is what keeps two schemas
+    // that sanitize identically (`user-name`, `user_name`) as distinct models
+    // and lets each `TypeRef::Named` ref resolve to the correct target.
+    let mut final_by_original: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    // Sanitized -> final, surfaced to the builder for request type-name remaps.
     let mut name_mapping: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
     let mut used_names = reserved_names.clone();
@@ -29,26 +36,24 @@ pub fn map_all_schemas(
     if let Some(ref components) = doc.components {
         for (name, _) in &components.schemas {
             let sanitized_name = sanitize_rust_ident(name);
-            let final_name = super::super::naming::deconflict_name(&sanitized_name, &used_names);
+            let final_name = deconflict_name(&sanitized_name, &used_names);
             used_names.insert(final_name.clone());
             if sanitized_name != final_name {
-                name_mapping.insert(sanitized_name, final_name);
+                name_mapping.insert(sanitized_name, final_name.clone());
             }
+            final_by_original.insert(name.clone(), final_name);
         }
 
-        let mut processed_names = reserved_names.clone();
         for (name, schema_ref) in &components.schemas {
-            let sanitized_name = sanitize_rust_ident(name);
-            let final_name = name_mapping
-                .get(&sanitized_name)
+            let final_name = final_by_original
+                .get(name)
                 .cloned()
-                .unwrap_or(sanitized_name);
-            processed_names.insert(final_name.clone());
+                .unwrap_or_else(|| sanitize_rust_ident(name));
 
             if let Some(mut model) =
                 map_schema_to_model(&final_name, name, schema_ref, resolver, diagnostics)
             {
-                remap_type_refs_in_model(&mut model, &name_mapping);
+                remap_type_refs_in_model(&mut model, &final_by_original);
                 types.push(model);
             }
         }
@@ -83,12 +88,16 @@ fn remap_type_refs_in_model(
     }
 }
 
+/// Resolves each `TypeRef::Named` from its original wire name to the final Rust
+/// name. `mapping` is keyed by original name; a name absent from it (e.g. a
+/// dangling ref) falls back to plain sanitization so output stays valid Rust.
 fn remap_type_ref(type_ref: &mut TypeRef, mapping: &std::collections::HashMap<String, String>) {
     match type_ref {
         TypeRef::Named(name) => {
-            if let Some(new_name) = mapping.get(name) {
-                *name = new_name.clone();
-            }
+            *name = mapping
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| sanitize_rust_ident(name));
         }
         TypeRef::Array(inner) | TypeRef::Map(inner) | TypeRef::Optional(inner) => {
             remap_type_ref(inner, mapping);
@@ -116,7 +125,8 @@ fn map_schema_to_model(
                 return Some(ModelDef::Alias(TypeAlias {
                     name: rust_name.to_string(),
                     description: None,
-                    target: TypeRef::Named(sanitize_rust_ident(target)),
+                    // Raw original name; `remap_type_refs_in_model` resolves it.
+                    target: TypeRef::Named(target.to_string()),
                 }));
             }
             diagnostics.push(OpenApiDiagnostic::warn(
@@ -236,7 +246,7 @@ fn map_object_to_struct(
     let mut fields = Vec::new();
 
     for (field_name, schema_ref) in &obj.properties {
-        let rust_field_name = to_snake_case(field_name);
+        let rust_field_name = sanitize_rust_field_ident(field_name);
         let serde_rename = if rust_field_name != *field_name {
             Some(field_name.clone())
         } else {
@@ -283,20 +293,21 @@ fn map_string_enum(
     description: Option<String>,
     string_type: &openapiv3::StringType,
 ) -> EnumDef {
-    let variants: Vec<EnumVariant> = string_type
-        .enumeration
-        .iter()
-        .filter_map(|v| {
-            v.as_ref().map(|s| {
-                let variant_name = sanitize_rust_ident(s);
-                EnumVariant {
-                    name: variant_name,
-                    value: Some(s.clone()),
-                    description: None,
-                }
-            })
-        })
-        .collect();
+    // Values differing only by case/separators (`active`/`Active`) sanitize to
+    // the same variant identifier; deconflict the identifier while keeping each
+    // original wire value so serde still round-trips the source string.
+    let mut used_variant_names: HashSet<String> = HashSet::new();
+    let mut variants: Vec<EnumVariant> = Vec::new();
+    for value in string_type.enumeration.iter().flatten() {
+        let sanitized = sanitize_rust_ident(value);
+        let variant_name = deconflict_name(&sanitized, &used_variant_names);
+        used_variant_names.insert(variant_name.clone());
+        variants.push(EnumVariant {
+            name: variant_name,
+            value: Some(value.clone()),
+            description: None,
+        });
+    }
 
     EnumDef {
         name: name.to_string(),
@@ -315,7 +326,7 @@ fn map_array_items(
         Some(item_ref) => match item_ref {
             ReferenceOr::Reference { reference } => {
                 if let Some(name) = reference.strip_prefix("#/components/schemas/") {
-                    TypeRef::Named(sanitize_rust_ident(name))
+                    TypeRef::Named(name.to_string())
                 } else {
                     diagnostics.push(OpenApiDiagnostic::warn(
                         reference.clone(),
@@ -338,7 +349,7 @@ fn map_schema_to_type_ref(
     match schema_ref {
         ReferenceOr::Reference { reference } => {
             if let Some(name) = reference.strip_prefix("#/components/schemas/") {
-                TypeRef::Named(sanitize_rust_ident(name))
+                TypeRef::Named(name.to_string())
             } else {
                 diagnostics.push(OpenApiDiagnostic::warn(
                     reference.clone(),
@@ -359,7 +370,7 @@ pub(super) fn map_schema_ref_to_type_ref(
     match schema_ref {
         ReferenceOr::Reference { reference } => {
             if let Some(name) = reference.strip_prefix("#/components/schemas/") {
-                TypeRef::Named(sanitize_rust_ident(name))
+                TypeRef::Named(name.to_string())
             } else {
                 diagnostics.push(OpenApiDiagnostic::warn(
                     reference.clone(),

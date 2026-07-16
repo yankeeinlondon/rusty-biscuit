@@ -37,6 +37,12 @@ struct Cli {
     /// Keep the DuckDB projection in memory instead of persisting it.
     /// Handy for short-lived debugging sessions where rebuilding the
     /// projection from redb on every restart is acceptable.
+    /// Directory to scan (bounded depth) for git checkouts feeding the
+    /// repos/{node_id} register. Repeatable; also settable as a
+    /// colon-separated list via the environment.
+    #[arg(long = "repo-root", env = "RENDEZVOUS_REPO_ROOTS", value_delimiter = ':')]
+    repo_roots: Vec<PathBuf>,
+
     #[arg(long = "in-memory-projection")]
     in_memory_projection: bool,
 
@@ -80,6 +86,9 @@ async fn run() -> Result<(), ServerError> {
         .data_dir
         .unwrap_or_else(|| std::env::temp_dir().join("rendezvous-data"));
     let mut config = DaemonConfig::with_data_dir(&data_dir);
+    if !cli.repo_roots.is_empty() {
+        config = config.with_repo_scan_roots(cli.repo_roots.clone());
+    }
     if cli.in_memory_projection {
         config = config.with_in_memory_projection();
     }

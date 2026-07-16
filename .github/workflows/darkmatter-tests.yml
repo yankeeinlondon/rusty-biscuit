@@ -1,8 +1,9 @@
 name: darkmatter-tests
 
-# Path-filtered test workflow for the Darkmatter library and CLI.
-# Runs whenever files under `darkmatter/` or workspace-level Cargo
-# manifests change.
+# Path-filtered CI for the Darkmatter area. Delegates to the shared
+# `_area-ci.yml` reusable workflow (macOS compile-check, full L1 on Linux +
+# Windows, sharded 4-ways, kache-cached) so platform behavior matches every
+# other area. See docs/testing-strategy.md → "Platform Coverage (CI)".
 
 on:
   push:
@@ -13,6 +14,7 @@ on:
       - "justfile"
       - "just/**"
       - ".github/workflows/darkmatter-tests.yml"
+      - ".github/workflows/_area-ci.yml"
   pull_request:
     paths:
       - "darkmatter/**"
@@ -21,57 +23,46 @@ on:
       - "justfile"
       - "just/**"
       - ".github/workflows/darkmatter-tests.yml"
+      - ".github/workflows/_area-ci.yml"
   workflow_dispatch: {}
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # Force biscuit-terminal's `color_depth()` to report TrueColor on a
-  # headless runner. The darkmatter terminal renderer routes through
-  # `biscuit_terminal::discovery::detection::color_depth()`, which under
-  # the default GitHub Actions environment (TERM=dumb, no COLORTERM)
-  # resolves to `ColorDepth::None` and strips the truecolor escape
-  # sequences that the committed insta snapshots assert on (e.g.
-  # `layout_snapshots__zero_config_prose_snapshot.snap`). Setting
-  # COLORTERM=truecolor is the upstream-recommended override.
-  COLORTERM: truecolor
 
 concurrency:
   group: darkmatter-tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Darkmatter tests
+  ci:
+    uses: ./.github/workflows/_area-ci.yml
+    with:
+      area: darkmatter
+      check-args: "-p darkmatter -p darkmatter-cli -p dmls"
+      full-os: '["ubuntu-latest", "windows-latest"]'
+      check-os: '["macos-latest"]'
+      # darkmatter's L1 suite is the largest in the repo; partition it 4 ways so
+      # the run stays well under the 30-minute ceiling it was breaching.
+      shards: '["1/4", "2/4", "3/4", "4/4"]'
+    secrets: inherit
+
+  # Area-specific regression guard (kept out of the shared workflow): the local
+  # pre-push hook runs `just test darkmatter` and previously broke for developers
+  # exporting NO_COLOR=1, because biscuit-terminal honors NO_COLOR before
+  # COLORTERM and the color-depth tests asserted truecolor. This exercises those
+  # tests under NO_COLOR=1 to keep them hermetic.
+  no-color-hermeticity:
+    name: color-depth tests hermetic under NO_COLOR=1
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      NO_COLOR: "1"
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Cargo artifacts
-        uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
-          shared-key: darkmatter-tests
-
-      - name: Install just
-        uses: extractions/setup-just@v2
-
-      - name: Run Darkmatter tests
-        run: just test darkmatter
-
-      # Regression guard for the local pre-push path. The hook delegates to
-      # `just test darkmatter`, which previously failed for developers who
-      # exported `NO_COLOR=1` in their shell because the color-depth tests
-      # asserted `COLORTERM=truecolor` without first clearing NO_COLOR.
-      # biscuit-terminal honors NO_COLOR before COLORTERM, so the assertion
-      # silently broke through no fault of the pushed code. This step
-      # exercises the previously-broken tests under `NO_COLOR=1` to ensure
-      # they remain hermetic.
-      - name: Verify color-depth tests are hermetic under NO_COLOR=1
-        env:
-          NO_COLOR: "1"
-        run: cargo test -p darkmatter --lib terminal::tests::test_color_depth
+          shared-key: area-ci-darkmatter-test-ubuntu-latest
+      - run: cargo test -p darkmatter --lib terminal::tests::test_color_depth

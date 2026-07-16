@@ -106,6 +106,7 @@ Practical notes:
 - [Players](./players.md) - Host player scoring and matching
 - [Sound Effects](./effects.md) - 88 effects, feature flags, native SFX routing
 - [Integration](./integration.md) - native playback, channel routing, ducking, and fallback patterns
+- [Audio Programming by OS](./audio-programming/SKILL.md) - Deep background on the platform audio subsystems Playa sits on top of (macOS CoreAudio, Windows WASAPI, Linux PulseAudio/PipeWire, iOS, Android), plus the Rust crate and TypeScript library landscapes. Reach for this when implementing or troubleshooting a native backend, output-channel routing, or ducking on a specific OS.
 
 ## See Also
 

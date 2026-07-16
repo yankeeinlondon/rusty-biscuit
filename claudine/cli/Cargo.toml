@@ -16,6 +16,9 @@ claudine = { path = "../lib" }
 playa = { path = "../../playa/lib", features = ["sound-effects"] }
 sniff = { path = "../../sniff/lib" }
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
+# Browser-fragment types for the dual-target `dashboard` render component
+# (mirrors the `MetricsReport` precedent in the claudine lib).
+renderable = { path = "../../renderable" }
 biscuit-tui = { path = "../../biscuit-tui/lib" }
 clap = { version = "4.5", features = ["derive", "env", "unstable-ext"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }

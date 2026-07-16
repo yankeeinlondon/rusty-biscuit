@@ -1,6 +1,9 @@
 ---
 features:
   - 2026-07-04-dmls
+  - 2026-07-09-suggest-constraint
+  - 2026-07-10-interpolation-literal
+  - 2026-07-10-schema-triggers
 ---
 # DMLS Diagnostics
 
@@ -106,8 +109,23 @@ feature layer.
 | `dm.schema.unknown_key` | A key the schema does not declare is present. |
 | `dm.schema.deprecated_key` | A deprecated key is present. |
 | `dm.schema.invalid_file_reference` | A `file(...)`-typed value failed to parse, resolve, or match a file. |
+| `dm.schema.invalid_suggestion` | A `suggest(...)` candidate is invalid metadata for its target schema (type, range, integer, length, not-empty, or pattern violation, or unrepresentable number syntax). **Warning.** |
+| `dm.schema.document_malformed` | A recognized standalone SimplifiedSchema envelope is malformed (missing or non-mapping `types`, unsupported tagged-envelope keys, or an invalid payload). Ranged over the whole schema document. |
 | `dm.style.unknown_key` | A `style:` key the style schema does not recognize. |
 | `dm.style.deprecated_key` | A deprecated `style:` key (a canonical replacement exists). |
+
+Two Layer-2 behaviors reach beyond the Markdown document under edit:
+
+- **Standalone schema documents own their problems.** When a schema YAML file
+  is itself open, its `invalid_suggestion` warnings and `document_malformed`
+  error are published on that document — they are never duplicated onto the
+  Markdown documents whose `$schema` consumes it.
+- **Trigger-schema load failures are published on the envelope.** When a
+  repository-scoped trigger-registry scan fails for an envelope whose payload
+  cannot be loaded, DMLS publishes a file-level `dm.schema.prepare` diagnostic
+  on that envelope file (even when it is not open) instead of failing
+  silently; the last-good registry keeps serving consumers meanwhile, and a
+  recovered scan clears the diagnostic.
 
 ### Layer 3 — Darkmatter DSL (`source: darkmatter.compose` / `darkmatter.security`)
 
@@ -121,7 +139,7 @@ feature layer.
 | `dm.transclusion.broken_path` | A `::file` / `::code` / prologue / epilogue target matched no file. |
 | `dm.transclusion.cycle` | A `::file` / `::code` transclusion cycle (ancestry in `relatedInformation`). |
 | `dm.expression.malformed` | A malformed `{{ … }}` interpolation or `when=` expression. |
-| `dm.expression.unknown_identifier` | An identifier naming no frontmatter key, `ctx.*`, `env.*`, or function. |
+| `dm.expression.unknown_identifier` | An identifier naming no frontmatter key, schema-declared property, `ctx.*`, `env.*`, or function. (A key the effective schema declares counts as known even when the document does not set it — it is a compose-time parameter. Content inside a `{{{ … }}}` literal is inert and never diagnosed.) |
 | `dm.fence.unknown_language` | A fenced-code language token no grammar recognizes (with a nearest-match suggestion). |
 | `dm.security.disallowed_command` | A `::shell` / `::shell-block` / `$()` command the shell policy disallows. |
 

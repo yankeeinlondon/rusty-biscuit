@@ -13,9 +13,40 @@ use darkmatter::markdown::compose::context::{
 };
 use darkmatter::markdown::compose::expression::{
     expression_function_descriptors, ExpressionFinder, ExpressionFunctionDescriptor, ParseError,
-    SpannedExpr, SpannedExprKind, parse_spanned,
+    SpannedExpr, SpannedExprKind, parse_condition_spanned, parse_spanned,
 };
 use darkmatter::markdown::span::SourceSpan;
+
+/// One `{{{ … }}}` interpolation literal with a document-relative span.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Literal {
+    /// Byte span of the whole `{{{ … }}}` construct (braces included).
+    pub outer: SourceSpan,
+    /// The literal content between `{{{` and `}}}`, preserved verbatim.
+    pub content: String,
+}
+
+/// All body interpolation literals at or after `body_base` (frontmatter literals
+/// are not body literals), in document order.
+pub fn literals(text: &str, body_base: usize) -> Vec<Literal> {
+    ExpressionFinder::new(text)
+        .scan()
+        .literals
+        .into_iter()
+        .filter(|literal| literal.start >= body_base)
+        .map(|literal| Literal {
+            outer: literal.start..literal.end,
+            content: literal.content,
+        })
+        .collect()
+}
+
+/// The literal whose span contains `offset`, if any.
+pub fn literal_at(text: &str, body_base: usize, offset: usize) -> Option<Literal> {
+    literals(text, body_base)
+        .into_iter()
+        .find(|literal| literal.outer.start <= offset && offset <= literal.outer.end)
+}
 
 /// One `{{ … }}` interpolation with document-relative spans.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,7 +87,11 @@ pub fn interpolation_at(text: &str, body_base: usize, offset: usize) -> Option<I
         .find(|interpolation| interpolation.outer.start <= offset && offset <= interpolation.outer.end)
 }
 
-/// Parses an interpolation's inner expression, span-carrying.
+/// Parses a **value-dialect** expression, span-carrying. This is the body
+/// `{{ }}` interpolation parser: it accepts `&&` (logical AND, identical to the
+/// condition dialect) and `||` (as fallback / first-truthy, whereas the
+/// condition dialect reads `||` as logical OR) — matching `md compose`'s
+/// interpolation grammar.
 ///
 /// ## Errors
 ///
@@ -64,6 +99,20 @@ pub fn interpolation_at(text: &str, body_base: usize, offset: usize) -> Option<I
 /// expression text) exactly as the compose parser would.
 pub fn parse(expression: &str) -> Result<SpannedExpr, ParseError> {
     parse_spanned(expression)
+}
+
+/// Parses a **condition-dialect** expression, span-carrying. This is the parse
+/// authority for an Expression-typed frontmatter value: it accepts `&&`/`||`
+/// (lowered to synthetic `and`/`or` calls), matching the `expression` schema
+/// format's `parse_condition` validation, so a value the schema accepts is never
+/// diagnosed as malformed here. Body `{{ }}` interpolation stays on [`parse`].
+///
+/// ## Errors
+///
+/// Returns the [`ParseError`] (with a byte-offset `position` into the
+/// expression text) exactly as the compose condition parser would.
+pub fn parse_condition(expression: &str) -> Result<SpannedExpr, ParseError> {
+    parse_condition_spanned(expression)
 }
 
 /// The leading identifier of an expression — a bare `Variable` name, or the
@@ -282,6 +331,236 @@ pub fn format_function_block(descriptor: &ExpressionFunctionDescriptor) -> Strin
     )
 }
 
+/// The kind of an [`ExprCompletion`] candidate, so a caller can map it onto its
+/// own LSP `CompletionItemKind` without this module depending on `lsp-types`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExprCompletionKind {
+    /// A same-document top-level frontmatter key.
+    FrontmatterKey,
+    /// A fully qualified `ctx.<name>` context variable.
+    ContextVariable,
+    /// An expression function.
+    Function,
+}
+
+/// One completion candidate for an expression context — either a body `{{ }}`
+/// interpolation or an Expression-typed frontmatter value. Presentation-neutral:
+/// every field is derived from the one catalog descriptor (or a frontmatter
+/// key), and LSP lowering happens in the provider.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExprCompletion {
+    /// The completion label — the untyped `signature` for functions.
+    pub label: String,
+    /// The eagerly inserted text — the bare name for functions (no snippet, no
+    /// synthesized parentheses), the fully qualified `ctx.<name>` for context
+    /// variables, the key for frontmatter keys.
+    pub insert_text: String,
+    /// The candidate kind.
+    pub kind: ExprCompletionKind,
+    /// The rendered `display_type` (`ctx.*`) or `typed_signature()` (functions).
+    pub detail: Option<String>,
+    /// The catalog description, ready to lower to eager Markdown documentation.
+    pub documentation: Option<String>,
+}
+
+/// Catalog + frontmatter-key completion candidates matching `partial`
+/// (prefix-based, case-sensitive): same-document top-level frontmatter keys,
+/// fully qualified `ctx.*` variables, and expression functions.
+///
+/// The single authority for expression completion so the body-interpolation and
+/// Expression-typed-frontmatter surfaces can never drift.
+pub fn completion_candidates(partial: &str, frontmatter_keys: &[String]) -> Vec<ExprCompletion> {
+    let mut items = Vec::new();
+
+    for key in frontmatter_keys {
+        if key.starts_with(partial) {
+            items.push(ExprCompletion {
+                label: key.clone(),
+                insert_text: key.clone(),
+                kind: ExprCompletionKind::FrontmatterKey,
+                detail: Some("frontmatter key".to_string()),
+                documentation: None,
+            });
+        }
+    }
+
+    for descriptor in context_descriptors() {
+        let label = format!("ctx.{}", descriptor.name);
+        if label.starts_with(partial) {
+            items.push(ExprCompletion {
+                insert_text: label.clone(),
+                label,
+                kind: ExprCompletionKind::ContextVariable,
+                detail: Some(descriptor.display_type.to_string()),
+                documentation: Some(descriptor.description.to_string()),
+            });
+        }
+    }
+
+    for descriptor in function_descriptors() {
+        let signature = descriptor.signature;
+        let name = function_name(signature);
+        if name.starts_with(partial) {
+            items.push(ExprCompletion {
+                label: signature.to_string(),
+                insert_text: name.to_string(),
+                kind: ExprCompletionKind::Function,
+                detail: Some(descriptor.typed_signature()),
+                documentation: Some(descriptor.description.to_string()),
+            });
+        }
+    }
+
+    items
+}
+
+/// The Markdown body of a **value-dialect** expression hover — the body `{{ }}`
+/// interpolation hover. `expr_offset` is the cursor's byte offset into
+/// `expression`. Pure so the D2/D5 classification is unit-testable.
+///
+/// The single authority for value-dialect expression hover markdown. See
+/// [`hover_markdown_from`] for the shared classification rule, and
+/// [`hover_markdown_condition`] for the condition-dialect companion used by
+/// Expression-typed frontmatter values.
+pub fn hover_markdown(
+    expression: &str,
+    expr_offset: usize,
+    frontmatter_scalar: impl Fn(&str) -> Option<String>,
+    schema_property: impl Fn(&str) -> Option<String>,
+) -> String {
+    hover_markdown_from(
+        parse(expression),
+        expression,
+        expr_offset,
+        frontmatter_scalar,
+        schema_property,
+    )
+}
+
+/// The Markdown body of a **condition-dialect** expression hover — the
+/// Expression-typed frontmatter value hover. Identical formatting to
+/// [`hover_markdown`], but parses with [`parse_condition`] so `&&`/`||`
+/// expressions (which the `expression` schema format accepts) receive the same
+/// intelligence as any other expression instead of an unparsed fallback.
+pub fn hover_markdown_condition(
+    expression: &str,
+    expr_offset: usize,
+    frontmatter_scalar: impl Fn(&str) -> Option<String>,
+    schema_property: impl Fn(&str) -> Option<String>,
+) -> String {
+    hover_markdown_from(
+        parse_condition(expression),
+        expression,
+        expr_offset,
+        frontmatter_scalar,
+        schema_property,
+    )
+}
+
+/// The shared hover-markdown formatter over an already-parsed expression, so the
+/// value- and condition-dialect entry points render identically once parsed.
+/// `expr_offset` is the cursor's byte offset into `expression`.
+///
+/// The D2 classification rule: only an explicitly `ctx.`-qualified root receives
+/// context-variable metadata — a bare identifier is a frontmatter variable even
+/// when its name matches a known `ctx.*` tail, and an unknown `ctx.<name>` keeps
+/// the generic hover without borrowing a similarly named bare key's value. A bare
+/// identifier with no static frontmatter value falls back to `schema_property` —
+/// the effective schema's type/constraints/description for a declared-but-unset
+/// property — before the generic function-name description. Nothing here
+/// evaluates the expression or reads `ctx.*`.
+fn hover_markdown_from(
+    parsed: Result<SpannedExpr, ParseError>,
+    expression: &str,
+    expr_offset: usize,
+    frontmatter_scalar: impl Fn(&str) -> Option<String>,
+    schema_property: impl Fn(&str) -> Option<String>,
+) -> String {
+    let mut value = match &parsed {
+        Ok(expr) => format!("**Expression**\n\n`{}`", expr.erase()),
+        Err(_) => format!("**Expression** (unparsed)\n\n`{expression}`"),
+    };
+    let Ok(expr) = parsed else {
+        return value;
+    };
+
+    // D5: a cursor on a known function-name identifier wins.
+    if let Some(name) = function_call_at(&expr, expression, expr_offset)
+        && let Some(descriptor) = function_descriptor(name)
+    {
+        value.push_str(&format!("\n\n{}", format_function_block(descriptor)));
+        return value;
+    }
+
+    // Resolve the identifier against the sub-expression under the cursor (e.g.
+    // a `ctx.packages` argument inside a call) rather than the top-level
+    // expression, so an argument's ctx/frontmatter hover is not shadowed by
+    // the enclosing call.
+    let Some(sub_expr) = expression_at(&expr, expr_offset) else {
+        return value;
+    };
+    let Some(name) = root_identifier(sub_expr) else {
+        return value;
+    };
+    if let Some(tail) = name.strip_prefix("ctx.") {
+        if let Some(descriptor) = ctx_descriptor(tail) {
+            value.push_str(&format!(
+                "\n\n{}\n\nThe `ctx` variable is evaluated at _compose_ time (rather than now).",
+                format_ctx_hover_block(descriptor)
+            ));
+        }
+    } else if let Some(scalar) = frontmatter_scalar(&name) {
+        value.push_str(&format!("\n\nStatic value: `{scalar}` (from frontmatter `{name}`)"));
+    } else if let Some(block) = schema_property(&name) {
+        value.push_str(&format!("\n\n{block}"));
+    } else if let Some(descriptor) = function_descriptor(&name) {
+        value.push_str(&format!("\n\nFunction: {}", descriptor.description));
+    }
+    value
+}
+
+/// Whether a bare identifier `name` names nothing DMLS can resolve — no
+/// frontmatter key, schema property, `ctx.*`/`env.*`/`doc.*` namespace, or
+/// expression function. The single authority for the unknown-root check so the
+/// body-interpolation and frontmatter-expression diagnostics agree.
+///
+/// Namespaced roots (`ctx.*`, `env.*`, `doc.*`) and any dotted path are always
+/// treated as known here; the caller supplies frontmatter-key and
+/// schema-property membership.
+pub fn is_unknown_root(
+    name: &str,
+    is_frontmatter_key: impl Fn(&str) -> bool,
+    is_schema_property: impl Fn(&str) -> bool,
+) -> bool {
+    if matches!(name, "ctx" | "env" | "doc") || name.contains('.') {
+        return false;
+    }
+    if function_description(name).is_some() {
+        return false;
+    }
+    if is_frontmatter_key(name) {
+        return false;
+    }
+    !is_schema_property(name)
+}
+
+/// The expression completion partial being typed inside an Expression-typed
+/// frontmatter value, and the document offset where it begins.
+///
+/// `value_text` is the authored text of the value from its start to the cursor;
+/// `value_start` is that value start's document offset. The token is the
+/// trailing run of identifier/`.` characters (so `ctx.to`, `as_csv(ctx.pa`'s
+/// `ctx.pa`, and a bare `len` all resolve). Always `Some` — an empty partial
+/// offers the full catalog — so the caller decides whether the value is
+/// Expression-typed before calling.
+pub fn value_completion_partial(value_text: &str, value_start: usize) -> (usize, &str) {
+    let token_rel = value_text
+        .rfind(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
+        .map(|index| index + 1)
+        .unwrap_or(0);
+    (value_start + token_rel, &value_text[token_rel..])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,7 +641,7 @@ mod tests {
 
     #[test]
     fn test_function_descriptor_fallible_signature_has_error_suffix() {
-        // `length` is fallible (`R_NUM_ERR`), so its typed signature carries the
+        // `length` is fallible, so its typed signature carries the
         // `| error` union suffix that the untyped `signature` lacks.
         let length = function_descriptor("length").expect("`length` is a known function");
         assert!(length.signature.contains("length("));
@@ -421,5 +700,119 @@ mod tests {
         assert!(block.contains(&length.typed_signature()));
         assert!(block.contains("| error"));
         assert!(block.contains(length.description));
+    }
+
+    #[test]
+    fn literals_finds_simple_literal_and_excludes_expressions() {
+        let text = "Hello {{{ name }}} and {{ title }}.";
+        let found = literals(text, 0);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].content, " name ");
+        assert_eq!(&text[found[0].outer.clone()],
+            "{{{ name }}}"
+        );
+    }
+
+    #[test]
+    fn literals_inside_inline_code_are_found() {
+        let text = "Code: `{{{ also_this }}}`";
+        let found = literals(text, 0);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].content, " also_this ");
+    }
+
+    #[test]
+    fn literals_body_base_filters_frontmatter_region() {
+        let text = "---\ntitle: {{{ seed }}}\n---\n\n{{{ body_var }}}\n";
+        let body_base = text.find("\n\n").unwrap() + 2;
+        let found = literals(text, body_base);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].content, " body_var ");
+    }
+
+    #[test]
+    fn literal_at_matches_cursor_on_braces_and_content() {
+        let text = "See {{{ name }}}.";
+        let literal = literal_at(text, 0, text.find("{{{").unwrap()).expect("on opening brace");
+        assert_eq!(literal.content, " name ");
+
+        let inside = literal_at(text, 0, text.find('n').unwrap()).expect("on content");
+        assert_eq!(inside.content, " name ");
+
+        let end = literal_at(text, 0, text.find("}}}.").unwrap() + 2).expect("on closing brace");
+        assert_eq!(end.content, " name ");
+
+        assert!(literal_at(text, 0, 2).is_none());
+    }
+
+    #[test]
+    fn literal_containing_expression_is_inert() {
+        let text = "{{{ {{ x }} }}}";
+        let found = literals(text, 0);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].content, " {{ x }} ");
+        assert!(interpolations(text, 0).is_empty());
+    }
+
+    #[test]
+    fn interpolations_inside_fenced_code_are_not_surfaced() {
+        // Semantic-token parity with diagnostics: a `{{ … }}` written inside a
+        // fenced code block must not become a token.
+        let text = "Real {{ shown }}\n\n```\n{{ hidden }}\n```\n";
+        let found = interpolations(text, 0);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].text, "shown");
+    }
+
+    #[test]
+    fn literals_inside_fenced_code_are_not_surfaced() {
+        let text = "Real {{{ shown }}}\n\n```\n{{{ hidden }}}\n```\n";
+        let found = literals(text, 0);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].content, " shown ");
+    }
+
+    #[test]
+    fn unclosed_interpolation_yields_no_token() {
+        // An unclosed or otherwise malformed construct emits nothing; guessing an
+        // end span would make token output flicker while the user types.
+        assert!(interpolations("Hello {{ title", 0).is_empty());
+        assert!(interpolations("Hello {{ title }", 0).is_empty());
+    }
+
+    #[test]
+    fn condition_dialect_lowers_logical_or_where_value_dialect_treats_it_as_fallback() {
+        // Both dialects accept the `expression`-format corpus (`&&`/`||`), so
+        // neither the spec example nor a `||` value is malformed. The dialects
+        // differ in meaning: the value dialect (body `{{ }}`) reads `||` as
+        // fallback, while the condition dialect (Expression-typed frontmatter
+        // values, matching the schema format's `parse_condition`) lowers it to a
+        // logical `or(...)`.
+        assert_eq!(parse("a && b").unwrap().erase().to_string(), "and(a, b)");
+        assert_eq!(parse_condition("a && b").unwrap().erase().to_string(), "and(a, b)");
+        assert_eq!(parse("a || b").unwrap().erase().to_string(), "a || b");
+        assert_eq!(parse_condition("a || b").unwrap().erase().to_string(), "or(a, b)");
+        // The spec's own example parses cleanly in both dialects.
+        assert!(parse(r#"is_agent() && os == "macos""#).is_ok());
+        assert!(parse_condition(r#"is_agent() && os == "macos""#).is_ok());
+    }
+
+    #[test]
+    fn condition_hover_uses_condition_grammar_body_hover_stays_value_grammar() {
+        let no_fm = |_: &str| None;
+        let no_schema = |_: &str| None;
+        // Body (value dialect) hover renders `||` as fallback — the behavior this
+        // change must preserve.
+        let body = hover_markdown("a || b", 0, no_fm, no_schema);
+        assert!(body.contains("`a || b`"), "{body}");
+        // Frontmatter (condition dialect) hover lowers `||` to a logical `or(...)`.
+        let cond = hover_markdown_condition("a || b", 0, no_fm, no_schema);
+        assert!(cond.contains("`or(a, b)`"), "{cond}");
+        // A function-call name inside a condition expression still enriches.
+        let source = "is_empty(title) || is_string(title)";
+        let fn_offset = source.find("is_empty").unwrap() + 2;
+        let enriched = hover_markdown_condition(source, fn_offset, no_fm, no_schema);
+        let is_empty = function_descriptor("is_empty").expect("`is_empty` is a known function");
+        assert!(enriched.contains(&format_function_block(is_empty)), "{enriched}");
     }
 }

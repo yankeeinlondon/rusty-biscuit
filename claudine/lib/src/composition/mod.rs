@@ -17,21 +17,21 @@ mod error;
 pub mod file_detail;
 pub mod frontmatter_excerpt;
 mod guardrails;
+pub mod hints;
+pub(crate) mod json_util;
 pub mod launch_workspace;
 pub mod lifecycle;
-mod lifecycle_actions;
-pub mod lifecycle_context;
-pub mod lifecycle_control;
-pub mod lifecycle_executor;
-pub mod loop_actions;
-pub mod loop_config;
-pub mod loop_engine;
-pub mod loop_expression;
+pub use self::lifecycle::actions as lifecycle_actions;
+pub use self::lifecycle::context as lifecycle_context;
+pub use self::lifecycle::control as lifecycle_control;
+pub use self::lifecycle::executor as lifecycle_executor;
+pub mod looping;
 pub mod mismatch;
 pub mod preflight;
 mod prepare;
 mod resolve;
-pub mod schema_validation;
+mod reserved;
+pub mod schema;
 mod select;
 pub mod sequence;
 mod types;
@@ -67,26 +67,28 @@ pub use lifecycle_control::{
 pub use lifecycle_executor::{
     LifecycleEventOutcome, ShellRunner, StackControl, StackExecutionContext, SystemShellRunner,
 };
-pub use loop_config::{
+pub use lifecycle::runtime::{
+    IterationSummarySignals, TerminalRoutingDecision, route_blocked_finalize,
+    route_failure_finalize, route_loop_gate,
+};
+pub use looping::{
     extract_control_variables, resolve_fail_fast_from_env, resolve_loop_config,
     resolve_max_iterations_from_env, resolve_pause_reset_margin_from_env,
 };
-pub use loop_engine::{
+pub use looping::{
     DEFAULT_MAX_ITERATIONS, LoopExecutionOptions, LoopExecutionResult, LoopIterationContext,
     LoopIterationOutput, LoopSeed, build_loop_seed, build_loop_seed_with_lifecycle, execute_loop,
     execute_loop_with_config, execute_loop_with_lifecycle,
 };
-pub use loop_expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
+pub use looping::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
 pub use mismatch::{capture_frontmatter_yaml, is_inline_sequence_mismatch};
 pub use preflight::{PreFlightResult, resolve_shell_approvals};
-pub use prepare::{
-    PrepareOptions, bind_agent_workspace, parse_interactive_hint,
-    parse_selection_hints_from_frontmatter, prepare_direct, prepare_inline,
-};
+pub use hints::{parse_interactive_hint, parse_selection_hints_from_frontmatter};
+pub use prepare::{PrepareOptions, bind_agent_workspace, prepare_direct, prepare_inline};
 pub use resolve::{
     enrich_composition_source_load_error, resolve_composition_source, validate_file_permissions,
 };
-pub use schema_validation::{
+pub use schema::{
     InteractiveSchemaOptions, PreValidatedSchema, PropertyState, PropertyStatus,
     SchemaStatusReport, build_schema_status_report, drop_invalid_optionals,
     pre_validate_schema, prepare_direct_with_schema, prepare_inline_with_schema,
@@ -104,6 +106,7 @@ pub use types::{
     CompositionExecutionRequest, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
     InstalledProviderSnapshot, LoopAction, LoopCondition, LoopConfig, ModelHint,
     ModelResolutionReason, OnRateLimit, OutputFormat, PickerInfluence, PreparedComposition,
+    RematerializeInputs,
     ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
     ResolvedCompositionSource, ResolvedExecutionTarget, ResolvedSessionInteractivity,
     SelectedProvider, SelectionReason, SessionInteractivitySource, SequenceExecutionOptions,

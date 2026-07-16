@@ -288,3 +288,8 @@ unmapped_native_events:
 - native_event: tool.definition
   description: Mutates a tool's description and parameter schema before the tool list is sent to the model.
   remediation: Author a Kilo plugin exporting a tool.definition hook; Claudine cannot dispatch this phase.
+# Ordered error-classification vocabulary (Phase A seed). Kilo shares
+# OpenCode's wire parser today, so this is an explicit ordered COPY of
+# OpenCode's current table (Phase B researches the copy independently; the
+# shared parser selects vocabulary by the wrapped provider's identity, not the
+# parser module name — so Kilo consumes Kilo data, not OpenCode's).

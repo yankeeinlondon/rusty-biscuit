@@ -1,6 +1,6 @@
 //! Behavior-trait implementations for the Antigravity provider.
 
-use crate::adapters::ProviderAdapter;
+use crate::hook_adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
 use crate::provider::behavior::{
     AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
@@ -38,7 +38,7 @@ impl McpBehavior for AntigravityProvider {
 }
 impl AdapterBehavior for AntigravityProvider {
     fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
-        &crate::adapters::ANTIGRAVITY_ADAPTER
+        &crate::hook_adapters::ANTIGRAVITY_ADAPTER
     }
 }
 impl ConfiguratorBehavior for AntigravityProvider {

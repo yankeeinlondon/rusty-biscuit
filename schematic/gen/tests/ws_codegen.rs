@@ -183,6 +183,23 @@ fn all_clients_have_auth_header_support() {
 }
 
 #[test]
+fn dial_surfaces_unparsable_headers_instead_of_dropping_them() {
+    for (name, plan) in lower_all_apis() {
+        let code = generate_ws_client_module(&plan).to_string();
+        assert!(
+            code.contains("InvalidHeader"),
+            "{name} dial should map a header parse failure to WsError::InvalidHeader"
+        );
+        // The old behavior tucked both parses into an `if let (Ok(_), Ok(_))`
+        // and silently skipped the header on failure.
+        assert!(
+            !code.contains("if let (Ok (hdr_name) , Ok (hdr_value))"),
+            "{name} dial must not silently drop unparsable headers"
+        );
+    }
+}
+
+#[test]
 fn elevenlabs_client_has_api_key_env_mapping() {
     let plan = lower_to_plan(&define_elevenlabs_websocket_api()).unwrap();
     let tokens = generate_ws_client_module(&plan);

@@ -8,10 +8,13 @@
 //! projection. Later phases will extend the `Rendezvous` service with
 //! pairing and sync operations.
 
+pub mod document;
 pub mod envelope;
 pub mod identity;
 pub mod invitation;
+pub mod repo_identity;
 pub mod session_log;
+pub mod session_status;
 pub mod socket;
 pub mod sync;
 
@@ -29,7 +32,12 @@ pub use proto::rendezvous_server::{Rendezvous, RendezvousServer};
 pub use proto::{
     AppendEntryRequest, AppendEntryResponse, ApprovePeerRequest, ApprovePeerResponse,
     ConnectToPeerRequest, ConnectToPeerResponse, CreateInvitationRequest,
-    CreateInvitationResponse, ListChunkEntriesRequest, ListChunkEntriesResponse,
+    CreateInvitationResponse, HostActiveSessions, HostCapability, HostRepos,
+    ListActiveSessionsRequest, ListActiveSessionsResponse, ListChunkEntriesRequest,
+    ListChunkEntriesResponse, ListHostCapabilitiesRequest, ListHostCapabilitiesResponse,
+    ListHostReposRequest, ListHostReposResponse, ReportSessionEventRequest,
+    ReportSessionEventResponse, SessionEventKind, SessionStatusBasis, SessionStatusState,
+    StatusProducer,
     ListPairingsRequest, ListPairingsResponse, ListPeersRequest, ListPeersResponse,
     ListSessionChunksRequest, ListSessionChunksResponse, PairingInfo, PeerConnectionState,
     PeerInfo, PeerSource, PingRequest, PingResponse, ProjectionRow, QueryProjectionRequest,
@@ -39,6 +47,11 @@ pub use proto::{
     SyncWithPeerResponse, sync_frame,
 };
 
+pub use document::{
+    CAPABILITY_DOMAIN, DocumentId, DocumentIdParseError, REPOS_DOMAIN, SESSION_DOMAIN,
+    SESSIONS_ACTIVE_DOMAIN,
+};
+pub use repo_identity::canonical_repo_id;
 pub use envelope::{
     ENVELOPE_HASH_LENGTH, EnvelopeError, EnvelopeInbox, EnvelopeSealer, PayloadKind,
     SignedEnvelope,

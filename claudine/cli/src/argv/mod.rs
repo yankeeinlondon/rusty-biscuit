@@ -14,14 +14,15 @@
 //!   silently rewritten into the child CLI's argv.
 //! - **Rule 2** — fuzzy `--provider <value>` values are canonicalized to a
 //!   known slug via `Provider::fuzzy_match_cli_name`.
-//! - **Rule 3** — on composition subcommands (`compose`, `inline-compose`,
-//!   `sequence`), pull composition flags that appear after the first
-//!   shorthand setter back ahead of that setter, then insert a single `--`
-//!   separator before the first positional setter that follows an
-//!   interleaved flag.
 //! - **Rule 4** — on composition subcommands, hoist a trailing `--help` or
 //!   `-h` token to position 1 so the root help flag fires instead of being
 //!   trapped inside clap's greedy positional collector.
+//!
+//! Composition provider-argument forwarding is **not** a normalization rule.
+//! It is a separate ownership partition ([`partition_composition_tail`]) that
+//! runs after normalization and splits the argv into the Claudine argv (for
+//! clap) and the agent tail (for execution). It replaced the former Rule 3,
+//! whose synthetic `--` separator collided with authored provider boundaries.
 //!
 //! ## Pass-through guarantees
 //!
@@ -36,31 +37,18 @@
 //! alongside it so the normalizer cannot silently start rewriting inputs it
 //! should leave alone.
 //!
-//! ## Rule ordering invariant
-//!
-//! Rule 4 must run before Rule 3 so `--help` is hoisted off the trailing
-//! setter region before the `--` separator is inserted. Otherwise Rule 3
-//! would bury `--help` inside clap's trailing raw-value bucket and the
-//! downstream positional parser would misclassify it as a second file
-//! reference.
-
 use std::ffi::OsString;
-use std::sync::LazyLock;
 
-use crate::commands::compose::ComposeArgs;
-use crate::commands::sequence::SequenceArgs;
 use claudine::provider::Provider;
 
-#[cfg(test)]
-mod flag_surface;
+mod partition;
 mod rule1_provider_bool;
 mod rule2_canonicalize;
-mod rule3_separator;
 mod rule4_help_hoist;
 
+pub(crate) use partition::{ProviderArgs, partition_composition_tail};
 pub(crate) use rule1_provider_bool::provider_for_boolean_flag;
 pub(crate) use rule2_canonicalize::is_fuzzy_provider_value;
-pub(crate) use rule3_separator::{apply_composition_separator, pull_late_composition_flags};
 pub(crate) use rule4_help_hoist::hoist_composition_help;
 
 /// Wrapper subcommands that hand off to an external agent CLI.
@@ -75,66 +63,6 @@ pub(crate) const COMPOSITION_SUBCOMMANDS: &[&str] = &["compose", "inline-compose
 /// Claudine root-level global long flags that consume the following token as
 /// their value (distinct from the `--flag=value` form, which is one token).
 const GLOBAL_FLAGS_WITH_VALUE: &[&str] = &["--debug"];
-
-/// Composition-subcommand flags whose value lives in the next argv slot
-/// rather than in a `--flag=value` pair. Rule 3 uses this to skip over
-/// flag values so that a value like `gpt-4` after `-m` is not misclassified
-/// as a positional token.
-///
-/// The surface is derived directly from clap's `ComposeArgs` and
-/// `SequenceArgs` definitions at first use, so a new value-bearing
-/// composition flag added to the clap surface is automatically tracked
-/// without a separate constant to keep in lockstep.
-static COMPOSITION_FLAGS_WITH_VALUE: LazyLock<Vec<String>> =
-    LazyLock::new(collect_composition_value_flags);
-
-/// Build the value-bearing composition flag surface by introspecting
-/// clap's `ComposeArgs` and `SequenceArgs`.
-pub(crate) fn collect_composition_value_flags() -> Vec<String> {
-    use clap::{ArgAction, Args};
-
-    fn collect<A: Args>(out: &mut Vec<String>) {
-        let cmd = A::augment_args(clap::Command::new("__argv_introspect"));
-        for arg in cmd.get_arguments() {
-            // Skip boolean-style args; they do not consume the next argv token.
-            if matches!(
-                arg.get_action(),
-                ArgAction::SetTrue
-                    | ArgAction::SetFalse
-                    | ArgAction::Count
-                    | ArgAction::Help
-                    | ArgAction::HelpShort
-                    | ArgAction::HelpLong
-                    | ArgAction::Version
-            ) {
-                continue;
-            }
-            // Skip positionals (no flag name).
-            let has_flag_name = arg.get_long().is_some() || arg.get_short().is_some();
-            if !has_flag_name {
-                continue;
-            }
-            if let Some(long) = arg.get_long() {
-                out.push(format!("--{long}"));
-            }
-            if let Some(aliases) = arg.get_visible_aliases() {
-                for alias in aliases {
-                    out.push(format!("--{alias}"));
-                }
-            }
-            if let Some(short) = arg.get_short() {
-                out.push(format!("-{short}"));
-            }
-        }
-    }
-
-    let mut flags = Vec::new();
-    collect::<ComposeArgs>(&mut flags);
-    collect::<SequenceArgs>(&mut flags);
-    flags.sort();
-    flags.dedup();
-    flags
-}
 
 /// Normalize raw argv before clap parses it.
 ///
@@ -249,14 +177,15 @@ fn normalize_inner(raw: Vec<OsString>, completion_active: bool) -> Vec<OsString>
         index += 1;
     }
 
-    // Rule 4 must precede Rule 3 so `--help` is hoisted off the trailing
-    // setter region before the `--` separator is inserted. Otherwise Rule 3
-    // would bury `--help` inside clap's trailing raw-value bucket and the
-    // downstream positional parser would misclassify it as a second file
-    // reference.
-    let with_help_hoisted = hoist_composition_help(out);
-    let with_late_flags_pulled = pull_late_composition_flags(with_help_hoisted);
-    apply_composition_separator(with_late_flags_pulled)
+    // Rule 4: hoist a trailing `--help` / `-h` to position 1 so the root help
+    // handler fires instead of being trapped in clap's greedy positional.
+    //
+    // Provider-argument forwarding is handled *after* normalization by
+    // [`partition_composition_tail`], which owns the split between Claudine
+    // argv and the agent tail. The retired Rule 3 synthetic-separator pass no
+    // longer runs — a `--` in composition argv is now always an authored
+    // boundary, never an internal clap-protection artifact.
+    hoist_composition_help(out)
 }
 
 /// Locate the first subcommand token in argv that matches any candidate.
@@ -341,24 +270,13 @@ pub(crate) fn is_global_flag_with_value(token: &str) -> bool {
     GLOBAL_FLAGS_WITH_VALUE.contains(&token)
 }
 
-/// True when `token` is a composition-surface flag whose value lives in the
-/// next argv slot rather than in a `--flag=value` pair.
-pub(crate) fn is_composition_flag_with_value(token: &str) -> bool {
-    if token.contains('=') {
-        return false;
-    }
-    COMPOSITION_FLAGS_WITH_VALUE
-        .iter()
-        .any(|flag| flag.as_str() == token)
-}
-
 /// True when `token` matches the composition shorthand-setter key pattern
 /// `^[A-Za-z_][A-Za-z0-9_-]*=`.
 ///
 /// This is the same key validation used by
 /// `crate::commands::compose`'s `parse_compose_setter`; keeping them in lockstep
-/// guarantees that any token Rule 3 protects behind a `--` separator will be
-/// classified the same way by the downstream positional parser.
+/// guarantees the ownership partition classifies a token the same way the
+/// downstream positional parser will.
 pub(crate) fn looks_like_setter(token: &str) -> bool {
     let Some(eq_pos) = token.find('=') else {
         return false;
@@ -573,10 +491,11 @@ mod tests {
         // Lock in that `normalize_with_completion(_, false)` produces the
         // exact argv `normalize` would emit for the same input when the
         // environment is clean — otherwise the test-only entry point
-        // could silently drift from the production path. This also
-        // exercises the full Rule 1 → Rule 4 → Rule 3 chain: `--gemini`
-        // is rewritten to `--provider gemini`, `--help` is hoisted to
-        // position 1, and `--` is inserted before the trailing setter.
+        // could silently drift from the production path. This exercises the
+        // Rule 1 → Rule 4 chain: `--gemini` is rewritten to
+        // `--provider gemini` and `--help` is hoisted to position 1. Setter
+        // protection is no longer a normalization concern — the ownership
+        // partition (run separately) keeps `name=Ken` in the Claudine argv.
         let input = argv(&[
             "claudine", "compose", "file.md", "--gemini", "name=Ken", "--help",
         ]);
@@ -587,7 +506,6 @@ mod tests {
             "file.md",
             "--provider",
             "gemini",
-            "--",
             "name=Ken",
         ]);
         assert_eq!(normalize_with_completion(input, false), expected);

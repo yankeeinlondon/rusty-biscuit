@@ -19,6 +19,7 @@ path = "src/main.rs"
 [dependencies]
 # Internal
 claudine-catalog-types = { path = "../catalog-types" }
+biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["file-reference"] }
 darkmatter = { path = "../../darkmatter/lib" }
 
 # Serialization
@@ -38,8 +39,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 # Generate-time compilation check for `match_op: regex` detection records
 regex = "1.11"
 
+tempfile = "3"
+
 # Variant-name introspection for the schema<->catalog compatibility gate
 strum = "0.28"
-
-[dev-dependencies]
-tempfile = "3"
