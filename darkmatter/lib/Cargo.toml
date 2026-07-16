@@ -169,3 +169,7 @@ harness = false
 [[bench]]
 name = "render_code_heavy"
 harness = false
+
+[[bench]]
+name = "reference_graph"
+harness = false

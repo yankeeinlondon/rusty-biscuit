@@ -457,8 +457,7 @@ pub struct ReferenceGraph {
     /// Private build provenance (root/source/mode/options/dependencies).
     ///
     /// Never presented via `Debug` or serialization; read by prebuilt-graph
-    /// validation, which is wired in Phase 3.
-    #[allow(dead_code)]
+    /// validation via [`provenance`](Self::provenance).
     provenance: ReferenceGraphProvenance,
 }
 
@@ -636,9 +635,7 @@ impl ReferenceGraph {
         std::iter::once(&self.root).chain(self.nodes.iter())
     }
 
-    /// The private build provenance, used by prebuilt-graph validation
-    /// (wired in Phase 3).
-    #[allow(dead_code)]
+    /// The private build provenance, used by prebuilt-graph validation.
     pub(crate) fn provenance(&self) -> &ReferenceGraphProvenance {
         &self.provenance
     }

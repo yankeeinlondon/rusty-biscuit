@@ -4,12 +4,16 @@
 //! with real filesystem documents using `tempfile`.
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::{ComposeOptions, ComposeSource};
+use darkmatter::markdown::compose::shell_expansion::{
+    ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest,
+};
+use darkmatter::markdown::compose::{ComposeOptions, ComposeSource, ShellExpansionError};
 use darkmatter::markdown::normalize::HeadingLevel;
 use darkmatter::markdown::reference::types::{
     ReferenceGraphOptions, ReferenceKind, ReferenceSyntax, ReferenceTarget,
 };
 use darkmatter::markdown::reference::validate::{ReferenceIssueCode, ReferenceValidationOptions};
+use std::sync::Arc;
 use tempfile::TempDir;
 
 // ── Helper ──────────────────────────────────────────────────────────
@@ -1132,4 +1136,571 @@ fn file_tree_section_caption_respects_heading_level() {
         insertion.context.section_heading_text.as_deref(),
         Some("Details")
     );
+}
+
+// ── Phase 3: prebuilt-graph validation compatibility guard ──────────
+//
+// These exercise the guard `validate_references_with_graph` runs before
+// flattening: a prebuilt graph must match the request's document, source,
+// mode (`Full`), and options, and every visited local child must still hold
+// its build-time content. All go through the public API; the mismatch reason
+// is asserted through the surfaced error message (its internals are private).
+
+/// A freshly built full graph validates identically to build-then-validate.
+#[test]
+fn prebuilt_graph_matches_build_then_validate() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[
+            (
+                "root.md",
+                "# Root\n\n[ok](https://example.com)\n\n::file child.md\n",
+            ),
+            ("child.md", "# Child\n\n[c](https://child.example.com)\n"),
+        ],
+    );
+    let md = load_md(&dir, "root.md");
+    let options = ReferenceValidationOptions::default();
+
+    let via_build = md.validate_references(options.clone()).unwrap();
+
+    let graph = md.reference_graph(options.graph.clone()).unwrap();
+    let via_graph = md.validate_references_with_graph(&graph, options).unwrap();
+
+    assert_eq!(via_build.references_scanned, via_graph.references_scanned);
+    assert_eq!(via_build.references_valid, via_graph.references_valid);
+    assert_eq!(via_build.error_count(), via_graph.error_count());
+    assert!(via_graph.is_valid());
+}
+
+/// A stale graph whose root document body changed is rejected (document
+/// dimension, checked first).
+#[test]
+fn prebuilt_graph_rejects_edited_root_body() {
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[("root.md", "# Root\n\n[ok](https://example.com)\n")]);
+    let original = load_md(&dir, "root.md");
+    let graph = original
+        .reference_graph(ReferenceGraphOptions::default())
+        .unwrap();
+
+    // A different in-memory document (extra body line) reuses the stale graph.
+    let edited = Markdown::new("# Root\n\n[ok](https://example.com)\n\nExtra line\n")
+        .with_source(ComposeSource::File(dir.path().join("root.md")));
+    let err = edited
+        .validate_references_with_graph(&graph, ReferenceValidationOptions::default())
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("root document"),
+        "expected a document-dimension mismatch, got: {err}"
+    );
+}
+
+/// Identical content at a different file source is rejected (source dimension).
+#[test]
+fn prebuilt_graph_rejects_different_source() {
+    let dir = TempDir::new().unwrap();
+    let body = "# Root\n\n[ok](https://example.com)\n";
+    write_files(&dir, &[("a.md", body), ("b.md", body)]);
+    let opts = ReferenceValidationOptions::default();
+
+    let md_a = load_md(&dir, "a.md");
+    let graph = md_a.reference_graph(opts.graph.clone()).unwrap();
+
+    // Same content, different file source → source rejects reuse even though
+    // the content-based document identity matches.
+    let md_b = load_md(&dir, "b.md");
+    let err = md_b
+        .validate_references_with_graph(&graph, opts)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("different document source"),
+        "expected a source-dimension mismatch, got: {err}"
+    );
+}
+
+/// A transclusion-only graph is rejected by full reference validation even
+/// when every other identity matches (mode dimension).
+#[test]
+fn prebuilt_transclusion_only_graph_rejected_by_full_validation() {
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[("root.md", "# Root\n\n[ok](https://example.com)\n")]);
+    let md = load_md(&dir, "root.md");
+    let opts = ReferenceValidationOptions::default();
+
+    let graph = md.transclusion_graph(opts.graph.clone()).unwrap();
+    let err = md
+        .validate_references_with_graph(&graph, opts)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("full reference validation"),
+        "expected a mode-dimension mismatch, got: {err}"
+    );
+}
+
+/// Changed graph options are rejected (options dimension).
+#[test]
+fn prebuilt_graph_rejects_changed_graph_options() {
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[("root.md", "# Root\n\n[ok](https://example.com)\n")]);
+    let md = load_md(&dir, "root.md");
+
+    // Build both option sets from one captured base so only the changed field
+    // differs (context capture is shared through the clone).
+    let base = ComposeOptions::new();
+    let graph = md
+        .reference_graph(ReferenceGraphOptions::with_compose(base.clone()))
+        .unwrap();
+
+    let changed = base.with_max_transclusion_depth(3);
+    let val_opts =
+        ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(changed));
+    let err = md
+        .validate_references_with_graph(&graph, val_opts)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("different reference-graph options"),
+        "expected an options-dimension mismatch, got: {err}"
+    );
+}
+
+/// Editing a visited child after construction is rejected before flattening,
+/// even with fragment validation disabled: a stale graph must not report
+/// success for a child that now holds a broken reference.
+#[test]
+fn prebuilt_graph_rejects_edited_child_before_flatten() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[("root.md", "# Root\n\n::file child.md\n"), ("child.md", "# Child\n")],
+    );
+    let md = load_md(&dir, "root.md");
+    let opts = ReferenceValidationOptions::default(); // fragments disabled
+    let graph = md.reference_graph(opts.graph.clone()).unwrap();
+
+    std::fs::write(
+        dir.path().join("child.md"),
+        "# Child\n\n[broken](./nope.md)\n",
+    )
+    .unwrap();
+
+    let err = md
+        .validate_references_with_graph(&graph, opts)
+        .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("changed on disk"), "got: {msg}");
+    assert!(msg.contains("child.md"), "names the child source: {msg}");
+}
+
+/// A deleted visited child is reported as a missing-descendant mismatch.
+#[test]
+fn prebuilt_graph_rejects_missing_child() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[("root.md", "# Root\n\n::file child.md\n"), ("child.md", "# Child\n")],
+    );
+    let md = load_md(&dir, "root.md");
+    let opts = ReferenceValidationOptions::default();
+    let graph = md.reference_graph(opts.graph.clone()).unwrap();
+
+    std::fs::remove_file(dir.path().join("child.md")).unwrap();
+
+    let err = md
+        .validate_references_with_graph(&graph, opts)
+        .unwrap_err();
+    assert!(err.to_string().contains("missing"), "got: {err}");
+}
+
+/// A visited child replaced by a directory still "exists" but cannot be read,
+/// so it is reported as unreadable rather than missing (cross-platform case
+/// that does not depend on Unix permission bits).
+#[test]
+fn prebuilt_graph_rejects_unreadable_child() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[("root.md", "# Root\n\n::file child.md\n"), ("child.md", "# Child\n")],
+    );
+    let md = load_md(&dir, "root.md");
+    let opts = ReferenceValidationOptions::default();
+    let graph = md.reference_graph(opts.graph.clone()).unwrap();
+
+    let child = dir.path().join("child.md");
+    std::fs::remove_file(&child).unwrap();
+    std::fs::create_dir(&child).unwrap();
+
+    let err = md
+        .validate_references_with_graph(&graph, opts)
+        .unwrap_err();
+    assert!(err.to_string().contains("no longer readable"), "got: {err}");
+}
+
+/// Descendant verification reads the child straight from disk, so a persistent
+/// cache holding the old content cannot mask a subsequent on-disk edit.
+#[test]
+fn prebuilt_graph_bypasses_cache_for_descendant_edit() {
+    let dir = TempDir::new().unwrap();
+    let cache_root = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[("root.md", "# Root\n\n::file child.md\n"), ("child.md", "# Child\n")],
+    );
+    let md = load_md(&dir, "root.md");
+
+    // Build the graph with a persistent cache populated from the old child.
+    let graph_opts =
+        ReferenceGraphOptions::with_compose(ComposeOptions::new().with_cache_root(cache_root.path()));
+    let graph = md.reference_graph(graph_opts.clone()).unwrap();
+
+    std::fs::write(dir.path().join("child.md"), "# Child edited\n").unwrap();
+
+    let val_opts = ReferenceValidationOptions::with_graph(graph_opts);
+    let err = md
+        .validate_references_with_graph(&graph, val_opts)
+        .unwrap_err();
+    assert!(err.to_string().contains("changed on disk"), "got: {err}");
+}
+
+/// A cloned full graph validates identically to its original (clone-stable
+/// provenance — the Finding 18 reuse guarantee).
+#[test]
+fn cloned_prebuilt_graph_validates_identically() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[
+            (
+                "root.md",
+                "# Root\n\n::file child.md\n\n[ok](https://example.com)\n",
+            ),
+            ("child.md", "# Child\n"),
+        ],
+    );
+    let md = load_md(&dir, "root.md");
+    let opts = ReferenceValidationOptions::default();
+    let graph = md.reference_graph(opts.graph.clone()).unwrap();
+    let cloned = graph.clone();
+
+    let a = md
+        .validate_references_with_graph(&graph, opts.clone())
+        .unwrap();
+    let b = md.validate_references_with_graph(&cloned, opts).unwrap();
+    assert!(a.is_valid() && b.is_valid());
+    assert_eq!(a.references_scanned, b.references_scanned);
+    assert_eq!(a.error_count(), b.error_count());
+}
+
+/// End-to-end Finding 18 guard: `FileTree::ensure_built` clones its graph
+/// options into both graph construction and validation, so clone-stable
+/// identity must let the reuse pass without a spurious mismatch.
+#[test]
+fn file_tree_validate_reuses_graph_without_spurious_mismatch() {
+    use darkmatter::markdown::reference::file_tree::FileTree;
+
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[
+            (
+                "root.md",
+                "# Root\n\n[ok](https://example.com)\n\n::file child.md\n",
+            ),
+            ("child.md", "# Child\n\n[c](https://child.example.com)\n"),
+        ],
+    );
+    let path = dir.path().join("root.md");
+    let mut tree = FileTree::new(&path).unwrap().validate();
+    tree.ensure_built().expect("graph reuse must not mismatch");
+    let report = tree.validation_report().expect("validation ran");
+    assert!(report.is_valid(), "issues: {:?}", report.issues);
+}
+
+/// Changed represented frontmatter is rejected (document dimension) even when
+/// the body and every reference are byte-identical — the reference *shape* is
+/// unchanged but the represented state is not.
+#[test]
+fn prebuilt_graph_rejects_changed_frontmatter() {
+    let dir = TempDir::new().unwrap();
+    let body = "[ok](https://example.com)\n";
+    write_files(&dir, &[("root.md", &format!("---\ntitle: A\n---\n{body}"))]);
+    let original = load_md(&dir, "root.md");
+    let graph = original
+        .reference_graph(ReferenceGraphOptions::default())
+        .unwrap();
+
+    // Same body and references, different frontmatter value → the stale graph
+    // must reject reuse on the document dimension.
+    let edited = Markdown::new(format!("---\ntitle: B\n---\n{body}"))
+        .with_source(ComposeSource::File(dir.path().join("root.md")));
+    let err = edited
+        .validate_references_with_graph(&graph, ReferenceValidationOptions::default())
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("root document"),
+        "expected a document-dimension mismatch, got: {err}"
+    );
+}
+
+/// Identical content at a different URL source is rejected (source dimension).
+#[test]
+fn prebuilt_graph_rejects_different_url_source() {
+    let body = "# Root\n\n[ok](https://example.com)\n";
+    let md_a = Markdown::new(body)
+        .with_source(ComposeSource::Url("https://host.example/a.md".parse().unwrap()));
+    let graph = md_a
+        .reference_graph(ReferenceGraphOptions::default())
+        .unwrap();
+
+    // Same content, different URL source → source rejects reuse even though the
+    // content-based document identity matches.
+    let md_b = Markdown::new(body)
+        .with_source(ComposeSource::Url("https://host.example/b.md".parse().unwrap()));
+    let err = md_b
+        .validate_references_with_graph(&graph, ReferenceValidationOptions::default())
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("different document source"),
+        "expected a source-dimension mismatch, got: {err}"
+    );
+}
+
+/// Representative option families (collection, transclusion, remote, shell,
+/// schema) each reject reuse through the options dimension when changed. Scalar
+/// changes are covered by `prebuilt_graph_rejects_changed_graph_options`.
+#[test]
+fn prebuilt_graph_rejects_representative_option_families() {
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[("root.md", "# Root\n\n[ok](https://example.com)\n")]);
+    let md = load_md(&dir, "root.md");
+
+    // Build from one captured base so only the mutated field differs (the
+    // shared clone carries the same captured context).
+    let base = ComposeOptions::new();
+    let graph = md
+        .reference_graph(ReferenceGraphOptions::with_compose(base.clone()))
+        .unwrap();
+
+    let mutations: Vec<(&str, ComposeOptions)> = vec![
+        ("collection", base.clone().with_exclude_keys(["k"])),
+        ("transclusion", base.clone().with_allow_local_markdown(false)),
+        ("remote", base.clone().with_allowed_host("example.com")),
+        ("shell", base.clone().with_shell_strip_ansi(false)),
+        ("schema", base.clone().with_darkmatter_baseline_schema()),
+    ];
+
+    for (family, opts) in mutations {
+        let val_opts =
+            ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(opts));
+        let err = md
+            .validate_references_with_graph(&graph, val_opts)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("different reference-graph options"),
+            "{family} option change must reject reuse, got: {err}"
+        );
+    }
+}
+
+/// A shell approval handler is a process-local instance, not a value. A graph
+/// built with one handler is rejected when validation supplies a **different**
+/// instance (even one with identical behavior, and even after the build-time
+/// instance has been dropped), and rejected again when validation supplies no
+/// handler at all — documenting the accepted v1 conservatism.
+#[test]
+fn prebuilt_graph_rejects_recreated_shell_handler() {
+    struct Denier;
+    impl ShellApprovalHandler for Denier {
+        fn approve(
+            &self,
+            _request: ShellApprovalRequest,
+        ) -> Result<ShellApprovalDecision, ShellExpansionError> {
+            Ok(ShellApprovalDecision::Deny)
+        }
+    }
+
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[("root.md", "# Root\n\n[ok](https://example.com)\n")]);
+    let md = load_md(&dir, "root.md");
+
+    // Build with handler A, whose only strong reference is moved into the
+    // build-time options and dropped when the graph is returned.
+    let base = ComposeOptions::new();
+    let handler_a: Arc<dyn ShellApprovalHandler> = Arc::new(Denier);
+    let graph = md
+        .reference_graph(ReferenceGraphOptions::with_compose(
+            base.clone().with_shell_approval_handler(handler_a),
+        ))
+        .unwrap();
+
+    // Allocator churn between the dropped build-time handler and the fresh one.
+    let _churn: Vec<Box<[u8]>> = (0..64).map(|_| vec![0u8; 128].into_boxed_slice()).collect();
+
+    // A fresh, behaviorally-identical handler is a different instance.
+    let handler_b: Arc<dyn ShellApprovalHandler> = Arc::new(Denier);
+    let val_recreated = ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+        base.clone().with_shell_approval_handler(handler_b),
+    ));
+    let err = md
+        .validate_references_with_graph(&graph, val_recreated)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("different reference-graph options"),
+        "a recreated handler instance must reject reuse, got: {err}"
+    );
+
+    // Supplying no handler at validation time is likewise rejected.
+    let val_absent =
+        ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(base));
+    let err = md
+        .validate_references_with_graph(&graph, val_absent)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("different reference-graph options"),
+        "an absent handler at validation must reject reuse, got: {err}"
+    );
+}
+
+/// Graph ownership stores only a `Weak` handle to the shell approval handler,
+/// so building and dropping a graph never extends the handler's lifetime
+/// (Arc strong-count assertion).
+#[test]
+fn graph_ownership_does_not_extend_shell_handler_lifetime() {
+    struct Denier;
+    impl ShellApprovalHandler for Denier {
+        fn approve(
+            &self,
+            _request: ShellApprovalRequest,
+        ) -> Result<ShellApprovalDecision, ShellExpansionError> {
+            Ok(ShellApprovalDecision::Deny)
+        }
+    }
+
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[("root.md", "# Root\n\n[ok](https://example.com)\n")]);
+    let md = load_md(&dir, "root.md");
+
+    let handler: Arc<dyn ShellApprovalHandler> = Arc::new(Denier);
+    // The `handler` variable plus the live `opts` each hold one strong ref.
+    let opts = ReferenceGraphOptions::with_compose(
+        ComposeOptions::new().with_shell_approval_handler(Arc::clone(&handler)),
+    );
+    let strong_with_opts = Arc::strong_count(&handler);
+
+    let graph = md.reference_graph(opts.clone()).unwrap();
+    // Building the graph captures only a `Weak` handle → no new strong ref.
+    assert_eq!(Arc::strong_count(&handler), strong_with_opts);
+
+    drop(graph);
+    // Dropping the graph likewise leaves the strong count untouched.
+    assert_eq!(Arc::strong_count(&handler), strong_with_opts);
+}
+
+/// A graph built from `options.clone()` validates against the **original**
+/// options and against a **further** clone with no spurious mismatch — the
+/// clone-stable identity that keeps the Finding 18 reuse path working.
+#[test]
+fn graph_from_cloned_options_passes_original_and_further_clone() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[
+            (
+                "root.md",
+                "# Root\n\n::file child.md\n\n[ok](https://example.com)\n",
+            ),
+            ("child.md", "# Child\n"),
+        ],
+    );
+    let md = load_md(&dir, "root.md");
+
+    let original = ComposeOptions::new();
+    // Mirror FileTree::ensure_built: build from a clone of the options.
+    let graph = md
+        .reference_graph(ReferenceGraphOptions::with_compose(original.clone()))
+        .unwrap();
+
+    let via_original = md
+        .validate_references_with_graph(
+            &graph,
+            ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+                original.clone(),
+            )),
+        )
+        .unwrap();
+    assert!(via_original.is_valid(), "issues: {:?}", via_original.issues);
+
+    let via_further_clone = md
+        .validate_references_with_graph(
+            &graph,
+            ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+                original.clone(),
+            )),
+        )
+        .unwrap();
+    assert!(
+        via_further_clone.is_valid(),
+        "issues: {:?}",
+        via_further_clone.issues
+    );
+}
+
+/// One child reached through multiple insertions is recorded once and, left
+/// unchanged, passes descendant verification (single dependency, single read).
+#[test]
+fn unchanged_child_via_multiple_insertions_passes() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[
+            ("root.md", "# Root\n\n::file child.md\n\n::file child.md\n"),
+            ("child.md", "# Child\n\n[c](https://child.example.com)\n"),
+        ],
+    );
+    let md = load_md(&dir, "root.md");
+    let opts = ReferenceValidationOptions::default();
+    let graph = md.reference_graph(opts.graph.clone()).unwrap();
+
+    let report = md.validate_references_with_graph(&graph, opts).unwrap();
+    assert!(report.is_valid(), "issues: {:?}", report.issues);
+}
+
+/// The serialized graph view never leaks provenance, hashes, the graph mode,
+/// the dependency manifest, or any freshness diagnostics — in either the
+/// followed or non-followed shape.
+#[test]
+fn prebuilt_graph_view_json_omits_provenance() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[
+            (
+                "root.md",
+                "# Root\n\n::file child.md\n\n[ok](https://example.com)\n",
+            ),
+            ("child.md", "# Child\n"),
+        ],
+    );
+    let md = load_md(&dir, "root.md");
+    let graph = md
+        .reference_graph(ReferenceGraphOptions::default())
+        .unwrap();
+
+    for follow in [false, true] {
+        let json = serde_json::to_string(&graph.view(follow)).unwrap();
+        for forbidden in [
+            "provenance",
+            "fingerprint",
+            "dependencies",
+            "manifest",
+            "whole_state",
+            "identity",
+        ] {
+            assert!(
+                !json.contains(forbidden),
+                "follow={follow} JSON leaked `{forbidden}`: {json}"
+            );
+        }
+    }
 }

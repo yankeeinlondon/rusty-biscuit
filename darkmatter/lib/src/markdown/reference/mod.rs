@@ -10,13 +10,6 @@ mod graph;
 pub(crate) mod html;
 pub(crate) mod local;
 pub mod meta;
-// The graph-construction surface of `provenance` is now wired (mode, document
-// and options identities, the dependency manifest, and `ReferenceGraphProvenance`
-// construction). What remains unused is the prebuilt-graph *validation* surface —
-// `ReferenceGraphMismatch`, `DependencyMismatchKind`, `check`, the provenance
-// readers, and the manifest readers — which Phase 3 consumes. The allowance is
-// scoped to this module and removed once validation is wired.
-#[allow(dead_code)]
 pub(crate) mod provenance;
 pub mod types;
 pub mod validate;
@@ -298,6 +291,12 @@ impl Markdown {
     }
 
     /// Builds a transclusion-only graph (no link/image extraction at leaf nodes).
+    ///
+    /// The returned [`ReferenceGraph`] records its build mode as
+    /// `TransclusionOnly` in its private provenance. Such a graph is **not**
+    /// accepted by [`validate_references_with_graph`](Self::validate_references_with_graph),
+    /// which requires a `Full`-mode graph; use [`reference_graph`](Self::reference_graph)
+    /// when the graph will feed prebuilt-graph validation.
     pub fn transclusion_graph(
         &self,
         options: ReferenceGraphOptions,
@@ -306,6 +305,11 @@ impl Markdown {
     }
 
     /// Builds a full reference graph (transclusions + all reference types at each node).
+    ///
+    /// The returned [`ReferenceGraph`] records its build mode as `Full` in its
+    /// private provenance, so it is eligible for prebuilt-graph validation via
+    /// [`validate_references_with_graph`](Self::validate_references_with_graph)
+    /// when built from the same document and `options.compose`.
     pub fn reference_graph(
         &self,
         options: ReferenceGraphOptions,
@@ -535,10 +539,30 @@ impl Markdown {
 
     /// Validates references against an already-built reference graph.
     ///
-    /// Callers that have already built a [`ReferenceGraph`] for this document
-    /// (with the same `options.graph`) pass it in to skip a redundant
-    /// `build_reference_graph` (Finding 18). The graph must correspond to this
-    /// document and validation options.
+    /// Callers that have already built a `Full`-mode [`ReferenceGraph`] for this
+    /// document (via [`reference_graph`](Self::reference_graph) with the same
+    /// `options.graph`) pass it in to skip a redundant `build_reference_graph`
+    /// (Finding 18).
+    ///
+    /// Before flattening, the prebuilt graph's private provenance is checked
+    /// against this call's inputs across four dimensions — document identity,
+    /// source, graph mode (`Full` required), and options
+    /// (`options.graph`; the other [`ReferenceValidationOptions`](validate::ReferenceValidationOptions)
+    /// fields do not participate) — and then every visited local descendant is
+    /// re-read from the authoritative filesystem and compared against its
+    /// recorded content identity. Identity is clone-stable, so a graph built
+    /// from a clone of the options still passes.
+    ///
+    /// ## Errors
+    ///
+    /// A mismatch on **any** dimension, or a changed / missing / unreadable
+    /// visited descendant, is a **hard error**
+    /// ([`ReferenceError::ReferenceGraphMismatch`]) — this method never silently
+    /// rebuilds the graph. Build-and-validate callers that do not already hold a
+    /// matching graph should call
+    /// [`validate_references`](Self::validate_references) instead, which builds
+    /// and validates in one step and is compatibility-guaranteed by
+    /// construction.
     pub fn validate_references_with_graph(
         &self,
         graph: &ReferenceGraph,

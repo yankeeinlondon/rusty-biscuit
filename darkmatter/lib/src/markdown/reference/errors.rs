@@ -3,6 +3,81 @@
 use biscuit_terminal::errors::SourceContext;
 use thiserror::Error;
 
+use super::provenance::{DependencyMismatchKind, ReferenceGraphMismatch};
+use crate::markdown::compose::ComposeSource;
+
+/// A prebuilt [`ReferenceGraph`] was incompatible with a validation request.
+///
+/// Wraps the crate-private mismatch reason so the differing dimension (root
+/// document, source, mode, options, or a visited descendant) can be reported
+/// without exposing the private provenance surface or any content fingerprint.
+/// Constructed only inside the crate by prebuilt-graph validation.
+///
+/// [`ReferenceGraph`]: super::types::ReferenceGraph
+#[derive(Debug, Clone)]
+pub struct ReferenceGraphMismatchError {
+    reason: ReferenceGraphMismatch,
+}
+
+impl ReferenceGraphMismatchError {
+    /// Wraps a mismatch reason produced by prebuilt-graph verification.
+    pub(crate) fn new(reason: ReferenceGraphMismatch) -> Self {
+        Self { reason }
+    }
+
+    /// One-line description of which dimension differs.
+    fn headline(&self) -> String {
+        match &self.reason {
+            ReferenceGraphMismatch::Document => {
+                "the root document's represented state changed since the graph was built".to_string()
+            }
+            ReferenceGraphMismatch::Source => {
+                "the graph was built from a different document source".to_string()
+            }
+            ReferenceGraphMismatch::Mode { .. } => {
+                "the graph was not built for full reference validation".to_string()
+            }
+            ReferenceGraphMismatch::Options => {
+                "the graph was built with different reference-graph options".to_string()
+            }
+            ReferenceGraphMismatch::Dependency { source, kind } => {
+                let name = source_display(source);
+                match kind {
+                    DependencyMismatchKind::Changed => {
+                        format!("a transcluded child changed on disk: {name}")
+                    }
+                    DependencyMismatchKind::Missing => {
+                        format!("a transcluded child is now missing: {name}")
+                    }
+                    DependencyMismatchKind::Unreadable => {
+                        format!("a transcluded child is no longer readable: {name}")
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for ReferenceGraphMismatchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Prebuilt reference graph does not match this validation request: {}. \
+             Rebuild the graph from the same document and options before validating.",
+            self.headline()
+        )
+    }
+}
+
+/// Renders a compose source for a diagnostic, never exposing a content hash.
+fn source_display(source: &ComposeSource) -> String {
+    match source {
+        ComposeSource::File(p) => p.display().to_string(),
+        ComposeSource::Url(u) => u.to_string(),
+        ComposeSource::Unknown => "unknown".to_string(),
+    }
+}
+
 /// Errors produced by reference analysis.
 #[derive(Debug, Error)]
 pub enum ReferenceError {
@@ -23,6 +98,16 @@ pub enum ReferenceError {
     /// A validation rule was violated.
     #[error("Validation error: {0}")]
     Validation(String),
+
+    /// A prebuilt reference graph did not match the validation request.
+    ///
+    /// Raised by [`Markdown::validate_references_with_graph`] before the graph
+    /// is flattened when the graph's build provenance (document, source, mode,
+    /// options) or a visited descendant no longer matches the request.
+    ///
+    /// [`Markdown::validate_references_with_graph`]: crate::markdown::Markdown::validate_references_with_graph
+    #[error("{0}")]
+    ReferenceGraphMismatch(ReferenceGraphMismatchError),
 
     /// An error propagated from the compose pipeline.
     #[error("{0}")]
@@ -110,6 +195,20 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
                 .error_header(ErrorHeader::new("ReferenceError", "validation failed"))
                 .body(Prose::escape_text(message))
                 .hint("Review the reference graph and fix any reported cycles or dangling edges."),
+
+            ReferenceError::ReferenceGraphMismatch(err) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ReferenceError", "graph out of date"))
+                .body(vec![
+                    Prose::new(Prose::escape_text(&err.headline())),
+                    Prose::new(
+                        "<dim>Note:</dim> the prebuilt graph no longer matches this document, its \
+                         source, mode, options, or a transcluded child.",
+                    ),
+                ])
+                .hint(
+                    "Rebuild the graph from the same document and options, or call \
+                     `validate_references` to build and validate in one step.",
+                ),
 
             ReferenceError::Compose(inner) => inner.status_block(term),
 

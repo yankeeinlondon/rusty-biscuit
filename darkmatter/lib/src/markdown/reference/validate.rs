@@ -14,13 +14,16 @@ use tracing::{debug, info, instrument, trace};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use super::errors::ReferenceError;
+use super::errors::{ReferenceError, ReferenceGraphMismatchError};
+use super::provenance::{
+    DependencyMismatchKind, ReferenceDocumentIdentity, ReferenceGraphMismatch, ReferenceGraphMode,
+};
 use super::types::{
     ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceOrigin, ReferenceRecord,
     ReferenceTarget,
 };
 use crate::markdown::Markdown;
-use crate::markdown::compose::ComposeSource;
+use crate::markdown::compose::{ComposeSource, ReferenceGraphOptionsIdentity};
 
 /// Per-run memoization of prepared heading slugs, keyed by canonical target
 /// path (Finding 18).
@@ -349,6 +352,15 @@ pub(crate) fn validate_with_graph(
     graph: &ReferenceGraph,
 ) -> Result<ReferenceValidationReport, ReferenceError> {
     info!("validate: starting reference validation");
+
+    // Opaque-graph compatibility guard (runs before flattening): the prebuilt
+    // graph must have been built from this document, this source, in `Full`
+    // mode, with these graph options — and every visited local child must still
+    // hold the content it did at build time. A freshly built graph from
+    // `validate` matches by construction; a stale or mispaired prebuilt graph
+    // is rejected here rather than producing a misleading report.
+    verify_graph_compatibility(md, options, graph)?;
+
     let ref_set = super::graph::flatten_graph(graph);
 
     let mut report = ReferenceValidationReport {
@@ -534,6 +546,100 @@ pub(crate) fn validate_with_graph(
     }
 
     Ok(report)
+}
+
+/// Verifies a prebuilt graph is compatible with a validation request.
+///
+/// Runs before flattening. First compares the four build dimensions
+/// (document → source → mode → options) recorded in the graph's provenance
+/// against the live request, then re-reads every visited local descendant from
+/// the authoritative filesystem to confirm none changed, went missing, or
+/// became unreadable since the graph was built.
+///
+/// ## Errors
+///
+/// Returns [`ReferenceError::ReferenceGraphMismatch`] on the first differing
+/// dimension or descendant.
+fn verify_graph_compatibility(
+    md: &Markdown,
+    options: &ReferenceValidationOptions,
+    graph: &ReferenceGraph,
+) -> Result<(), ReferenceError> {
+    // Request-side identity comes entirely from this call's own inputs: `md`
+    // supplies live document + source identity, and the compared options are the
+    // `ReferenceGraphOptions` nested in the validation request — the other
+    // `ReferenceValidationOptions` fields do not participate in graph identity.
+    let request_document = ReferenceDocumentIdentity::capture(md);
+    let request_source = md.source().clone();
+    let request_options = ReferenceGraphOptionsIdentity::capture(&options.graph.compose);
+
+    graph
+        .provenance()
+        .check(
+            &request_document,
+            &request_source,
+            ReferenceGraphMode::Full,
+            &request_options,
+        )
+        .map_err(|reason| {
+            ReferenceError::ReferenceGraphMismatch(ReferenceGraphMismatchError::new(reason))
+        })?;
+
+    verify_descendants(graph)
+}
+
+/// Re-verifies every recorded local descendant against the filesystem.
+///
+/// The dependency manifest already holds one entry per unique visited local
+/// child, so each child is read and hashed at most once. Each read goes
+/// straight to disk via [`Markdown::try_from`], bypassing the graph-building
+/// runtime and both the run-local and persistent caches, so stale cached
+/// content cannot mask an on-disk edit. Content identity (not mtime/size/inode)
+/// is authoritative.
+///
+/// ## Errors
+///
+/// Returns [`ReferenceError::ReferenceGraphMismatch`] for the first descendant
+/// that changed, is missing, or is unreadable.
+fn verify_descendants(graph: &ReferenceGraph) -> Result<(), ReferenceError> {
+    for entry in graph.provenance().dependencies().documents() {
+        // Only local file children enter the manifest; skip anything else
+        // defensively rather than treating it as a mismatch.
+        let ComposeSource::File(path) = &entry.source else {
+            continue;
+        };
+
+        match Markdown::try_from(path.as_path()) {
+            Ok(current_md) => {
+                let current = ReferenceDocumentIdentity::capture(&current_md);
+                if current != entry.document {
+                    return Err(dependency_mismatch(
+                        entry.source.clone(),
+                        DependencyMismatchKind::Changed,
+                    ));
+                }
+            }
+            Err(_) => {
+                // Distinguish a vanished child from one that exists but cannot
+                // be read (e.g. replaced by a directory, or permission-denied),
+                // using only cross-platform-deterministic signals.
+                let kind = if path.exists() {
+                    DependencyMismatchKind::Unreadable
+                } else {
+                    DependencyMismatchKind::Missing
+                };
+                return Err(dependency_mismatch(entry.source.clone(), kind));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Builds a dependency-mismatch reference error for a descendant.
+fn dependency_mismatch(source: ComposeSource, kind: DependencyMismatchKind) -> ReferenceError {
+    ReferenceError::ReferenceGraphMismatch(ReferenceGraphMismatchError::new(
+        ReferenceGraphMismatch::Dependency { source, kind },
+    ))
 }
 
 /// Validate a local file path reference.

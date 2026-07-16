@@ -1642,9 +1642,9 @@ impl ComposeOptions {
 /// and fails closed: a dropped or independently constructed stateful instance
 /// is never equivalent even when the visible configuration matches. This is an
 /// in-process correctness guard, **not** a cryptographically unforgeable token.
-// Consumed by the graph provenance during the opacity cutover; the allowance is
-// temporary until `ReferenceGraph` stores and compares it.
-#[allow(dead_code)]
+///
+/// Consumed by the reference-graph provenance: `from_build` captures it and
+/// prebuilt-graph validation compares it.
 #[derive(Clone)]
 pub(crate) struct ReferenceGraphOptionsIdentity {
     value_fingerprint: u64,
@@ -1653,7 +1653,6 @@ pub(crate) struct ReferenceGraphOptionsIdentity {
     remote_fetch: Option<RemoteFetchWeakId>,
 }
 
-#[allow(dead_code)]
 impl ReferenceGraphOptionsIdentity {
     /// Captures the identity of `options`' graph-affecting configuration.
     pub(crate) fn capture(options: &ComposeOptions) -> Self {

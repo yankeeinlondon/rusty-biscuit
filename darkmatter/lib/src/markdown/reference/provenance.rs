@@ -144,11 +144,16 @@ impl ReferenceDependencyManifest {
     }
 
     /// Number of recorded dependency entries.
+    ///
+    /// Descendant verification iterates [`documents`](Self::documents); `len`
+    /// and `is_empty` exist for assertions in the reference-graph tests.
+    #[allow(dead_code)]
     pub(crate) fn len(&self) -> usize {
         self.documents.len()
     }
 
     /// Returns `true` when no dependencies were recorded.
+    #[allow(dead_code)]
     pub(crate) fn is_empty(&self) -> bool {
         self.documents.is_empty()
     }
@@ -227,6 +232,10 @@ impl ReferenceGraphProvenance {
     }
 
     /// The recorded graph mode.
+    ///
+    /// `check` compares the mode internally; this accessor exists for
+    /// reference-graph test assertions.
+    #[allow(dead_code)]
     pub(crate) fn mode(&self) -> ReferenceGraphMode {
         self.mode
     }
