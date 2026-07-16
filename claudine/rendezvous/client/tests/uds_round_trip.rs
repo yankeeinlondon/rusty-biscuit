@@ -10,6 +10,26 @@ use rendezvous_daemon::server::{DaemonConfig, spawn_uds_server};
 use tempfile::TempDir;
 use tokio::time::sleep;
 
+/// A private directory to hold the endpoint.
+///
+/// `tempfile` creates 0755 directories, which the daemon refuses: the endpoint
+/// directory is the Unix security boundary. The real default resolves into a
+/// private directory, so a fixture has to build one too rather than dropping
+/// the socket straight into the temp root.
+fn runtime_socket(tmp: &TempDir, name: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::DirBuilderExt;
+
+    let dir = tmp.path().join("runtime");
+    if !dir.exists() {
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&dir)
+            .expect("create runtime dir");
+    }
+    dir.join(format!("{name}.sock"))
+}
+
+
 fn ephemeral_config(tmp: &TempDir) -> DaemonConfig {
     DaemonConfig::with_data_dir(tmp.path().join("data"))
         .with_in_memory_projection()
@@ -19,7 +39,7 @@ fn ephemeral_config(tmp: &TempDir) -> DaemonConfig {
 #[tokio::test]
 async fn ping_round_trips_over_uds() {
     let tmp = TempDir::new().expect("tempdir");
-    let socket_path = tmp.path().join("daemon.sock");
+    let socket_path = runtime_socket(&tmp, "daemon");
     let config = ephemeral_config(&tmp);
 
     let handle = spawn_uds_server(socket_path.clone(), config).expect("spawn daemon");
@@ -44,7 +64,7 @@ async fn ping_round_trips_over_uds() {
 #[tokio::test]
 async fn status_round_trips_over_uds() {
     let tmp = TempDir::new().expect("tempdir");
-    let socket_path = tmp.path().join("daemon.sock");
+    let socket_path = runtime_socket(&tmp, "daemon");
     let config = ephemeral_config(&tmp);
 
     let handle = spawn_uds_server(socket_path.clone(), config).expect("spawn daemon");
@@ -67,7 +87,7 @@ async fn status_round_trips_over_uds() {
 #[tokio::test]
 async fn dropping_handle_removes_socket_file() {
     let tmp = TempDir::new().expect("tempdir");
-    let socket_path = tmp.path().join("daemon.sock");
+    let socket_path = runtime_socket(&tmp, "daemon");
     let config = ephemeral_config(&tmp);
 
     {

@@ -20,6 +20,26 @@ use std::path::PathBuf;
 use tempfile::TempDir;
 use tokio::time::sleep;
 
+/// A private directory to hold the endpoint.
+///
+/// `tempfile` creates 0755 directories, which the daemon refuses: the endpoint
+/// directory is the Unix security boundary. The real default resolves into a
+/// private directory, so a fixture has to build one too rather than dropping
+/// the socket straight into the temp root.
+fn runtime_socket(tmp: &TempDir, name: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::DirBuilderExt;
+
+    let dir = tmp.path().join("runtime");
+    if !dir.exists() {
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&dir)
+            .expect("create runtime dir");
+    }
+    dir.join(format!("{name}.sock"))
+}
+
+
 fn fast_config(tmp: &TempDir, chunk_config: ChunkConfig) -> DaemonConfig {
     let mut config = DaemonConfig::with_data_dir(tmp.path().join("data")).without_networking();
     config.batcher_config = BatcherConfig {
@@ -43,7 +63,7 @@ async fn wait_until_bound(path: &std::path::Path) {
 #[tokio::test]
 async fn append_persists_to_redb_and_eventually_to_duckdb() {
     let tmp = TempDir::new().expect("tempdir");
-    let socket = tmp.path().join("daemon.sock");
+    let socket = runtime_socket(&tmp, "daemon");
     let config = fast_config(&tmp, ChunkConfig::default());
     let storage_path = config.storage_path.clone();
 
@@ -135,7 +155,7 @@ fn assert_redb_has_snapshots(path: &PathBuf) {
 #[tokio::test]
 async fn chunk_rotation_creates_new_chunk_at_threshold() {
     let tmp = TempDir::new().expect("tempdir");
-    let socket = tmp.path().join("daemon.sock");
+    let socket = runtime_socket(&tmp, "daemon");
     // Force rotation after every two appends so we deterministically
     // observe a chunk transition.
     let config = fast_config(&tmp, ChunkConfig::new(2, 16 * 1024));
