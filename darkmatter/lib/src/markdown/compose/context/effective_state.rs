@@ -376,6 +376,13 @@ impl super::super::expression::EvaluationLookup for ResolvingLookup<'_> {
         Some(self.resolution_context.clone())
     }
 
+    fn resolution_context_ref(&self) -> Option<&super::super::expression::ResolutionContext> {
+        // Borrowed path (Finding 12): body interpolation evaluates every
+        // read-side function through this adapter; returning a borrow avoids
+        // cloning the context per call.
+        Some(&self.resolution_context)
+    }
+
     fn is_valid_context_variable(&self, name: &str) -> bool {
         self.state.is_valid_context_variable(name)
     }

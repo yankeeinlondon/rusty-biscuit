@@ -48,6 +48,7 @@ pub use types::{
     ShellExpansionError, ShellExpansionOptions, ShellExpansionRuntime, ShellPolicyPaths,
     ShellRuleSet, ShellTimeoutBehavior,
 };
+pub(crate) use types::ShellRuntimeSnapshot;
 
 use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::ComposeWarning;
@@ -130,8 +131,10 @@ pub fn execute_directive(
     policy_paths: &ShellPolicyPaths,
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<String, ShellExpansionError> {
+    // A lone directive is its own stage, so it opens its own policy snapshot.
+    let snapshot = shell_runtime.snapshot();
     Ok(
-        execute_directive_detailed(directive, options, policy_paths, shell_runtime)?
+        execute_directive_detailed(directive, options, policy_paths, &snapshot, shell_runtime)?
             .combined_output(),
     )
 }
@@ -142,18 +145,41 @@ pub(crate) fn execute_directive_detailed(
     directive: &ShellDirective,
     options: &ComposeOptions,
     policy_paths: &ShellPolicyPaths,
+    snapshot: &ShellRuntimeSnapshot,
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<DirectiveExecutionResult, ShellExpansionError> {
-    let prepared = prepare_directive(directive, options, policy_paths, shell_runtime)?;
+    let prepared = prepare_directive(directive, options, policy_paths, snapshot, shell_runtime)?;
     execute_prepared_directive(&prepared, options, shell_runtime)
 }
 
 /// Resolves aliases, applies policy checks, and records approval decisions
 /// without executing the command yet.
+///
+/// ## Notes
+///
+/// `snapshot` is the **stage-opening** policy view, taken once by the stage
+/// orchestrator via [`ShellExpansionRuntime::snapshot`] and shared by every
+/// directive that stage admits. This fixes the policy each directive is judged
+/// against for the whole stage, which has two consequences worth stating:
+///
+/// - Whitelist/blacklist entries *persisted* by an approval earlier in this
+///   stage are written to the runtime but are **not** policy input until a
+///   later stage opens a fresh snapshot. A second directive matching a
+///   just-persisted rule therefore prompts again within the same stage.
+/// - Allow-once approvals are exempt: they are arbitrated live through
+///   [`ShellExpansionRuntime::reserve_allow_once`] against shared runtime
+///   state, not through `snapshot`, so one approval still covers repeats of
+///   that exact command across the rest of the stage (and across concurrent
+///   sibling transclusions).
+///
+/// Taking the snapshot per stage rather than per directive also keeps the
+/// policy mutex out of parsing, approval, and command execution: the lock is
+/// held only for the clone itself.
 pub(crate) fn prepare_directive(
     directive: &ShellDirective,
     options: &ComposeOptions,
     policy_paths: &ShellPolicyPaths,
+    snapshot: &ShellRuntimeSnapshot,
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<PreparedShellDirective, ShellExpansionError> {
     let (effective, alias_name) = resolve_or_passthrough(directive);
@@ -185,7 +211,7 @@ pub(crate) fn prepare_directive(
         });
     }
 
-    let runtime_snapshot = shell_runtime.snapshot();
+    let runtime_snapshot = snapshot;
 
     // 1. Check built-in blacklist for all commands
     for (exe, args) in executables_with_args(&effective) {
@@ -1407,6 +1433,162 @@ name: world
         assert_eq!(handler.approvals(), 2);
         assert_eq!(report.shell_approvals_used, 2);
         assert_eq!(report.shell_expansions_applied, 2);
+    }
+
+    /// F32, half 1 of the stage-snapshot visibility contract — a rule persisted
+    /// by an approval in one stage IS policy input for a *subsequent* stage.
+    /// The root body stage persists `prefix echo`; the transcluded child's body
+    /// stage opens a fresh snapshot, sees it, and never prompts.
+    #[test]
+    fn persisted_whitelist_from_one_stage_is_policy_input_for_the_next_stage() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path().join("root.md");
+        let child = temp_dir.path().join("child.md");
+
+        std::fs::write(&root, "::shell echo alpha\n\n::file ./child.md\n").unwrap();
+        std::fs::write(&child, "## Child\n\n::shell echo beta\n").unwrap();
+
+        let handler = Arc::new(CountingApprovalHandler::new(
+            ShellApprovalDecision::AllowCommandPersist,
+        ));
+        let options =
+            ComposeOptions::new()
+                .with_source_file(&root)
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(handler.clone()),
+                    ..Default::default()
+                });
+
+        let (composed, _report) = Markdown::try_from(root.as_path())
+            .unwrap()
+            .compose_with(options)
+            .unwrap();
+
+        assert_eq!(
+            handler.approvals(),
+            1,
+            "the child stage's fresh snapshot must see the whitelist entry the root stage persisted"
+        );
+        assert!(composed.content().contains("alpha"));
+        assert!(composed.content().contains("beta"));
+    }
+
+    /// F32, half 2 of the stage-snapshot visibility contract — a rule persisted
+    /// mid-stage is written to the runtime but is NOT policy input for later
+    /// directives in that *same* stage, which are judged against the snapshot
+    /// the stage opened with. Both `echo` directives therefore prompt.
+    ///
+    /// This is a deliberate behavior change from per-directive snapshotting,
+    /// where the second directive would have observed the freshly persisted
+    /// `prefix echo` rule and skipped its prompt.
+    #[test]
+    fn persistence_mid_stage_is_not_policy_input_for_the_same_stage() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell echo alpha\n\n::shell echo beta\n";
+        let md: Markdown = content.into();
+
+        let handler = Arc::new(CountingApprovalHandler::new(
+            ShellApprovalDecision::AllowCommandPersist,
+        ));
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(handler.clone()),
+                ..Default::default()
+            });
+
+        let (composed, _report) = md.compose_with(options).unwrap();
+
+        assert_eq!(
+            handler.approvals(),
+            2,
+            "both directives are judged against the stage-opening snapshot, which has no `echo` rule"
+        );
+        // The persistence itself still happened — it is deferred as *policy
+        // input*, not dropped.
+        let whitelist = std::fs::read_to_string(temp_dir.path().join(".darkmatter-shell-whitelist"))
+            .unwrap();
+        assert!(
+            whitelist.contains("prefix echo"),
+            "approval must still persist its rule; got: {whitelist:?}"
+        );
+        assert!(composed.content().contains("alpha"));
+        assert!(composed.content().contains("beta"));
+    }
+
+    /// F32 — allow-once approvals are exempt from the stage-snapshot freeze.
+    /// They are arbitrated live through `reserve_allow_once` against shared
+    /// runtime state, so one approval still covers a repeat of that exact
+    /// command later in the SAME stage.
+    #[test]
+    fn allow_once_still_dedupes_within_a_single_stage() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell --no-cache echo same\n\n::shell --no-cache echo same\n";
+        let md: Markdown = content.into();
+
+        let handler = Arc::new(CountingApprovalHandler::new(
+            ShellApprovalDecision::AllowOnce,
+        ));
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(handler.clone()),
+                ..Default::default()
+            });
+
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        assert_eq!(
+            handler.approvals(),
+            1,
+            "allow-once must not be frozen by the stage snapshot"
+        );
+        assert_eq!(report.shell_expansions_applied, 2);
+        assert_eq!(composed.content().matches("same").count(), 2);
+    }
+
+    /// F32 — the policy mutex must not be held across approval. A handler that
+    /// touches the same runtime (here: by taking a snapshot of it) while the
+    /// stage is mid-approval would deadlock if `prepare_directive` still held
+    /// the lock. The test's own timeout is the failure signal.
+    #[test]
+    fn policy_mutex_is_not_held_across_approval() {
+        struct RuntimeTouchingHandler {
+            runtime: ShellExpansionRuntime,
+        }
+
+        impl ShellApprovalHandler for RuntimeTouchingHandler {
+            fn approve(
+                &self,
+                _request: ShellApprovalRequest,
+            ) -> Result<ShellApprovalDecision, ShellExpansionError> {
+                // Reaching into the shared policy state from inside the approval
+                // callback must not block.
+                let _ = self.runtime.snapshot();
+                Ok(ShellApprovalDecision::AllowOnce)
+            }
+        }
+
+        let temp_dir = TempDir::new().unwrap();
+        let runtime = ShellExpansionRuntime::new();
+        let content = "::shell echo hello\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(RuntimeTouchingHandler {
+                    runtime: runtime.clone_for_child(),
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _report) = md.compose_with(options).unwrap();
+        assert!(composed.content().contains("hello"));
     }
 
     /// Regression test: when the source file is a bare filename (no directory

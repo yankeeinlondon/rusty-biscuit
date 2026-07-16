@@ -45,8 +45,19 @@ dashmap = "6.1"
 # Utilities
 lazy_static = "1.5"
 regex = "1.11"
+# Exact multi-pattern (leftmost-longest) automaton for `replace:` text
+# replacement (Finding 13). Already compiled transitively via `regex`, so no
+# added build cost.
+aho-corasick = "1.1"
 tempfile = "3.8"
 globset = "0.4"
+# Blocking child-process wait that stays killable from another thread, so shell
+# directives wait on an OS event instead of a 10ms poll loop (Finding 17).
+# `default-features = false` drops the `timeout` feature: its `wait_timeout` is
+# built on a process-wide SIGCHLD handler (via `sigchld`/`signal-hook`), and
+# Darkmatter is a library that must not hijack a host's signal disposition. The
+# ungated `wait`/`kill` core we use is `waitid`-based and installs nothing.
+shared_child = { version = "1.1", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock", "now"] }
 which = "7"
 dirs = "6"
@@ -172,4 +183,20 @@ harness = false
 
 [[bench]]
 name = "reference_graph"
+harness = false
+
+[[bench]]
+name = "phase6_interpolation"
+harness = false
+
+[[bench]]
+name = "phase8_render"
+harness = false
+
+[[bench]]
+name = "phase9_remote"
+harness = false
+
+[[bench]]
+name = "phase10_residuals"
 harness = false

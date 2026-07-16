@@ -15,17 +15,21 @@
 //! locally; this module-level `allow` covers the adapter's own impls and tests.
 #![allow(deprecated)]
 
+use std::cell::{OnceCell, RefCell};
+
 use biscuit_terminal::components::mermaid::MermaidDiagram;
 use biscuit_terminal::terminal::Terminal;
 use renderable::browser::fragment::{BrowserFragment, Ready};
-use renderable::color::{ColorDepth as RenderableColorDepth, TerminalCodeContext};
+use renderable::color::{
+    ColorDepth as RenderableColorDepth, ColorMode as RenderableColorMode, TerminalCodeContext,
+};
 use renderable::tree::{CodeRenderer, NodeAttrs};
 
 use crate::markdown::{
     dsl::{CodeBlockMeta, parse_code_info},
-    highlighting::{CodeBlockMode, CodeHighlighter, ColorMode, ThemePair},
+    highlighting::{CodeBlockMode, CodeHighlighter, ColorMode, ThemePair, themes::Theme},
     language_grammar::LanguageGrammar,
-    output::code_block::{render_html_code_block, render_terminal_code_block},
+    output::code_block::{mode_for_background, render_html_code_block, render_terminal_code_block},
     output::html::HtmlOptions,
     output::terminal::{
         ColorDepth, DimMode, HyperlinkMode, ItalicMode, MermaidMode, TerminalImageMode,
@@ -60,7 +64,7 @@ use crate::markdown::{
             Markdown documents with DarkmatterPage. If you genuinely need the raw \
             CodeRenderer hook, suppress this warning locally."
 )]
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct TerminalCodeRenderer {
     terminal: Option<Terminal>,
     code_block_mode: CodeBlockMode,
@@ -78,17 +82,93 @@ pub struct TerminalCodeRenderer {
     /// the direct `CodeBlock` browser path, which emits no page stylesheet to
     /// disagree with.
     html_options: Option<HtmlOptions>,
+    /// `CODE_THEME` / `THEME` read once when this renderer is constructed —
+    /// the render-scoped environment snapshot (finding 23). Every entry point
+    /// builds one renderer per render invocation (both `entrypoints` options
+    /// mappers and both [`CodeBlock`](crate::markdown::code_block::CodeBlock)
+    /// surfaces), so a later render still observes an environment change while
+    /// a 40-fence document reads the environment once instead of once per
+    /// fence.
+    env_code_theme: Option<ThemePair>,
+    /// Terminal theme resolution memoized for the render's
+    /// [`TerminalCodeContext`]. The tree renderer hands every code block in one
+    /// render the same context, so the first block resolves the surface and the
+    /// rest reuse it. The key keeps a renderer that is reused across *different*
+    /// contexts (the whitebox tests, which switch pinned theme/mode on one
+    /// renderer) resolving each context correctly.
+    terminal_surface: RefCell<Option<(TerminalSurfaceKey, CodeSurface)>>,
+    /// Browser theme resolution memoized for the render. Unlike the terminal
+    /// hook the browser hook takes no per-call context, so its inputs
+    /// (`html_options`, `theme_override`, the environment snapshot) are fixed
+    /// for the renderer's lifetime and need no key.
+    browser_surface: OnceCell<BrowserSurface>,
+}
+
+/// The [`TerminalCodeContext`] inputs a [`CodeSurface`] resolution depends on.
+///
+/// Width, color depth, line numbers, and page surface colors are *not* part of
+/// the key: none of them participates in theme or color-mode selection.
+type TerminalSurfaceKey = (Option<String>, RenderableColorMode);
+
+/// One render's resolved code-panel theme and color modes (finding 23).
+///
+/// Produced once per render by
+/// [`TerminalCodeRenderer::resolve_terminal_surface`] /
+/// [`resolve_browser_surface`](TerminalCodeRenderer::resolve_browser_surface)
+/// and reused by every code block, replacing the per-block environment read
+/// plus theme/surface resolution chain.
+#[derive(Debug, Clone, Copy)]
+struct CodeSurface {
+    /// The selected theme pair, carried into `TerminalOptions` so the code
+    /// block's own padding/header math sees the same pair.
+    code_theme: ThemePair,
+    /// The concrete theme variant the panel loads.
+    theme: Theme,
+    /// The surrounding page's color mode, unresolved (`Unknown` preserved) —
+    /// the value `TerminalOptions::color_mode` carries.
+    page_mode: ColorMode,
+    /// The code panel's own color mode (the page mode's inversion under the
+    /// default [`CodeBlockMode::Inverse`]).
+    panel_mode: ColorMode,
+    /// Header/body chrome contrast, keyed off the *resolved theme background*
+    /// rather than the requested mode, so single-variant themes still get
+    /// readable chrome.
+    header_mode: ColorMode,
+}
+
+/// One render's resolved browser code-panel state.
+#[derive(Debug, Clone)]
+struct BrowserSurface {
+    /// The page's [`HtmlOptions`] with the theme chain (override → page →
+    /// environment snapshot → default) already applied. Held so the hook
+    /// borrows it per block instead of cloning the page options per block.
+    options: HtmlOptions,
+    /// The concrete theme variant the panel loads.
+    theme: Theme,
+    /// The code panel's own color mode.
+    panel_mode: ColorMode,
 }
 
 impl TerminalCodeRenderer {
     /// Creates a new [`TerminalCodeRenderer`].
     #[must_use]
     pub fn new() -> Self {
+        Self::with_surface_snapshot(None, CodeBlockMode::default())
+    }
+
+    /// Builds a renderer and takes its render-scoped environment snapshot.
+    ///
+    /// Every constructor funnels through here so `CODE_THEME` / `THEME` are
+    /// read exactly once per renderer — i.e. once per render invocation.
+    fn with_surface_snapshot(terminal: Option<Terminal>, code_block_mode: CodeBlockMode) -> Self {
         Self {
-            terminal: None,
-            code_block_mode: CodeBlockMode::default(),
+            terminal,
+            code_block_mode,
             theme_override: None,
             html_options: None,
+            env_code_theme: code_theme_from_env(),
+            terminal_surface: RefCell::new(None),
+            browser_surface: OnceCell::new(),
         }
     }
 
@@ -99,6 +179,7 @@ impl TerminalCodeRenderer {
     #[must_use]
     pub fn with_theme_override(mut self, theme: Option<ThemePair>) -> Self {
         self.theme_override = theme;
+        self.invalidate_surfaces();
         self
     }
 
@@ -108,7 +189,18 @@ impl TerminalCodeRenderer {
     #[must_use]
     pub fn with_html_options(mut self, options: HtmlOptions) -> Self {
         self.html_options = Some(options);
+        self.invalidate_surfaces();
         self
+    }
+
+    /// Drops any memoized surface after a builder changes a resolution input.
+    ///
+    /// The entry points call the builders before rendering, so this normally
+    /// clears nothing; it keeps the memo from outliving the inputs it was
+    /// derived from if a caller ever reorders the two.
+    fn invalidate_surfaces(&mut self) {
+        self.terminal_surface = RefCell::new(None);
+        self.browser_surface = OnceCell::new();
     }
 
     /// Creates a new [`TerminalCodeRenderer`] with a caller-supplied
@@ -122,23 +214,152 @@ impl TerminalCodeRenderer {
     /// the page-side mode.
     #[must_use]
     pub fn new_with_code_block_mode(code_block_mode: CodeBlockMode) -> Self {
-        Self {
-            terminal: None,
-            code_block_mode,
-            theme_override: None,
-            html_options: None,
-        }
+        Self::with_surface_snapshot(None, code_block_mode)
     }
 
     /// Creates a [`TerminalCodeRenderer`] bound to the detected terminal.
     #[must_use]
     pub fn for_terminal(term: &Terminal, code_block_mode: CodeBlockMode) -> Self {
-        Self {
-            terminal: Some(term.clone()),
-            code_block_mode,
-            theme_override: None,
-            html_options: None,
+        Self::with_surface_snapshot(Some(term.clone()), code_block_mode)
+    }
+
+    /// Returns the render-scoped terminal surface for `context`, resolving it
+    /// on the render's first code block and reusing it for the rest.
+    fn terminal_surface(&self, context: &TerminalCodeContext) -> CodeSurface {
+        let key: TerminalSurfaceKey = (
+            context.code_theme_name().map(str::to_string),
+            context.color_mode(),
+        );
+        if let Some((cached_key, surface)) = self.terminal_surface.borrow().as_ref()
+            && *cached_key == key
+        {
+            return *surface;
         }
+        let surface = self.resolve_terminal_surface(context);
+        *self.terminal_surface.borrow_mut() = Some((key, surface));
+        surface
+    }
+
+    /// Resolves the theme, page mode, panel mode, and chrome contrast for one
+    /// render. Runs once per render — see [`CodeSurface`].
+    fn resolve_terminal_surface(&self, context: &TerminalCodeContext) -> CodeSurface {
+        #[cfg(test)]
+        surface_probe::note_terminal_resolution();
+
+        // The page surface and the code panel must share a single source of
+        // truth (Phase 2): a `Terminal` bound to the renderer is the
+        // preferred source (it carries the caller's real detected mode); if
+        // no terminal is bound (the entry-point path), fall back to the
+        // context's `color_mode()` (which the entry point sets from
+        // `opts.color_mode` so the page and panel agree). The
+        // [`ThemePair::resolve_for_surface`](crate::markdown::highlighting::themes::ThemePair::resolve_for_surface)
+        // boundary resolver feeds both surfaces from the same source.
+        let page_mode: ColorMode = self
+            .terminal
+            .as_ref()
+            .map(Terminal::color_mode)
+            .unwrap_or_else(|| context.color_mode().into());
+        // Theme resolution chain (spec: CodeBlock.theme -> page code_theme ->
+        // env/default): an explicit `CodeBlock::with_theme(...)` /
+        // `md code-block --theme` override wins; then the page-supplied theme
+        // name (the page bakes `CODE_THEME` / `THEME` into it at construction);
+        // then — for the direct, page-less `CodeBlock` / `md code-block`
+        // surface, where the context carries no theme name — the render's
+        // `CODE_THEME` / `THEME` environment snapshot; finally the `OneHalf`
+        // default. Without the env leg, `THEME=github md code-block …` resolved
+        // as `OneHalf` because the direct path pins no context theme name
+        // (review-2 finding 1).
+        let code_theme = self
+            .theme_override
+            .or_else(|| context.code_theme_name().map(ThemePair::from_str_or_default))
+            .or(self.env_code_theme)
+            .unwrap_or(ThemePair::OneHalf);
+        let surface = self
+            .terminal
+            .as_ref()
+            .map(crate::markdown::highlighting::Surface::Terminal)
+            .unwrap_or(crate::markdown::highlighting::Surface::Mode(page_mode));
+        let resolved = code_theme.resolve_for_surface(
+            surface,
+            Some(code_theme),
+            self.code_block_mode,
+        );
+        let header_mode = mode_for_background(
+            CodeHighlighter::from_theme(resolved.theme, resolved.color_mode)
+                .theme()
+                .settings
+                .background
+                .unwrap_or(syntect::highlighting::Color::BLACK),
+        );
+        CodeSurface {
+            code_theme,
+            theme: resolved.theme,
+            page_mode,
+            panel_mode: resolved.color_mode,
+            header_mode,
+        }
+    }
+
+    /// Returns the render-scoped browser surface, resolving it on the render's
+    /// first code block and reusing it for the rest.
+    fn browser_surface(&self) -> &BrowserSurface {
+        self.browser_surface
+            .get_or_init(|| self.resolve_browser_surface())
+    }
+
+    /// Resolves the effective [`HtmlOptions`] and theme variant for one render.
+    fn resolve_browser_surface(&self) -> BrowserSurface {
+        #[cfg(test)]
+        surface_probe::note_browser_resolution();
+
+        // Render with the page's resolved options (code theme, page color mode,
+        // code-block mode, line numbers), not `HtmlOptions::default()`: the page
+        // frame and the injected `.code-block` stylesheet are built from these
+        // same options, so the highlighted markup must agree (review-1 finding
+        // 2). A direct `CodeBlock` browser render (no page) carries no options
+        // and falls back to the default; a `CodeBlock::with_theme(...)` override
+        // wins over the carried theme.
+        let mut options = self.html_options.clone().unwrap_or_default();
+        // Theme resolution chain (spec: CodeBlock.theme -> page code_theme ->
+        // env/default). When page options are carried, `options.code_theme` is
+        // already the page-resolved theme (the page bakes `CODE_THEME` /
+        // `THEME` in at construction). On the direct, page-less surface no
+        // options are carried, so honor the render's `CODE_THEME` / `THEME`
+        // snapshot before the `HtmlOptions` default — otherwise a `THEME=github`
+        // direct `CodeBlock` HTML render resolved as the default theme
+        // (review-2 finding 1). An explicit `with_theme` override still wins.
+        if self.html_options.is_none()
+            && let Some(env_theme) = self.env_code_theme
+        {
+            options.code_theme = env_theme;
+        }
+        if let Some(theme) = self.theme_override {
+            options.code_theme = theme;
+        }
+        // Code blocks contrast against the page: resolve the theme *variant*
+        // against the page color mode using the configured `CodeBlockMode`
+        // (default `Inverse`: a light code panel on a dark page, and vice
+        // versa — Defect D / spec.md:394-397). Single-variant themes
+        // (dracula/nord/monokai/vs-dark) are a deliberate no-op.
+        let resolved = options.code_theme.resolve_for_surface(
+            crate::markdown::highlighting::Surface::Mode(options.color_mode),
+            Some(options.code_theme),
+            options.code_block_mode,
+        );
+        BrowserSurface {
+            options,
+            theme: resolved.theme,
+            panel_mode: resolved.color_mode,
+        }
+    }
+}
+
+impl Default for TerminalCodeRenderer {
+    /// Equivalent to [`TerminalCodeRenderer::new`] — in particular it takes the
+    /// same render-scoped environment snapshot, which a derived `Default` would
+    /// silently skip.
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -174,6 +395,9 @@ fn build_code_meta(lang: &str, meta: Option<&str>) -> CodeBlockMeta {
 /// the direct path carries no such options, so this hook is the boundary
 /// that must honor it (review-2 finding 1).
 fn code_theme_from_env() -> Option<ThemePair> {
+    #[cfg(test)]
+    surface_probe::note_env_read();
+
     std::env::var("CODE_THEME")
         .ok()
         .and_then(|name| ThemePair::try_from(name.trim()).ok())
@@ -182,6 +406,51 @@ fn code_theme_from_env() -> Option<ThemePair> {
                 .ok()
                 .and_then(|name| ThemePair::try_from(name.trim()).ok())
         })
+}
+
+/// Counting seam proving the finding-23 contract — "resolved once per render",
+/// not once per code block — is observable rather than inferred from equal
+/// output (which a per-block resolution would also produce).
+///
+/// Counters are thread-local, so a render on the test's own thread is not
+/// disturbed by concurrently running tests.
+#[cfg(test)]
+mod surface_probe {
+    use std::cell::Cell;
+
+    thread_local! {
+        static ENV_READS: Cell<usize> = const { Cell::new(0) };
+        static TERMINAL_RESOLUTIONS: Cell<usize> = const { Cell::new(0) };
+        static BROWSER_RESOLUTIONS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub(super) fn note_env_read() {
+        ENV_READS.with(|c| c.set(c.get() + 1));
+    }
+
+    pub(super) fn note_terminal_resolution() {
+        TERMINAL_RESOLUTIONS.with(|c| c.set(c.get() + 1));
+    }
+
+    pub(super) fn note_browser_resolution() {
+        BROWSER_RESOLUTIONS.with(|c| c.set(c.get() + 1));
+    }
+
+    /// Runs `body` with the counters zeroed and returns
+    /// `(env_reads, terminal_resolutions, browser_resolutions)` alongside its
+    /// value.
+    pub(super) fn counted<T>(body: impl FnOnce() -> T) -> (T, usize, usize, usize) {
+        ENV_READS.with(|c| c.set(0));
+        TERMINAL_RESOLUTIONS.with(|c| c.set(0));
+        BROWSER_RESOLUTIONS.with(|c| c.set(0));
+        let value = body();
+        (
+            value,
+            ENV_READS.with(Cell::get),
+            TERMINAL_RESOLUTIONS.with(Cell::get),
+            BROWSER_RESOLUTIONS.with(Cell::get),
+        )
+    }
 }
 
 impl CodeRenderer for TerminalCodeRenderer {
@@ -202,54 +471,13 @@ impl CodeRenderer for TerminalCodeRenderer {
             return None;
         }
         let hints = attrs.code_hints();
-        // The page surface and the code panel must share a single source of
-        // truth (Phase 2): a `Terminal` bound to the renderer is the
-        // preferred source (it carries the caller's real detected mode); if
-        // no terminal is bound (the entry-point path), fall back to the
-        // context's `color_mode()` (which the entry point sets from
-        // `opts.color_mode` so the page and panel agree). The
-        // [`ThemePair::resolve_for_surface`](crate::markdown::highlighting::themes::ThemePair::resolve_for_surface)
-        // boundary resolver feeds both surfaces from the same source.
-        let page_mode: ColorMode = self
-            .terminal
-            .as_ref()
-            .map(Terminal::color_mode)
-            .unwrap_or_else(|| context.color_mode().into());
-        // Theme resolution chain (spec: CodeBlock.theme -> page code_theme ->
-        // env/default): an explicit `CodeBlock::with_theme(...)` /
-        // `md code-block --theme` override wins; then the page-supplied theme
-        // name (the page bakes `CODE_THEME` / `THEME` into it at construction);
-        // then — for the direct, page-less `CodeBlock` / `md code-block`
-        // surface, where the context carries no theme name — the
-        // `CODE_THEME` / `THEME` env fallback; finally the `OneHalf` default.
-        // Without the env leg, `THEME=github md code-block …` resolved as
-        // `OneHalf` because the direct path pins no context theme name
-        // (review-2 finding 1).
-        let code_theme = self
-            .theme_override
-            .or_else(|| context.code_theme_name().map(ThemePair::from_str_or_default))
-            .or_else(code_theme_from_env)
-            .unwrap_or(ThemePair::OneHalf);
-        let surface = self
-            .terminal
-            .as_ref()
-            .map(crate::markdown::highlighting::Surface::Terminal)
-            .unwrap_or(crate::markdown::highlighting::Surface::Mode(page_mode));
-        let resolved = code_theme.resolve_for_surface(
-            surface,
-            Some(code_theme),
-            self.code_block_mode,
-        );
-        let highlighter = CodeHighlighter::from_theme(resolved.theme, resolved.color_mode);
-        // Header/body contrast keys off the resolved theme background, not the
-        // requested mode, so single-variant themes still get readable chrome.
-        let color_mode = crate::markdown::output::code_block::mode_for_background(
-            highlighter
-                .theme()
-                .settings
-                .background
-                .unwrap_or(syntect::highlighting::Color::BLACK),
-        );
+        // Theme, page mode, panel mode, and chrome contrast are resolved once
+        // per render and reused by every block (finding 23).
+        let surface = self.terminal_surface(&context);
+        let highlighter = CodeHighlighter::from_theme(surface.theme, surface.panel_mode);
+        let color_mode = surface.header_mode;
+        let code_theme = surface.code_theme;
+        let page_mode = surface.page_mode;
         let code_meta = build_code_meta(lang.unwrap_or(""), meta);
         let language = lang.unwrap_or("");
         let grammar = LanguageGrammar::from_token_or_plain_text(language);
@@ -328,41 +556,11 @@ impl CodeRenderer for TerminalCodeRenderer {
         // an observable promotion failure the renderer can apply strictness to.
         // Catching the SVG failure here and returning a code-block fragment
         // would hide that failure behind `Some(_)` and bypass strictness.
-        // Render with the page's resolved options (code theme, page color mode,
-        // code-block mode, line numbers), not `HtmlOptions::default()`: the page
-        // frame and the injected `.code-block` stylesheet are built from these
-        // same options, so the highlighted markup must agree (review-1 finding
-        // 2). A direct `CodeBlock` browser render (no page) carries no options
-        // and falls back to the default; a `CodeBlock::with_theme(...)` override
-        // wins over the carried theme.
-        let mut options = self.html_options.clone().unwrap_or_default();
-        // Theme resolution chain (spec: CodeBlock.theme -> page code_theme ->
-        // env/default). When page options are carried, `options.code_theme` is
-        // already the page-resolved theme (the page bakes `CODE_THEME` /
-        // `THEME` in at construction). On the direct, page-less surface no
-        // options are carried, so honor the `CODE_THEME` / `THEME` env fallback
-        // before the `HtmlOptions` default — otherwise a `THEME=github` direct
-        // `CodeBlock` HTML render resolved as the default theme (review-2
-        // finding 1). An explicit `with_theme` override still wins.
-        if self.html_options.is_none()
-            && let Some(env_theme) = code_theme_from_env()
-        {
-            options.code_theme = env_theme;
-        }
-        if let Some(theme) = self.theme_override {
-            options.code_theme = theme;
-        }
-        // Code blocks contrast against the page: resolve the theme *variant*
-        // against the page color mode using the configured `CodeBlockMode`
-        // (default `Inverse`: a light code panel on a dark page, and vice
-        // versa — Defect D / spec.md:394-397). Single-variant themes
-        // (dracula/nord/monokai/vs-dark) are a deliberate no-op.
-        let resolved = options.code_theme.resolve_for_surface(
-            crate::markdown::highlighting::Surface::Mode(options.color_mode),
-            Some(options.code_theme),
-            options.code_block_mode,
-        );
-        let highlighter = CodeHighlighter::from_theme(resolved.theme, resolved.color_mode);
+        // The effective options and theme variant are resolved once per render
+        // and borrowed here, rather than cloned and re-resolved per block
+        // (finding 23).
+        let surface = self.browser_surface();
+        let highlighter = CodeHighlighter::from_theme(surface.theme, surface.panel_mode);
         let code_meta = build_code_meta(lang.unwrap_or(""), meta);
         let grammar = LanguageGrammar::from_token_or_plain_text(lang.unwrap_or(""));
 
@@ -370,7 +568,8 @@ impl CodeRenderer for TerminalCodeRenderer {
         // directive so the HTML reproduces the legacy renderer's title block,
         // line-number table, and highlighted-line markup.
         let html =
-            render_html_code_block(value, &grammar, &code_meta, &highlighter, &options).ok()?;
+            render_html_code_block(value, &grammar, &code_meta, &highlighter, &surface.options)
+                .ok()?;
         Some(BrowserFragment::new().define_as_raw_html(html).finalize())
     }
 
@@ -397,11 +596,74 @@ impl CodeRenderer for TerminalCodeRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markdown::Markdown;
     use renderable::color::ColorDepth;
     use renderable::color::ColorMode as RenderableColorMode;
     use renderable::tree::CodeRenderHints;
+    use serial_test::serial;
     use syntect::easy::HighlightLines;
     use syntect::highlighting::Color;
+
+    /// Restores an env var to its prior value, removing it if previously unset.
+    struct EnvVarGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn capture(key: &'static str) -> Self {
+            Self {
+                key,
+                prev: std::env::var(key).ok(),
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(value) => unsafe { std::env::set_var(self.key, value) },
+                None => unsafe { std::env::remove_var(self.key) },
+            }
+        }
+    }
+
+    /// Five fences in three languages — the multi-block document the
+    /// finding-23 "one snapshot per render" assertions render.
+    const MULTI_BLOCK_DOC: &str = "\
+# Multi
+
+```rust
+fn a() -> usize { 1 }
+```
+
+```yaml
+first: 1
+```
+
+```rust
+fn b() -> usize { 2 }
+```
+
+```json
+{ \"k\": 3 }
+```
+
+```yaml
+last: 4
+```
+";
+
+    fn multi_block_terminal_options() -> TerminalOptions {
+        TerminalOptions {
+            // Pin color depth: a `ColorDepth::None` context short-circuits the
+            // hook before it resolves anything, which would make a
+            // "resolved once" assertion pass vacuously.
+            color_depth: Some(crate::markdown::output::terminal::ColorDepth::TrueColor),
+            max_width: Some(80),
+            ..TerminalOptions::default()
+        }
+    }
 
     fn yaml_attrs() -> NodeAttrs {
         let mut attrs = NodeAttrs::default();
@@ -449,6 +711,149 @@ mod tests {
             .settings
             .background
             .expect("theme background")
+    }
+
+    /// Finding 23: one terminal render resolves the code theme/environment
+    /// **once**, however many fences the document holds. Counted rather than
+    /// inferred from equal output, which a per-block resolution would produce
+    /// too.
+    #[test]
+    #[serial]
+    fn terminal_render_resolves_code_surface_once_per_render() {
+        let _theme = EnvVarGuard::capture("THEME");
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        let _no_color = EnvVarGuard::capture("NO_COLOR");
+        unsafe {
+            std::env::remove_var("NO_COLOR");
+            std::env::remove_var("CODE_THEME");
+            std::env::set_var("THEME", "github");
+        }
+        let md: Markdown = MULTI_BLOCK_DOC.into();
+        let opts = multi_block_terminal_options();
+
+        let (rendered, env_reads, terminal_resolutions, _) =
+            surface_probe::counted(|| md.as_terminal(opts).expect("terminal render"));
+
+        let plain = crate::testing::strip_ansi_codes(&rendered);
+        for token in ["fn a()", "first: 1", "fn b()", "\"k\": 3", "last: 4"] {
+            assert!(
+                plain.contains(token),
+                "all five fences must render through the code hook; {token:?} missing from:\n{plain}",
+            );
+        }
+        assert_eq!(
+            terminal_resolutions, 1,
+            "five fences in one render must share one resolved code surface",
+        );
+        assert_eq!(
+            env_reads, 1,
+            "the render's CODE_THEME/THEME snapshot must be taken once, not once per fence",
+        );
+    }
+
+    /// Finding 23, browser half: one HTML render resolves the effective
+    /// `HtmlOptions` + theme variant once and every fence borrows it.
+    #[test]
+    #[serial]
+    fn browser_render_resolves_code_surface_once_per_render() {
+        let _theme = EnvVarGuard::capture("THEME");
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        unsafe {
+            std::env::remove_var("CODE_THEME");
+            std::env::set_var("THEME", "github");
+        }
+        let md: Markdown = MULTI_BLOCK_DOC.into();
+
+        let (html, env_reads, _, browser_resolutions) =
+            surface_probe::counted(|| md.as_html(HtmlOptions::default()).expect("html render"));
+
+        assert_eq!(
+            html.matches("language-").count(),
+            5,
+            "all five fences must render through the code hook:\n{html}",
+        );
+        assert_eq!(
+            browser_resolutions, 1,
+            "five fences in one render must share one resolved browser surface",
+        );
+        assert_eq!(
+            env_reads, 1,
+            "the render's CODE_THEME/THEME snapshot must be taken once, not once per fence",
+        );
+    }
+
+    /// Finding 23's dynamic half: the snapshot is scoped to **one render**, so
+    /// a later render observes an environment change. Each `as_terminal` call
+    /// builds its own renderer, and therefore its own snapshot.
+    #[test]
+    #[serial]
+    fn separate_terminal_renders_observe_theme_environment_change() {
+        let _theme = EnvVarGuard::capture("THEME");
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        let _no_color = EnvVarGuard::capture("NO_COLOR");
+        unsafe {
+            std::env::remove_var("NO_COLOR");
+            std::env::remove_var("CODE_THEME");
+        }
+        let md: Markdown = MULTI_BLOCK_DOC.into();
+
+        unsafe { std::env::set_var("THEME", "github") };
+        let github = md
+            .as_terminal(multi_block_terminal_options())
+            .expect("github render");
+        unsafe { std::env::set_var("THEME", "dracula") };
+        let dracula = md
+            .as_terminal(multi_block_terminal_options())
+            .expect("dracula render");
+
+        assert_ne!(
+            github, dracula,
+            "a THEME change between renders must be observed by the later render",
+        );
+    }
+
+    /// The same contract on the direct, page-less surface — the one where the
+    /// renderer's own environment snapshot (rather than the page's baked
+    /// options) selects the theme. A snapshot that outlived its render, or a
+    /// process-wide cache, would return the stale theme here.
+    #[test]
+    #[serial]
+    fn separate_direct_renders_observe_code_theme_environment_change() {
+        let _theme = EnvVarGuard::capture("THEME");
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        unsafe { std::env::remove_var("THEME") };
+        let code = "fn demo() -> usize { 42 }";
+        // No `code_theme_name` on the context: the direct surface, where the
+        // environment snapshot is the only theme signal.
+        let context =
+            || TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark);
+
+        unsafe { std::env::set_var("CODE_THEME", "github") };
+        let github = TerminalCodeRenderer::new()
+            .render_terminal_code(Some("rust"), code, None, &NodeAttrs::default(), context())
+            .expect("github render");
+        let github_html = TerminalCodeRenderer::new()
+            .render_browser_code(Some("rust"), code, None, &NodeAttrs::default())
+            .expect("github html")
+            .render();
+
+        unsafe { std::env::set_var("CODE_THEME", "dracula") };
+        let dracula = TerminalCodeRenderer::new()
+            .render_terminal_code(Some("rust"), code, None, &NodeAttrs::default(), context())
+            .expect("dracula render");
+        let dracula_html = TerminalCodeRenderer::new()
+            .render_browser_code(Some("rust"), code, None, &NodeAttrs::default())
+            .expect("dracula html")
+            .render();
+
+        assert_ne!(
+            github, dracula,
+            "a CODE_THEME change must reach a newly constructed renderer's terminal output",
+        );
+        assert_ne!(
+            github_html, dracula_html,
+            "a CODE_THEME change must reach a newly constructed renderer's HTML output",
+        );
     }
 
     /// A pinned `code_theme_name` on the context must reach the highlighter so

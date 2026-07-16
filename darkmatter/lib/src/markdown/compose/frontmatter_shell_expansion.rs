@@ -35,7 +35,9 @@ use super::shell_expansion::types::{
     ChainOperator, ErrorHandling, PipelineRuntime, ShellCommandOrigin, ShellDirective,
     ShellExpansionError, ShellPipeline, ShellPolicyPaths, frontmatter_key_line,
 };
-use super::shell_expansion::{PreparedShellDirective, execute_prepared_directive, prepare_directive};
+use super::shell_expansion::{
+    PreparedShellDirective, ShellRuntimeSnapshot, execute_prepared_directive, prepare_directive,
+};
 use super::{ComposeOptions, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
 use crate::markdown::span::{SourceSpan, Spanned};
@@ -1300,6 +1302,10 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     let policy_paths = resolve_policy_paths(&shell_opts, &options.source)?;
     runtime.shell.ensure_loaded(&policy_paths)?;
 
+    // One policy snapshot opens the stage and is shared by every directive in
+    // it, rather than each directive cloning the rule sets for itself.
+    let snapshot = runtime.shell.snapshot();
+
     // Snapshot frontmatter values for ternary condition lookups. Built lazily
     // so non-ternary inputs don't pay the cloning cost. The real run carries a
     // resolution context so a ternary condition and its selected branch can use
@@ -1329,6 +1335,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                     candidate,
                     options,
                     &policy_paths,
+                    &snapshot,
                     runtime,
                     ctx,
                 )?;
@@ -1366,6 +1373,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                     candidate,
                     options,
                     &policy_paths,
+                    &snapshot,
                     runtime,
                     ctx,
                     state,
@@ -1376,6 +1384,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                     candidate,
                     options,
                     &policy_paths,
+                    &snapshot,
                     runtime,
                     ctx,
                     state,
@@ -1589,12 +1598,14 @@ fn evaluate_ternary_condition(
 /// is enforced. The pipeline's [`ShellPipeline::display_string`] is used as
 /// `raw_command` so approval prompts identify the specific branch being
 /// authorized rather than the surrounding ternary text.
+#[allow(clippy::too_many_arguments)]
 fn prepare_branch_pipeline(
     pipeline: ShellPipeline,
     raw_command: String,
     candidate: &FrontmatterShellDirective,
     options: &ComposeOptions,
     policy_paths: &ShellPolicyPaths,
+    snapshot: &ShellRuntimeSnapshot,
     runtime: &mut PipelineRuntime,
     ctx: &SourceContext,
 ) -> Result<PreparedShellDirective, ShellExpansionError> {
@@ -1618,7 +1629,7 @@ fn prepare_branch_pipeline(
         ctx: ctx.clone(),
     };
 
-    prepare_directive(&directive, options, policy_paths, &mut runtime.shell)
+    prepare_directive(&directive, options, policy_paths, snapshot, &mut runtime.shell)
 }
 
 /// A ternary branch resolved for execution: either a value produced without a
@@ -1648,6 +1659,7 @@ fn prepare_optional_branch(
     candidate: &FrontmatterShellDirective,
     options: &ComposeOptions,
     policy_paths: &ShellPolicyPaths,
+    snapshot: &ShellRuntimeSnapshot,
     runtime: &mut PipelineRuntime,
     ctx: &SourceContext,
     state: &FrontmatterSeedState,
@@ -1690,6 +1702,7 @@ fn prepare_optional_branch(
                 candidate,
                 options,
                 policy_paths,
+                snapshot,
                 runtime,
                 ctx,
             )?;

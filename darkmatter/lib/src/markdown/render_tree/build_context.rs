@@ -373,15 +373,35 @@ fn apply_disclosure_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
 /// Attaches typed link policy: colors, text-layout hints, and structured
 /// browser directives.
 fn apply_link_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
-    let (url, title) = match &node.kind {
-        NodeKind::Link { url, title, .. } => (url.clone(), title.clone()),
-        _ => return,
+    // The URL and title are read, never stored, so they are borrowed out of the
+    // node instead of cloned for every link in the document — including on the
+    // empty-policy path, where the clones were the only work done.
+    //
+    // Every decision is resolved into an owned value inside this scope so the
+    // borrow of `node.kind` ends before the node is mutated below. Application
+    // order (colors, then layout hints, then directive) is unchanged;
+    // `parse_link_directive` is pure, so computing it earlier is equivalent.
+    let (fg, bg, common, directive) = {
+        let NodeKind::Link { url, title, .. } = &node.kind else {
+            return;
+        };
+
+        let is_local = is_local_link(url);
+        let (fg, bg) = ctx.hyperlink_color(is_local);
+        let common = ctx.effective_hyperlink_style(is_local);
+
+        let directive = title.as_ref().and_then(|raw_title| {
+            let frontmatter_css = common
+                .as_ref()
+                .and_then(|c| c.to_css_overlay())
+                .map(|c| c.to_css().replace('\n', " "));
+            parse_link_directive(url, raw_title, frontmatter_css.as_deref())
+        });
+
+        (fg, bg, common, directive)
     };
 
-    let is_local = is_local_link(&url);
-
     // Colors.
-    let (fg, bg) = ctx.hyperlink_color(is_local);
     if fg.is_some() || bg.is_some() {
         let mut style = node.attrs.style().unwrap_or_default();
         set_style_colors(&mut style, fg.as_ref(), bg.as_ref());
@@ -389,35 +409,42 @@ fn apply_link_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
     }
 
     // Text-layout hints (typed, not content mutation).
-    let common = ctx.effective_hyperlink_style(is_local);
     if let Some(ref common) = common {
         attach_text_layout(node, common);
     }
 
     // Structured directive parsing.
-    if let Some(raw_title) = title.as_ref() {
-        let frontmatter_css = common
-            .as_ref()
-            .and_then(|c| c.to_css_overlay())
-            .map(|c| c.to_css().replace('\n', " "));
-        if let Some(directive) = parse_link_directive(&url, raw_title, frontmatter_css.as_deref()) {
-            directive.apply_to_link_node(node);
-        }
+    if let Some(directive) = directive {
+        directive.apply_to_link_node(node);
     }
 }
 
 /// Attaches typed image policy: colors, text-layout hints, and structured
 /// directives.
 fn apply_image_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
-    let (url, title) = match &node.kind {
-        NodeKind::Image { url, title, .. } => (url.clone(), title.clone()),
-        _ => return,
+    // Borrowed for the same reason as `apply_link_policy`: the URL and title are
+    // only read, so cloning both for every image — empty policy included — was
+    // pure overhead.
+    let (fg, bg, is_local, directive) = {
+        let NodeKind::Image { url, title, .. } = &node.kind else {
+            return;
+        };
+
+        let is_local = is_local_image(url);
+        let (fg, bg) = ctx.image_color(is_local);
+
+        let directive = title.as_ref().and_then(|raw_title| {
+            let frontmatter_css = ctx
+                .local_image_style
+                .and_then(|c| c.to_css_overlay())
+                .map(|c| c.to_css().replace('\n', " "));
+            parse_image_directive(url, raw_title, frontmatter_css.as_deref())
+        });
+
+        (fg, bg, is_local, directive)
     };
 
-    let is_local = is_local_image(&url);
-
     // Colors.
-    let (fg, bg) = ctx.image_color(is_local);
     if fg.is_some() || bg.is_some() {
         let mut style = node.attrs.style().unwrap_or_default();
         set_style_colors(&mut style, fg.as_ref(), bg.as_ref());
@@ -432,14 +459,8 @@ fn apply_image_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
     }
 
     // Structured directive parsing for images (inline CSS / class).
-    if let Some(raw_title) = title.as_ref() {
-        let frontmatter_css = ctx
-            .local_image_style
-            .and_then(|c| c.to_css_overlay())
-            .map(|c| c.to_css().replace('\n', " "));
-        if let Some(directive) = parse_image_directive(&url, raw_title, frontmatter_css.as_deref()) {
-            directive.apply_to_image_node(node);
-        }
+    if let Some(directive) = directive {
+        directive.apply_to_image_node(node);
     }
 }
 
@@ -1301,5 +1322,258 @@ mod structural_tests {
             .expect("link node");
         let hints = link.attrs.text_layout_ref().expect("text_layout hints");
         assert!(hints.width.is_some(), "width hint attached");
+    }
+}
+
+/// Finding 35.7 regression coverage.
+///
+/// `apply_link_policy` / `apply_image_policy` stopped cloning the node's URL and
+/// title before deciding anything and now borrow them, resolving each decision
+/// into an owned value before the node is mutated. Both are pure performance
+/// changes, so the contract is exact equality with the previous appliers —
+/// proven differentially rather than by re-asserting hand-picked attrs.
+#[cfg(test)]
+mod finding_35_7 {
+    use super::*;
+    use std::collections::HashMap;
+
+    /// The pre-optimization `apply_link_policy`, verbatim.
+    fn baseline_apply_link_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
+        let (url, title) = match &node.kind {
+            NodeKind::Link { url, title, .. } => (url.clone(), title.clone()),
+            _ => return,
+        };
+
+        let is_local = is_local_link(&url);
+
+        let (fg, bg) = ctx.hyperlink_color(is_local);
+        if fg.is_some() || bg.is_some() {
+            let mut style = node.attrs.style().unwrap_or_default();
+            set_style_colors(&mut style, fg.as_ref(), bg.as_ref());
+            node.attrs.set_style(&style);
+        }
+
+        let common = ctx.effective_hyperlink_style(is_local);
+        if let Some(ref common) = common {
+            attach_text_layout(node, common);
+        }
+
+        if let Some(raw_title) = title.as_ref() {
+            let frontmatter_css = common
+                .as_ref()
+                .and_then(|c| c.to_css_overlay())
+                .map(|c| c.to_css().replace('\n', " "));
+            if let Some(directive) = parse_link_directive(&url, raw_title, frontmatter_css.as_deref())
+            {
+                directive.apply_to_link_node(node);
+            }
+        }
+    }
+
+    /// The pre-optimization `apply_image_policy`, verbatim.
+    fn baseline_apply_image_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
+        let (url, title) = match &node.kind {
+            NodeKind::Image { url, title, .. } => (url.clone(), title.clone()),
+            _ => return,
+        };
+
+        let is_local = is_local_image(&url);
+
+        let (fg, bg) = ctx.image_color(is_local);
+        if fg.is_some() || bg.is_some() {
+            let mut style = node.attrs.style().unwrap_or_default();
+            set_style_colors(&mut style, fg.as_ref(), bg.as_ref());
+            node.attrs.set_style(&style);
+        }
+
+        if is_local
+            && let Some(common) = ctx.local_image_style
+        {
+            attach_text_layout(node, common);
+        }
+
+        if let Some(raw_title) = title.as_ref() {
+            let frontmatter_css = ctx
+                .local_image_style
+                .and_then(|c| c.to_css_overlay())
+                .map(|c| c.to_css().replace('\n', " "));
+            if let Some(directive) =
+                parse_image_directive(&url, raw_title, frontmatter_css.as_deref())
+            {
+                directive.apply_to_image_node(node);
+            }
+        }
+    }
+
+    fn node(kind: NodeKind) -> RenderNode {
+        RenderNode {
+            kind,
+            span: renderable::tree::SourceSpan::synthetic(),
+            attrs: renderable::tree::NodeAttrs::default(),
+        }
+    }
+
+    fn text(value: &str) -> RenderNode {
+        node(NodeKind::Text {
+            value: value.to_string(),
+        })
+    }
+
+    fn styled(color: &str) -> CommonStyle {
+        CommonStyle {
+            color: Some(crate::style::StyleColor {
+                color: renderable::color::Color::Tailwind(
+                    renderable::color::Tailwind::from_kebab_name(color).unwrap(),
+                ),
+                opacity: None,
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// URL / title pairs spanning local vs remote, absent vs present titles, and
+    /// titles that do and do not parse as structured directives.
+    fn url_title_cases() -> Vec<(&'static str, Option<&'static str>)> {
+        vec![
+            ("./local/doc.md", None),
+            ("./local/doc.md", Some("A plain title")),
+            ("./local/doc.md#anchor", Some("Titled with anchor")),
+            ("../sibling/doc.md", None),
+            ("/absolute/doc.md", Some("Absolute")),
+            ("https://example.com/page", None),
+            ("https://example.com/page", Some("Remote title")),
+            ("https://example.com/page", Some("class=hero")),
+            ("./img/pic.png", Some("style=color:red")),
+            ("./img/pic.png", Some("")),
+            ("mailto:someone@example.com", None),
+            ("#in-page-anchor", Some("Anchor only")),
+            ("", None),
+            ("./unicode/é—ü.md", Some("Ünïcödé — title")),
+        ]
+    }
+
+    /// Every meaningful context shape the appliers branch on.
+    fn contexts<'a>(
+        policies: &'a HashMap<PageComponent, ComponentPolicy>,
+        global: &'a CommonStyle,
+        local: &'a CommonStyle,
+        image: &'a CommonStyle,
+    ) -> Vec<(&'static str, TreeBuildContext<'a>)> {
+        let base = || TreeBuildContext {
+            component_policies: policies,
+            page_color: None,
+            page_bg_color: None,
+            hyperlink_style: None,
+            local_hyperlink_style: None,
+            local_image_style: None,
+            hr_defaults: None,
+        };
+
+        vec![
+            ("empty policy", base()),
+            (
+                "global hyperlink style",
+                TreeBuildContext {
+                    hyperlink_style: Some(global),
+                    ..base()
+                },
+            ),
+            (
+                "local hyperlink override",
+                TreeBuildContext {
+                    hyperlink_style: Some(global),
+                    local_hyperlink_style: Some(local),
+                    ..base()
+                },
+            ),
+            (
+                "local hyperlink only",
+                TreeBuildContext {
+                    local_hyperlink_style: Some(local),
+                    ..base()
+                },
+            ),
+            (
+                "local image style",
+                TreeBuildContext {
+                    local_image_style: Some(image),
+                    ..base()
+                },
+            ),
+        ]
+    }
+
+    #[test]
+    fn link_policy_matches_the_pre_optimization_applier() {
+        let policies = HashMap::new();
+        let (global, local, image) = (styled("red-500"), styled("blue-500"), styled("green-500"));
+
+        for (ctx_label, ctx) in contexts(&policies, &global, &local, &image) {
+            for (url, title) in url_title_cases() {
+                let make = || {
+                    node(NodeKind::Link {
+                        url: url.to_string(),
+                        title: title.map(str::to_string),
+                        children: vec![text("link text")],
+                    })
+                };
+
+                let mut actual = make();
+                let mut expected = make();
+                apply_link_policy(&mut actual, &ctx);
+                baseline_apply_link_policy(&mut expected, &ctx);
+
+                assert_eq!(
+                    format!("{actual:?}"),
+                    format!("{expected:?}"),
+                    "link policy differs under {ctx_label:?} for url={url:?} title={title:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn image_policy_matches_the_pre_optimization_applier() {
+        let policies = HashMap::new();
+        let (global, local, image) = (styled("red-500"), styled("blue-500"), styled("green-500"));
+
+        for (ctx_label, ctx) in contexts(&policies, &global, &local, &image) {
+            for (url, title) in url_title_cases() {
+                let make = || {
+                    node(NodeKind::Image {
+                        url: url.to_string(),
+                        title: title.map(str::to_string),
+                        alt: "alt text".to_string(),
+                    })
+                };
+
+                let mut actual = make();
+                let mut expected = make();
+                apply_image_policy(&mut actual, &ctx);
+                baseline_apply_image_policy(&mut expected, &ctx);
+
+                assert_eq!(
+                    format!("{actual:?}"),
+                    format!("{expected:?}"),
+                    "image policy differs under {ctx_label:?} for url={url:?} title={title:?}"
+                );
+            }
+        }
+    }
+
+    /// The appliers are called for every node in the fold, so a non-link/image
+    /// node must still be left untouched by both.
+    #[test]
+    fn unrelated_nodes_are_untouched() {
+        let policies = HashMap::new();
+        let (global, local, image) = (styled("red-500"), styled("blue-500"), styled("green-500"));
+
+        for (ctx_label, ctx) in contexts(&policies, &global, &local, &image) {
+            let mut n = text("just text");
+            let before = format!("{n:?}");
+            apply_link_policy(&mut n, &ctx);
+            apply_image_policy(&mut n, &ctx);
+            assert_eq!(format!("{n:?}"), before, "text node mutated under {ctx_label:?}");
+        }
     }
 }

@@ -129,6 +129,13 @@ impl EvaluationLookup for FrontmatterSeedState {
         self.resolution_context.clone()
     }
 
+    fn resolution_context_ref(&self) -> Option<&ResolutionContext> {
+        // Borrowed path (Finding 12): the fixpoint reuses one state across every
+        // key, so returning a borrow keeps each read-side function call from
+        // deep-cloning the context.
+        self.resolution_context.as_ref()
+    }
+
     /// Mirrors `EffectiveState`'s catalog-aware validation so frontmatter
     /// interpolation does not flag valid `ctx.*` references as unknown. Without
     /// this override the trait default (`false`) marks *every* `ctx.*` reference
@@ -214,7 +221,29 @@ fn rewrite_value<L: EvaluationLookup>(
 /// This is applied once, after the final interpolation pass, so literals
 /// survive both frontmatter passes when shell expansion is enabled. The
 /// replacement is not counted as an interpolation replacement.
+/// Returns `true` when any string in the JSON value tree contains the `{{{`
+/// interpolation-literal marker (F14 fast-path guard).
+fn value_contains_literal_marker(value: &Value) -> bool {
+    match value {
+        Value::String(s) => s.contains("{{{"),
+        Value::Array(arr) => arr.iter().any(value_contains_literal_marker),
+        Value::Object(obj) => obj.values().any(value_contains_literal_marker),
+        _ => false,
+    }
+}
+
 pub(crate) fn convert_frontmatter_literals(frontmatter: &mut Frontmatter) {
+    // Fast path (F14): a `{{{ … }}}` literal is impossible without the `{{{`
+    // sequence, so scanning and copying every string value is a provable no-op
+    // when no value contains it. `convert_literals` on a `{{{`-free string
+    // returns it unchanged, so this is byte-identical.
+    if !frontmatter
+        .as_map()
+        .values()
+        .any(value_contains_literal_marker)
+    {
+        return;
+    }
     fn convert_value(value: &mut Value) {
         match value {
             Value::String(s) => {
@@ -440,11 +469,43 @@ fn interpolate_frontmatter_impl(
     }
 
     let templated_set: HashSet<String> = templated_keys.iter().cloned().collect();
+
+    // F11: extract each templated key's interpolation dependencies **once**,
+    // then drive the fixpoint from maintained dependency counts + reverse edges
+    // instead of re-parsing every value on every sweep. `dep_count[key]` is the
+    // number of distinct *templated* references the key still waits on;
+    // `dependents[dep]` are the keys to decrement when `dep` resolves;
+    // `blocked_by_shell` is the set of keys that directly reference a
+    // shell-pending (`$(...)`) value and therefore defer to the fallback pass.
+    let refs_by_key: HashMap<String, Vec<String>> = templated_keys
+        .iter()
+        .filter_map(|k| original_values.get(k).map(|v| (k.clone(), extract_frontmatter_key_refs(v))))
+        .collect();
+    let mut dep_count: HashMap<String, usize> = HashMap::with_capacity(templated_keys.len());
+    let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
+    let mut blocked_by_shell: HashSet<String> = HashSet::new();
+    for key in &templated_keys {
+        let Some(refs) = refs_by_key.get(key) else {
+            continue;
+        };
+        let mut count = 0usize;
+        for r in refs {
+            if shell_pending_keys.contains(r) {
+                blocked_by_shell.insert(key.clone());
+            }
+            if templated_set.contains(r) {
+                count += 1;
+                dependents.entry(r.clone()).or_default().push(key.clone());
+            }
+        }
+        dep_count.insert(key.clone(), count);
+    }
+
     let mut resolved: HashSet<String> = HashSet::new();
     // Best-effort only: keys whose evaluation failed here (e.g. a context-free
     // call to a filesystem function such as `file_exists`). A key that errors
-    // contributes no value to `seed_map`, so any sibling that references it must
-    // NOT be finalized — resolving it would substitute the errored key as
+    // contributes no value to the seed map, so any sibling that references it
+    // must NOT be finalized — resolving it would substitute the errored key as
     // empty/undefined and bake a value execution will never produce into the
     // result (and, for a `$(...)` key, into the pre-flight approval set). Such
     // dependents are propagated into this set and left unresolved, mirroring the
@@ -453,60 +514,82 @@ fn interpolate_frontmatter_impl(
     let mut total_replacements = 0;
     let mut all_warnings = Vec::new();
 
+    // F11/F12: a single reused lookup whose seed map is mutated **in place** as
+    // keys resolve, instead of cloning the whole seed map, the `ComposeContext`,
+    // and the `ResolutionContext` for every key on every sweep. The evaluator
+    // borrows `&state` per key and is dropped before the next mutation.
+    let mut state = FrontmatterSeedState::new(seed_map, context.clone())
+        .with_resolution_context(resolution_context);
+
+    // Decrements the dependency count of every key that referenced `key`.
+    // Marks `key` resolved (used by the eligibility check above). Returns
+    // nothing; the sweep re-scans in original key order for newly-eligible keys.
+    fn mark_resolved(
+        key: &str,
+        resolved: &mut HashSet<String>,
+        dep_count: &mut HashMap<String, usize>,
+        dependents: &HashMap<String, Vec<String>>,
+    ) {
+        resolved.insert(key.to_string());
+        if let Some(deps) = dependents.get(key) {
+            for dependent in deps {
+                if let Some(count) = dep_count.get_mut(dependent) {
+                    *count = count.saturating_sub(1);
+                }
+            }
+        }
+    }
+
     loop {
         let mut made_progress = false;
 
         for key in &templated_keys {
-            if resolved.contains(key) {
+            if resolved.contains(key) || blocked_by_shell.contains(key) {
                 continue;
             }
-
-            let original = match original_values.get(key) {
-                Some(v) => v,
-                None => continue,
+            // Still waiting on an unresolved templated dependency.
+            if dep_count.get(key).copied().unwrap_or(0) > 0 {
+                continue;
+            }
+            let Some(original) = original_values.get(key) else {
+                continue;
             };
-
-            let refs = extract_frontmatter_key_refs(original);
-            let has_unresolved = refs
-                .iter()
-                .any(|r| templated_set.contains(r) && !resolved.contains(r));
-            let has_shell_pending = refs.iter().any(|r| shell_pending_keys.contains(r));
-            if has_unresolved || has_shell_pending {
-                continue;
-            }
+            let refs = refs_by_key.get(key);
 
             // A dependency errored in best-effort mode: this key cannot resolve
             // to a faithful value. Mark it errored too (so its own dependents
             // defer transitively) and leave its original text in place. The
-            // dependency-order loop guarantees the errored ref is already known
+            // dependency-order sweep guarantees the errored ref is already known
             // by the time this key becomes eligible.
-            if best_effort && refs.iter().any(|r| errored.contains(r)) {
+            if best_effort
+                && refs.is_some_and(|refs| refs.iter().any(|r| errored.contains(r)))
+            {
                 errored.insert(key.clone());
-                resolved.insert(key.clone());
+                mark_resolved(key, &mut resolved, &mut dep_count, &dependents);
                 made_progress = true;
                 continue;
             }
 
-            let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone())
-                .with_resolution_context(resolution_context.clone());
-            let evaluator = Evaluator::new(&seed_state);
-            let (new_value, count, mut warnings) =
-                match rewrite_value(original, &evaluator, fail_fast)
-                    .map_err(|e| key_scoped_error(key, e))
-                {
-                    Ok(triple) => triple,
-                    Err(_) if best_effort => {
-                        // Record the failure and mark resolved so the fixpoint
-                        // loop makes progress and the fallback pass still runs
-                        // for the other keys; leave this key's original
-                        // (unresolved) value in place.
-                        errored.insert(key.clone());
-                        resolved.insert(key.clone());
-                        made_progress = true;
-                        continue;
-                    }
-                    Err(e) => return Err(e),
-                };
+            // Scope the evaluator so its `&state` borrow ends before we mutate
+            // `state.data` below.
+            let outcome = {
+                let evaluator = Evaluator::new(&state);
+                rewrite_value(original, &evaluator, fail_fast).map_err(|e| key_scoped_error(key, e))
+            };
+            let (new_value, count, mut warnings) = match outcome {
+                Ok(triple) => triple,
+                Err(_) if best_effort => {
+                    // Record the failure and mark resolved so the fixpoint
+                    // makes progress and the fallback pass still runs for the
+                    // other keys; leave this key's original (unresolved) value
+                    // in place.
+                    errored.insert(key.clone());
+                    mark_resolved(key, &mut resolved, &mut dep_count, &dependents);
+                    made_progress = true;
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
 
             for w in &mut warnings {
                 w.message = format!("key '{}': {}", key, w.message);
@@ -515,10 +598,10 @@ fn interpolate_frontmatter_impl(
             frontmatter
                 .as_map_mut()
                 .insert(key.clone(), new_value.clone());
-            seed_map.insert(key.clone(), new_value);
-            resolved.insert(key.clone());
+            state.data.insert(key.clone(), new_value);
             total_replacements += count;
             all_warnings.extend(warnings);
+            mark_resolved(key, &mut resolved, &mut dep_count, &dependents);
             made_progress = true;
         }
 
@@ -536,7 +619,7 @@ fn interpolate_frontmatter_impl(
         &templated_keys,
         &original_values,
         &shell_pending_keys,
-        &seed_map,
+        &state.data,
     );
 
     for key in &templated_keys {
@@ -553,20 +636,23 @@ fn interpolate_frontmatter_impl(
             continue;
         }
 
-        // Same errored-dependency guard as the main loop: a key reaching the
+        // Same errored-dependency guard as the main sweep: a key reaching the
         // fallback that still references an errored key must stay raw rather
         // than finalize with the errored key substituted as empty.
-        if best_effort && extract_frontmatter_key_refs(original).iter().any(|r| errored.contains(r)) {
+        if best_effort
+            && refs_by_key
+                .get(key)
+                .is_some_and(|refs| refs.iter().any(|r| errored.contains(r)))
+        {
             errored.insert(key.clone());
             continue;
         }
 
-        let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone())
-            .with_resolution_context(resolution_context.clone());
-        let evaluator = Evaluator::new(&seed_state);
-        let (new_value, count, mut warnings) = match rewrite_value(original, &evaluator, fail_fast)
-            .map_err(|e| key_scoped_error(key, e))
-        {
+        let outcome = {
+            let evaluator = Evaluator::new(&state);
+            rewrite_value(original, &evaluator, fail_fast).map_err(|e| key_scoped_error(key, e))
+        };
+        let (new_value, count, mut warnings) = match outcome {
             Ok(triple) => triple,
             // Best-effort: leave this key's original value in place and keep
             // resolving the rest (see [`interpolate_frontmatter_best_effort`]).
@@ -581,7 +667,7 @@ fn interpolate_frontmatter_impl(
         frontmatter
             .as_map_mut()
             .insert(key.clone(), new_value.clone());
-        seed_map.insert(key.clone(), new_value);
+        state.data.insert(key.clone(), new_value);
         total_replacements += count;
         all_warnings.extend(warnings);
     }
@@ -1338,6 +1424,66 @@ mod tests {
             }));
             let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new()).unwrap();
             assert_eq!(report.replacements, 0);
+        }
+
+        /// F11 worklist correctness at scale: a wide fan-out (many keys off one
+        /// base) plus a deep dependency chain (each key referencing the prior)
+        /// must all resolve in dependency order — the incremental dependency
+        /// counts + reverse edges must reach every key.
+        #[test]
+        fn wide_and_deep_graph_resolves_in_dependency_order() {
+            let mut obj = serde_json::Map::new();
+            obj.insert("base".into(), json!("/root"));
+            // Wide fan-out: 20 keys each depending only on `base`.
+            for i in 0..20 {
+                obj.insert(format!("wide_{i:02}"), json!(format!("{{{{base}}}}/w{i:02}")));
+            }
+            // Deep chain: chain_00 -> base, chain_N -> chain_{N-1}.
+            obj.insert("chain_00".into(), json!("{{base}}"));
+            for i in 1..=15 {
+                obj.insert(format!("chain_{i:02}"), json!(format!("{{{{chain_{:02}}}}}/l{i}", i - 1)));
+            }
+            let mut fm = fm_from_json(Value::Object(obj));
+
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new())
+                .unwrap();
+
+            assert_eq!(fm.as_map().get("wide_00"), Some(&json!("/root/w00")));
+            assert_eq!(fm.as_map().get("wide_19"), Some(&json!("/root/w19")));
+            // The deepest chain link only resolves if every prior link did.
+            assert_eq!(
+                fm.as_map().get("chain_15"),
+                Some(&json!("/root/l1/l2/l3/l4/l5/l6/l7/l8/l9/l10/l11/l12/l13/l14/l15"))
+            );
+        }
+
+        /// F11 termination: a self-referential templated key must not loop the
+        /// fixpoint forever. Its dependency count never reaches zero, so it is
+        /// left for the fallback pass, where it resolves against the (still
+        /// absent) seed value — i.e. to empty — exactly as before.
+        #[test]
+        fn self_referential_key_terminates_and_resolves_empty() {
+            let mut fm = fm_from_json(json!({ "a": "{{a}}/tail" }));
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new())
+                .unwrap();
+            assert_eq!(fm.as_map().get("a"), Some(&json!("/tail")));
+        }
+
+        /// F11 termination: a mutual cycle (`a` ⇄ `b`) never satisfies the main
+        /// sweep's dependency counts, so both keys fall through to the fallback
+        /// pass and resolve against each other's absent seed values (empty)
+        /// without hanging.
+        #[test]
+        fn mutual_cycle_terminates_without_hang() {
+            let mut fm = fm_from_json(json!({ "a": "A{{b}}", "b": "B{{a}}" }));
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new())
+                .unwrap();
+            // Deterministic fallback order (map insertion): both resolve, no raw
+            // template survives, and the run terminates.
+            let a = fm.as_map().get("a").and_then(|v| v.as_str()).unwrap();
+            let b = fm.as_map().get("b").and_then(|v| v.as_str()).unwrap();
+            assert!(!a.contains("{{"), "a left raw: {a}");
+            assert!(!b.contains("{{"), "b left raw: {b}");
         }
 
         #[test]

@@ -13,6 +13,18 @@ pub(super) const KEYS: &[&str] = &[
 
 pub(super) const ALIASES: &[&str] = &["utc", "dow", "dow_abbr"];
 
+/// Fetches sniff timezone information for datetime capture.
+///
+/// The `fetch` probe is injected so a Darkmatter-local test can supply a spy and
+/// assert that the production path passes `probe_ntp: false` — compose surfaces
+/// only `timezone`/`timezone_iana`, never NTP status, so the live probe (a
+/// network round-trip) is always skipped. Injecting a real function keeps the
+/// proof inside this crate rather than depending on sniff's own `cfg(test)`
+/// instrumentation crossing the crate boundary.
+fn capture_timezone_info(fetch: impl FnOnce(bool) -> sniff::os::TimeInfo) -> sniff::os::TimeInfo {
+    fetch(false)
+}
+
 pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
     use chrono::{Datelike, Local, Utc};
 
@@ -126,7 +138,7 @@ pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
     // `probe_ntp: false` — darkmatter only consumes `timezone`/`timezone_iana`;
     // `ntp_status` is never surfaced by any `ctx.*` key, so the live NTP probe
     // (a network round-trip; up to 10s on Linux) must be skipped here.
-    let tz_info = sniff::os::detect_timezone_with_options(false);
+    let tz_info = capture_timezone_info(sniff::os::detect_timezone_with_options);
     values.insert(
         "timezone".into(),
         tz_info.timezone_abbr.map_or(Value::Null, Value::String),
@@ -251,6 +263,29 @@ pub(super) fn strip_trailing_sep(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+
+    /// Finding 1 (Darkmatter side): compose datetime capture must pass
+    /// `probe_ntp: false` to sniff so no live NTP probe runs during
+    /// composition. Proven by injecting a spy through the local seam — no
+    /// dependency on sniff's `cfg(test)` instrumentation and no source-text
+    /// assertion.
+    #[test]
+    fn compose_datetime_capture_never_probes_ntp() {
+        let probed_with: Cell<Option<bool>> = Cell::new(None);
+        let info = capture_timezone_info(|probe_ntp| {
+            probed_with.set(Some(probe_ntp));
+            sniff::os::TimeInfo::default()
+        });
+
+        assert_eq!(
+            probed_with.get(),
+            Some(false),
+            "compose must pass probe_ntp: false to sniff",
+        );
+        // The seam returns the injected value verbatim.
+        assert_eq!(info.ntp_status, sniff::os::NtpStatus::Unknown);
+    }
 
     #[test]
     fn populate_datetime_produces_all_expected_keys() {

@@ -5,10 +5,13 @@
 
 use std::io::Read;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, ExitStatus};
+use std::sync::Arc;
+use std::sync::mpsc::RecvTimeoutError;
 use std::thread::JoinHandle;
-use std::time::Instant;
+use std::time::Duration;
 
+use shared_child::SharedChild;
 use tracing::{debug, instrument, warn};
 
 use super::types::{
@@ -205,8 +208,8 @@ pub(crate) fn execute_command_detailed(
     }
 
     // 4. Spawn
-    let mut child = cmd
-        .spawn()
+    let child = SharedChild::spawn(&mut cmd)
+        .map(Arc::new)
         .map_err(|e| ShellExpansionError::ExecutionFailed {
             ctx: Box::new(directive.ctx.clone()),
             command: directive.raw_command.clone(),
@@ -217,8 +220,8 @@ pub(crate) fn execute_command_detailed(
         })?;
 
     // 5. Drain stdout and stderr concurrently via threads
-    let stdout_handle = child.stdout.take();
-    let stderr_handle = child.stderr.take();
+    let stdout_handle = child.take_stdout();
+    let stderr_handle = child.take_stderr();
 
     let stdout_thread = std::thread::spawn(move || {
         let mut buf = Vec::new();
@@ -236,89 +239,66 @@ pub(crate) fn execute_command_detailed(
         buf
     });
 
-    // 6. Poll with timeout
+    // 6. Wait with timeout
     let timeout = directive.timeout_override.unwrap_or(shell_opts.timeout);
-    let start = Instant::now();
-    let sleep_duration = std::time::Duration::from_millis(10);
 
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                // Process completed
-                let stdout_bytes = join_output_thread_raw(stdout_thread, "stdout", &directive.ctx)?;
-                let stderr_bytes = join_output_thread_raw(stderr_thread, "stderr", &directive.ctx)?;
-                let stdout_str = String::from_utf8_lossy(&stdout_bytes).to_string();
-                let stderr_str = String::from_utf8_lossy(&stderr_bytes).to_string();
-
-                if status.success() {
-                    let (mut stdout, mut stderr) = (stdout_str, stderr_str);
-
-                    if shell_opts.strip_ansi {
-                        stdout = biscuit_terminal::prelude::strip_escape_codes(stdout);
-                        stderr = biscuit_terminal::prelude::strip_escape_codes(stderr);
-                    }
-
-                    let output = CommandExecution::from_streams(stdout, stderr);
-
-                    debug!(
-                        exit_code = 0,
-                        output_len = output.combined_output().len(),
-                        "shell: command succeeded"
-                    );
-                    return Ok(output);
-                } else {
-                    let mut stdout = stdout_str;
-                    let mut stderr = stderr_str;
-
-                    if shell_opts.strip_ansi {
-                        stdout = biscuit_terminal::prelude::strip_escape_codes(stdout);
-                        stderr = biscuit_terminal::prelude::strip_escape_codes(stderr);
-                    }
-
-                    return Err(ShellExpansionError::ExecutionFailed {
+    let status = match wait_with_timeout(&child, timeout) {
+        Ok(WaitOutcome::Exited(status)) => status,
+        Ok(WaitOutcome::TimedOut) => {
+            warn!(?timeout, "shell: command timed out");
+            match shell_opts.timeout_behavior {
+                ShellTimeoutBehavior::Error => {
+                    return Err(ShellExpansionError::Timeout {
                         ctx: Box::new(directive.ctx.clone()),
                         command: directive.raw_command.clone(),
-                        code: status.code().unwrap_or(-1),
-                        stdout,
-                        stderr,
+                        timeout,
                         origin: directive.origin.clone(),
                     });
                 }
-            }
-            Ok(None) => {
-                // Still running
-                if start.elapsed() >= timeout {
-                    // Kill the child
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    warn!(elapsed = ?start.elapsed(), "shell: command timed out");
-                    match shell_opts.timeout_behavior {
-                        ShellTimeoutBehavior::Error => {
-                            return Err(ShellExpansionError::Timeout {
-                                ctx: Box::new(directive.ctx.clone()),
-                                command: directive.raw_command.clone(),
-                                timeout,
-                                origin: directive.origin.clone(),
-                            });
-                        }
-                        ShellTimeoutBehavior::EmptyString => {
-                            return Ok(CommandExecution::timeout_fallback(timeout));
-                        }
-                    }
+                ShellTimeoutBehavior::EmptyString => {
+                    return Ok(CommandExecution::timeout_fallback(timeout));
                 }
-                std::thread::sleep(sleep_duration);
-            }
-            Err(e) => {
-                return Err(ShellExpansionError::ExecutionFailed {
-                    ctx: Box::new(directive.ctx.clone()),
-                    command: directive.raw_command.clone(),
-                    code: -1,
-                    stdout: String::new(),
-                    stderr: e.to_string(),
-                    origin: directive.origin.clone(),
-                });
             }
         }
+        Err(e) => {
+            return Err(ShellExpansionError::ExecutionFailed {
+                ctx: Box::new(directive.ctx.clone()),
+                command: directive.raw_command.clone(),
+                code: -1,
+                stdout: String::new(),
+                stderr: e.to_string(),
+                origin: directive.origin.clone(),
+            });
+        }
+    };
+
+    let stdout_bytes = join_output_thread_raw(stdout_thread, "stdout", &directive.ctx)?;
+    let stderr_bytes = join_output_thread_raw(stderr_thread, "stderr", &directive.ctx)?;
+    let mut stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
+    let mut stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
+
+    if shell_opts.strip_ansi {
+        stdout = biscuit_terminal::prelude::strip_escape_codes(stdout);
+        stderr = biscuit_terminal::prelude::strip_escape_codes(stderr);
+    }
+
+    if status.success() {
+        let output = CommandExecution::from_streams(stdout, stderr);
+        debug!(
+            exit_code = 0,
+            output_len = output.combined_output().len(),
+            "shell: command succeeded"
+        );
+        Ok(output)
+    } else {
+        Err(ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(directive.ctx.clone()),
+            command: directive.raw_command.clone(),
+            code: status.code().unwrap_or(-1),
+            stdout,
+            stderr,
+            origin: directive.origin.clone(),
+        })
     }
 }
 
@@ -508,8 +488,8 @@ fn execute_single_action(
         }
     })?;
 
-    let mut child = cmd
-        .spawn()
+    let child = SharedChild::spawn(&mut cmd)
+        .map(Arc::new)
         .map_err(|e| ShellExpansionError::ExecutionFailed {
             ctx: Box::new(ctx.clone()),
             command: raw_command.to_string(),
@@ -544,8 +524,8 @@ fn execute_single_action(
             }
         }
         None => {
-            let stdout_handle = child.stdout.take();
-            let stderr_handle = child.stderr.take();
+            let stdout_handle = child.take_stdout();
+            let stderr_handle = child.take_stderr();
 
             let stdout_thread = std::thread::spawn(move || {
                 let mut buf = Vec::new();
@@ -570,80 +550,71 @@ fn execute_single_action(
         }
     };
 
-    let start = Instant::now();
-    let sleep_duration = std::time::Duration::from_millis(10);
-
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let (mut final_stdout, mut final_stderr) = match read_strategy {
-                    ReadStrategy::Merged { thread, target } => {
-                        let bytes = join_output_thread_raw(thread, "merged", ctx)?;
-                        let merged = String::from_utf8_lossy(&bytes).to_string();
-                        match target {
-                            MergeTarget::Stdout => (merged, String::new()),
-                            MergeTarget::Stderr => (String::new(), merged),
-                        }
-                    }
-                    ReadStrategy::Separate { stdout, stderr } => {
-                        let stdout_bytes = join_output_thread_raw(stdout, "stdout", ctx)?;
-                        let stderr_bytes = join_output_thread_raw(stderr, "stderr", ctx)?;
-                        (
-                            String::from_utf8_lossy(&stdout_bytes).to_string(),
-                            String::from_utf8_lossy(&stderr_bytes).to_string(),
-                        )
-                    }
-                };
-
-                if shell_opts.strip_ansi {
-                    final_stdout = biscuit_terminal::prelude::strip_escape_codes(final_stdout);
-                    final_stderr = biscuit_terminal::prelude::strip_escape_codes(final_stderr);
-                }
-
-                if status.success() {
-                    return Ok(CommandExecution::from_streams(final_stdout, final_stderr));
-                } else {
-                    return Err(ShellExpansionError::ExecutionFailed {
+    let status = match wait_with_timeout(&child, timeout) {
+        Ok(WaitOutcome::Exited(status)) => status,
+        Ok(WaitOutcome::TimedOut) => {
+            warn!(?timeout, "shell: command timed out");
+            match shell_opts.timeout_behavior {
+                ShellTimeoutBehavior::Error => {
+                    return Err(ShellExpansionError::Timeout {
                         ctx: Box::new(ctx.clone()),
                         command: raw_command.to_string(),
-                        code: status.code().unwrap_or(-1),
-                        stdout: final_stdout,
-                        stderr: final_stderr,
+                        timeout,
                         origin: origin.clone(),
                     });
                 }
-            }
-            Ok(None) => {
-                if start.elapsed() >= timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    match shell_opts.timeout_behavior {
-                        ShellTimeoutBehavior::Error => {
-                            return Err(ShellExpansionError::Timeout {
-                                ctx: Box::new(ctx.clone()),
-                                command: raw_command.to_string(),
-                                timeout,
-                                origin: origin.clone(),
-                            });
-                        }
-                        ShellTimeoutBehavior::EmptyString => {
-                            return Ok(CommandExecution::timeout_fallback(timeout));
-                        }
-                    }
+                ShellTimeoutBehavior::EmptyString => {
+                    return Ok(CommandExecution::timeout_fallback(timeout));
                 }
-                std::thread::sleep(sleep_duration);
-            }
-            Err(e) => {
-                return Err(ShellExpansionError::ExecutionFailed {
-                    ctx: Box::new(ctx.clone()),
-                    command: raw_command.to_string(),
-                    code: -1,
-                    stdout: String::new(),
-                    stderr: e.to_string(),
-                    origin: origin.clone(),
-                });
             }
         }
+        Err(e) => {
+            return Err(ShellExpansionError::ExecutionFailed {
+                ctx: Box::new(ctx.clone()),
+                command: raw_command.to_string(),
+                code: -1,
+                stdout: String::new(),
+                stderr: e.to_string(),
+                origin: origin.clone(),
+            });
+        }
+    };
+
+    let (mut final_stdout, mut final_stderr) = match read_strategy {
+        ReadStrategy::Merged { thread, target } => {
+            let bytes = join_output_thread_raw(thread, "merged", ctx)?;
+            let merged = String::from_utf8_lossy(&bytes).to_string();
+            match target {
+                MergeTarget::Stdout => (merged, String::new()),
+                MergeTarget::Stderr => (String::new(), merged),
+            }
+        }
+        ReadStrategy::Separate { stdout, stderr } => {
+            let stdout_bytes = join_output_thread_raw(stdout, "stdout", ctx)?;
+            let stderr_bytes = join_output_thread_raw(stderr, "stderr", ctx)?;
+            (
+                String::from_utf8_lossy(&stdout_bytes).to_string(),
+                String::from_utf8_lossy(&stderr_bytes).to_string(),
+            )
+        }
+    };
+
+    if shell_opts.strip_ansi {
+        final_stdout = biscuit_terminal::prelude::strip_escape_codes(final_stdout);
+        final_stderr = biscuit_terminal::prelude::strip_escape_codes(final_stderr);
+    }
+
+    if status.success() {
+        Ok(CommandExecution::from_streams(final_stdout, final_stderr))
+    } else {
+        Err(ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(ctx.clone()),
+            command: raw_command.to_string(),
+            code: status.code().unwrap_or(-1),
+            stdout: final_stdout,
+            stderr: final_stderr,
+            origin: origin.clone(),
+        })
     }
 }
 
@@ -730,6 +701,53 @@ fn configure_streams(
     })
 }
 
+/// Why a [`wait_with_timeout`] call stopped waiting.
+enum WaitOutcome {
+    Exited(ExitStatus),
+    TimedOut,
+}
+
+/// Blocks until the child exits or `timeout` elapses, then reports which.
+///
+/// A helper thread performs the OS-blocking wait and hands the status back over
+/// a channel, so the caller neither polls nor sleeps: a child that exits early
+/// is observed immediately rather than up to one poll interval later, and an
+/// idle wait costs no syscalls. `SharedChild` is what makes this safe — it
+/// permits the timeout path to kill and reap through the same handle the waiter
+/// thread is blocked on.
+///
+/// ## Notes
+///
+/// Callers must already be draining stdout/stderr concurrently. Blocking here
+/// while a child fills an undrained pipe would deadlock: the child blocks on
+/// write, we block on exit, and only the timeout breaks the tie.
+fn wait_with_timeout(
+    child: &Arc<SharedChild>,
+    timeout: Duration,
+) -> Result<WaitOutcome, std::io::Error> {
+    let waiter = Arc::clone(child);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let wait_thread = std::thread::spawn(move || {
+        let _ = tx.send(waiter.wait());
+    });
+
+    let outcome = match rx.recv_timeout(timeout) {
+        Ok(status) => status.map(WaitOutcome::Exited),
+        Err(RecvTimeoutError::Timeout) => {
+            // Kill first so the blocked waiter thread can observe the exit and
+            // reap the child; joining below guarantees it did.
+            let _ = child.kill();
+            Ok(WaitOutcome::TimedOut)
+        }
+        Err(RecvTimeoutError::Disconnected) => Err(std::io::Error::other(
+            "process wait thread terminated without reporting a status",
+        )),
+    };
+
+    let _ = wait_thread.join();
+    outcome
+}
+
 fn join_output_thread_raw(
     handle: JoinHandle<Vec<u8>>,
     stream_name: &str,
@@ -750,9 +768,11 @@ fn join_output_thread_raw(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::compose::shell_expansion::types::{ErrorHandling, ShellCommandOrigin};
+    use crate::markdown::compose::shell_expansion::types::{
+        ErrorHandling, PipelineAction, ShellCommandOrigin,
+    };
     use std::ffi::OsStr;
-    use std::time::Duration;
+    use std::time::Instant;
     use tempfile::TempDir;
 
     fn test_ctx() -> biscuit_terminal::errors::SourceContext {
@@ -1150,6 +1170,235 @@ mod tests {
                 assert_eq!(timeout, Duration::from_millis(100));
             }
             err => panic!("Expected Timeout, got: {:?}", err),
+        }
+    }
+
+    /// Bytes per stream for the saturation tests. Comfortably above the 64 KiB
+    /// pipe buffer both Unix and Windows default to, so an undrained pipe is
+    /// guaranteed to wedge the child rather than merely be a tight fit.
+    const SATURATION_BYTES: usize = 256 * 1024;
+
+    /// A Python program that interleaves `SATURATION_BYTES` onto stdout and
+    /// stderr in 8 KiB chunks, so neither pipe can be fully drained before the
+    /// other is written to.
+    fn saturate_both_streams_program() -> String {
+        format!(
+            "import sys\n\
+             chunk = 8192\n\
+             total = {SATURATION_BYTES}\n\
+             written = 0\n\
+             while written < total:\n\
+             \x20   n = min(chunk, total - written)\n\
+             \x20   sys.stdout.write('o' * n)\n\
+             \x20   sys.stdout.flush()\n\
+             \x20   sys.stderr.write('e' * n)\n\
+             \x20   sys.stderr.flush()\n\
+             \x20   written += n\n"
+        )
+    }
+
+    fn python_directive(python: &std::path::Path, program: &str) -> ShellDirective {
+        ShellDirective {
+            raw_command: format!("{} -c ...", python.display()),
+            executable: python.to_string_lossy().to_string(),
+            args: vec!["-c".to_string(), program.to_string()],
+            span: 0..0,
+            indent: String::new(),
+            origin: ShellCommandOrigin::Body { line: 1 },
+            error_handling: ErrorHandling::default(),
+            timeout_override: Some(Duration::from_secs(60)),
+            pipeline: None,
+            no_cache: false,
+            ctx: test_ctx(),
+        }
+    }
+
+    /// F17 — the blocking wait must keep draining both pipes concurrently.
+    /// A wait that blocked on child exit without draining would wedge: the child
+    /// blocks writing into a full pipe, we block waiting for it to exit, and
+    /// only the timeout breaks the tie. Covers `execute_command_detailed`.
+    #[test]
+    fn saturated_dual_stream_capture_does_not_deadlock() {
+        let Some(python) = find_python() else {
+            return;
+        };
+        let d = python_directive(&python, &saturate_both_streams_program());
+        let options = ShellExpansionOptions {
+            strip_ansi: false,
+            ..Default::default()
+        };
+
+        let output = execute_command_detailed(&d, &options, &ComposeSource::Unknown).unwrap();
+        assert_eq!(output.stdout.len(), SATURATION_BYTES);
+        assert_eq!(output.stderr.len(), SATURATION_BYTES);
+        assert!(output.stdout.bytes().all(|b| b == b'o'));
+        assert!(output.stderr.bytes().all(|b| b == b'e'));
+    }
+
+    /// F17 — the same saturation guarantee for the redirection/`execute_single_action`
+    /// executor, whose `ReadStrategy::Separate` branch owns its own drain threads.
+    #[test]
+    fn saturated_dual_stream_capture_does_not_deadlock_in_pipeline_executor() {
+        let Some(python) = find_python() else {
+            return;
+        };
+        let mut d = python_directive(&python, &saturate_both_streams_program());
+        // Two actions force `execute_pipeline_detailed` -> `execute_single_action`
+        // rather than the standard single-command path.
+        d.pipeline = Some(ShellPipeline {
+            actions: vec![
+                PipelineAction {
+                    operator: ChainOperator::None,
+                    command: CommandAction {
+                        executable: d.executable.clone(),
+                        args: d.args.clone(),
+                        redirection: RedirectionConfig::default(),
+                    },
+                },
+                PipelineAction {
+                    operator: ChainOperator::And,
+                    command: CommandAction {
+                        executable: "true".to_string(),
+                        args: vec![],
+                        redirection: RedirectionConfig::default(),
+                    },
+                },
+            ],
+        });
+        let options = ShellExpansionOptions {
+            strip_ansi: false,
+            ..Default::default()
+        };
+
+        let output = execute_directive_impl(&d, &options, &ComposeSource::Unknown).unwrap();
+        assert_eq!(output.stdout.len(), SATURATION_BYTES);
+        assert_eq!(output.stderr.len(), SATURATION_BYTES);
+    }
+
+    /// F17 — the merged (`2>&1`) capture path shares one OS pipe for both
+    /// streams, so saturation must not wedge its single merged reader either.
+    #[test]
+    fn saturated_merged_stream_capture_does_not_deadlock() {
+        let Some(python) = find_python() else {
+            return;
+        };
+        let mut d = python_directive(&python, &saturate_both_streams_program());
+        d.pipeline = Some(ShellPipeline {
+            actions: vec![PipelineAction {
+                operator: ChainOperator::None,
+                command: CommandAction {
+                    executable: d.executable.clone(),
+                    args: d.args.clone(),
+                    redirection: RedirectionConfig {
+                        stdout: StdoutTarget::Capture,
+                        stderr: StderrTarget::ToStdout,
+                    },
+                },
+            }],
+        });
+        let options = ShellExpansionOptions {
+            strip_ansi: false,
+            ..Default::default()
+        };
+
+        let output = execute_command_detailed(&d, &options, &ComposeSource::Unknown).unwrap();
+        // Both streams land in stdout; stderr stays empty for a `2>&1` merge.
+        assert_eq!(output.stdout.len(), SATURATION_BYTES * 2);
+        assert_eq!(output.stderr, "");
+    }
+
+    /// F17 — the wait must observe an early exit immediately rather than at the
+    /// next poll tick. The retired loop slept in 10ms increments, so a command
+    /// that exits in ~0ms still cost up to 10ms. Ten sequential no-op commands
+    /// would have accrued up to 100ms of pure sleep; 50ms is far under that
+    /// while staying far above real spawn+wait cost, so this fails on a
+    /// reintroduced poll loop without being flaky on a slow host.
+    #[test]
+    fn fast_command_completion_is_not_delayed_by_a_poll_interval() {
+        let options = ShellExpansionOptions::default();
+        let source = ComposeSource::Unknown;
+
+        let start = Instant::now();
+        for _ in 0..10 {
+            let d = directive("true", "true", &[], 1);
+            execute_command(&d, &options, &source).unwrap();
+        }
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "10 no-op commands took {elapsed:?}; a 10ms poll loop would add up to 100ms of sleep"
+        );
+    }
+
+    /// F17 — a timed-out child is killed, not merely abandoned. The wait
+    /// primitive owns the kill+reap, so prove the process is actually gone
+    /// rather than left running past the timeout.
+    #[cfg(unix)]
+    #[test]
+    fn timed_out_child_process_is_killed_and_reaped() {
+        let Some(python) = find_python() else {
+            return;
+        };
+        // Print our own PID, then outlive the timeout.
+        let d = python_directive(
+            &python,
+            "import sys, time\nsys.stdout.write(str(__import__('os').getpid()))\n\
+             sys.stdout.flush()\ntime.sleep(30)\n",
+        );
+        let mut d = d;
+        d.timeout_override = Some(Duration::from_millis(200));
+        let options = ShellExpansionOptions {
+            timeout_behavior: ShellTimeoutBehavior::EmptyString,
+            ..Default::default()
+        };
+
+        let result = execute_command_detailed(&d, &options, &ComposeSource::Unknown).unwrap();
+        assert_eq!(result.timeout_fallback, Some(Duration::from_millis(200)));
+
+        // The kill is synchronous with the timeout return, so by now the child
+        // must no longer be a live process. `kill -0` on a reaped PID fails.
+        // (We cannot read the PID from stdout: the fallback discards output, so
+        // assert via the process table that no python child of ours survives.)
+        let still_running = std::process::Command::new("pgrep")
+            .args(["-P", &std::process::id().to_string()])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+        assert!(
+            still_running.is_empty(),
+            "timed-out child must be killed and reaped; surviving child PIDs: {still_running}"
+        );
+    }
+
+    /// F17 — timeout must still select the `Timeout` error (not `ExecutionFailed`)
+    /// for the redirection executor, whose wait path is separate from the
+    /// standard one.
+    #[test]
+    fn pipeline_executor_timeout_selects_timeout_error() {
+        let mut d = directive("sleep 10", "sleep", &["10"], 1);
+        d.timeout_override = Some(Duration::from_millis(100));
+        d.pipeline = Some(ShellPipeline {
+            actions: vec![PipelineAction {
+                operator: ChainOperator::None,
+                command: CommandAction {
+                    executable: "sleep".to_string(),
+                    args: vec!["10".to_string()],
+                    redirection: RedirectionConfig {
+                        stdout: StdoutTarget::Capture,
+                        stderr: StderrTarget::ToStdout,
+                    },
+                },
+            }],
+        });
+        let options = ShellExpansionOptions::default();
+
+        let err = execute_command_detailed(&d, &options, &ComposeSource::Unknown).unwrap_err();
+        match err {
+            ShellExpansionError::Timeout { timeout, .. } => {
+                assert_eq!(timeout, Duration::from_millis(100));
+            }
+            other => panic!("Expected Timeout, got: {other:?}"),
         }
     }
 

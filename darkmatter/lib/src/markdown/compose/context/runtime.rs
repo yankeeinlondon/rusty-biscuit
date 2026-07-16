@@ -341,6 +341,25 @@ impl ComposeContext {
             }),
         }
     }
+
+    /// Returns a copy of [`fixed_for_testing`](Self::fixed_for_testing) with the
+    /// given values inserted (or overwritten).
+    ///
+    /// Lets a test build two contexts that differ only in a single value — e.g.
+    /// a volatile `timestamp` — to prove the reference-graph identity is
+    /// complete rather than reusing the persistent-cache `context_hash`.
+    #[cfg(test)]
+    pub(crate) fn fixed_for_testing_with(
+        extra: impl IntoIterator<Item = (&'static str, serde_json::Value)>,
+    ) -> Self {
+        let mut ctx = Self::fixed_for_testing();
+        let inner = std::sync::Arc::make_mut(&mut ctx.inner);
+        for (key, value) in extra {
+            inner.values.insert(key.to_string(), value);
+        }
+        inner.overrides = std::sync::OnceLock::new();
+        ctx
+    }
 }
 
 fn normalized_env_value(

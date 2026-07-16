@@ -220,6 +220,24 @@ pub trait EvaluationLookup {
         None
     }
 
+    /// Borrowed companion to [`resolution_context`](Self::resolution_context).
+    ///
+    /// The owned method above is the public, compatibility-preserving accessor.
+    /// This borrowed variant lets the evaluator dispatch a read-side function
+    /// against a lookup's context **without cloning** it (Finding 12): a
+    /// document with many `frontmatter()` / `file_exists()` calls would
+    /// otherwise deep-clone the context — its `PathBuf`s, magic-path vector, and
+    /// captured `ctx` map — once per call. Implementors that own or borrow a
+    /// context override this to return `Some(&ctx)`; the evaluator prefers it
+    /// and only falls back to the owned clone when it yields `None`.
+    ///
+    /// The default returns `None`, so a lookup that overrides only the owned
+    /// method keeps working unchanged (the evaluator's owned fallback covers
+    /// it).
+    fn resolution_context_ref(&self) -> Option<&ResolutionContext> {
+        None
+    }
+
     /// Returns true when `name` is a known runtime context variable.
     ///
     /// The default implementation always returns `false`, which disables
@@ -694,7 +712,15 @@ fn evaluate_function<L: EvaluationLookup>(
                 .iter()
                 .map(|arg| evaluate(arg, lookup))
                 .collect::<Result<_, _>>()?;
-            if let Some(ctx) = lookup.resolution_context()
+            // Prefer the borrowed context (Finding 12) so a read-side function
+            // dispatched here does not deep-clone the lookup's context; only
+            // fall back to the owned clone for lookups that expose only the
+            // owned accessor.
+            let ctx = lookup
+                .resolution_context_ref()
+                .map(std::borrow::Cow::Borrowed)
+                .or_else(|| lookup.resolution_context().map(std::borrow::Cow::Owned));
+            if let Some(ctx) = ctx
                 && let Some(result) = functions::dispatch_fs(other, &evaluated, &ctx)
             {
                 return result.map_err(|error| match error {

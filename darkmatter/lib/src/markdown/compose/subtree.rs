@@ -237,6 +237,12 @@ impl<'a> EvaluationLookup for LayeredLookup<'a> {
         self.resolution_context.clone()
     }
 
+    fn resolution_context_ref(&self) -> Option<&ResolutionContext> {
+        // Borrowed path (Finding 12) — avoids cloning the context per read-side
+        // function call during subtree evaluation.
+        self.resolution_context.as_ref()
+    }
+
     fn is_valid_context_variable(&self, name: &str) -> bool {
         self.state.is_valid_context_variable(name)
     }

@@ -312,10 +312,23 @@ impl Markdown {
 
         let resolve_start = perf_collector.is_enabled().then(std::time::Instant::now);
 
+        // 35.1: the effective-state and context hashes are phase-wide — the same
+        // `EffectiveState` drives every directive resolved below. Capture the
+        // pair once here instead of re-canonicalizing the full state/context
+        // maps inside each markdown transclusion's cache-key construction.
+        let state_identity = crate::markdown::compose::cache::hashing::PhaseStateIdentity::capture(state);
         let runtime_mutex = std::sync::Mutex::new(runtime);
         let results = prepared
             .into_par_iter()
-            .map(|item| engine.resolve_prepared_transclusion(item, state, options, &runtime_mutex))
+            .map(|item| {
+                engine.resolve_prepared_transclusion(
+                    item,
+                    state,
+                    state_identity,
+                    options,
+                    &runtime_mutex,
+                )
+            })
             .collect::<Vec<_>>();
 
         debug!(
