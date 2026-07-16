@@ -299,6 +299,21 @@ fn attribute_requires_test(attribute: &[u8]) -> bool {
     .requires_test()
 }
 
+fn skip_visibility(bytes: &[u8], cursor: usize) -> usize {
+    if bytes.get(cursor..cursor + 3) != Some(b"pub")
+        || bytes.get(cursor + 3).is_some_and(|&byte| is_ident(byte))
+    {
+        return cursor;
+    }
+    let mut cursor = skip_whitespace(bytes, cursor + 3);
+    if bytes.get(cursor) == Some(&b'(')
+        && let Some(close) = matching_delimiter(bytes, cursor, b'(')
+    {
+        cursor = skip_whitespace(bytes, close + 1);
+    }
+    cursor
+}
+
 fn inline_test_modules(source: &str) -> Vec<InlineTestModule> {
     let bytes = sanitize(source);
     let mut modules = Vec::new();
@@ -320,6 +335,7 @@ fn inline_test_modules(source: &str) -> Vec<InlineTestModule> {
             }
         }
 
+        cursor = skip_visibility(&bytes, cursor);
         if gated_by_test
             && bytes.get(cursor..cursor + 3) == Some(b"mod")
             && bytes.get(cursor + 3).is_some_and(|&byte| !is_ident(byte))
@@ -567,6 +583,23 @@ fn analyzer_is_newline_portable_and_ignores_external_test_modules() {
         None
     );
     assert!(count_lines("#[cfg(all(test, unix))]\nmod tests { fn case() {} }\n").is_some());
+}
+
+#[test]
+fn analyzer_recognizes_visibility_qualified_inline_test_modules() {
+    for visibility in ["", "pub ", "pub(crate) ", "pub(super) "] {
+        let source = format!(
+            "fn live() {{}}\n#[cfg(test)]\n{visibility}mod tests {{\n    fn case() {{}}\n}}\n"
+        );
+        assert_eq!(
+            count_lines(&source),
+            Some(LineCounts {
+                production: 1,
+                tests: 4,
+            }),
+            "visibility {visibility:?} was not recognized"
+        );
+    }
 }
 
 #[test]
