@@ -11,6 +11,58 @@ feature: 2026-07-15-performance-followup/review-1.md
 
 # Review 1 — Performance Follow-up
 
+## Implementation status (2026-07-16)
+
+Seven of the nine findings are closed. **Two remain open and cannot be closed by
+implementation** — they need an owner decision and a Windows host respectively,
+so `implemented` stays `false`.
+
+| Finding | Status |
+|---|---|
+| High — F21 redirected-output test is red | **Closed.** Already fixed by `74e0fdc90` before this pass; verified green. |
+| High — F2 has no Level-2 proof | **Closed.** Genuine L2 test added under WezTerm; the manufactured-PTY test reclassified as L1. |
+| High — nine checkout-hostile fixture paths | **Closed.** Removed from the index and working tree; `results.md` provenance corrected. |
+| High — raw benchmark samples not retained | **Closed with corrections.** 1,950 real observations retained; F33's headline corrected. |
+| High — Windows behavior open / F17 tests not Windows-ready | **Partially closed.** Tests are now Windows-*ready* (Unix-utility deps removed) and Linux-verified on a real kernel. Windows **behavioral** run remains **OPEN** — no Windows host reachable. |
+| High — F32 unapproved prompt-frequency change | **Closed.** Prior prompt behavior restored; clone removal retained. |
+| High — F35.5 computes the same artifact twice | **Closed.** Also fixed an unreported `--save` defect (three artifacts, not two). |
+| High — integrated compose regression gate fails | **OPEN — owner decision required.** Re-measured under a drift bracket in a quiet window: the regressions are **real**, not measurement noise. |
+| Medium — F17 no-poll timing test ineffective | **Closed.** Replaced with a deterministic wait seam; mutation-tested. |
+
+### What the owner must decide
+
+1. **The compose regression gate (High).** A bracketed re-measurement at the
+   current head confirms `compose_trivial` +34.0 %, `compose_schema_transclusion`
+   +27.4 %, `compose_interpolation_heavy` +11.0 %, `compose_transclusion_heavy`
+   +14.4 %, against a drift floor of ≤5.9 % and a flat `render_basic` control.
+   The "it's noise" explanation is closed off. The cost is graph/identity
+   construction on the **setup** path (Command Setup 5.3 → 8.5 ms), not the
+   descendant re-read. Options: fix the ReferenceGraph setup cost, re-threshold
+   with a recorded compatibility decision, or keep the feature blocked. No
+   production code was changed to chase the benchmark.
+   Evidence: `benchmarks/raw/f-cumulative-closeout/run-20260716T230028/`.
+2. **Windows behavioral evidence (High).** Requires a Windows host. The F17 and
+   F22 suites are now portable by construction and cross-compile clean, but
+   "compiles" is not "behaves" and this review is right to insist on the
+   distinction.
+
+### Claims downgraded during this pass
+
+Two previously reported measurements did not survive re-measurement and are
+corrected in `results.md`:
+
+- **F33's control regressions** (−19.3 % / −19.1 %) were **cross-run drift on a
+  loaded host** and sit at parity (+0.1 % / +0.7 %) when re-measured quietly.
+  The target win is **−77.5 %**, not −82.5 %. The disposition still passes its
+  ≥30 % floor, on better evidence.
+- **F2's "Verified (L2) on macOS and real Linux"** was **wrong** — that test was
+  L1, exactly as this review found. Real L2 now exists on macOS/WezTerm only;
+  L2 on Linux remains open.
+
+Additionally, **F35.5/35.6/35.7, F23, and F25** rest on temporary harnesses that
+were deleted after capture; their raw observations are unrecoverable and those
+claims should be treated as **unverified** pending a rebuilt harness.
+
 ## Verdict
 
 Not ready for production. Several of the implementation changes are sound and the focused

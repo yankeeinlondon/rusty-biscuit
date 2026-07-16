@@ -205,36 +205,79 @@ required (documentation/fixture/test-only changes per the Preflight rule).
 Run record (interactive PTY + piped CLI as separate cases):
 `benchmarks/raw/f2f3f21-terminal-evidence/run-20260716T065617/`.
 
-### Finding 2 — OSC 10 process cache (Evidence added)
+### Finding 2 — OSC 10 process cache (Evidence added; L2 gap closed 2026-07-16)
 
-- **Disposition:** Verified. Requirement-matched L2 proof + latency recorded.
-- **Implementation touched (evidence only):**
-  - `biscuit-terminal/lib/examples/discovery_probe.rs` — new `terminal_cache`
-    and `terminal_latency` probe modes.
-  - `biscuit-terminal/lib/tests/common/pty.rs` — master-side helpers
-    (`OSC10_QUERY`/`OSC11_QUERY` byte patterns, `count_occurrences`,
-    one-shot `OscAnswer` injection, `drive_probe`). No second PTY abstraction —
-    the existing `expectrl` path is extended.
-  - `biscuit-terminal/lib/tests/level2_terminal_osc_cache.rs` — new `level2_*`
-    binary.
-- **Evidence:**
-  - `level2_terminal_construction_emits_single_osc10_request` — a **dedicated
-    child process** (fresh `OnceLock`) constructs three `Terminal`s; the master
-    side manufactures a reply only for the **first** OSC 10 request and observes
-    **exactly one** `\x1b]10;?\x07` across all three constructions, with every
-    construction reporting the same manufactured value
-    (`RgbValue { r: 18, g: 86, b: 154 }`, distinct from any terminal default —
-    proving reuse, not coincidental equality).
-  - `level2_terminal_repeated_construction_latency` — warm-up 3, 50 samples;
-    interactive PTY repeated-construction median **0.970 ms** (stddev 0.022 ms),
-    two orders of magnitude below the ~200 ms a dropped cache would re-pay. Raw
-    samples in the run record's `interactive-pty-latency.txt`.
-- **Cross-platform:** the OSC/PTY path is **Unix-only**, target-gated so Windows
-  compiles and records a clean skip (`level2_terminal_osc_cache_unsupported_on_this_platform`).
-  Real non-macOS L2 (Linux) evidence deferred to Phase 11 on this macOS-only host.
-- **Runner note:** the L2 gate runs through `just test-l2`. It uses `expectrl`
-  PTYs directly (like the existing `level1_*` PTY tests), not the WezTerm/Kitty
-  broker panes, so it is parallel-safe and needs no shared terminal.
+- **Disposition:** Verified at Level 1 **and** Level 2.
+- **Correction to the earlier closeout.** This entry previously claimed
+  *"Verified (L2) on macOS and real Linux"*. **That claim was wrong**, and
+  review-1 of this feature was right to reject it. The test called itself
+  `level2_*` because it used `expectrl`, but the **test manufactured the OSC 10
+  and OSC 11 reply bytes it then asserted on**. A bare PTY is a kernel pipe with
+  `is_tty()` semantics, not a program that parses OSC and answers — so nothing in
+  that run was terminal behavior, and running it under a Linux kernel did not
+  change that. It was Level 1 mislabeled. The `level2_*` name and the Linux-kernel
+  run were both doing rhetorical work the evidence did not support.
+- **What is now L1 (retained, not deleted).**
+  `biscuit-terminal/lib/tests/level1_terminal_osc_cache.rs` (renamed from
+  `level2_terminal_osc_cache.rs`; tests de-prefixed to
+  `terminal_construction_emits_single_osc10_request` and
+  `terminal_repeated_construction_latency`). This is genuinely useful coverage of
+  the cache and the request count: in a dedicated child process (fresh
+  `OnceLock`) three `Terminal`s are constructed, the master side answers only the
+  **first** OSC 10, and it observes **exactly one** `\x1b]10;?\x07` across all
+  three — a wire count a real emulator cannot give us. Kept as the fast,
+  deterministic, always-available regression.
+- **What is now genuinely L2.**
+  `biscuit-terminal/lib/tests/level2_terminal_osc_wezterm.rs` — runs
+  `discovery_probe` in a **real WezTerm pane** via the shared
+  `biscuit-test-harness` (no second PTY abstraction). **WezTerm parses the query
+  and writes the answer.**
+  - `level2_wezterm_answers_osc10_once_across_repeated_terminal_construction`
+    — three constructions all report WezTerm's real foreground
+    **`(192, 202, 245)`**, matching its wire answer `rgb:c0c0/caca/f5f5`, and
+    `osc10_actual_queries=1`.
+  - `level2_wezterm_repeated_terminal_construction_latency` — warm-up **3**,
+    samples **50**, min 934500 ns, **median 962042 ns**, mean 996680.1 ns,
+    max 1497625 ns, **stddev 107804.4 ns**, `osc10_actual_queries=1`.
+- **Why tmux is not the backend.** `query_osc_color_with_timeout` gates the real
+  query on `detect_multiplexer().is_none()`, so inside tmux the library never
+  emits OSC 10 and returns the compiled-in per-app default. Measured directly:
+  in a tmux pane the probe reports `(229, 229, 229)` with **zero** OSC 10 queries
+  on the wire (`tmux pipe-pane` capture). A tmux "L2" run would report a
+  plausible color no terminal ever sent — the same self-referential trap in a new
+  costume. The backend must be a non-multiplexer emulator on the library's
+  supported list.
+- **Two guards against a fallback masquerading as evidence:**
+  1. The test **fails** if the reported color equals the WezTerm default fallback
+     `(229, 229, 229)`, i.e. if no real answer arrived. This is not theoretical —
+     a probe fired at a cold pane was observed reporting exactly that, because
+     WezTerm does not answer until it is up and the library's timeout is 100 ms.
+     The test settles the pane first.
+  2. Color equality alone is **insufficient** and is not relied on: a broken
+     cache re-queries and gets the same answer from the same terminal. The
+     single-round-trip claim rests on the library's own counter.
+- **Counter provenance (`osc-query-counter` feature).** A real emulator consumes
+  the query and answers on the wire, so unlike a manufactured PTY there is no
+  master side to count bytes on; the count is read from inside the process
+  (mirrors `renderable`'s `hint-access-counter`). `just test-l2` passes
+  `--features osc-query-counter`; without it the test **fails loudly** rather than
+  silently dropping the assertion.
+- **Negative control (run 2026-07-16).** Making `text_color()` bypass the cache
+  made the L2 test fail with *"expected exactly 1 actual OSC 10 round-trip across
+  3 Terminal constructions, saw 3"*. WezTerm still returned `(192, 202, 245)` all
+  three times — so color equality would have passed. The cache was restored;
+  this confirms the counter is what carries the claim.
+- **Cross-platform:** the OSC/PTY path is **Unix-only**;
+  `level2_terminal_osc_wezterm.rs` is `#![cfg(unix)]` and the L1 binary records a
+  clean non-Unix skip. `cargo check -p biscuit-terminal --all-targets --target
+  x86_64-pc-windows-gnu` passes with and without the feature.
+- **Runner note:** L1 uses `expectrl` PTYs directly (parallel-safe, no terminal
+  needed). L2 attaches to the `test-l2` broker's shared WezTerm pane and is
+  `#[serial(level2_terminal)]`. It `require_level!`-skips when WezTerm is
+  unreachable — note `available()` means *runtime reachability*
+  (`WEZTERM_UNIX_SOCKET`), so the suite must be launched from WezTerm or a
+  cold-started one; `BISCUIT_TEST_LEVEL_REQUIRED=2` turns that skip into a
+  failure.
 
 ### Finding 3 — `md compose` single terminal detection (Evidence added)
 
@@ -614,13 +657,26 @@ composed artifact (see F11 evidence).
   position). The full 32-test `replacement` suite (overlap-longest,
   lexicographic tiebreak, non-recursive, unicode, multibyte, adjacent,
   substring-key, coercion, invalid-map) passes byte-identically.
-- **Measurement:** isolated `apply_replacements` microbenchmark over the
-  43-rule `replace_heavy` body (state built once): **2.371 ms → 0.087 ms
-  (≈27× faster, p < 0.05, non-overlapping CIs)**. Predeclared threshold — any
+- **Measurement:** isolated `scan_and_replace` microbenchmark over the 43-rule
+  `replace_heavy` body (state built once): **2.3668 ms → 87.54 µs (27.0× faster,
+  −96.3 %, CIs separated by an order of magnitude)**. Predeclared threshold — any
   repeatable out-of-noise win with byte-identical output on the canonical
-  precedence — met. Bench `phase6_interpolation::apply_replacements_direct`; raw
-  in the run record. End-to-end guard:
-  `compose_phase6::replace_heavy_fixture_applies_longest_match`.
+  precedence — met. Bench `phase6_interpolation::f13_scan_and_replace`
+  (baseline/candidate interleaved in one process); raw **sample vectors** in
+  `benchmarks/raw/f11f12f13f14-interpolation/run-20260716T153700/`. End-to-end
+  guard: `compose_phase6::replace_heavy_fixture_applies_longest_match`.
+- **Re-measured 2026-07-16 (review-1 raw-sample re-run) — claim reproduces.**
+  The original figure (2.371 ms → 0.087 ms, ≈27×) came from a separately
+  compiled baseline whose samples were not retained. The baseline is now a
+  verbatim `b425fb466` copy of `scan_and_replace` **pinned inside the bench**
+  and sampled interleaved with the candidate, gated by an in-process assertion
+  that both produce byte-identical output and an identical replacement count
+  before any timing is reported. Unlike the Phase-8/Phase-10 temporary harnesses,
+  **this one is retained**, so F13 is reproducible on demand. Read the candidate
+  on the **median** (87.54 µs): its sample carries one scheduling excursion
+  (max 355 µs vs min 84.8 µs) that inflates the mean to 105.8 µs; the separately
+  benched `apply_replacements_direct` median (86.71 µs) corroborates, and the
+  retained vector lets anyone verify that reading.
 - **Dependency:** `aho-corasick` added as a direct `darkmatter/lib` dependency
   (already compiled transitively via `regex`, so no added build cost); recorded
   in `darkmatter/docs/dependencies.md`.
@@ -637,10 +693,15 @@ composed artifact (see F11 evidence).
   value contains `{{{`.
 - **Measurement:** the parse F14 skips on an interpolation-free body vs the
   guard, over the `toc_large` body: `ExpressionFinder::new(body).find_all()`
-  **240.1 µs → `body.contains("{{")` 2.3 µs (≈104× less work per compose)** for
-  every `{{`-free body (the common case). Benches
+  **247.94 µs → `body.contains("{{")` 2.33 µs (106.5× less work per compose)**
+  for every `{{`-free body (the common case). Benches
   `phase6_interpolation::f14_baseline_markdown_scan` /
-  `f14_candidate_contains_guard`; raw in the run record.
+  `f14_candidate_contains_guard`, sampled in one process so the ratio needs no
+  drift argument; raw **sample vectors** in
+  `benchmarks/raw/f11f12f13f14-interpolation/run-20260716T153700/`.
+- **Re-measured 2026-07-16 (review-1 raw-sample re-run) — claim reproduces.**
+  The original recorded ≈104×; the re-measured 106.5× differs by ~2 % run-to-run
+  variation and is marginally more favorable. No correction required.
 - **Nested-interpolation care:** the guard only triggers when `{{` is entirely
   absent, so nested/rescan fixpoint behavior is untouched; a `{{{`-bearing body
   still runs `convert_literals`. New units:
@@ -691,86 +752,181 @@ manifest.
 - **Deadlock safety:** drain threads are still spawned **before** the wait in
   both variants — unchanged structure. The wait can only block on child exit,
   never on a pipe.
+- **Test helper — no external utilities.** The suite depends on nothing beyond
+  the toolchain that built it. The test binary re-executes **itself** as the
+  helper child (`current_exe()` + an `--exact` filter derived from
+  `module_path!()`), selecting a `ChildMode` through an argv token: `Noop`
+  (replaces `true`), `Saturate` (replaces the `python -c` saturation program),
+  `Heartbeat` (replaces `sleep`, and doubles as a liveness probe), `Streams`
+  (replaces the `python -c` two-stream program). The mode travels in **argv, not
+  env**, because a `ShellDirective` cannot set child env — the parent would have
+  to mutate its own process env, which is global and racy. libtest treats the
+  token as a name filter that matches no test under `--exact`, so it is inert.
+  - **Preamble caveat.** The helper *is* the test binary, so libtest prints its
+    own `running 1 test` line into the pipe ahead of the payload and cannot be
+    silenced. Payload bytes (`#`, `@`) are chosen to be absent from that
+    preamble and from this module's test names, so assertions frame on the first
+    payload byte (separate streams) or count payload bytes (the merged `2>&1`
+    stream, where interleaving means only totals are defined).
+- **No silent skips.** `find_python()` and its four `let Some(python) = … else {
+  return; }` guards are **gone**. Previously `saturated_dual_stream_*` (×3),
+  `timed_out_child_process_is_killed_and_reaped`, `stderr_is_captured_and_combined`,
+  and `execution_failed_includes_output_streams` all returned **green** on a host
+  without Python — reporting success while testing nothing. No prerequisite
+  remains to gate, so no `require_level!` is needed; the tests simply always run.
 - **Evidence (tests):** `saturated_dual_stream_capture_does_not_deadlock`
   (standard executor), `…_in_pipeline_executor` (`ReadStrategy::Separate` via a
   two-action chain), `saturated_merged_stream_capture_does_not_deadlock`
   (`2>&1` single merged reader) — each interleaves 256 KiB per stream in 8 KiB
   chunks, well past the 64 KiB pipe buffer both OS families default to, so an
   undrained pipe would wedge rather than merely be a tight fit;
-  `timed_out_child_process_is_killed_and_reaped` (`cfg(unix)`; `pgrep -P` proves
-  no surviving child, i.e. cleanup is synchronous with the timeout return);
+  `timed_out_child_process_is_killed_and_reaped` (all platforms — the helper's
+  heartbeat file stopping proves the kill, replacing the Unix-only `pgrep -P`
+  process-table query; the *reap* half is proven by the test terminating at all,
+  since `wait_with_timeout` joins a thread parked in `SharedChild::wait` that
+  cannot return until the child is reaped);
   `pipeline_executor_timeout_selects_timeout_error` (error selection on the
-  second variant); `fast_command_completion_is_not_delayed_by_a_poll_interval`
-  (granularity guard — 10 no-op commands under 500 ms, where a reinstated 10 ms
-  poll loop would add up to 100 ms of pure sleep). Existing timeout-boundary,
-  source-order, redirection-emission-order, and report-count suites are
-  unchanged and green.
+  second variant); `wait_hands_the_full_budget_to_one_blocking_span` and its
+  `pipeline_…` twin (no-poll guard, both wait call sites). Existing
+  timeout-boundary, source-order, redirection-emission-order, and report-count
+  suites are unchanged and green.
+- **No-poll guard is structural, not timed.** The retired
+  `fast_command_completion_is_not_delayed_by_a_poll_interval` asserted 10 no-op
+  commands finish within 500 ms — a bound the 10 ms poll loop fits inside
+  comfortably, so it could not fail on the regression it named. It is replaced by
+  a seam: `recv_wait` reports the span it requests to a `#[cfg(test)]`
+  thread-local `wait_probe`, and the test asserts **exactly one span equal to the
+  caller's full budget**. A `recv_timeout(10ms)` poll loop records many short
+  spans; the retired `try_wait` + `sleep(10ms)` loop bypasses `recv_wait` and
+  records none. Both fail.
+  - **Mutation-verified.** Reintroducing the retired `try_wait` + `sleep(10ms)`
+    loop makes both new tests fail (`left: []`, `right: [7s]`) while the retired
+    timing test **passes** (0.147 s, inside its 500 ms bound) — a direct
+    confirmation of the review's claim.
 - **Cross-platform:** **OS-divergent by classification** (a process-wait
   primitive), even though the divergence is vendored into `shared_child`.
-  Linux + Windows behavioral runs are **deferred to Phase 11** — not executable
-  on this macOS-only host. See *Deferred cross-platform evidence* below.
+  - **Linux — verified behaviorally.** The `shell_expansion::executor` suite runs
+    green on a real Linux kernel (`Linux 6.12.76-linuxkit aarch64`, Docker,
+    `rust:latest`). Not a cross-compile: real kernel, real `waitid`, real pipes.
+  - **Windows — Windows-*ready*, not Windows-*verified*.** The suite no longer
+    invokes `true`, `sleep`, `pgrep`, or `python`, and carries no `cfg(unix)`
+    gate, so it is Windows-neutral **by construction** rather than Windows-hostile
+    as before. It compiles clean under `cargo check -p darkmatter --all-targets
+    --target x86_64-pc-windows-gnu`. **A behavioral Windows run remains open** —
+    no Windows host is reachable from this environment, and compiling for a
+    target is not evidence that it behaves there. Still deferred to Phase 11; see
+    *Deferred cross-platform evidence* below.
 
-### Finding 32 — Stage-owned shell policy snapshot (Implemented)
+### Finding 32 — Shared (not cloned) shell policy rule sets (Implemented)
 
-- **Disposition:** Implemented. `shell_runtime.snapshot()` (which clones
-  `allow_once`, `whitelist`, and `user_blacklist`) moved out of
-  `prepare_directive` and up to the three stage orchestrators —
-  `inline/shell_expansion.rs`, `shell_blocks/mod.rs`, and
-  `frontmatter_shell_expansion.rs` — each taking it once at stage open, after
-  `ensure_loaded`. `prepare_directive` / `execute_directive_detailed` now accept
-  `snapshot: &ShellRuntimeSnapshot`. The frontmatter path threads it alongside
-  the existing `policy_paths` through `prepare_optional_branch` /
-  `prepare_branch_pipeline`. `policy.rs` matching helpers are unchanged —
-  still borrowed consumers.
-- **No public API change:** the public `execute_directive` keeps its signature
-  and opens its own snapshot, since a lone directive is its own stage.
-  `ShellRuntimeSnapshot` remains `pub(crate)`.
-- **Mutex discipline:** the policy lock is held only for the clone itself —
-  never across parsing, approval, or command execution. Guarded by
+**Revised at review-1.** The original implementation hoisted the policy snapshot
+to the three stage orchestrators, which removed the per-directive clone but
+froze the policy for the whole stage and thereby changed user-visible prompt
+frequency. Review-1 ruled that change unapproved and required either owner
+acceptance or preservation of the prior behavior. The session that resolved it
+was non-interactive, so the owner could not be asked; the **behavior-preserving
+branch was taken**. The prompt-frequency change is **reverted**; the clone
+removal — the actual finding — is **retained**.
+
+- **Disposition:** Implemented by making the rule collections *shared* rather
+  than *snapshotted per stage*. `SharedShellExpansionRuntime` now holds
+  `allow_once: Arc<HashSet<String>>`, `whitelist: Arc<ShellRuleSet>`, and
+  `user_blacklist: Arc<ShellRuleSet>`. `ShellRuntimeSnapshot` carries the same
+  three `Arc`s, so `snapshot()` is three refcount bumps and copies no rules.
+  Writers (`persist_whitelist_exact` / `_prefix`, `persist_blacklist_exact`,
+  `complete_allow_once`) mutate copy-on-write via `Arc::make_mut`, so an
+  outstanding snapshot keeps observing the rules it was taken with.
+- **Snapshot ownership reverted to `prepare_directive`**, which takes its own
+  view at entry. The `snapshot: &ShellRuntimeSnapshot` parameter is gone from
+  `prepare_directive` / `execute_directive_detailed`, and the stage-open
+  snapshots are gone from `inline/shell_expansion.rs`, `shell_blocks/mod.rs`,
+  and `frontmatter_shell_expansion.rs` (including the
+  `prepare_optional_branch` / `prepare_branch_pipeline` threading). Taking a
+  view per directive is affordable precisely because it copies no rules.
+  `policy.rs` matching helpers are unchanged — still borrowed consumers, reached
+  by deref coercion through the `Arc`.
+- **No public API change:** `execute_directive` keeps its signature.
+  `ShellRuntimeSnapshot` remains `pub(crate)` and no longer needs a crate-level
+  re-export. `ShellRuleSet` is unchanged and still `pub`.
+- **Mutex discipline:** the policy lock is held only for the three `Arc` clones
+  — never across parsing, approval, or command execution. Guarded by
   `policy_mutex_is_not_held_across_approval`, whose approval handler reaches
   back into the same runtime and would deadlock if the lock were still held.
 - **Visibility contract (documented on `prepare_directive`'s rustdoc):**
   - *Half 1* — a rule persisted in one stage **is** policy input for a
-    subsequent stage. `persisted_whitelist_from_one_stage_is_policy_input_for_the_next_stage`:
+    subsequent stage.
+    `persisted_whitelist_from_one_stage_is_policy_input_for_the_next_stage`:
     the root body stage persists `prefix echo`; the transcluded child's stage
-    opens a fresh snapshot, sees it, and never prompts → 1 approval.
-  - *Half 2* — a rule persisted mid-stage is written to the runtime but is
-    **not** policy input for the rest of that same stage.
-    `persistence_mid_stage_is_not_policy_input_for_the_same_stage`: two `echo`
-    directives in one stage both prompt → 2 approvals, while
-    `.darkmatter-shell-whitelist` still receives `prefix echo`.
+    sees it and never prompts → 1 approval. Unchanged.
+  - *Half 2 (restored)* — a rule persisted mid-stage **is** policy input for
+    later directives in that same stage.
+    `persistence_mid_stage_is_policy_input_for_the_same_stage`: two `echo`
+    directives, `AllowCommandPersist` → **1 approval**, and
+    `.darkmatter-shell-whitelist` still receives `prefix echo`. This test
+    previously asserted 2 approvals; the assertion was flipped as part of the
+    revert and is the pin on observable prompt frequency.
+  - *Half 2, negative control* —
+    `exact_persist_mid_stage_suppresses_only_the_same_command`: `echo alpha`,
+    `echo alpha`, `printf beta` under `AllowExactPersist` → **2 approvals**. The
+    repeat reuses the persisted exact rule; the unrelated command still prompts.
+    This guards against preserving the frequency count by over-authorizing.
   - *Allow-once exemption* — allow-once approvals are arbitrated live through
-    `reserve_allow_once` against shared runtime state, **not** through the
-    snapshot, so one approval still covers repeats of that exact command for
-    the rest of the stage and across concurrent sibling transclusions.
+    `reserve_allow_once` against shared runtime state, not through a snapshot,
+    so one approval covers repeats of that exact command for the rest of the
+    stage and across concurrent sibling transclusions.
     `allow_once_still_dedupes_within_a_single_stage`, plus the unchanged
     existing recursive/sibling transclusion approval suite.
-- **⚠ Deliberate behavior change (owner-visible):** *half 2* is a real change,
-  not a refactor. Under per-directive snapshotting, a second directive in the
-  same stage observed a freshly persisted `AllowExactPersist` /
-  `AllowCommandPersist` rule and skipped its prompt; it now re-prompts, because
-  the stage froze its policy view at open. Concretely: `::shell git status` →
-  "allow command (persist)" followed by `::shell git log` in the same body now
-  prompts twice where it previously prompted once. Allow-once is unaffected, and
-  the next stage/run sees the persisted rule. This is the contract the plan
-  mandates ("approvals/persistence produced during that stage update the runtime
-  but become policy input only for a subsequent stage") and it is intentionally
-  conservative — it can only ever *over*-prompt, never under-authorize — but it
-  is a prompt-frequency regression for multi-directive persist flows and is
-  flagged here for owner acceptance.
-- **Cross-platform:** OS-identical. The changed diff is snapshot ownership and
-  parameter threading — no `cfg`, filesystem, or process branch. Windows
-  compile + macOS behavioral run + ordinary Linux CI is sufficient.
+- **Structural evidence for the clone removal:**
+  `snapshot_shares_rule_collections_by_pointer` asserts `Arc::ptr_eq` across two
+  snapshots of an unchanged runtime (one allocation per collection, no deep
+  copy), then asserts that a `persist_whitelist_prefix` leaves the earlier
+  snapshot's rules untouched (`entries.is_empty()`) while a later snapshot
+  observes the new rule. Deterministic; no timing assertion.
+- **Spec reconciliation:** Required Work item 6 sanctions "one immutable stage
+  snapshot **or** share immutable collections". The second option is taken,
+  because the first cannot hold compatibility invariants #1/#5 (prompt
+  frequency) at the same time. The finding's goal was removing clone cost, not
+  changing when users are prompted.
+- **Cross-platform:** OS-identical. The changed diff is `Arc` ownership and
+  parameter removal — no `cfg`, filesystem, or process branch. Windows compile +
+  macOS behavioral run + ordinary Linux CI is sufficient.
+- **Gates at revision:** `just test` in the `darkmatter` area — 5760 passed
+  (`darkmatter`), 559 passed (`darkmatter-cli`), 566 passed (`dmls`), 0 failed.
+  `just lint` — clean.
 
 ### Deferred cross-platform evidence (Phase 7 → Phase 11)
 
 Per the plan's Phase-11 cross-platform item, F17's wait primitive requires real
-**Linux and Windows** behavioral runs. This host is macOS-only, so those runs
-are deferred to Phase 11 and recorded here as an open gap alongside the Phase-1
-F22 gap. macOS behavioral evidence is complete (all F17 tests above pass).
-Windows compilation is likewise unverified here; `shared_child` supports it and
-Darkmatter adds no `cfg`-gated code of its own, but that is an expectation, not
-evidence.
+**Linux and Windows** behavioral runs. Status after the review-1 test rework:
+
+| Platform | Status | Evidence |
+|----------|--------|----------|
+| macOS    | **Verified** | All F17 tests pass on this host. |
+| Linux    | **Verified** | `shell_expansion::executor` — 26/26 pass on a real kernel (`Linux 6.12.76-linuxkit aarch64`, Docker `rust:latest`, `cargo nextest`). Real `waitid`, real pipes, real process kill — not a cross-compile. |
+| Windows  | **Ready, not verified** | The F17 tests compile clean for `x86_64-pc-windows-gnu` (`--all-targets`), have no Unix-utility dependency, and carry no `cfg(unix)` gate — target-neutral by construction. **No behavioral run**: no Windows host is reachable here. |
+
+The **Linux gap is closed** — that run is genuine behavioral evidence on a real
+kernel, and it was only reachable because the tests no longer need a Python
+interpreter in the image.
+
+The **Windows behavioral gap remains open** and stays deferred to Phase 11,
+alongside the Phase-1 F22 gap. What changed is only that the F17 tests are no
+longer Windows-*hostile* (they previously could not have run there at all); they
+are now Windows-*ready*. Compiling for a target is not evidence that it behaves
+on that target: `shared_child` maps our wait onto `WaitForSingleObject` there,
+and nothing above tests that mapping.
+
+**Blocker for the eventual Windows run (pre-existing, outside F17's scope).**
+Making the F17 tests portable is necessary but not sufficient to run the
+`shell_expansion::executor` binary on Windows. Roughly eight *other* tests in the
+same module still invoke `echo`, `env`, `sleep`, and `true` by name
+(`echo_hello_returns_output`, `execute_command_sets_no_color_env`,
+`per_command_timeout_override_beats_global`,
+`timeout_with_empty_string_behavior_returns_empty`, and neighbors). They predate
+this finding and are untouched. The `ChildMode` helper introduced here is the
+obvious migration path for the `sleep`/`true` cases; the `echo`/`env` cases need
+a helper mode that echoes argv and dumps its environment. Phase 11 should budget
+for that before expecting a green Windows run of this binary.
 
 ## Phase 8 — Render & cleanup sub-items (Findings 23 & 25)
 
@@ -900,9 +1056,15 @@ requirement.
 
 ## Phase 9 — Remote discovery line positions (Finding 33)
 
-Run record: `benchmarks/raw/f33-remote-discovery/run-20260716T140000/`
-(declared contract, fixture identity, environment, baseline + candidate medians,
-raw Criterion estimates for all six measurements).
+Run records:
+
+- **Current — `benchmarks/raw/f33-remote-discovery/run-20260716T153200/`**
+  (raw Criterion **sample vectors**, drift-bracketed baseline, recomputed
+  statistics). **This run corrects the figures below**; see *Measurement
+  correction*.
+- Superseded — `benchmarks/raw/f33-remote-discovery/run-20260716T140000/`
+  (retained Criterion *estimates only*, which review-1 rejected as
+  unreproducible).
 
 ### Finding 33 — Per-expression prefix rescan → one offset table (Implemented, threshold met)
 
@@ -929,26 +1091,39 @@ raw Criterion estimates for all six measurements).
   private helpers therefore live in `remote.rs`, and `line_at_offset`'s rustdoc
   records why it is not the TOC function.
 - **Measurement (identical fixture + harness bytes; only the code under test
-  differs):**
+  differs).** Recomputed from the retained sample vectors in
+  `run-20260716T153200/`; medians, baseline → candidate:
 
   | Benchmark | Baseline | Candidate | Δ |
   |-----------|----------|-----------|---|
-  | `f33_discover_remote_heavy` (target) | 2.3944 ms | **419.95 µs** | **−82.5 %** |
-  | `f33_discover_no_http_guard` (control 1) | 2.8849 µs | 2.3245 µs | −19.3 % |
-  | `f33_discover_http_without_expressions` (control 2) | 9.4041 µs | 7.5487 µs | −19.1 % |
+  | `f33_discover_remote_heavy` (target) | 1.9401 ms | **435.82 µs** | **−77.5 %** |
+  | `f33_discover_no_http_guard` (control 1) | 2.3150 µs | 2.3181 µs | +0.1 % (parity) |
+  | `f33_discover_http_without_expressions` (control 2) | 7.9693 µs | 8.0247 µs | +0.7 % (parity) |
 
   Declared floor ≥ 30 % win / ≤ 5 % control regression, fixed before the baseline
-  was captured. Criterion, release, 3 s warm-up, 100 samples, median + 95 % CI.
-- **Control movement investigated, not waved through.** Both controls moved
-  −19 %, which a target-confined change should not cause; a second full candidate
-  run reproduced every figure within CI, so it is systematic, not noise. Control
-  2 is a **genuine** win (the new early return elides the unconditional `PathBuf`
-  clone). Control 1's path is unchanged code, so its −19 % is build/inlining
-  layout drift between two separate compilations, which flatters every benchmark
-  in the binary including the target. Discounting the entire −19 % as drift, the
-  target's code-specific win is still ≈ **−78 %** — far past the 30 % floor — and
-  no control *regressed*, so the declared contract holds on its strict reading.
-  The headline −82.5 % is reported with this caveat rather than as a clean delta.
+  was captured — **met**. Criterion 0.5.1, release, 3 s warm-up, 100 samples,
+  median + 95 % CI. Both controls' baseline and candidate CIs overlap.
+- **Measurement correction (2026-07-16, review-1 raw-sample re-run).** The
+  figures above **replace** the original closeout's `−82.5 % / −19.3 % / −19.1 %`
+  row, which does not reproduce. The original captured baseline and candidate as
+  separate runs on a host under load ~29–30; re-measured on a quiet host (load
+  ~8) with the baseline **bracketed** by two candidate runs (drift 0.7 % on the
+  target, < 0.5 % on both controls):
+  - The target win is **−77.5 %**, not −82.5 %. Still far past the 30 % floor,
+    so the **ACCEPTED** disposition is unchanged.
+  - **Both controls are at parity**, not −19 %. The original's two explanations
+    for that movement — "build/inlining layout drift" for control 1 and a
+    "genuine win" from eliding a `PathBuf` clone for control 2 — were rationalized
+    noise. Neither survives. The `PathBuf` story was never mechanically plausible:
+    one clone of a short path is tens of nanoseconds against an 8 µs path
+    (≈0.5 %), not 19 %.
+  - The original's own hedge ("discounting the entire −19 % as drift, the
+    code-specific win is still ≈ −78 %") landed within 0.5 pp of the re-measured
+    −77.5 %. Its skeptical reading was sound; its headline was not.
+
+  The correction is a strict improvement in evidence quality: the verdict now
+  rests on controls that behave the way a target-confined change predicts,
+  instead of on a discounting argument needed to explain why they did not.
 - **Fixture (frozen before the baseline, per the evidence contract):**
   `remote_heavy` — 300 `frontmatter("https://…")` expressions, 79028 bytes, 2405
   lines, xxHash64 `0dc952a78995bde7`, Darkmatter hash
@@ -1013,8 +1188,16 @@ raw Criterion estimates for all six measurements).
 
 ## Phase 10 — Remaining Finding-35 residual sub-items (Work 10)
 
-Run record for every sub-item:
-[`benchmarks/raw/f35-residuals/run-20260716T160000/`](benchmarks/raw/f35-residuals/run-20260716T160000/summary.md).
+Run records:
+
+- **35.2 — current:**
+  [`benchmarks/raw/f35-residuals/run-20260716T153400/`](benchmarks/raw/f35-residuals/run-20260716T153400/summary.md)
+  (raw Criterion **sample vectors** + recomputed statistics; the claim
+  reproduces).
+- **35.3 / 35.5 / 35.6 / 35.7:**
+  [`benchmarks/raw/f35-residuals/run-20260716T160000/`](benchmarks/raw/f35-residuals/run-20260716T160000/summary.md)
+  — **raw observations unrecoverable; open evidence gap.** See *Raw-sample
+  evidence gap* below.
 
 ### Measurement method for this phase (deviation, recorded)
 
@@ -1039,11 +1222,56 @@ the public API addition the standing contract bars.
 
 | Sub-item | Disposition | Target result | Evidence | Cross-platform |
 |---|---|---|---|---|
-| **35.2** `relevel_with_overflow` | **Implemented (win)** | prefix **25.351 ms → 314.93 µs (−98.8 %)**; overflow −98.5 %; extract-only −98.5 %; heading-free control at parity | `criterion-f35_2_relevel_*-{baseline,candidate}.json` | OS-identical (byte/line scan; no `cfg`/filesystem) |
+| **35.2** `relevel_with_overflow` | **Implemented (win)** | prefix **20.998 ms → 285.86 µs (−98.6 %)**; overflow −98.3 %; extract-only −98.5 %; heading-free control −5.2 % (no regression) | `run-20260716T153400/f35_2_relevel_*-{baseline,candidate}-sample.json` (raw vectors) | OS-identical (byte/line scan; no `cfg`/filesystem) |
 | **35.3** `Arc<str>` fetch bodies | **No-win → reverted** | net **pessimization** (+1.29 µs `::file`, +0.50 µs `::code`); copy budget = **0.125 %** of a loopback fetch vs a ≥5 % floor | `f35_3-copy-cost-model.txt` | OS-identical (path inspected, not preclassified); moot — nothing shipped |
 | **35.5** `md hash --diff`/`--save` | **Implemented (win)**, residual recorded | CLI **17.2 ms → 14.1 ms (−18.0 %, ≈4σ)**; library sequence −29.3 %; controls within σ | `f35_5-hash-artifact-profile.txt` | OS-identical (call-graph only; CLI still owns `fs::write`) |
 | **35.6** `normalize_body_rhythm` | **Implemented (win)** | decorated **164.8 → 14.8 µs (−91.1 %)**; code panel −93.3 %; escape-free control −30.3 %; decorated render ≈**20 % faster** | `f35_6-rhythm-profile.txt` | OS-identical (in-memory regex predicate) |
 | **35.7** link/image policy appliers | **Implemented (win)** at the target operation | empty policy/no title **72.6 → 58.2 µs (−19.9 %)**; all four shapes improved, none regressed; ≈0.44 % of a full render | `f35_7-link-policy-profile.txt` | OS-identical (borrow-vs-clone) |
+
+### Raw-sample evidence gap (review-1, High — partially closed 2026-07-16)
+
+Review-1 found that no retained artifact carried Criterion **sample vectors**;
+the `criterion-*.json` files are copies of `estimates.json` (derived `mean` /
+`median` / `slope` / `std_dev` only), so no reported statistic could be
+independently recomputed. Confirmed. Status after the raw-sample re-run:
+
+| Claim | Raw samples now retained? | Statistic |
+|---|---|---|
+| **F13** replacement matcher | **Yes** — `run-20260716T153700/` | Reproduces (27.0×) |
+| **F14** scan fast-path | **Yes** — `run-20260716T153700/` | Reproduces (106.5×) |
+| **F33** remote discovery | **Yes** — `run-20260716T153200/` | **Corrected** (−77.5 %, controls at parity) |
+| **35.2** `relevel_with_overflow` | **Yes** — `run-20260716T153400/` | Reproduces (−98.6 %) |
+| **F23** render theme snapshot | **No** — estimates only | Unverified; claim is *no measurable win* |
+| **F25** cleanup-pass profile | **No** — harness deleted | Unverified |
+| **35.3 / 35.5 / 35.6 / 35.7** | **No** — harnesses deleted | Unverified |
+
+**Correction to review-1's list.** The review named "Findings 13, 14, 23, 33, and
+35, including 35.5–35.7". Two adjustments, both from reading the artifacts rather
+than the review:
+
+- **35.2 was missing from the review's list** and is the single largest measured
+  win in Phase 10 (−98.6 %). It had the same defect (estimates only). Now closed.
+- **F25 was missing** from the raw-samples finding, though the review does flag it
+  separately under "measured no-win dispositions". Its profile harness was
+  deleted, so it has the same unrecoverable-observations defect as 35.3–35.7.
+
+**Unrecoverable observations — recorded, not fabricated.** F25, 35.3, 35.5, 35.6
+and 35.7 were measured by temporary in-crate harnesses (`f35_5_profile` in
+`hash/explain.rs`, `f35_6_profile` in `layout/page/tests.rs`, `f35_7_profile` in
+`render_tree/build_context.rs`, plus the F25 cleanup profiler and the 35.3
+copy-cost model), each **deleted after capture**. The retained `.txt` files
+record medians and prose only. Nothing in the repository can reproduce or
+recompute them; their raw observations are **gone**. Regenerating them requires
+rebuilding each harness against a pinned baseline — the pattern F13 now
+demonstrates — which this session did not have the budget to complete. This is an
+**open gap**, not a closed one. The affected claims (35.5 −18.0 % CLI, 35.6
+−91.1 %, 35.7 −19.9 %) should be treated as unverified pending that work.
+
+**Contract change adopted:** a benchmark harness that carries a pinned baseline
+is now **retained** rather than deleted (see `f13_scan_and_replace` in
+`phase6_interpolation.rs`). Deleting the harness is what made these observations
+unrecoverable; the "delete the temporary harness" precedent set in Phase 8 is the
+root cause of this finding and should not be repeated.
 
 ### 35.2 — `relevel_with_overflow` (Implemented)
 
@@ -1252,6 +1480,15 @@ its own gate** — it would have rotted silently.
   `76 tests run: 76 passed` for the CLI. Green.
 - This is the only non-documentation change Phase 11 made.
 
+**Superseded 2026-07-16 (review-1).** The reachability fix above stands, but the
+file it made reachable was mis-tiered: `level2_terminal_osc_cache.rs` is now
+`level1_terminal_osc_cache.rs` (see Finding 2). The library's `level2_` tests are
+now the real-terminal `level2_terminal_osc_wezterm.rs`. `just test-l2` still runs
+`_test_l2 {{ LIBRARY }}` then `_test_l2 {{ CLI }}` — the library arm now
+additionally passes `--features osc-query-counter`. Latest run:
+`2 tests run: 2 passed` (library, both WezTerm tests) + `76 tests run: 76 passed`
+(CLI).
+
 ### Cumulative closeout run
 
 Run record:
@@ -1282,6 +1519,22 @@ Four compose cases regressed out of noise against the audit commit:
 `compose_trivial` **+34.8 %**, `compose_schema_transclusion` +23.1 %,
 `compose_interpolation_heavy` +18.3 %, `compose_transclusion_heavy` +14.0 %.
 Per the declared contract this was **investigated, not narrated**.
+
+> **Confirmed by independent bracketed re-measurement** —
+> [`run-20260716T230028`](benchmarks/raw/f-cumulative-closeout/run-20260716T230028/).
+> Review-1 required testing whether these four numbers were artifacts of an
+> unbracketed run on a loaded host (the failure mode that erased two phantom
+> −19 % control shifts in F33). **They are not.** Re-measured at load 6.2–6.6
+> against `base 51c1f16e1` → `cand 74e0fdc90` (the *current* integrated head),
+> under an explicit `cand_A → base → cand_B` drift bracket on the same
+> manifest-verified fixture bytes: `compose_trivial` **+34.0 %**,
+> `compose_schema_transclusion` **+27.4 %**, `compose_transclusion_heavy`
+> **+14.4 %**, `compose_interpolation_heavy` **+11.0 %** — every one exceeding
+> the 0.4–5.9 % bracket drift, with **non-overlapping bootstrap 95 % CIs**,
+> while the `render_basic` control stayed flat (+0.7 %, CIs overlap). The
+> `--perf` segment split reproduces too (Command Setup 5.3 → 8.5 ms; pipeline
+> flat at 788 µs → 1.0 ms). Raw per-observation vectors retained beside that run
+> record; recompute with `bun benchmarks/recompute.ts <run-dir>`.
 
 `audit → head` is **not this follow-up's diff**. Only two *code* commits landed
 in that interval (the rest are documentation), and **both belong to the linked
@@ -1315,6 +1568,29 @@ feature to disposition. The guard is a correctness mechanism (it refuses a stale
 prebuilt graph), so its cost may be a deliberate accepted trade; that call is
 that feature's owner's to make.
 
+**But attribution is not a pass (review-1).** Establishing that the cost is the
+reference-graph feature's explains *whose* regression it is; it does not make
+this feature's predeclared regression gate pass. Production readiness is a
+property of the **integrated head**, which is what ships — and the gate fails
+there, on two independent bracketed measurements. This feature therefore **does
+not close on this table**. It is blocked pending an explicit owner decision
+among exactly three options:
+
+1. **Fix** the setup-path cost in the Opaque Reference Graph feature — the
+   `validate references` / `build options` construction, *not* the descendant
+   walk (`compose_trivial` has no descendants yet still regresses ~+3 ms) — and
+   re-run this gate; or
+2. **Re-threshold** the gate by a recorded owner decision that accepts +11–34 %
+   on compose as the price of the guard's correctness, with this evidence cited;
+   or
+3. **Keep this feature blocked** on the linked reference-graph work.
+
+The linked feature's own `construct` microbenchmark passing its budget does not
+discharge this: that bench measures graph construction at **µs** scale
+(167 → 234 µs, +67 µs), whereas this gate measures the whole `md compose`
+command, where Command Setup grows by **~3 ms** — three orders of magnitude
+apart. The two are not substitutes.
+
 ### Cross-platform evidence — Linux and Windows
 
 The Phase 1/3/7 records deferred all non-macOS evidence to this phase as "not
@@ -1325,12 +1601,21 @@ kernel *was* reachable (Docker Desktop's linux/arm64 VM) and the Windows target
 Evidence: `benchmarks/raw/f-cumulative-closeout/run-20260716T050518/linux-behavioral-run.txt`
 and `…/linux-behavioral-run-2.txt`.
 
+> **Tier correction (2026-07-16, review-1).** The F2/F21 row below was recorded
+> as closing an **L2** gap. It did not. That test manufactures its own OSC reply
+> bytes, which makes it L1 regardless of kernel — running an L1 test on Linux
+> yields a *portability* result, not a *verification-level* upgrade. The row is
+> relabeled below; the Linux run itself is still valid evidence of what it
+> actually covers. Genuine L2 now exists on macOS via WezTerm (see Finding 2);
+> **real-terminal L2 on Linux remains open** — it needs a Linux host running a
+> supported non-multiplexer emulator, which headless Docker does not provide.
+
 **Linux — real behavioral runs on `Linux 6.12.76-linuxkit aarch64` (Debian 13),
 not a cross-compile. ALL PASS:**
 
 | Finding | Linux result |
 |---|---|
-| **F2 / F21** — Unix PTY helper (L2) | ✅ **2/2 pass** — `level2_terminal_construction_emits_single_osc10_request` + `…_repeated_construction_latency` under a real PTY. **Gap closed.** |
+| **F2 / F21** — Unix PTY helper (**L1**, see note) | ✅ **2/2 pass** — `terminal_construction_emits_single_osc10_request` + `…_repeated_construction_latency` under a real PTY on a real Linux kernel. Confirms the **cache and request count** are kernel-portable. |
 | **F17** — shell wait primitive | ✅ **6/6 pass** — all three saturation tests (256 KiB/stream past the 64 KiB pipe buffer), the kill+reap timeout arm, error selection, and the no-poll-loop granularity guard. |
 | **F22** — directory-hash membership | ✅ **15/15 CLI** (incl. `test_hash_directory_vendored_membership_matches_plain_dir`) **+ the lib unit**. Linux agrees with macOS on membership. |
 | **F1** — sniff timezone seam | ✅ **2/2 pass** (via `--lib`; see the sniff note below). |
@@ -1482,12 +1767,13 @@ Carried to the owner. None is a defect in this feature's shipped code.
    with a stale arity inside a `#[cfg(target_os = "linux")]` test, so it is
    invisible from macOS. Pre-existing and unrelated to this feature (whose sniff
    diff is `os/time.rs` + `README.md`), but it means sniff's Linux CI is red.
-3. **Finding 32's deliberate prompt-frequency change** — a rule persisted
-   mid-stage no longer suppresses a later prompt **in that same stage**
-   (`::shell git status` "allow command (persist)" then `::shell git log` now
-   prompts twice). It is conservative by construction (it can only over-prompt,
-   never under-authorize) and is the contract the plan mandates, but it is a
-   real UX change **awaiting owner acceptance**.
+3. ~~**Finding 32's deliberate prompt-frequency change**~~ — **resolved at
+   review-1; no longer a residual.** The prompt-frequency change was reverted:
+   a rule persisted mid-stage again suppresses a later prompt in that same
+   stage (`::shell git status` "allow command (persist)" then `::shell git log`
+   prompts once, as before this feature). The clone removal was kept by sharing
+   the rule collections behind `Arc` with copy-on-write writes, so no owner
+   compatibility decision is needed. See the Finding 32 section above.
 4. **Compose setup regression owned by the Opaque Reference Graph feature** —
    +13–27 % on every compose case, from `a8e5e98d9` + `16ed1e57a`. Evidence and
    bisect in the cumulative run record. Not fixed here (scope boundary).
@@ -1498,12 +1784,12 @@ Carried to the owner. None is a defect in this feature's shipped code.
 6. **`strip_incidental_newlines` cost** — surfaced by F25's profile, covered by
    **no** finding: 22.0 % of cleanup on `toc_large`, 70.8 % on `replace_heavy`.
    A future candidate, not actioned.
-7. **Stray newline-named directory** — see immediately below. A **Windows
-   checkout hazard** if ever committed.
+7. **Stray newline-named directory** — see immediately below. It **was
+   committed**, making it a live Windows checkout hazard; removed at review-1.
 
-## Pre-existing working-tree artifact (found in Phase 10, NOT created by it)
+## Newline-named fixture duplicates (committed by Phase 10, removed at review-1)
 
-An **untracked** stray directory exists under this feature:
+A stray directory existed under this feature:
 
 ```
 darkmatter/features/2026-07-15-performance-followup/benchmarks<LF>/Users/ken/.../benchmarks/fixtures/*.md
@@ -1512,25 +1798,28 @@ darkmatter/features/2026-07-15-performance-followup/benchmarks<LF>/Users/ken/...
 — a directory whose name ends in a literal **newline**, containing a full
 absolute path, holding 9 markdown files.
 
-- **Provenance:** not Phase 10. It holds exactly the **Phase-2** fixture set
+- **Provenance (corrected 2026-07-16):** the directory itself predates Phase 10
+  and was written by an early, since-corrected `generate.sh` whose `out` path
+  picked up a trailing newline — it holds exactly the **Phase-2** fixture set
   (`render_basic`, `compose_child`, `compose_schema_transclusion`,
   `compose_trivial`, `hash_basic`, `render_code_heavy`, `toc_small`, `toc_medium`,
   `toc_large`) and lacks every fixture added later (`compose_transclusion_heavy`
-  P5, `compose_interpolation_heavy`/`replace_heavy` P6, `remote_heavy` P9), so it
-  was written by an early, since-corrected `generate.sh` whose `out` path picked
-  up a trailing newline. The committed generator (v1.3.0) computes
-  `out="$here/fixtures"` correctly and does not reproduce it.
-- **Contents:** all 9 files are **byte-identical** to their committed
-  counterparts under `benchmarks/fixtures/`. Nothing unique is stored there.
-- **Status:** untracked (`git status` reports it as `??`); it is not part of any
-  commit and no fixture identity depends on it.
-- **Why it matters:** a filename containing a newline is **invalid on Windows**.
-  If a future `git add -A` swept it into a commit it would break Windows
-  checkouts of the whole monorepo, which every package is required to support.
-- **Action:** left in place deliberately — Phase 10 did not create it, so it is
-  surfaced rather than silently deleted. Recommend deleting it before the commit
-  step (it is pure duplicate junk), and taking care not to `git add -A` this
-  directory in the meantime.
+  P5, `compose_interpolation_heavy`/`replace_heavy` P6, `remote_heavy` P9). The
+  committed generator (v1.3.0) computes `out="$here/fixtures"` correctly and does
+  not reproduce it. **However, Phase 10's closeout commit `093ea3dfb` swept all
+  nine paths into the index** — the exact `git add -A` hazard the original entry
+  below warned about. This section previously claimed they were untracked; that
+  claim was wrong, and `git log --diff-filter=A` on the paths shows `093ea3dfb`.
+- **Contents:** all 9 files were **byte-identical** to their committed
+  counterparts under `benchmarks/fixtures/`. Nothing unique was stored there.
+- **Why it mattered:** a filename containing a newline is **invalid on Windows**.
+  Tracked, it broke Windows checkouts of the whole monorepo, which every package
+  is required to support — a direct violation of the cross-platform acceptance
+  criterion.
+- **Action (review-1):** the nine malformed entries were removed from the index
+  (`git update-index --force-remove`) and the stray directory deleted from the
+  working tree. The 13 intended fixtures under `benchmarks/fixtures/` remain
+  tracked and byte-unchanged.
 
 ## Pre-existing failures (not introduced by this feature)
 
