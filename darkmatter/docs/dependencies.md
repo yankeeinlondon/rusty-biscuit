@@ -14,6 +14,32 @@
 These dependencies are required so every network egress path goes through the
 same scheme validation and deny-all-by-default host policy.
 
+## Compose Text Replacement
+
+- `aho-corasick` powers the `replace:` map matcher in
+  `markdown/compose/replacement.rs`: a `MatchKind::LeftmostLongest` automaton
+  gives a single linear pass with the same leftmost / non-overlapping /
+  longest-key-wins / no-rescan contract the previous hand-rolled per-character
+  scanner had, but without its `O(content × rules × keylen)` cost. Already
+  compiled transitively via `regex`, so it adds no build cost.
+
+## Shell Directive Execution
+
+- `shared_child` backs the child-process wait in
+  `markdown/compose/shell_expansion/executor.rs`. Both executor variants block
+  on an OS wait event (a helper thread calls `SharedChild::wait`, the caller
+  consumes it with `recv_timeout`) instead of the previous 10 ms
+  `try_wait`/`sleep` poll loop, so a fast command's completion is observed
+  immediately rather than up to one poll interval later. `SharedChild` is what
+  makes the timeout arm safe: it can kill and reap through the same handle the
+  waiter thread is blocked on, which `std::process::Child` cannot express.
+  Depended on with `default-features = false` — the default `timeout` feature's
+  `wait_timeout` is built on a process-wide SIGCHLD handler (pulling
+  `sigchld`/`signal-hook`), and Darkmatter is a library that must not hijack a
+  host application's signal disposition. The ungated `wait`/`kill` core we use
+  is `waitid`/`WaitForSingleObject`-based and installs nothing, so Darkmatter
+  carries no platform split of its own.
+
 ## DMLS (`darkmatter/dmls`)
 
 The Darkmatter Language Server keeps its dependency surface small and
