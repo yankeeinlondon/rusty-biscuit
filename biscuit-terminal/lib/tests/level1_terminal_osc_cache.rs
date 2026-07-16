@@ -1,16 +1,31 @@
-//! Level-2 PTY evidence for the per-process OSC 10 foreground-color cache
+//! Level-1 PTY evidence for the per-process OSC 10 foreground-color cache
 //! (Findings 2 & 21 of the 2026-07-12 performance review).
 //!
-//! These tests spawn the `discovery_probe` example inside a real
-//! pseudoterminal (via [`expectrl`], through the shared `tests/common/pty.rs`
-//! helper — no second PTY abstraction), so `is_tty()` is true and the OSC
-//! foreground query is actually emitted. The proof runs in a **dedicated
-//! child process**, so the `OnceLock`-backed cache starts empty and no test
-//! ordering can contaminate it.
+//! These tests spawn the `discovery_probe` example inside a pseudoterminal (via
+//! [`expectrl`], through the shared `tests/common/pty.rs` helper — no second
+//! PTY abstraction), so `is_tty()` is true and the OSC foreground query is
+//! actually emitted. The proof runs in a **dedicated child process**, so the
+//! `OnceLock`-backed cache starts empty and no test ordering can contaminate
+//! it.
 //!
-//! They are `level2_*` because they require a real PTY; run them only through
-//! `just test-l2`. The Unix-only `expectrl`/PTY code is target-gated so Windows
-//! still compiles and records a clean unsupported/skip disposition.
+//! ## Why Level 1 and not Level 2
+//!
+//! The **test** manufactures the OSC 10/11 reply bytes (`OSC10_REPLY` below)
+//! and writes them back into the PTY. Nothing here is a terminal emulator: a
+//! bare PTY is a kernel pipe with `is_tty()` semantics, not a program that
+//! parses OSC and answers. Because the test owns both the question and the
+//! answer, it verifies the *cache and request count* — which is real, valuable
+//! coverage — but proves nothing about how any terminal behaves. Under the
+//! taxonomy in the `rust-testing` skill that is Level 1, regardless of what the
+//! file is called or which kernel it runs on.
+//!
+//! The complementary real-terminal proof, where **WezTerm** owns the response
+//! bytes, lives in `level2_terminal_osc_wezterm.rs`. Keep both: this one is the
+//! fast, deterministic, always-available regression; that one is the evidence
+//! that the emulator actually answers.
+//!
+//! The Unix-only `expectrl`/PTY code is target-gated so Windows still compiles
+//! and records a clean unsupported/skip disposition.
 //!
 //! Run `cargo build -p biscuit-terminal --example discovery_probe` first.
 
@@ -61,8 +76,11 @@ mod unix {
     /// Three `Terminal` constructions in one process emit exactly one OSC 10
     /// request, and every construction reports the same cached foreground
     /// response. Proves the `TEXT_COLOR_CACHE` reuse (Findings 2 & 21).
+    ///
+    /// The reply is manufactured by this test, so the scope is the cache and
+    /// the request count — not terminal behavior. See the module docs.
     #[test]
-    fn level2_terminal_construction_emits_single_osc10_request() {
+    fn terminal_construction_emits_single_osc10_request() {
         let mut session = spawn_with_env(&[
             ("PROBE", "terminal_cache"),
             ("PROBE_TERM_PROGRAM", "WezTerm"),
@@ -120,7 +138,7 @@ mod unix {
     /// constructions. This test emits the statistics on stdout for evidence
     /// harvesting and sanity-asserts that repeated construction is cheap.
     #[test]
-    fn level2_terminal_repeated_construction_latency() {
+    fn terminal_repeated_construction_latency() {
         let mut session = spawn_with_env(&[
             ("PROBE", "terminal_latency"),
             ("PROBE_TERM_PROGRAM", "WezTerm"),
@@ -180,8 +198,8 @@ mod unix {
 /// unsupported/skip disposition so Windows still builds this binary.
 #[cfg(not(unix))]
 #[test]
-fn level2_terminal_osc_cache_unsupported_on_this_platform() {
+fn terminal_osc_cache_unsupported_on_this_platform() {
     eprintln!(
-        "level2_terminal_osc_cache: skipped — PTY (expectrl) OSC cache evidence is Unix-only"
+        "level1_terminal_osc_cache: skipped — PTY (expectrl) OSC cache evidence is Unix-only"
     );
 }
