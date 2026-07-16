@@ -4,9 +4,10 @@ ready: false
 agent: codex/default
 created: 2026-07-15T19:09:49-07:00
 spec: 2026-07-15-reference-graph/spec.md
-implemented: false
+implemented: true
 description: "A **feature** review of `2026-07-15-reference-graph/spec.md`"
 feature: 2026-07-15-reference-graph/review-1.md
+next: 2026-07-15-reference-graph/review-2.md
 ---
 
 # Review 1 — Reference Graph

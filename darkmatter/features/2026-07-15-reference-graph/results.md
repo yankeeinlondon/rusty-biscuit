@@ -115,31 +115,77 @@ dedupes by resolved source, so each child is hashed at most once. The measured
 by InlinePre compose + reference extraction, not the handful of extra hashes:
 `small` construct 204.78 µs, `large` 6.2283 ms, `multi_transclusion` 6.0571 ms.
 
-## Regression budget
+## Regression budget — measured cross-commit `construct` comparison
 
-The acceptance rule is: a construction regression is unacceptable only when it
-exceeds **both** 5% and 100 µs at the median on a stable fixture.
+The acceptance rule (spec `spec.md:612-624`, AC13 `spec.md:678-679`) is: a
+construction regression is unacceptable only when it exceeds **both** 5% **and**
+100 µs at the median on a stable fixture. This is the primary evidence; the
+analytical bound below is retained only as a consistency check.
 
-No pre-opacity baseline bench exists for `reference_graph` — the bench target is
-new to this branch, and Phases 1–3 (which introduced provenance) are already
-merged here, so a same-commit `--baseline` comparison cannot isolate the
-provenance delta. To obtain a true baseline/candidate comparison, run:
+### How the baseline was produced
 
-```text
-git checkout <pre-Phase-1 commit>   # add this bench file first if absent
-cargo bench -p darkmatter --bench reference_graph -- --save-baseline pre-provenance
-git checkout darkmatter
-cargo bench -p darkmatter --bench reference_graph -- --baseline pre-provenance
-```
+The bench target is new to this branch, so the pre-opacity commit had no
+`reference_graph` bench. To obtain a true baseline the candidate bench file was
+copied **byte-for-byte** into a detached worktree at the pre-opacity commit and
+registered with a matching `[[bench]]` entry. The pre-opacity public API
+(`Markdown::reference_graph`, `ReferenceGraphOptions::with_compose`,
+`ReferenceValidationOptions::with_graph`,
+`validate_references{,_with_graph}`) is signature-identical to the candidate, so
+the bench compiled and ran **unmodified — no trimming was required**; all three
+functions (`build_and_validate`, `validate_prebuilt`, `construct`) ported
+cleanly, and only the `construct` medians are used for this comparison.
 
-On the analytical grounds above (bounded constant-factor hashing, no
-large-object retention, O(unique children) manifest work) the provenance
-addition cannot move the `construct` median by more than a few microseconds on
-these fixtures — well inside the 100 µs / 5% budget. A cross-commit measurement
-should be added when a pre-Phase-1 checkout is convenient; the harness is now in
-place to produce it in one command.
+Byte-identity of the workload across both commits was verified: the candidate
+and the pre-opacity copy are `diff`-clean and share
+`sha256 db628b1593fe4ffca8a35e7b946c167dd15cebe05bef4a69d15bf0ce3e110a39`.
+(This supersedes the stale `bench-source-sha256` recorded above, which predated
+a later edit to the bench file.)
 
-> The `change:` percentage Criterion prints when a stale saved baseline is
-> present is **not** meaningful here — an earlier miscalibrated draft (context
-> captured per iteration) left a saved baseline that made `small` appear
-> "-99.9%". That baseline was cleared before the recorded run above.
+### Run parameters (identical on both commits)
+
+- Commits: baseline `db7e46792` (pre-opacity parent of `a8e5e98d9`;
+  `provenance.rs` absent, `ReferenceGraph` still has public `root`/`nodes`
+  fields) vs candidate `b425fb466` (main worktree `HEAD`).
+- Host: Apple M4 Max, macOS (Darwin 25.5.0, arm64,
+  `Darwin Kernel Version 25.5.0 … RELEASE_ARM64_T6041`).
+- Toolchain: `rustc 1.96.0 (ac68faa20 2026-05-25)`, `--release`.
+- Criterion: `sample_size(30)`, `--warm-up-time 1 --measurement-time 3`
+  (same flags both sides; each worktree has its own `target/`, both measured in
+  the same session on the same idle host).
+- Filter: `-- construct` (isolates the three `construct` benches).
+
+### Measured `construct` medians (Criterion `[low median high]`)
+
+| Fixture | Baseline `db7e46792` | Candidate `b425fb466` | Δ median (abs) | Δ median (%) |
+|---|---|---|---:|---:|
+| `small` | 167.18 µs `[166.01, 168.65]` | 211.83 µs `[210.20, 213.69]` | +44.65 µs | +26.7 % |
+| `large` | 6.1351 ms `[6.1019, 6.1710]` | 6.2115 ms `[6.1796, 6.2405]` | +76.4 µs | +1.25 % |
+| `multi_transclusion` | 5.8717 ms `[5.8387, 5.9078]` | 6.0398 ms `[6.0088, 6.0713]` | +168.1 µs | +2.86 % |
+
+Dispersion is tight on both sides — every `[low, high]` confidence interval is
+within ~±1 % of its median — so the deltas are signal, not sampling noise.
+Criterion flagged 1–4 mild/severe high outliers per bench (≤13 % of 30
+samples), the routine long-tail of a live machine; medians are robust to them.
+The `change:` line Criterion prints compares against each worktree's own stale
+saved baseline, **not** across commits, so it is not the comparison here — the
+cross-commit deltas above are computed from the two medians directly.
+
+### Verdict against the 5 % / 100 µs budget
+
+A regression fails **only** when it exceeds **both** thresholds at the median.
+
+| Fixture | >+5 %? | >+100 µs? | Both? | Result |
+|---|:--:|:--:|:--:|---|
+| `small` | yes (+26.7 %) | no (+44.65 µs) | no | **PASS** — under the µs floor |
+| `large` | no (+1.25 %) | no (+76.4 µs) | no | **PASS** |
+| `multi_transclusion` | no (+2.86 %) | yes (+168.1 µs) | no | **PASS** — under the % floor |
+
+**Overall: PASS.** No fixture trips both gates. The small fixture regresses
+notably in *percentage* terms (+26.7 %) because its absolute cost is tiny, so
+the fixed-cost provenance hashing is proportionally visible — but the +44.65 µs
+absolute delta is well under the 100 µs floor, which is exactly the case the
+two-threshold rule is designed to absorb. The two larger fixtures each trip at
+most one gate. The measurement is consistent with the analytical bound above
+(bounded constant-factor hashing, no large-object retention, O(unique children)
+manifest work): the provenance addition is a small fixed cost, dominant only
+where the total construction cost is smallest.
