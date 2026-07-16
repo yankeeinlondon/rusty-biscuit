@@ -1,6 +1,8 @@
 ---
 status: draft
-reviewed: false
+reviewed: true
+reviewed_by: claude/default
+reviewed_on: 2026-07-15
 created: 2026-07-15
 source_review: ../../reviews/2026-07-12-perf/spec.md
 source_assessment: ../../reviews/2026-07-12-perf/review-3.md
@@ -171,11 +173,26 @@ fixtures or a checked-in deterministic generator plus a manifest containing:
   raw result locations;
 - predeclared improvement and no-regression thresholds.
 
-Build the before and after binaries from the selected commits, then run both
-against the same immutable fixture directory. At minimum cover `md --help`,
-render, hash, trivial compose, schema/transclusion compose, the three TOC size
-tiers, and the code-heavy render cases. Do not use measurements from different
-hosts as a pass/fail comparison.
+For the historical closeout, build the before and after binaries from the
+pinned commits, then run both against the same immutable fixture directory. The
+"before" binary is the pre-optimization baseline `83aaecc8f` (the commit
+`baseline.md` was captured from); the "after" binary is this feature's audit
+commit `51c1f16e10ffe825b56987573ba4eabc659c768e`. `baseline.md` recorded fixture
+sizes but **not** the fixture bytes or their hashes, and told re-runs to use
+"any deterministic generator of the same sizes" — that missing byte identity is
+the reproducibility hole this work item closes, so the manifest above must be
+reconstructed (committed fixtures or a pinned generator) rather than trusted
+from the prior capture. At minimum cover `md --help`, render, hash, trivial
+compose, schema/transclusion compose, the three TOC size tiers, and the
+code-heavy render cases. Do not use measurements from different hosts as a
+pass/fail comparison.
+
+Those pins reconstruct the accumulated 2026-07-12 result only. They are not the
+baseline/candidate pair for changes implemented by this follow-up. Each new
+optimization checkpoint must compare its immediate pre-change implementation
+(or a saved same-source Criterion baseline) with its candidate on identical
+input and harness bytes. Closeout also runs the complete manifest against the
+final feature head so the cumulative result includes every follow-up change.
 
 ### 4. Finish Cross-Pass Compose Reuse (Findings 7 and 16)
 
@@ -184,6 +201,20 @@ child body into the main pass: conditions, parent state, directive position,
 and lifecycle decisions may change the result. The implementation must first
 define a cache key or reusable intermediate whose identity contains every
 semantic input.
+
+Do not design this identity as a greenfield key. The current transclusion path
+already combines `cache::hashing::options_hash(options)` with source, effective
+state, context, and directive-overlay identities, and the result can drive both
+run-local single-flight reuse and persistent cache reads/writes. Audit that
+existing key before changing reuse boundaries. Its selected-field `Debug`-based
+encoding is not the exhaustive canonical authority required by the linked
+[Opaque Reference Graph](../2026-07-15-reference-graph/spec.md) feature.
+
+Both consumers must derive from the shared field-classification authority in
+[Architecture Decision B](#architecture-decision-b--shared-classification-purpose-specific-identities).
+They must not share one undifferentiated fingerprint: graph provenance is a
+conservative in-process compatibility comparison, while a compose cache key is
+a purpose-specific output identity that may persist across processes.
 
 Preferred design order:
 
@@ -195,7 +226,11 @@ Preferred design order:
    narrower candidates.
 
 The cache must be run-local or bounded, preserve condition-aware behavior, and
-must not retain unrelated contexts, graphs, callbacks, or runtimes.
+must not retain unrelated contexts, graphs, callbacks, or runtimes. Because the
+transclusion phase composes children concurrently, any shared prepared-content
+cache introduced here must be concurrency-safe (or partitioned per compose run);
+a data race or a lock held across child composition is a correctness and
+liveness regression, not just a performance one.
 
 ### 5. Reduce Frontmatter and Expression Rework (Findings 11–14)
 
@@ -252,8 +287,13 @@ the aggregate includes the same Markdown membership as before the performance
 change. Add an end-to-end CLI test that freezes the aggregate, diagnostics, and
 exit status for a tree containing those directory names.
 
-An opt-in ignore policy may be proposed separately. Changing the default again
-requires owner approval and must explain how stored aggregate hashes migrate.
+The revert itself needs no hash-migration step: the exclusion change was never
+released and there are no external consumers, so any aggregate computed under it
+is a private working-tree artifact, not stored state to migrate. The migration
+requirement applies only to a *future* opt-in ignore policy that changes
+membership again. Such a policy may be proposed separately; changing the default
+again requires owner approval and must explain how any then-stored aggregate
+hashes migrate.
 
 ### 9. Complete Remote Discovery (Finding 33)
 
@@ -340,20 +380,89 @@ identity. Do not introduce ad hoc hashing implementations.
 | F33/F35 residuals | Focused behavior tests and one target/control benchmark per sub-item |
 | Feature closeout | `just test`, `just test-l2`, and `just lint` in every touched area; root recipes for cross-package changes; `cargo check --workspace`; `cargo fmt --check`; `git diff --check` |
 
-No write-mode formatter is authorized. Windows/Linux CI evidence must be
+No write-mode formatter is authorized. Linux and Windows evidence must be
 recorded before completion; macOS-only success is insufficient for the stated
 cross-platform contract.
 
+The cross-platform gate is targeted, not blanket. Findings whose code path is
+genuinely OS-divergent **require** a real non-macOS behavioral run, not merely a
+successful cross-compile: F17's shell wait primitive (blocking-wait vs.
+event-driven notification differs by OS), the F2/F3/F21 PTY/L2 terminal helper
+(Unix-only PTY, target-gated on Windows), and F22's directory traversal and path
+handling. For findings that are OS-identical by construction (pure allocation,
+scanning, caching, and hashing changes with no `cfg`-gated or filesystem-shape
+branch), state that identity in the disposition and treat Windows compile
+evidence plus the macOS behavioral run and the repository's ordinary Linux CI
+as sufficient. Make that classification from the implementation actually
+changed, not from the finding number: F12 can reach filesystem-backed expression
+functions, for example, so Findings 5–14 are not categorically OS-identical.
+This keeps the gate honest without demanding a per-finding Windows behavioral
+run for code that cannot vary across platforms.
+
 ## Documentation Deliverables
 
-- Replace or amend the old plan/results so they no longer mark partial findings
-  complete.
+- Add a dated correction/supersession notice to the old plan/results, linking to
+  this feature's audit and final dispositions. Do not rewrite their original
+  body or checkboxes: they remain the historical `codex/default` record. This
+  feature's own dispositions, measurements, and manifests live in the
+  feature-local evidence home defined by Architecture Decision A.
 - Link the original review to this active follow-up and to the opaque graph
   feature.
 - Record one disposition and evidence location for every open sub-item.
 - Document the restored Sniff and directory-hash compatibility behavior.
 - Update public rustdoc and README material only where behavior or supported
   construction changes.
+
+## Architecture Decisions
+
+### Architecture Decision A — Feature-local evidence with focused runners
+
+Create `results.md` beside this specification as the disposition and evidence
+index. Store the fixture manifest and either committed fixtures or the pinned
+deterministic generator in a sibling `benchmarks/` directory. The manifest is
+the single authority for fixture identity across all checkpoints.
+
+One manifest does not imply one universal runner. Use the existing Criterion
+recipes for library microbenchmarks, a release CLI runner for command-level
+measurements, and the checked-in PTY/L2 helper for interactive terminal
+measurements. Each runner records its commands, raw samples, and environment in
+the feature-local evidence index and consumes the shared manifest wherever it
+uses file fixtures. Do not force CLI or PTY evidence through `just bench`, which
+is a Criterion runner.
+
+The 2026-07-12 review remains historical evidence. Add only dated
+correction/supersession notices and cross-links there; do not rewrite its body,
+checkboxes, or original measurements.
+
+### Architecture Decision B — Shared classification, purpose-specific identities
+
+Define one crate-private, exhaustive `ComposeOptions` field-classification
+authority in the `ComposeOptions` owning module. It destructures
+`ComposeOptions` without `..` and requires every field to be classified when a
+field is added. Both graph provenance and compose caching derive their own
+identity products from that classification; neither maintains an independent
+field inventory.
+
+The derived products retain distinct contracts:
+
+- `ReferenceGraphOptionsIdentity` is conservative and fail-closed. It may use
+  weak/minimal instance handles for stateful callbacks or runtimes and may
+  include fields irrelevant to rendered output.
+- the compose-cache value fingerprint includes only canonical value semantics
+  relevant to the cached artifact, combined with the existing source, effective
+  state, context, directive-overlay, and pass-scope dimensions;
+- process-local identity required by a stateful field participates only in
+  run-local reuse. A key that depends on pointer/instance identity must not read
+  or write a persistent cache entry;
+- when equivalence cannot be established, reject reuse rather than guessing.
+
+Canonical value encoding uses field names, type boundaries, sorted unordered
+collections, and a versioned domain marker. It must not use `Debug` output. The
+implementation replaces or delegates the existing
+`cache::hashing::options_hash`; it does not add a parallel third options
+fingerprint. Selecting this shared authority requires the linked opaque-graph
+specification and implementation to use the same field-classification contract
+in the coordinated change.
 
 ## Acceptance Criteria
 
@@ -372,3 +481,7 @@ This feature is complete when:
    pass, with Linux and Windows evidence recorded.
 7. The audit table and original review documentation reflect the final honest
    disposition of every finding.
+8. Architecture Decisions A and B are implemented: evidence remains
+   feature-local behind one fixture manifest and focused runners, while graph
+   provenance and compose caching derive purpose-specific identities from one
+   exhaustive `ComposeOptions` field classification.
