@@ -14,9 +14,10 @@ use claudine::composition::lifecycle::{
 };
 use claudine::composition::lifecycle_executor::{LifecycleEventOutcome, StackControl};
 use claudine::composition::{
-    CompositionError, LifecycleCurrent, LifecycleErrorInfo, LifecycleTiming,
+    CompositionError, LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchState,
+    LifecycleCurrent, LifecycleErrorInfo, LifecycleTiming,
     LifecycleTransitionAbort, LifecycleTransitionDecision, LifecycleTransitionInput,
-    decide_lifecycle_transition, route_blocked_finalize,
+    decide_lifecycle_transition,
 };
 use claudine::composition::lifecycle_executor::StackExecutionContext;
 use claudine::composition::lifecycle_executor::SystemShellRunner;
@@ -124,113 +125,57 @@ pub(super) fn emit_preflight_blocked_and_finalize(
         settings,
     };
     let blocked_outcome = guard.execute_event(LifecycleSignal::Blocked, &blocked_ctx);
-
-    // A late-binding evaluation error on `blocked` (a crashed `when:` guard or
-    // interpolation) routes through `failure` + `finalize` carrying the
-    // evaluation error as `err`, then surfaces the typed run failure
-    // (Decision #5). `blocked` already took the terminal slot, so we
-    // redesignate it to `Failure` (mirroring the `error()`-downgrade path in
-    // `execute_terminal_event`) and run the failure stack directly via
-    // `run_event_stack` (which bypasses the already-recorded slot). The
-    // subsequent `execute_event(Finalize)` still works because
-    // `terminal_emitted` remains true and `finalize_emitted` is unset.
-    if let Some(eval_info) = blocked_outcome.evaluation_error.as_ref() {
-        // Surface the original `blocked` crash to stderr before the
-        // `failure`/`finalize` catch events fire (Decision #2).
-        let early = crate::output::error_walker::emit_lifecycle_evaluation_error_early(
-            source_path,
-            "blocked",
-            eval_info,
-            term,
-        );
-        guard.redesignate_terminal_to_failure();
-        let failure_ctx = blocked_ctx.with_signal(LifecycleSignal::Failure);
-        let failure_ctx = failure_ctx.with_error(eval_info);
-        let failure_outcome = guard.run_event_stack(LifecycleSignal::Failure, &failure_ctx);
-        // If `failure` raised, thread its error (not the original) into
-        // finalize so a `finalize.stack` can branch on the failure raise.
-        let active_err = failure_outcome
-            .evaluation_error
-            .as_ref()
-            .unwrap_or(eval_info);
-        let finalize_ctx = blocked_ctx.with_signal(LifecycleSignal::Finalize);
-        let finalize_ctx = finalize_ctx.with_error(active_err);
-        let finalize_outcome = guard.execute_event(LifecycleSignal::Finalize, &finalize_ctx);
-        return PreflightBlockedOutcome::EvaluationError(surface_preflight_catch_error(
-            source_path,
-            Some(&failure_outcome),
-            Some(&finalize_outcome),
-            early,
-            term,
-        ));
-    }
-
-    // No evaluation error on `blocked`: run `finalize` with the original
-    // pre-flight `err`. `with_signal` borrows `blocked_ctx` by shared
-    // reference, which does not conflict with the `&mut guard` `execute_event`
-    // requires because the guard and the context borrow from disjoint locals
-    // (emitter/settings/... passed in as arguments, not pulled out of the
-    // guard).
-    let finalize_ctx = blocked_ctx.with_signal(LifecycleSignal::Finalize);
-    let finalize_outcome = guard.execute_event(LifecycleSignal::Finalize, &finalize_ctx);
-
-    // A raise inside `finalize` itself halts without re-entering `finalize`
-    // (the re-entry guard). Surface it to stderr at the point of error.
-    let decision = route_blocked_finalize(&blocked_outcome, None, Some(&finalize_outcome));
-    if let Some(eval_info) = finalize_outcome.evaluation_error.as_ref() {
-        let early = crate::output::error_walker::emit_lifecycle_evaluation_error_early(
-            source_path,
-            "finalize",
-            eval_info,
-            term,
-        );
-        return PreflightBlockedOutcome::EvaluationError(early);
-    }
-
-    // Surface the blocked stack's flow-control action (if any) so the caller
-    // can dispatch it. At the compose pre-flight layer the provider has not
-    // launched and there is no run-loop to re-enter, so the caller maps
-    // `resume` → `ResumeWithoutSession` and `retry`/`requeue`/`proxy` → a
-    // typed setup-phase-deferred error rather than silently dropping the
-    // control.
-    PreflightBlockedOutcome::Control(decision.control)
-}
-
-/// Decide which evaluation error surfaces after a pre-flight `blocked` catch
-/// ran its `failure`/`finalize` events, keeping the "already emitted to stderr"
-/// bookkeeping correct (Decision #2).
-///
-/// The shared runtime router selects the winning event; this adapter renders
-/// that event as a [`CompositionError`] for the pre-flight caller.
-pub(super) fn surface_preflight_catch_error(
-    source_path: &Path,
-    failure_outcome: Option<&LifecycleEventOutcome>,
-    finalize_outcome: Option<&LifecycleEventOutcome>,
-    early: CompositionError,
-    term: &Terminal,
-) -> CompositionError {
-    let empty = LifecycleEventOutcome::default();
-    let decision = claudine::composition::route_failure_finalize(
-        failure_outcome.unwrap_or(&empty),
-        finalize_outcome,
+    let original_early = blocked_outcome.evaluation_error.as_ref().map(|info| {
+        crate::output::error_walker::emit_lifecycle_evaluation_error_early(
+            source_path, "blocked", info, term,
+        )
+    });
+    let mut protocol = LifecycleCatchProtocol::new(
+        LifecycleSignal::Blocked,
+        LifecycleCatchState {
+            terminal_slot: guard.terminal_signal(),
+            finalize_emitted: guard.finalize_emitted(),
+        },
+        Some(err_info.clone()),
+        blocked_outcome,
     );
-    let (event, info) = match decision.evaluation_error_signal {
-        Some(LifecycleSignal::Finalize) => (
-            "finalize",
-            finalize_outcome.and_then(|outcome| outcome.evaluation_error.as_ref()),
-        ),
-        Some(LifecycleSignal::Failure) => (
-            "failure",
-            failure_outcome.and_then(|outcome| outcome.evaluation_error.as_ref()),
-        ),
-        _ => return early,
-    };
-    crate::output::error_walker::emit_lifecycle_evaluation_error_early(
-        source_path,
-        event,
-        info.expect("routing decision identifies an evaluation error"),
-        term,
-    )
+    while let Some(step) = protocol.next_step().cloned() {
+        let event_ctx = blocked_ctx.with_signal(step.signal);
+        let event_ctx = match step.error.as_ref() {
+            Some(error) => event_ctx.with_error(error),
+            None => event_ctx,
+        };
+        let outcome = match step.execution {
+            LifecycleCatchExecution::Record => guard.execute_event(step.signal, &event_ctx),
+            LifecycleCatchExecution::RedesignateBlockedAsFailure => {
+                guard.redesignate_terminal_to_failure();
+                guard.run_event_stack(step.signal, &event_ctx)
+            }
+        };
+        assert!(protocol.record(step.signal, outcome));
+    }
+    let result = protocol.finish().expect("preflight catch protocol completed");
+    if let (Some(signal), Some(info)) = (
+        result.evaluation_error_signal,
+        result.evaluation_error.as_ref(),
+    ) {
+        let error = if signal == LifecycleSignal::Blocked {
+            original_early.expect("origin evaluation error was emitted")
+        } else {
+            crate::output::error_walker::emit_lifecycle_evaluation_error_early(
+                source_path,
+                match signal {
+                    LifecycleSignal::Failure => "failure",
+                    LifecycleSignal::Finalize => "finalize",
+                    _ => unreachable!("catch protocol returned an unexpected signal"),
+                },
+                info,
+                term,
+            )
+        };
+        return PreflightBlockedOutcome::EvaluationError(error);
+    }
+    PreflightBlockedOutcome::Control(result.control)
 }
 
 /// Translate a compose pre-flight `blocked` stack's surfaced flow-control action

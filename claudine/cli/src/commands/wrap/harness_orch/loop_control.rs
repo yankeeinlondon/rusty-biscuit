@@ -12,9 +12,10 @@ use claudine::composition::lifecycle_executor::{
     LifecycleEventOutcome, StackControl, StackExecutionContext, SystemShellRunner,
 };
 use claudine::composition::{
-    CompositionError, IterationSummarySignals, LifecycleTransitionAbort,
+    CompositionError, IterationSummarySignals, LifecycleCatchExecution,
+    LifecycleCatchProtocol, LifecycleCatchState, LifecycleTransitionAbort,
     LifecycleTransitionDecision, LifecycleTransitionError, LifecycleTransitionInput,
-    decide_lifecycle_transition, route_blocked_finalize, route_failure_finalize,
+    decide_lifecycle_transition,
 };
 use claudine::events::EnvironmentContext;
 use claudine::provider::Provider;
@@ -231,6 +232,33 @@ struct PreparedHarnessAttempt {
     plan: claudine::harness::HarnessPlan,
 }
 
+struct AttemptPromptPreparation<'a> {
+    prompt_state: &'a mut HarnessPromptState,
+    harness_context: &'a mut CachedHarnessLoopContext,
+    initial_materialized: &'a mut Option<MaterializedHarnessPrompt>,
+    child_cwd: &'a Path,
+    repo_root: Option<&'a Path>,
+    effective_non_interactive: bool,
+    show_checks: bool,
+    detail_requested: bool,
+    silent: bool,
+}
+
+struct AttemptLifecycleExecution<'a, 'guard> {
+    guard: &'a mut claudine::composition::LifecycleRunGuard<'guard>,
+    effect_engine: &'a EffectEngine,
+    term: &'a Terminal,
+    loop_start: std::time::Instant,
+}
+
+struct AttemptRetryProxyControl<'a> {
+    attempt: &'a mut u32,
+    budgets: &'a mut ControlBudgets,
+    proxy: &'a mut ProxyTracking,
+    provider: Provider,
+    profile: &'a dyn crate::commands::wrap::profile::WrapperProfile,
+}
+
 struct ExecutedHarnessAttempt {
     materialized: MaterializedHarnessPrompt,
     outcome: claudine::harness::AttemptOutcome,
@@ -262,423 +290,99 @@ fn run_harness_loop_inner(ctx: HarnessLoopCtx<'_, '_>) -> Result<LoopStep> {
 fn prepare_attempt_phase(
     state: &mut HarnessLoopState<'_, '_>,
 ) -> Result<PhaseResult<PreparedHarnessAttempt>> {
-    let provider = state.run.provider;
-    let profile = state.run.profile;
-    let child_cwd = state.run.child_cwd;
-    let effective_non_interactive = state.run.effective_non_interactive;
-    let show_checks = state.run.show_checks;
-    let detail_requested = state.run.detail_requested;
-    let silent = state.run.silent;
-    let repo_root = state.run.repo_root;
-    let term = state.run.term;
-    let prompt_state = &mut *state.run.prompt_state;
-    let lifecycle_guard = &mut *state.run.lifecycle_guard;
-    let effect_engine = &state.effect_engine;
-    let harness_context = &mut state.harness_context;
-    let initial_materialized = &mut state.initial_materialized;
-    let control_budgets = &mut state.control_budgets;
-    let proxy_tracking = &mut state.proxy_tracking;
-    let mut attempt = state.attempt;
-    let loop_start = state.loop_start;
+    let mut prompt = AttemptPromptPreparation {
+        prompt_state: state.run.prompt_state,
+        harness_context: &mut state.harness_context,
+        initial_materialized: &mut state.initial_materialized,
+        child_cwd: state.run.child_cwd,
+        repo_root: state.run.repo_root,
+        effective_non_interactive: state.run.effective_non_interactive,
+        show_checks: state.run.show_checks,
+        detail_requested: state.run.detail_requested,
+        silent: state.run.silent,
+    };
+    let mut lifecycle = AttemptLifecycleExecution {
+        guard: state.run.lifecycle_guard,
+        effect_engine: &state.effect_engine,
+        term: state.run.term,
+        loop_start: state.loop_start,
+    };
+    let mut control = AttemptRetryProxyControl {
+        attempt: &mut state.attempt,
+        budgets: &mut state.control_budgets,
+        proxy: &mut state.proxy_tracking,
+        provider: state.run.provider,
+        profile: state.run.profile,
+    };
     let _attempt_cycle_span = info_span!(
         "harness_attempt_cycle",
-        provider = %provider,
-        attempt,
-        prompt_mode = harness_prompt_mode_label(prompt_state.mode),
-        source_path = %prompt_state.source_path.display(),
+        provider = %control.provider,
+        attempt = *control.attempt,
+        prompt_mode = harness_prompt_mode_label(prompt.prompt_state.mode),
+        source_path = %prompt.prompt_state.source_path.display(),
     )
     .entered();
-    harness_context.refresh(&prompt_state.source_path, repo_root);
-    // Announce a pending proxy hand-off before the target is materialized,
-    // so the redirect is reported even if the target then fails to compose
-    // (e.g. a bad transclusion). Fires for every proxy — `initialize` or
-    // recovery — because both re-enter here with `pending` set and
-    // `source_path` already swapped to the target.
-    if proxy_tracking.pending && !silent {
-        claudine::harness::report::report_proxy_handoff(&prompt_state.source_path, term);
-    }
-    // A `proxy` hand-off is "a fresh prompt run, including pre-flight"
-    // (lifecycle spec). The proxying document's pre-flight never saw the
-    // target's own frontmatter `$(...)` / `::shell` commands, so audit them
-    // now and fold the approvals into the carried pre-approved set before the
-    // re-materialize compose below expands them — otherwise a whitelisted
-    // command still trips `NotPreApproved`. Skipped when a seed prompt is
-    // already staged (the original prepared prompt was preflighted upstream).
-    if proxy_tracking.pending
-        && initial_materialized.is_none()
-        && let Err(e) = info_span!(
-            "harness_proxy_target_preflight",
-            attempt,
-            source_path = %prompt_state.source_path.display(),
-        )
-        .in_scope(|| {
-            preflight_proxy_target(
-                prompt_state,
-                harness_context.shell_options(),
-                child_cwd,
-            )
-        })
-    {
-        // A denial is a composition-preflight blocked path: route through
-        // the stack-aware runner so `blocked`/`finalize` fire, matching the
-        // primary pre-flight's shell-audit handling.
-        let err_info =
-            LifecycleErrorInfo::from_action_failure("shell_approval", e.to_string());
-        let empty = MaterializedHarnessPrompt {
-            frontmatter: serde_json::Value::Null,
-            prompt: String::new(),
-            env_overrides: Vec::new(),
-            inline_closure_plan: None,
-            live_frontmatter: MaterializedHarnessPrompt::live_cell_from(
-                &serde_json::Value::Null,
-            ),
-        };
-        return Err(emit_blocked_finalize_with_err(
-            lifecycle_guard,
-            &empty,
-            &prompt_state.source_path,
-            repo_root,
-            term,
-            effect_engine,
-            &err_info,
-            loop_start,
-        )
-        .map(color_eyre::eyre::Report::from)
-        .unwrap_or_else(|| eyre!("{e}")));
-    }
-    let materialized = if let Some(seed) = initial_materialized.take() {
-        seed
-    } else {
-        info_span!(
-            "harness_materialize_prompt",
-            attempt,
-            source_path = %prompt_state.source_path.display(),
-        )
-        .in_scope(|| materialize_harness_prompt(prompt_state, repo_root, child_cwd))
-        .map_err(|e| {
-            let err_info =
-                LifecycleErrorInfo::from_action_failure("materialize", e.to_string());
-            // Materialization failed, so there is no prompt to carry into the
-            // stack context. Synthesize an empty one: the guard still holds the
-            // (proxying/original) document's parsed lifecycle, so its
-            // blocked/finalize stacks fire. `frontmatter: Null` makes the
-            // stack-context builder fall back to an empty frontmatter map, so
-            // any `when:` referencing frontmatter resolves against {} — correct,
-            // because the real frontmatter never materialized.
-            let empty = MaterializedHarnessPrompt {
-                frontmatter: serde_json::Value::Null,
-                prompt: String::new(),
-                env_overrides: Vec::new(),
-                inline_closure_plan: None,
-                live_frontmatter: MaterializedHarnessPrompt::live_cell_from(
-                    &serde_json::Value::Null,
-                ),
-            };
-            // A lifecycle evaluation error raised by the synthesized empty
-            // prompt's blocked/finalize stack takes precedence over the
-            // original materialize error — the lifecycle raise is the more
-            // actionable diagnosis and must halt the run.
-            match emit_blocked_finalize_with_err(
-                lifecycle_guard,
-                &empty,
-                &prompt_state.source_path,
-                repo_root,
-                term,
-                effect_engine,
-                &err_info,
-                loop_start,
-            ) {
-                Some(ce) => ce.into(),
-                // Return the original report unflattened: it wraps the typed
-                // Darkmatter compose/transclusion `BlockError`, so the CLI's
-                // top-level walker renders it as a styled block instead of a
-                // crude `Error: <string>`. `eyre!("{e}")` would discard the
-                // type and defeat that path.
-                None => e,
-            }
-        })?
-    };
+    prompt
+        .harness_context
+        .refresh(&prompt.prompt_state.source_path, prompt.repo_root);
+    preflight_pending_proxy_phase(&mut prompt, &mut lifecycle, &control)?;
+    let materialized =
+        materialize_attempt_prompt_phase(&mut prompt, &mut lifecycle, &control)?;
 
-    // A proxy hand-off (from `initialize`, `blocked`, or `failure`)
-    // swapped `source_path` to the target. The guard still holds the
-    // proxying document's lifecycle, so repoint it at the target's —
-    // parsed from the freshly materialized target frontmatter — before any
-    // of the target's events fire. Without this the target's own
-    // `start`/`success`/`finalize` never run and the proxying document's
-    // `failure`/`proxy` stack re-fires, looping forever.
-    if proxy_tracking.pending {
-        proxy_tracking.pending = false;
-        match claudine::composition::parse_lifecycle_config(
-            &materialized.frontmatter,
-            &prompt_state.source_path,
-        ) {
-            Ok(target_lifecycle) => lifecycle_guard.set_config(target_lifecycle),
-            Err(e) => {
-                let err_info = LifecycleErrorInfo::from_composition_error(&e);
-                // A lifecycle evaluation error raised by the target's
-                // blocked/finalize stack takes precedence over the original
-                // target-lifecycle parse error — the lifecycle raise is the
-                // more actionable diagnosis and must halt the run.
-                return Err(emit_blocked_finalize_with_err(
-                    lifecycle_guard,
-                    &materialized,
-                    &prompt_state.source_path,
-                    repo_root,
-                    term,
-                    effect_engine,
-                    &err_info,
-                    loop_start,
-                )
-                .map(color_eyre::eyre::Report::from)
-                .unwrap_or_else(|| eyre!("{e}")));
-            }
-        }
-        // The proxied document enters at its own `initialize` — a fresh
-        // prompt run. Reset the guard and emit the target's `initialize`
-        // before pre-flight checks, honoring target-side `Skip`/`Proxy`/
-        // `Error` logic.
-        match run_target_initialize(
-            lifecycle_guard,
-            &materialized,
-            &prompt_state.source_path,
-            repo_root,
-            term,
-            effect_engine,
-            loop_start,
-        ) {
-            TargetInitializeAction::Proceed => {}
-            TargetInitializeAction::ExitCleanly => {
-                return Ok(PhaseResult::Transition(Box::new(LoopStep::Return((0, None, None)))));
-            }
-            TargetInitializeAction::Abort(e) => return Err(e),
-            TargetInitializeAction::Repoint { resolved } => {
-                if !proxy_tracking
-                    .chain
-                    .iter()
-                    .any(|p| p == &prompt_state.source_path)
-                {
-                    proxy_tracking.chain.push(prompt_state.source_path.clone());
-                }
-                if !claudine::composition::proxy_handoff_allowed(
-                    &proxy_tracking.chain,
-                    &resolved,
-                ) {
-                    return Err(CompositionError::LifecycleProxyCycle {
-                        source_path: prompt_state.source_path.clone(),
-                        target: resolved.display().to_string(),
-                        chain: proxy_tracking
-                            .chain
-                            .iter()
-                            .map(|p| p.display().to_string())
-                            .collect(),
-                        limit: claudine::composition::MAX_PROXY_HOPS,
-                    }
-                    .into());
-                }
-                prompt_state.source_path = resolved.clone();
-                prompt_state.original_ref = resolved.display().to_string();
-                prompt_state.prompt_tail.clear();
-                prompt_state.next_prompt_override = None;
-                prompt_state.next_resume_session_id = None;
-                proxy_tracking.chain.push(resolved.clone());
-                proxy_tracking.pending = true;
-                // The next iteration's pending-adoption point announces the
-                // hand-off via `report_proxy_handoff`, so no message here.
-                // Re-enter at attempt 1 so the target document gets a clean
-                // pre-flight / freeze cycle rather than inheriting the
-                // proxying document's attempt count.
-                attempt = 1;
-                state.attempt = attempt;
-                return Ok(PhaseResult::Transition(Box::new(LoopStep::NextAttempt)));
-            }
-        }
-        // Reached only when the target's `initialize` returned `Proceed`
-        // (the other arms return/continue above), so this is the settled
-        // document that actually runs. Its composed body — not the proxying
-        // source's — is the agent prompt; the pre-loop preview was
-        // suppressed for an `initialize` proxy, so emit it here. Gated to
-        // non-interactive runs to mirror the pre-loop preview.
-        if effective_non_interactive {
-            crate::output::log_compose_prompt(
-                &materialized.prompt,
-                detail_requested,
-                silent,
-                false,
-                term,
-            );
-        }
+    if let Some(step) = adopt_proxy_lifecycle_phase(
+        &mut prompt,
+        &mut lifecycle,
+        &mut control,
+        &materialized,
+    )? {
+        return Ok(PhaseResult::Transition(Box::new(step)));
     }
 
-    let plan = info_span!(
-        "harness_plan_parse",
-        attempt,
-        source_path = %prompt_state.source_path.display(),
-    )
-    .in_scope(|| {
-        claudine::harness::parse_harness_plan(
-            &materialized.frontmatter,
-            &prompt_state.source_path,
-        )
-    })
-    .map_err(|e| {
-        let err_info = LifecycleErrorInfo::from_harness_error(&e);
-        // A lifecycle evaluation error raised by the blocked/finalize stack
-        // takes precedence over the original harness-plan parse error —
-        // the lifecycle raise is the more actionable diagnosis and must
-        // halt the run.
-        match emit_blocked_finalize_with_err(
-            lifecycle_guard,
-            &materialized,
-            &prompt_state.source_path,
-            repo_root,
-            term,
-            effect_engine,
-            &err_info,
-            loop_start,
-        ) {
-            Some(ce) => ce.into(),
-            None => eyre!("{e}"),
-        }
-    })?;
+    let plan = prepare_harness_plan_phase(
+        &mut prompt,
+        &mut lifecycle,
+        &control,
+        &materialized,
+    )?;
 
-    // Source-file existence reporting
-    if show_checks {
-        claudine::harness::report::report_source_file(
-            &prompt_state.original_ref,
-            &prompt_state.source_path,
-            term,
-        );
-    }
-    if !prompt_state.source_path.exists() {
-        if show_checks {
-            claudine::harness::report::report_unhandled_failure(
-                "source file does not exist — cannot proceed",
-                term,
-            );
-        }
-        let err_info = LifecycleErrorInfo::from_action_failure(
-            "missing_source",
-            format!(
-                "source file does not exist: {}",
-                prompt_state.source_path.display()
-            ),
-        );
-        // A lifecycle evaluation error raised by the blocked/finalize stack
-        // takes precedence over the original missing-source error — the
-        // lifecycle raise is the more actionable diagnosis and must halt
-        // the run non-zero instead of being swallowed.
-        if let Some(ce) = emit_blocked_finalize_with_err(
-            lifecycle_guard,
-            &materialized,
-            &prompt_state.source_path,
-            repo_root,
-            term,
-            effect_engine,
-            &err_info,
-            loop_start,
-        ) {
-            return Err(ce.into());
-        }
-        return Err(eyre!(
-            "source file does not exist: {}",
-            prompt_state.source_path.display()
-        ));
+    if let Some(step) = start_lifecycle_phase(
+        &mut prompt,
+        &mut lifecycle,
+        &mut control,
+        &materialized,
+    )? {
+        return Ok(PhaseResult::Transition(Box::new(step)));
     }
 
-    // The parsed harness plan is used for shell audit and timeout
-    // configuration. Pre/post validation checks have been removed.
+    // Pre-run snapshot capture for post-check comparisons has been
+    // removed along with post-check validation.
 
-    // Shell audit preflight.
-    //
-    // Composition flows (Compose/Inline) preflight all shell commands
-    // before the provider starts — template directives during composition
-    // and harness commands in execute_composition_request.  The per-
-    // attempt audit below is redundant for those modes because:
-    //
-    //   1. source_text is None, so source-page ::shell directives are
-    //      excluded (they were discovered via Darkmatter's graph walker
-    //      during composition, which respects ::block when="false").
-    //   2. Harness commands were approved and cached during the
-    //      composition preflight pass.
-    //   3. The approval handler is frozen after attempt 1, so no new
-    //      interactive prompts are possible.
-    //
-    // Only Passthrough mode needs the per-attempt audit because it reads
-    // raw source text and the source file may change between
-    // redirect/retry iterations.
-    if matches!(prompt_state.mode, HarnessPromptMode::Passthrough) {
-        let source_text = std::fs::read_to_string(&prompt_state.source_path).ok();
 
-        let auditable =
-            claudine::harness::collect_auditable_commands(source_text.as_deref())?;
+    Ok(PhaseResult::Ready(PreparedHarnessAttempt { materialized, plan }))
+}
 
-        let audit_report = info_span!(
-            "harness_shell_audit",
-            attempt,
-            command_count = auditable.len(),
-        )
-        .in_scope(|| {
-            claudine::harness::audit_shell_commands(&auditable, harness_context.shell_options())
-        });
-
-        if show_checks {
-            claudine::harness::report::report_shell_audit_header(
-                audit_report.outcomes.len(),
-                term,
-            );
-            claudine::harness::report::report_shell_audit_outcomes(&audit_report, term);
-        }
-
-        if !audit_report.all_passed() {
-            let failed = audit_report.failures();
-            let msg = format!(
-                "shell audit failed: {} denied directive(s) in source page",
-                failed.len()
-            );
-            if show_checks {
-                claudine::harness::report::report_unhandled_failure(
-                    "shell audit failed for source-page directives — cannot proceed",
-                    term,
-                );
-            }
-            let err_info = LifecycleErrorInfo::from_action_failure("shell_audit", &msg);
-            // A lifecycle evaluation error raised by the blocked/finalize
-            // stack takes precedence over the original shell-audit error —
-            // the lifecycle raise is the more actionable diagnosis and must
-            // halt the run non-zero instead of being swallowed.
-            if let Some(ce) = emit_blocked_finalize_with_err(
-                lifecycle_guard,
-                &materialized,
-                &prompt_state.source_path,
-                repo_root,
-                term,
-                effect_engine,
-                &err_info,
-                loop_start,
-            ) {
-                return Err(ce.into());
-            }
-            return Err(eyre!(msg));
-        }
-    }
-
-    // Composition flows resolved all shell approvals during preflight.
-    // Freeze the approval set so redirect/retry iterations cannot
-    // trigger new interactive prompts — only cached/whitelisted
-    // commands pass; new uncached commands are denied.  Passthrough
-    // mode has no prior preflight so its handler stays active.
-    if attempt == 1 && !matches!(prompt_state.mode, HarnessPromptMode::Passthrough) {
-        harness_context.freeze_shell_approvals();
-    }
-
-    // Pre-check validation has been removed. Shell audit still runs above
-    // for Passthrough mode; composition flows audit during preflight.
-
-    // Emit start lifecycle signal before the first provider launch.
+fn start_lifecycle_phase(
+    prompt: &mut AttemptPromptPreparation<'_>,
+    lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
+    control: &mut AttemptRetryProxyControl<'_>,
+    materialized: &MaterializedHarnessPrompt,
+) -> Result<Option<LoopStep>> {
+    let attempt = &mut *control.attempt;
+    let profile = control.profile;
+    let provider = control.provider;
+    let control_budgets = &mut *control.budgets;
+    let proxy_tracking = &mut *control.proxy;
+    let prompt_state = &mut *prompt.prompt_state;
+    let repo_root = prompt.repo_root;
+    let show_checks = prompt.show_checks;
+    let lifecycle_guard = &mut *lifecycle.guard;
+    let effect_engine = lifecycle.effect_engine;
+    let term = lifecycle.term;
+    let loop_start = lifecycle.loop_start;
     let start_outcome = run_lifecycle_event(
         lifecycle_guard,
         LifecycleSignal::Start,
-        &materialized,
+        materialized,
         &prompt_state.source_path,
         repo_root,
         term,
@@ -686,15 +390,11 @@ fn prepare_attempt_phase(
         None,
         loop_start,
     );
-    // A late-binding evaluation error on `start` (a crashed `when:` guard or
-    // interpolation) routes through `failure` → `finalize` like any other
-    // setup failure and halts non-zero (Decision #5). Checked before the
-    // control match because an evaluation raise leaves `control` `None`.
     if let Some(err) = handle_setup_evaluation_error(
         &start_outcome,
         "start",
         lifecycle_guard,
-        &materialized,
+        materialized,
         &prompt_state.source_path,
         repo_root,
         term,
@@ -711,34 +411,37 @@ fn prepare_attempt_phase(
                     .unwrap_or_else(|| "lifecycle start error".to_string());
                 let err_info =
                     LifecycleErrorInfo::from_action_failure("error", msg.as_str());
-                if let Some(ce) = emit_failure_finalize_with_err(
+                let result = run_catch_protocol(
                     lifecycle_guard,
-                    &materialized,
+                    LifecycleSignal::Start,
+                    start_outcome.clone(),
+                    materialized,
                     &prompt_state.source_path,
                     repo_root,
                     term,
                     effect_engine,
                     &err_info,
                     loop_start,
+                );
+                if let Some(err) = render_catch_evaluation(
+                    &result,
+                    &prompt_state.source_path,
+                    term,
                 ) {
-                    return Err(ce.into());
+                    return Err(err.into());
                 }
                 return Err(eyre!(msg));
             }
             StackControl::Stop => {}
-            // retry/resume/proxy/requeue at `start` dispatch through the
-            // uniform path. The provider has not launched yet, so `resume`
-            // surfaces `ResumeWithoutSession` and `retry` re-enters before
-            // the agent runs.
             _ => match dispatch_terminal_control(
                 &start_outcome,
-                attempt,
+                *attempt,
                 control_budgets,
                 None,
                 profile,
                 provider,
                 prompt_state,
-                &materialized,
+                materialized,
                 repo_root,
                 lifecycle_guard,
                 proxy_tracking,
@@ -746,20 +449,14 @@ fn prepare_attempt_phase(
                 show_checks,
             ) {
                 TerminalControlAction::Continue { next_attempt } => {
-                    attempt = next_attempt;
-                    state.attempt = attempt;
-                    return Ok(PhaseResult::Transition(Box::new(LoopStep::NextAttempt)));
+                    *attempt = next_attempt;
+                    return Ok(Some(LoopStep::NextAttempt));
                 }
                 TerminalControlAction::Abort(err) => {
-                    // No error info is available at the start-control-abort
-                    // point, so `finalize` runs with `None` `err`; but its
-                    // own stack may still raise an evaluation error, which
-                    // must surface and halt rather than being swallowed by
-                    // the abort `return`.
                     let finalize_outcome = run_lifecycle_event(
                         lifecycle_guard,
                         LifecycleSignal::Finalize,
-                        &materialized,
+                        materialized,
                         &prompt_state.source_path,
                         repo_root,
                         term,
@@ -787,104 +484,354 @@ fn prepare_attempt_phase(
         }
     }
     if start_outcome.routes_to_failure(LifecycleSignal::Start) {
-        // Record the `Failure` terminal signal FIRST, while we still hold
-        // `&mut guard`, so the subsequent `Finalize` actually fires. The
-        // error-carrying context built below immutably borrows
-        // `guard.emitter()`/`guard.context()`, so recording must happen
-        // before the borrow split. Skipping this (calling `run_event_stack`
-        // directly) would leave `terminal_emitted` false and silently
-        // suppress `finalize`.
-        if lifecycle_guard.record_event_emission(LifecycleSignal::Failure) {
-            let (timing, current) = capture_lifecycle_globals(
-                &prompt_state.source_path,
-                repo_root,
-                lifecycle_guard.context().launch_area,
-                loop_start,
-            );
-            let ctx = build_lifecycle_stack_context_for_materialized(
-                LifecycleSignal::Failure,
-                &materialized,
-                &prompt_state.source_path,
-                repo_root,
-                lifecycle_guard.context().launch_area,
-                lifecycle_guard.effective_prepared_context(),
-                term,
-                lifecycle_guard.emitter(),
-                lifecycle_guard.context().settings,
-                lifecycle_guard.context().messaging,
-                effect_engine,
-                start_outcome.action_error.as_ref(),
-                Some(&timing),
-                Some(&current),
-            );
-            let failure_outcome =
-                lifecycle_guard.run_event_stack(LifecycleSignal::Failure, &ctx);
-            // If `failure` raised, thread its error (not the original) into
-            // finalize so a `finalize.stack` can branch on the failure raise.
-            let synthetic =
-                LifecycleErrorInfo::from_action_failure("error", "lifecycle start failed");
-            let active_err = failure_outcome
-                .evaluation_error
-                .as_ref()
-                .or(start_outcome.action_error.as_ref())
-                .unwrap_or(&synthetic);
-            let finalize_outcome = run_lifecycle_event(
-                lifecycle_guard,
-                LifecycleSignal::Finalize,
-                &materialized,
-                &prompt_state.source_path,
-                repo_root,
-                term,
-                effect_engine,
-                Some(active_err),
-                loop_start,
-            );
-            if failure_outcome.evaluation_error.is_some()
-                || finalize_outcome.evaluation_error.is_some()
-            {
-                let info = start_outcome
-                    .action_error
-                    .as_ref()
-                    .unwrap_or(&synthetic);
-                // The original `start` failure was not an evaluation error;
-                // a catch event raised. Emit the surfaced evaluation error
-                // now — no further lifecycle events fire (Decision #2).
-                return Err(
-                    crate::output::error_walker::emit_lifecycle_evaluation_error_block(
-                        CompositionError::catch_evaluation_error(
-                            &prompt_state.source_path,
-                            "start",
-                            info,
-                            Some(&failure_outcome),
-                            Some(&finalize_outcome),
-                        ),
-                        term,
-                    )
-                    .into(),
-                );
-            }
-        } else {
-            run_lifecycle_event(
-                lifecycle_guard,
-                LifecycleSignal::Finalize,
-                &materialized,
-                &prompt_state.source_path,
-                repo_root,
-                term,
-                effect_engine,
-                start_outcome.action_error.as_ref(),
-                loop_start,
-            );
+        let synthetic =
+            LifecycleErrorInfo::from_action_failure("error", "lifecycle start failed");
+        let active_error = start_outcome.action_error.as_ref().unwrap_or(&synthetic);
+        let result = run_catch_protocol(
+            lifecycle_guard,
+            LifecycleSignal::Start,
+            start_outcome.clone(),
+            materialized,
+            &prompt_state.source_path,
+            repo_root,
+            term,
+            effect_engine,
+            active_error,
+            loop_start,
+        );
+        if let Some(err) = render_catch_evaluation(&result, &prompt_state.source_path, term) {
+            return Err(err.into());
         }
         return Err(eyre!("lifecycle start failed"));
     }
+    Ok(None)
+}
 
-    // Pre-run snapshot capture for post-check comparisons has been
-    // removed along with post-check validation.
+fn adopt_proxy_lifecycle_phase(
+    prompt: &mut AttemptPromptPreparation<'_>,
+    lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
+    control: &mut AttemptRetryProxyControl<'_>,
+    materialized: &MaterializedHarnessPrompt,
+) -> Result<Option<LoopStep>> {
+    let attempt = &mut *control.attempt;
+    let proxy_tracking = &mut *control.proxy;
+    let prompt_state = &mut *prompt.prompt_state;
+    let effective_non_interactive = prompt.effective_non_interactive;
+    let detail_requested = prompt.detail_requested;
+    let silent = prompt.silent;
+    let repo_root = prompt.repo_root;
+    let lifecycle_guard = &mut *lifecycle.guard;
+    let effect_engine = lifecycle.effect_engine;
+    let term = lifecycle.term;
+    let loop_start = lifecycle.loop_start;
+    if !proxy_tracking.pending {
+        return Ok(None);
+    }
+    proxy_tracking.pending = false;
+    match claudine::composition::parse_lifecycle_config(
+        &materialized.frontmatter,
+        &prompt_state.source_path,
+    ) {
+        Ok(target_lifecycle) => lifecycle_guard.set_config(target_lifecycle),
+        Err(error) => {
+            let err_info = LifecycleErrorInfo::from_composition_error(&error);
+            return Err(emit_blocked_finalize_with_err(
+                lifecycle_guard,
+                materialized,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                effect_engine,
+                &err_info,
+                loop_start,
+            )
+            .map(color_eyre::eyre::Report::from)
+            .unwrap_or_else(|| eyre!("{error}")));
+        }
+    }
+    match run_target_initialize(
+        lifecycle_guard,
+        materialized,
+        &prompt_state.source_path,
+        repo_root,
+        term,
+        effect_engine,
+        loop_start,
+    ) {
+        TargetInitializeAction::Proceed => {}
+        TargetInitializeAction::ExitCleanly => {
+            return Ok(Some(LoopStep::Return((0, None, None))));
+        }
+        TargetInitializeAction::Abort(error) => return Err(error),
+        TargetInitializeAction::Repoint { resolved } => {
+            if !proxy_tracking.chain.contains(&prompt_state.source_path) {
+                proxy_tracking.chain.push(prompt_state.source_path.clone());
+            }
+            if !claudine::composition::proxy_handoff_allowed(&proxy_tracking.chain, &resolved) {
+                return Err(CompositionError::LifecycleProxyCycle {
+                    source_path: prompt_state.source_path.clone(),
+                    target: resolved.display().to_string(),
+                    chain: proxy_tracking
+                        .chain
+                        .iter()
+                        .map(|path| path.display().to_string())
+                        .collect(),
+                    limit: claudine::composition::MAX_PROXY_HOPS,
+                }
+                .into());
+            }
+            prompt_state.source_path = resolved.clone();
+            prompt_state.original_ref = resolved.display().to_string();
+            prompt_state.prompt_tail.clear();
+            prompt_state.next_prompt_override = None;
+            prompt_state.next_resume_session_id = None;
+            proxy_tracking.chain.push(resolved);
+            proxy_tracking.pending = true;
+            *attempt = 1;
+            return Ok(Some(LoopStep::NextAttempt));
+        }
+    }
+    if effective_non_interactive {
+        crate::output::log_compose_prompt(
+            &materialized.prompt,
+            detail_requested,
+            silent,
+            false,
+            term,
+        );
+    }
+    Ok(None)
+}
 
+fn empty_materialized_prompt() -> MaterializedHarnessPrompt {
+    MaterializedHarnessPrompt {
+        frontmatter: serde_json::Value::Null,
+        prompt: String::new(),
+        env_overrides: Vec::new(),
+        inline_closure_plan: None,
+        live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&serde_json::Value::Null),
+    }
+}
 
-    state.attempt = attempt;
-    Ok(PhaseResult::Ready(PreparedHarnessAttempt { materialized, plan }))
+fn preflight_pending_proxy_phase(
+    prompt: &mut AttemptPromptPreparation<'_>,
+    lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
+    control: &AttemptRetryProxyControl<'_>,
+) -> Result<()> {
+    let attempt = *control.attempt;
+    let proxy_pending = control.proxy.pending;
+    let has_seed = prompt.initial_materialized.is_some();
+    let silent = prompt.silent;
+    let prompt_state = &mut *prompt.prompt_state;
+    let harness_context = &mut *prompt.harness_context;
+    let child_cwd = prompt.child_cwd;
+    let repo_root = prompt.repo_root;
+    let lifecycle_guard = &mut *lifecycle.guard;
+    let effect_engine = lifecycle.effect_engine;
+    let term = lifecycle.term;
+    let loop_start = lifecycle.loop_start;
+    if proxy_pending && !silent {
+        claudine::harness::report::report_proxy_handoff(&prompt_state.source_path, term);
+    }
+    if !proxy_pending || has_seed {
+        return Ok(());
+    }
+    let result = info_span!(
+        "harness_proxy_target_preflight",
+        attempt,
+        source_path = %prompt_state.source_path.display(),
+    )
+    .in_scope(|| {
+        preflight_proxy_target(prompt_state, harness_context.shell_options(), child_cwd)
+    });
+    if let Err(error) = result {
+        let err_info =
+            LifecycleErrorInfo::from_action_failure("shell_approval", error.to_string());
+        let empty = empty_materialized_prompt();
+        return Err(emit_blocked_finalize_with_err(
+            lifecycle_guard,
+            &empty,
+            &prompt_state.source_path,
+            repo_root,
+            term,
+            effect_engine,
+            &err_info,
+            loop_start,
+        )
+        .map(color_eyre::eyre::Report::from)
+        .unwrap_or_else(|| eyre!("{error}")));
+    }
+    Ok(())
+}
+
+fn materialize_attempt_prompt_phase(
+    prompt: &mut AttemptPromptPreparation<'_>,
+    lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
+    control: &AttemptRetryProxyControl<'_>,
+) -> Result<MaterializedHarnessPrompt> {
+    let attempt = *control.attempt;
+    let initial_materialized = &mut *prompt.initial_materialized;
+    let prompt_state = &mut *prompt.prompt_state;
+    let child_cwd = prompt.child_cwd;
+    let repo_root = prompt.repo_root;
+    let lifecycle_guard = &mut *lifecycle.guard;
+    let effect_engine = lifecycle.effect_engine;
+    let term = lifecycle.term;
+    let loop_start = lifecycle.loop_start;
+    if let Some(seed) = initial_materialized.take() {
+        return Ok(seed);
+    }
+    info_span!(
+        "harness_materialize_prompt",
+        attempt,
+        source_path = %prompt_state.source_path.display(),
+    )
+    .in_scope(|| materialize_harness_prompt(prompt_state, repo_root, child_cwd))
+    .map_err(|error| {
+        let err_info =
+            LifecycleErrorInfo::from_action_failure("materialize", error.to_string());
+        let empty = empty_materialized_prompt();
+        match emit_blocked_finalize_with_err(
+            lifecycle_guard,
+            &empty,
+            &prompt_state.source_path,
+            repo_root,
+            term,
+            effect_engine,
+            &err_info,
+            loop_start,
+        ) {
+            Some(lifecycle_error) => lifecycle_error.into(),
+            None => error,
+        }
+    })
+}
+
+fn prepare_harness_plan_phase(
+    prompt: &mut AttemptPromptPreparation<'_>,
+    lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
+    control: &AttemptRetryProxyControl<'_>,
+    materialized: &MaterializedHarnessPrompt,
+) -> Result<claudine::harness::HarnessPlan> {
+    let attempt = *control.attempt;
+    let show_checks = prompt.show_checks;
+    let prompt_state = &*prompt.prompt_state;
+    let harness_context = &mut *prompt.harness_context;
+    let repo_root = prompt.repo_root;
+    let lifecycle_guard = &mut *lifecycle.guard;
+    let effect_engine = lifecycle.effect_engine;
+    let term = lifecycle.term;
+    let loop_start = lifecycle.loop_start;
+    let plan = info_span!(
+        "harness_plan_parse",
+        attempt,
+        source_path = %prompt_state.source_path.display(),
+    )
+    .in_scope(|| {
+        claudine::harness::parse_harness_plan(
+            &materialized.frontmatter,
+            &prompt_state.source_path,
+        )
+    })
+    .map_err(|error| {
+        let err_info = LifecycleErrorInfo::from_harness_error(&error);
+        emit_blocked_finalize_with_err(
+            lifecycle_guard,
+            materialized,
+            &prompt_state.source_path,
+            repo_root,
+            term,
+            effect_engine,
+            &err_info,
+            loop_start,
+        )
+        .map(color_eyre::eyre::Report::from)
+        .unwrap_or_else(|| eyre!("{error}"))
+    })?;
+
+    if show_checks {
+        claudine::harness::report::report_source_file(
+            &prompt_state.original_ref,
+            &prompt_state.source_path,
+            term,
+        );
+    }
+    if !prompt_state.source_path.exists() {
+        if show_checks {
+            claudine::harness::report::report_unhandled_failure(
+                "source file does not exist — cannot proceed",
+                term,
+            );
+        }
+        let message = format!(
+            "source file does not exist: {}",
+            prompt_state.source_path.display()
+        );
+        let err_info = LifecycleErrorInfo::from_action_failure("missing_source", &message);
+        if let Some(error) = emit_blocked_finalize_with_err(
+            lifecycle_guard,
+            materialized,
+            &prompt_state.source_path,
+            repo_root,
+            term,
+            effect_engine,
+            &err_info,
+            loop_start,
+        ) {
+            return Err(error.into());
+        }
+        return Err(eyre!(message));
+    }
+
+    if matches!(prompt_state.mode, HarnessPromptMode::Passthrough) {
+        let source_text = std::fs::read_to_string(&prompt_state.source_path).ok();
+        let auditable = claudine::harness::collect_auditable_commands(source_text.as_deref())?;
+        let audit_report = info_span!(
+            "harness_shell_audit",
+            attempt,
+            command_count = auditable.len(),
+        )
+        .in_scope(|| {
+            claudine::harness::audit_shell_commands(&auditable, harness_context.shell_options())
+        });
+        if show_checks {
+            claudine::harness::report::report_shell_audit_header(
+                audit_report.outcomes.len(),
+                term,
+            );
+            claudine::harness::report::report_shell_audit_outcomes(&audit_report, term);
+        }
+        if !audit_report.all_passed() {
+            let message = format!(
+                "shell audit failed: {} denied directive(s) in source page",
+                audit_report.failures().len()
+            );
+            if show_checks {
+                claudine::harness::report::report_unhandled_failure(
+                    "shell audit failed for source-page directives — cannot proceed",
+                    term,
+                );
+            }
+            let err_info = LifecycleErrorInfo::from_action_failure("shell_audit", &message);
+            if let Some(error) = emit_blocked_finalize_with_err(
+                lifecycle_guard,
+                materialized,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                effect_engine,
+                &err_info,
+                loop_start,
+            ) {
+                return Err(error.into());
+            }
+            return Err(eyre!(message));
+        }
+    }
+    if attempt == 1 && !matches!(prompt_state.mode, HarnessPromptMode::Passthrough) {
+        harness_context.freeze_shell_approvals();
+    }
+    Ok(plan)
 }
 
 fn execute_attempt_phase(

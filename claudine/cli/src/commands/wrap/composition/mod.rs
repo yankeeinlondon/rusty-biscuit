@@ -25,7 +25,7 @@ use claudine::composition::{
     CompositionMode, InlineClosurePlan, IterationSummarySignals, ModelResolutionReason,
     ResolvedExecutionTarget, SelectionReason, SessionInteractivitySource, agent_state_breakdown,
     build_installed_snapshot, build_picker_plan, classify_agent_resolution,
-    invalid_agent_message, resolve_target_non_tty_with_catalog, route_blocked_finalize,
+    invalid_agent_message, resolve_target_non_tty_with_catalog,
 };
 use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use claudine::stream::stderr::Verbosity;
@@ -79,7 +79,7 @@ pub(crate) use launch::select_launch_workspace;
 use launch::enforce_repo_launch_detection;
 use preflight::{
     PreflightBlockedOutcome, emit_preflight_blocked_and_finalize, preflight_blocked_control_error,
-    setup_phase_deferred, surface_preflight_catch_error,
+    setup_phase_deferred,
 };
 
 /// Result of executing a single composition step through the wrapper pipeline.

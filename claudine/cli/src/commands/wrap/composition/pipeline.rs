@@ -5,8 +5,8 @@ use std::time::Instant;
 
 use super::*;
 use claudine::composition::{
-    LifecycleTransitionAbort, LifecycleTransitionDecision, LifecycleTransitionError,
-    LifecycleTransitionInput, decide_lifecycle_transition,
+    LifecycleCatchProtocol, LifecycleCatchResult, LifecycleCatchState, LifecycleTransitionAbort,
+    LifecycleTransitionDecision, LifecycleTransitionError, LifecycleTransitionInput, decide_lifecycle_transition,
 };
 
 enum CompositionPhaseResult<T> {
@@ -1024,6 +1024,65 @@ fn construct_lifecycle_runtime(
 }
 
 
+fn execute_initialize_catch(
+    guard: &mut LifecycleRunGuard<'_>,
+    init_ctx: &StackExecutionContext<'_>,
+    source_path: &Path,
+    term: &Terminal,
+    init_outcome: LifecycleEventOutcome,
+) -> Result<LifecycleCatchResult> {
+    let original_early = init_outcome.evaluation_error.as_ref().map(|info| {
+        crate::output::error_walker::emit_lifecycle_evaluation_error_early(
+            source_path,
+            "initialize",
+            info,
+            term,
+        )
+    });
+    let mut protocol = LifecycleCatchProtocol::new(
+        LifecycleSignal::Initialize,
+        LifecycleCatchState {
+            terminal_slot: guard.terminal_signal(),
+            finalize_emitted: guard.finalize_emitted(),
+        },
+        None,
+        init_outcome,
+    );
+    while let Some(step) = protocol.next_step().cloned() {
+        let event_ctx = init_ctx.with_signal(step.signal);
+        let event_ctx = match step.error.as_ref() {
+            Some(error) => event_ctx.with_error(error),
+            None => event_ctx,
+        };
+        let outcome = guard.execute_event(step.signal, &event_ctx);
+        assert!(protocol.record(step.signal, outcome));
+    }
+    let result = protocol.finish().expect("initialize catch protocol completed");
+    let Some(signal) = result.evaluation_error_signal else {
+        return Ok(result);
+    };
+    if signal == LifecycleSignal::Initialize {
+        return Err(original_early
+            .expect("initialize evaluation error was emitted")
+            .into());
+    }
+    let info = result
+        .evaluation_error
+        .as_ref()
+        .expect("evaluation signal carries error info");
+    Err(crate::output::error_walker::emit_lifecycle_evaluation_error_early(
+        source_path,
+        match signal {
+            LifecycleSignal::Failure => "failure",
+            LifecycleSignal::Finalize => "finalize",
+            _ => unreachable!("catch protocol returned an unexpected signal"),
+        },
+        info,
+        term,
+    )
+    .into())
+}
+
 fn route_initialize(
     guard: &mut LifecycleRunGuard<'_>,
     init_ctx: &StackExecutionContext<'_>,
@@ -1034,6 +1093,24 @@ fn route_initialize(
 ) -> CompositionPhaseResult<Option<PathBuf>> {
     let routed = (|| -> Result<CompositionPhaseResult<Option<PathBuf>>> {
         let init_outcome = guard.execute_event(LifecycleSignal::Initialize, init_ctx);
+        let init_result = execute_initialize_catch(
+            guard,
+            init_ctx,
+            source_path,
+            term,
+            init_outcome.clone(),
+        )?;
+        if let Some(setup_error) = init_result.setup_error.as_ref() {
+            let message = if matches!(
+                init_result.control,
+                Some(StackControl::Error { .. })
+            ) {
+                setup_error.msg.clone()
+            } else {
+                "lifecycle initialize failed".to_string()
+            };
+            return Err(eyre!(message));
+        }
         let init_decision = decide_lifecycle_transition(&LifecycleTransitionInput {
             event: LifecycleSignal::Initialize,
             terminal_slot: None,
@@ -1047,54 +1124,11 @@ fn route_initialize(
             proxy_target_seen: false,
             finalize_emitted: false,
         });
-        // A late-binding evaluation error on `initialize` (a crashed `when:` guard
-        // or interpolation) routes through `failure` → `finalize` like any other
-        // setup failure and halts non-zero (Decision #5). Checked before the
-        // control match because an evaluation raise leaves `control` `None`.
-        if matches!(
-            init_decision,
-            LifecycleTransitionDecision::CatchFailure {
-                error: LifecycleTransitionError::Evaluation
-            }
-        ) {
-            let info = init_outcome
-                .evaluation_error
-                .as_ref()
-                .expect("evaluation transition carries evaluation error");
-            // Surface the original `initialize` crash to stderr before the
-            // `failure`/`finalize` catch events fire (Decision #2).
-            let early = crate::output::error_walker::emit_lifecycle_evaluation_error_early(
-                source_path,
-                "initialize",
-                info,
-                term,
-            );
-            let failure_outcome =
-                guard.execute_event(LifecycleSignal::Failure, &init_ctx.with_error(info));
-            // If `failure` raised, thread its error (not the original) into
-            // finalize so a `finalize.stack` can branch on the failure raise.
-            let active_err = failure_outcome
-                .evaluation_error
-                .as_ref()
-                .unwrap_or(info);
-            let finalize_outcome = guard.execute_event(
-                LifecycleSignal::Finalize,
-                &init_ctx.with_error(active_err).with_signal(LifecycleSignal::Finalize),
-            );
-            return Err(surface_preflight_catch_error(
-                source_path,
-                Some(&failure_outcome),
-                Some(&finalize_outcome),
-                early,
-                term,
-            )
-            .into());
-        }
         // Set by an `initialize` Proxy control: the resolved target document the
         // run is handed off to. Threaded into `run_composition_body` so the harness loop
         // re-composes and runs the target instead of the original document.
         let mut init_proxy_target: Option<std::path::PathBuf> = None;
-        if let Some(ref control) = init_outcome.control {
+        if let Some(ref control) = init_result.control {
             match (&init_decision, control) {
                 (_, StackControl::Skip) => {
                     // Clean whole-document opt-out: no pre-flight, no provider,
@@ -1109,61 +1143,6 @@ fn route_initialize(
                             terminal_signal: None,
                         },
                     )));
-                }
-                (
-                    LifecycleTransitionDecision::TerminalFailure {
-                        error: LifecycleTransitionError::ExplicitControl,
-                    },
-                    StackControl::Error { reason },
-                ) => {
-                    let msg = reason
-                        .clone()
-                        .unwrap_or_else(|| "lifecycle initialize error".to_string());
-                    let action_error =
-                        claudine::composition::lifecycle_context::LifecycleErrorInfo::from_action_failure(
-                            "error",
-                            msg.clone(),
-                        );
-                    let failure_outcome = guard.execute_event(
-                        LifecycleSignal::Failure,
-                        &init_ctx.with_error(&action_error),
-                    );
-                    // If `failure` raised, thread its error (not the original) into
-                    // finalize so a `finalize.stack` can branch on the failure raise.
-                    let active_err = failure_outcome
-                        .evaluation_error
-                        .as_ref()
-                        .unwrap_or(&action_error);
-                    let finalize_outcome = guard.execute_event(
-                        LifecycleSignal::Finalize,
-                        &init_ctx.with_error(active_err).with_signal(LifecycleSignal::Finalize),
-                    );
-                    if failure_outcome.evaluation_error.is_some()
-                        || finalize_outcome.evaluation_error.is_some()
-                    {
-                        // A catch event raised an evaluation error (the original was
-                        // an explicit `error(...)`, not an evaluation error, so it
-                        // was not early-emitted). Surface the catch raise to stderr;
-                        // no further lifecycle events fire (Decision #2). The `early`
-                        // fallback is unreachable inside this guard.
-                        let early = CompositionError::catch_evaluation_error(
-                            source_path,
-                            "initialize",
-                            &action_error,
-                            Some(&failure_outcome),
-                            Some(&finalize_outcome),
-                        )
-                        .already_emitted();
-                        return Err(surface_preflight_catch_error(
-                            source_path,
-                            Some(&failure_outcome),
-                            Some(&finalize_outcome),
-                            early,
-                            term,
-                        )
-                        .into());
-                    }
-                    return Err(eyre!(msg));
                 }
                 (
                     LifecycleTransitionDecision::ProxyHandoff { target },
@@ -1232,60 +1211,6 @@ fn route_initialize(
                 }
                 _ => unreachable!("initialize control and transition decision diverged"),
             }
-        }
-        if matches!(
-            init_decision,
-            LifecycleTransitionDecision::CatchFailure {
-                error: LifecycleTransitionError::Action
-            }
-        ) {
-            let original_info = init_outcome.action_error.as_ref();
-            let failure_ctx = match original_info {
-                Some(e) => init_ctx.with_error(e),
-                None => init_ctx.with_signal(LifecycleSignal::Failure),
-            };
-            let failure_outcome = guard.execute_event(LifecycleSignal::Failure, &failure_ctx);
-            // If `failure` raised, thread its error (not the original) into finalize
-            // so a `finalize.stack` can branch on the failure raise. If there was no
-            // original action error, synthesize one for finalize to carry.
-            let synthetic_info =
-                claudine::composition::lifecycle_context::LifecycleErrorInfo::from_action_failure(
-                    "error",
-                    "lifecycle initialize failed",
-                );
-            let active_err = failure_outcome
-                .evaluation_error
-                .as_ref()
-                .or(original_info)
-                .unwrap_or(&synthetic_info);
-            let finalize_ctx = init_ctx.with_signal(LifecycleSignal::Finalize);
-            let finalize_ctx = finalize_ctx.with_error(active_err);
-            let finalize_outcome = guard.execute_event(LifecycleSignal::Finalize, &finalize_ctx);
-            if failure_outcome.evaluation_error.is_some()
-                || finalize_outcome.evaluation_error.is_some()
-            {
-                // A catch event raised an evaluation error while routing this
-                // setup failure. Surface it to stderr; no further lifecycle events
-                // fire (Decision #2). The `early` fallback is unreachable here.
-                let info = original_info.unwrap_or(&synthetic_info);
-                let early = CompositionError::catch_evaluation_error(
-                    source_path,
-                    "initialize",
-                    info,
-                    Some(&failure_outcome),
-                    Some(&finalize_outcome),
-                )
-                .already_emitted();
-                return Err(surface_preflight_catch_error(
-                    source_path,
-                    Some(&failure_outcome),
-                    Some(&finalize_outcome),
-                    early,
-                    term,
-                )
-                .into());
-            }
-            return Err(eyre!("lifecycle initialize failed"));
         }
         Ok(CompositionPhaseResult::Proceed(init_proxy_target))
     })();
