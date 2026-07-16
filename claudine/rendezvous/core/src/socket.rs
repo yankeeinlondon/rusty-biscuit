@@ -17,9 +17,32 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
+use crate::local_endpoint::LocalEndpoint;
+
 /// Environment variable that overrides the IPC endpoint (UDS path on Unix,
 /// named-pipe name on Windows).
 pub const SOCKET_ENV_VAR: &str = "RENDEZVOUS_SOCKET";
+
+/// Tag a legacy path-shaped endpoint with the transport it always implied.
+///
+/// The path-shaped API decided the transport by compile target and never said
+/// so; this reproduces that decision exactly, so a caller still on
+/// [`default_socket_path`] keeps the endpoint it has today while the typed
+/// connector lands. It is a migration seam, not a general conversion — a
+/// `PathBuf` is not evidence of a transport, which is the whole reason
+/// [`LocalEndpoint`] exists. Phase 6 removes this module and its callers
+/// together.
+#[must_use]
+pub fn legacy_local_endpoint(path: PathBuf) -> LocalEndpoint {
+    #[cfg(unix)]
+    {
+        LocalEndpoint::UnixSocket(path)
+    }
+    #[cfg(windows)]
+    {
+        LocalEndpoint::WindowsNamedPipe(path.into_os_string())
+    }
+}
 
 /// Default socket file name within the resolved parent directory (Unix only).
 #[cfg(unix)]
