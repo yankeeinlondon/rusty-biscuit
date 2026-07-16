@@ -6,6 +6,25 @@ use biscuit_terminal::terminal::Terminal;
 use super::model::{Intervention, MeshSnapshot, Staleness, STALENESS_THRESHOLD_MS};
 use super::report::DashboardReport;
 
+/// A private directory to hold the daemon's endpoint.
+///
+/// `tempfile` creates 0755 directories, which the daemon refuses: the endpoint
+/// directory is the Unix security boundary. The real default resolves into a
+/// private directory, so a fixture has to build one too.
+fn private_endpoint_dir(parent: &std::path::Path) -> std::path::PathBuf {
+    use std::os::unix::fs::DirBuilderExt;
+
+    let dir = parent.join("rendezvous-runtime");
+    if !dir.exists() {
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&dir)
+            .expect("create runtime dir");
+    }
+    dir
+}
+
+
 const LOCAL: &str = "aaaa1111";
 const REMOTE: &str = "bbbb2222";
 
@@ -244,7 +263,7 @@ async fn fetch_snapshot_reflects_a_live_session() {
     use std::time::{Duration, Instant};
 
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let socket = tmp.path().join("daemon.sock");
+    let socket = private_endpoint_dir(tmp.path()).join("daemon.sock");
     let mut config = rendezvous_daemon::server::DaemonConfig::with_data_dir(
         tmp.path().join("data"),
     )

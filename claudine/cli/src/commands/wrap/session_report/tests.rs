@@ -1,6 +1,25 @@
 use super::*;
 use std::time::Instant;
 
+/// A private directory to hold the daemon's endpoint.
+///
+/// `tempfile` creates 0755 directories, which the daemon refuses: the endpoint
+/// directory is the Unix security boundary. The real default resolves into a
+/// private directory, so a fixture has to build one too.
+fn private_endpoint_dir(parent: &std::path::Path) -> std::path::PathBuf {
+    use std::os::unix::fs::DirBuilderExt;
+
+    let dir = parent.join("rendezvous-runtime");
+    if !dir.exists() {
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&dir)
+            .expect("create runtime dir");
+    }
+    dir
+}
+
+
 fn env_context() -> EnvironmentContext {
     EnvironmentContext::default()
 }
@@ -54,7 +73,7 @@ async fn kill_switch_disables_reporting() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn round_trip_against_live_daemon() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let socket = tmp.path().join("daemon.sock");
+    let socket = private_endpoint_dir(tmp.path()).join("daemon.sock");
     point_socket_at(&socket);
 
     let mut config = rendezvous_daemon::server::DaemonConfig::with_data_dir(
@@ -124,7 +143,7 @@ async fn round_trip_against_live_daemon() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn status_reporter_flips_and_clears_waiting() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let socket = tmp.path().join("daemon.sock");
+    let socket = private_endpoint_dir(tmp.path()).join("daemon.sock");
     point_socket_at(&socket);
 
     let mut config = rendezvous_daemon::server::DaemonConfig::with_data_dir(
@@ -212,7 +231,7 @@ async fn report_status_kill_switch_and_missing_session_are_fast_noops() {
 async fn report_status_flips_idle_and_clears_to_active() {
     unsafe { std::env::remove_var(ENABLE_ENV) };
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let socket = tmp.path().join("daemon.sock");
+    let socket = private_endpoint_dir(tmp.path()).join("daemon.sock");
     point_socket_at(&socket);
 
     let mut config = rendezvous_daemon::server::DaemonConfig::with_data_dir(
@@ -264,7 +283,7 @@ async fn report_status_flips_idle_and_clears_to_active() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn started_records_permission_signal_per_provider() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let socket = tmp.path().join("daemon.sock");
+    let socket = private_endpoint_dir(tmp.path()).join("daemon.sock");
     point_socket_at(&socket);
 
     let mut config = rendezvous_daemon::server::DaemonConfig::with_data_dir(

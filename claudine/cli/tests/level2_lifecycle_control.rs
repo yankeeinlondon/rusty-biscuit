@@ -102,6 +102,25 @@ use std::time::{Duration, Instant};
 use tempfile::tempdir;
 use test_toolkit::{Level, require_level};
 
+/// A private directory to hold the daemon's endpoint.
+///
+/// `tempfile` creates 0755 directories, which the daemon refuses: the endpoint
+/// directory is the Unix security boundary. The real default resolves into a
+/// private directory, so a fixture has to build one too.
+fn private_endpoint_dir(parent: &std::path::Path) -> std::path::PathBuf {
+    use std::os::unix::fs::DirBuilderExt;
+
+    let dir = parent.join("rendezvous-runtime");
+    if !dir.exists() {
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&dir)
+            .expect("create runtime dir");
+    }
+    dir
+}
+
+
 struct Staged {
     workspace: tempfile::TempDir,
     bin_dir: std::path::PathBuf,
@@ -257,7 +276,7 @@ struct RendezvousQueue {
 #[allow(dead_code)]
 impl RendezvousQueue {
     fn spawn(workspace: &Path) -> Self {
-        let socket = workspace.join("rendezvous.sock");
+        let socket = private_endpoint_dir(workspace).join("rendezvous.sock");
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
