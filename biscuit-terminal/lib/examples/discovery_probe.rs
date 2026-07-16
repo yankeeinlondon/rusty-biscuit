@@ -31,6 +31,17 @@
 //! * `cursor` — Query cursor position (DSR).
 //! * `cursor_timeout` — Query cursor position with custom timeout.
 //! * `terminal` — Build a `Terminal` instance and print its fields.
+//! * `terminal_cache` — Construct `PROBE_TERM_CONSTRUCTIONS` (default 3)
+//!   `Terminal` values in one process and print each one's `text_color`.
+//!   Because the OSC 10 foreground query is cached per process, the master
+//!   side observes exactly one `\x1b]10;?\x07` request across every
+//!   construction and every printed `text_color` is the same cached value.
+//!   Finding 2/21 cache-reuse evidence.
+//! * `terminal_latency` — Construct `PROBE_TERM_WARMUP` (default 3) warm-up
+//!   `Terminal` values (untimed, to absorb the one-time cold OSC round-trip),
+//!   then time `PROBE_TERM_SAMPLES` (default 50) repeated constructions and
+//!   print min/median/mean/max/stddev (nanoseconds) plus the raw sample
+//!   vector. Finding 2/3 repeated-construction latency evidence.
 //! * `prose` — Render a [`Prose`] string against the detected (or
 //!   override-built) terminal and print the raw bytes between
 //!   `---PROSE---` / `---END---` markers.
@@ -91,6 +102,8 @@ fn main() {
         "cursor" => probe_cursor(),
         "cursor_timeout" => probe_cursor_timeout(),
         "terminal" => probe_terminal(),
+        "terminal_cache" => probe_terminal_cache(),
+        "terminal_latency" => probe_terminal_latency(),
         "prose" => probe_prose(),
         _ => probe_all(),
     }
@@ -239,6 +252,100 @@ fn probe_terminal() {
     println!("underline_support={:?}", term.underline_support);
     println!("osc_link_support={}", term.osc_link_support);
     println!("is_ci={}", term.is_ci);
+}
+
+// ---------------------------------------------------------------------------
+// Terminal construction cache proof (Finding 2/21)
+// ---------------------------------------------------------------------------
+
+/// Read `PROBE_TERM_CONSTRUCTIONS` (default 3, floored at 2).
+fn construction_count() -> usize {
+    std::env::var("PROBE_TERM_CONSTRUCTIONS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(3)
+        .max(2)
+}
+
+/// Construct N `Terminal` values in one process and print each one's
+/// `text_color`. The OSC 10 foreground query is cached per process, so the
+/// master side sees exactly one `\x1b]10;?\x07` request across every
+/// construction, and every printed value equals the single cached first
+/// response — proving reuse rather than coincidental equality.
+fn probe_terminal_cache() {
+    use biscuit_terminal::terminal::Terminal;
+
+    let n = construction_count();
+    println!("terminal_cache_count={n}");
+    for i in 0..n {
+        let term = Terminal::new();
+        // Debug of `Option<RgbValue>`; identical across constructions when the
+        // cached response is reused.
+        println!("terminal_text_color[{i}]={:?}", term.text_color);
+    }
+    println!("terminal_cache_done");
+}
+
+// ---------------------------------------------------------------------------
+// Repeated-construction latency (Finding 2/3)
+// ---------------------------------------------------------------------------
+
+fn usize_env(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(default)
+}
+
+/// Warm up (untimed) to absorb the one-time cold OSC round-trip, then time
+/// repeated `Terminal` constructions and print the summary statistics plus the
+/// raw nanosecond samples for retention in the feature-local evidence index.
+fn probe_terminal_latency() {
+    use biscuit_terminal::terminal::Terminal;
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    let warmup = usize_env("PROBE_TERM_WARMUP", 3).max(1);
+    let samples = usize_env("PROBE_TERM_SAMPLES", 50).max(1);
+
+    for _ in 0..warmup {
+        black_box(Terminal::new());
+    }
+
+    let mut ns: Vec<u128> = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        let start = Instant::now();
+        black_box(Terminal::new());
+        ns.push(start.elapsed().as_nanos());
+    }
+
+    let count = ns.len() as f64;
+    let sum: u128 = ns.iter().sum();
+    let mean = sum as f64 / count;
+    let variance = ns
+        .iter()
+        .map(|&v| {
+            let d = v as f64 - mean;
+            d * d
+        })
+        .sum::<f64>()
+        / count;
+    let stddev = variance.sqrt();
+
+    let mut sorted = ns.clone();
+    sorted.sort_unstable();
+    let median = sorted[sorted.len() / 2];
+
+    println!("terminal_latency_warmup={warmup}");
+    println!("terminal_latency_samples={samples}");
+    println!("terminal_latency_min_ns={}", sorted[0]);
+    println!("terminal_latency_median_ns={median}");
+    println!("terminal_latency_mean_ns={mean:.1}");
+    println!("terminal_latency_max_ns={}", sorted[sorted.len() - 1]);
+    println!("terminal_latency_stddev_ns={stddev:.1}");
+    let raw: Vec<String> = ns.iter().map(|v| v.to_string()).collect();
+    println!("terminal_latency_raw_ns={}", raw.join(","));
+    println!("terminal_latency_done");
 }
 
 // ---------------------------------------------------------------------------
