@@ -12,6 +12,7 @@ use std::process::ExitCode;
 
 use clap::Parser;
 use rendezvous_core::socket::default_socket_path;
+use rendezvous_daemon::private_dir::default_data_dir;
 use rendezvous_daemon::server::{DaemonConfig, NetworkConfig, ServerError, spawn_uds_server};
 use tracing_subscriber::EnvFilter;
 
@@ -28,9 +29,11 @@ struct Cli {
     #[arg(long = "socket", env = "RENDEZVOUS_SOCKET")]
     socket: Option<PathBuf>,
 
-    /// Directory used for the daemon's persistent state (redb file and
-    /// DuckDB projection). Defaults to `$RENDEZVOUS_DATA_DIR` if
-    /// set, otherwise `<tempdir>/rendezvous-data`.
+    /// Directory used for the daemon's persistent state (node-identity seed,
+    /// redb file, and DuckDB projection). Defaults to `$RENDEZVOUS_DATA_DIR`
+    /// if set, otherwise `<local-data-dir>/claudine/rendezvous`. An override
+    /// changes the location, not the requirement that it be private to the
+    /// current user.
     #[arg(long = "data-dir", env = "RENDEZVOUS_DATA_DIR")]
     data_dir: Option<PathBuf>,
 
@@ -82,9 +85,10 @@ async fn run() -> Result<(), ServerError> {
 
     let cli = Cli::parse();
     let socket_path = cli.socket.unwrap_or_else(default_socket_path);
-    let data_dir = cli
-        .data_dir
-        .unwrap_or_else(|| std::env::temp_dir().join("rendezvous-data"));
+    let data_dir = match cli.data_dir {
+        Some(explicit) => explicit,
+        None => default_data_dir()?,
+    };
     let mut config = DaemonConfig::with_data_dir(&data_dir);
     if !cli.repo_roots.is_empty() {
         config = config.with_repo_scan_roots(cli.repo_roots.clone());
@@ -107,7 +111,7 @@ async fn run() -> Result<(), ServerError> {
     let handle = spawn_uds_server(socket_path, config)?;
 
     tracing::info!(
-        socket = %handle.socket_path().display(),
+        endpoint = %handle.local_endpoint(),
         data_dir = %data_dir.display(),
         quic_addr = ?handle.quic_local_addr(),
         "rendezvous-daemon listening"
