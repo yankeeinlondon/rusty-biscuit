@@ -33,7 +33,7 @@ pub(super) const REQUEUE_FALLBACK_FILE_NAME: &str = "deferred-queue.jsonl";
 pub(super) enum RequeueEnqueueError {
     #[error("failed to connect to rendezvous daemon at {endpoint}: {source}")]
     Connect {
-        endpoint: std::path::PathBuf,
+        endpoint: rendezvous_core::LocalEndpoint,
         #[source]
         source: rendezvous_client::ConnectError,
     },
@@ -145,7 +145,8 @@ pub(super) async fn enqueue_requeue_entry_async(
     delay: &str,
     reason: Option<&str>,
 ) -> std::result::Result<(), RequeueEnqueueError> {
-    let endpoint = rendezvous_core::socket::default_socket_path();
+    let endpoint =
+        rendezvous_core::socket::legacy_local_endpoint(rendezvous_core::socket::default_socket_path());
     let metadata = serde_json::json!({
         "kind": "claudine.lifecycle.requeue",
         "provider": provider.as_slug(),
@@ -170,11 +171,10 @@ pub(super) async fn enqueue_requeue_entry_async(
         ),
         metadata_json: serde_json::to_string(&metadata)?,
     };
-    // Daemon-first: try the live rendezvous daemon over the platform's IPC
-    // transport (UDS on unix, named pipe on windows). On any connect or
-    // append failure, durably persist the entry to the local fallback file
-    // so the prompt is never lost. Only a fallback write failure surfaces.
-    match try_enqueue_via_daemon(endpoint.clone(), &request).await {
+    // Daemon-first: on any connect or append failure, durably persist the
+    // entry to the local fallback file so the prompt is never lost. Only a
+    // fallback write failure surfaces.
+    match try_enqueue_via_daemon(&endpoint, &request).await {
         Ok(()) => Ok(()),
         Err(daemon_err) => {
             let Some(fallback_path) = requeue_fallback_path() else {
@@ -200,14 +200,13 @@ pub(super) async fn enqueue_requeue_entry_async(
     }
 }
 
-/// Attempt the live-daemon append-entry RPC. The connector dispatches by
-/// platform (`connect_uds` on unix, `connect_named_pipe` on windows).
+/// Attempt the live-daemon append-entry RPC.
 #[allow(dead_code)] // retained for the future rendezvous deferred-execution backend
 pub(super) async fn try_enqueue_via_daemon(
-    endpoint: std::path::PathBuf,
+    endpoint: &rendezvous_core::LocalEndpoint,
     request: &rendezvous_core::AppendEntryRequest,
 ) -> std::result::Result<(), RequeueEnqueueError> {
-    let mut client = rendezvous_client::connect(endpoint.clone())
+    let mut client = rendezvous_client::connect(endpoint)
         .await
         .map_err(|source| RequeueEnqueueError::Connect {
             endpoint: endpoint.clone(),

@@ -152,8 +152,10 @@ impl StatusReporter {
         let contribution = sink_contribution(status);
         handle.spawn(async move {
             let send = async {
-                let endpoint = rendezvous_core::socket::default_socket_path();
-                let mut client = rendezvous_client::connect(endpoint).await?;
+                let endpoint = rendezvous_core::socket::legacy_local_endpoint(
+            rendezvous_core::socket::default_socket_path(),
+        );
+                let mut client = rendezvous_client::connect(&endpoint).await?;
                 client
                     .report_session_event(rendezvous_core::ReportSessionEventRequest {
                         session_id: session_id.to_string(),
@@ -257,8 +259,10 @@ pub(crate) async fn report_status(session_id: &str, status: &str) {
     }
     let contribution = idle_hook_contribution(status);
     let send = async {
-        let endpoint = rendezvous_core::socket::default_socket_path();
-        let mut client = rendezvous_client::connect(endpoint).await?;
+        let endpoint = rendezvous_core::socket::legacy_local_endpoint(
+            rendezvous_core::socket::default_socket_path(),
+        );
+        let mut client = rendezvous_client::connect(&endpoint).await?;
         client
             .report_session_event(rendezvous_core::ReportSessionEventRequest {
                 session_id: session_id.to_string(),
@@ -341,8 +345,10 @@ fn block_report(
     tokio::task::block_in_place(|| {
         handle.block_on(async {
             let send = async {
-                let endpoint = rendezvous_core::socket::default_socket_path();
-                let mut client = rendezvous_client::connect(endpoint).await?;
+                let endpoint = rendezvous_core::socket::legacy_local_endpoint(
+            rendezvous_core::socket::default_socket_path(),
+        );
+                let mut client = rendezvous_client::connect(&endpoint).await?;
                 client
                     .report_session_event(rendezvous_core::ReportSessionEventRequest {
                         session_id,

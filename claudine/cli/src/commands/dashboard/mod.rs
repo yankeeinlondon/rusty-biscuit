@@ -42,9 +42,11 @@ pub struct DashboardArgs {
 /// Render the mesh NOW view once and return.
 pub async fn run(args: DashboardArgs) -> Result<()> {
     let term = log::terminal();
-    let endpoint = rendezvous_core::socket::default_socket_path();
+    let endpoint = rendezvous_core::socket::legacy_local_endpoint(
+            rendezvous_core::socket::default_socket_path(),
+        );
 
-    let mut client = match rendezvous_client::connect(endpoint).await {
+    let mut client = match rendezvous_client::connect(&endpoint).await {
         Ok(client) => client,
         Err(err) => {
             tracing::debug!(target: "claudine::dashboard", %err, "daemon unreachable");

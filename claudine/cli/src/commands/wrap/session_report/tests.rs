@@ -87,7 +87,7 @@ async fn round_trip_against_live_daemon() {
     );
     assert_eq!(presence.session_id.as_deref(), Some("sess-presence"));
 
-    let mut client = rendezvous_client::connect(&socket).await.expect("client");
+    let mut client = rendezvous_client::connect(&rendezvous_core::socket::legacy_local_endpoint(socket.clone())).await.expect("client");
     let hosts = client
         .list_active_sessions(rendezvous_core::ListActiveSessionsRequest {})
         .await
@@ -155,7 +155,7 @@ async fn status_reporter_flips_and_clears_waiting() {
     );
     let reporter = presence.status_reporter();
 
-    let mut client = rendezvous_client::connect(&socket).await.expect("client");
+    let mut client = rendezvous_client::connect(&rendezvous_core::socket::legacy_local_endpoint(socket.clone())).await.expect("client");
 
     // Trigger 1: a permission ask flips the session to waiting.
     reporter.report("waiting_on_user");
@@ -242,7 +242,7 @@ async fn report_status_flips_idle_and_clears_to_active() {
         &child_env,
     );
 
-    let mut client = rendezvous_client::connect(&socket).await.expect("client");
+    let mut client = rendezvous_client::connect(&rendezvous_core::socket::legacy_local_endpoint(socket.clone())).await.expect("client");
 
     // Turn complete on an interactive session → idle.
     report_status("sess-idle", "idle").await;
@@ -296,7 +296,7 @@ async fn started_records_permission_signal_per_provider() {
     let unsupported =
         SessionPresence::started(Provider::Codex, None, true, &env_context(), &child_env("uns"));
 
-    let mut client = rendezvous_client::connect(&socket).await.expect("client");
+    let mut client = rendezvous_client::connect(&rendezvous_core::socket::legacy_local_endpoint(socket.clone())).await.expect("client");
     let hosts = client
         .list_active_sessions(rendezvous_core::ListActiveSessionsRequest {})
         .await

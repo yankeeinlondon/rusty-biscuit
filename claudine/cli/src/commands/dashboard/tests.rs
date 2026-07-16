@@ -259,7 +259,7 @@ async fn fetch_snapshot_reflects_a_live_session() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    let mut client = rendezvous_client::connect(&socket).await.expect("client");
+    let mut client = rendezvous_client::connect(&rendezvous_core::socket::legacy_local_endpoint(socket.clone())).await.expect("client");
     client
         .report_session_event(rendezvous_core::ReportSessionEventRequest {
             session_id: "sess-live".into(),
