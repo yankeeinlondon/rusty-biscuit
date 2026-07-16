@@ -10,7 +10,7 @@ use super::super::shell_expansion::types::ShellTimeoutBehavior;
 use super::super::remote_fetch::RemoteFetchWeakId;
 use super::super::shell_expansion::ShellApprovalHandler;
 use super::runtime::ComposeContext;
-use biscuit_hash::xx_hash;
+use biscuit_hash::{xx_hash, xx_hash_bytes};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -1341,19 +1341,142 @@ impl Default for TransclusionOptions {
 //
 // The versioned domain marker prevents collisions with unrelated hashed
 // content and lets the encoding evolve deliberately.
-const OPTIONS_IDENTITY_DOMAIN: &str = "dm.compose-options.v1";
+const OPTIONS_IDENTITY_DOMAIN: &str = "dm.compose-options.v2";
+
+/// Versioned domain marker for the compose-cache options fingerprint.
+///
+/// Distinct from [`OPTIONS_IDENTITY_DOMAIN`] (the graph identity) so the two
+/// products of the single classification never collide, and distinct from the
+/// historical `options_hash` string-join encoding this replaced: a persistent
+/// cache entry keyed under the old encoding hashes to a different value and is
+/// therefore unreachable under this domain. Bump the version to deliberately
+/// invalidate persisted compose entries.
+const CACHE_OPTIONS_DOMAIN: &str = "dm.compose-cache-options.v1";
+
+/// Versioned domain marker for the reference-graph's complete runtime-context
+/// encoding. Kept distinct from the persistent-cache `context_hash` product so
+/// the two encodings can evolve independently.
+const GRAPH_CONTEXT_DOMAIN: &str = "dm.compose-graph-context.v1";
+
+/// Complete fingerprint of the captured runtime context for the reference-graph
+/// identity.
+///
+/// Unlike the persistent-cache `context_hash` — which deliberately drops
+/// volatile per-second fields (`now`, `timestamp`, ...) and system-state fields
+/// (`memory_used`, `memory_avail`) so a stable document is not re-cached every
+/// second — the graph identity must be complete and fail-closed: graph
+/// construction interpolates `{{ ctx.* }}` into link/transclusion targets and
+/// evaluates transclusion `when=` conditions against these same values, so two
+/// contexts differing only in an otherwise-volatile value can yield different
+/// references and must not share a graph identity.
+///
+/// Hashes every entry of the full normalized values map plus every environment
+/// value; `canonical_json_sorted` sorts object keys recursively and env pairs
+/// are sorted explicitly, so the fingerprint is deterministic. The context is
+/// captured once and cloned into every `ComposeOptions::clone`, so it is also
+/// clone-stable.
+fn graph_context_fingerprint(ctx: &ComposeContext) -> u64 {
+    use super::super::cache::hashing::canonical_json_sorted;
+    use serde_json::Value;
+
+    let values_canonical = canonical_json_sorted(&Value::Object(ctx.values().clone()));
+    let mut parts = vec![GRAPH_CONTEXT_DOMAIN.to_string(), values_canonical];
+
+    let mut env_pairs: Vec<_> = ctx.env().iter().collect();
+    env_pairs.sort_by_key(|(k, _)| *k);
+    for (k, v) in env_pairs {
+        parts.push(format!("env.{k}={v}"));
+    }
+
+    xx_hash(&parts.join("\0"))
+}
+
+/// Unambiguous, length-prefixed canonical byte encoder for the reference-graph
+/// options value fingerprint.
+///
+/// Every variable-length segment is written as an 8-byte little-endian length
+/// prefix followed by its bytes, and every collection as an element count
+/// followed by each element, so segment and element boundaries always survive.
+/// The historical comma/NUL string join lost them, letting
+/// `pre_approved_commands = {"a,b"}` and `{"a", "b"}` hash identically even
+/// though the values are not equivalent. Enum discriminants are explicit stable
+/// bytes here, never `Debug` output (which the spec prohibits as a canonical
+/// encoding). The buffer is xxHashed via `biscuit-hash`.
+struct GraphIdentityEncoder {
+    buf: Vec<u8>,
+}
+
+impl GraphIdentityEncoder {
+    /// Starts a buffer seeded with the versioned domain marker.
+    fn new(domain: &str) -> Self {
+        let mut enc = Self { buf: Vec::new() };
+        enc.segment(domain.as_bytes());
+        enc
+    }
+
+    /// Writes a length-prefixed byte segment.
+    fn segment(&mut self, data: &[u8]) {
+        self.buf.extend_from_slice(&(data.len() as u64).to_le_bytes());
+        self.buf.extend_from_slice(data);
+    }
+
+    /// Writes a stable field label so two fields whose values encode to the
+    /// same bytes stay distinct.
+    fn field(&mut self, name: &str) {
+        self.segment(name.as_bytes());
+    }
+
+    /// Writes a length-prefixed UTF-8 value.
+    fn str(&mut self, value: &str) {
+        self.segment(value.as_bytes());
+    }
+
+    /// Writes an explicit stable enum discriminant byte.
+    fn tag(&mut self, discriminant: u8) {
+        self.buf.push(discriminant);
+    }
+
+    fn bool(&mut self, value: bool) {
+        self.buf.push(u8::from(value));
+    }
+
+    fn u64(&mut self, value: u64) {
+        self.buf.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn u128(&mut self, value: u128) {
+        self.buf.extend_from_slice(&value.to_le_bytes());
+    }
+
+    /// Writes a collection element count; each element follows via `str`.
+    fn count(&mut self, n: usize) {
+        self.u64(n as u64);
+    }
+
+    fn finish(self) -> u64 {
+        xx_hash_bytes(&self.buf)
+    }
+}
 
 /// Result of the single exhaustive `ComposeOptions` field classification.
-// `graph_parts` and the weak handles are read only by the graph-identity
-// product, which the graph/validator do not consume until the opacity cutover.
-#[allow(dead_code)]
+///
+/// The two fingerprints and the weak handles are the raw material of the two
+/// derived products: `ReferenceGraphOptionsIdentity::capture` reads
+/// `graph_value_fingerprint` plus the weak handles; `compose_cache_fingerprint`
+/// reads `cache_value_fingerprint`.
 struct ComposeOptionsClassification {
-    /// Canonical, versioned, field-named encoding of every value-representable
-    /// field — the conservative reference-graph identity input.
-    graph_parts: Vec<String>,
-    /// Legacy-format encoding of the output-affecting subset — the compose-cache
-    /// fingerprint input, byte-compatible with the historical `options_hash`.
-    cache_parts: Vec<String>,
+    /// Canonical, versioned value fingerprint over every value-representable
+    /// field — the conservative reference-graph identity input. Built by
+    /// [`GraphIdentityEncoder`] so element and field boundaries are
+    /// unambiguous.
+    graph_value_fingerprint: u64,
+    /// Typed, length-delimited fingerprint over the output-affecting field
+    /// subset — the compose-cache identity input. Built by the same
+    /// [`GraphIdentityEncoder`] under the distinct [`CACHE_OPTIONS_DOMAIN`]
+    /// marker, so it carries no `Debug`-based encoding and a persistent entry
+    /// written under the historical string-join `options_hash` cannot be read
+    /// back under this encoding (the domain and value both differ).
+    cache_value_fingerprint: u64,
     /// Weak instance handle for the shell approval handler (stateful; not
     /// value-representable).
     shell_approval_handler: Option<Weak<dyn ShellApprovalHandler>>,
@@ -1420,116 +1543,233 @@ impl ComposeOptions {
         } = self;
 
         use super::super::cache::hashing::canonical_json_sorted;
-        use super::super::cache::hashing::context_hash;
         use serde_json::Value;
-
-        let ops: Vec<String> = enabled_operations
-            .iter()
-            .map(|op| format!("{op:?}"))
-            .collect();
-
-        let source_repr = match source {
-            ComposeSource::Unknown => "unknown".to_string(),
-            ComposeSource::File(p) => format!("file:{}", p.display()),
-            ComposeSource::Url(u) => format!("url:{u}"),
-        };
-
-        let magic_paths_repr: Vec<String> = magic_paths
-            .iter()
-            .map(|(p, pos)| format!("{}:{pos:?}", p.display()))
-            .collect();
 
         // ── Graph identity: conservative, covers every value-representable
         //    field (stateful fields are handled by weak instance handles).
-        let mut graph_parts: Vec<String> = Vec::new();
-        graph_parts.push(OPTIONS_IDENTITY_DOMAIN.to_string());
-        graph_parts.push(format!("ops=[{}]", ops.join(",")));
-        graph_parts.push(format!("fail_fast={fail_fast}"));
-        graph_parts.push(format!("allow_ctx_override={allow_ctx_override}"));
-        graph_parts.push(format!(
-            "allow_invalid_frontmatter_assignment={allow_invalid_frontmatter_assignment}"
-        ));
-        graph_parts.push(format!(
-            "allow_reassigned_frontmatter_property={allow_reassigned_frontmatter_property}"
-        ));
-        graph_parts.push(format!("source={source_repr}"));
-        graph_parts.push(match external_state {
-            Some(v) => format!("external_state=Some:{}", canonical_json_sorted(v)),
-            None => "external_state=None".to_string(),
-        });
-        graph_parts.push(match set_overrides {
-            Some(v) => format!("set_overrides=Some:{}", canonical_json_sorted(v)),
-            None => "set_overrides=None".to_string(),
-        });
-        graph_parts.push(format!("max_transclusion_depth={max_transclusion_depth}"));
-        graph_parts.push(format!("allow_remote_transclusion={allow_remote_transclusion}"));
-        graph_parts.push(format!("allow_local_markdown={allow_local_markdown}"));
-        graph_parts.push(format!("allow_local_code={allow_local_code}"));
-        graph_parts.push(format!("code_fallback_language={code_fallback_language}"));
-        graph_parts.push(format!("ignore_invalid_references={ignore_invalid_references:?}"));
-        graph_parts.push(format!("resolve_repo_root={resolve_repo_root}"));
+        //
+        //    Encoded as a length-prefixed, tagged byte buffer so element and
+        //    field boundaries are unambiguous and every enum contributes an
+        //    explicit stable discriminant rather than `Debug` output.
+        let mut enc = GraphIdentityEncoder::new(OPTIONS_IDENTITY_DOMAIN);
+
+        // Bounded operation set: encode the canonical-order index of each
+        // enabled operation (never the `Debug` name).
+        enc.field("enabled_operations");
+        let enabled_indices: Vec<usize> = enabled_operations.iter().map(|op| op.index()).collect();
+        enc.count(enabled_indices.len());
+        for index in enabled_indices {
+            enc.u64(index as u64);
+        }
+
+        enc.field("fail_fast");
+        enc.bool(*fail_fast);
+        enc.field("allow_ctx_override");
+        enc.bool(*allow_ctx_override);
+        enc.field("allow_invalid_frontmatter_assignment");
+        enc.bool(*allow_invalid_frontmatter_assignment);
+        enc.field("allow_reassigned_frontmatter_property");
+        enc.bool(*allow_reassigned_frontmatter_property);
+
+        enc.field("source");
+        match source {
+            ComposeSource::Unknown => enc.tag(0),
+            ComposeSource::File(p) => {
+                enc.tag(1);
+                enc.str(&p.display().to_string());
+            }
+            ComposeSource::Url(u) => {
+                enc.tag(2);
+                enc.str(u.as_str());
+            }
+        }
+
+        enc.field("external_state");
+        match external_state {
+            Some(v) => {
+                enc.tag(1);
+                enc.str(&canonical_json_sorted(v));
+            }
+            None => enc.tag(0),
+        }
+        enc.field("set_overrides");
+        match set_overrides {
+            Some(v) => {
+                enc.tag(1);
+                enc.str(&canonical_json_sorted(v));
+            }
+            None => enc.tag(0),
+        }
+
+        enc.field("max_transclusion_depth");
+        enc.u64(*max_transclusion_depth as u64);
+        enc.field("allow_remote_transclusion");
+        enc.bool(*allow_remote_transclusion);
+        enc.field("allow_local_markdown");
+        enc.bool(*allow_local_markdown);
+        enc.field("allow_local_code");
+        enc.bool(*allow_local_code);
+        enc.field("code_fallback_language");
+        enc.str(code_fallback_language);
+
+        enc.field("ignore_invalid_references");
+        match ignore_invalid_references {
+            None => enc.tag(0),
+            Some(false) => enc.tag(1),
+            Some(true) => enc.tag(2),
+        }
+
+        enc.field("resolve_repo_root");
+        enc.bool(*resolve_repo_root);
+
         // Ordered vector: preserve order (search-root precedence is behavioral).
-        graph_parts.push(format!("magic_paths=[{}]", magic_paths_repr.join(",")));
-        graph_parts.push(format!("shell_timeout_ns={}", shell_timeout.as_nanos()));
-        graph_parts.push(format!("shell_timeout_behavior={shell_timeout_behavior:?}"));
-        graph_parts.push(match shell_policy_root {
-            Some(p) => format!("shell_policy_root=Some:{}", p.display()),
-            None => "shell_policy_root=None".to_string(),
+        enc.field("magic_paths");
+        enc.count(magic_paths.len());
+        for (path, position) in magic_paths {
+            enc.str(&path.display().to_string());
+            enc.tag(match position {
+                biscuit_file::PathPosition::Start => 0,
+                biscuit_file::PathPosition::End => 1,
+            });
+        }
+
+        enc.field("shell_timeout_ns");
+        enc.u128(shell_timeout.as_nanos());
+        enc.field("shell_timeout_behavior");
+        enc.tag(match shell_timeout_behavior {
+            ShellTimeoutBehavior::Error => 0,
+            ShellTimeoutBehavior::EmptyString => 1,
         });
-        graph_parts.push(match shell_working_directory {
-            Some(p) => format!("shell_working_directory=Some:{}", p.display()),
-            None => "shell_working_directory=None".to_string(),
-        });
+        enc.field("shell_policy_root");
+        match shell_policy_root {
+            Some(p) => {
+                enc.tag(1);
+                enc.str(&p.display().to_string());
+            }
+            None => enc.tag(0),
+        }
+        enc.field("shell_working_directory");
+        match shell_working_directory {
+            Some(p) => {
+                enc.tag(1);
+                enc.str(&p.display().to_string());
+            }
+            None => enc.tag(0),
+        }
+
         // Unordered set: sort for canonical order.
-        graph_parts.push(match pre_approved_commands {
+        enc.field("pre_approved_commands");
+        match pre_approved_commands {
             Some(set) => {
+                enc.tag(1);
                 let mut entries: Vec<&str> = set.iter().map(String::as_str).collect();
                 entries.sort_unstable();
-                format!("pre_approved_commands=Some:[{}]", entries.join(","))
+                enc.count(entries.len());
+                for entry in entries {
+                    enc.str(entry);
+                }
             }
-            None => "pre_approved_commands=None".to_string(),
+            None => enc.tag(0),
+        }
+
+        enc.field("shell_strip_ansi");
+        enc.bool(*shell_strip_ansi);
+
+        enc.field("list_spacing");
+        enc.tag(match list_spacing {
+            crate::markdown::cleanup::ListSpacingMode::Normal => 0,
+            crate::markdown::cleanup::ListSpacingMode::Compact => 1,
+            crate::markdown::cleanup::ListSpacingMode::Loose => 2,
         });
-        graph_parts.push(format!("shell_strip_ansi={shell_strip_ansi}"));
-        graph_parts.push(format!("list_spacing={list_spacing:?}"));
-        graph_parts.push(format!("incidental_newline_mode={incidental_newline_mode:?}"));
-        graph_parts.push(format!("fixed_width={fixed_width:?}"));
-        graph_parts.push(format!("indent_size={indent_size}"));
-        graph_parts.push(format!("cache_access_mode={cache_access_mode:?}"));
-        graph_parts.push(format!("cache_freshness_mode={cache_freshness_mode:?}"));
-        graph_parts.push(match cache_root {
-            Some(p) => format!("cache_root=Some:{}", p.display()),
-            None => "cache_root=None".to_string(),
+        enc.field("incidental_newline_mode");
+        enc.tag(match incidental_newline_mode {
+            crate::markdown::cleanup::IncidentalNewlineMode::Strip => 0,
+            crate::markdown::cleanup::IncidentalNewlineMode::Preserve => 1,
         });
-        graph_parts.push(match cache_namespace {
-            Some(n) => format!("cache_namespace=Some:{n}"),
-            None => "cache_namespace=None".to_string(),
+        enc.field("fixed_width");
+        match fixed_width {
+            Some(width) => {
+                enc.tag(1);
+                enc.u64(*width as u64);
+            }
+            None => enc.tag(0),
+        }
+        enc.field("indent_size");
+        enc.u64(*indent_size as u64);
+
+        enc.field("cache_access_mode");
+        enc.tag(match cache_access_mode {
+            CacheAccessMode::Off => 0,
+            CacheAccessMode::ReadOnly => 1,
+            CacheAccessMode::ReadWrite => 2,
+            CacheAccessMode::Refresh => 3,
         });
-        graph_parts.push(format!("perf_enabled={perf_enabled}"));
-        // Runtime context: interpolation/condition-affecting values (volatile
-        // per-second and system-state fields excluded by `context_hash`).
-        graph_parts.push(format!("context={:016x}", context_hash(context)));
-        graph_parts.push(format!("replace_parent_wins={replace_parent_wins}"));
-        graph_parts.push(match one_off_replace {
-            Some(m) => format!(
-                "one_off_replace=Some:{}",
-                canonical_json_sorted(&Value::Object(m.clone()))
-            ),
-            None => "one_off_replace=None".to_string(),
+        enc.field("cache_freshness_mode");
+        enc.tag(match cache_freshness_mode {
+            CacheFreshnessMode::Strict => 0,
+            CacheFreshnessMode::Fallback => 1,
+            CacheFreshnessMode::Optimistic => 2,
+            CacheFreshnessMode::Forced => 3,
         });
-        graph_parts.push(format!("interpolate_code_blocks={interpolate_code_blocks}"));
-        graph_parts.push(match baseline_schema {
+        enc.field("cache_root");
+        match cache_root {
+            Some(p) => {
+                enc.tag(1);
+                enc.str(&p.display().to_string());
+            }
+            None => enc.tag(0),
+        }
+        enc.field("cache_namespace");
+        match cache_namespace {
+            Some(n) => {
+                enc.tag(1);
+                enc.str(n);
+            }
+            None => enc.tag(0),
+        }
+
+        enc.field("perf_enabled");
+        enc.bool(*perf_enabled);
+
+        // Runtime context: complete encoding of every captured value and env
+        // entry — including the volatile per-second and system-state fields the
+        // persistent-cache `context_hash` drops. Graph construction interpolates
+        // `{{ ctx.* }}` into link/transclusion targets and evaluates `when=`
+        // conditions against these values, so the graph identity must be
+        // complete and fail closed rather than reuse the cache product.
+        enc.field("context");
+        enc.u64(graph_context_fingerprint(context));
+
+        enc.field("replace_parent_wins");
+        enc.bool(*replace_parent_wins);
+        enc.field("one_off_replace");
+        match one_off_replace {
+            Some(m) => {
+                enc.tag(1);
+                enc.str(&canonical_json_sorted(&Value::Object(m.clone())));
+            }
+            None => enc.tag(0),
+        }
+        enc.field("interpolate_code_blocks");
+        enc.bool(*interpolate_code_blocks);
+
+        enc.field("baseline_schema");
+        match baseline_schema {
             Some(schema) => {
+                enc.tag(1);
                 let json = crate::markdown::schemas::to_json_schema(schema)
                     .unwrap_or_else(|_| serde_json::json!({"baseline_schema_error": true}));
-                format!("baseline_schema=Some:{}", canonical_json_sorted(&json))
+                enc.str(&canonical_json_sorted(&json));
             }
-            None => "baseline_schema=None".to_string(),
-        });
-        graph_parts.push(format!(
-            "baseline_is_darkmatter_default={baseline_is_darkmatter_default}"
-        ));
-        graph_parts.push(format!("trigger_schemas={trigger_schemas}"));
+            None => enc.tag(0),
+        }
+        enc.field("baseline_is_darkmatter_default");
+        enc.bool(*baseline_is_darkmatter_default);
+        enc.field("trigger_schemas");
+        enc.bool(*trigger_schemas);
+
         // Remote read config: allowed_hosts is an unordered allowlist → sort.
+        enc.field("remote_read_config.allowed_hosts");
         {
             let mut hosts: Vec<&str> = remote_read_config
                 .allowed_hosts
@@ -1537,74 +1777,176 @@ impl ComposeOptions {
                 .map(String::as_str)
                 .collect();
             hosts.sort_unstable();
-            graph_parts.push(format!(
-                "remote_read_config=hosts[{}];concurrency={};ttl_ns={:?};refresh={};freshness={:?}",
-                hosts.join(","),
-                remote_read_config.remote_concurrency,
-                remote_read_config.remote_ttl.map(|d| d.as_nanos()),
-                remote_read_config.refresh,
-                remote_read_config.freshness_mode,
-            ));
+            enc.count(hosts.len());
+            for host in hosts {
+                enc.str(host);
+            }
         }
-        graph_parts.push(format!(
-            "defer_shell_pending_schema_problems={defer_shell_pending_schema_problems}"
-        ));
+        enc.field("remote_read_config.remote_concurrency");
+        enc.u64(remote_read_config.remote_concurrency as u64);
+        enc.field("remote_read_config.remote_ttl");
+        match remote_read_config.remote_ttl {
+            Some(ttl) => {
+                enc.tag(1);
+                enc.u128(ttl.as_nanos());
+            }
+            None => enc.tag(0),
+        }
+        enc.field("remote_read_config.refresh");
+        enc.bool(remote_read_config.refresh);
+        enc.field("remote_read_config.freshness_mode");
+        enc.tag(match remote_read_config.freshness_mode {
+            RemoteFreshnessMode::Optimistic => 0,
+            RemoteFreshnessMode::Strict => 1,
+            RemoteFreshnessMode::Fallback => 2,
+        });
+
+        enc.field("defer_shell_pending_schema_problems");
+        enc.bool(*defer_shell_pending_schema_problems);
+
         // Unordered set: sort for canonical order.
+        enc.field("exclude_keys");
         {
             let mut keys: Vec<&str> = exclude_keys.iter().map(String::as_str).collect();
             keys.sort_unstable();
-            graph_parts.push(format!("exclude_keys=[{}]", keys.join(",")));
+            enc.count(keys.len());
+            for key in keys {
+                enc.str(key);
+            }
         }
         // Ordered vector: preserve order.
-        graph_parts.push(format!("env_path_whitelist=[{}]", env_path_whitelist.join(",")));
-        graph_parts.push(match file_ref_fallback_dir {
-            Some(dir) => format!("file_ref_fallback_dir=Some:{}", dir.display()),
-            None => "file_ref_fallback_dir=None".to_string(),
-        });
+        enc.field("env_path_whitelist");
+        enc.count(env_path_whitelist.len());
+        for entry in env_path_whitelist {
+            enc.str(entry);
+        }
 
-        // ── Compose-cache fingerprint: output-affecting subset, byte-compatible
-        //    with the historical `options_hash` so existing cache entries and
-        //    the cache-reuse tests remain stable.
-        let mut cache_parts: Vec<String> = Vec::new();
-        cache_parts.push(format!("ops={}", ops.join(",")));
-        cache_parts.push(format!("fail_fast={fail_fast}"));
-        cache_parts.push(format!("max_depth={max_transclusion_depth}"));
-        cache_parts.push(format!("allow_remote={allow_remote_transclusion}"));
-        cache_parts.push(format!("allow_local_md={allow_local_markdown}"));
-        cache_parts.push(format!("allow_local_code={allow_local_code}"));
-        cache_parts.push(format!("code_fallback_lang={code_fallback_language}"));
-        cache_parts.push(format!("ignore_invalid={ignore_invalid_references:?}"));
-        cache_parts.push(format!("resolve_repo_root={resolve_repo_root}"));
-        if !magic_paths.is_empty() {
-            cache_parts.push(format!("magic_paths={}", magic_paths_repr.join(",")));
-        }
-        cache_parts.push(format!("list_spacing={list_spacing:?}"));
-        cache_parts.push(format!("indent_size={indent_size}"));
-        cache_parts.push(format!("replace_parent_wins={replace_parent_wins}"));
-        if let Some(one_off) = one_off_replace {
-            let canonical = canonical_json_sorted(&Value::Object(one_off.clone()));
-            cache_parts.push(format!("one_off_replace={canonical}"));
-        }
-        if let Some(ext) = external_state {
-            cache_parts.push(format!("external_state={}", canonical_json_sorted(ext)));
-        }
-        if let Some(overrides) = set_overrides {
-            cache_parts.push(format!("set_overrides={}", canonical_json_sorted(overrides)));
-        }
-        if let Some(baseline) = baseline_schema {
-            let json = crate::markdown::schemas::to_json_schema(baseline)
-                .unwrap_or_else(|_| serde_json::json!({"baseline_schema_error": true}));
-            cache_parts.push(format!("baseline_schema={}", canonical_json_sorted(&json)));
-        }
-        cache_parts.push(format!("trigger_schemas={trigger_schemas}"));
+        enc.field("file_ref_fallback_dir");
         match file_ref_fallback_dir {
-            Some(dir) => cache_parts.push(format!("file_ref_fallback_dir=Some:{}", dir.display())),
-            None => cache_parts.push("file_ref_fallback_dir=None".to_string()),
+            Some(dir) => {
+                enc.tag(1);
+                enc.str(&dir.display().to_string());
+            }
+            None => enc.tag(0),
         }
+
+        let graph_value_fingerprint = enc.finish();
+
+        // ── Compose-cache fingerprint: output-affecting subset only, encoded by
+        //    the same typed, length-delimited [`GraphIdentityEncoder`] under the
+        //    distinct [`CACHE_OPTIONS_DOMAIN`]. This drops the historical
+        //    `Debug`/string-join encoding entirely (no `{:?}`, no `,`/NUL joins)
+        //    so element and field boundaries are unambiguous, and the domain
+        //    marker makes any persistent entry keyed under the old encoding
+        //    unreadable here (its `options_hash` dimension no longer matches).
+        //    Same field subset as the historical hash → cache-reuse semantics
+        //    are preserved (equal options still share a key); only the encoding
+        //    and value changed.
+        let mut cenc = GraphIdentityEncoder::new(CACHE_OPTIONS_DOMAIN);
+
+        cenc.field("enabled_operations");
+        let cache_op_indices: Vec<usize> = enabled_operations.iter().map(|op| op.index()).collect();
+        cenc.count(cache_op_indices.len());
+        for index in cache_op_indices {
+            cenc.u64(index as u64);
+        }
+
+        cenc.field("fail_fast");
+        cenc.bool(*fail_fast);
+        cenc.field("max_transclusion_depth");
+        cenc.u64(*max_transclusion_depth as u64);
+        cenc.field("allow_remote_transclusion");
+        cenc.bool(*allow_remote_transclusion);
+        cenc.field("allow_local_markdown");
+        cenc.bool(*allow_local_markdown);
+        cenc.field("allow_local_code");
+        cenc.bool(*allow_local_code);
+        cenc.field("code_fallback_language");
+        cenc.str(code_fallback_language);
+
+        cenc.field("ignore_invalid_references");
+        match ignore_invalid_references {
+            None => cenc.tag(0),
+            Some(false) => cenc.tag(1),
+            Some(true) => cenc.tag(2),
+        }
+
+        cenc.field("resolve_repo_root");
+        cenc.bool(*resolve_repo_root);
+
+        // Ordered vector: preserve order (search-root precedence is behavioral).
+        cenc.field("magic_paths");
+        cenc.count(magic_paths.len());
+        for (path, position) in magic_paths {
+            cenc.str(&path.display().to_string());
+            cenc.tag(match position {
+                biscuit_file::PathPosition::Start => 0,
+                biscuit_file::PathPosition::End => 1,
+            });
+        }
+
+        cenc.field("list_spacing");
+        cenc.tag(match list_spacing {
+            crate::markdown::cleanup::ListSpacingMode::Normal => 0,
+            crate::markdown::cleanup::ListSpacingMode::Compact => 1,
+            crate::markdown::cleanup::ListSpacingMode::Loose => 2,
+        });
+        cenc.field("indent_size");
+        cenc.u64(*indent_size as u64);
+        cenc.field("replace_parent_wins");
+        cenc.bool(*replace_parent_wins);
+
+        cenc.field("one_off_replace");
+        match one_off_replace {
+            Some(m) => {
+                cenc.tag(1);
+                cenc.str(&canonical_json_sorted(&Value::Object(m.clone())));
+            }
+            None => cenc.tag(0),
+        }
+        cenc.field("external_state");
+        match external_state {
+            Some(v) => {
+                cenc.tag(1);
+                cenc.str(&canonical_json_sorted(v));
+            }
+            None => cenc.tag(0),
+        }
+        cenc.field("set_overrides");
+        match set_overrides {
+            Some(v) => {
+                cenc.tag(1);
+                cenc.str(&canonical_json_sorted(v));
+            }
+            None => cenc.tag(0),
+        }
+        cenc.field("baseline_schema");
+        match baseline_schema {
+            Some(schema) => {
+                cenc.tag(1);
+                let json = crate::markdown::schemas::to_json_schema(schema)
+                    .unwrap_or_else(|_| serde_json::json!({"baseline_schema_error": true}));
+                cenc.str(&canonical_json_sorted(&json));
+            }
+            None => cenc.tag(0),
+        }
+        cenc.field("trigger_schemas");
+        cenc.bool(*trigger_schemas);
+
+        cenc.field("file_ref_fallback_dir");
+        match file_ref_fallback_dir {
+            Some(dir) => {
+                cenc.tag(1);
+                cenc.str(&dir.display().to_string());
+            }
+            None => cenc.tag(0),
+        }
+
+        let cache_value_fingerprint = cenc.finish();
 
         ComposeOptionsClassification {
-            graph_parts,
-            cache_parts,
+            graph_value_fingerprint,
+            cache_value_fingerprint,
             shell_approval_handler: shell_approval_handler.as_ref().map(Arc::downgrade),
             preflight_graph: preflight_graph.as_ref().map(Arc::downgrade),
             remote_fetch: remote_fetch.as_ref().map(RemoteFetchRuntime::weak_id),
@@ -1613,10 +1955,15 @@ impl ComposeOptions {
 
     /// Compose-cache value fingerprint over the output-affecting option subset.
     ///
-    /// Byte-compatible with the historical `options_hash`; `options_hash`
-    /// delegates here so there is a single field inventory.
+    /// Derived from the single [`classify_options`](Self::classify_options)
+    /// inventory — the same field authority the reference-graph identity uses,
+    /// so there is no parallel field list. `options_hash` delegates here.
+    /// Encoded by the typed, length-delimited [`GraphIdentityEncoder`] under
+    /// [`CACHE_OPTIONS_DOMAIN`]; it carries no `Debug` encoding and is not
+    /// value-compatible with the historical string-join hash (a persistent
+    /// entry keyed under that encoding is unreachable here by design).
     pub(crate) fn compose_cache_fingerprint(&self) -> u64 {
-        xx_hash(&self.classify_options().cache_parts.join("\0"))
+        self.classify_options().cache_value_fingerprint
     }
 
     /// Whether this options value may participate in persistent-cache reads and
@@ -1658,7 +2005,7 @@ impl ReferenceGraphOptionsIdentity {
     pub(crate) fn capture(options: &ComposeOptions) -> Self {
         let classification = options.classify_options();
         Self {
-            value_fingerprint: xx_hash(&classification.graph_parts.join("\0")),
+            value_fingerprint: classification.graph_value_fingerprint,
             shell_approval_handler: classification.shell_approval_handler,
             preflight_graph: classification.preflight_graph,
             remote_fetch: classification.remote_fetch,
@@ -1849,16 +2196,27 @@ mod tests {
         ReferenceGraphOptionsIdentity::capture(options)
     }
 
+    /// Options over a deterministic fixed context.
+    ///
+    /// The graph identity folds in the complete runtime context (including
+    /// volatile `now`/`timestamp`/`memory_*`), so comparing options built from
+    /// two independent `ComposeContext::capture()` calls would differ on that
+    /// capture drift alone. A shared fixed context isolates the option field
+    /// each identity test actually targets.
+    fn fixed_opts() -> ComposeOptions {
+        ComposeOptions::new_with_context(ComposeContext::fixed_for_testing())
+    }
+
     #[test]
     fn options_identity_ignores_unordered_set_insertion_order() {
         // `exclude_keys` (HashSet) and `pre_approved_commands` (HashSet) are
         // genuinely unordered: identity must be insensitive to insertion order.
-        let a = ComposeOptions::new()
+        let a = fixed_opts()
             .with_exclude_keys(["alpha", "beta", "gamma"])
             .with_pre_approved_commands(
                 ["ls", "cat", "echo"].iter().map(|s| s.to_string()).collect(),
             );
-        let b = ComposeOptions::new()
+        let b = fixed_opts()
             .with_exclude_keys(["gamma", "alpha", "beta"])
             .with_pre_approved_commands(
                 ["echo", "ls", "cat"].iter().map(|s| s.to_string()).collect(),
@@ -1870,56 +2228,154 @@ mod tests {
     fn options_identity_sensitive_to_ordered_vector_reorder() {
         // `magic_paths` order is behavioral (search-root precedence); reordering
         // must change identity.
-        let a = ComposeOptions::new()
+        let a = fixed_opts()
             .with_magic_path("/one", biscuit_file::PathPosition::Start)
             .with_magic_path("/two", biscuit_file::PathPosition::Start);
-        let b = ComposeOptions::new()
+        let b = fixed_opts()
             .with_magic_path("/two", biscuit_file::PathPosition::Start)
             .with_magic_path("/one", biscuit_file::PathPosition::Start);
         assert_ne!(id(&a), id(&b));
 
         // `env_path_whitelist` order is likewise preserved.
-        let c = ComposeOptions::new().with_env_path_whitelist(vec!["A".into(), "B".into()]);
-        let d = ComposeOptions::new().with_env_path_whitelist(vec!["B".into(), "A".into()]);
+        let c = fixed_opts().with_env_path_whitelist(vec!["A".into(), "B".into()]);
+        let d = fixed_opts().with_env_path_whitelist(vec!["B".into(), "A".into()]);
         assert_ne!(id(&c), id(&d));
+    }
+
+    /// The length-prefixed encoding keeps set-element boundaries: a single
+    /// element that embeds the historical `,` delimiter must not collide with
+    /// two separate elements. The old comma/NUL join collapsed both to the same
+    /// fingerprint even though the values are not equivalent (they change which
+    /// commands are pre-approved).
+    #[test]
+    fn options_identity_pre_approved_commands_element_boundaries_are_injective() {
+        let merged = fixed_opts()
+            .with_pre_approved_commands(["a,b"].iter().map(|s| s.to_string()).collect());
+        let split = fixed_opts()
+            .with_pre_approved_commands(["a", "b"].iter().map(|s| s.to_string()).collect());
+        assert_ne!(id(&merged), id(&split));
+    }
+
+    /// Same boundary guarantee for the `exclude_keys` set.
+    #[test]
+    fn options_identity_exclude_keys_element_boundaries_are_injective() {
+        let merged = fixed_opts().with_exclude_keys(["a,b"]);
+        let split = fixed_opts().with_exclude_keys(["a", "b"]);
+        assert_ne!(id(&merged), id(&split));
+    }
+
+    /// Same boundary guarantee for the ordered `env_path_whitelist` vector and
+    /// the sorted `allowed_hosts` allowlist: a delimiter embedded in one element
+    /// stays distinct from that delimiter splitting two elements.
+    #[test]
+    fn options_identity_ordered_and_host_element_boundaries_are_injective() {
+        let merged_env = fixed_opts().with_env_path_whitelist(vec!["A,B".into()]);
+        let split_env = fixed_opts().with_env_path_whitelist(vec!["A".into(), "B".into()]);
+        assert_ne!(id(&merged_env), id(&split_env));
+
+        let merged_host = fixed_opts().with_allowed_host("a.example,b.example");
+        let split_host = fixed_opts()
+            .with_allowed_host("a.example")
+            .with_allowed_host("b.example");
+        assert_ne!(id(&merged_host), id(&split_host));
+    }
+
+    /// The typed encoder distinguishes an absent optional field from a present
+    /// but empty one: `None` writes a `0` tag while `Some(<empty>)` writes a `1`
+    /// tag plus a zero count, so a dropped value and an empty value never share
+    /// a graph identity.
+    #[test]
+    fn options_identity_distinguishes_none_from_empty_collection() {
+        let base = fixed_opts();
+
+        // `pre_approved_commands: Option<HashSet>` — None vs Some(empty set).
+        let empty_pre_approved =
+            fixed_opts().with_pre_approved_commands(std::collections::HashSet::new());
+        assert_ne!(id(&base), id(&empty_pre_approved));
+
+        // `external_state: Option<Value>` — None vs Some(empty object).
+        let empty_state = fixed_opts().with_external_state(serde_json::json!({}));
+        assert_ne!(id(&base), id(&empty_state));
     }
 
     #[test]
     fn options_identity_sensitive_across_representative_families() {
-        let base = ComposeOptions::new();
+        let base = fixed_opts();
         // scalar
-        assert_ne!(id(&base), id(&ComposeOptions::new().with_max_transclusion_depth(3)));
+        assert_ne!(id(&base), id(&fixed_opts().with_max_transclusion_depth(3)));
         // collection
-        assert_ne!(
-            id(&base),
-            id(&ComposeOptions::new().with_exclude_keys(["k"]))
-        );
+        assert_ne!(id(&base), id(&fixed_opts().with_exclude_keys(["k"])));
         // transclusion
-        assert_ne!(
-            id(&base),
-            id(&ComposeOptions::new().with_allow_local_markdown(false))
-        );
+        assert_ne!(id(&base), id(&fixed_opts().with_allow_local_markdown(false)));
         // remote
-        assert_ne!(
-            id(&base),
-            id(&ComposeOptions::new().with_allowed_host("example.com"))
-        );
+        assert_ne!(id(&base), id(&fixed_opts().with_allowed_host("example.com")));
         // shell
-        assert_ne!(
-            id(&base),
-            id(&ComposeOptions::new().with_shell_strip_ansi(false))
-        );
+        assert_ne!(id(&base), id(&fixed_opts().with_shell_strip_ansi(false)));
         // schema
-        assert_ne!(
-            id(&base),
-            id(&ComposeOptions::new().with_darkmatter_baseline_schema())
+        assert_ne!(id(&base), id(&fixed_opts().with_darkmatter_baseline_schema()));
+    }
+
+    #[test]
+    fn options_identity_sensitive_to_volatile_context_value() {
+        use super::super::super::cache::hashing::context_hash;
+
+        // Two contexts identical except for `timestamp` — a field the
+        // persistent-cache `context_hash` deliberately drops. Graph
+        // construction interpolates `{{ ctx.timestamp }}` into link and
+        // transclusion targets, so distinct timestamps can yield distinct
+        // references and must not share a graph identity.
+        let ctx_a =
+            ComposeContext::fixed_for_testing_with([("timestamp", serde_json::json!("1000"))]);
+        let ctx_b =
+            ComposeContext::fixed_for_testing_with([("timestamp", serde_json::json!("2000"))]);
+
+        // Precondition: the cache product genuinely collides here (this is why
+        // reusing it for the graph identity was unsound).
+        assert_eq!(
+            context_hash(&ctx_a),
+            context_hash(&ctx_b),
+            "cache context_hash is expected to drop the volatile timestamp"
         );
+
+        let a = ComposeOptions::new_with_context(ctx_a);
+        let b = ComposeOptions::new_with_context(ctx_b);
+        assert_ne!(
+            id(&a),
+            id(&b),
+            "graph identity must distinguish contexts differing only in a volatile value"
+        );
+    }
+
+    #[test]
+    fn options_identity_sensitive_to_volatile_system_state() {
+        // A `when=` transclusion condition can reference volatile system-state
+        // values such as `memory_used`, which `context_hash` also drops. The
+        // graph identity must still separate them so a prebuilt graph is not
+        // reused across a changed condition outcome.
+        let ctx_a =
+            ComposeContext::fixed_for_testing_with([("memory_used", serde_json::json!(1024))]);
+        let ctx_b =
+            ComposeContext::fixed_for_testing_with([("memory_used", serde_json::json!(2048))]);
+        let a = ComposeOptions::new_with_context(ctx_a);
+        let b = ComposeOptions::new_with_context(ctx_b);
+        assert_ne!(id(&a), id(&b));
+    }
+
+    #[test]
+    fn options_identity_clone_stable_across_volatile_context() {
+        // Invariant: the context is captured once and cloned into every
+        // `ComposeOptions::clone`, so a complete encoding stays clone-stable
+        // even though it now includes volatile fields.
+        let ctx =
+            ComposeContext::fixed_for_testing_with([("timestamp", serde_json::json!("1000"))]);
+        let opts = ComposeOptions::new_with_context(ctx);
+        assert_eq!(id(&opts), id(&opts.clone()));
     }
 
     #[test]
     fn options_identity_clone_stable_including_shared_stateful_arc() {
         let handler: Arc<dyn ShellApprovalHandlerTrait> = Arc::new(DummyApproval);
-        let opts = ComposeOptions::new().with_shell_approval_handler(handler);
+        let opts = fixed_opts().with_shell_approval_handler(handler);
         // A clone shares the same `Arc`, so identity is stable.
         assert_eq!(id(&opts), id(&opts.clone()));
     }
@@ -1928,8 +2384,8 @@ mod tests {
     fn options_identity_unequal_for_fresh_stateful_instance() {
         let handler_a: Arc<dyn ShellApprovalHandlerTrait> = Arc::new(DummyApproval);
         let handler_b: Arc<dyn ShellApprovalHandlerTrait> = Arc::new(DummyApproval);
-        let a = ComposeOptions::new().with_shell_approval_handler(handler_a);
-        let b = ComposeOptions::new().with_shell_approval_handler(handler_b);
+        let a = fixed_opts().with_shell_approval_handler(handler_a);
+        let b = fixed_opts().with_shell_approval_handler(handler_b);
         // Distinct instances with identical visible configuration are not equal.
         assert_ne!(id(&a), id(&b));
     }
@@ -1938,7 +2394,7 @@ mod tests {
     fn options_identity_rejects_dropped_then_recreated_instance() {
         let captured = {
             let handler: Arc<dyn ShellApprovalHandlerTrait> = Arc::new(DummyApproval);
-            let opts = ComposeOptions::new().with_shell_approval_handler(Arc::clone(&handler));
+            let opts = fixed_opts().with_shell_approval_handler(Arc::clone(&handler));
             let strong_before = Arc::strong_count(&handler);
             let identity = id(&opts);
             // Identity capture and graph ownership do not add strong references.
@@ -1950,18 +2406,63 @@ mod tests {
         // Allocator churn, then a fresh instance with identical configuration.
         let _churn: Vec<Box<[u8]>> = (0..64).map(|_| vec![0u8; 128].into_boxed_slice()).collect();
         let fresh: Arc<dyn ShellApprovalHandlerTrait> = Arc::new(DummyApproval);
-        let fresh_opts = ComposeOptions::new().with_shell_approval_handler(fresh);
+        let fresh_opts = fixed_opts().with_shell_approval_handler(fresh);
         assert_ne!(captured, id(&fresh_opts));
     }
 
     #[test]
     fn options_identity_clone_stable_with_shared_remote_fetch_runtime() {
-        let opts = ComposeOptions::new().with_shared_remote_fetch();
+        let opts = fixed_opts().with_shared_remote_fetch();
         // A clone shares the same runtime `Arc`, so identity is stable; a
         // separately built runtime would not be.
         assert_eq!(id(&opts), id(&opts.clone()));
-        let other = ComposeOptions::new().with_shared_remote_fetch();
+        let other = fixed_opts().with_shared_remote_fetch();
         assert_ne!(id(&opts), id(&other));
+    }
+
+    #[test]
+    fn options_identity_preflight_weak_does_not_extend_lifetime() {
+        use super::super::super::preflight::PreflightGraphNode;
+
+        // Own the preflight `Arc` externally so its strong count is observable
+        // (the public `with_preflight_graph` builder wraps a private `Arc`).
+        let preflight = Arc::new(PreflightGraphNode::default());
+        let strong_before = Arc::strong_count(&preflight);
+        let mut opts = fixed_opts();
+        opts.preflight_graph = Some(Arc::clone(&preflight));
+        let strong_with_opts = Arc::strong_count(&preflight);
+
+        let captured = id(&opts);
+        // Identity capture downgrades the preflight `Arc` → no new strong ref.
+        assert_eq!(Arc::strong_count(&preflight), strong_with_opts);
+
+        drop(opts);
+        // The captured identity holds only a `Weak`, so releasing the owning
+        // options returns the strong count to baseline — graph provenance never
+        // pins the preflight instance alive.
+        assert_eq!(Arc::strong_count(&preflight), strong_before);
+
+        // The now-dead weak can never match a fresh preflight (fail-closed).
+        let mut fresh = fixed_opts();
+        fresh.preflight_graph = Some(Arc::new(PreflightGraphNode::default()));
+        assert_ne!(captured, id(&fresh));
+    }
+
+    #[test]
+    fn options_identity_rejects_dropped_then_recreated_remote_fetch() {
+        let captured = {
+            let opts = fixed_opts().with_shared_remote_fetch();
+            id(&opts)
+            // `opts`, the sole owner of the runtime, drops here — expiring the
+            // captured weak identity handle.
+        };
+        // Allocator churn, then a fresh runtime with identical configuration.
+        let _churn: Vec<Box<[u8]>> = (0..64).map(|_| vec![0u8; 128].into_boxed_slice()).collect();
+        let fresh = fixed_opts().with_shared_remote_fetch();
+        // A fresh runtime built after the build-time one dropped can never match
+        // the expired handle, exercising the drop path the two-live-instances
+        // test does not.
+        assert_ne!(captured, id(&fresh));
     }
 
     #[test]

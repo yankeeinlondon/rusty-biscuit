@@ -70,7 +70,8 @@ pub use normalize::{
 };
 pub use reference::file_tree::{FileTree, FileTreeError};
 pub use reference::{
-    ReferenceError, ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceRecord,
+    DependencyMismatchKind, ReferenceError, ReferenceGraph, ReferenceGraphMismatchError,
+    ReferenceGraphMismatchKind, ReferenceGraphOptions, ReferenceKind, ReferenceRecord,
     ReferenceSet, TransclusionRef, extract_document_references,
 };
 #[allow(deprecated)]
