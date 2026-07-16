@@ -1,8 +1,15 @@
-//! Discovery probe — example binary for Level-1 PTY tests.
+//! Discovery probe — example binary for the PTY and real-terminal tests.
 //!
-//! Called inside a pseudoterminal by the test suite.  Accepts environment
-//! variables that control which discovery routines are exercised and prints
-//! machine-readable `key=value` lines.
+//! Accepts environment variables that control which discovery routines are
+//! exercised and prints machine-readable `key=value` lines. Two suites drive it:
+//!
+//! * Level 1 (`tests/level1_*.rs`) runs it inside a pseudoterminal and
+//!   manufactures the OSC reply bytes itself.
+//! * Level 2 (`tests/level2_terminal_osc_wezterm.rs`) runs it inside a real
+//!   WezTerm pane, where the emulator supplies the replies.
+//!
+//! Output is read back off the terminal, so keep stdout on the tty: `is_tty()`
+//! keys on stdout and a redirect suppresses the OSC queries entirely.
 //!
 //! ## Environment variables
 //!
@@ -33,10 +40,8 @@
 //! * `terminal` — Build a `Terminal` instance and print its fields.
 //! * `terminal_cache` — Construct `PROBE_TERM_CONSTRUCTIONS` (default 3)
 //!   `Terminal` values in one process and print each one's `text_color`.
-//!   Because the OSC 10 foreground query is cached per process, the master
-//!   side observes exactly one `\x1b]10;?\x07` request across every
-//!   construction and every printed `text_color` is the same cached value.
-//!   Finding 2/21 cache-reuse evidence.
+//!   Because the OSC 10 foreground query is cached per process, every printed
+//!   `text_color` is the same cached value. Finding 2/21 cache-reuse evidence.
 //! * `terminal_latency` — Construct `PROBE_TERM_WARMUP` (default 3) warm-up
 //!   `Terminal` values (untimed, to absorb the one-time cold OSC round-trip),
 //!   then time `PROBE_TERM_SAMPLES` (default 50) repeated constructions and
@@ -65,6 +70,13 @@
 //! Every line is `key=value` where `value` is the `Debug` representation of
 //! the result.  `Option::None` is printed as `None` so tests can assert with
 //! simple string containment.
+//!
+//! The `terminal_cache` and `terminal_latency` modes additionally print
+//! `osc10_actual_queries=` / `osc11_actual_queries=` — the library's count of
+//! real tty round-trips — but only when built with the `osc-query-counter`
+//! feature. A real emulator consumes the query and answers on the wire, so
+//! there is no master side for a Level-2 test to count bytes on; the count has
+//! to come from inside the process.
 //!
 //! ```text
 //! bg_color=Some(RgbValue { r: 128, g: 128, b: 128 })
@@ -267,6 +279,22 @@ fn construction_count() -> usize {
         .max(2)
 }
 
+/// Print the actual-OSC-round-trip counts when the library was built with the
+/// `osc-query-counter` feature.
+///
+/// Under a manufactured PTY the test can count `\x1b]10;?\x07` on the master
+/// side directly; under a real emulator it cannot (the terminal consumes the
+/// query and answers on the wire), so the count is read from the library.
+/// Silent when the feature is off — callers that need it assert on its absence.
+fn print_osc_query_counts() {
+    #[cfg(feature = "osc-query-counter")]
+    {
+        use biscuit_terminal::discovery::osc_queries::actual_query_count;
+        println!("osc10_actual_queries={}", actual_query_count(10));
+        println!("osc11_actual_queries={}", actual_query_count(11));
+    }
+}
+
 /// Construct N `Terminal` values in one process and print each one's
 /// `text_color`. The OSC 10 foreground query is cached per process, so the
 /// master side sees exactly one `\x1b]10;?\x07` request across every
@@ -283,6 +311,7 @@ fn probe_terminal_cache() {
         // cached response is reused.
         println!("terminal_text_color[{i}]={:?}", term.text_color);
     }
+    print_osc_query_counts();
     println!("terminal_cache_done");
 }
 
@@ -345,6 +374,7 @@ fn probe_terminal_latency() {
     println!("terminal_latency_stddev_ns={stddev:.1}");
     let raw: Vec<String> = ns.iter().map(|v| v.to_string()).collect();
     println!("terminal_latency_raw_ns={}", raw.join(","));
+    print_osc_query_counts();
     println!("terminal_latency_done");
 }
 
