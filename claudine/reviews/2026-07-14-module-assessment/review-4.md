@@ -1,5 +1,6 @@
 ---
 implemented: true
+next: 2026-07-14-module-assessment/review-5.md
 ---
 # Claudine Module-Assessment Implementation Review, Round 4
 
