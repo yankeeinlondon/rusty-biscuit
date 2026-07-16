@@ -707,6 +707,52 @@ enum WaitOutcome {
     TimedOut,
 }
 
+/// Test-only record of the blocking wait spans [`recv_wait`] requested.
+///
+/// Exists because elapsed wall-clock time cannot distinguish a single blocking
+/// wait from the 10ms poll loop it replaced (Finding 17): a 10ms tick is far
+/// inside any bound that stays non-flaky on a loaded host. The span *shape* can
+/// — one span sized to the caller's whole budget is only producible by a
+/// blocking wait.
+///
+/// Thread-local: `wait_with_timeout` blocks on its caller's thread, so spans
+/// never mix between concurrent tests in one process.
+#[cfg(test)]
+mod wait_probe {
+    use std::cell::RefCell;
+    use std::time::Duration;
+
+    thread_local! {
+        static SPANS: RefCell<Vec<Duration>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub(super) fn record(span: Duration) {
+        SPANS.with(|spans| spans.borrow_mut().push(span));
+    }
+
+    /// Drains this thread's spans, returning those recorded since the last call.
+    pub(super) fn take() -> Vec<Duration> {
+        SPANS.with(|spans| std::mem::take(&mut *spans.borrow_mut()))
+    }
+}
+
+/// Performs the one blocking wait span, reporting its length to [`wait_probe`].
+///
+/// Wrapping `recv_timeout` rather than calling it inline is deliberate: it gives
+/// the tests a seam that observes *how long the implementation asked to block
+/// for*, which is the signal that separates one full-budget blocking wait from a
+/// poll loop. A loop calling this with a short span records many short spans; a
+/// `try_wait` + `sleep` loop bypasses it and records none. Both fail the
+/// exactly-one-full-budget-span assertion.
+fn recv_wait(
+    rx: &std::sync::mpsc::Receiver<std::io::Result<ExitStatus>>,
+    span: Duration,
+) -> Result<std::io::Result<ExitStatus>, RecvTimeoutError> {
+    #[cfg(test)]
+    wait_probe::record(span);
+    rx.recv_timeout(span)
+}
+
 /// Blocks until the child exits or `timeout` elapses, then reports which.
 ///
 /// A helper thread performs the OS-blocking wait and hands the status back over
@@ -731,7 +777,7 @@ fn wait_with_timeout(
         let _ = tx.send(waiter.wait());
     });
 
-    let outcome = match rx.recv_timeout(timeout) {
+    let outcome = match recv_wait(&rx, timeout) {
         Ok(status) => status.map(WaitOutcome::Exited),
         Err(RecvTimeoutError::Timeout) => {
             // Kill first so the blocked waiter thread can observe the exit and
@@ -771,8 +817,6 @@ mod tests {
     use crate::markdown::compose::shell_expansion::types::{
         ErrorHandling, PipelineAction, ShellCommandOrigin,
     };
-    use std::ffi::OsStr;
-    use std::time::Instant;
     use tempfile::TempDir;
 
     fn test_ctx() -> biscuit_terminal::errors::SourceContext {
@@ -930,33 +974,21 @@ mod tests {
 
     #[test]
     fn stderr_is_captured_and_combined() {
-        let Some(python) = find_python() else {
-            return;
-        };
-
-        let d = ShellDirective {
-            raw_command: format!("{} -c ...", python.display()),
-            executable: python.to_string_lossy().to_string(),
-            args: vec![
-                "-c".to_string(),
-                "import sys; sys.stderr.write('oops'); sys.stdout.write('ok')".to_string(),
-            ],
-            span: 0..10,
-            indent: String::new(),
-            origin: ShellCommandOrigin::Body { line: 1 },
-            error_handling: ErrorHandling::default(),
-            timeout_override: None,
-            pipeline: None,
-            no_cache: false,
-            ctx: test_ctx(),
-        };
+        let d = child_directive(ChildMode::Streams { code: 0 });
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::Unknown;
 
         let output = execute_command_detailed(&d, &options, &source).unwrap();
-        assert_eq!(output.stdout, "ok");
-        assert_eq!(output.stderr, "oops");
-        assert_eq!(output.combined_output(), "ok\noops");
+        assert_eq!(framed_payload(&output.stdout), "out");
+        assert_eq!(framed_payload(&output.stderr), "err");
+        // Only stdout carries libtest's preamble, so the tail of the combined
+        // output still pins both the order and the newline separator.
+        let frame = PAYLOAD_FRAME as char;
+        let combined = output.combined_output();
+        assert!(
+            combined.ends_with(&format!("{frame}out\n{frame}err")),
+            "combined output must be stdout then stderr, newline separated: {combined:?}"
+        );
     }
 
     #[test]
@@ -1020,27 +1052,7 @@ mod tests {
 
     #[test]
     fn execution_failed_includes_output_streams() {
-        let Some(python) = find_python() else {
-            return;
-        };
-
-        let d = ShellDirective {
-            raw_command: format!("{} -c ...", python.display()),
-            executable: python.to_string_lossy().to_string(),
-            args: vec![
-                "-c".to_string(),
-                "import sys; sys.stdout.write('out'); sys.stderr.write('err'); sys.exit(42)"
-                    .to_string(),
-            ],
-            span: 0..10,
-            indent: String::new(),
-            origin: ShellCommandOrigin::Body { line: 1 },
-            error_handling: ErrorHandling::default(),
-            timeout_override: None,
-            pipeline: None,
-            no_cache: false,
-            ctx: test_ctx(),
-        };
+        let d = child_directive(ChildMode::Streams { code: 42 });
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::Unknown;
 
@@ -1052,24 +1064,10 @@ mod tests {
                 ..
             }) => {
                 assert_eq!(code, 42);
-                assert_eq!(stdout, "out");
-                assert_eq!(stderr, "err");
+                assert_eq!(framed_payload(&stdout), "out");
+                assert_eq!(framed_payload(&stderr), "err");
             }
             other => panic!("Expected ExecutionFailed with code 42, got: {:?}", other),
-        }
-    }
-
-    fn find_python() -> Option<PathBuf> {
-        ["python3", "python"]
-            .into_iter()
-            .find_map(|candidate| which::which(candidate).ok())
-            .filter(|path| !path.as_os_str().is_empty())
-    }
-
-    #[test]
-    fn find_python_returns_python_binary_when_available() {
-        if let Some(path) = find_python() {
-            assert_ne!(path.as_os_str(), OsStr::new(""));
         }
     }
 
@@ -1173,35 +1171,196 @@ mod tests {
         }
     }
 
+    // ---------------------------------------------------------------------
+    // Finding 17 helper child process
+    //
+    // The F17 tests need a child that saturates its pipes, one that exits
+    // instantly, and one that outlives a timeout. Reaching for `python`,
+    // `true`, and `sleep` made them Unix-only and let them pass silently when
+    // the interpreter was absent. Instead the test binary re-executes *itself*
+    // as the helper, so the suite depends on nothing beyond the toolchain that
+    // built it and behaves identically on every target.
+    // ---------------------------------------------------------------------
+
+    /// argv token that turns a re-executed copy of this test binary into a
+    /// helper child process.
+    ///
+    /// The mode travels in argv rather than the environment because the executor
+    /// under test gives a `ShellDirective` no way to set child env — the parent
+    /// would have to mutate its own process env, which is global and racy. libtest
+    /// treats an unrecognized positional as a name filter, and under `--exact`
+    /// this token matches no test, so it is inert to the harness.
+    const CHILD_MODE_ARG: &str = "dm-child-mode=";
+
+    /// stdout payload byte for [`ChildMode::Saturate`].
+    ///
+    /// The helper *is* the test binary, so libtest prints its own `running 1
+    /// test` preamble into the pipe before our payload and we cannot suppress
+    /// it. Both payload bytes are chosen to be absent from that preamble and
+    /// from this module's test names, which makes the first payload byte an
+    /// unambiguous frame start (see [`payload_after_preamble`]) and keeps the
+    /// merged-stream counts exact.
+    const SATURATE_STDOUT_BYTE: u8 = b'#';
+
+    /// stderr payload byte for [`ChildMode::Saturate`]; see [`SATURATE_STDOUT_BYTE`].
+    const SATURATE_STDERR_BYTE: u8 = b'@';
+
+    /// Precedes each [`ChildMode::Streams`] payload, marking where libtest's
+    /// preamble ends and the helper's own bytes begin. Same reasoning as
+    /// [`SATURATE_STDOUT_BYTE`], but these payloads are short and arbitrary, so
+    /// they need an explicit frame rather than a distinctive alphabet.
+    const PAYLOAD_FRAME: u8 = b'#';
+
     /// Bytes per stream for the saturation tests. Comfortably above the 64 KiB
     /// pipe buffer both Unix and Windows default to, so an undrained pipe is
     /// guaranteed to wedge the child rather than merely be a tight fit.
     const SATURATION_BYTES: usize = 256 * 1024;
 
-    /// A Python program that interleaves `SATURATION_BYTES` onto stdout and
-    /// stderr in 8 KiB chunks, so neither pipe can be fully drained before the
-    /// other is written to.
-    fn saturate_both_streams_program() -> String {
-        format!(
-            "import sys\n\
-             chunk = 8192\n\
-             total = {SATURATION_BYTES}\n\
-             written = 0\n\
-             while written < total:\n\
-             \x20   n = min(chunk, total - written)\n\
-             \x20   sys.stdout.write('o' * n)\n\
-             \x20   sys.stdout.flush()\n\
-             \x20   sys.stderr.write('e' * n)\n\
-             \x20   sys.stderr.flush()\n\
-             \x20   written += n\n"
-        )
+    /// What a re-executed copy of this test binary should do instead of testing.
+    enum ChildMode {
+        /// Exit 0 immediately, writing nothing. Replaces `true`.
+        Noop,
+        /// Interleave `SATURATION_BYTES` onto stdout and stderr in 8 KiB chunks,
+        /// so neither pipe can be fully drained before the other is written to.
+        Saturate,
+        /// Append a byte to the given file every 20ms, forever. Replaces `sleep`,
+        /// and the file doubles as a platform-neutral liveness probe.
+        Heartbeat(std::path::PathBuf),
+        /// Write `#out` to stdout and `#err` to stderr, then exit with `code`.
+        /// Replaces a `python -c` one-liner that printed to both streams.
+        Streams { code: i32 },
     }
 
-    fn python_directive(python: &std::path::Path, program: &str) -> ShellDirective {
+    impl ChildMode {
+        /// Renders the mode into the argv token, and parses it back in the child.
+        fn spec(&self) -> String {
+            match self {
+                Self::Noop => "noop".to_string(),
+                Self::Saturate => "saturate".to_string(),
+                Self::Heartbeat(path) => format!("heartbeat:{}", path.display()),
+                Self::Streams { code } => format!("streams:{code}"),
+            }
+        }
+
+        fn parse(spec: &str) -> Self {
+            // `split_once` stops at the first colon, so a Windows `C:\...`
+            // heartbeat path survives intact in the argument.
+            match spec.split_once(':') {
+                None if spec == "noop" => Self::Noop,
+                None if spec == "saturate" => Self::Saturate,
+                Some(("heartbeat", path)) => Self::Heartbeat(std::path::PathBuf::from(path)),
+                Some(("streams", code)) => Self::Streams {
+                    code: code.parse().expect("streams:<exit-code>"),
+                },
+                _ => panic!("unknown child mode `{spec}`"),
+            }
+        }
+    }
+
+    /// Helper-child entrypoint. A no-op during an ordinary test run; when this
+    /// binary is re-executed by [`child_directive`] it becomes the helper
+    /// process and never returns.
+    #[test]
+    fn child_process_entrypoint() {
+        let Some(spec) = std::env::args()
+            .find_map(|arg| arg.strip_prefix(CHILD_MODE_ARG).map(str::to_owned))
+        else {
+            return;
+        };
+
+        let exit_code = match ChildMode::parse(&spec) {
+            ChildMode::Noop => 0,
+            ChildMode::Saturate => {
+                saturate_both_streams();
+                0
+            }
+            ChildMode::Heartbeat(path) => heartbeat_forever(&path),
+            ChildMode::Streams { code } => {
+                write_framed_streams();
+                code
+            }
+        };
+
+        // Exit rather than return: libtest would otherwise print its result
+        // footer into the very pipes the parent is asserting on.
+        std::process::exit(exit_code);
+    }
+
+    fn write_framed_streams() {
+        use std::io::Write;
+
+        let frame = PAYLOAD_FRAME as char;
+        let mut stdout = std::io::stdout();
+        let mut stderr = std::io::stderr();
+        write!(stdout, "{frame}out").expect("child: write stdout");
+        stdout.flush().expect("child: flush stdout");
+        write!(stderr, "{frame}err").expect("child: write stderr");
+        stderr.flush().expect("child: flush stderr");
+    }
+
+    fn saturate_both_streams() {
+        use std::io::Write;
+
+        const CHUNK: usize = 8 * 1024;
+        let mut stdout = std::io::stdout();
+        let mut stderr = std::io::stderr();
+        let mut written = 0;
+        while written < SATURATION_BYTES {
+            let n = CHUNK.min(SATURATION_BYTES - written);
+            stdout
+                .write_all(&vec![SATURATE_STDOUT_BYTE; n])
+                .expect("child: write stdout");
+            stdout.flush().expect("child: flush stdout");
+            stderr
+                .write_all(&vec![SATURATE_STDERR_BYTE; n])
+                .expect("child: write stderr");
+            stderr.flush().expect("child: flush stderr");
+            written += n;
+        }
+    }
+
+    fn heartbeat_forever(path: &std::path::Path) -> ! {
+        use std::io::Write;
+
+        loop {
+            if let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+            {
+                let _ = file.write_all(b".");
+                let _ = file.flush();
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Builds a directive that re-executes this test binary in `mode`.
+    ///
+    /// `--nocapture` is required: without it libtest buffers the helper's
+    /// `println!`-family writes internally and they never reach the OS pipe the
+    /// executor is draining.
+    ///
+    /// The `--exact` filter is derived from `module_path!()` rather than
+    /// hardcoded, so moving or renaming this module cannot silently leave the
+    /// filter matching zero tests.
+    fn child_directive(mode: ChildMode) -> ShellDirective {
+        let exe = std::env::current_exe().expect("locate current test executable");
+        let module = module_path!()
+            .split_once("::")
+            .map(|(_crate_name, rest)| rest)
+            .expect("test module path has a crate segment");
+        let spec = mode.spec();
+
         ShellDirective {
-            raw_command: format!("{} -c ...", python.display()),
-            executable: python.to_string_lossy().to_string(),
-            args: vec!["-c".to_string(), program.to_string()],
+            raw_command: format!("<test-helper> {spec}"),
+            executable: exe.to_string_lossy().into_owned(),
+            args: vec![
+                "--exact".to_string(),
+                format!("{module}::child_process_entrypoint"),
+                "--nocapture".to_string(),
+                format!("{CHILD_MODE_ARG}{spec}"),
+            ],
             span: 0..0,
             indent: String::new(),
             origin: ShellCommandOrigin::Body { line: 1 },
@@ -1213,36 +1372,61 @@ mod tests {
         }
     }
 
+    /// Returns the helper's payload, dropping libtest's preamble ahead of it.
+    ///
+    /// Panics rather than returning empty when no payload byte is present: that
+    /// means the helper never ran (most likely the `--exact` filter matched no
+    /// test), and a silent empty string would turn that into a confusing
+    /// length-mismatch instead of naming the real fault.
+    fn payload_after_preamble(stream: &str, payload_byte: u8) -> &str {
+        let start = stream.find(payload_byte as char).unwrap_or_else(|| {
+            panic!(
+                "helper child produced no `{}` payload; captured {} bytes: {:?}",
+                payload_byte as char,
+                stream.len(),
+                stream.chars().take(200).collect::<String>(),
+            )
+        });
+        &stream[start..]
+    }
+
+    fn count_byte(stream: &str, byte: u8) -> usize {
+        stream.bytes().filter(|b| *b == byte).count()
+    }
+
+    /// Returns a [`ChildMode::Streams`] payload with its frame and any preceding
+    /// libtest preamble removed.
+    fn framed_payload(stream: &str) -> &str {
+        &payload_after_preamble(stream, PAYLOAD_FRAME)[1..]
+    }
+
     /// F17 — the blocking wait must keep draining both pipes concurrently.
     /// A wait that blocked on child exit without draining would wedge: the child
     /// blocks writing into a full pipe, we block waiting for it to exit, and
     /// only the timeout breaks the tie. Covers `execute_command_detailed`.
     #[test]
     fn saturated_dual_stream_capture_does_not_deadlock() {
-        let Some(python) = find_python() else {
-            return;
-        };
-        let d = python_directive(&python, &saturate_both_streams_program());
+        let d = child_directive(ChildMode::Saturate);
         let options = ShellExpansionOptions {
             strip_ansi: false,
             ..Default::default()
         };
 
         let output = execute_command_detailed(&d, &options, &ComposeSource::Unknown).unwrap();
-        assert_eq!(output.stdout.len(), SATURATION_BYTES);
-        assert_eq!(output.stderr.len(), SATURATION_BYTES);
-        assert!(output.stdout.bytes().all(|b| b == b'o'));
-        assert!(output.stderr.bytes().all(|b| b == b'e'));
+        let stdout = payload_after_preamble(&output.stdout, SATURATE_STDOUT_BYTE);
+        let stderr = payload_after_preamble(&output.stderr, SATURATE_STDERR_BYTE);
+        assert_eq!(stdout.len(), SATURATION_BYTES);
+        assert_eq!(stderr.len(), SATURATION_BYTES);
+        assert!(stdout.bytes().all(|b| b == SATURATE_STDOUT_BYTE));
+        assert!(stderr.bytes().all(|b| b == SATURATE_STDERR_BYTE));
     }
 
     /// F17 — the same saturation guarantee for the redirection/`execute_single_action`
     /// executor, whose `ReadStrategy::Separate` branch owns its own drain threads.
     #[test]
     fn saturated_dual_stream_capture_does_not_deadlock_in_pipeline_executor() {
-        let Some(python) = find_python() else {
-            return;
-        };
-        let mut d = python_directive(&python, &saturate_both_streams_program());
+        let mut d = child_directive(ChildMode::Saturate);
+        let noop = child_directive(ChildMode::Noop);
         // Two actions force `execute_pipeline_detailed` -> `execute_single_action`
         // rather than the standard single-command path.
         d.pipeline = Some(ShellPipeline {
@@ -1258,8 +1442,8 @@ mod tests {
                 PipelineAction {
                     operator: ChainOperator::And,
                     command: CommandAction {
-                        executable: "true".to_string(),
-                        args: vec![],
+                        executable: noop.executable.clone(),
+                        args: noop.args.clone(),
                         redirection: RedirectionConfig::default(),
                     },
                 },
@@ -1271,18 +1455,24 @@ mod tests {
         };
 
         let output = execute_directive_impl(&d, &options, &ComposeSource::Unknown).unwrap();
-        assert_eq!(output.stdout.len(), SATURATION_BYTES);
-        assert_eq!(output.stderr.len(), SATURATION_BYTES);
+        // Counted, not framed: the pipeline concatenates both actions' captures,
+        // so each stream carries two libtest preambles rather than one leading
+        // one. The payload bytes cannot occur in either.
+        assert_eq!(
+            count_byte(&output.stdout, SATURATE_STDOUT_BYTE),
+            SATURATION_BYTES
+        );
+        assert_eq!(
+            count_byte(&output.stderr, SATURATE_STDERR_BYTE),
+            SATURATION_BYTES
+        );
     }
 
     /// F17 — the merged (`2>&1`) capture path shares one OS pipe for both
     /// streams, so saturation must not wedge its single merged reader either.
     #[test]
     fn saturated_merged_stream_capture_does_not_deadlock() {
-        let Some(python) = find_python() else {
-            return;
-        };
-        let mut d = python_directive(&python, &saturate_both_streams_program());
+        let mut d = child_directive(ChildMode::Saturate);
         d.pipeline = Some(ShellPipeline {
             actions: vec![PipelineAction {
                 operator: ChainOperator::None,
@@ -1303,71 +1493,114 @@ mod tests {
 
         let output = execute_command_detailed(&d, &options, &ComposeSource::Unknown).unwrap();
         // Both streams land in stdout; stderr stays empty for a `2>&1` merge.
-        assert_eq!(output.stdout.len(), SATURATION_BYTES * 2);
+        // Counted per payload byte rather than framed: a merged pipe interleaves
+        // the two streams at chunk granularity, so only the totals are defined.
+        assert_eq!(
+            count_byte(&output.stdout, SATURATE_STDOUT_BYTE),
+            SATURATION_BYTES
+        );
+        assert_eq!(
+            count_byte(&output.stdout, SATURATE_STDERR_BYTE),
+            SATURATION_BYTES
+        );
         assert_eq!(output.stderr, "");
     }
 
+    /// The wait budget the no-poll tests hand to the executor. Arbitrary, but far
+    /// from any real duration so an assertion failure names the shape mismatch
+    /// rather than looking like a timing coincidence.
+    const NO_POLL_BUDGET: Duration = Duration::from_secs(7);
+
     /// F17 — the wait must observe an early exit immediately rather than at the
-    /// next poll tick. The retired loop slept in 10ms increments, so a command
-    /// that exits in ~0ms still cost up to 10ms. Ten sequential no-op commands
-    /// would have accrued up to 100ms of pure sleep; 50ms is far under that
-    /// while staying far above real spawn+wait cost, so this fails on a
-    /// reintroduced poll loop without being flaky on a slow host.
+    /// next poll tick, so it must hand its whole budget to one blocking span
+    /// instead of slicing it into ticks.
+    ///
+    /// This asserts the *shape* of the wait, not its duration. Elapsed time
+    /// cannot separate the two implementations: the retired loop's 10ms tick
+    /// fits inside any bound that stays non-flaky on a loaded host. The retired
+    /// `try_wait` + `sleep(10ms)` loop records no spans at all, and a
+    /// short-span polling variant records many; only a single full-budget span
+    /// passes. Covers the `execute_command_detailed` wait.
     #[test]
-    fn fast_command_completion_is_not_delayed_by_a_poll_interval() {
+    fn wait_hands_the_full_budget_to_one_blocking_span() {
+        let mut d = child_directive(ChildMode::Noop);
+        d.timeout_override = Some(NO_POLL_BUDGET);
         let options = ShellExpansionOptions::default();
-        let source = ComposeSource::Unknown;
 
-        let start = Instant::now();
-        for _ in 0..10 {
-            let d = directive("true", "true", &[], 1);
-            execute_command(&d, &options, &source).unwrap();
-        }
-        let elapsed = start.elapsed();
+        wait_probe::take();
+        execute_command(&d, &options, &ComposeSource::Unknown).unwrap();
 
-        assert!(
-            elapsed < Duration::from_millis(500),
-            "10 no-op commands took {elapsed:?}; a 10ms poll loop would add up to 100ms of sleep"
-        );
+        assert_eq!(wait_probe::take(), vec![NO_POLL_BUDGET]);
+    }
+
+    /// F17 — the same no-poll guarantee for the redirection executor, whose wait
+    /// is a separate call site from the standard one.
+    #[test]
+    fn pipeline_wait_hands_the_full_budget_to_one_blocking_span() {
+        let mut d = child_directive(ChildMode::Noop);
+        d.timeout_override = Some(NO_POLL_BUDGET);
+        // A non-default redirection routes through `execute_single_action`.
+        d.pipeline = Some(ShellPipeline {
+            actions: vec![PipelineAction {
+                operator: ChainOperator::None,
+                command: CommandAction {
+                    executable: d.executable.clone(),
+                    args: d.args.clone(),
+                    redirection: RedirectionConfig {
+                        stdout: StdoutTarget::Capture,
+                        stderr: StderrTarget::ToStdout,
+                    },
+                },
+            }],
+        });
+        let options = ShellExpansionOptions::default();
+
+        wait_probe::take();
+        execute_command_detailed(&d, &options, &ComposeSource::Unknown).unwrap();
+
+        assert_eq!(wait_probe::take(), vec![NO_POLL_BUDGET]);
     }
 
     /// F17 — a timed-out child is killed, not merely abandoned. The wait
-    /// primitive owns the kill+reap, so prove the process is actually gone
-    /// rather than left running past the timeout.
-    #[cfg(unix)]
+    /// primitive owns the kill+reap, so prove the process actually stopped
+    /// running rather than being left behind past the timeout.
+    ///
+    /// The liveness proof is the helper's own heartbeat file rather than a
+    /// process-table query: `pgrep` does not exist on Windows, whereas a file
+    /// that stops growing is the same evidence everywhere.
+    ///
+    /// The *reap* half is proven by this test terminating at all.
+    /// `wait_with_timeout` joins the thread parked in `SharedChild::wait`, which
+    /// cannot return until the child is reaped — so a kill that failed to reap
+    /// hangs this test rather than passing it.
     #[test]
     fn timed_out_child_process_is_killed_and_reaped() {
-        let Some(python) = find_python() else {
-            return;
-        };
-        // Print our own PID, then outlive the timeout.
-        let d = python_directive(
-            &python,
-            "import sys, time\nsys.stdout.write(str(__import__('os').getpid()))\n\
-             sys.stdout.flush()\ntime.sleep(30)\n",
-        );
-        let mut d = d;
-        d.timeout_override = Some(Duration::from_millis(200));
+        let tmp = TempDir::new().unwrap();
+        let heartbeat = tmp.path().join("heartbeat");
+        let mut d = child_directive(ChildMode::Heartbeat(heartbeat.clone()));
+        d.timeout_override = Some(Duration::from_millis(500));
         let options = ShellExpansionOptions {
             timeout_behavior: ShellTimeoutBehavior::EmptyString,
             ..Default::default()
         };
 
         let result = execute_command_detailed(&d, &options, &ComposeSource::Unknown).unwrap();
-        assert_eq!(result.timeout_fallback, Some(Duration::from_millis(200)));
+        assert_eq!(result.timeout_fallback, Some(Duration::from_millis(500)));
 
-        // The kill is synchronous with the timeout return, so by now the child
-        // must no longer be a live process. `kill -0` on a reaped PID fails.
-        // (We cannot read the PID from stdout: the fallback discards output, so
-        // assert via the process table that no python child of ours survives.)
-        let still_running = std::process::Command::new("pgrep")
-            .args(["-P", &std::process::id().to_string()])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap_or_default();
+        // Without this, a helper that never started would satisfy the
+        // stopped-growing check below and the test would pass vacuously.
+        let beats_at_timeout = std::fs::metadata(&heartbeat).map(|m| m.len()).unwrap_or(0);
         assert!(
-            still_running.is_empty(),
-            "timed-out child must be killed and reaped; surviving child PIDs: {still_running}"
+            beats_at_timeout > 0,
+            "helper child never wrote a heartbeat, so it cannot show it was killed"
+        );
+
+        // Long enough for many more 20ms beats had the kill not landed.
+        std::thread::sleep(Duration::from_millis(400));
+        let beats_after = std::fs::metadata(&heartbeat).unwrap().len();
+        assert_eq!(
+            beats_after, beats_at_timeout,
+            "timed-out child kept beating past the timeout; it was abandoned, not killed"
         );
     }
 
@@ -1376,14 +1609,15 @@ mod tests {
     /// standard one.
     #[test]
     fn pipeline_executor_timeout_selects_timeout_error() {
-        let mut d = directive("sleep 10", "sleep", &["10"], 1);
+        let tmp = TempDir::new().unwrap();
+        let mut d = child_directive(ChildMode::Heartbeat(tmp.path().join("heartbeat")));
         d.timeout_override = Some(Duration::from_millis(100));
         d.pipeline = Some(ShellPipeline {
             actions: vec![PipelineAction {
                 operator: ChainOperator::None,
                 command: CommandAction {
-                    executable: "sleep".to_string(),
-                    args: vec!["10".to_string()],
+                    executable: d.executable.clone(),
+                    args: d.args.clone(),
                     redirection: RedirectionConfig {
                         stdout: StdoutTarget::Capture,
                         stderr: StderrTarget::ToStdout,
