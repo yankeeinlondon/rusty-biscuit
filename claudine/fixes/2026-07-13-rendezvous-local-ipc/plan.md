@@ -1,7 +1,7 @@
 ---
 total_phases: 8
 created: 2026-07-16
-phase: 4
+phase: 5
 agent: codex/default
 yolo: true
 packages:
@@ -57,6 +57,29 @@ source_files_during_phase_4:
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+    - claudine/rendezvous/daemon/src/local_transport/mod.rs
+    - claudine/rendezvous/daemon/src/local_transport/unix.rs
+    - claudine/rendezvous/daemon/src/local_transport/unix/tests.rs
+    - claudine/rendezvous/daemon/src/local_transport/windows.rs
+    - claudine/rendezvous/daemon/src/local_transport/windows/tests.rs
+    - claudine/rendezvous/daemon/src/private_dir.rs
+    - claudine/rendezvous/daemon/src/private_dir/tests.rs
+    - claudine/rendezvous/daemon/src/server.rs
+    - claudine/rendezvous/daemon/src/server/tests.rs
+    - claudine/rendezvous/daemon/Cargo.toml
+    - claudine/rendezvous/daemon/tests/peer_discovery.rs
+    - claudine/rendezvous/daemon/tests/pairing_and_sync.rs
+    - claudine/rendezvous/daemon/tests/phase6_integration.rs
+    - claudine/rendezvous/client/tests/uds_round_trip.rs
+    - claudine/rendezvous/client/tests/session_log_round_trip.rs
+    - claudine/cli/src/commands/dashboard/tests.rs
+    - claudine/cli/src/commands/wrap/session_report/tests.rs
+    - claudine/cli/tests/level2_lifecycle_control.rs
+    - claudine/docs/providers/dispatch-inventory.json
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 ---
 
 # Cross-Platform, Per-User Rendezvous Local IPC — Execution Plan
@@ -284,58 +307,74 @@ implementation cannot duplicate the storage/network stack.
 
 ### Unix workstream
 
-- [ ] Add `local_transport/unix.rs` to walk endpoint-parent components with
+- [x] Add `local_transport/unix.rs` to walk endpoint-parent components with
   non-following metadata, reject symlinks/non-directories, create the private
   runtime directory with mode `0700` without a permissive creation window, and
   verify effective-UID ownership plus no group/other access.
-- [ ] Classify a pre-existing endpoint with `symlink_metadata`; reject regular
+- [x] Classify a pre-existing endpoint with `symlink_metadata`; reject regular
   files, directories, symlinks, foreign-owned sockets, and active sockets, and
   remove only a stale socket owned by the expected UID.
-- [ ] Bind `UnixListener`, force socket mode `0600` independent of umask, and
+- [x] Bind `UnixListener`, force socket mode `0600` independent of umask, and
   capture the bound socket's device/inode/owner identity for cleanup.
-- [ ] On shutdown/drop, remove the endpoint only if fresh non-following metadata
+- [x] On shutdown/drop, remove the endpoint only if fresh non-following metadata
   still matches the captured socket instance; leave any replaced endpoint
   untouched and report cleanup failures without deleting foreign data.
-- [ ] Apply the same owner/type/symlink/private-mode policy to the default and
+- [x] Apply the same owner/type/symlink/private-mode policy to the default and
   overridden Unix data root before opening identity or database files.
 
 ### Windows workstream
 
-- [ ] Add `local_transport/windows.rs` using
+- [x] Add `local_transport/windows.rs` using
   `tokio::net::windows::named_pipe::ServerOptions` in byte mode with
   `reject_remote_clients(true)` and `first_pipe_instance(true)` on initial
   creation.
-- [ ] Build an RAII-owned security descriptor/DACL granting the current user SID
+- [x] Build an RAII-owned security descriptor/DACL granting the current user SID
   the required pipe access (with administrator/system handling limited to the
   stated threat boundary), pass it through Tokio's security-attributes creation
   API, and free every Win32 allocation on success and failure.
-- [ ] Implement an incoming stream that creates the next pipe instance before
+- [x] Implement an incoming stream that creates the next pipe instance before
   yielding the connected instance, supports concurrent clients, and closes all
   pending/connected instances on shutdown without filesystem cleanup.
-- [ ] Map first-instance collisions, access denial, connection/accept failure,
+- [x] Map first-instance collisions, access denial, connection/accept failure,
   and shutdown to the typed server errors from Phase 4.
-- [ ] Apply a current-user Windows DACL to the data root and validate explicit
+- [x] Apply a current-user Windows DACL to the data root and validate explicit
   `--data-dir` overrides before the identity seed or databases are opened.
 
 ### Parallelization and review
 
-- [ ] **Parallelizable:** Run the Unix and Windows workstreams independently
+- [x] **Parallelizable:** Run the Unix and Windows workstreams independently
   after Phases 3–4; they may share only the prepared-service interface,
   ownership policy inputs, and typed errors.
-- [ ] Review the two platform modules together to verify neither duplicates
+- [x] Review the two platform modules together to verify neither duplicates
   persistence, identity, register, QUIC, discovery, or worker initialization.
 
 **Validation checkpoint**
 
-- [ ] On Unix, run focused tests for private directory creation, exact modes,
+- [x] On Unix, run focused tests for private directory creation, exact modes,
   safe existing directories, symlink parents, wrong endpoint types,
   foreign-owned entries where permitted, stale owned sockets, active sockets,
   and replacement-safe teardown.
+    - Foreign-*owned* entries are the one gap: planting one needs a second UID,
+      which the unprivileged macOS dev host cannot provision. The classifier's
+      other refusals are covered; Phase 7 owns the multi-principal leg.
 - [ ] On Windows, run focused tests for first-instance exclusion, same-user
   DACL inspection, remote-client rejection, acceptor continuity, and clean
   shutdown; Phase 7 supplies complete gRPC/concurrency runtime coverage.
-- [ ] Run `cd claudine/rendezvous && just check` after both target branches
+    - **Blocked on this host, deferred to Phase 7's `windows-latest` runner.**
+      The tests are written (`local_transport/windows/tests.rs`, plus the two
+      Windows cases in `private_dir/tests.rs`) but cannot be *run* from macOS.
+      Cross-compiling the daemon is also impossible here: `duckdb-sys`'s bundled
+      C++ overflows mingw's COFF section limit (`too many sections`), and MSVC
+      is the real target anyway. Evidence obtained instead: every Win32 surface
+      Phase 5 adds (`private_dir`'s DACL/`CreateDirectoryW`/
+      `GetNamedSecurityInfoW` half, `local_transport/windows.rs`, and both test
+      files' Win32 bodies) was compiled clean for `x86_64-pc-windows-gnu` in a
+      throwaway probe crate with the duckdb-bearing seams stubbed. That proves
+      the API signatures, not the runtime behavior.
+- [x] Run `cd claudine/rendezvous && just check` after both target branches
   compile.
+    - Unix branch: `just check` + `just test` + `just lint` green. Windows
+      branch: probe-checked only, per the note above.
 
 ## Phase 6 — Migrate Overrides, Production Callers, and Fixtures
 
