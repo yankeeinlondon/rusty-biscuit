@@ -4,9 +4,10 @@ ready: false
 agent: codex/default
 created: 2026-07-16T09:36:53-07:00
 spec: 2026-07-15-performance-followup/spec.md
-implemented: false
+implemented: true
 description: "A **feature** review of `2026-07-15-performance-followup/spec.md`"
 feature: 2026-07-15-performance-followup/review-1.md
+next: 2026-07-15-performance-followup/review-2.md
 ---
 
 # Review 1 — Performance Follow-up
