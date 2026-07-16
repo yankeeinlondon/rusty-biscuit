@@ -454,18 +454,31 @@ fn setup_evaluation_error_routes_through_failure_and_finalize() {
         )),
         ..Default::default()
     };
-    let err = handle_setup_evaluation_error(
-        &outcome,
+    let early = crate::output::error_walker::emit_lifecycle_evaluation_error_early(
+        &fx.source_path,
         "start",
+        outcome.evaluation_error.as_ref().unwrap(),
+        &fx.term,
+    );
+    let result = run_catch_protocol(
         &mut guard,
+        LifecycleSignal::Start,
+        outcome,
         &fx.materialized,
         &fx.source_path,
         Some(fx._dir.path()),
         &fx.term,
         &eng,
+        None,
         std::time::Instant::now(),
-    )
-    .expect("a setup evaluation error produces a run failure");
+    );
+    let err = surface_protocol_evaluation(
+        &result,
+        LifecycleSignal::Start,
+        &fx.source_path,
+        Some(early),
+        &fx.term,
+    );
 
     assert!(err.to_string().contains("`start`"), "names the start event");
     // Both `failure` and `finalize` ran, each seeing `err` populated.
@@ -956,4 +969,3 @@ fn blocked_stack_error_routes_to_failure_keeps_blocked_comm_before_failure() {
 }
 
 // -- dispatch_terminal_control runtime-wiring tests --------------------
-

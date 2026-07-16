@@ -374,10 +374,10 @@ fn emit_failure_finalize_failure_raise_surfaces_finalize() {
     };
     let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
     // Reach `start` without launching the provider — exactly the state at
-    // the snapshot / launch / pre-spawn-attempt `?` sites.
+    // the launch / pre-spawn-attempt `?` sites.
     assert!(guard.record_event_emission(LifecycleSignal::Start));
     let eng = engine(fx._dir.path());
-    let err_info = LifecycleErrorInfo::from_action_failure("harness_snapshot", "boom");
+    let err_info = LifecycleErrorInfo::from_action_failure("harness_launch", "boom");
 
     let result = emit_failure_finalize_with_err(
         &mut guard,
@@ -606,18 +606,31 @@ fn setup_raise_then_failure_raise_surfaces_failure_and_threads_into_finalize() {
         )),
         ..Default::default()
     };
-    let err = handle_setup_evaluation_error(
-        &outcome,
+    let early = crate::output::error_walker::emit_lifecycle_evaluation_error_early(
+        &fx.source_path,
         "start",
+        outcome.evaluation_error.as_ref().unwrap(),
+        &fx.term,
+    );
+    let result = run_catch_protocol(
         &mut guard,
+        LifecycleSignal::Start,
+        outcome,
         &fx.materialized,
         &fx.source_path,
         Some(fx._dir.path()),
         &fx.term,
         &eng,
+        None,
         std::time::Instant::now(),
-    )
-    .expect("the setup evaluation error halts the run");
+    );
+    let err = surface_protocol_evaluation(
+        &result,
+        LifecycleSignal::Start,
+        &fx.source_path,
+        Some(early),
+        &fx.term,
+    );
 
     let rendered = err.to_string();
     assert!(
@@ -749,7 +762,7 @@ fn emit_blocked_finalize_returns_none_when_no_evaluation_error() {
 /// `run_target_initialize` — a target's `initialize.error(...)` whose catch
 /// `failure.when:` raises surfaces the FAILURE evaluation error, not the
 /// original `error(...)` reason. Proves the previously-discarded failure
-/// outcome now threads through `catch_evaluation_error`.
+/// outcome now threads through the lifecycle catch protocol.
 #[test]
 fn target_initialize_error_with_failure_raise_surfaces_failure_evaluation_error() {
     let fx = fixture(serde_json::json!({
@@ -809,7 +822,7 @@ fn target_initialize_error_with_failure_raise_surfaces_failure_evaluation_error(
 /// `routes_to_failure` whose catch `failure.when:` raises surfaces the
 /// FAILURE evaluation error, not the generic "lifecycle initialize failed"
 /// fallback. Proves the previously-discarded failure outcome now threads
-/// through `catch_evaluation_error` for the routes_to_failure path.
+/// through the lifecycle catch protocol for the action-error path.
 #[test]
 fn target_initialize_routes_to_failure_with_raise_surfaces_failure_evaluation_error() {
     let fx = fixture(serde_json::json!({
@@ -907,64 +920,33 @@ fn start_routes_to_failure_with_raise_surfaces_failure_and_threads_into_finalize
     guard.mark_provider_launched();
     let eng = engine(fx._dir.path());
 
-    // Model a `start` outcome that routed to failure with an action error.
     let action_error = LifecycleErrorInfo::from_action_failure("shell", "boom");
-
-    // Replicate the Location G fix: record Failure FIRST, then run the
-    // error-carrying failure stack via run_event_stack, threading any
-    // failure raise into finalize.
-    assert!(guard.record_event_emission(LifecycleSignal::Failure));
-    let failure_ctx = build_lifecycle_stack_context_for_materialized(
-        LifecycleSignal::Failure,
-        &fx.materialized,
-        &fx.source_path,
-        Some(fx._dir.path()),
-        None,
-        None,
-        &fx.term,
-        guard.emitter(),
-        guard.context().settings,
-        guard.context().messaging,
-        &eng,
-        Some(&action_error),
-        None,
-        None,
-    );
-    let failure_outcome = guard.run_event_stack(LifecycleSignal::Failure, &failure_ctx);
-
-    // The fix: thread active_err into finalize (failure raise > original).
-    // When failure raises, active_err is the failure evaluation error; the
-    // synthetic-fallback case (no original action_error and no failure
-    // raise) is exercised by the runtime paths but not duplicated here.
-    let active_err = failure_outcome
-        .evaluation_error
-        .as_ref()
-        .unwrap_or(&action_error);
-    let finalize_outcome = run_lifecycle_event(
+    let result = run_catch_protocol(
         &mut guard,
-        LifecycleSignal::Finalize,
+        LifecycleSignal::Start,
+        LifecycleEventOutcome {
+            action_error: Some(action_error),
+            ..LifecycleEventOutcome::default()
+        },
         &fx.materialized,
         &fx.source_path,
         Some(fx._dir.path()),
         &fx.term,
         &eng,
-        Some(active_err),
+        None,
         std::time::Instant::now(),
     );
-
-    // The failure raised, so the surfaced error must name `failure`.
-    assert!(
-        failure_outcome.evaluation_error.is_some(),
-        "the failure `when:` raised"
-    );
-    let ce = CompositionError::catch_evaluation_error(
+    let failure_error = result
+        .evaluation_error
+        .as_ref()
+        .expect("the failure `when:` raised");
+    assert_eq!(result.evaluation_error_signal, Some(LifecycleSignal::Failure));
+    let rendered = CompositionError::lifecycle_evaluation(
+        "failure",
         &fx.source_path,
-        "start",
-        &action_error,
-        Some(&failure_outcome),
-        Some(&finalize_outcome),
-    );
-    let rendered = ce.to_string();
+        failure_error,
+    )
+    .to_string();
     assert!(
         rendered.contains("`failure`"),
         "the surfaced error must name the failure event; got: {rendered}"

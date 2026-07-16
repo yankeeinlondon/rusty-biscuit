@@ -325,7 +325,7 @@ fn emit_blocked_finalize_tolerates_null_frontmatter_materialized() {
 
 // -- emit_failure_finalize_with_err (post-start setup `?` sites) --------
 
-/// The post-start setup sites (snapshot / launch / pre-spawn attempt) run
+/// The post-start setup sites (launch / pre-spawn attempt) run
 /// after `start` and pre-flight have passed, so their terminal signal is
 /// always `Failure` — never `Blocked` — and `finalize` must follow with
 /// `err` available to both stacks. Here the guard has emitted `start` but
@@ -359,11 +359,11 @@ fn emit_failure_finalize_forces_failure_when_not_launched() {
     };
     let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
     // Reach `start` without launching the provider — exactly the state at
-    // the snapshot / launch / pre-spawn-attempt `?` sites.
+    // the launch / pre-spawn-attempt `?` sites.
     assert!(guard.record_event_emission(LifecycleSignal::Start));
     assert!(!guard.provider_launched());
     let eng = engine(fx._dir.path());
-    let err_info = LifecycleErrorInfo::from_action_failure("harness_snapshot", "boom");
+    let err_info = LifecycleErrorInfo::from_action_failure("harness_launch", "boom");
 
     emit_failure_finalize_with_err(
         &mut guard,
@@ -390,7 +390,7 @@ fn emit_failure_finalize_forces_failure_when_not_launched() {
         lines.lines().collect::<Vec<_>>(),
         vec![
             "failure-kind=LifecycleAction",
-            "failure-variant=harness_snapshot",
+            "failure-variant=harness_launch",
             "finalize-msg=boom",
         ],
         "failure stack observes err.kind/err.variant; finalize `when: err` is \
@@ -447,4 +447,3 @@ fn emit_failure_finalize_tolerates_null_frontmatter() {
         vec!["failure-ran", "finalize-ran"],
     );
 }
-

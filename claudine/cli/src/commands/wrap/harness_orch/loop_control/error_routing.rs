@@ -177,12 +177,12 @@ pub(super) fn emit_blocked_finalize_with_err(
 /// has fired and pre-flight has
 /// already passed, so the failure is never semantically `Blocked` (which means
 /// pre-flight failed). The harness setup steps between `start` and the first
-/// terminal event — snapshot capture, launch construction, and the
-/// pre-spawn portion of attempt execution — propagate their errors with a bare
-/// `?`; without this routing only `LifecycleRunGuard::drop`'s legacy
+/// terminal event — launch construction and the pre-spawn portion of attempt
+/// execution — propagate their errors with a bare `?`; without this routing
+/// only `LifecycleRunGuard::drop`'s legacy
 /// `emit_signal` path would run, which never executes the typed
 /// `failure.stack`/`finalize.stack` nor exposes `err.kind`/`err.variant`/
-/// `err.msg`. Used for the snapshot / launch / attempt `?` sites.
+/// `err.msg`. Used for the launch and attempt `?` sites.
 ///
 /// Returns `Some(CompositionError::LifecycleEvaluationError)` when the
 /// `failure` stack or the `finalize` stack raised a late-binding evaluation
@@ -227,11 +227,11 @@ pub(super) fn emit_failure_finalize_with_err(
     render_catch_evaluation(&result, source_path, term)
 }
 
-fn surface_protocol_evaluation(
+pub(super) fn surface_protocol_evaluation(
     result: &claudine::composition::LifecycleCatchResult,
     origin: LifecycleSignal,
     source_path: &Path,
-    early: CompositionError,
+    early: Option<CompositionError>,
     term: &Terminal,
 ) -> color_eyre::eyre::Report {
     let surfaced = result
@@ -253,7 +253,7 @@ fn surface_protocol_evaluation(
                 term,
             )
         })
-        .unwrap_or(early);
+        .unwrap_or_else(|| early.expect("origin evaluation error was emitted"));
     surfaced.into()
 }
 
@@ -309,62 +309,11 @@ pub(super) fn handle_terminal_evaluation_error(
         Some(info),
         loop_start,
     );
-    Some(surface_protocol_evaluation(&result, origin, source_path, early, term))
-}
-
-/// Handle a setup-phase lifecycle **evaluation** error (Decision #5).
-///
-/// `initialize`/`start`/`blocked` route an evaluation error through `failure`
-/// then `finalize` (carrying it as the `err` global) exactly like any other
-/// setup failure, then return the typed run failure for the caller to
-/// propagate non-zero. Returns `None` when `outcome` carries no evaluation
-/// error.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn handle_setup_evaluation_error(
-    outcome: &LifecycleEventOutcome,
-    event: &str,
-    guard: &mut claudine::composition::LifecycleRunGuard<'_>,
-    materialized: &MaterializedHarnessPrompt,
-    source_path: &Path,
-    repo_root: Option<&Path>,
-    term: &Terminal,
-    effect_engine: &EffectEngine,
-    loop_start: std::time::Instant,
-) -> Option<color_eyre::eyre::Report> {
-    let info = outcome.evaluation_error.as_ref()?;
-    // Surface the original crash to stderr at the point of error, before the
-    // `failure`/`finalize` catch events fire (Decision #2). Marked already-
-    // emitted so the outer renderer does not double-emit; a later catch-event
-    // raise supersedes it.
-    let early = crate::output::error_walker::emit_lifecycle_evaluation_error_early(
-        source_path,
-        event,
-        info,
-        term,
-    );
-    let origin = match event {
-        "initialize" => LifecycleSignal::Initialize,
-        "start" => LifecycleSignal::Start,
-        "blocked" => LifecycleSignal::Blocked,
-        _ => unreachable!("setup evaluation routing received a non-setup event"),
-    };
-    let result = run_catch_protocol(
-        guard,
-        origin,
-        outcome.clone(),
-        materialized,
-        source_path,
-        repo_root,
-        term,
-        effect_engine,
-        Some(info),
-        loop_start,
-    );
     Some(surface_protocol_evaluation(
         &result,
         origin,
         source_path,
-        early,
+        Some(early),
         term,
     ))
 }

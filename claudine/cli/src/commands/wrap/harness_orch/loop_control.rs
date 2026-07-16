@@ -354,10 +354,6 @@ fn prepare_attempt_phase(
         return Ok(PhaseResult::Transition(Box::new(step)));
     }
 
-    // Pre-run snapshot capture for post-check comparisons has been
-    // removed along with post-check validation.
-
-
     Ok(PhaseResult::Ready(PreparedHarnessAttempt { materialized, plan }))
 }
 
@@ -390,47 +386,50 @@ fn start_lifecycle_phase(
         None,
         loop_start,
     );
-    if let Some(err) = handle_setup_evaluation_error(
-        &start_outcome,
-        "start",
+    let start_early = start_outcome.evaluation_error.as_ref().map(|info| {
+        crate::output::error_walker::emit_lifecycle_evaluation_error_early(
+            &prompt_state.source_path,
+            "start",
+            info,
+            term,
+        )
+    });
+    let catch_result = run_catch_protocol(
         lifecycle_guard,
+        LifecycleSignal::Start,
+        start_outcome.clone(),
         materialized,
         &prompt_state.source_path,
         repo_root,
         term,
         effect_engine,
+        None,
         loop_start,
-    ) {
-        return Err(err);
+    );
+    if catch_result.evaluation_error_signal.is_some() {
+        return Err(surface_protocol_evaluation(
+            &catch_result,
+            LifecycleSignal::Start,
+            &prompt_state.source_path,
+            start_early,
+            term,
+        ));
     }
-    if let Some(ref control) = start_outcome.control {
+    if let Some(setup_error) = catch_result.setup_error.as_ref() {
+        let message = if matches!(
+            catch_result.control,
+            Some(StackControl::Error { .. })
+        ) {
+            setup_error.msg.clone()
+        } else {
+            "lifecycle start failed".to_string()
+        };
+        return Err(eyre!(message));
+    }
+    if let Some(ref control) = catch_result.control {
         match control {
-            StackControl::Error { reason } => {
-                let msg = reason
-                    .clone()
-                    .unwrap_or_else(|| "lifecycle start error".to_string());
-                let err_info =
-                    LifecycleErrorInfo::from_action_failure("error", msg.as_str());
-                let result = run_catch_protocol(
-                    lifecycle_guard,
-                    LifecycleSignal::Start,
-                    start_outcome.clone(),
-                    materialized,
-                    &prompt_state.source_path,
-                    repo_root,
-                    term,
-                    effect_engine,
-                    &err_info,
-                    loop_start,
-                );
-                if let Some(err) = render_catch_evaluation(
-                    &result,
-                    &prompt_state.source_path,
-                    term,
-                ) {
-                    return Err(err.into());
-                }
-                return Err(eyre!(msg));
+            StackControl::Error { .. } => {
+                unreachable!("the catch protocol consumes start error control")
             }
             StackControl::Stop => {}
             _ => match dispatch_terminal_control(
@@ -482,27 +481,6 @@ fn start_lifecycle_phase(
                 TerminalControlAction::Fallthrough => {}
             },
         }
-    }
-    if start_outcome.routes_to_failure(LifecycleSignal::Start) {
-        let synthetic =
-            LifecycleErrorInfo::from_action_failure("error", "lifecycle start failed");
-        let active_error = start_outcome.action_error.as_ref().unwrap_or(&synthetic);
-        let result = run_catch_protocol(
-            lifecycle_guard,
-            LifecycleSignal::Start,
-            start_outcome.clone(),
-            materialized,
-            &prompt_state.source_path,
-            repo_root,
-            term,
-            effect_engine,
-            active_error,
-            loop_start,
-        );
-        if let Some(err) = render_catch_evaluation(&result, &prompt_state.source_path, term) {
-            return Err(err.into());
-        }
-        return Err(eyre!("lifecycle start failed"));
     }
     Ok(None)
 }

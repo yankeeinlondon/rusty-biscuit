@@ -32,42 +32,51 @@ pub(super) fn run_target_initialize(
         None,
         loop_start,
     );
-    // A late-binding evaluation error on the target's `initialize` routes
-    // through `failure` → `finalize` and aborts the hand-off (Decision #5).
-    if let Some(err) = handle_setup_evaluation_error(
-        &outcome,
-        "initialize",
+    let initialize_early = outcome.evaluation_error.as_ref().map(|info| {
+        crate::output::error_walker::emit_lifecycle_evaluation_error_early(
+            source_path,
+            "initialize",
+            info,
+            term,
+        )
+    });
+    let catch_result = run_catch_protocol(
         lifecycle_guard,
+        LifecycleSignal::Initialize,
+        outcome.clone(),
         materialized,
         source_path,
         repo_root,
         term,
         effect_engine,
+        None,
         loop_start,
-    ) {
-        return TargetInitializeAction::Abort(err);
+    );
+    if catch_result.evaluation_error_signal.is_some() {
+        return TargetInitializeAction::Abort(surface_protocol_evaluation(
+            &catch_result,
+            LifecycleSignal::Initialize,
+            source_path,
+            initialize_early,
+            term,
+        ));
     }
-    if let Some(control) = outcome.control.as_ref() {
+    if let Some(setup_error) = catch_result.setup_error.as_ref() {
+        let message = if matches!(
+            catch_result.control,
+            Some(StackControl::Error { .. })
+        ) {
+            setup_error.msg.clone()
+        } else {
+            "lifecycle initialize failed".to_string()
+        };
+        return TargetInitializeAction::Abort(eyre!(message));
+    }
+    if let Some(control) = catch_result.control.as_ref() {
         match control {
             StackControl::Skip => TargetInitializeAction::ExitCleanly,
-            StackControl::Error { reason } => {
-                let msg = reason
-                    .clone()
-                    .unwrap_or_else(|| "lifecycle initialize error".to_string());
-                let action_error = LifecycleErrorInfo::from_action_failure("error", msg.clone());
-                if let Some(ce) = emit_failure_finalize_with_err(
-                    lifecycle_guard,
-                    materialized,
-                    source_path,
-                    repo_root,
-                    term,
-                    effect_engine,
-                    &action_error,
-                    loop_start,
-                ) {
-                    return TargetInitializeAction::Abort(ce.into());
-                }
-                TargetInitializeAction::Abort(eyre!(msg))
+            StackControl::Error { .. } => {
+                unreachable!("the catch protocol consumes initialize error control")
             }
             StackControl::Proxy { target } => {
                 let resolved = match claudine::composition::resolve_proxy_target(
@@ -91,27 +100,6 @@ pub(super) fn run_target_initialize(
                 "lifecycle control action {control:?} is not valid at initialize"
             )),
         }
-    } else if outcome.routes_to_failure(LifecycleSignal::Initialize) {
-        let err = outcome.action_error.as_ref();
-        // `emit_failure_finalize_with_err` requires a non-optional error; when
-        // the outcome had no action_error, synthesize one so failure/finalize
-        // still run with an `err` global.
-        let synthetic =
-            LifecycleErrorInfo::from_action_failure("error", "lifecycle initialize failed");
-        let err_ref = err.cloned().unwrap_or(synthetic);
-        if let Some(ce) = emit_failure_finalize_with_err(
-            lifecycle_guard,
-            materialized,
-            source_path,
-            repo_root,
-            term,
-            effect_engine,
-            &err_ref,
-            loop_start,
-        ) {
-            return TargetInitializeAction::Abort(ce.into());
-        }
-        TargetInitializeAction::Abort(eyre!("lifecycle initialize failed"))
     } else {
         TargetInitializeAction::Proceed
     }
