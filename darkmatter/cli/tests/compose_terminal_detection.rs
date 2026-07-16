@@ -10,8 +10,10 @@
 //!
 //! Finding 21: for fully redirected (non-TTY) output, macOS appearance
 //! discovery must not fork the `defaults read -g AppleInterfaceStyle`
-//! subprocess. We prove this by putting a sentinel-writing `defaults` shim
-//! first on the child's PATH and asserting it is never executed.
+//! subprocess. We prove this by putting a `defaults` shim first on the child's
+//! PATH and asserting that shim is never invoked *with the appearance-probe
+//! argv*. `defaults` has other legitimate consumers on the same code path, so
+//! the shim discriminates on arguments rather than on being run at all.
 //!
 //! Both cases are **piped / redirected** and spawn an ordinary child process,
 //! so they are L1 (no PTY). The interactive (PTY) OSC evidence lives in
@@ -74,9 +76,19 @@ fn compose_verbose_perf_performs_single_terminal_detection() {
 }
 
 /// On macOS, fully redirected (non-TTY) output must not fork the
-/// `defaults read -g AppleInterfaceStyle` appearance probe. A sentinel-writing
-/// `defaults` shim placed first on the child's PATH proves the subprocess is
-/// never spawned in the redirected path. (Finding 21.)
+/// `defaults read -g AppleInterfaceStyle` appearance probe. A `defaults` shim
+/// placed first on the child's PATH records a sentinel when — and only when —
+/// that specific probe runs. (Finding 21.)
+///
+/// The shim must discriminate on argv: `defaults` has other, unrelated
+/// consumers in the same `Terminal::default()` construction. Notably
+/// `discovery::fonts::iterm2` reads `com.googlecode.iterm2 New Bookmarks` for
+/// font name/size whenever `TERM_PROGRAM` says iTerm2, and those reads are
+/// deliberately not TTY-gated (`fonts::nerd` consumes `font_name()` to pick
+/// glyphs even in redirected output). A shim keyed on *any* `defaults`
+/// invocation therefore fires on an iTerm2 host and reports an appearance-guard
+/// regression that did not happen — the failure would track the developer's
+/// `TERM_PROGRAM` rather than the code under test.
 ///
 /// The shim would fire if the `is_tty()` guard in
 /// `biscuit-terminal ::discovery::detection::color::detect_color_mode` were
@@ -90,15 +102,19 @@ fn compose_redirected_does_not_spawn_appearance_defaults() {
     use std::os::unix::fs::PermissionsExt;
 
     let shim_dir = tempfile::tempdir().expect("shim tempdir");
-    let sentinel = shim_dir.path().join("defaults-was-invoked");
+    let sentinel = shim_dir.path().join("appearance-probe-was-invoked");
     let shim = shim_dir.path().join("defaults");
 
-    // A `defaults` stand-in that records any invocation, then behaves like a
-    // no-match (exit 1) so behavior is unchanged if it *were* (wrongly) called.
+    // Every invocation exits 1 (a `defaults` no-match) so unrelated callers see
+    // unchanged behavior whether or not they matched the sentinel.
     std::fs::write(
         &shim,
         format!(
-            "#!/bin/sh\n/usr/bin/touch {:?}\nexit 1\n",
+            "#!/bin/sh\n\
+             if [ \"$1\" = read ] && [ \"$2\" = -g ] && [ \"$3\" = AppleInterfaceStyle ]; then\n\
+             \x20 /usr/bin/touch {:?}\n\
+             fi\n\
+             exit 1\n",
             sentinel.display()
         ),
     )
@@ -127,8 +143,10 @@ fn compose_redirected_does_not_spawn_appearance_defaults() {
     );
     assert!(
         !sentinel.exists(),
-        "redirected `md compose` forked the macOS `defaults` appearance probe \
-         (sentinel {:?} was created) — the non-TTY guard regressed",
+        "redirected `md compose` ran `defaults read -g AppleInterfaceStyle` \
+         (sentinel {:?} was created) — the non-TTY guard on the macOS \
+         appearance probe regressed. Only that argv trips this sentinel; other \
+         `defaults` consumers (e.g. the iTerm2 font reads) are ignored.",
         sentinel.display()
     );
 }
