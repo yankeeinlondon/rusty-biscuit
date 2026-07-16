@@ -309,7 +309,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/composition/pipeline.rs",
-      "line": 205,
+      "line": 204,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -319,7 +319,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/composition/pipeline.rs",
-      "line": 343,
+      "line": 342,
       "form": "matches-macro",
       "dispatch_class": "conditional",
       "providers": [
@@ -1365,7 +1365,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs",
-      "line": 522,
+      "line": 535,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
