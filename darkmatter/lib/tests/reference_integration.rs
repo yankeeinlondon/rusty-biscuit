@@ -57,13 +57,13 @@ fn recursive_file_traversal() {
     assert_eq!(graph.node_count(), 2);
 
     // Root has link + transclusion record
-    let root_links = graph.root.local_references.hyperlinks();
+    let root_links = graph.root().local_references.hyperlinks();
     assert_eq!(root_links.len(), 1);
-    let root_transclusions = graph.root.local_references.transclusions();
+    let root_transclusions = graph.root().local_references.transclusions();
     assert_eq!(root_transclusions.len(), 1);
 
     // Child has its own link
-    let child = &graph.nodes[0];
+    let child = &graph.nodes()[0];
     assert_eq!(child.local_references.hyperlinks().len(), 1);
 }
 
@@ -138,8 +138,8 @@ fn cycle_detection_stops_infinite_recursion() {
     );
 
     // Verify no duplicate node IDs
-    let mut ids = vec![graph.root.node_id.clone()];
-    ids.extend(graph.nodes.iter().map(|n| n.node_id.clone()));
+    let mut ids = vec![graph.root().node_id.clone()];
+    ids.extend(graph.nodes().iter().map(|n| n.node_id.clone()));
     let unique: std::collections::HashSet<_> = ids.iter().cloned().collect();
     assert_eq!(ids.len(), unique.len(), "all node IDs should be unique");
 }
@@ -213,7 +213,7 @@ fn transclusion_records_in_all_views() {
 
     // Local references should include transclusion records
     let graph = md.reference_graph(options.clone()).unwrap();
-    let transclusions = graph.root.local_references.transclusions();
+    let transclusions = graph.root().local_references.transclusions();
     assert_eq!(transclusions.len(), 2);
 
     // Composed references should also include them
@@ -241,8 +241,7 @@ fn toc_linking_dependency_and_generated_links_appear_in_composed_references() {
     let options = ReferenceGraphOptions::default();
     let graph = md.reference_graph(options.clone()).unwrap();
 
-    let toc_deps: Vec<_> = graph
-        .root
+    let toc_deps: Vec<_> = graph.root()
         .local_references
         .transclusions()
         .into_iter()
@@ -658,8 +657,8 @@ fn reference_graph_with_cache_root() {
     let graph2 = md.reference_graph(options).unwrap();
     assert_eq!(graph2.node_count(), 2);
     assert_eq!(
-        graph2.root.local_references.hyperlinks().len(),
-        graph1.root.local_references.hyperlinks().len()
+        graph2.root().local_references.hyperlinks().len(),
+        graph1.root().local_references.hyperlinks().len()
     );
 }
 
@@ -832,10 +831,10 @@ fn section_context_populated_in_graph() {
         .unwrap();
 
     assert!(
-        !graph.root.child_insertions.is_empty(),
+        !graph.root().child_insertions.is_empty(),
         "expected child insertions"
     );
-    let insertion = &graph.root.child_insertions[0];
+    let insertion = &graph.root().child_insertions[0];
     assert_eq!(
         insertion.context.section_heading_text.as_deref(),
         Some("Intro"),
@@ -1122,7 +1121,7 @@ fn file_tree_section_caption_respects_heading_level() {
     let graph = md.reference_graph(options).unwrap();
 
     // Find the insertion for child.md
-    let insertion = &graph.root.child_insertions[0];
+    let insertion = &graph.root().child_insertions[0];
     // The directive is under ### Details (level 3)
     assert_eq!(
         insertion.context.section_heading_level,

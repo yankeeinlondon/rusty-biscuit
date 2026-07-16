@@ -1374,6 +1374,7 @@ impl<'a> TransclusionEngine<'a> {
             &cache_key,
             Some(&persistent_ctx),
             options.cache_freshness_mode,
+            options.persistent_cache_eligible(),
             || {
                 let mut child_options = options
                     .clone()

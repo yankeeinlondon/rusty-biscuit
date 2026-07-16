@@ -8,7 +8,7 @@
 #[cfg(test)]
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
 
 use biscuit_file::file_reference::fetch::{FetchPolicy, HostPattern, PolicyClient};
 use dashmap::DashMap;
@@ -186,7 +186,46 @@ impl std::fmt::Debug for RemoteFetchInner {
     }
 }
 
+/// Clone-stable weak identity handle for a [`RemoteFetchRuntime`].
+///
+/// Retains only a `Weak` reference to the shared inner allocation, so identity
+/// tracking never extends the runtime's lifetime and never stores a raw pointer
+/// address. Cloning a `RemoteFetchRuntime` shares the same allocation, so both
+/// handles compare equal; a dropped or independently constructed runtime never
+/// compares equal even when its visible configuration matches. This is an
+/// in-process instance-identity guard, not a cryptographic identity.
+// `same_instance` is exercised by the graph-options identity comparison, which
+// the graph does not consume until the opacity cutover; allowance is temporary.
+#[allow(dead_code)]
+#[derive(Clone)]
+pub(crate) struct RemoteFetchWeakId(Weak<RemoteFetchInner>);
+
+#[allow(dead_code)]
+impl RemoteFetchWeakId {
+    /// Returns `true` when both handles still point at the same live
+    /// allocation.
+    ///
+    /// Uses `Weak::upgrade` + `Arc::ptr_eq` so a dropped instance (whose weak
+    /// upgrade yields `None`) is never equivalent — this is ABA-safe because
+    /// the live `Weak` keeps the allocation's control block from being reused
+    /// while either handle exists.
+    pub(crate) fn same_instance(&self, other: &Self) -> bool {
+        match (self.0.upgrade(), other.0.upgrade()) {
+            (Some(a), Some(b)) => Arc::ptr_eq(&a, &b),
+            _ => false,
+        }
+    }
+}
+
 impl RemoteFetchRuntime {
+    /// Returns a clone-stable weak identity handle for this runtime.
+    ///
+    /// The narrow accessor exists so identity capture never reaches through the
+    /// private `inner` field; it only downgrades the shared allocation.
+    pub(crate) fn weak_id(&self) -> RemoteFetchWeakId {
+        RemoteFetchWeakId(Arc::downgrade(&self.inner))
+    }
+
     /// Creates a runtime from the remote-read config with an optional
     /// persistent cache store for cross-run remote artifact caching.
     pub fn with_store(config: &RemoteReadConfig, store: Option<Arc<FileStore>>) -> Self {

@@ -190,13 +190,13 @@ pub fn build_file_tree_model(
     // Build an id → &ReferenceGraphNode map once for O(1) lookups
     // during recursive model construction (avoids O(n²) linear scans).
     let mut node_map: HashMap<&str, &ReferenceGraphNode> =
-        HashMap::with_capacity(graph.nodes.len() + 1);
-    node_map.insert(graph.root.node_id.as_ref(), &graph.root);
-    for node in &graph.nodes {
+        HashMap::with_capacity(graph.nodes().len() + 1);
+    node_map.insert(graph.root().node_id.as_ref(), graph.root());
+    for node in graph.nodes() {
         node_map.insert(node.node_id.as_ref(), node);
     }
 
-    let root = build_node_model(&graph.root, &node_map, &issue_map, follow);
+    let root = build_node_model(graph.root(), &node_map, &issue_map, follow);
     FileTreeModel { root }
 }
 
@@ -670,9 +670,14 @@ mod tests {
 
     #[test]
     fn reference_id_matching_over_directive_line() {
+        use crate::markdown::Markdown;
+        use crate::markdown::reference::provenance::{
+            ReferenceDependencyManifest, ReferenceGraphMode,
+        };
         use crate::markdown::reference::types::{
-            ReferenceGraph, ReferenceGraphNode, ReferenceInsertion, ReferenceInsertionContext,
-            ReferenceOrigin, ReferenceRecord, ReferenceSet, ReferenceTarget,
+            ReferenceGraph, ReferenceGraphNode, ReferenceGraphOptions, ReferenceInsertion,
+            ReferenceInsertionContext, ReferenceOrigin, ReferenceRecord, ReferenceSet,
+            ReferenceTarget,
         };
 
         // Simulate two prologues: both have directive_line=0 but different reference_ids
@@ -777,10 +782,14 @@ mod tests {
             child_insertions: vec![],
         };
 
-        let graph = ReferenceGraph {
+        let graph = ReferenceGraph::from_build(
+            &Markdown::new(""),
+            &ReferenceGraphOptions::default(),
+            ReferenceGraphMode::Full,
             root,
-            nodes: vec![child_a, child_b],
-        };
+            vec![child_a, child_b],
+            ReferenceDependencyManifest::default(),
+        );
 
         let model = build_file_tree_model(&graph, None, true);
 
@@ -796,9 +805,14 @@ mod tests {
 
     #[test]
     fn epilogue_matches_by_reference_id() {
+        use crate::markdown::Markdown;
+        use crate::markdown::reference::provenance::{
+            ReferenceDependencyManifest, ReferenceGraphMode,
+        };
         use crate::markdown::reference::types::{
-            ReferenceGraph, ReferenceGraphNode, ReferenceInsertion, ReferenceInsertionContext,
-            ReferenceOrigin, ReferenceRecord, ReferenceSet, ReferenceTarget,
+            ReferenceGraph, ReferenceGraphNode, ReferenceGraphOptions, ReferenceInsertion,
+            ReferenceInsertionContext, ReferenceOrigin, ReferenceRecord, ReferenceSet,
+            ReferenceTarget,
         };
 
         let root = ReferenceGraphNode {
@@ -840,10 +854,14 @@ mod tests {
             child_insertions: vec![],
         };
 
-        let graph = ReferenceGraph {
+        let graph = ReferenceGraph::from_build(
+            &Markdown::new(""),
+            &ReferenceGraphOptions::default(),
+            ReferenceGraphMode::Full,
             root,
-            nodes: vec![child],
-        };
+            vec![child],
+            ReferenceDependencyManifest::default(),
+        );
 
         let model = build_file_tree_model(&graph, None, true);
 

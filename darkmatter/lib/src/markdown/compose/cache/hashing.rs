@@ -132,84 +132,14 @@ pub(crate) fn context_hash(ctx: &ComposeContext) -> u64 {
 ///
 /// Only includes fields that change the composed result. Internal
 /// bookkeeping fields (approval handler, policy root, etc.) are excluded.
+///
+/// Delegates to [`ComposeOptions::compose_cache_fingerprint`], the compose-cache
+/// product of the single exhaustive options field-classification authority
+/// (`compose/context/options.rs`). The reference-graph options identity is the
+/// other product of that same classification, so cache and graph identity share
+/// one field inventory.
 pub(crate) fn options_hash(options: &ComposeOptions) -> u64 {
-    let mut parts = Vec::new();
-
-    // Operation set
-    let ops: Vec<String> = options
-        .enabled_operations
-        .iter()
-        .map(|op| format!("{:?}", op))
-        .collect();
-    parts.push(format!("ops={}", ops.join(",")));
-
-    parts.push(format!("fail_fast={}", options.fail_fast));
-    parts.push(format!("max_depth={}", options.max_transclusion_depth));
-    parts.push(format!(
-        "allow_remote={}",
-        options.allow_remote_transclusion
-    ));
-    parts.push(format!("allow_local_md={}", options.allow_local_markdown));
-    parts.push(format!("allow_local_code={}", options.allow_local_code));
-    parts.push(format!(
-        "code_fallback_lang={}",
-        options.code_fallback_language
-    ));
-    parts.push(format!(
-        "ignore_invalid={:?}",
-        options.ignore_invalid_references
-    ));
-    parts.push(format!("resolve_repo_root={}", options.resolve_repo_root));
-
-    if !options.magic_paths.is_empty() {
-        let paths: Vec<String> = options
-            .magic_paths
-            .iter()
-            .map(|(p, pos)| format!("{}:{:?}", p.display(), pos))
-            .collect();
-        parts.push(format!("magic_paths={}", paths.join(",")));
-    }
-
-    parts.push(format!("list_spacing={:?}", options.list_spacing));
-    parts.push(format!("indent_size={}", options.indent_size));
-    parts.push(format!(
-        "replace_parent_wins={}",
-        options.replace_parent_wins
-    ));
-
-    if let Some(ref one_off) = options.one_off_replace {
-        let canonical = canonical_json_sorted(&Value::Object(one_off.clone()));
-        parts.push(format!("one_off_replace={}", canonical));
-    }
-
-    if let Some(ref ext) = options.external_state {
-        let canonical = canonical_json_sorted(ext);
-        parts.push(format!("external_state={}", canonical));
-    }
-
-    if let Some(ref overrides) = options.set_overrides {
-        let canonical = canonical_json_sorted(overrides);
-        parts.push(format!("set_overrides={}", canonical));
-    }
-
-    if let Some(ref baseline) = options.baseline_schema {
-        let json = crate::markdown::schemas::to_json_schema(baseline)
-            .unwrap_or_else(|_| serde_json::json!({"baseline_schema_error": true}));
-        let canonical = canonical_json_sorted(&json);
-        parts.push(format!("baseline_schema={}", canonical));
-    }
-    parts.push(format!("trigger_schemas={}", options.trigger_schemas));
-
-    // The launch-area anchor changes read-side file resolution (file_exists,
-    // frontmatter, file schema validation), so distinct anchors must not share
-    // a cache entry. A `Some` discriminant keeps `None` distinct from
-    // `Some("")`.
-    match options.file_ref_fallback_dir {
-        Some(ref dir) => parts.push(format!("file_ref_fallback_dir=Some:{}", dir.display())),
-        None => parts.push("file_ref_fallback_dir=None".to_string()),
-    }
-
-    xx_hash(&parts.join("\0"))
+    options.compose_cache_fingerprint()
 }
 
 /// Combines the base options hash with a directive's set-overlay hash.

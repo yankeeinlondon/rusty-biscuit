@@ -660,7 +660,7 @@ fn collect_composed_heading_slugs(
     all_slugs.extend(collect_prepared_heading_slugs(md, &source, graph_options));
 
     // Collect headings from all child nodes (prepared, disk-loaded, cached).
-    for node in &graph.nodes {
+    for node in graph.nodes() {
         if let ComposeSource::File(path) = &node.source
             && let Ok(child_md) = Markdown::try_from(path.as_path())
         {

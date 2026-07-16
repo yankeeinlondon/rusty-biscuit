@@ -5,6 +5,9 @@
 
 use std::collections::BTreeMap;
 
+use super::provenance::{
+    ReferenceDependencyManifest, ReferenceDocumentIdentity, ReferenceGraphMode,
+};
 use super::types::{
     NodeId, ReferenceGraph, ReferenceGraphNode, ReferenceGraphOptions, ReferenceInsertion,
     ReferenceInsertionContext, ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSet,
@@ -69,12 +72,16 @@ fn make_cache(options: &ReferenceGraphOptions) -> RunLocalCache {
     }
 }
 
-/// Shared graph construction with configurable reference extraction.
+/// Shared graph construction. The build [`ReferenceGraphMode`] is the sole
+/// input controlling reference extraction.
 fn build_graph_inner(
     md: &Markdown,
     options: &ReferenceGraphOptions,
-    extract_references: bool,
+    mode: ReferenceGraphMode,
 ) -> MarkdownResult<ReferenceGraph> {
+    // Graph mode is the single source of truth for reference extraction.
+    let extract_references = matches!(mode, ReferenceGraphMode::Full);
+
     let mut runtime = ReferenceAnalysisRuntime {
         transclusion: TransclusionRuntime::new(options.compose.max_transclusion_depth),
         cache: make_cache(options),
@@ -89,14 +96,28 @@ fn build_graph_inner(
         .transclusion
         .enter(root_id.to_string(), source_to_path(&source), 1);
 
-    let (root, all_nodes) = build_node(md, &source, options, &mut runtime, extract_references)?;
+    // Accumulates one compact identity per unique visited local child.
+    let mut dependencies = ReferenceDependencyManifest::default();
+
+    let (root, all_nodes) = build_node(
+        md,
+        &source,
+        options,
+        &mut runtime,
+        extract_references,
+        &mut dependencies,
+    )?;
 
     runtime.transclusion.exit();
 
-    Ok(ReferenceGraph {
+    Ok(ReferenceGraph::from_build(
+        md,
+        options,
+        mode,
         root,
-        nodes: all_nodes,
-    })
+        all_nodes,
+        dependencies,
+    ))
 }
 
 /// Build a transclusion-only graph (no link/image extraction at leaf nodes).
@@ -104,7 +125,7 @@ pub(crate) fn build_transclusion_graph(
     md: &Markdown,
     options: &ReferenceGraphOptions,
 ) -> MarkdownResult<ReferenceGraph> {
-    build_graph_inner(md, options, false)
+    build_graph_inner(md, options, ReferenceGraphMode::TransclusionOnly)
 }
 
 /// Build a full reference graph (transclusions + all reference types at each node).
@@ -112,13 +133,13 @@ pub(crate) fn build_reference_graph(
     md: &Markdown,
     options: &ReferenceGraphOptions,
 ) -> MarkdownResult<ReferenceGraph> {
-    build_graph_inner(md, options, true)
+    build_graph_inner(md, options, ReferenceGraphMode::Full)
 }
 
 /// Flatten a reference graph into composed-order [`ReferenceSet`].
 pub(crate) fn flatten_graph(graph: &ReferenceGraph) -> ReferenceSet {
     let mut records = Vec::new();
-    flatten_node(&graph.root, graph, &mut records);
+    flatten_node(graph.root(), graph, &mut records);
     ReferenceSet { records }
 }
 
@@ -238,6 +259,7 @@ fn build_node(
     options: &ReferenceGraphOptions,
     runtime: &mut ReferenceAnalysisRuntime,
     extract_references: bool,
+    dependencies: &mut ReferenceDependencyManifest,
 ) -> MarkdownResult<(ReferenceGraphNode, Vec<ReferenceGraphNode>)> {
     let node_id = source_to_id(source);
 
@@ -361,12 +383,19 @@ fn build_node(
                         .is_ok()
                     {
                         if let Some(child_md) = runtime.load_markdown(&child_path) {
+                            // Record this visited local child from the value we
+                            // just loaded (deduped per unique resolved source).
+                            dependencies.record(
+                                child_source.clone(),
+                                ReferenceDocumentIdentity::capture(&child_md),
+                            );
                             let (child_node, mut descendants) = build_node(
                                 &child_md,
                                 &child_source,
                                 options,
                                 runtime,
                                 extract_references,
+                                dependencies,
                             )?;
 
                             let (sec_text, sec_level) =
@@ -456,12 +485,17 @@ fn build_node(
                     .is_ok()
                 {
                     if let Some(child_md) = runtime.load_markdown(&path) {
+                        dependencies.record(
+                            child_source.clone(),
+                            ReferenceDocumentIdentity::capture(&child_md),
+                        );
                         let (child_node, mut descendants) = build_node(
                             &child_md,
                             &child_source,
                             options,
                             runtime,
                             extract_references,
+                            dependencies,
                         )?;
 
                         child_insertions.push(ReferenceInsertion {
@@ -613,12 +647,17 @@ fn build_node(
                     .is_ok()
                 {
                     if let Some(child_md) = runtime.load_markdown(&child_path) {
+                        dependencies.record(
+                            child_source.clone(),
+                            ReferenceDocumentIdentity::capture(&child_md),
+                        );
                         let (child_node, mut descendants) = build_node(
                             &child_md,
                             &child_source,
                             options,
                             runtime,
                             extract_references,
+                            dependencies,
                         )?;
 
                         let ref_id = make_reference_id(source, 0, idx);
@@ -688,12 +727,17 @@ fn build_node(
                     .is_ok()
                 {
                     if let Some(child_md) = runtime.load_markdown(&child_path) {
+                        dependencies.record(
+                            child_source.clone(),
+                            ReferenceDocumentIdentity::capture(&child_md),
+                        );
                         let (child_node, mut descendants) = build_node(
                             &child_md,
                             &child_source,
                             options,
                             runtime,
                             extract_references,
+                            dependencies,
                         )?;
 
                         let (sec_text, sec_level) = heading_index
@@ -956,12 +1000,12 @@ mod tests {
         let graph = build_reference_graph(&md, &options).unwrap();
 
         assert_eq!(graph.node_count(), 1);
-        assert!(!graph.root.local_references.is_empty());
+        assert!(!graph.root().local_references.is_empty());
 
-        let links = graph.root.local_references.hyperlinks();
+        let links = graph.root().local_references.hyperlinks();
         assert_eq!(links.len(), 1);
 
-        let images = graph.root.local_references.images();
+        let images = graph.root().local_references.images();
         assert_eq!(images.len(), 1);
     }
 
@@ -981,7 +1025,7 @@ mod tests {
         let graph = build_transclusion_graph(&md, &options).unwrap();
 
         assert_eq!(graph.node_count(), 1);
-        assert!(graph.root.local_references.is_empty());
+        assert!(graph.root().local_references.is_empty());
     }
 
     #[test]
@@ -1058,13 +1102,13 @@ mod tests {
         assert_eq!(graph.node_count(), 2);
 
         // Root should have links + transclusion record
-        let root_links = graph.root.local_references.hyperlinks();
+        let root_links = graph.root().local_references.hyperlinks();
         assert_eq!(root_links.len(), 2); // root-link + after
-        let root_transclusions = graph.root.local_references.transclusions();
+        let root_transclusions = graph.root().local_references.transclusions();
         assert_eq!(root_transclusions.len(), 1);
 
         // Child node should have its link
-        let child_node = &graph.nodes[0];
+        let child_node = &graph.nodes()[0];
         let child_links = child_node.local_references.hyperlinks();
         assert_eq!(child_links.len(), 1);
 
@@ -1106,7 +1150,7 @@ mod tests {
         assert_eq!(graph.node_count(), 3);
 
         // Root should have transclusion records for prologue and epilogue
-        let transclusions = graph.root.local_references.transclusions();
+        let transclusions = graph.root().local_references.transclusions();
         assert_eq!(transclusions.len(), 2);
     }
 
@@ -1132,8 +1176,8 @@ mod tests {
         );
 
         // Verify no duplicate node IDs
-        let mut ids: Vec<&str> = vec![graph.root.node_id.as_ref()];
-        ids.extend(graph.nodes.iter().map(|n| n.node_id.as_ref()));
+        let mut ids: Vec<&str> = vec![graph.root().node_id.as_ref()];
+        ids.extend(graph.nodes().iter().map(|n| n.node_id.as_ref()));
         let unique: std::collections::HashSet<&str> = ids.iter().copied().collect();
         assert_eq!(ids.len(), unique.len(), "all node IDs should be unique");
     }
@@ -1166,7 +1210,7 @@ mod tests {
         let options = ReferenceGraphOptions::default();
         let graph = build_reference_graph(&md, &options).unwrap();
 
-        let transclusions = graph.root.local_references.transclusions();
+        let transclusions = graph.root().local_references.transclusions();
         assert_eq!(transclusions.len(), 3);
 
         // Verify syntax types
@@ -1245,10 +1289,14 @@ mod tests {
             child_insertions: vec![],
         };
 
-        let graph = ReferenceGraph {
-            root: node,
-            nodes: vec![child_a, child_b],
-        };
+        let graph = ReferenceGraph::from_build(
+            &Markdown::new(""),
+            &ReferenceGraphOptions::default(),
+            ReferenceGraphMode::Full,
+            node,
+            vec![child_a, child_b],
+            ReferenceDependencyManifest::default(),
+        );
 
         let flat = flatten_graph(&graph);
         // Both children should appear in insertion_order (a before b)
@@ -1277,7 +1325,7 @@ mod tests {
 
         // Root + child = 2 nodes when the condition is true
         assert_eq!(graph.node_count(), 2);
-        let transclusions = graph.root.local_references.transclusions();
+        let transclusions = graph.root().local_references.transclusions();
         assert_eq!(transclusions.len(), 1);
     }
 
@@ -1301,8 +1349,70 @@ mod tests {
 
         // Child is skipped, so only the root node remains
         assert_eq!(graph.node_count(), 1);
-        let transclusions = graph.root.local_references.transclusions();
+        let transclusions = graph.root().local_references.transclusions();
         assert_eq!(transclusions.len(), 0);
+    }
+
+    #[test]
+    fn dependency_manifest_records_one_entry_per_unique_local_child() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("child.md"), "# Child\n").unwrap();
+
+        // The same local child is reached through two `::file` insertions; a
+        // remote `::url` target is present but must not enter the manifest.
+        let root_path = dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            "::file child.md\n\n::file child.md\n\n::url https://example.com\n",
+        )
+        .unwrap();
+
+        let root_md = Markdown::try_from(root_path.as_path()).unwrap();
+        let graph = build_reference_graph(&root_md, &ReferenceGraphOptions::default()).unwrap();
+
+        let manifest = graph.provenance().dependencies();
+        assert_eq!(
+            manifest.len(),
+            1,
+            "one child reached twice yields exactly one entry; remote ::url is excluded"
+        );
+        let recorded = &manifest.documents()[0];
+        match &recorded.source {
+            ComposeSource::File(p) => assert_eq!(p.file_name().unwrap(), "child.md"),
+            other => panic!("expected a local file source, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dependency_manifest_covers_prologue_and_epilogue_children() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("prologue.md"), "# Prologue\n").unwrap();
+        std::fs::write(dir.path().join("epilogue.md"), "# Epilogue\n").unwrap();
+
+        let root_path = dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            "---\nprologue: prologue.md\nepilogue: epilogue.md\n---\n\n# Body\n",
+        )
+        .unwrap();
+
+        let root_md = Markdown::try_from(root_path.as_path()).unwrap();
+        let graph = build_reference_graph(&root_md, &ReferenceGraphOptions::default()).unwrap();
+
+        let manifest = graph.provenance().dependencies();
+        assert_eq!(
+            manifest.len(),
+            2,
+            "prologue and epilogue children each record one manifest entry"
+        );
+    }
+
+    #[test]
+    fn dependency_manifest_empty_without_local_children() {
+        // A remote-only transclusion never materializes a local child.
+        let md = Markdown::new("::url https://example.com\n[link](https://example.com)");
+        let graph = build_reference_graph(&md, &ReferenceGraphOptions::default()).unwrap();
+        assert!(graph.provenance().dependencies().is_empty());
     }
 
     #[test]
@@ -1324,7 +1434,7 @@ mod tests {
         let graph = build_reference_graph(&root_md, &options).unwrap();
 
         assert_eq!(graph.node_count(), 2);
-        let transclusions = graph.root.local_references.transclusions();
+        let transclusions = graph.root().local_references.transclusions();
         assert_eq!(transclusions.len(), 1);
     }
 }

@@ -10,6 +10,14 @@ mod graph;
 pub(crate) mod html;
 pub(crate) mod local;
 pub mod meta;
+// The graph-construction surface of `provenance` is now wired (mode, document
+// and options identities, the dependency manifest, and `ReferenceGraphProvenance`
+// construction). What remains unused is the prebuilt-graph *validation* surface —
+// `ReferenceGraphMismatch`, `DependencyMismatchKind`, `check`, the provenance
+// readers, and the manifest readers — which Phase 3 consumes. The allowance is
+// scoped to this module and removed once validation is wired.
+#[allow(dead_code)]
+pub(crate) mod provenance;
 pub mod types;
 pub mod validate;
 
