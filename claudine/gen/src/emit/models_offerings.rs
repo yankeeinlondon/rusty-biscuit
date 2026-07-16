@@ -237,3 +237,36 @@ pub(crate) fn model_catalog_source(
     crate::generate::model_catalog_source_variant(field, member)
         .map(|variant| format!("ModelCatalogSource::{variant}"))
 }
+
+pub(crate) fn emission_fragment(
+    values: &ResolvedValues<'_>,
+    ctx: &mut EmitCtx,
+) -> Result<EmissionFragment, GenError> {
+    let mut fragment = EmissionFragment::new();
+    fragment.field(
+        29,
+        "expected_offerings",
+        expected_offerings("expected_offerings", values.get("expected_offerings")?, 1, ctx)?,
+    );
+    fragment.field(
+        30,
+        "offering_sources",
+        offering_sources("offering_sources", values.get("offering_sources")?, 1, ctx)?,
+    );
+    fragment.field(
+        31,
+        "model_catalog_source",
+        model_catalog_source("model_catalog_source", values.get("model_catalog_source")?, ctx)?,
+    );
+    fragment.field(32, "model_env_vars", str_slice("model_env_vars", values.get("model_env_vars")?, 1)?);
+    fragment.field(34, "repo_home_root_files", str_slice("repo_home_root_files", values.get("repo_home_root_files")?, 1)?);
+    fragment.field(35, "resume", resume_support("resume", values.get("resume")?, ctx)?);
+    fragment.field(
+        36,
+        "model_cli_flag",
+        optional_string_literal("model_cli_flag", values.get("model_cli_flag")?)?,
+    );
+    fragment.field(38, "billing_models", billing_models("billing_models", values.get("billing_models")?, 1, ctx)?);
+    fragment.field(39, "cap_policies", cap_policies("cap_policies", values.get("cap_policies")?, 1, ctx)?);
+    Ok(fragment)
+}

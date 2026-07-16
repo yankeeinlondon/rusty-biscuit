@@ -33,20 +33,6 @@ mod identity_paths;
 mod linking;
 mod models_offerings;
 
-use event_policy::{
-    acp, display_policy, event_mapping_table, known_gaps, platform_kind, unmapped_native_events,
-};
-use execution_prompting::{
-    cli_sensitive_axes, entrypoints, output_formats, prompt_arg_conventions, reasoning,
-    stream_protocol, system_prompt_spec, yolo,
-};
-use identity_paths::{path_list_from_records, path_list_from_strings, provider_expr, sniff_binding};
-use linking::resource_support_builder;
-use models_offerings::{
-    billing_models, cap_policies, expected_offerings, model_catalog_source, offering_sources,
-    resume_support,
-};
-
 /// Fixed slug → `Provider` variant map. Generation can never invent a
 /// variant: onboarding step 3 (hand wiring) must add it here AND in the
 /// lib's `Provider` enum before `claudine-gen generate <slug>` works.
@@ -251,6 +237,59 @@ pub struct FieldValue<'a> {
     pub value: &'a Value,
 }
 
+pub(crate) struct ResolvedValues<'a> {
+    values: &'a [FieldValue<'a>],
+}
+
+impl<'a> ResolvedValues<'a> {
+    fn new(values: &'a [FieldValue<'a>]) -> Self {
+        Self { values }
+    }
+
+    pub(crate) fn get(&self, field: &'static str) -> Result<&'a Value, GenError> {
+        self.values
+            .iter()
+            .find(|value| value.field == field)
+            .map(|value| value.value)
+            .ok_or_else(|| GenError::MissingValue {
+                field: "data.rs",
+                message: format!("assembler received no resolved value for `{field}`"),
+            })
+    }
+}
+
+pub(crate) struct EmittedField {
+    order: u8,
+    name: &'static str,
+    expression: String,
+}
+
+pub(crate) struct EmissionFragment {
+    fields: Vec<EmittedField>,
+    supporting_items: Vec<String>,
+}
+
+impl EmissionFragment {
+    pub(crate) fn new() -> Self {
+        Self {
+            fields: Vec::new(),
+            supporting_items: Vec::new(),
+        }
+    }
+
+    pub(crate) fn field(&mut self, order: u8, name: &'static str, expression: String) {
+        self.fields.push(EmittedField {
+            order,
+            name,
+            expression,
+        });
+    }
+
+    pub(crate) fn supporting_item(&mut self, item: String) {
+        self.supporting_items.push(item);
+    }
+}
+
 /// Assembles the complete generated `data.rs` for `slug` from the resolved
 /// catalog values (registry order).
 ///
@@ -275,27 +314,11 @@ pub fn emit_data_file(
     values: &[FieldValue<'_>],
 ) -> Result<String, GenError> {
     let mut ctx = EmitCtx::new(slug)?;
-    let lookup = |field: &str| -> Result<&Value, GenError> {
-        values
-            .iter()
-            .find(|fv| fv.field == field)
-            .map(|fv| fv.value)
-            .ok_or_else(|| GenError::MissingValue {
-                field: "data.rs",
-                message: format!("assembler received no resolved value for `{field}`"),
-            })
-    };
-
+    let values = ResolvedValues::new(values);
     let prefix = ctx.prefix.clone();
     let memory_const = format!("{prefix}_MEMORY_FILES");
     let event_static = format!("{prefix}_EVENT_MAPPING");
-    let lazy_static = format!("{prefix}_RESOURCE_SUPPORT");
-
-    // system_prompt.memory_files must equal the top-level memory_files
-    // list — the generated shape references ONE list (matrix v1 cleanup).
-    let memory_value = lookup("memory_files")?;
-    let system_prompt_value = lookup("system_prompt")?;
-    if system_prompt_value.get("memory_files") != Some(memory_value) {
+    if values.get("system_prompt")?.get("memory_files") != Some(values.get("memory_files")?) {
         return Err(GenError::UnmappableValue {
             field: "system_prompt",
             message: "system_prompt.memory_files diverges from the top-level memory_files \
@@ -303,177 +326,94 @@ pub fn emit_data_file(
                 .to_string(),
         });
     }
-
-    // INFO field lines, ProviderInfo declaration order.
-    let mut info_lines: Vec<String> = Vec::new();
-    let mut push = |field: &str, expr: String| {
-        info_lines.push(format!("    {field}: {expr},"));
-    };
-
-    push("provider", provider_expr(&mut ctx));
-    push("display_name", string_literal("display_name", lookup("display_name")?)?);
-    push("slug", string_literal("slug", lookup("slug")?)?);
-    push("short_name", string_literal("short_name", lookup("short_name")?)?);
-    push("binary", string_literal("binary", lookup("binary")?)?);
-    push("agent_offset", string_literal("agent_offset", lookup("agent_offset")?)?);
-    push("cli_aliases", str_slice("cli_aliases", lookup("cli_aliases")?, 1)?);
-    push("docs_url", string_literal("docs_url", lookup("docs_url")?)?);
-    push(
-        "usage_dashboard_url",
-        optional_string_literal("usage_dashboard_url", lookup("usage_dashboard_url")?)?,
-    );
-    push(
-        "sniff_binding",
-        sniff_binding("sniff_binding", lookup("sniff_binding")?, &mut ctx)?,
-    );
-    push(
-        "supports_skills",
-        bool_literal("supports_skills", lookup("supports_skills")?)?,
-    );
-    push(
-        "stream_protocol",
-        stream_protocol("stream_protocol", lookup("stream_protocol")?, &mut ctx)?,
-    );
-    push("event_mapping", format!("&{event_static}"));
-    // Behavior wiring: fixed structural boilerplate parameterized by the
-    // provider ident; the implementations live in behavior.rs.
     let provider_static = format!("{prefix}_PROVIDER");
-    push("behavior", format!("&{provider_static}"));
-    push("mcp", format!("&{provider_static}"));
-    push("adapter", format!("&{provider_static}"));
-    push("configurator", format!("&{provider_static}"));
-    push("resource_support_fn", "resource_support".to_string());
-    push(
-        "session_log_paths",
-        path_list_from_strings("session_log_paths", lookup("session_log_paths")?, 1, &mut ctx)?,
-    );
-    push(
-        "config_paths",
-        path_list_from_strings("config_paths", lookup("config_paths")?, 1, &mut ctx)?,
-    );
-    push("memory_files", memory_const.clone());
-    push(
-        "output_formats",
-        output_formats("output_formats", lookup("output_formats")?, 1, &mut ctx)?,
-    );
-    push(
-        "entrypoints",
-        entrypoints("entrypoints", lookup("entrypoints")?, 1, &mut ctx)?,
-    );
-    push(
-        "system_prompt",
-        system_prompt_spec("system_prompt", system_prompt_value, &memory_const, 1, &mut ctx)?,
-    );
-    push("yolo", yolo("yolo", lookup("yolo")?, 1, &mut ctx)?);
-    push("reasoning", reasoning("reasoning", lookup("reasoning")?, 1, &mut ctx)?);
-    push("known_gaps", known_gaps("known_gaps", lookup("known_gaps")?, 1, &mut ctx)?);
-    push("acp", acp("acp", lookup("acp")?, 1, &mut ctx)?);
-    push(
-        "prompt_arg_conventions",
-        prompt_arg_conventions(
-            "prompt_arg_conventions",
-            lookup("prompt_arg_conventions")?,
-            1,
-            &mut ctx,
-        )?,
-    );
-    push(
-        "expected_offerings",
-        expected_offerings("expected_offerings", lookup("expected_offerings")?, 1, &mut ctx)?,
-    );
-    push(
-        "offering_sources",
-        offering_sources("offering_sources", lookup("offering_sources")?, 1, &mut ctx)?,
-    );
-    push(
-        "model_catalog_source",
-        model_catalog_source("model_catalog_source", lookup("model_catalog_source")?, &mut ctx)?,
-    );
-    push(
-        "model_env_vars",
-        str_slice("model_env_vars", lookup("model_env_vars")?, 1)?,
-    );
-    push(
-        "cli_sensitive_axes",
-        cli_sensitive_axes("cli_sensitive_axes", lookup("cli_sensitive_axes")?, 1, &mut ctx)?,
-    );
-    push(
-        "repo_home_root_files",
-        str_slice("repo_home_root_files", lookup("repo_home_root_files")?, 1)?,
-    );
-    push("resume", resume_support("resume", lookup("resume")?, &mut ctx)?);
-    push(
-        "model_cli_flag",
-        optional_string_literal("model_cli_flag", lookup("model_cli_flag")?)?,
-    );
-    push(
-        "non_interactive_conflicting_flags",
-        str_slice(
-            "non_interactive_conflicting_flags",
-            lookup("non_interactive_conflicting_flags")?,
-            1,
-        )?,
-    );
-    push(
-        "billing_models",
-        billing_models("billing_models", lookup("billing_models")?, 1, &mut ctx)?,
-    );
-    push(
-        "cap_policies",
-        cap_policies("cap_policies", lookup("cap_policies")?, 1, &mut ctx)?,
-    );
-    push(
-        "allowed_env_keys",
-        str_slice("allowed_env_keys", lookup("allowed_env_keys")?, 1)?,
-    );
-    push(
-        "display_policy",
-        display_policy("display_policy", lookup("display_policy")?, 1, &mut ctx)?,
-    );
-    push(
-        "suppress_structured_stderr_on_success",
-        bool_literal(
-            "suppress_structured_stderr_on_success",
-            lookup("suppress_structured_stderr_on_success")?,
-        )?,
-    );
-    push(
-        "supports_interactive_inline_closure",
-        bool_literal(
-            "supports_interactive_inline_closure",
-            lookup("supports_interactive_inline_closure")?,
-        )?,
-    );
-    push(
-        "model_required_in_non_tty",
-        bool_literal("model_required_in_non_tty", lookup("model_required_in_non_tty")?)?,
-    );
-    push(
-        "platform_kind",
-        platform_kind("platform_kind", lookup("platform_kind")?, &mut ctx)?,
-    );
-    push(
-        "unmapped_native_events",
-        unmapped_native_events(
-            "unmapped_native_events",
-            lookup("unmapped_native_events")?,
-            1,
-            &mut ctx,
-        )?,
-    );
-
-    // Supporting items (emitted after INFO).
-    let event_table = event_mapping_table("event_mapping", lookup("event_mapping")?, 0, &mut ctx)?;
-    let memory_files =
-        path_list_from_records("memory_files", memory_value, 0, &mut ctx)?;
-    let builder =
-        resource_support_builder("resource_support", lookup("resource_support")?, &mut ctx)?;
+    let mut fragments = vec![
+        event_policy::emission_fragment(&values, &event_static, &mut ctx)?,
+        identity_paths::emission_fragment(&values, &memory_const, &mut ctx)?,
+        execution_prompting::emission_fragment(&values, &memory_const, &mut ctx)?,
+        models_offerings::emission_fragment(&values, &mut ctx)?,
+        linking::emission_fragment(&values, &mut ctx)?,
+        core_emission_fragment(&values, &provider_static)?,
+    ];
     ctx.import("std::sync::LazyLock");
     ctx.import("crate::provider::ProviderInfo");
     ctx.import("crate::linking::capabilities::ProviderCapabilities");
     ctx.import("crate::provider::path_template::PathTemplate");
+    let mut fields = fragments
+        .iter_mut()
+        .flat_map(|fragment| fragment.fields.drain(..))
+        .collect::<Vec<_>>();
+    fields.sort_by_key(|field| field.order);
+    if fields.len() != 47 || fields.iter().enumerate().any(|(order, field)| order != field.order as usize) {
+        return Err(unmappable(
+            "data.rs",
+            "domain fragments did not emit each ProviderInfo field exactly once".to_string(),
+        ));
+    }
+    let supporting_items = fragments
+        .into_iter()
+        .flat_map(|fragment| fragment.supporting_items)
+        .collect::<Vec<_>>();
+    Ok(render_data_file(
+        slug,
+        display_name,
+        &prefix,
+        &provider_static,
+        &ctx.imports,
+        &fields,
+        &supporting_items,
+    ))
+}
 
-    // Assemble.
+fn core_emission_fragment(
+    values: &ResolvedValues<'_>,
+    provider_static: &str,
+) -> Result<EmissionFragment, GenError> {
+    let mut fragment = EmissionFragment::new();
+    for (order, name, expression) in [
+        (13, "behavior", format!("&{provider_static}")),
+        (14, "mcp", format!("&{provider_static}")),
+        (15, "adapter", format!("&{provider_static}")),
+        (16, "configurator", format!("&{provider_static}")),
+        (17, "resource_support_fn", "resource_support".to_string()),
+    ] {
+        fragment.field(order, name, expression);
+    }
+    fragment.field(40, "allowed_env_keys", str_slice("allowed_env_keys", values.get("allowed_env_keys")?, 1)?);
+    fragment.field(
+        42,
+        "suppress_structured_stderr_on_success",
+        bool_literal(
+            "suppress_structured_stderr_on_success",
+            values.get("suppress_structured_stderr_on_success")?,
+        )?,
+    );
+    fragment.field(
+        43,
+        "supports_interactive_inline_closure",
+        bool_literal(
+            "supports_interactive_inline_closure",
+            values.get("supports_interactive_inline_closure")?,
+        )?,
+    );
+    fragment.field(
+        44,
+        "model_required_in_non_tty",
+        bool_literal("model_required_in_non_tty", values.get("model_required_in_non_tty")?)?,
+    );
+    Ok(fragment)
+}
+
+fn render_data_file(
+    slug: &str,
+    display_name: &str,
+    prefix: &str,
+    provider_static: &str,
+    imports: &BTreeSet<String>,
+    fields: &[EmittedField],
+    supporting_items: &[String],
+) -> String {
+    let lazy_static = format!("{prefix}_RESOURCE_SUPPORT");
     let mut out = String::new();
     out.push_str(&format!(
         "// GENERATED by claudine-gen — DO NOT EDIT BY HAND.\n\
@@ -488,7 +428,7 @@ pub fn emit_data_file(
          \n\
          //! Typed static catalog data for the {display_name} provider (generated).\n\n"
     ));
-    out.push_str(&render_imports(&ctx.imports, &provider_static));
+    out.push_str(&render_imports(imports, provider_static));
     out.push('\n');
     out.push_str(&format!(
         "static {lazy_static}: LazyLock<ProviderCapabilities> =\n    LazyLock::new(build_resource_support);\n\n\
@@ -497,27 +437,17 @@ pub fn emit_data_file(
     out.push_str(&format!(
         "pub(in crate::provider) static {prefix}_INFO: ProviderInfo = ProviderInfo {{\n"
     ));
-    for line in &info_lines {
-        out.push_str(line);
-        out.push('\n');
+    for field in fields {
+        out.push_str(&format!("    {}: {},\n", field.name, field.expression));
     }
     out.push_str("};\n\n");
-    out.push_str(
-        "/// Event-mapping table (also referenced directly by behavior modules).\n",
-    );
-    out.push_str(&format!(
-        "pub(in crate::provider) static {event_static}: EventMappingTable = {event_table};\n\n"
-    ));
-    out.push_str(
-        "/// Memory / instruction files contributing to the system prompt\n\
-         /// hierarchy — one list, shared by `memory_files` and\n\
-         /// `system_prompt.memory_files`.\n",
-    );
-    out.push_str(&format!(
-        "const {memory_const}: &[PathTemplate] = {memory_files};\n\n"
-    ));
-    out.push_str(&builder);
-    Ok(out)
+    for (index, item) in supporting_items.iter().enumerate() {
+        out.push_str(item);
+        if index + 1 < supporting_items.len() {
+            out.push('\n');
+        }
+    }
+    out
 }
 
 /// Renders the `use` block: std, external (sniff), crate, then the fixed

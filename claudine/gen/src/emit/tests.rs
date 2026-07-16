@@ -1,4 +1,6 @@
 use super::*;
+use super::execution_prompting::{stream_protocol, yolo};
+use super::identity_paths::path_list_from_records;
 use serde_json::json;
 
 #[test]

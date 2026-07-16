@@ -302,3 +302,36 @@ pub(crate) fn display_policy(
         indent(level)
     ))
 }
+
+pub(crate) fn emission_fragment(
+    values: &ResolvedValues<'_>,
+    event_static: &str,
+    ctx: &mut EmitCtx,
+) -> Result<EmissionFragment, GenError> {
+    let mut fragment = EmissionFragment::new();
+    fragment.field(12, "event_mapping", format!("&{event_static}"));
+    fragment.field(26, "known_gaps", known_gaps("known_gaps", values.get("known_gaps")?, 1, ctx)?);
+    fragment.field(27, "acp", acp("acp", values.get("acp")?, 1, ctx)?);
+    fragment.field(
+        41,
+        "display_policy",
+        display_policy("display_policy", values.get("display_policy")?, 1, ctx)?,
+    );
+    fragment.field(45, "platform_kind", platform_kind("platform_kind", values.get("platform_kind")?, ctx)?);
+    fragment.field(
+        46,
+        "unmapped_native_events",
+        unmapped_native_events(
+            "unmapped_native_events",
+            values.get("unmapped_native_events")?,
+            1,
+            ctx,
+        )?,
+    );
+    let table = event_mapping_table("event_mapping", values.get("event_mapping")?, 0, ctx)?;
+    fragment.supporting_item(format!(
+        "/// Event-mapping table (also referenced directly by behavior modules).\n\
+         pub(in crate::provider) static {event_static}: EventMappingTable = {table};\n"
+    ));
+    Ok(fragment)
+}

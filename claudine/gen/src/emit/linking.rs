@@ -31,6 +31,19 @@ pub(crate) fn resource_support_builder(
     Ok(out)
 }
 
+pub(crate) fn emission_fragment(
+    values: &ResolvedValues<'_>,
+    ctx: &mut EmitCtx,
+) -> Result<EmissionFragment, GenError> {
+    let mut fragment = EmissionFragment::new();
+    fragment.supporting_item(resource_support_builder(
+        "resource_support",
+        values.get("resource_support")?,
+        ctx,
+    )?);
+    Ok(fragment)
+}
+
 fn resource_support_entry(
     field: &'static str,
     value: &Value,

@@ -392,3 +392,46 @@ pub(crate) fn cli_sensitive_axes(
     out.push_str(&format!("{}}}", indent(level)));
     Ok(out)
 }
+
+pub(crate) fn emission_fragment(
+    values: &ResolvedValues<'_>,
+    memory_const: &str,
+    ctx: &mut EmitCtx,
+) -> Result<EmissionFragment, GenError> {
+    let mut fragment = EmissionFragment::new();
+    fragment.field(11, "stream_protocol", stream_protocol("stream_protocol", values.get("stream_protocol")?, ctx)?);
+    fragment.field(21, "output_formats", output_formats("output_formats", values.get("output_formats")?, 1, ctx)?);
+    fragment.field(22, "entrypoints", entrypoints("entrypoints", values.get("entrypoints")?, 1, ctx)?);
+    fragment.field(
+        23,
+        "system_prompt",
+        system_prompt_spec("system_prompt", values.get("system_prompt")?, memory_const, 1, ctx)?,
+    );
+    fragment.field(24, "yolo", yolo("yolo", values.get("yolo")?, 1, ctx)?);
+    fragment.field(25, "reasoning", reasoning("reasoning", values.get("reasoning")?, 1, ctx)?);
+    fragment.field(
+        28,
+        "prompt_arg_conventions",
+        prompt_arg_conventions(
+            "prompt_arg_conventions",
+            values.get("prompt_arg_conventions")?,
+            1,
+            ctx,
+        )?,
+    );
+    fragment.field(
+        33,
+        "cli_sensitive_axes",
+        cli_sensitive_axes("cli_sensitive_axes", values.get("cli_sensitive_axes")?, 1, ctx)?,
+    );
+    fragment.field(
+        37,
+        "non_interactive_conflicting_flags",
+        str_slice(
+            "non_interactive_conflicting_flags",
+            values.get("non_interactive_conflicting_flags")?,
+            1,
+        )?,
+    );
+    Ok(fragment)
+}
