@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-996d58394401202c
-last_updated: 2026-07-14
+hash: 87f17662fa397abe-aaf0f9d0d4aac708
+last_updated: 2026-07-15
 ---
 
 # darkmatter
@@ -257,6 +257,24 @@ The removed god-files (`args.rs`, `commands.rs`, `output.rs`,
   shapes, so CLI JSON paths should call `serde_json` on the library values.
 - `darkmatter::markdown::reference::validate::ValidationReportView` is the
   terminal view for reference validation reports.
+- `ReferenceGraph` is an **opaque, immutable, builder-produced artifact**. It
+  has no public constructor and no public/`pub(crate)` data fields — only the
+  crate's builders (`Markdown::reference_graph` / `transclusion_graph`, routed
+  through the private `from_build`) produce one, and it carries private build
+  provenance (document/source/mode/options identities + a visited-descendant
+  dependency manifest). Downstream callers **inspect** via the read-only
+  accessors `root()`, `nodes()`, `iter()` (root once, then children),
+  `node_by_id()`, `node_count()`, `to_mermaid()`, `to_dot()`, and serialize via
+  `graph.view(follow)` — never field access. Provenance is JSON-invisible and
+  absent from `Debug`. `Markdown::validate_references_with_graph` verifies the
+  prebuilt graph's provenance (document → source → `Full`-mode → `options.graph`)
+  **and** re-reads every visited local descendant from disk before flattening; a
+  mismatch or changed/missing/unreadable child is a hard
+  `ReferenceError::ReferenceGraphMismatch` — it never silently rebuilds, so
+  plain build-and-validate callers should use `validate_references`. Identity is
+  clone-stable (a graph built from `options.clone()` still validates against the
+  original — the Finding 18 reuse guard). See
+  `darkmatter/features/2026-07-15-reference-graph/`.
 - `darkmatter::style::CliStyleClaims`, `apply_cli_claims`, and the
   `*_style_overrides_from_claims` helpers are the single authority for CLI
   style precedence.
