@@ -143,6 +143,34 @@ unrecoverable observations and no way to reproduce their claims. Do not repeat
 it. Measuring a private function is not a reason to delete the harness; a bench
 target is test-tier code and adds no public API.
 
+### Where to put a harness (private vs public target)
+
+The Phase-8 deletions were rationalized as unavoidable: "exposing a private
+function purely to benchmark it would be the public API addition the standing
+contract bars." That is correct about the API and wrong about the remedy — the
+choice was never "widen the API or delete the harness". Pick by what the target's
+visibility is:
+
+| Target visibility | Home | Why |
+|---|---|---|
+| `pub` | `darkmatter/lib/benches/*.rs` (Criterion) | A bench is a separate compilation unit; it sees only `pub` items. |
+| crate-private | `darkmatter/lib/src/perf_harness.rs` + a `#[cfg(test)]` caller in the target's own module | Lives *inside* the crate, so it reaches private items, and `#[cfg(test)]` ships in no artifact — **no public API is added**. |
+
+Never widen a production item's visibility to measure it.
+
+In-crate harness tests are `#[ignore]`d **and** gated on `Harness::from_env`
+(`DM_PERF_RAW_DIR`), so the ordinary `just test` gate neither runs nor is slowed
+by them:
+
+```
+DM_PERF_RAW_DIR=<abs run-record dir> \
+  cargo nextest run -p darkmatter --lib --release \
+  --run-ignored all -E 'test(<harness_test_name>)' --no-capture
+```
+
+They emit Criterion's `sample.json` shape, so `recompute.ts` reads them through
+the same path as Criterion's own vectors.
+
 ### Cross-run comparison requires a drift bracket
 
 This host is shared. Identical unmodified code has been observed drifting
