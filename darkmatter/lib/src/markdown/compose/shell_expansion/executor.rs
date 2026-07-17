@@ -844,6 +844,24 @@ mod tests {
         }
     }
 
+    // ---------------------------------------------------------------------
+    // Unix-utility fixture tests
+    //
+    // These predate the F17 helper-child redesign and reach for `echo`, `true`,
+    // `false`, `cat`, `sleep`, and `env` by name. None of the six exists as a
+    // spawnable executable on Windows (`echo` is a cmd.exe builtin, not a
+    // binary), so `Command::new` there fails with `CommandNotFound` and the
+    // assertion under test is never reached. They are gated rather than left to
+    // fail: the executor behavior each one covers is target-neutral, and the
+    // Unix utility is only a convenient fixture — not the subject.
+    //
+    // Porting them needs helper-child modes that echo argv and dump the
+    // environment (see `ChildMode`); that migration is scoped to Phase 11. The
+    // gate exists so this binary is Windows-runnable as a whole *now*, which the
+    // F17 Windows behavioral run requires.
+    // ---------------------------------------------------------------------
+
+    #[cfg(unix)]
     #[test]
     fn echo_hello_returns_output() {
         let directive = directive("echo hello", "echo", &["hello"], 1);
@@ -854,6 +872,7 @@ mod tests {
         assert_eq!(output.trim(), "hello");
     }
 
+    #[cfg(unix)]
     #[test]
     fn empty_output_returns_empty_string() {
         let d = directive("true", "true", &[], 1);
@@ -864,6 +883,7 @@ mod tests {
         assert_eq!(output, "");
     }
 
+    #[cfg(unix)]
     #[test]
     fn non_zero_exit_produces_execution_failed() {
         let d = directive("false", "false", &[], 1);
@@ -899,6 +919,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn timeout_kills_long_running_command() {
         let d = directive("sleep 10", "sleep", &["10"], 1);
@@ -953,6 +974,7 @@ mod tests {
         assert!(!wd.as_os_str().is_empty());
     }
 
+    #[cfg(unix)]
     #[test]
     fn stdin_is_null_command_does_not_hang() {
         let d = directive("cat", "cat", &[], 1);
@@ -1018,6 +1040,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn execute_command_with_bare_filename_source_succeeds() {
         let d = directive("echo works", "echo", &["works"], 5);
@@ -1028,6 +1051,7 @@ mod tests {
         assert_eq!(output.trim(), "works");
     }
 
+    #[cfg(unix)]
     #[test]
     fn execute_command_with_quoted_args() {
         let d = ShellDirective {
@@ -1071,6 +1095,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn execute_command_strips_ansi_by_default() {
         let d = ShellDirective {
@@ -1093,6 +1118,7 @@ mod tests {
         assert_eq!(output.trim(), "hello");
     }
 
+    #[cfg(unix)]
     #[test]
     fn execute_command_keeps_ansi_when_opt_out() {
         let d = ShellDirective {
@@ -1118,6 +1144,7 @@ mod tests {
         assert_eq!(output.trim(), "\x1b[31mhello\x1b[0m");
     }
 
+    #[cfg(unix)]
     #[test]
     fn execute_command_sets_no_color_env() {
         let d = ShellDirective {
@@ -1140,6 +1167,7 @@ mod tests {
         assert!(output.contains("NO_COLOR=1"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn per_command_timeout_override_beats_global() {
         let d = ShellDirective {
@@ -1636,6 +1664,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn timeout_with_empty_string_behavior_returns_empty() {
         let d = ShellDirective {
