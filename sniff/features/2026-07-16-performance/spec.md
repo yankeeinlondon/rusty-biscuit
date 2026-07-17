@@ -2,7 +2,7 @@
 status: ready for planning
 date: 2026-07-16
 reviewed: true
-review_iterations: 1
+review_iterations: 3
 reviewed_by: codex/default
 reviewed_on: 2026-07-16
 source_reviews:

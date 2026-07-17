@@ -2,7 +2,7 @@
 sub-spec: true
 depends-on: ../01-work-accounting/spec.md
 phase: 2
-status: in progress
+status: complete
 date: 2026-07-16
 ---
 
@@ -77,7 +77,7 @@ pub fn attribute_paths(packages: &[Package], paths: &[PathBuf]) -> PathAttributi
 pub struct PathAttribution { pub packages: Vec<String>, pub package_areas: Vec<String> }
 ```
 
-Behavior is preserved exactly in this phase — including the current first-match-wins-per-package semantics and the root-package (`relative == ""`) special case. **Phase 4 replaces the internals with the shared deepest-prefix index**; this phase only moves ownership so that replacement has one site to change. Output ordering stays `BTreeSet`-sorted.
+Behavior was preserved exactly in this phase — including the then-current first-match-wins-per-package semantics and the root-package (`relative == ""`) special case. **Phase 4 and its review follow-ups later replaced the internals with the shared deepest-prefix index**; this phase only moved ownership so that replacement had one site to change. Output ordering stays `BTreeSet`-sorted.
 
 ### C4 — Walk-scope decision table
 
@@ -222,7 +222,9 @@ Test-process isolation note: the two cache-population assertions are exact under
 
 ## Lane A — as built
 
-Implements R2. `build_aggregate_value` is now a pure projection; every fact it renders is observed before it runs.
+Implements the Phase 2 portion of R2. At this boundary, `build_aggregate_value` had only the temporary
+path-normalization allowance documented below; review cycle 3 removed it and now requires every fact
+to be observed before the counter-silent projection runs.
 
 ### Counter deltas
 
@@ -245,7 +247,7 @@ The non-Git reductions are a second-order win that C2 did not predict: `default_
 
 ### Contract deviations
 
-1. **`GitRequest::full()` confirmed as the C1 floor.** Bare `repo --json` is neither `lightweight_repo_action` nor `changes_only_repo_action`, so `select_git_request` returns `full()`, which sets `include_file_changes`. The precondition is enforced rather than assumed: `ensure_detailed_status` rejects a `GitInfo` whose status reports dirty while carrying no `file_changes` — the one below-`full()` case that is detectable by inspection. A clean tree legitimately has neither and passes.
+1. **`GitRequest::full()` was the C1 floor at the Phase 2 boundary.** Bare `repo --json` was neither `lightweight_repo_action` nor `changes_only_repo_action`, so `select_git_request` returned `full()`, which set `include_file_changes`. The precondition was enforced rather than assumed: `ensure_detailed_status` rejects a `GitInfo` whose status reports dirty while carrying no `file_changes` — the one below-`full()` case that is detectable by inspection. A clean tree legitimately has neither and passes. Review cycle 3 later narrowed the aggregate to detailed status plus focused Git config metadata; commits, branches, and worktrees come from the aggregate observation. This preserves the projection while avoiding the linked-worktree status walk implicit in the historical request.
 
 2. **`git.repository_discoveries == 1` required a change beyond C2's table.** `detect_repo_identity_with_repo` → `resolve_name` → `remote_basename` called the *path-based* `preferred_remote_url`, a second discovery on every repository whose root carries no manifest name. `remote_basename` now reads through the caller's handle via `api::preferred_remote_url_with_repo`, which routes to the same `resolve_origin_or_first` so preferred-remote semantics cannot drift.
 
@@ -259,9 +261,15 @@ Normalized for host/run variance: commit ids and timestamps, temp paths (`redact
 
 `git_status.file_changes` **order is nondeterministic on clean HEAD** — the gix status walk is parallel, reproduced 6/6 runs on the unmodified binary. The golden sorts that one field rather than dropping it. This is pre-existing and not a Lane A regression, but it means the aggregate's `file_changes` order is not a contract. The four `ScopeBucket`s are unaffected: `scope_paths` preserves `file_changes` order and the projection sorts afterward, matching `collect_changed_paths`'s sort/dedup byte-for-byte.
 
-### Known residual — `build_aggregate_value` is not counter-silent
+### Historical residual — aggregate projection purity (resolved)
 
-R2.7 says the builder performs no filesystem read. It records **4 `filesystem.io.canonicalizations`** and nothing else: the cwd-relative `context` block resolves the invoking directory against the package catalog through `output::filesystem`. No repository open, status walk, file read, subprocess, or request remains. `build_aggregate_value_performs_no_observation_beyond_path_normalization` allows exactly that one counter and fails on any other. **R6.2** (Phase 3) replaces those lookups with lexical prefix/depth comparisons over reusable normalized keys; tighten the assertion to `counters.is_empty()` then.
+At the Phase 2 boundary, R2.7's builder still recorded **4
+`filesystem.io.canonicalizations`** while resolving the cwd-relative `context` block. That allowance
+is historical, not the current contract. The aggregate observation now resolves context through one
+request-scoped `PackageOwnershipIndex`, carries the detected version collapse, and synthesizes a
+standalone package during the original detection pass. `build_aggregate_value` is a pure projection;
+`build_aggregate_value_performs_no_observation` supplies a populated two-package `RepoInfo` with real
+manifest files and requires `counters.is_empty()`.
 
 ### Escalation — status walks were invisible through the planner (RESOLVED)
 
@@ -360,7 +368,9 @@ The two failures are the **same two Phase 1 documented as pre-existing on clean 
 
 ## Gate for Phase 3
 
-R2, R3, R7, and R13.1–R13.2 are implemented and asserted by counter. The planner's counter-propagation defect is closed, so Phase 3 can assert walk counts end-to-end. Two items are deliberately carried forward:
+R2, R3, R7, and R13.1–R13.2 are implemented and asserted by counter. The planner's counter-propagation defect is closed, so Phase 3 can assert walk counts end-to-end. Two items were carried forward at the Phase 2 boundary and were completed by later phases and review cycles:
 
-- `build_aggregate_value` still records 4 `canonicalize` calls via the cwd-relative `context` block (Lane A). That is R6.2's target; its test allows exactly that counter and fails on any other, and should tighten to `is_empty()` once Phase 3/4 land the normalized-path boundary.
-- `attribute_paths` preserves the current first-match/lossy-string semantics verbatim. **Phase 4 replaces its internals with the deepest-prefix index** (R6.4/R6.5); this phase only moved ownership so that replacement has one site to change.
+- Aggregate projection is now counter-silent, including a populated repository/version path; context
+  and ownership are observed before projection.
+- Package attribution now uses one native-path, component-aware deepest-prefix ownership index for
+  inventory, documents, aggregate context, and commit-file attribution.

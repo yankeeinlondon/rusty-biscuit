@@ -49,7 +49,7 @@ which is the documentation-maintenance rule working as intended, not an omission
 | Capped inventory determinism | **Already correct.** Phase 2 rewrote `file_types/model.rs` to state ordering is deterministic while a truncated subset is not. | Verified, no change. |
 | 375-package benchmark name/count | **Already correct.** Phase 1 renamed the `huge_500_packages` IDs to `huge_375_packages`. | Verified; added the "never compare against an archived `huge_500` result" note to the bench manifest. |
 
-### The "10–50×" claim was worse than unsupported
+### Historical Phase 8 structure/full evidence
 
 The umbrella spec asked for the claim to be "replaced with qualified evidence" on the strength of a
 2.4× measurement. The counters say the honest number is closer to **1×** on the fixture in question:
@@ -62,17 +62,18 @@ The umbrella spec asked for the claim to be "replaced with qualified evidence" o
 | `filesystem.repo.package_enrichments` | 300 | 300 |
 | `filesystem.file_inventory.files_accepted` | — | 3,755 |
 
-Structure mode records the *same discovery work* as full mode. Full's only material addition is
-classifying the inventory. Two reasons, both already documented elsewhere and now joined up:
+At the Phase 8 capture, structure mode recorded the *same discovery work* as full mode. Full's only
+material addition was classifying the inventory. Two reasons explained that historical result:
 
-1. **R5.6 is blocked.** Structure mode is supposed to skip enrichment; it does not, and Phase 4
+1. **R5.6 was blocked.** Structure mode was supposed to skip enrichment; it did not, and Phase 4
    stopped for review rather than ship a change that silently empties `sniff repo test-runner`,
    `dependencies`, and `package-manager`. Until that lands, structure's only saving is inventory.
 2. **Structure pays a walk full mode does not.** It skips the manifest index and therefore falls back
    to `walk_for_nested_markers` (`filesystem.repo.nested_marker_walks: 1`), while full reuses the
    observation index.
 
-So the claim was not merely imprecise — it pointed the wrong way about where the cost is. Replaced
+So the claim was not merely imprecise — it pointed the wrong way about where the cost was at that
+phase boundary. It was replaced
 in all six sites with the counter comparison plus the workload dependence (the ratio grows with
 files-per-package and collapses toward 1 on package-dense, file-sparse trees; `_huge` is 375
 packages × ~10 files, which is exactly the converging shape).
@@ -90,9 +91,13 @@ categories; the skill and the type say **9** (test runners were added later). Re
 belongs to the phase that owns program detection, not to a performance-completion phase whose diff
 is supposed to contain no behavior. Recorded here so it is not lost.
 
-## Final counters vs. Phase 1
+## Historical Phase 8 counters vs. Phase 1
 
 `cargo run -p sniff --release --example work_counts`, same host and fixtures as Phases 1–7.
+
+These tables preserve the Phase 8 measurement record. They predate the later shallow-structure,
+manifest-store, and ownership-index work and must not be used as current structure-mode bounds.
+Full-mode and Git rows remain the final Phase 8 baseline for the work they describe.
 
 **`staged_filesystem_full_all_stages`** (`FilesystemRequest::new()`):
 
@@ -133,9 +138,9 @@ is supposed to contain no behavior. Recorded here so it is not lost.
 | `git.ref_walks` | 2 | 2 | 3 | 3 |
 | `git.repository_discoveries` | 1 | 1 | 1 | 1 |
 
-**Unchanged cases (drift brackets):** `staged_filesystem_summary_git_plus_repo` and
+**Historical unchanged cases (drift brackets):** `staged_filesystem_summary_git_plus_repo` and
 `repo_structure_huge_375_packages` are **byte-identical to Phase 1 on every counter**. Both are
-structure-mode, and R5.6 — the only requirement that would have moved them — is blocked. Their
+structure-mode, and R5.6 — the only requirement that would have moved them — was blocked. Their
 stability is what makes the deltas above readable as real rather than as harness drift.
 
 ### ⚠ Counters that cannot be compared naively
@@ -164,10 +169,11 @@ evidence than a fixture row would be, because it fails the build rather than pri
 
 Phase 4's sub-spec projected `filesystem.io.canonicalizations` would fall "with the enrichment
 halving" (600 → 300). It did not: it is 600, unchanged from Phase 1, while enrichments did halve.
-Not a regression — no case got worse — but the mechanism was mis-modeled, and canonicalization is
-evidently not driven per-enrichment. Recorded rather than quietly dropped; R6.2's "hot ownership
-lookups use lexical comparisons rather than repeated canonicalize" is the requirement that would
-own it, and the deepest-prefix ownership index it depends on (R6.4) is itself unimplemented.
+Not a regression — no case got worse — but the mechanism was mis-modeled, and canonicalization was
+not driven per-enrichment. The prediction remains part of the historical table rather than being
+retroactively rewritten. Current source implements R6.2/R6.4 with a request-scoped,
+deepest-component-prefix `PackageOwnershipIndex`; its hot-lookup test requires zero
+canonicalizations.
 
 ## Timing evidence
 
@@ -182,6 +188,21 @@ the umbrella spec states performance acceptance "is primarily structural", and e
 R2–R13 is discharged by a counter or a test. The scheduled CI matrix added by this phase is the
 durable answer — it collects work counts per OS on a runner class that can be compared with itself
 over time, which a one-off run on a loaded dev box never could.
+
+### Post-review workload coverage
+
+Review cycle 3 added the specified setup-excluded Criterion workload families for deep/wide
+formatting-only detection, package-scoped Git plus inventory, integrated versus standalone nested
+observation, mixed ecosystems at 100/500/2,000 packages, inventory saturation, document ownership,
+dirty-file sizes, divergent worktrees, remote containment, sparse path history, filesystem case
+behavior, and a real provider backed by wiremock. Work-counter tests remain the acceptance bounds;
+no timing verdict was collected on the loaded host.
+
+The large synthetic service-listing timing row remains deferred. The public service API observes the
+host, while parser and injected-command seams are crate-private; exposing a production injection API
+only for Criterion would broaden unrelated surface. Level-1 tests already pin service chunking,
+partial failure, deadlines, descendant cleanup, and child reaping, so the missing timing row is a
+benchmark-fixture limitation rather than an unbounded-work gap.
 
 ## CI
 
@@ -233,19 +254,44 @@ Output parity: the CLI's default/`--plain`/`--json` goldens and the library resu
 unmodified. This phase changes no serializer, no render path, and no result type, so parity is
 preserved by construction; the goldens are the check on that claim, not the argument for it.
 
+### Post-review verification
+
+After review cycle 3 repaired host-dependent OS-version normalization and selected an explicit
+`main` branch for Git fixtures, the canonical macOS run passed all 1,657 sniff-lib tests and all 777
+sniff-cli tests; `just lint` also passed. A Windows GNU
+`cargo check -p sniff --all-targets --features remote` passed, including the process-tree cleanup
+path. Native Linux and Windows Level-1 execution was not available on this macOS host; the Windows
+CLI cross-check was stopped while still compiling dependencies under the session timeout rule, and
+an MSVC cross-check lacked Windows SDK headers. The three-OS CI jobs remain the authoritative place
+for native execution and retained per-OS work-count artifacts; their definitions are future coverage,
+not evidence that those legs ran in this local implementation cycle.
+
 ## Completion boundary
 
 Per the umbrella spec, completion requires R1–R13 implemented, acceptance criteria passing, output
-parity, and cross-platform correctness. **The umbrella feature does not move to `_completed`**, and
-this phase must not be read as declaring it complete. Open at the end of Phase 8:
+parity, and cross-platform correctness. At the original Phase 8 boundary the umbrella feature did
+not move to `_completed`. The following table is the historical state that review cycles 1–3
+superseded:
 
 | Requirement | State |
 |---|---|
-| R5.5 / R5.6 | `ManifestStore` partial (`LockStore` only); the structure-only migration is **blocked pending owner review** — implementing it literally breaks three shipped CLI commands. |
-| R6.4 | The single deepest-prefix ownership index is **not built**; three correct implementations remain. |
-| R9.5 / R9.6 | Remote-tracking tip-set reuse and worktree-metadata reuse **not done**. |
+| R5.5 / R5.6 | At the Phase 8 boundary, `ManifestStore` was partial (`LockStore` only) and the structure-only migration was blocked pending owner review. |
+| R6.4 | At the Phase 8 boundary, the single deepest-prefix ownership index was not built. |
+| R9.5 / R9.6 | At the Phase 8 boundary, remote-tracking tip-set reuse and worktree-metadata reuse were not done. |
 
-Phase sub-specs 1–8 may each move to `_completed` independently; the umbrella stays open on the
-above. R14 is explicitly **not** on this list — Phase 7 measured all nine candidates and deferred
-them with evidence, which the umbrella spec's completion boundary expressly permits ("unimplemented
-R14 candidates do not block completion when evidence shows they are negligible").
+Current source closes all three rows: `ManifestStore` and focused shallow repository details satisfy
+R5.5/R5.6; `PackageOwnershipIndex` satisfies R6.4; and the shared `RefSnapshot` plus proxy/admin-HEAD
+worktree projection satisfy R9.5/R9.6. Review cycle 3 also closes aggregate projection purity,
+linked-worktree status duplication, component-aware area matching, manifest-failure reuse, and
+process-tree-bounded subprocess cleanup.
+
+The remaining limitations are evidence and benchmark scope, not open R1–R13 implementations:
+
+- Native Linux/Windows Level-1 runs and retained non-macOS artifacts were not produced on this
+  macOS-only host; the existing three-OS workflows must supply them.
+- The synthetic large-service Criterion row is deferred for the API-surface reason documented under
+  [Post-review workload coverage](#post-review-workload-coverage).
+
+R14 is explicitly not on this list — Phase 7 measured all nine candidates and deferred them with
+evidence, which the umbrella spec's completion boundary expressly permits ("unimplemented R14
+candidates do not block completion when evidence shows they are negligible").

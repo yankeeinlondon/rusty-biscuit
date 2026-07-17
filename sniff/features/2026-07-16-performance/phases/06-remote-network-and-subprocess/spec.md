@@ -4,7 +4,7 @@ depends-on:
   - ../05-git-observation/spec.md
   - ../../spec.md
 phase: 6
-status: in-progress
+status: complete
 date: 2026-07-17
 ---
 
@@ -179,6 +179,16 @@ wasteful — they were wrong:
 
 Two more sites had **no deadline at all** and were outside the survey's framing: `host_capability`'s
 `id -Gn` and `sudo -n true`.
+
+### Post-review subprocess boundary
+
+Review cycle 3 found one remaining bypass and a descendant-pipe gap in the shared helper. The
+Windows BurntToast availability probe now uses the named three-second policy through
+`process::run_for_stdout`. On Unix, children run in a dedicated process group; on Windows, they enter
+a kill-on-close Job Object before resuming. Timeout and direct-child exit cleanup terminate the
+whole group/job before joining pipe drains, so a descendant retaining stdout or stderr cannot extend
+the deadline. Portable Level-1 fixtures spawn such a descendant and require prompt cleanup; the
+Windows GNU all-target check compiles the Job Object path.
 
 ### Percent-encoding constrains the continuation design
 

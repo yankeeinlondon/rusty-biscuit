@@ -2,7 +2,7 @@
 sub-spec: true
 depends-on: ../04-package-enrichment-and-ownership/spec.md
 phase: 5
-status: in-progress
+status: complete
 date: 2026-07-17
 ---
 
@@ -291,17 +291,30 @@ one `GitRequest` struct literal (R9.7's accepted source break), migrated to
   express "no decorations". Both real callers passed `Some`, so redefining `None` as "attach none"
   was free, and it is what makes `wants_ref_decorations()` a genuine opt-out rather than a no-op.
 
-### Not done
+### Not done at the Phase 5 boundary
 
-- **R9.5 remote-tracking tip-set reuse** and **R9.6 worktree-metadata reuse.** Both are real, both
-  are in code this phase did not otherwise touch, and neither has a counter test that would prove the
-  reuse. Ranked below the R8/R10 bounds and deferred rather than rushed.
+- **R9.5 remote-tracking tip-set reuse** and **R9.6 worktree-metadata reuse.** Both were real, both
+  were in code this phase did not otherwise touch, and neither had a counter test that would prove
+  the reuse. They ranked below the R8/R10 bounds and were deferred rather than rushed.
 - **Git Criterion fixtures** (100 files at 1 KiB/100 KiB/multi-MB, branch-heavy repos, sparse-match
   history, many remote tips). Deferred to Phase 8 on the Phase 3 precedent: this host's Criterion
   numbers are noise (Phase 3 measured +330% on a byte-identical case under load), and the work bounds
   this phase claims are asserted by counter in-process instead.
 - **`git.file_diffs` baseline correction is not retro-applied** to the Phase 1–4 archived tables.
   Those values under-report every `include_diffs` case.
+
+### Post-review completion of R9.5 and R9.6
+
+The two reuse items deferred at the Phase 5 boundary are now implemented:
+
+- One request-scoped `RefSnapshot` supplies local tips, remote-tracking tips, and decorations to
+  branch, tracking, remote, containment, and recent-commit projections. The Level-1
+  `focused_ref_consumers_share_one_observation` fixture requires one ref walk for the combined
+  request.
+- Linked-worktree identity, path, branch, and tip come from gix worktree proxies plus administrative
+  `HEAD`. Metadata-only requests open no linked repositories, while current-worktree detail reuses
+  the already-discovered repository. Focused Level-1 fixtures require zero linked-repository opens
+  for both cases.
 
 ### Files
 
@@ -319,4 +332,4 @@ Migration: `git/types.rs`, `git/api.rs`, `git/mod.rs`, `filesystem/mod.rs`, `cli
   `git.blob_loads` on the two-sided fixture above 4 has re-introduced the double-observation.
 - The containment stop is a **reachability** bound. Any future attempt to bound it by commit time
   re-opens the skewed-timestamp defect the pre-existing test guards.
-- R9.5/R9.6 remain open and belong to whichever phase next touches ref/worktree enumeration.
+- R9.5/R9.6 were open at the Phase 5 boundary and are now complete as described above.

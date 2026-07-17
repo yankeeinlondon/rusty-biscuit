@@ -2,7 +2,7 @@
 sub-spec: true
 depends-on: ../03-observation-index/spec.md
 phase: 4
-status: in-progress
+status: complete
 date: 2026-07-17
 ---
 
@@ -137,9 +137,9 @@ One operation, `normalized_key`, is the single place a path becomes a comparison
 ## Deepest-prefix ownership index (R6.4)
 
 One index answers "which package owns this path?" for inventory, docs, aggregate buckets, and
-commit-file attribution. Today three implementations answer it independently:
+commit-file attribution. At the Phase 4 boundary, three implementations answered it independently:
 
-| Site | Current mechanism |
+| Site | Phase 4 boundary mechanism |
 |---|---|
 | `detection::refresh_package_boundaries` | walks each classification's parents against a `HashMap<&Path, usize>` |
 | `types::RepoInfo::package_for_dir` | scans all packages, keeps longest match |
@@ -148,7 +148,7 @@ commit-file attribution. Today three implementations answer it independently:
 The index compares **path components and depth**, so a nested package always beats a shallower
 prefix and `pkg-a2` never matches `pkg-a`.
 
-## Structure-only migration (R5.6) — BLOCKED, needs owner decision
+## Historical Phase 4 decision — structure-only migration
 
 The plan's R5.6 task reads:
 
@@ -208,9 +208,10 @@ This delivers R5.6's actual objective — structure mode stops doing work its ca
 no silent output regression, and it is strictly cheaper for `sniff repo test-runner` than the plan's
 own suggested migration to `full()`.
 
-Per the plan's execution rule ("stop for review before any HIGH or CRITICAL-risk edit"), R5.6 is
-**not implemented in this phase** pending that decision. R5.1–R5.5, R5.7, R5.8, and R6 do not depend
-on it and proceed.
+Per the plan's execution rule ("stop for review before any HIGH or CRITICAL-risk edit"), R5.6 was
+not implemented at the Phase 4 boundary pending that decision. The post-review implementation below
+supersedes this historical decision with focused detail requests that preserve all three CLI
+commands without making them pay for full inventory-backed enrichment.
 
 ## Counters
 
@@ -238,7 +239,7 @@ Commands run from `sniff/`:
 Equivalence: serialized `RepoInfo` must be byte-identical across the refactor for every fixture —
 this phase changes work, not results.
 
-## As built
+## As built at the Phase 4 boundary
 
 ### Work removed
 
@@ -259,15 +260,15 @@ this phase changes work, not results.
 **The drift bracket settles it.** `repo_structure_huge_375_packages` and
 `staged_filesystem_summary_git_plus_repo` are **byte-identical** to Phase 3 on every counter (13274
 probes / 702 `read_dirs` / 454 parses / 457 opens / 300 enrichments). Phase 4 does not touch
-structure-only detection — R5.6 is blocked — so an unchanged control is exactly what should appear,
+structure-only detection — R5.6 was blocked at that boundary — so an unchanged control is exactly what should appear,
 and it is what makes the full-mode deltas above attributable to the change rather than to the host.
 
-After this phase `repo_full`'s probes and `read_dirs` land within **1** of `repo_structure`'s
+At this phase boundary, `repo_full`'s probes and `read_dirs` landed within **1** of `repo_structure`'s
 (13275 vs 13274; 701 vs 702). Full detection now costs structure detection plus the inventory,
 which is the shape R5 predicted once the second enrichment pass is gone.
 
-`canonicalizations` is unchanged at 600 by design: producing the duplicate seed still costs one
-normalization each. That is the whole point — a duplicate now costs one `canonicalize` instead of a
+`canonicalizations` was unchanged at 600 by design: producing the duplicate seed still cost one
+normalization each. That was the point — a duplicate cost one `canonicalize` instead of a
 full enrichment.
 
 ### Results are unchanged
@@ -276,11 +277,11 @@ full enrichment.
 `filesystem::repo::area::tests::detect_area_errors_when_not_in_repo`, the Phase 1 pre-existing
 temp-dir timeout verified on clean `HEAD`. `just lint`, `just build`, and `just doctest` are clean.
 
-### Deviations from the design above
+### Historical deviations from the design above
 
-- **`ManifestStore` is a `LockStore`.** Only the lockfile half is built: one `Cargo.lock` parse per
+- **`ManifestStore` was a `LockStore`.** Only the lockfile half was built: one `Cargo.lock` parse per
   unique `owner_root`, replacing one parse per detector plus one per full-mode scan. The parsed
-  Cargo/Node/Python manifest store is not built, so `cargo::read_toml_at` still re-reads the
+  Cargo/Node/Python manifest store was not built, so `cargo::read_toml_at` still re-read the
   inherited root `Cargo.toml` once per member. The 375-package fixture does not use
   `version.workspace = true`, so this does not show in the table above; a fixture that does would
   make it visible, and is the natural first Phase 4 follow-up.
@@ -298,10 +299,10 @@ temp-dir timeout verified on clean `HEAD`. `just lint`, `just build`, and `just 
   manifests, so an empty evidence set does not mean "no manifest here". A fast path may skip probes
   only for kinds known present. Left unwired rather than shipped as a subtly wrong optimization.
 
-### Not done
+### Not done at the Phase 4 boundary
 
-- **R5.6 structure-only migration** — blocked above, awaiting an owner decision.
-- **R6.4 deepest-prefix ownership index** — the three existing implementations are unchanged and
+- **R5.6 structure-only migration** — was blocked above, awaiting an owner decision.
+- **R6.4 deepest-prefix ownership index** — the three existing implementations were unchanged and
   correct; unifying them is pure consolidation with no measured cost attached, and it was ranked
   below the enrichment defect.
 - **100/500/2,000-package and symlink / non-UTF-8 / Windows-drive fixtures.**
@@ -329,4 +330,26 @@ shape that allowed it.
 - Phase 4's counter table above supersedes Phase 3's for full-mode cases.
 - `repo_full` ≈ `repo_structure` + inventory. Any future full-mode counter materially above
   structure's is a re-introduced second pass.
-- The blocked R5.6 decision also governs Phase 8's "structure/full semantics" documentation task.
+- The historical R5.6 decision governed Phase 8's original "structure/full semantics"
+  documentation. The post-review implementation below is now authoritative.
+
+## Post-review completion
+
+Review cycles 1–3 completed the work that the Phase 4 boundary left open:
+
+- `ManifestStore` is request-scoped and caches parsed or raw Cargo, Node, Python, Go, pnpm, lockfile,
+  inherited-workspace, and root-configuration inputs by normalized native path. Node,
+  `pnpm-workspace.yaml`, and `pyproject.toml` retain successful parses and replayable failures, so a
+  tolerant discovery probe followed by a required consumer does not reopen malformed input.
+- `RepoRequest::structure()` now returns topology and minimum package identity only. The three CLI
+  consumers identified above use `RepoRequest::focused(RepoDetailRequest::…)` for package managers,
+  dependencies, or test runners, preserving their output without enabling full inventory, language,
+  framework, feature, or file-list work.
+- One crate-private `PackageOwnershipIndex` is built from normalized package keys and reused by
+  inventory, document, aggregate-context, and commit-file attribution. Lookups ascend native `Path`
+  components and choose the deepest package without lossy UTF-8 conversion, string prefixes, or
+  ad hoc Windows case folding.
+- Level-1 detection fixtures cover valid and malformed npm, pnpm, and uv roots, inherited Cargo
+  versions, focused detail requests, deepest-prefix and prefix-sibling behavior, non-UTF-8 Unix
+  components, and Windows drive/case behavior. Current structure-mode work is intentionally not
+  represented by the historical Phase 4 structure/full counter rows above.
