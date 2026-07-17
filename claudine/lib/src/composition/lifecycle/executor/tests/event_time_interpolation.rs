@@ -34,6 +34,7 @@ fn io_err(msg: &str) -> LifecycleErrorInfo {
         variant: "Io".to_string(),
         msg: msg.to_string(),
         facets: None,
+        cause: None,
     }
 }
 
