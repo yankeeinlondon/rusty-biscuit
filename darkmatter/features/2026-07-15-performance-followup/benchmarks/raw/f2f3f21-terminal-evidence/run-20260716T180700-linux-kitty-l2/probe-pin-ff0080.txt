@@ -1,0 +1,22 @@
+PROBE_STDOUT_IS_TTY=NO
+terminal_cache_count=3
+terminal_text_color[0]=Some(RgbValue { r: 255, g: 0, b: 128 })
+terminal_text_color[1]=Some(RgbValue { r: 255, g: 0, b: 128 })
+terminal_text_color[2]=Some(RgbValue { r: 255, g: 0, b: 128 })
+osc10_actual_queries=1
+osc11_actual_queries=1
+terminal_cache_done
+
+
+
+
+
+
+
+
+
+
+
+
+
+
