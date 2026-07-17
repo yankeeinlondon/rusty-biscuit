@@ -12,10 +12,13 @@ pub enum FileReferenceError {
     CurrentDirectory(#[source] std::io::Error),
 
     #[error("could not inspect git repository state: {0}")]
-    Git(String),
+    Git(#[source] Box<gix::discover::Error>),
+
+    #[error("git repository is bare and has no working directory")]
+    BareRepository,
 
     #[error("could not inspect Cargo workspace state: {0}")]
-    Workspace(String),
+    Workspace(#[source] Box<cargo_metadata::Error>),
 
     #[error("vault reference used without any configured vault roots")]
     VaultNotConfigured,

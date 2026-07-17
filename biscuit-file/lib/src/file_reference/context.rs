@@ -254,9 +254,9 @@ pub fn find_git_root(from: &Path) -> Result<Option<PathBuf>, FileReferenceError>
     trace!(?from, "searching for git root");
     match gix::discover(from) {
         Ok(repo) => {
-            let workdir = repo.workdir().ok_or_else(|| {
-                FileReferenceError::Git("bare repository has no working directory".to_string())
-            })?;
+            let workdir = repo
+                .workdir()
+                .ok_or(FileReferenceError::BareRepository)?;
             debug!(?workdir, "found git root");
             Ok(Some(workdir.to_path_buf()))
         }
@@ -270,7 +270,7 @@ pub fn find_git_root(from: &Path) -> Result<Option<PathBuf>, FileReferenceError>
             trace!("no git repository found");
             Ok(None)
         }
-        Err(e) => Err(FileReferenceError::Git(e.to_string())),
+        Err(e) => Err(FileReferenceError::Git(Box::new(e))),
     }
 }
 
@@ -291,7 +291,7 @@ pub fn find_package_area(
         .manifest_path(repo_root.join("Cargo.toml"))
         .no_deps()
         .exec()
-        .map_err(|e| FileReferenceError::Workspace(e.to_string()))?;
+        .map_err(|e| FileReferenceError::Workspace(Box::new(e)))?;
 
     let workspace_root = metadata.workspace_root.as_std_path();
 
