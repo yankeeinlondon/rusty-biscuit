@@ -139,85 +139,9 @@ pub(crate) fn collect_ref_decorations(
 pub(crate) fn collect_ref_decorations_fallible(
     repo: &gix::Repository,
 ) -> Result<HashMap<gix::ObjectId, Vec<RefDecoration>>> {
-    let mut decorations: HashMap<gix::ObjectId, Vec<RefDecoration>> = HashMap::new();
-
-    // Short name of the branch HEAD points to (None when HEAD is detached), so
-    // the active branch can be marked.
-    let head_target: Option<String> = repo
-        .head_name()
-        .map_err(|e| {
-            debug!(error = %e, "could not read HEAD for decorations");
-            e
-        })
-        .ok()
-        .flatten()
-        .map(|full| full.shorten().to_string());
-
-    // One increment per enumeration, not per ref: the measured unit is the pass
-    // over the ref store, which is what a later phase would eliminate.
-    performance::increment_counter(counters::GIT_REF_WALKS, 1);
-    let platform = repo
-        .references()
-        .map_err(|e| SniffError::git("references", e))?;
-    let iter = platform
-        .all()
-        .map_err(|e| SniffError::git("references", e))?;
-
-    for reference in iter {
-        let reference = reference.map_err(|e| SniffError::git("references", e))?;
-        let full_name = reference.name().as_bstr().to_string();
-
-        // Peel through annotated tags to the commit the ref ultimately names.
-        let oid = reference
-            .into_fully_peeled_id()
-            .map_err(|e| SniffError::git("peel", e))?
-            .detach();
-
-        // Determine ref kind and display name
-        let (kind, display_name) = if let Some(branch) = full_name.strip_prefix("refs/heads/") {
-            (RefKind::LocalBranch, branch.to_string())
-        } else if let Some(remote) = full_name.strip_prefix("refs/remotes/") {
-            (RefKind::RemoteBranch, remote.to_string())
-        } else if let Some(tag) = full_name.strip_prefix("refs/tags/") {
-            (RefKind::Tag, tag.to_string())
-        } else {
-            continue; // Skip other refs (notes, stash, etc.)
-        };
-
-        // Check if this is the HEAD branch
-        let is_head = kind == RefKind::LocalBranch
-            && head_target.as_ref().is_some_and(|h| h == &display_name);
-
-        let decoration = RefDecoration {
-            name: display_name,
-            kind,
-            is_head,
-        };
-
-        decorations.entry(oid).or_default().push(decoration);
-    }
-
-    // Sort decorations: HEAD branch first, then local branches, remote branches, tags
-    for refs in decorations.values_mut() {
-        refs.sort_by(|a, b| {
-            // HEAD branch comes first
-            if a.is_head != b.is_head {
-                return b.is_head.cmp(&a.is_head);
-            }
-            // Then by kind: LocalBranch < RemoteBranch < Tag
-            match (a.kind, b.kind) {
-                (RefKind::LocalBranch, RefKind::LocalBranch) => a.name.cmp(&b.name),
-                (RefKind::LocalBranch, _) => std::cmp::Ordering::Less,
-                (_, RefKind::LocalBranch) => std::cmp::Ordering::Greater,
-                (RefKind::RemoteBranch, RefKind::RemoteBranch) => a.name.cmp(&b.name),
-                (RefKind::RemoteBranch, _) => std::cmp::Ordering::Less,
-                (_, RefKind::RemoteBranch) => std::cmp::Ordering::Greater,
-                (RefKind::Tag, RefKind::Tag) => a.name.cmp(&b.name),
-            }
-        });
-    }
-
-    Ok(decorations)
+    Ok(super::remote_refresh::RefSnapshot::observe(repo, true, true, true)?
+        .decorations()
+        .clone())
 }
 
 /// Gets the last N commits from HEAD using a gix revwalk, attaching

@@ -8,13 +8,180 @@ use gix::bstr::ByteSlice;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tracing::{debug, warn};
+use tracing::warn;
 
 use super::discovery::resolve_base_branch;
 use super::status::get_repo_status_counts;
 use super::types::*;
 use crate::SniffError;
 use crate::performance::{self, counters};
+
+#[derive(Debug, Clone)]
+struct ObservedBranch {
+    name: String,
+    tip: gix::ObjectId,
+}
+
+#[derive(Debug, Clone)]
+struct ObservedRemoteBranch {
+    remote: String,
+    branch: String,
+    tip: gix::ObjectId,
+}
+
+/// One request-scoped observation of the repository's ref store.
+///
+/// Consumers project branches, decorations, remote tips, and tracking status
+/// from the same peeled refs. This is deliberately request-local: refs may
+/// change between requests, and a process-global cache would make freshness
+/// semantics surprising.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RefSnapshot {
+    local_branches: Vec<ObservedBranch>,
+    remote_branches: Vec<ObservedRemoteBranch>,
+    remote_defaults: HashMap<String, String>,
+    decorations: HashMap<gix::ObjectId, Vec<RefDecoration>>,
+}
+
+impl RefSnapshot {
+    pub(crate) fn observe(
+        repo: &gix::Repository,
+        local_branches: bool,
+        remote_branches: bool,
+        decorations: bool,
+    ) -> crate::Result<Self> {
+        let head_target = repo
+            .head_name()
+            .ok()
+            .flatten()
+            .map(|name| name.shorten().to_string());
+
+        performance::increment_counter(counters::GIT_REF_WALKS, 1);
+        let platform = repo
+            .references()
+            .map_err(|e| SniffError::git("references", e))?;
+        let iter = platform
+            .all()
+            .map_err(|e| SniffError::git("references", e))?;
+
+        let mut snapshot = Self::default();
+        for reference in iter {
+            let reference = reference.map_err(|e| SniffError::git("references", e))?;
+            let full_name = reference.name().as_bstr().to_string();
+            let is_local = full_name.starts_with("refs/heads/");
+            let is_remote = full_name.starts_with("refs/remotes/");
+            let is_tag = full_name.starts_with("refs/tags/");
+            if !((local_branches && is_local)
+                || (remote_branches && is_remote)
+                || (decorations && (is_local || is_remote || is_tag)))
+            {
+                continue;
+            }
+            let symbolic_target = match reference.target() {
+                gix::refs::TargetRef::Symbolic(target) => Some(target.as_bstr().to_string()),
+                gix::refs::TargetRef::Object(_) => None,
+            };
+            let tip = reference
+                .into_fully_peeled_id()
+                .map_err(|e| SniffError::git("peel", e))?
+                .detach();
+
+            let (kind, display_name) = if let Some(branch) = full_name.strip_prefix("refs/heads/") {
+                if local_branches {
+                    snapshot.local_branches.push(ObservedBranch {
+                        name: branch.to_string(),
+                        tip,
+                    });
+                }
+                (RefKind::LocalBranch, branch.to_string())
+            } else if let Some(remote_branch) = full_name.strip_prefix("refs/remotes/") {
+                let Some((remote, branch)) = remote_branch.split_once('/') else {
+                    continue;
+                };
+                if branch == "HEAD" {
+                    if let Some(target) = symbolic_target {
+                        let prefix = format!("refs/remotes/{remote}/");
+                        if let Some(default) = target.strip_prefix(&prefix) {
+                            snapshot
+                                .remote_defaults
+                                .insert(remote.to_string(), default.to_string());
+                        }
+                    }
+                } else if remote_branches {
+                    snapshot.remote_branches.push(ObservedRemoteBranch {
+                        remote: remote.to_string(),
+                        branch: branch.to_string(),
+                        tip,
+                    });
+                }
+                (RefKind::RemoteBranch, remote_branch.to_string())
+            } else if let Some(tag) = full_name.strip_prefix("refs/tags/") {
+                (RefKind::Tag, tag.to_string())
+            } else {
+                continue;
+            };
+
+            if decorations {
+                snapshot.decorations.entry(tip).or_default().push(RefDecoration {
+                    is_head: kind == RefKind::LocalBranch
+                        && head_target.as_ref().is_some_and(|head| head == &display_name),
+                    name: display_name,
+                    kind,
+                });
+            }
+        }
+
+        snapshot.local_branches.sort_by(|a, b| a.name.cmp(&b.name));
+        snapshot.remote_branches.sort_by(|a, b| {
+            a.remote
+                .cmp(&b.remote)
+                .then_with(|| a.branch.cmp(&b.branch))
+        });
+        for decorations in snapshot.decorations.values_mut() {
+            decorations.sort_by(|a, b| {
+                b.is_head
+                    .cmp(&a.is_head)
+                    .then_with(|| ref_kind_order(a.kind).cmp(&ref_kind_order(b.kind)))
+                    .then_with(|| a.name.cmp(&b.name))
+            });
+        }
+        Ok(snapshot)
+    }
+
+    pub(crate) fn decorations(&self) -> &HashMap<gix::ObjectId, Vec<RefDecoration>> {
+        &self.decorations
+    }
+
+    fn local_tip(&self, branch: &str) -> Option<gix::ObjectId> {
+        self.local_branches
+            .iter()
+            .find(|observed| observed.name == branch)
+            .map(|observed| observed.tip)
+    }
+
+    fn remote_tip(&self, remote: &str, branch: &str) -> Option<gix::ObjectId> {
+        self.remote_branches
+            .iter()
+            .find(|observed| observed.remote == remote && observed.branch == branch)
+            .map(|observed| observed.tip)
+    }
+
+    fn remote_tips(&self, remote: &str) -> Vec<gix::ObjectId> {
+        self.remote_branches
+            .iter()
+            .filter(|observed| observed.remote == remote)
+            .map(|observed| observed.tip)
+            .collect()
+    }
+}
+
+fn ref_kind_order(kind: RefKind) -> u8 {
+    match kind {
+        RefKind::LocalBranch => 0,
+        RefKind::RemoteBranch => 1,
+        RefKind::Tag => 2,
+    }
+}
 
 /// gix equivalent of git2's `graph_ahead_behind`: `(commits reachable from
 /// `local` but not `upstream`, commits reachable from `upstream` but not
@@ -34,28 +201,21 @@ pub(crate) fn get_branch_info_fallible(
     repo: &gix::Repository,
     current_branch: Option<&str>,
 ) -> crate::Result<Vec<BranchInfo>> {
-    let remote_tips = remote_tracking_tips(repo)?;
+    let refs = RefSnapshot::observe(repo, true, true, false)?;
+    get_branch_info_from_snapshot(repo, current_branch, &refs)
+}
+
+pub(crate) fn get_branch_info_from_snapshot(
+    repo: &gix::Repository,
+    current_branch: Option<&str>,
+    refs: &RefSnapshot,
+) -> crate::Result<Vec<BranchInfo>> {
     let config = repo.config_snapshot();
     let mut branches = Vec::new();
 
-    let platform = repo
-        .references()
-        .map_err(|e| SniffError::git("references", e))?;
-    let iter = platform
-        .local_branches()
-        .map_err(|e| SniffError::git("local_branches", e))?;
-
-    for reference in iter {
-        let reference = reference.map_err(|e| SniffError::git("local_branches", e))?;
-        let full = reference.name().as_bstr().to_str_lossy().into_owned();
-        let Some(name) = full.strip_prefix("refs/heads/") else {
-            continue;
-        };
-        let name = name.to_string();
-        let tip = reference
-            .into_fully_peeled_id()
-            .map_err(|e| SniffError::git("peel", e))?
-            .detach();
+    for observed in &refs.local_branches {
+        let name = observed.name.clone();
+        let tip = observed.tip;
         let sha = tip.to_string();
         let upstream = configured_upstream(&config, &name);
         // ahead/behind are only meaningful against a known upstream tip. With no
@@ -64,10 +224,11 @@ pub(crate) fn get_branch_info_fallible(
         // even with its upstream.
         let (ahead, behind) = match upstream
             .as_deref()
-            .and_then(|upstream| remote_tips.get(upstream))
+            .and_then(|upstream| upstream.split_once('/'))
+            .and_then(|(remote, branch)| refs.remote_tip(remote, branch))
         {
             Some(remote) => {
-                let (ahead, behind) = ahead_behind(repo, tip, *remote)?;
+                let (ahead, behind) = ahead_behind(repo, tip, remote)?;
                 (Some(ahead), Some(behind))
             }
             None => (None, None),
@@ -75,7 +236,10 @@ pub(crate) fn get_branch_info_fallible(
 
         branches.push(BranchInfo {
             current: current_branch.is_some_and(|current| current == name),
-            remote_represented: remote_tips.values().any(|remote| *remote == tip),
+            remote_represented: refs
+                .remote_branches
+                .iter()
+                .any(|remote| remote.tip == tip),
             name,
             sha,
             upstream,
@@ -97,33 +261,6 @@ fn configured_upstream(config: &gix::config::File<'_>, branch: &str) -> Option<S
         .map(|value| value.to_string())?;
     let upstream_branch = merge.strip_prefix("refs/heads/").unwrap_or(&merge);
     Some(format!("{remote}/{upstream_branch}"))
-}
-
-fn remote_tracking_tips(repo: &gix::Repository) -> crate::Result<HashMap<String, gix::ObjectId>> {
-    performance::increment_counter(counters::GIT_REF_WALKS, 1);
-    let platform = repo
-        .references()
-        .map_err(|e| SniffError::git("references", e))?;
-    let iter = platform
-        .prefixed("refs/remotes/")
-        .map_err(|e| SniffError::git("remote_branches", e))?;
-    let mut tips = HashMap::new();
-    for reference in iter {
-        let reference = reference.map_err(|e| SniffError::git("remote_branches", e))?;
-        let full = reference.name().as_bstr().to_str_lossy().into_owned();
-        let Some(name) = full.strip_prefix("refs/remotes/") else {
-            continue;
-        };
-        if name.ends_with("/HEAD") {
-            continue;
-        }
-        let tip = reference
-            .into_fully_peeled_id()
-            .map_err(|e| SniffError::git("peel", e))?
-            .detach();
-        tips.insert(name.to_string(), tip);
-    }
-    Ok(tips)
 }
 
 /// Count commits reachable from `tip` once everything reachable from `hide` is
@@ -262,6 +399,16 @@ pub(crate) fn get_local_branches_fallible(
     current_branch: Option<&str>,
     include_divergence: bool,
 ) -> crate::Result<Vec<LocalBranchInfo>> {
+    let refs = RefSnapshot::observe(repo, true, false, false)?;
+    get_local_branches_from_snapshot(repo, current_branch, include_divergence, &refs)
+}
+
+pub(crate) fn get_local_branches_from_snapshot(
+    repo: &gix::Repository,
+    current_branch: Option<&str>,
+    include_divergence: bool,
+    refs: &RefSnapshot,
+) -> crate::Result<Vec<LocalBranchInfo>> {
     let mut branches = Vec::new();
 
     // HEAD commit OID for ahead/behind calculations. An unborn HEAD is `None`
@@ -273,29 +420,10 @@ pub(crate) fn get_local_branches_fallible(
         None
     };
 
-    performance::increment_counter(counters::GIT_REF_WALKS, 1);
-    let platform = repo
-        .references()
-        .map_err(|e| SniffError::git("references", e))?;
-    let iter = platform
-        .local_branches()
-        .map_err(|e| SniffError::git("local_branches", e))?;
-
-    for reference in iter {
-        let reference = reference.map_err(|e| SniffError::git("local_branches", e))?;
-        let full = reference.name().as_bstr().to_str_lossy().into_owned();
-        let Some(name) = full.strip_prefix("refs/heads/") else {
-            continue;
-        };
-        let name = name.to_string();
+    for observed in &refs.local_branches {
+        let name = observed.name.clone();
         let is_current = current_branch.is_some_and(|cb| cb == name);
-
-        // Tip commit of the branch (peeling through annotated tags is a no-op
-        // for a branch ref, but keeps behavior uniform).
-        let tip = reference
-            .into_fully_peeled_id()
-            .map_err(|e| SniffError::git("peel", e))?
-            .detach();
+        let tip = observed.tip;
 
         let short_hash = {
             let id = tip.to_string();
@@ -327,36 +455,34 @@ pub(crate) fn get_tracking_status_fallible(
     repo: &gix::Repository,
     current_branch: Option<&str>,
 ) -> crate::Result<Vec<RemoteTrackingStatus>> {
+    let refs = RefSnapshot::observe(repo, true, true, false)?;
+    get_tracking_status_from_snapshot(repo, current_branch, &refs)
+}
+
+pub(crate) fn get_tracking_status_from_snapshot(
+    repo: &gix::Repository,
+    current_branch: Option<&str>,
+    refs: &RefSnapshot,
+) -> crate::Result<Vec<RemoteTrackingStatus>> {
     let mut tracking = Vec::new();
 
     let Some(branch_name) = current_branch else {
         return Ok(tracking);
     };
 
-    let local_ref = repo
-        .find_reference(&format!("refs/heads/{branch_name}"))
-        .map_err(|e| SniffError::git("find_reference", e))?;
-    let local = local_ref
-        .into_fully_peeled_id()
-        .map_err(|e| SniffError::git("peel", e))?
-        .detach();
+    let local = refs
+        .local_tip(branch_name)
+        .ok_or_else(|| SniffError::git("find_reference", "current branch ref is missing"))?;
 
     for remote_name in repo.remote_names() {
         let remote_name = remote_name.to_string();
-        let remote_ref_name = format!("refs/remotes/{remote_name}/{branch_name}");
-        let remote_ref = match repo.find_reference(&remote_ref_name) {
-            Ok(r) => r,
-            Err(gix::reference::find::existing::Error::NotFound { .. }) => continue,
-            Err(e) => return Err(SniffError::git("find_reference", e)),
+        let Some(remote) = refs.remote_tip(&remote_name, branch_name) else {
+            continue;
         };
-        let remote = remote_ref
-            .into_fully_peeled_id()
-            .map_err(|e| SniffError::git("peel", e))?
-            .detach();
 
         // behind: commits on the remote-tracking branch the local does not have.
         let behind = count_reachable_excluding(repo, remote, local)?;
-        let ahead = push_relevant_ahead(repo, local, &remote_name)?;
+        let ahead = push_relevant_ahead(repo, local, refs.remote_tips(&remote_name))?;
 
         tracking.push(RemoteTrackingStatus {
             remote: remote_name,
@@ -379,25 +505,8 @@ pub(crate) fn get_tracking_status_fallible(
 fn push_relevant_ahead(
     repo: &gix::Repository,
     local: gix::ObjectId,
-    remote_name: &str,
+    hidden: Vec<gix::ObjectId>,
 ) -> crate::Result<usize> {
-    let prefix = format!("refs/remotes/{remote_name}/");
-    performance::increment_counter(counters::GIT_REF_WALKS, 1);
-    let platform = repo
-        .references()
-        .map_err(|e| SniffError::git("references", e))?;
-    let iter = platform
-        .prefixed(prefix.as_str())
-        .map_err(|e| SniffError::git("prefixed", e))?;
-    let mut hidden: Vec<gix::ObjectId> = Vec::new();
-    for reference in iter {
-        let reference = reference.map_err(|e| SniffError::git("references", e))?;
-        let id = reference
-            .into_fully_peeled_id()
-            .map_err(|e| SniffError::git("peel", e))?;
-        hidden.push(id.detach());
-    }
-
     let walk = repo
         .rev_walk(Some(local))
         .with_hidden(hidden)
@@ -418,6 +527,16 @@ fn push_relevant_ahead(
 /// When `include_remote_details` is true, also includes locally known
 /// remote-tracking branches and the resolved default branch.
 pub(crate) fn get_remotes(repo: &gix::Repository, include_remote_details: bool) -> Vec<RemoteInfo> {
+    let refs = include_remote_details
+        .then(|| RefSnapshot::observe(repo, false, true, false).unwrap_or_default());
+    get_remotes_from_snapshot(repo, include_remote_details, refs.as_ref())
+}
+
+pub(crate) fn get_remotes_from_snapshot(
+    repo: &gix::Repository,
+    include_remote_details: bool,
+    refs: Option<&RefSnapshot>,
+) -> Vec<RemoteInfo> {
     // Read URLs straight from config (`remote.<name>.url`) so the exact stored
     // string is preserved rather than gix's reserialized `Url` form.
     let cfg = repo.config_snapshot();
@@ -434,10 +553,19 @@ pub(crate) fn get_remotes(repo: &gix::Repository, include_remote_details: bool) 
                 .unwrap_or(GitHostingProvider::Unknown);
 
             let (branches, default_branch) = if include_remote_details {
-                (
-                    get_remote_branches(repo, &name),
-                    get_remote_default_branch(repo, &name),
-                )
+                let branches = refs.and_then(|snapshot| {
+                    let branches: Vec<String> = snapshot
+                        .remote_branches
+                        .iter()
+                        .filter(|observed| observed.remote == name)
+                        .map(|observed| observed.branch.clone())
+                        .collect();
+                    (!branches.is_empty()).then_some(branches)
+                });
+                let default_branch = refs
+                    .and_then(|snapshot| snapshot.remote_defaults.get(&name))
+                    .cloned();
+                (branches, default_branch)
             } else {
                 (None, None)
             };
@@ -549,12 +677,27 @@ pub(crate) fn summarize_behind_status(tracking: &[RemoteTrackingStatus]) -> Opti
 ///
 /// Uses gix's commit-graph aware revwalk for timestamp-and-parent-only
 /// gates, falling back to the object database when no graph is present.
+#[cfg(test)]
 pub(crate) fn populate_recent_commit_remotes(
     repo: &gix::Repository,
     commits: &mut [CommitInfo],
     max_branches: Option<usize>,
 ) {
-    let mut remote_tips = remote_branch_tips(repo);
+    let refs = RefSnapshot::observe(repo, false, true, false).unwrap_or_default();
+    populate_recent_commit_remotes_from_snapshot(repo, commits, max_branches, &refs);
+}
+
+pub(crate) fn populate_recent_commit_remotes_from_snapshot(
+    repo: &gix::Repository,
+    commits: &mut [CommitInfo],
+    max_branches: Option<usize>,
+    refs: &RefSnapshot,
+) {
+    let mut remote_tips: Vec<(String, gix::ObjectId)> = refs
+        .remote_branches
+        .iter()
+        .map(|observed| (observed.remote.clone(), observed.tip))
+        .collect();
     if remote_tips.is_empty() || commits.is_empty() {
         return;
     }
@@ -659,105 +802,13 @@ pub(crate) fn populate_recent_commit_remotes(
     }
 }
 
-/// Collect the tip OIDs for all remote-tracking branches keyed by remote name.
-fn remote_branch_tips(repo: &gix::Repository) -> Vec<(String, gix::ObjectId)> {
-    performance::increment_counter(counters::GIT_REF_WALKS, 1);
-    let Ok(refs) = repo.references() else {
-        return Vec::new();
-    };
-
-    let Ok(iter) = refs.prefixed("refs/remotes/") else {
-        return Vec::new();
-    };
-
-    iter.flatten()
-        .filter_map(|reference| {
-            let name = reference.name().as_bstr().to_str_lossy().to_string();
-            let branch = name.strip_prefix("refs/remotes/")?;
-            if branch.ends_with("/HEAD") {
-                return None;
-            }
-
-            let (remote_name, _) = branch.split_once('/')?;
-            let target = reference
-                .into_fully_peeled_id()
-                .map_err(|e| {
-                    debug!(branch = %name, error = %e, "could not peel remote ref to commit");
-                    e
-                })
-                .ok()?;
-            Some((remote_name.to_string(), target.detach()))
-        })
-        .collect()
-}
-
-/// Resolves the default branch for a remote from `refs/remotes/{name}/HEAD`.
-///
-/// Returns the branch name (e.g., "main") if the symbolic ref exists and can be resolved.
-fn get_remote_default_branch(repo: &gix::Repository, remote_name: &str) -> Option<String> {
-    let ref_name = format!("refs/remotes/{}/HEAD", remote_name);
-    let reference = repo
-        .find_reference(&ref_name)
-        .map_err(|e| {
-            debug!(remote = remote_name, error = %e, "could not find remote HEAD reference");
-            e
-        })
-        .ok()?;
-    let gix::refs::TargetRef::Symbolic(target) = reference.target() else {
-        return None;
-    };
-    let prefix = format!("refs/remotes/{}/", remote_name);
-    target
-        .as_bstr()
-        .to_str_lossy()
-        .strip_prefix(&prefix)
-        .map(String::from)
-}
-
-/// Gets branch names for a remote from local tracking refs (`refs/remotes/<name>/*`).
-///
-/// Reads locally cached remote branch info (updated on fetch/pull).
-/// No network access required.
-fn get_remote_branches(repo: &gix::Repository, remote_name: &str) -> Option<Vec<String>> {
-    let prefix = format!("refs/remotes/{}/", remote_name);
-    performance::increment_counter(counters::GIT_REF_WALKS, 1);
-    let refs = repo.references().ok()?;
-    let iter = refs
-        .prefixed(prefix.as_str())
-        .map_err(|e| {
-            debug!(remote = remote_name, error = %e, "could not glob remote branches");
-            e
-        })
-        .ok()?;
-
-    let mut branches: Vec<String> = iter
-        .flatten()
-        .filter_map(|r| {
-            let name = r.name().as_bstr().to_str_lossy().into_owned();
-            let branch = name.strip_prefix(&prefix)?;
-            if branch == "HEAD" {
-                None
-            } else {
-                Some(branch.to_string())
-            }
-        })
-        .collect();
-
-    branches.sort();
-
-    if branches.is_empty() {
-        None
-    } else {
-        Some(branches)
-    }
-}
-
 /// Retrieves all linked worktrees for the repository.
 ///
 /// Returns a HashMap keyed by branch name. Anonymous worktrees (without a name)
-/// are filtered out. For each worktree, opens it as a Repository to access
-/// HEAD commit, dirty status, and ahead/behind counts relative to the base
-/// repository's default branch.
+/// are filtered out. Paths, branches, and HEAD commits come directly from gix's
+/// worktree proxy and administrative `HEAD`; a checkout is opened as a
+/// repository only when requested status or graph details are unavailable from
+/// the already-open current repository.
 ///
 /// When `full_details` is `false`, the expensive per-worktree probes — the
 /// commit-graph walks (ahead/behind, merge-conflict detection) and the
@@ -775,6 +826,23 @@ pub(crate) fn get_worktrees(
     full_details: bool,
     current_worktree_path: Option<&Path>,
 ) -> crate::Result<HashMap<String, WorktreeInfo>> {
+    get_worktrees_from_snapshot(repo, full_details, current_worktree_path, None)
+}
+
+#[derive(Debug)]
+struct LinkedWorktreeMetadata {
+    name: String,
+    path: PathBuf,
+    branch: Option<String>,
+    tip: Option<gix::ObjectId>,
+}
+
+pub(crate) fn get_worktrees_from_snapshot(
+    repo: &gix::Repository,
+    full_details: bool,
+    current_worktree_path: Option<&Path>,
+    refs: Option<&RefSnapshot>,
+) -> crate::Result<HashMap<String, WorktreeInfo>> {
     use rayon::prelude::*;
 
     let proxies = repo
@@ -789,16 +857,33 @@ pub(crate) fn get_worktrees(
     // cheap path comparison without repeated disk access.
     let current_canonical = current_worktree_path.and_then(|p| std::fs::canonicalize(p).ok());
 
-    // Collect (name, worktree path) pairs up front — cheap sequential work —
-    // before the per-worktree analysis fans out. Trust, permission, I/O, and
-    // corruption failures are propagated rather than silently dropped.
-    let mut worktree_paths: Vec<(String, PathBuf)> = Vec::new();
+    // HEAD and checkout location live in each proxy's administrative directory,
+    // so metadata-only projections do not need to open the checkout as a full
+    // repository. A repository open remains the fallback only when status or
+    // graph details were explicitly requested for that worktree.
+    let mut worktree_metadata = Vec::new();
     for proxy in proxies {
         let name = proxy.id().to_str_lossy().into_owned();
         let path = proxy
             .base()
             .map_err(|e| SniffError::git("worktree_base", e))?;
-        worktree_paths.push((name, path));
+        if path.as_os_str().is_empty() {
+            return Err(SniffError::git("worktree_base", "worktree path is empty"));
+        }
+        let path = std::fs::canonicalize(&path).unwrap_or(path);
+        let (branch, direct_tip) = read_worktree_head(proxy.git_dir());
+        let tip = match branch.as_deref() {
+            Some(branch) => refs
+                .and_then(|snapshot| snapshot.local_tip(branch))
+                .or_else(|| peel_branch_tip(repo, branch)),
+            None => direct_tip,
+        };
+        worktree_metadata.push(LinkedWorktreeMetadata {
+            name,
+            path,
+            branch,
+            tip,
+        });
     }
 
     // R4: open the base repository once and share it across Rayon workers via
@@ -807,36 +892,43 @@ pub(crate) fn get_worktrees(
     let base_sync = repo.clone().into_sync();
 
     let collector = performance::current_collector();
-    let results: crate::Result<Vec<(String, WorktreeInfo)>> = worktree_paths
+    let results: crate::Result<Vec<(String, WorktreeInfo)>> = worktree_metadata
         .par_iter()
-        .map(|(name, worktree_path)| {
+        .map(|metadata| {
             let _worker = performance::pooled_worker(collector.as_ref());
-            let base = base_sync.to_thread_local();
-            performance::increment_counter(counters::GIT_WORKTREE_OPENS, 1);
-            let mut worktree_repo = super::open::trusted_open(worktree_path)?;
-            super::open::configure_cache(&mut worktree_repo);
-
-            let branch = worktree_repo
-                .head_name()
-                .ok()
-                .flatten()
-                .map(|n| n.shorten().to_string())
-                .unwrap_or_else(|| name.clone());
-            let wt_head = worktree_repo.head_id().ok().map(|id| id.detach());
+            let mut base = base_sync.to_thread_local();
+            let branch = metadata
+                .branch
+                .clone()
+                .unwrap_or_else(|| metadata.name.clone());
+            let wt_head = metadata.tip;
             let sha = wt_head.map(|o| o.to_string()).unwrap_or_default();
 
             // Determine whether this worktree is the current one.
             let is_current = current_canonical.as_ref().is_some_and(|current| {
-                std::fs::canonicalize(worktree_path).ok().as_ref() == Some(current)
+                metadata.path.as_path() == current.as_path()
             });
 
             // Skip expensive commit-graph walks for non-current worktrees when
             // the caller has not requested full details.
             let compute_full = full_details || is_current;
+            let base_workdir = base
+                .workdir()
+                .map(|path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
+            let base_is_worktree = base_workdir.as_deref() == Some(metadata.path.as_path());
+            let mut opened_worktree = if compute_full && !base_is_worktree {
+                performance::increment_counter(counters::GIT_WORKTREE_OPENS, 1);
+                let mut opened = super::open::trusted_open(&metadata.path)?;
+                super::open::configure_cache(&mut opened);
+                Some(opened)
+            } else {
+                None
+            };
+            let detail_repo = opened_worktree.as_mut().unwrap_or(&mut base);
 
             let (ahead, behind) = if compute_full {
                 match (wt_head, base_oid) {
-                    (Some(wt), Some(base_id)) => ahead_behind(&base, wt, base_id)?,
+                    (Some(wt), Some(base_id)) => ahead_behind(detail_repo, wt, base_id)?,
                     _ => (0, 0),
                 }
             } else {
@@ -846,7 +938,7 @@ pub(crate) fn get_worktrees(
             // `merged` when the base already contains the worktree tip.
             let merged = if compute_full {
                 match (wt_head, base_oid) {
-                    (Some(wt), Some(base_id)) => is_ancestor(&base, wt, base_id)?,
+                    (Some(wt), Some(base_id)) => is_ancestor(detail_repo, wt, base_id)?,
                     _ => false,
                 }
             } else {
@@ -860,7 +952,9 @@ pub(crate) fn get_worktrees(
                     false
                 } else {
                     match (wt_head, base_oid) {
-                        (Some(wt), Some(base_id)) => has_merge_conflicts(&base, wt, base_id)?,
+                        (Some(wt), Some(base_id)) => {
+                            has_merge_conflicts(detail_repo, wt, base_id)?
+                        }
                         _ => false,
                     }
                 }
@@ -874,7 +968,7 @@ pub(crate) fn get_worktrees(
             // default `git-status` renders only a count for other worktrees, so
             // their dirty state is never shown and must not cost a status scan.
             let (dirty, changed_files) = if compute_full {
-                get_repo_status_counts(&worktree_repo)?
+                get_repo_status_counts(detail_repo)?
             } else {
                 (false, 0)
             };
@@ -883,7 +977,7 @@ pub(crate) fn get_worktrees(
                 branch.clone(),
                 WorktreeInfo {
                     branch,
-                    filepath: worktree_path.clone(),
+                    filepath: metadata.path.clone(),
                     sha,
                     dirty,
                     ahead,
@@ -899,6 +993,31 @@ pub(crate) fn get_worktrees(
         .collect();
 
     Ok(results?.into_iter().collect())
+}
+
+fn read_worktree_head(git_dir: &Path) -> (Option<String>, Option<gix::ObjectId>) {
+    let Ok(bytes) = std::fs::read(git_dir.join("HEAD")) else {
+        return (None, None);
+    };
+    let head = bytes.trim();
+    if let Some(reference) = head.strip_prefix(b"ref: ") {
+        let reference = reference.as_bstr().to_str_lossy();
+        let branch = reference
+            .strip_prefix("refs/heads/")
+            .unwrap_or(&reference)
+            .to_string();
+        (Some(branch), None)
+    } else {
+        (None, gix::ObjectId::from_hex(head).ok())
+    }
+}
+
+fn peel_branch_tip(repo: &gix::Repository, branch: &str) -> Option<gix::ObjectId> {
+    repo.find_reference(&format!("refs/heads/{branch}"))
+        .ok()?
+        .into_fully_peeled_id()
+        .ok()
+        .map(|id| id.detach())
 }
 
 /// Merge the worktree tip into the base in memory (no repository writes) and
@@ -1975,7 +2094,11 @@ mod tests {
         let feature_path = dir.path().join("feature");
         let gix_repo = gix::open(dir.path()).unwrap();
 
-        let worktrees = get_worktrees(&gix_repo, true, Some(&feature_path)).unwrap();
+        let collector = crate::performance::PerformanceCollector::new_shared();
+        let worktrees = crate::performance::with_current_collector(
+            Some(collector.clone()),
+            || get_worktrees(&gix_repo, true, Some(&feature_path)).unwrap(),
+        );
 
         let feature = worktrees
             .get("feature")
@@ -1989,6 +2112,17 @@ mod tests {
         assert!(
             other.ahead > 0,
             "non-current worktree must also have ahead in full-detail mode"
+        );
+        let counters = collector
+            .snapshot(std::time::Duration::ZERO)
+            .counters;
+        assert_eq!(
+            counters
+                .get(counters::GIT_WORKTREE_OPENS)
+                .copied()
+                .unwrap_or(0),
+            2,
+            "full details open only the two checkouts unavailable through the main handle"
         );
     }
 

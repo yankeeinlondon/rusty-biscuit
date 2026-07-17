@@ -5,7 +5,6 @@
 //! listing all worktrees in a repository.
 
 use crate::SniffError;
-use crate::performance::{self, counters};
 use gix::bstr::ByteSlice;
 use std::error::Error;
 use std::path::{Path, PathBuf};
@@ -198,14 +197,12 @@ fn list_worktrees_from_gix(discovered: &gix::Repository) -> Result<Vec<WorktreeE
         let path = proxy
             .base()
             .map_err(|e| SniffError::git("worktree_base", e))?;
+        if path.as_os_str().is_empty() {
+            return Err(SniffError::git("worktree_base", "worktree path is empty").into());
+        }
         let canonical = std::fs::canonicalize(&path).unwrap_or(path);
 
-        // Open the worktree as its own repository to read HEAD.
-        let (branch, is_detached) = {
-            performance::increment_counter(counters::GIT_WORKTREE_OPENS, 1);
-            let wt_repo = super::open::trusted_open(&canonical)?;
-            resolve_branch_and_detached(&wt_repo)
-        };
+        let (branch, is_detached) = resolve_linked_branch_and_detached(proxy.git_dir());
 
         let is_current = is_worktree_current(&canonical, current_canonical.as_deref());
 
@@ -234,6 +231,23 @@ fn resolve_branch_and_detached(repo: &gix::Repository) -> (Option<String>, bool)
         head.referent_name().map(|name| name.shorten().to_string())
     };
     (branch, is_detached)
+}
+
+fn resolve_linked_branch_and_detached(git_dir: &Path) -> (Option<String>, bool) {
+    let Ok(bytes) = std::fs::read(git_dir.join("HEAD")) else {
+        return (None, false);
+    };
+    let head = bytes.trim();
+    if let Some(reference) = head.strip_prefix(b"ref: ") {
+        let reference = reference.as_bstr().to_str_lossy();
+        let branch = reference
+            .strip_prefix("refs/heads/")
+            .unwrap_or(&reference)
+            .to_string();
+        (Some(branch), false)
+    } else {
+        (None, gix::ObjectId::from_hex(head).is_ok())
+    }
 }
 
 /// Checks whether a worktree's canonical path matches the current directory.
@@ -372,6 +386,28 @@ mod tests {
     }
 
     #[test]
+    fn list_worktrees_from_bare_common_repo_has_no_main_entry() {
+        let common = TempDir::new().unwrap();
+        let checkout = TempDir::new().unwrap();
+        let checkout_path = checkout.path().join("linked");
+        let repo = git2::Repository::init_bare(common.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = repo.treebuilder(None).unwrap().write().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+            .unwrap();
+        repo.worktree("linked", &checkout_path, None).unwrap();
+
+        let worktrees = list_worktrees(&checkout_path).unwrap().unwrap();
+        assert_eq!(worktrees.len(), 1, "a bare common repo has no main checkout");
+        assert_eq!(worktrees[0].name, "linked");
+        assert_eq!(
+            worktrees[0].path,
+            std::fs::canonicalize(checkout_path).unwrap()
+        );
+    }
+
+    #[test]
     fn list_worktrees_with_linked_worktrees() {
         let (dir, repo) = setup_repo();
 
@@ -434,6 +470,67 @@ mod tests {
             .expect("detached worktree should exist");
         assert!(detached.is_detached, "linked worktree should be detached");
         assert_eq!(detached.branch, None, "branch should be None when detached");
+    }
+
+    #[test]
+    fn list_worktrees_reads_linked_admin_metadata_without_repository_open() {
+        let (dir, repo) = setup_repo();
+        let wt_path = dir.path().join("native-ü-path");
+        repo.worktree("native-ü", &wt_path, None).unwrap();
+
+        let collector = crate::performance::PerformanceCollector::new_shared();
+        let worktrees = crate::performance::with_current_collector(
+            Some(collector.clone()),
+            || list_worktrees(dir.path()).unwrap().unwrap(),
+        );
+        let counters = collector
+            .snapshot(std::time::Duration::ZERO)
+            .counters;
+
+        assert_eq!(
+            counters
+                .get(crate::performance::counters::GIT_WORKTREE_OPENS)
+                .copied()
+                .unwrap_or(0),
+            0,
+            "branch and detached state come from admin HEAD: {counters:?}"
+        );
+        let linked = worktrees
+            .iter()
+            .find(|worktree| worktree.name == "native-ü")
+            .unwrap();
+        assert_eq!(linked.path, std::fs::canonicalize(&wt_path).unwrap());
+        assert!(linked.branch.is_some());
+        assert!(!linked.is_detached);
+    }
+
+    #[test]
+    fn list_worktrees_preserves_prunable_and_missing_head_metadata() {
+        let (dir, repo) = setup_repo();
+        let wt_path = dir.path().join("prunable");
+        repo.worktree("prunable", &wt_path, None).unwrap();
+        let admin = dir.path().join(".git/worktrees/prunable");
+
+        std::fs::remove_dir_all(&wt_path).unwrap();
+        let prunable = list_worktrees(dir.path()).unwrap().unwrap();
+        let linked = prunable
+            .iter()
+            .find(|worktree| worktree.name == "prunable")
+            .expect("stale checkout remains represented by its admin metadata");
+        assert_eq!(
+            linked.path,
+            std::fs::canonicalize(dir.path()).unwrap().join("prunable")
+        );
+        assert!(linked.branch.is_some());
+
+        std::fs::remove_file(admin.join("HEAD")).unwrap();
+        let missing_head = list_worktrees(dir.path()).unwrap().unwrap();
+        let linked = missing_head
+            .iter()
+            .find(|worktree| worktree.name == "prunable")
+            .expect("missing HEAD does not erase the registered worktree");
+        assert_eq!(linked.branch, None);
+        assert!(!linked.is_detached);
     }
 
     #[test]
