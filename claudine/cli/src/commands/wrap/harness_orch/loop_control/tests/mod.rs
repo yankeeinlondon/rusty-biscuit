@@ -241,6 +241,7 @@ fn dispatch_guard<'a>(
 }
 
 
+mod budget_scoping;
 mod coordinator_adoption;
 mod lifecycle_ordering;
 mod overlay_layering;
