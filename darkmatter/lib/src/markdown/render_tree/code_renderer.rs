@@ -713,6 +713,258 @@ last: 4
             .expect("theme background")
     }
 
+    /// The `render_code_heavy` manifest fixture's 40 fenced blocks as
+    /// `(language, body)` pairs — the same frozen bytes `benches/phase8_render.rs`
+    /// renders, entered at the code hook instead of at `as_terminal` / `as_html`.
+    fn code_heavy_blocks() -> Vec<(String, String)> {
+        use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+
+        let text = crate::perf_harness::fixture_text("render_code_heavy");
+        let mut blocks = Vec::new();
+        let mut current: Option<(String, String)> = None;
+        for event in Parser::new_ext(&text, Options::all()) {
+            match event {
+                Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) => {
+                    let language = info.split_whitespace().next().unwrap_or_default().to_string();
+                    current = Some((language, String::new()));
+                }
+                Event::Text(text) => {
+                    if let Some((_, body)) = current.as_mut() {
+                        body.push_str(&text);
+                    }
+                }
+                Event::End(TagEnd::CodeBlock) => {
+                    if let Some(block) = current.take() {
+                        blocks.push(block);
+                    }
+                }
+                _ => {}
+            }
+        }
+        blocks
+    }
+
+    /// Finding 23's retained raw-sample harness — the per-observation vectors the
+    /// benchmark contract requires ("Raw samples (mandatory)"; "Harnesses are
+    /// retained, not deleted").
+    ///
+    /// The pre-F23 shape is reconstructed without a pinned code copy and without
+    /// a production seam: a renderer that is *rebuilt per block* reads the
+    /// environment and resolves the surface once per block, which is exactly what
+    /// the per-block resolution did; the F23 renderer is built once per render
+    /// and resolves once. The `surface_probe` counters assert that reconstruction
+    /// is real (40 vs 1) rather than assumed, and the byte-equality gate runs
+    /// before any timing.
+    ///
+    /// Entering at the code hook rather than at `as_terminal` / `as_html` gives
+    /// F23 its *best* case: the fixture's prose, layout, and frame work is
+    /// excluded, so the hoisted resolution is a larger share here than in any
+    /// real render. A null result at this boundary therefore bounds the null
+    /// result at the entry points.
+    ///
+    /// The single-block control is F23's measurement floor: at one block the
+    /// two shapes do identical work (one construction, one resolution, one
+    /// highlight), so whatever separates them is the harness's own noise.
+    #[test]
+    #[ignore = "measurement harness; run explicitly with DM_PERF_RAW_DIR set"]
+    #[serial]
+    fn f23_code_surface_raw_samples() {
+        use crate::perf_harness::Harness;
+        use std::hint::black_box;
+
+        // 300 samples: at 100 the two arms' 95% CIs abutted, which cannot
+        // separate a ~1% effect from the control's own ±0.2% floor.
+        let Some(render_harness) = Harness::from_env(300, 1) else {
+            return;
+        };
+        let control_harness = Harness::from_env(300, 20).expect("DM_PERF_RAW_DIR still set");
+
+        let _theme = EnvVarGuard::capture("THEME");
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        let _no_color = EnvVarGuard::capture("NO_COLOR");
+        // Pin the theme signal: the measured resolution chain must not depend on
+        // the invoking shell's environment.
+        unsafe {
+            std::env::remove_var("NO_COLOR");
+            std::env::remove_var("CODE_THEME");
+            std::env::set_var("THEME", "github");
+        }
+
+        let blocks = code_heavy_blocks();
+        assert_eq!(
+            blocks.len(),
+            40,
+            "render_code_heavy is the frozen 40-fence manifest fixture",
+        );
+        let context =
+            || TerminalCodeContext::new(120, ColorDepth::TrueColor, RenderableColorMode::Dark);
+
+        let terminal_baseline = || {
+            let mut out = String::new();
+            for (language, body) in &blocks {
+                out.push_str(
+                    &TerminalCodeRenderer::new()
+                        .render_terminal_code(
+                            Some(language),
+                            body,
+                            None,
+                            &NodeAttrs::default(),
+                            context(),
+                        )
+                        .expect("baseline terminal block"),
+                );
+            }
+            out
+        };
+        let terminal_candidate = || {
+            let renderer = TerminalCodeRenderer::new();
+            let mut out = String::new();
+            for (language, body) in &blocks {
+                out.push_str(
+                    &renderer
+                        .render_terminal_code(
+                            Some(language),
+                            body,
+                            None,
+                            &NodeAttrs::default(),
+                            context(),
+                        )
+                        .expect("candidate terminal block"),
+                );
+            }
+            out
+        };
+
+        let (baseline_out, baseline_env, baseline_resolutions, _) =
+            surface_probe::counted(terminal_baseline);
+        let (candidate_out, candidate_env, candidate_resolutions, _) =
+            surface_probe::counted(terminal_candidate);
+        assert_eq!(
+            baseline_out, candidate_out,
+            "F23 terminal baseline and candidate must produce byte-identical output",
+        );
+        assert_eq!(
+            (baseline_env, baseline_resolutions),
+            (40, 40),
+            "the baseline must read the environment and resolve once per block, or it does not \
+             represent the pre-F23 shape",
+        );
+        assert_eq!(
+            (candidate_env, candidate_resolutions),
+            (1, 1),
+            "the candidate must take one snapshot and one resolution per render",
+        );
+
+        let browser_baseline = || {
+            let mut out = String::new();
+            for (language, body) in &blocks {
+                out.push_str(
+                    &TerminalCodeRenderer::new()
+                        .render_browser_code(Some(language), body, None, &NodeAttrs::default())
+                        .expect("baseline browser block")
+                        .render(),
+                );
+            }
+            out
+        };
+        let browser_candidate = || {
+            let renderer = TerminalCodeRenderer::new();
+            let mut out = String::new();
+            for (language, body) in &blocks {
+                out.push_str(
+                    &renderer
+                        .render_browser_code(Some(language), body, None, &NodeAttrs::default())
+                        .expect("candidate browser block")
+                        .render(),
+                );
+            }
+            out
+        };
+
+        let (baseline_html, baseline_env, _, baseline_resolutions) =
+            surface_probe::counted(browser_baseline);
+        let (candidate_html, candidate_env, _, candidate_resolutions) =
+            surface_probe::counted(browser_candidate);
+        assert_eq!(
+            baseline_html, candidate_html,
+            "F23 browser baseline and candidate must produce byte-identical output",
+        );
+        assert_eq!(
+            (baseline_env, baseline_resolutions),
+            (40, 40),
+            "the browser baseline must resolve once per block",
+        );
+        assert_eq!(
+            (candidate_env, candidate_resolutions),
+            (1, 1),
+            "the browser candidate must resolve once per render",
+        );
+
+        let (control_language, control_body) = &blocks[0];
+        let control_baseline = || {
+            TerminalCodeRenderer::new()
+                .render_terminal_code(
+                    Some(control_language),
+                    control_body,
+                    None,
+                    &NodeAttrs::default(),
+                    context(),
+                )
+                .expect("control baseline block")
+        };
+        let control_candidate = || {
+            let renderer = TerminalCodeRenderer::new();
+            renderer
+                .render_terminal_code(
+                    Some(control_language),
+                    control_body,
+                    None,
+                    &NodeAttrs::default(),
+                    context(),
+                )
+                .expect("control candidate block")
+        };
+        assert_eq!(
+            control_baseline(),
+            control_candidate(),
+            "F23 control shapes must produce byte-identical output",
+        );
+
+        println!("f23: terminal (40 fences)");
+        render_harness.interleaved_pair(
+            "f23-terminal-code-heavy-baseline",
+            || {
+                black_box(terminal_baseline());
+            },
+            "f23-terminal-code-heavy-candidate",
+            || {
+                black_box(terminal_candidate());
+            },
+        );
+        println!("f23: browser (40 fences)");
+        render_harness.interleaved_pair(
+            "f23-browser-code-heavy-baseline",
+            || {
+                black_box(browser_baseline());
+            },
+            "f23-browser-code-heavy-candidate",
+            || {
+                black_box(browser_candidate());
+            },
+        );
+        println!("f23: control (1 fence — identical work on both shapes)");
+        control_harness.interleaved_pair(
+            "f23-control-single-block-baseline",
+            || {
+                black_box(control_baseline());
+            },
+            "f23-control-single-block-candidate",
+            || {
+                black_box(control_candidate());
+            },
+        );
+    }
+
     /// Finding 23: one terminal render resolves the code theme/environment
     /// **once**, however many fences the document holds. Counted rather than
     /// inferred from equal output, which a per-block resolution would produce

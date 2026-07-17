@@ -1576,4 +1576,96 @@ mod finding_35_7 {
             assert_eq!(format!("{n:?}"), before, "text node mutated under {ctx_label:?}");
         }
     }
+
+    /// 1000 synthetic link nodes shaped like `toc_large`'s TOC entries, per the
+    /// profile record's fixture description.
+    fn synthetic_links(with_title: bool) -> Vec<RenderNode> {
+        (0..1000)
+            .map(|n| {
+                node(NodeKind::Link {
+                    url: format!("./docs/chapter-{n}/section-{n}.md#heading-{n}"),
+                    title: with_title.then(|| format!("Section {n}")),
+                    children: vec![text(&format!("Section {n}"))],
+                })
+            })
+            .collect()
+    }
+
+    /// Retained raw-sample harness for Finding 35.7 (run record:
+    /// `benchmarks/raw/f35-residuals/`).
+    ///
+    /// Replaces the deleted `f35_7_profile` module whose capture left the
+    /// finding's claim unreproducible. Ignored *and* gated on `DM_PERF_RAW_DIR`,
+    /// so `just test` neither runs nor is slowed by it.
+    ///
+    /// Each timed batch applies the policy to all 1000 nodes in place. The two
+    /// arms own separate node vectors, so neither observes the other's
+    /// mutations; because the appliers are equivalent (gated below), both
+    /// vectors evolve through identical states across samples.
+    #[test]
+    #[ignore = "measurement harness; opt in with DM_PERF_RAW_DIR"]
+    fn f35_7_link_policy_raw_samples() {
+        let Some(harness) = crate::perf_harness::Harness::from_env(50, 1) else {
+            return;
+        };
+
+        let policies = HashMap::new();
+        let global = styled("red-500");
+        let base = || TreeBuildContext {
+            component_policies: &policies,
+            page_color: None,
+            page_bg_color: None,
+            hyperlink_style: None,
+            local_hyperlink_style: None,
+            local_image_style: None,
+            hr_defaults: None,
+        };
+        let empty_policy = base();
+        let hyperlink_policy = TreeBuildContext {
+            hyperlink_style: Some(&global),
+            ..base()
+        };
+
+        let cases: Vec<(&str, &TreeBuildContext, bool)> = vec![
+            ("empty-policy-no-title", &empty_policy, false),
+            ("empty-policy-with-title", &empty_policy, true),
+            ("hyperlink-policy-no-title", &hyperlink_policy, false),
+            ("hyperlink-policy-with-title", &hyperlink_policy, true),
+        ];
+
+        // Equivalence gate: a ratio between two appliers that disagree is not a
+        // result. Every measured node is compared by `Debug`, before any timing.
+        for (label, ctx, with_title) in &cases {
+            let mut candidate_nodes = synthetic_links(*with_title);
+            let mut baseline_nodes = synthetic_links(*with_title);
+            for (candidate, baseline) in candidate_nodes.iter_mut().zip(baseline_nodes.iter_mut()) {
+                apply_link_policy(candidate, ctx);
+                baseline_apply_link_policy(baseline, ctx);
+                assert_eq!(
+                    format!("{candidate:?}"),
+                    format!("{baseline:?}"),
+                    "F35.7 baseline and candidate must agree on every {label} node"
+                );
+            }
+        }
+
+        for (label, ctx, with_title) in &cases {
+            let mut baseline_nodes = synthetic_links(*with_title);
+            let mut candidate_nodes = synthetic_links(*with_title);
+            harness.interleaved_pair(
+                &format!("f35_7-{label}-baseline"),
+                || {
+                    for n in baseline_nodes.iter_mut() {
+                        baseline_apply_link_policy(n, ctx);
+                    }
+                },
+                &format!("f35_7-{label}-candidate"),
+                || {
+                    for n in candidate_nodes.iter_mut() {
+                        apply_link_policy(n, ctx);
+                    }
+                },
+            );
+        }
+    }
 }

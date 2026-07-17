@@ -12,6 +12,8 @@ mod reflow;
 mod tables;
 
 #[cfg(test)]
+mod perf_profile;
+#[cfg(test)]
 mod tests;
 
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, Options, Parser, Tag};

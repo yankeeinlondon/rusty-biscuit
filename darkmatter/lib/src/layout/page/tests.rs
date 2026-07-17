@@ -3309,4 +3309,64 @@ mod finding_35_6 {
         assert_eq!(normalize_body_rhythm("\n\n\n"), "");
         assert_eq!(normalize_body_rhythm(""), "");
     }
+
+    /// Renders a manifest fixture through the page path the profile record
+    /// names, yielding the decorated body the rhythm pass actually runs on.
+    fn decorated_body(stem: &str) -> String {
+        use crate::layout::page::{DarkmatterPage, PageBackground};
+        use crate::markdown::Markdown;
+        use biscuit_terminal::terminal::Terminal;
+
+        let term = Terminal::new_optimistic(100);
+        let page = DarkmatterPage::new(&term)
+            .with_margin(2)
+            .with_padding(1)
+            .with_page_background(PageBackground::Subtle);
+        let md: Markdown = crate::perf_harness::fixture_text(stem).into();
+        page.render(&md).expect("fixture renders through the page")
+    }
+
+    /// Retained raw-sample harness for Finding 35.6 (run record:
+    /// `benchmarks/raw/f35-residuals/`).
+    ///
+    /// Replaces the deleted `f35_6_profile` module whose capture left the
+    /// finding's claim unreproducible. Ignored *and* gated on `DM_PERF_RAW_DIR`,
+    /// so `just test` neither runs nor is slowed by it.
+    #[test]
+    #[ignore = "measurement harness; opt in with DM_PERF_RAW_DIR"]
+    fn f35_6_rhythm_raw_samples() {
+        let Some(harness) = crate::perf_harness::Harness::from_env(100, 1) else {
+            return;
+        };
+
+        let cases: Vec<(&str, String)> = vec![
+            ("decorated-prose", decorated_body("toc_medium")),
+            ("code-panel", decorated_body("render_code_heavy")),
+            ("plain-control", crate::perf_harness::fixture_text("toc_medium")),
+        ];
+
+        for (label, body) in &cases {
+            // Equivalence gate: a ratio between two functions that disagree is
+            // not a result. Asserted for every measured body before any timing.
+            assert_eq!(
+                normalize_body_rhythm(body),
+                naive_normalize(body),
+                "F35.6 baseline and candidate must agree on the {label} body"
+            );
+            println!("{label}: {} lines", body.lines().count());
+        }
+
+        for (label, body) in &cases {
+            harness.interleaved_pair(
+                &format!("f35_6-{label}-baseline"),
+                || {
+                    std::hint::black_box(naive_normalize(std::hint::black_box(body)));
+                },
+                &format!("f35_6-{label}-candidate"),
+                || {
+                    std::hint::black_box(normalize_body_rhythm(std::hint::black_box(body)));
+                },
+            );
+        }
+    }
 }
