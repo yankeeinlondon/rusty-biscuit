@@ -5,6 +5,7 @@ agent: codex/default
 created: 2026-07-17T08:06:51-07:00
 spec: 2026-07-13-proxy-with/spec.md
 implemented: true
+next: 2026-07-13-proxy-with/review-4.md
 description: A **feature** review of `2026-07-13-proxy-with/spec.md`
 feature: 2026-07-13-proxy-with/review-3.md
 previous: 2026-07-13-proxy-with/review-2.md
