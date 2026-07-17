@@ -41,7 +41,15 @@
 //!   global as a synthesized `error_kind` string rather than a typed error;
 //!   [`code_for_error_kind`] maps that label to its locked code so
 //!   [`LifecycleErrorInfo::from_action_failure`] still projects the full facet
-//!   surface.
+//!   surface. The per-instance values are unknowable from a label, so every
+//!   declared `detail` key projects `null` — but the object stays
+//!   catalog-shaped, because a registered code must never carry a *top-level*
+//!   `null` detail.
+//!
+//! Every one of those constructors resolves through [`select_effective_diagnostic`],
+//! the same walk `claudine-cli`'s error walker renders through and
+//! [`DiagnosticSnapshot`] serializes through. That shared seam is what stops a
+//! route from classifying one cause while rendering another.
 //!
 //! [`CompositionError`]: crate::composition::CompositionError
 //! [`ClaudineError`]: crate::error::ClaudineError

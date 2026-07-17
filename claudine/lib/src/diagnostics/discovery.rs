@@ -163,14 +163,6 @@ pub fn select_effective_diagnostic<'a>(
     select_with(error, as_diagnostic)
 }
 
-/// The selection walk, parameterized by its Claudine discovery function.
-///
-/// `discover` is [`as_diagnostic`] in production. The seam exists because the
-/// registry is a closed downcast list over concrete types: every Claudine
-/// diagnostic that terminates a chain today is `Semantic`, so the
-/// deepest-transparent and guard-with-candidate rules are unreachable from the
-/// public entry point until a transparent leaf type ships. Tests supply a probe
-/// registry to exercise them.
 /// The next registered diagnostic *below* `diagnostic` in its cause chain.
 ///
 /// The one-level cause projection D9's snapshot and the `err.cause.*` globals
@@ -237,6 +229,14 @@ fn next_registered_cause_with<'a>(
     None
 }
 
+/// The selection walk, parameterized by its Claudine discovery function.
+///
+/// `discover` is [`as_diagnostic`] in production. The seam exists because the
+/// registry is a closed downcast list over concrete types: every Claudine
+/// diagnostic that terminates a chain today is `Semantic`, so the
+/// deepest-transparent and guard-with-candidate rules are unreachable from the
+/// public entry point until a transparent leaf type ships. Tests supply a probe
+/// registry to exercise them.
 fn select_with<'a>(
     error: &'a (dyn StdError + 'static),
     discover: fn(&'a (dyn StdError + 'static)) -> Option<&'a (dyn Diagnostic + 'static)>,

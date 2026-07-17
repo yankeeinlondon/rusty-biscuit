@@ -20,9 +20,15 @@
 //! optional-error `finalize` events. Exposed through the [`Diagnostic`] facets
 //! `err.code` / `err.category` / `err.disposition` / `err.origin` /
 //! `err.severity` / `err.detail.*` (when the source error is classifiable),
-//! plus the deprecated aliases `err.kind` / `err.variant` / `err.msg` —
-//! `err.kind` / `err.variant` are deprecated spellings of `err.category` /
-//! `err.code`. Parse-time validation (see
+//! the one-level `err.cause.*` projection of the next registered diagnostic
+//! below it, plus the deprecated aliases `err.kind` / `err.variant` /
+//! `err.msg` — `err.kind` / `err.variant` are deprecated spellings of
+//! `err.category` / `err.code`.
+//!
+//! Which error in a chain answers all of this is decided by
+//! [`select_effective_diagnostic`] — the same walk the CLI renders through and
+//! the snapshot serializes through, so a route cannot classify one cause while
+//! rendering another. Parse-time validation (see
 //! [`super::lifecycle::validate_no_err_in_no_error_events`]) rejects `err`
 //! references in `initialize`, `start`, `success`, and `loop`.
 //!
@@ -38,13 +44,17 @@
 //! and `current.env.<name>`.
 
 use std::collections::HashMap;
+use std::error::Error as StdError;
 
 use darkmatter::markdown::compose::subtree::InjectedGlobal;
 use serde_json::{Map, Value};
 
 use super::super::error::CompositionError;
-use crate::diagnostics::Diagnostic;
+use crate::diagnostics::{
+    Diagnostic, DiagnosticCause, next_registered_cause, select_effective_diagnostic,
+};
 use crate::error::ClaudineError;
+use crate::harness::concise_message;
 use crate::harness::error::HarnessError;
 
 /// Snapshot of the lifecycle-stack-only `err` global.
@@ -82,8 +92,12 @@ pub struct LifecycleErrorInfo {
     /// its `code` there instead (see [`Self::to_value`]).
     pub variant: String,
 
-    /// The human-readable error message (the `Display` rendering of the
-    /// source error).
+    /// The concise, notification-safe message of the *selected* diagnostic —
+    /// single-line, escape-free, and length-clamped, because this string feeds
+    /// TTS, outbound messaging routes, and desktop notifications verbatim.
+    ///
+    /// It is the effective diagnostic's `Display`, not the wrapper's and not
+    /// its multi-line rendered block.
     pub msg: String,
 
     /// The classification facets, when the source is classifiable.
@@ -97,6 +111,15 @@ pub struct LifecycleErrorInfo {
     /// to keep `LifecycleErrorInfo` small — it is the `Err` type of several hot
     /// `Result`-returning lifecycle helpers.
     pub facets: Option<Box<DiagnosticFacets>>,
+
+    /// The next registered diagnostic below the selected one, projected to
+    /// `err.cause.*`.
+    ///
+    /// A strict **one-level** projection: [`DiagnosticCause`] carries no cause
+    /// of its own, so `err.cause.cause` is unrepresentable rather than merely
+    /// undocumented (spec §D4). Always `None` when `facets` is `None` — a cause
+    /// is only meaningful below a selected diagnostic.
+    pub cause: Option<Box<DiagnosticCause>>,
 }
 
 /// The [`Diagnostic`] facets captured from a typed error, projected into the
@@ -140,10 +163,14 @@ impl DiagnosticFacets {
     /// Used for the provider/cap/timeout/runaway failures that reach the
     /// lifecycle `err` global as a synthesized `error_kind` string rather than
     /// a typed [`Diagnostic`] error (see
-    /// [`crate::diagnostics::code_for_error_kind`]). The structured `detail`
-    /// payload is not reconstructable from the label alone, so it projects as
-    /// `null`; `code`/`category`/`disposition`/`origin` are the handleable
-    /// surface here. Returns `None` for a code absent from the catalog.
+    /// [`crate::diagnostics::code_for_error_kind`]).
+    ///
+    /// The per-instance `detail` values are not reconstructable from the label
+    /// alone, so every declared key projects `null` — but the object itself is
+    /// still catalog-shaped. A registered code must never project a *top-level*
+    /// `null` detail (spec §D7): `err.detail.reset_at` has to read as "this
+    /// code has that field and it is unknown", not blow up against a scalar.
+    /// Returns `None` for a code absent from the catalog.
     pub fn from_code(code: &'static str) -> Option<Self> {
         let spec = crate::diagnostics::code_spec(code)?;
         Some(Self {
@@ -152,7 +179,7 @@ impl DiagnosticFacets {
             disposition: spec.disposition.as_str(),
             origin: spec.origin.as_str(),
             severity: spec.severity().as_str(),
-            detail: Value::Null,
+            detail: crate::diagnostics::null_detail_for(spec.code),
         })
     }
 }
@@ -163,36 +190,86 @@ impl LifecycleErrorInfo {
     /// aliases. Covers the top-level Claudine and provider error surface
     /// (`provider.unavailable`, `io.*`, `config.*`, `usage.*`, …).
     pub fn from_claudine_error(err: &ClaudineError) -> Self {
-        Self {
-            kind: "ClaudineError",
-            variant: variant_name_from_debug(err),
-            msg: err.to_string(),
-            facets: Some(Box::new(DiagnosticFacets::from_diagnostic(err))),
-        }
+        Self::from_selection("ClaudineError", variant_name_from_debug(err), err)
     }
 
     /// Build the snapshot from a [`HarnessError`], capturing its [`Diagnostic`]
     /// facets so `err.code` / `err.detail.*` project alongside the legacy
     /// aliases.
     pub fn from_harness_error(err: &HarnessError) -> Self {
-        Self {
-            kind: "HarnessError",
-            variant: variant_name_from_debug(err),
-            msg: err.to_string(),
-            facets: Some(Box::new(DiagnosticFacets::from_diagnostic(err))),
-        }
+        Self::from_selection("HarnessError", variant_name_from_debug(err), err)
     }
 
     /// Build the snapshot from a [`CompositionError`], capturing its
     /// [`Diagnostic`] facets so `err.code` / `err.detail.*` project alongside the
     /// legacy aliases.
     pub fn from_composition_error(err: &CompositionError) -> Self {
-        Self {
-            kind: "CompositionError",
-            variant: variant_name_from_debug(err),
-            msg: err.to_string(),
-            facets: Some(Box::new(DiagnosticFacets::from_diagnostic(err))),
+        Self::from_selection("CompositionError", variant_name_from_debug(err), err)
+    }
+
+    /// Build the snapshot from an arbitrary error, preferring the effective
+    /// diagnostic and falling back to a facet-less action failure labeled
+    /// `verb` when nothing in the chain is registered.
+    ///
+    /// The seam for a boundary that holds a typed error behind an opaque
+    /// [`Report`](color_eyre::Report) or a `Box<dyn Error>`: passing the error
+    /// keeps its facets, where `from_action_failure(verb, err.to_string())`
+    /// would flatten them to prose and force `err.*` to disagree with what the
+    /// same failure renders.
+    pub fn from_error_or_action(verb: impl Into<String>, error: &(dyn StdError + 'static)) -> Self {
+        let variant = verb.into();
+        match Self::select(error) {
+            Some((facets, cause, msg)) => Self {
+                kind: "LifecycleAction",
+                variant,
+                msg,
+                facets: Some(facets),
+                cause,
+            },
+            None => Self::from_action_failure(variant, error.to_string()),
         }
+    }
+
+    /// Build from the diagnostic [`select_effective_diagnostic`] chooses,
+    /// falling back to `error`'s own prose when the chain has none.
+    ///
+    /// The one place `err.*` reads its facets from, so it cannot disagree with
+    /// what the CLI renders or what the snapshot serializes — those resolve
+    /// through the same selection.
+    fn from_selection(
+        kind: &'static str,
+        variant: String,
+        error: &(dyn StdError + 'static),
+    ) -> Self {
+        match Self::select(error) {
+            Some((facets, cause, msg)) => Self {
+                kind,
+                variant,
+                msg,
+                facets: Some(facets),
+                cause,
+            },
+            None => Self {
+                kind,
+                variant,
+                msg: concise_message(&error.to_string()),
+                facets: None,
+                cause: None,
+            },
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn select(
+        error: &(dyn StdError + 'static),
+    ) -> Option<(Box<DiagnosticFacets>, Option<Box<DiagnosticCause>>, String)> {
+        let selected = select_effective_diagnostic(error)?.diagnostic()?;
+        Some((
+            Box::new(DiagnosticFacets::from_diagnostic(selected)),
+            next_registered_cause(selected)
+                .map(|cause| Box::new(DiagnosticCause::from_diagnostic(cause))),
+            concise_message(&selected.to_string()),
+        ))
     }
 
     /// Build a snapshot for a failed lifecycle stack action (a side-effect,
@@ -211,6 +288,13 @@ impl LifecycleErrorInfo {
     /// `err.origin` project alongside the legacy aliases. A generic action verb
     /// (`shell`, `set_frontmatter`) is not an error_kind, so it stays
     /// facet-less.
+    ///
+    /// `msg` passes through [`concise_message`], the same hygiene
+    /// [`failure_message`](crate::harness::failure_message) already applied on
+    /// the provider-attempt path — so a hand-built message here cannot reach
+    /// TTS or a webhook multi-line or escape-bearing. The pass is idempotent,
+    /// which is what lets the provider cascade keep its ratified precedence
+    /// (including its budget-reserved `(attempt N)` suffix) unchanged.
     pub fn from_action_failure(verb: impl Into<String>, msg: impl Into<String>) -> Self {
         let variant = verb.into();
         let facets = crate::diagnostics::code_for_error_kind(&variant)
@@ -219,8 +303,10 @@ impl LifecycleErrorInfo {
         Self {
             kind: "LifecycleAction",
             variant,
-            msg: msg.into(),
+            msg: concise_message(&msg.into()),
             facets,
+            // No typed error, so no chain to project a cause from.
+            cause: None,
         }
     }
 
@@ -292,6 +378,19 @@ impl LifecycleErrorInfo {
             obj.insert(
                 "retry_after_ms".to_string(),
                 promoted_detail_field(&facets.detail, "retry_after_ms"),
+            );
+
+            // Present-but-null when the selected diagnostic has no registered
+            // cause, so `err.cause.code` reads as unknown rather than as a
+            // lookup on a missing key.
+            obj.insert(
+                "cause".to_string(),
+                match &self.cause {
+                    Some(cause) => {
+                        serde_json::to_value(cause.as_ref()).unwrap_or(Value::Null)
+                    }
+                    None => Value::Null,
+                },
             );
         }
         Value::Object(obj)

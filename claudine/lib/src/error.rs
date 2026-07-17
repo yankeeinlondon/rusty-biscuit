@@ -243,7 +243,14 @@ pub enum ClaudineError {
 }
 
 impl BlockError for ClaudineError {
-    fn status_block(&self, _term: &Terminal) -> StatusBlock {
+    fn status_block(&self, term: &Terminal) -> StatusBlock {
+        // Semantic over a typed Darkmatter cause: this layer owns
+        // `composition.failed` because a Darkmatter error carries no facets,
+        // but the cause holds the path, line, and transclusion chain, so the
+        // block is built from it rather than flattened to one line here.
+        if let ClaudineError::SystemPromptComposition(md) = self {
+            return md.status_block(term);
+        }
         // Claudine's library errors are reported by the CLI's top-level walker,
         // which renders the typed `Display` text; the block-style report here
         // carries the same message under the variant-derived code so the

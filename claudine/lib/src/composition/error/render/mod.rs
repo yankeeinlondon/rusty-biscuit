@@ -28,6 +28,16 @@ impl BlockError for CompositionError {
                 inner.status_block(term)
             }
 
+            // Semantic over a typed Darkmatter cause: this layer owns the code
+            // (a Darkmatter error supplies no facets), but the cause is what
+            // holds the path, line, and source excerpt — so the block comes
+            // from it. Owning the identity and borrowing the pixels is the
+            // split `ShellExpansionFailed` already makes.
+            CompositionError::ComposeFailed(md)
+            | CompositionError::FrontmatterParse(md)
+            | CompositionError::InlineHashMalformed(md)
+            | CompositionError::PreFlightDiscoveryFailed(md) => md.status_block(term),
+
             // Lifecycle authoring / evaluation family.
             CompositionError::LifecycleInvalid { .. }
             | CompositionError::LifecycleInterpolationLeak { .. }
