@@ -177,6 +177,15 @@ docs_updated_during_phase_9:
 docs_created_during_phase_9: []
 skills_files_updated_during_phase_9:
     - .claude/skills/claudine/architecture.md
+# Phase 10 was ATTEMPTED and NOT STARTED: it is blocked on Phase 9's R6 launch
+# rebuild, exactly as checkpoint 9 predicted. No production code was changed —
+# the only artifact is the blocker analysis and the relaunch-seam design
+# recorded at checkpoint 10. `phase` stays at 8.
+source_files_during_phase_10: []
+docs_updated_during_phase_10:
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_10: []
+skills_files_updated_during_phase_10: []
 packages:
     - claudine-cli
 ---
@@ -1061,6 +1070,86 @@ loop ownership moves.
 - `loop_initialize_proxy_hands_off_without_iterating`
   (`lib/src/composition/looping/engine/tests/lifecycle_control.rs:232`) still
   encodes correct behavior, or is rewritten with the change documented.
+
+**Attempt 1 (2026-07-17) — NOT STARTED. Blocked on Phase 9 R6, as Phase 9's own
+checkpoint predicted. No production code was changed; no task above is checked.**
+
+Re-verified at `HEAD` (`8efdded07`): R6 is still unstarted — `LaunchInputs` and
+`TargetLaunchRebuilder` do not exist, and neither does any relaunch seam.
+
+**Why Phase 10 cannot be landed on top of Phase 9's partial state.** The
+coordinator is *not* above the loop engine. Phase 6 placed
+`ActiveDocumentCoordinator` (`loop_control/coordinator.rs:33`) inside
+`run_harness_loop`, which sits **below** the engine:
+
+```
+compose/prep.rs::execute_loop_or_single      ← decides loop vs single (origin doc only)
+  └── looping::engine::run_loop_with_overrides
+        └── per-iteration closure → execute_composition_attempt
+              └── pipeline.rs → run_harness_loop
+                    └── ActiveDocumentCoordinator::adopt   ← proxy targets land HERE
+```
+
+Loop recognition therefore happens two frames *above* the place a proxy target is
+adopted. Giving a proxied target its loop means inverting that ownership — which
+is the same relaunch seam R6 needs (`plan.md` Phase 9, candidate design 2).
+`run_harness_loop` returns `(i32, perf, signals)` (`loop_control.rs:36-40`);
+`LoopStep` is `NextAttempt | Return | Abort`; `SingleCompositionOutcome`
+(`runner.rs:495`) carries no document field. There is no outbound
+document-identity channel at any of the five frames between `adopt` and prep.
+
+**A narrow shortcut exists and was rejected.** Bailing out at the target's
+*bootstrap read* (before the narrow gate and before target `initialize`) and
+letting prep's engine drive the target would turn checkpoint 10's headline L2
+green without R6 — the router in `EQUIV_ROUTER` has no `loop:` and no `with:`,
+so no engine frame unwinds and the overlay is empty. It was not taken because it
+buys the signal by reintroducing what this feature exists to delete:
+
+1. **Phase 10's first task is not discharged.** Recognition would sit *before*
+   stabilization, so a target whose `initialize` authors or removes `loop:` is
+   misclassified — the `prep.rs:462` drift relocated one document downstream,
+   not removed.
+2. **Phase 10's preamble is violated.** `resolve_loop_config` reads
+   `source.markdown.frontmatter()` — authored bytes, no overlay.
+   `with: {max: 5}` + `loop: {max: "{{max}}"}` would not see the overlay.
+   `PrepareOptions` (`prep.rs:735-744`) has no overlay channel.
+3. **Two boot contracts — the split ownership Phase 6 deleted.** Loop targets
+   would get prep's audit-then-initialize order; non-loop targets keep Phase 7's
+   narrow-gate → initialize → stabilized reread → full audit. Loop targets would
+   ship exactly the drift Phase 7 fixed.
+
+**The correct seam, for whoever picks this up.** Bail *after* Phase 7's staged
+boot has stabilized the target (so recognition sees post-`initialize`,
+post-overlay `loop:`, and one boot contract survives), and unwind all the way to
+prep rather than relaunching inside `provider_run_handoff`. Unwinding to prep is
+what dissolves the knot Phase 9 named: the whole `CompositionAttempt` — and with
+it the `LifecycleRunGuard` borrow of `attempt.request` — drops on return. R6
+then falls out **incidentally** for the loop route, because each engine iteration
+re-enters all four pipeline phases fresh from the target's `prepared`
+(`prep.rs:581-600`); no in-place rebuilder is needed. Required pieces:
+
+- A `Relaunch` variant on `LoopStep`/`HarnessLoopResult`, surfaced through
+  `SingleCompositionOutcome` → `provider_run_handoff` → `run_composition_body` →
+  `execute_composition_request` to prep, raised only when the stabilized target
+  declares `loop:`. Non-loop targets never bail; the common path is untouched.
+- An "initialize already emitted" input to `execute_loop_with_lifecycle` — it
+  unconditionally emits `Initialize` at `engine.rs:352` on a fresh guard
+  (`:336`), which would double-fire the target's.
+- The `RunLedger` must cross and re-seed. `ActiveDocumentCoordinator::new`
+  (`coordinator.rs:45`) always calls `RunLedger::new`, so a fresh coordinator
+  loses cycle detection and resets the hop budget: `A → B → C(loop) → A` stops
+  being a cycle. The approval cache is an `Arc` and crosses free.
+- An overlay channel into the loop seed / `PrepareOptions`, so
+  `resolve_loop_config` and every iteration read the same immutable overlay
+  Phase 8 installed.
+- `resolved_target` and `header_emitted` must be cleared on relaunch, or
+  `resolve_execution_target` short-circuits on the router's provider
+  (`target.rs:88-90`) and the target reprints the router's execution line.
+  Precedence is free: `explicit_provider` is checked at `target.rs:110` ahead of
+  any frontmatter hint — which is also checkpoint 9's `--codex`-still-wins rule.
+
+Recommended order: land R6 (or the relaunch seam above, which subsumes its loop
+route) before re-attempting Phase 10. The two are one refactor, not two.
 
 ---
 
