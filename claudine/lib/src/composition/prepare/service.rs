@@ -15,8 +15,9 @@
 mod tests;
 
 use super::entry::DocumentEntryReason;
-use super::{PrepareOptions, prepare_direct_with_prompt, prepare_inline};
+use super::PrepareOptions;
 use crate::composition::error::CompositionError;
+use crate::composition::schema::{prepare_direct_with_schema_and_prompt, prepare_inline_with_schema};
 use crate::composition::types::{CompositionMode, PreparedComposition, ResolvedCompositionSource};
 
 /// Where the delivered prompt text comes from.
@@ -59,11 +60,22 @@ pub struct DocumentPreparation<'a> {
 /// what the entry reason changes is which *stages around* preparation run, and
 /// that is recorded on the result rather than re-derived downstream.
 ///
+/// Preparation runs through the schema layer, so a `$schema`-declaring
+/// document reaches the same typed [`CompositionError::SchemaValidation`] /
+/// [`CompositionError::MissingProperties`] categorization — and the same
+/// invalid-optional drop-and-retry — on every route. The `compose` and
+/// `sequence` routes already composed through it; the harness route did not,
+/// so a proxied or retried target surfaced an uncategorized
+/// `ComposeFailed(SchemaValidationFailed)` where the identical document
+/// invoked directly surfaced the typed variant. That is cross-route typed
+/// identity, which `features/2026-07-13-proxy-with` Phase 12 owns.
+///
 /// ## Errors
 ///
 /// Propagates the composer's typed [`CompositionError`] — a compose failure,
-/// a shell-expansion denial, a removed validation key, an empty composed body,
-/// or a lifecycle parse/pre-flight failure.
+/// a schema load/parse/validation failure, a shell-expansion denial, a removed
+/// validation key, an empty composed body, or a lifecycle parse/pre-flight
+/// failure.
 pub fn prepare_document(
     request: DocumentPreparation<'_>,
 ) -> Result<PreparedComposition, CompositionError> {
@@ -77,9 +89,9 @@ pub fn prepare_document(
 
     let mut prepared = match mode {
         CompositionMode::ChainedDocument => {
-            prepare_direct_with_prompt(source, options, prompt_source)?
+            prepare_direct_with_schema_and_prompt(source, options, prompt_source)?
         }
-        CompositionMode::InlineFrontmatterPrompt => prepare_inline(source, options)?,
+        CompositionMode::InlineFrontmatterPrompt => prepare_inline_with_schema(source, options)?,
     };
     prepared.entry = entry;
     Ok(prepared)

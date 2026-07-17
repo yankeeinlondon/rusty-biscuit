@@ -52,7 +52,12 @@ impl BlockError for CompositionError {
             | CompositionError::LifecycleProxyWithWholeMapping { .. }
             | CompositionError::LifecycleProxyWithDynamicKey { .. }
             | CompositionError::LifecycleProxyWithEvaluationFailed { .. }
-            | CompositionError::LifecycleProxyOnlyParameter { .. } => lifecycle::status_block(self),
+            | CompositionError::LifecycleProxyOnlyParameter { .. }
+            | CompositionError::LifecycleProxyCycle { .. }
+            | CompositionError::LifecycleProxyTargetBootstrapFailed { .. }
+            | CompositionError::LifecycleTransitionUnownedAtStage { .. } => {
+                lifecycle::status_block(self)
+            }
 
             // Schema / frontmatter validation family.
             CompositionError::SchemaLoad { .. }

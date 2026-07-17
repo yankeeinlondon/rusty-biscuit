@@ -8,6 +8,32 @@ use indexmap::IndexMap;
 
 use crate::composition::lifecycle::LifecycleSignal;
 
+/// Render an overlay as its property names against a redaction placeholder.
+///
+/// An overlay is evaluated from the source document's live state, so a value
+/// can be a token, a key, or anything else `{{ ... }}` reached. Status may say
+/// a handoff carries an overlay and tracing may record which properties it
+/// names; neither may print what is in it. A derived `Debug` would print every
+/// value verbatim, and `Debug` is one `tracing::debug!(?handoff)` away from
+/// being live — so the overlay-carrying types implement it by hand through
+/// this helper rather than leaving the leak one keystroke away.
+fn redacted_overlay(overlay: &IndexMap<String, serde_json::Value>) -> impl fmt::Debug + '_ {
+    struct Redacted<'a>(&'a IndexMap<String, serde_json::Value>);
+
+    impl fmt::Debug for Redacted<'_> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_map()
+                .entries(self.0.keys().map(|key| (key, REDACTED_VALUE)))
+                .finish()
+        }
+    }
+
+    Redacted(overlay)
+}
+
+/// What an overlay value renders as anywhere it would otherwise be printed.
+pub(crate) const REDACTED_VALUE: &str = "<redacted>";
+
 /// Where in a document's lifecycle frontmatter an action was authored.
 ///
 /// Renders as the dotted `"{event}.stack[{i}].action[{j}]"` form that the
@@ -111,11 +137,21 @@ impl ProxyProvenance {
 /// [`ProxyHandoff`] requires a [`ResolvedProxyTarget`] from the shared
 /// file-resolution authority plus a hop/cycle approval from the coordinator's
 /// run ledger.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct EvaluatedProxyRequest {
     target: String,
     overlay: IndexMap<String, serde_json::Value>,
     provenance: ProxyProvenance,
+}
+
+impl fmt::Debug for EvaluatedProxyRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EvaluatedProxyRequest")
+            .field("target", &self.target)
+            .field("overlay", &redacted_overlay(&self.overlay))
+            .field("provenance", &self.provenance)
+            .finish()
+    }
 }
 
 impl EvaluatedProxyRequest {
@@ -215,12 +251,23 @@ impl HopApproval {
 /// // No such constructor exists: a handoff needs a resolved, approved target.
 /// let _ = ProxyHandoff::new("@prompts/foo.md");
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct ProxyHandoff {
     authored_target: String,
     resolved_target: PathBuf,
     overlay: IndexMap<String, serde_json::Value>,
     provenance: ProxyProvenance,
+}
+
+impl fmt::Debug for ProxyHandoff {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ProxyHandoff")
+            .field("authored_target", &self.authored_target)
+            .field("resolved_target", &self.resolved_target)
+            .field("overlay", &redacted_overlay(&self.overlay))
+            .field("provenance", &self.provenance)
+            .finish()
+    }
 }
 
 impl ProxyHandoff {

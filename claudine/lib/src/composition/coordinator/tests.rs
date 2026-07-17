@@ -514,3 +514,120 @@ fn prepared_composition() -> crate::composition::types::PreparedComposition {
         compose_context: darkmatter::markdown::compose::ComposeContext::capture_for_content(std::path::Path::new("."), ""),
     }
 }
+
+// -- overlay redaction ------------------------------------------------------
+//
+// Phase 12 of `features/2026-07-13-proxy-with`: status may report that a
+// hand-off *includes* an overlay and tracing may record property names and
+// counts, but neither may print overlay values — an overlay is evaluated from
+// the source's live state and can carry a token, a key, or anything else
+// `{{ ... }}` reached. `Debug` is the realistic leak: it is one
+// `tracing::debug!(?handoff)` away from being live, and a derived impl prints
+// every value verbatim. These tests are what stop a future `#[derive(Debug)]`
+// from silently reopening that.
+
+/// A value distinctive enough that no incidental formatting could produce it.
+const SECRET: &str = "sk-live-51H8xQ2zZzZzZ";
+
+fn secret_overlay() -> Vec<(&'static str, serde_json::Value)> {
+    vec![
+        ("api_token", serde_json::json!(SECRET)),
+        ("nested", serde_json::json!({ "inner_key": SECRET })),
+        ("listed", serde_json::json!([SECRET])),
+    ]
+}
+
+#[test]
+fn an_evaluated_request_debug_names_properties_but_never_values() {
+    let rendered = format!("{:?}", request("target", &secret_overlay()));
+
+    assert!(
+        !rendered.contains(SECRET),
+        "`EvaluatedProxyRequest`'s Debug leaked an overlay value — including one \
+         nested inside an object or an array, which a shallow redaction would \
+         miss; got {rendered}"
+    );
+    for property in ["api_token", "nested", "listed"] {
+        assert!(
+            rendered.contains(property),
+            "the property name must survive: naming what a hand-off carries is \
+             explicitly allowed and is what makes the status useful; got {rendered}"
+        );
+    }
+    assert!(
+        rendered.contains("<redacted>"),
+        "the redaction must be visible rather than the value silently omitted, \
+         so a reader can tell the difference between an empty overlay and a \
+         withheld one; got {rendered}"
+    );
+}
+
+#[test]
+fn a_committed_handoff_debug_names_properties_but_never_values() {
+    let mut ledger = RunLedger::new(doc("router"), SharedApprovalCache::default());
+    let handoff = commit(&mut ledger, "target", &secret_overlay());
+    let rendered = format!("{handoff:?}");
+
+    assert!(
+        !rendered.contains(SECRET),
+        "`ProxyHandoff`'s Debug leaked an overlay value; got {rendered}"
+    );
+    assert!(
+        rendered.contains("api_token") && rendered.contains("<redacted>"),
+        "the handoff must still name its overlay properties; got {rendered}"
+    );
+    assert!(
+        rendered.contains("target"),
+        "the target is not a secret and must stay visible for diagnostics; \
+         got {rendered}"
+    );
+}
+
+/// `PreparedDocument` derives `Debug` and holds a `DocumentOverlay`, so the
+/// overlay's own impl is what protects it. A `{:?}` on a prepared document is
+/// the most likely accidental leak of the three: it is the type a debugging
+/// session reaches for.
+#[test]
+fn a_prepared_document_debug_never_prints_overlay_values() {
+    let mut ledger = RunLedger::new(doc("router"), SharedApprovalCache::default());
+    let handoff = commit(&mut ledger, "target", &secret_overlay());
+    let prepared = PreparedDocument::from_handoff(handoff, prepared_composition());
+
+    let rendered = format!("{prepared:?}");
+    assert!(
+        !rendered.contains(SECRET),
+        "a prepared document's Debug leaked its overlay through `DocumentOverlay`; \
+         got {rendered}"
+    );
+    assert!(
+        format!("{:?}", prepared.overlay()).contains("api_token"),
+        "the overlay still names its properties"
+    );
+}
+
+/// The values are still *reachable* — redaction is about accidental printing,
+/// not about the coordinator being unable to use the overlay it carries. A
+/// redaction that broke this would be a bug, not extra safety.
+#[test]
+fn redaction_does_not_hide_overlay_values_from_the_code_that_needs_them() {
+    let mut ledger = RunLedger::new(doc("router"), SharedApprovalCache::default());
+    let handoff = commit(&mut ledger, "target", &secret_overlay());
+
+    assert_eq!(
+        handoff.overlay().get("api_token"),
+        Some(&serde_json::json!(SECRET)),
+        "the overlay's values must remain readable by the layers that apply them"
+    );
+
+    let prepared = PreparedDocument::from_handoff(handoff, prepared_composition());
+    assert_eq!(
+        prepared.overlay().values().get("api_token"),
+        Some(&serde_json::json!(SECRET))
+    );
+    assert_eq!(
+        prepared.overlay().property_names().collect::<Vec<_>>(),
+        vec!["api_token", "nested", "listed"],
+        "`property_names` is the sanctioned status accessor and preserves \
+         authored order"
+    );
+}

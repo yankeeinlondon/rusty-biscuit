@@ -108,7 +108,8 @@ pub use resolve::{
 pub use schema::{
     InteractiveSchemaOptions, PreValidatedSchema, PropertyState, PropertyStatus,
     SchemaStatusReport, build_schema_status_report, drop_invalid_optionals,
-    pre_validate_schema, prepare_direct_with_schema, prepare_inline_with_schema,
+    pre_validate_schema, prepare_direct_with_schema, prepare_direct_with_schema_and_prompt,
+    prepare_inline_with_schema,
 };
 pub use select::{
     build_candidate_set, build_installed_snapshot, build_picker_plan, build_picker_plan_with_hints,

@@ -19,9 +19,25 @@ use super::handoff::{ProxyHandoff, ProxyProvenance};
 /// invalid-optional drops shape the prepared *effective* frontmatter; if they
 /// could also rewrite this, a later refresh would reapply a different overlay
 /// than the one the source authored, and repeated refreshes would drift.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 pub struct DocumentOverlay {
     values: IndexMap<String, serde_json::Value>,
+}
+
+impl std::fmt::Debug for DocumentOverlay {
+    /// Names the properties, never the values — see
+    /// [`property_names`](Self::property_names). `PreparedDocument` derives
+    /// `Debug` and holds one of these, so this impl is what keeps a
+    /// `{:?}`-printed prepared document from spilling the overlay.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_map()
+            .entries(
+                self.values
+                    .keys()
+                    .map(|key| (key, super::handoff::REDACTED_VALUE)),
+            )
+            .finish()
+    }
 }
 
 impl DocumentOverlay {

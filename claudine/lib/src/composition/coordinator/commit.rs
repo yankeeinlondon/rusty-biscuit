@@ -53,7 +53,22 @@ impl std::fmt::Display for ProxyCommitError {
     }
 }
 
-impl std::error::Error for ProxyCommitError {}
+impl std::error::Error for ProxyCommitError {
+    /// Expose the concrete cause to the renderer.
+    ///
+    /// Every consumer selects its styled block by walking `source()` and
+    /// downcasting (`crate::output::error_walker` in `claudine-cli`), so the
+    /// default `None` would render a proxy cycle — which carries a perfectly
+    /// good [`CompositionError::LifecycleProxyCycle`] — as a bare `Display`
+    /// string. Keeping the concrete error reachable is what makes the same
+    /// failure render identically whichever route produced it.
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Resolution { error, .. } => Some(error),
+            Self::Rejected(error) => Some(error),
+        }
+    }
+}
 
 /// Resolve, approve, and commit `request` against `ledger`.
 ///

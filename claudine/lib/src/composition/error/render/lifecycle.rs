@@ -452,6 +452,86 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                     "Remove the parameter, or use `{ action: proxy, target: ..., with: { ... } }`.",
                 )
         }
+        CompositionError::LifecycleTransitionUnownedAtStage {
+            source_path,
+            property,
+            verb,
+            stage,
+            reason,
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = format!(
+                "Lifecycle action <cyan>`{verb}`</cyan> in <cyan>`{property}`</cyan> in \
+                 {file_link} ran at <cyan>`{stage}`</cyan>, which cannot act on \
+                 it.\n\n{reason}"
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "transition has no owner at this stage",
+                ))
+                .body(body)
+                .hint(
+                    "`retry`, `resume`, and `defer` act on a provider attempt, so they \
+                     need one to have run. Use `proxy`, `skip`, or `error` for a \
+                     decision made before the provider launches.",
+                )
+        }
+        CompositionError::LifecycleProxyCycle {
+            source_path,
+            target,
+            chain,
+            limit,
+        } => {
+            let file_link = render_file_link(source_path);
+            let rendered_chain = chain
+                .iter()
+                .map(|hop| format!("<cyan>`{}`</cyan>", escape_prose_path(hop)))
+                .collect::<Vec<_>>()
+                .join(" → ");
+            let body = format!(
+                "A lifecycle <cyan>`proxy`</cyan> in {file_link} hands off to \
+                 <cyan>`{}`</cyan>, which would re-enter a document already on the \
+                 active chain or exceed the hop limit of {limit}.\n\nActive chain: \
+                 {rendered_chain}",
+                escape_prose_path(target)
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "proxy chain forms a cycle",
+                ))
+                .body(body)
+                .hint(
+                    "A document already on the chain cannot be handed off to again — an \
+                     overlay does not make it a distinct target. Give the chain a terminal \
+                     document, or guard the `proxy` with a `when:` condition that stops it.",
+                )
+        }
+        CompositionError::LifecycleProxyTargetBootstrapFailed {
+            target_path,
+            source_path,
+            property,
+            reason,
+        } => {
+            let source_link = render_file_link(source_path);
+            let target_link = render_file_link(target_path);
+            let body = format!(
+                "The lifecycle <cyan>`proxy`</cyan> at <cyan>`{property}`</cyan> in \
+                 {source_link} handed off to {target_link}, which could not be \
+                 prepared.\n\n{reason}"
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "proxy target could not be prepared",
+                ))
+                .body(body)
+                .hint(
+                    "The hand-off was committed but the target never started — no part of \
+                     it ran. Check that the target composes on its own before proxying to it.",
+                )
+        }
         CompositionError::LifecycleWrongArity {
             source_path,
             property,

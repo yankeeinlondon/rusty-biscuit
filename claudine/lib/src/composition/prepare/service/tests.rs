@@ -370,3 +370,188 @@ fn a_different_launch_anchor_derives_a_different_context() {
          snapshot was captured ambiently"
     );
 }
+
+// -- cross-route typed identity ---------------------------------------------
+//
+// Phase 12 of `features/2026-07-13-proxy-with`. These lock the claim the
+// service's docs make: preparation runs through the schema layer, so a
+// `$schema`-declaring document reaches the same typed error whichever route
+// reached it. Before this, `prepare_document` called `prepare_direct_with_prompt`
+// directly while `compose` and `sequence` called `prepare_direct_with_schema` —
+// so the *harness* route (every proxied, retried, resumed, and loop-refreshed
+// document) surfaced an uncategorized `ComposeFailed(SchemaValidationFailed)`
+// where the identical document invoked directly surfaced the typed variant.
+
+/// A document whose schema requires a property the frontmatter supplies with
+/// the wrong type.
+///
+/// Uses the inline `$schema` map rather than a sidecar reference: the subject
+/// here is which *typed error* each route surfaces, and an inline schema keeps
+/// that independent of file resolution.
+fn invalid_required_source(dir: &Path) -> ResolvedCompositionSource {
+    source_at(
+        dir,
+        "doc.md",
+        "---\n$schema:\n  count: 'number(required)'\ncount: not-a-number\n---\nbody\n",
+    )
+}
+
+fn options_in(dir: &Path) -> PrepareOptions {
+    PrepareOptions {
+        file_ref_fallback_dir: Some(dir.to_path_buf()),
+        ..PrepareOptions::default()
+    }
+}
+
+/// The checkpoint's headline gate, at the layer that decides it.
+///
+/// The same document failing the same way must produce the same typed variant
+/// whether it was named directly or reached by a transition. Both proxy entries
+/// are covered because they are the two proxy routes the plan names: a proxy
+/// from `initialize` and a proxy from terminal recovery both adopt their target
+/// as `ProxyTarget`, and retry/resume re-prepare the active document.
+#[test]
+fn a_schema_failure_has_one_typed_identity_across_every_entry() {
+    let dir = TempDir::new().unwrap();
+    let source = invalid_required_source(dir.path());
+
+    let direct = crate::composition::prepare_direct_with_schema(&source, options_in(dir.path()))
+        .expect_err("an invalid required value fails");
+
+    for entry in [
+        DocumentEntryReason::Direct,
+        DocumentEntryReason::ProxyTarget,
+        DocumentEntryReason::Retry,
+        DocumentEntryReason::Resume,
+        DocumentEntryReason::LoopIteration,
+    ] {
+        let err = prepare_document(DocumentPreparation {
+            entry,
+            mode: CompositionMode::ChainedDocument,
+            source: &source,
+            prompt_source: PromptSource::ComposedBody,
+            options: options_in(dir.path()),
+        })
+        .expect_err("an invalid required value fails on every entry");
+
+        assert!(
+            matches!(err, CompositionError::SchemaValidation { .. }),
+            "entry {entry:?} must surface the typed `SchemaValidation`, not an \
+             uncategorized compose failure; got {err:?}"
+        );
+        assert_eq!(
+            err.to_string(),
+            direct.to_string(),
+            "entry {entry:?} must render identically to the direct route"
+        );
+    }
+}
+
+/// The missing-required case is a *different* typed variant, and the harness
+/// route must reach that one too — categorization, not just "some typed error".
+#[test]
+fn a_missing_required_property_is_typed_on_the_harness_route() {
+    let dir = TempDir::new().unwrap();
+    let source = source_at(
+        dir.path(),
+        "doc.md",
+        "---\n$schema:\n  count: 'number(required)'\n---\nbody\n",
+    );
+
+    let err = prepare_document(DocumentPreparation {
+        entry: DocumentEntryReason::ProxyTarget,
+        mode: CompositionMode::ChainedDocument,
+        source: &source,
+        prompt_source: PromptSource::ComposedBody,
+        options: options_in(dir.path()),
+    })
+    .expect_err("a missing required value fails");
+
+    assert!(
+        matches!(&err, CompositionError::MissingProperties { missing, .. } if
+            missing.iter().any(|property| property.name == "count")),
+        "the proxy route must reach `MissingProperties` and name the property, \
+         which is what drives the interactive collection prompt; got {err:?}"
+    );
+}
+
+/// Invalid-**optional** drop-and-retry is the other half of what the schema
+/// layer adds, and it is a behavior change on the harness route rather than
+/// only a typing change: preparation now *succeeds*, dropping the bad value,
+/// where it previously failed outright.
+#[test]
+fn an_invalid_optional_is_dropped_and_recorded_on_the_harness_route() {
+    let dir = TempDir::new().unwrap();
+    let source = source_at(
+        dir.path(),
+        "doc.md",
+        "---\n$schema:\n  note: 'string(required)'\n  count: 'number'\n\
+         note: hello\ncount: not-a-number\n---\nbody\n",
+    );
+
+    let prepared = prepare_document(DocumentPreparation {
+        entry: DocumentEntryReason::ProxyTarget,
+        mode: CompositionMode::ChainedDocument,
+        source: &source,
+        prompt_source: PromptSource::ComposedBody,
+        options: options_in(dir.path()),
+    })
+    .expect("an invalid optional is dropped rather than fatal");
+
+    assert!(
+        prepared
+            .dropped_optionals
+            .iter()
+            .any(|dropped| dropped.property == "count"),
+        "the drop must be recorded so the CLI can warn about it — off the schema \
+         path this vector was always empty, so a proxied target could not warn \
+         about a silently dropped value even in principle; got {:?}",
+        prepared.dropped_optionals
+    );
+    assert!(
+        prepared.effective_frontmatter.get("count").is_none(),
+        "the dropped property must not survive into the effective frontmatter"
+    );
+}
+
+/// `PromptSource::Supplied` must survive the schema layer.
+///
+/// This is the one thing that made the unification non-mechanical: the schema
+/// path hardcoded `ComposedBody`, but the passthrough case composes the
+/// document only for its frontmatter and must skip the body-emptiness check.
+/// Threading it through is what lets the harness route use the schema layer at
+/// all, so a regression here would silently push that route back off it.
+#[test]
+fn a_supplied_prompt_survives_the_schema_layer_with_an_empty_body() {
+    // Empty body: fatal for `ComposedBody`, expected for `Supplied`.
+    let dir = TempDir::new().unwrap();
+    let source = source_at(
+        dir.path(),
+        "doc.md",
+        "---\n$schema:\n  note: 'string(required)'\nnote: hi\n---\n",
+    );
+
+    let prepared = prepare_document(DocumentPreparation {
+        entry: DocumentEntryReason::Direct,
+        mode: CompositionMode::ChainedDocument,
+        source: &source,
+        prompt_source: PromptSource::Supplied("the caller's prompt".to_string()),
+        options: options_in(dir.path()),
+    })
+    .expect("a supplied prompt does not require a composed body");
+
+    assert_eq!(prepared.prompt, "the caller's prompt");
+
+    let composed = prepare_document(DocumentPreparation {
+        entry: DocumentEntryReason::Direct,
+        mode: CompositionMode::ChainedDocument,
+        source: &source,
+        prompt_source: PromptSource::ComposedBody,
+        options: options_in(dir.path()),
+    });
+    assert!(
+        composed.is_err(),
+        "the same document with a composed-body prompt must still fail the \
+         emptiness check — threading `PromptSource` must not disable it"
+    );
+}

@@ -880,6 +880,58 @@ pub enum CompositionError {
         limit: usize,
     },
 
+    /// A lifecycle stack returned a transition that is real and well-formed,
+    /// but that no coordinator at this point in the run can consume.
+    ///
+    /// `retry`, `resume`, and `defer` all need a provider attempt to act on —
+    /// there is nothing to retry before one has run. Reaching this means the
+    /// authored control is valid everywhere (`is_valid_for` makes every control
+    /// except `skip` universally placeable) but meaningless *here*, so the
+    /// diagnostic names the stage rather than claiming the action is invalid.
+    #[error(
+        "lifecycle `{verb}` cannot be honored at `{stage}`: {reason} ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleTransitionUnownedAtStage {
+        /// The document whose stack returned the transition.
+        source_path: PathBuf,
+        /// The dotted `"{event}.stack[{i}].action[{j}]"` location.
+        property: String,
+        /// The control verb, as authored (`retry`, `resume`, `defer`).
+        verb: &'static str,
+        /// The run stage that has no coordinator for it.
+        stage: &'static str,
+        /// Why this stage cannot own it.
+        reason: String,
+    },
+
+    /// A proxy target could not be brought up far enough to run: the
+    /// coordinator committed the hand-off, but the target's staged boot could
+    /// not produce the surface the next stage requires.
+    ///
+    /// Carries the source and the action location so a bootstrap failure is
+    /// attributable to the `proxy` that requested it — the target itself is
+    /// often blameless, and without provenance the user sees a document they
+    /// never named failing for a reason they cannot trace. This is the typed
+    /// replacement for what was a bare `eyre!` string on the adoption path.
+    #[error(
+        "proxy target `{target_path}` could not be prepared: {reason} \
+         (requested by {property} in {source_path})",
+        target_path = target_path.display(),
+        source_path = source_path.display()
+    )]
+    LifecycleProxyTargetBootstrapFailed {
+        /// The resolved target that failed to bootstrap.
+        target_path: PathBuf,
+        /// The document whose lifecycle requested the hand-off.
+        source_path: PathBuf,
+        /// The dotted `"{event}.stack[{i}].action[{j}]"` location of the
+        /// `proxy` action.
+        property: String,
+        /// What the staged boot could not produce.
+        reason: String,
+    },
+
     /// A lifecycle `initialize` stack raised an explicit `error(...)` (or an
     /// unintentional action error routed to `failure`), so the run aborts
     /// before any iteration runs.
@@ -1802,7 +1854,11 @@ impl CompositionError {
             | CompositionError::LifecycleActionOrder { property, .. }
             | CompositionError::LifecycleInvalidArgs { property, .. }
             | CompositionError::LifecycleErrNotAvailable { property, .. }
-            | CompositionError::LifecycleProxyOnlyParameter { property, .. } => {
+            | CompositionError::LifecycleProxyOnlyParameter { property, .. }
+            // The target failed, but the `proxy` that named it is the line the
+            // user can act on — and the only one in a document they authored.
+            | CompositionError::LifecycleProxyTargetBootstrapFailed { property, .. }
+            | CompositionError::LifecycleTransitionUnownedAtStage { property, .. } => {
                 Some(FrontmatterHighlight::Property(property.clone()))
             }
             // The `with`-rooted family names the deepest representable path;
