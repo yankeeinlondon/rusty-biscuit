@@ -79,13 +79,24 @@ impl Markdown {
     /// instead hashes the document a second time under the same stored-policy
     /// identity, since neither can see the other's artifact.
     ///
+    /// Crate-private for the same reason as [`Self::diff_hash`]: see that
+    /// method's note on compatibility invariant 2 and the `internal` seam
+    /// `darkmatter-cli` reaches it through.
+    ///
     /// ## Errors
     ///
     /// Propagates [`MarkdownError::MalformedStoredHash`] from
     /// [`Self::compare_hash`] when a stored flat value is malformed.
     ///
     /// [`MarkdownError::MalformedStoredHash`]: crate::markdown::MarkdownError::MalformedStoredHash
-    pub fn plan_hash_save_explained(
+    // Its only non-test caller is the `internal` seam, which the CLI turns on and
+    // a default-feature build compiles away — leaving this genuinely unused in
+    // exactly that configuration, which `-D dead-code` would otherwise fail on.
+    #[cfg_attr(
+        not(feature = "internal-hash-orchestration"),
+        allow(dead_code, reason = "used by the `internal` seam and by tests")
+    )]
+    pub(crate) fn plan_hash_save_explained(
         &self,
         stored: Option<&StoredHash>,
         options: &MdHashOptions,

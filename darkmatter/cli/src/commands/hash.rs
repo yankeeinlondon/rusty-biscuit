@@ -148,7 +148,7 @@ fn run_hash_diff(
         std::process::exit(2);
     };
 
-    let (comparison, explanation) = md.diff_hash(stored, options)?;
+    let (comparison, explanation) = darkmatter::internal::diff_hash(md, stored, options)?;
     println!("{}", explanation.render());
 
     if comparison.frontmatter_changed || comparison.body_changed {
@@ -170,7 +170,8 @@ fn run_hash_save(
         .filter(|p| p.to_str() != Some("-"))
         .ok_or_else(|| eyre!("--save requires an input file path (stdin is not supported)"))?;
 
-    let (decision, explanation) = md.plan_hash_save_explained(stored, options)?;
+    let (decision, explanation) =
+        darkmatter::internal::plan_hash_save_explained(md, stored, options)?;
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
     if let Some(written) = md.apply_hash_save(&decision, options, &today) {

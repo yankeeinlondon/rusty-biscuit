@@ -463,28 +463,12 @@ impl Markdown {
     /// the document twice. This computes it once and returns both products,
     /// which are identical to those of the two-call path.
     ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use darkmatter::markdown::Markdown;
-    /// use darkmatter::markdown::hash::{MdHashKind, MdHashOptions, StoredHash};
-    ///
-    /// let original: Markdown = "---\ntitle: T\n---\n# H\n\nBody.".into();
-    /// let opts = MdHashOptions::default();
-    /// let stored = StoredHash {
-    ///     kind: MdHashKind::Simple,
-    ///     value: original.compute_hash(MdHashKind::Simple, &opts).to_stored_value(),
-    ///     ignored: Vec::new(),
-    /// };
-    ///
-    /// let edited: Markdown = "---\ntitle: T\n---\n# H\n\nNew body.".into();
-    /// let (comparison, explanation) = edited.diff_hash(&stored, &opts).unwrap();
-    /// assert!(comparison.body_changed);
-    /// assert_eq!(
-    ///     explanation.render(),
-    ///     "Frontmatter remains unchanged, but body has changed",
-    /// );
-    /// ```
+    /// Crate-private: compatibility invariant 2 of the 2026-07-15 performance
+    /// follow-up bars this feature from adding public API shape, and `md hash`
+    /// is the only consumer that needs both products. `darkmatter-cli` reaches
+    /// it through the `internal` module, which is `#[doc(hidden)]` and gated
+    /// behind the non-default `internal-hash-orchestration` feature, so the
+    /// crate's default public surface is unchanged.
     ///
     /// ## Errors
     ///
@@ -492,7 +476,7 @@ impl Markdown {
     /// [`Self::compare_hash`] when a stored value is malformed for its kind.
     ///
     /// [`MarkdownError::MalformedStoredHash`]: crate::markdown::MarkdownError::MalformedStoredHash
-    pub fn diff_hash(
+    pub(crate) fn diff_hash(
         &self,
         stored: &StoredHash,
         options: &MdHashOptions,
@@ -1322,5 +1306,118 @@ mod finding_35_5_diff {
             err,
             crate::markdown::MarkdownError::MalformedStoredHash { .. }
         ));
+    }
+}
+
+/// Finding 35.5's retained measurement harness.
+///
+/// This lived in `benches/phase11_evidence.rs` while [`Markdown::diff_hash`] was
+/// public. Review-3 found that public method violated the follow-up's
+/// compatibility invariant 2; demoting it to `pub(crate)` put it out of reach of
+/// a `benches/*` target, which is a separate compilation unit. That is exactly
+/// the case `perf_harness` exists for, so the checkpoint moved in-crate rather
+/// than the API staying wide to keep a benchmark compiling.
+///
+/// Both arms are the real code:
+///
+/// - baseline  — `compare_hash` + `explain_hash_diff`, verbatim the two-call
+///   path `run_hash_diff` used before commit `b8ecb88cb`, computing the
+///   like-for-like artifact twice;
+/// - candidate — `diff_hash`, computing it once and returning both products.
+#[cfg(test)]
+mod finding_35_5_perf {
+    use super::super::compute::probe;
+    use super::*;
+    use crate::perf_harness::{Harness, fixture_text};
+    use std::hint::black_box;
+
+    /// Builds a stored hash of `kind` from `source`, then edits the body so the
+    /// diff has real work to explain (an unchanged document short-circuits parts
+    /// of the detailed alignment and would flatter both arms equally).
+    fn stored_and_edited(source: &str, kind: MdHashKind) -> (Markdown, StoredHash) {
+        let options = MdHashOptions::default();
+        let original: Markdown = Markdown::from(source);
+        let stored = StoredHash {
+            kind,
+            value: original.compute_hash(kind, &options).to_stored_value(),
+            ignored: Vec::new(),
+        };
+        let edited: Markdown =
+            Markdown::from(format!("{source}\n\nAppended paragraph.\n").as_str());
+        (edited, stored)
+    }
+
+    #[test]
+    #[ignore = "measurement harness; run explicitly with DM_PERF_RAW_DIR set"]
+    fn f35_5_diff_hash_raw_samples() {
+        let Some(harness) = Harness::from_env(100, 1) else {
+            return;
+        };
+        let options = MdHashOptions::default();
+        let large = fixture_text("toc_large");
+        let small = fixture_text("hash_basic");
+
+        for (fixture_name, source) in [("toc_large", &large), ("hash_basic", &small)] {
+            for kind in [MdHashKind::Simple, MdHashKind::Structured, MdHashKind::Detailed] {
+                let (edited, stored) = stored_and_edited(source, kind);
+
+                // Equivalence gate: refuse to report a ratio between two paths
+                // that do not agree. The candidate must return exactly the
+                // comparison and the explanation the two-call baseline produces.
+                let baseline_comparison = edited
+                    .compare_hash(&stored, &options)
+                    .expect("baseline comparison");
+                let baseline_explanation = edited
+                    .explain_hash_diff(&stored, &options)
+                    .expect("baseline explanation");
+                let (candidate_comparison, candidate_explanation) =
+                    edited.diff_hash(&stored, &options).expect("candidate diff");
+                assert_eq!(
+                    baseline_comparison, candidate_comparison,
+                    "35.5 baseline/candidate must agree on the comparison ({fixture_name}/{kind:?})"
+                );
+                assert_eq!(
+                    baseline_explanation.render(),
+                    candidate_explanation.render(),
+                    "35.5 baseline/candidate must render an identical explanation ({fixture_name}/{kind:?})"
+                );
+
+                // The mechanism, asserted structurally rather than inferred from
+                // the timing below: two artifacts against one.
+                let (_, baseline_calls) = probe::count_calls(|| {
+                    let comparison = edited.compare_hash(&stored, &options).expect("comparison");
+                    let explanation = edited
+                        .explain_hash_diff(&stored, &options)
+                        .expect("explanation");
+                    (comparison, explanation)
+                });
+                let (_, candidate_calls) =
+                    probe::count_calls(|| edited.diff_hash(&stored, &options).expect("diff"));
+                assert_eq!(baseline_calls, 2, "baseline computes the artifact twice");
+                assert_eq!(candidate_calls, 1, "candidate computes it once");
+
+                let kind_name = format!("{kind:?}").to_lowercase();
+                harness.interleaved_pair(
+                    &format!("f35_5_diff_hash_{fixture_name}_{kind_name}_baseline"),
+                    || {
+                        let comparison = black_box(&edited)
+                            .compare_hash(black_box(&stored), black_box(&options))
+                            .expect("comparison");
+                        let explanation = black_box(&edited)
+                            .explain_hash_diff(black_box(&stored), black_box(&options))
+                            .expect("explanation");
+                        black_box((comparison, explanation));
+                    },
+                    &format!("f35_5_diff_hash_{fixture_name}_{kind_name}_candidate"),
+                    || {
+                        black_box(
+                            black_box(&edited)
+                                .diff_hash(black_box(&stored), black_box(&options))
+                                .expect("diff"),
+                        );
+                    },
+                );
+            }
+        }
     }
 }

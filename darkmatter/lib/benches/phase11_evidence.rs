@@ -1,14 +1,17 @@
-//! Criterion benchmarks retaining raw sample vectors for the two 2026-07-15
-//! performance-followup checkpoints whose measured surface is **public API**:
-//! Finding 35.3 (`Arc<str>` fetched response bodies) and Finding 35.5
-//! (`md hash --diff` / `--save` shared artifact).
+//! Criterion benchmarks retaining raw sample vectors for the 2026-07-15
+//! performance-followup checkpoint whose measured surface is **public API**:
+//! Finding 35.3 (`Arc<str>` fetched response bodies).
 //!
 //! Review-2 ("Several benchmark dispositions still lack retained raw samples")
-//! found that both were originally measured by *temporary* in-crate harnesses
-//! that were deleted after capture, leaving only derived medians and prose. This
-//! target is the retained replacement for the parts that need no crate-private
-//! access; the crate-private checkpoints (23, 25, 35.6, 35.7) are measured by
-//! the retained `#[cfg(test)]` harness in `src/perf_harness.rs` instead.
+//! found it was originally measured by a *temporary* in-crate harness that was
+//! deleted after capture, leaving only derived medians and prose. This target is
+//! the retained replacement for the parts that need no crate-private access; the
+//! crate-private checkpoints (23, 25, 35.5, 35.6, 35.7) are measured by the
+//! retained `#[cfg(test)]` harness in `src/perf_harness.rs` instead.
+//!
+//! Finding 35.5 moved here → `src/markdown/hash/explain.rs` when review-3
+//! demoted `diff_hash` to `pub(crate)` (compatibility invariant 2): a `benches/*`
+//! target cannot see it.
 //!
 //! Inputs are the committed, hashed manifest fixtures (Architecture Decision A),
 //! so the measured bytes are frozen and reproducible.
@@ -22,8 +25,6 @@
 //! every statistic quoted in a run record from those vectors.
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use darkmatter::markdown::Markdown;
-use darkmatter::markdown::hash::{MdHashKind, MdHashOptions, StoredHash};
 use std::hint::black_box;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -96,101 +97,5 @@ fn bench_f35_3_copy_model(c: &mut Criterion) {
     group.finish();
 }
 
-// ---------------------------------------------------------------------------
-// Finding 35.5 — `md hash --diff` shared artifact.
-//
-// Baseline and candidate are BOTH current public API, so this needs no pinned
-// copy and no cross-build comparison:
-//
-// - baseline  = `compare_hash` + `explain_hash_diff` — verbatim the two-call
-//   path `run_hash_diff` used before commit `b8ecb88cb`, which computed the
-//   like-for-like artifact twice;
-// - candidate = `diff_hash` — what `run_hash_diff` calls now, computing it once
-//   and returning both products.
-//
-// This is the delta of the CURRENT implementation, which review-2 found had no
-// reproducible measurement: the retained −18.0% CLI figure measured an EARLIER
-// state (`540262812`, whose own record calls the double-compute an unfixed
-// residual), not this one.
-// ---------------------------------------------------------------------------
-
-/// Builds a stored hash of `kind` from `source`, then edits the body so the
-/// diff has real work to explain (an unchanged document short-circuits parts of
-/// the detailed alignment and would flatter both arms equally).
-fn stored_and_edited(source: &str, kind: MdHashKind) -> (Markdown, StoredHash) {
-    let options = MdHashOptions::default();
-    let original: Markdown = Markdown::from(source);
-    let stored = StoredHash {
-        kind,
-        value: original.compute_hash(kind, &options).to_stored_value(),
-        ignored: Vec::new(),
-    };
-    let edited: Markdown = Markdown::from(format!("{source}\n\nAppended paragraph.\n").as_str());
-    (edited, stored)
-}
-
-fn bench_f35_5_diff_hash(c: &mut Criterion) {
-    let options = MdHashOptions::default();
-    let large = fixture_text("toc_large");
-    let small = fixture_text("hash_basic");
-
-    for (fixture_name, source) in [("toc_large", &large), ("hash_basic", &small)] {
-        for kind in [MdHashKind::Simple, MdHashKind::Structured, MdHashKind::Detailed] {
-            let (edited, stored) = stored_and_edited(source, kind);
-
-            // Equivalence gate: refuse to report a ratio between two paths that
-            // do not agree. The candidate must return exactly the comparison and
-            // the explanation the two-call baseline produces.
-            let baseline_comparison = edited
-                .compare_hash(&stored, &options)
-                .expect("baseline comparison");
-            let baseline_explanation = edited
-                .explain_hash_diff(&stored, &options)
-                .expect("baseline explanation");
-            let (candidate_comparison, candidate_explanation) =
-                edited.diff_hash(&stored, &options).expect("candidate diff");
-            assert_eq!(
-                baseline_comparison.frontmatter_changed, candidate_comparison.frontmatter_changed,
-                "35.5 baseline/candidate must agree on frontmatter_changed ({fixture_name}/{kind:?})"
-            );
-            assert_eq!(
-                baseline_comparison.body_changed, candidate_comparison.body_changed,
-                "35.5 baseline/candidate must agree on body_changed ({fixture_name}/{kind:?})"
-            );
-            assert_eq!(
-                baseline_explanation.render(),
-                candidate_explanation.render(),
-                "35.5 baseline/candidate must render an identical explanation ({fixture_name}/{kind:?})"
-            );
-
-            let kind_name = format!("{kind:?}").to_lowercase();
-            let mut group =
-                c.benchmark_group(format!("f35_5_diff_hash_{fixture_name}_{kind_name}"));
-            group.sample_size(100);
-            group.bench_function("baseline", |b| {
-                b.iter(|| {
-                    let comparison = black_box(&edited)
-                        .compare_hash(black_box(&stored), black_box(&options))
-                        .expect("comparison");
-                    let explanation = black_box(&edited)
-                        .explain_hash_diff(black_box(&stored), black_box(&options))
-                        .expect("explanation");
-                    black_box((comparison, explanation))
-                });
-            });
-            group.bench_function("candidate", |b| {
-                b.iter(|| {
-                    black_box(
-                        black_box(&edited)
-                            .diff_hash(black_box(&stored), black_box(&options))
-                            .expect("diff"),
-                    )
-                });
-            });
-            group.finish();
-        }
-    }
-}
-
-criterion_group!(benches, bench_f35_3_copy_model, bench_f35_5_diff_hash);
+criterion_group!(benches, bench_f35_3_copy_model);
 criterion_main!(benches);
