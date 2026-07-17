@@ -174,16 +174,18 @@ pub(super) fn dispatch_terminal_control(
             )
         }
         LifecycleTransitionDecision::ProxyHandoff { target } => {
-            let resolve_ctx = claudine::harness::HarnessResolutionContext {
-                source_path: &prompt_state.source_path,
+            // Every proxy route funnels through `resolve_proxy_target` (D5/D6):
+            // the shared existence-checking resolver anchored on the current
+            // source document. This route previously called
+            // `resolve_harness_path` directly and swapped `source_path` to a
+            // path it never probed, so a `failure`-stack proxy to a missing
+            // file only failed later in pre-flight.
+            let resolved = match claudine::composition::resolve_proxy_target(
+                &target,
+                &prompt_state.source_path,
                 repo_root,
-            };
-            let resolved = match claudine::harness::resolve_harness_path(&target, &resolve_ctx) {
+            ) {
                 Ok(path) => path,
-                // D-2: this route resolves without probing existence, so a
-                // missing target still fails later in pre-flight — converging
-                // the two routes is a routing change and out of scope here.
-                // Typing *this* failure is not.
                 Err(e) => {
                     return TerminalControlAction::Abort(
                         CompositionError::InvalidFileReference {
