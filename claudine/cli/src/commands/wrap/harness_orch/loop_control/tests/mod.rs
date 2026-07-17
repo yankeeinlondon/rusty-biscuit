@@ -243,6 +243,7 @@ fn dispatch_guard<'a>(
 
 mod coordinator_adoption;
 mod lifecycle_ordering;
+mod overlay_layering;
 mod proxy;
 mod requeue;
 mod retry_resume;

@@ -1204,6 +1204,68 @@ fn level2_lifecycle_initialize_proxy_forwards_set_params_to_target_schema() {
     );
 }
 
+/// End-to-end precedence for `proxy.with`, through the shipped binary and the
+/// normal `claudine compose` invocation path: target-authored frontmatter <
+/// `with:` < the caller's `key=value`.
+///
+/// Both rungs are exercised in one run. `phase` is contested by all three
+/// layers and the caller must win; `note` is contested by the target and the
+/// router only and the router must win. Asserting them together is what makes
+/// this a precedence test rather than two separate "a layer applies" tests —
+/// an implementation that simply took the last writer would fail one of them.
+///
+/// The overlay is read through the *target's* own lifecycle stack, so this also
+/// proves the values reach the document's late-bound event surface and not only
+/// its body.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_proxy_with_overlay_loses_to_a_caller_set_and_beats_the_target() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let source_doc = "---\ntitle: router\ninitialize:\n  stack:\n    \
+         - action: {action: proxy, target: '@target.md', with: {phase: 2, note: from-router}}\n\
+         ---\nrouter body\n";
+    let target_doc = "---\ntitle: target\nphase: 0\nnote: from-target\nsuccess:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'phase={{ phase }} note={{ note }}']}\n\
+         finalize:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'target-finalize']}\n---\ntarget body\n";
+    let staged = stage_proxy_pair(source_doc, target_doc, true);
+
+    let pane = run_proxy_in_tmux_with_set(&staged, "phase=9", "target-finalize");
+
+    let lines = event_lines(&staged);
+    assert!(
+        lines.iter().any(|l| l == "phase=9 note=from-router"),
+        "the caller's `phase=9` must outrank the router's `with: {{phase: 2}}`, and the \
+         router's `note` must outrank the target's authored `from-target`; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.contains("phase=2")),
+        "a router must never silently replace an explicit caller value; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.contains("note=from-target")),
+        "the overlay must reach the target's authored frontmatter; \
+         got {lines:?}; pane:\n{pane}"
+    );
+
+    // `with:` is transient: neither document is rewritten by having carried an
+    // overlay. A persisted overlay would silently edit a file the operator
+    // never touched.
+    assert_eq!(
+        fs::read_to_string(&staged.md_file).unwrap(),
+        source_doc,
+        "the router's bytes must be unchanged; pane:\n{pane}"
+    );
+    assert_eq!(
+        fs::read_to_string(staged.workspace.path().join("target.md")).unwrap(),
+        target_doc,
+        "the target's bytes must be unchanged; pane:\n{pane}"
+    );
+}
+
 /// An `initialize` proxy hand-off must (a) announce the redirect with an INFO
 /// line and (b) preview the *target* document's body as the agent prompt — not
 /// the proxying source's body, which never reaches the agent.
