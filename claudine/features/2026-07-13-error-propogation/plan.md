@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 2
+phase: 3
 total_phases: 8
 agent: claude/default
 yolo: "true"
@@ -30,6 +30,24 @@ docs_updated_during_phase_2:
     - claudine/features/2026-07-13-error-propogation/decisions.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+packages_during_phase_3:
+    - claudine
+source_files_during_phase_3:
+    - claudine/lib/src/diagnostics/snapshot.rs
+    - claudine/lib/src/diagnostics/snapshot/tests.rs
+    - claudine/lib/src/diagnostics/mod.rs
+    - claudine/lib/src/diagnostics/registry.rs
+    - claudine/lib/src/diagnostics/discovery.rs
+    - claudine/lib/src/diagnostics/discovery/tests.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/harness/runtime.rs
+    - claudine/lib/src/harness/mod.rs
+docs_updated_during_phase_3:
+    - claudine/features/2026-07-13-error-propogation/plan.md
+    - claudine/features/2026-07-13-error-propogation/decisions.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Execution Plan — End-to-End Typed Error Propagation
@@ -177,30 +195,30 @@ coverage for both roles; `as_diagnostic` is reachable from `claudine-cli`
 
 Parallelizable with Phase 2 after the role type lands; both are additive.
 
-- [ ] **[D9] Define `DiagnosticSnapshot`** (name may differ) with: schema
+- [x] **[D9] Define `DiagnosticSnapshot`** (name may differ) with: schema
       version; category, code, disposition, origin, severity; catalog-shaped
       structured detail; concise notification-safe message; and the one-level
       next registered cause from D4.
-- [ ] **[D9]** Facet values are **owned strings** at the snapshot boundary even
+- [x] **[D9]** Facet values are **owned strings** at the snapshot boundary even
       though the in-process API uses closed enums — a newer producer must stay
       readable to an older consumer.
-- [ ] **[D9]** Deserialization preserves **unknown additive** codes and detail
+- [x] **[D9]** Deserialization preserves **unknown additive** codes and detail
       fields rather than dropping or erroring on them.
-- [ ] **[D3] Extend `composition.invalid_file_reference`** in
+- [x] **[D3] Extend `composition.invalid_file_reference`** in
       `lib/src/diagnostics/registry.rs` **additively**. Keep `reference`, `kind`,
       `base_dir`, `suggestions`, `fallback_dir`; add `source_path`, `property`,
       `event`, `repository_root`, `candidates`, `failure`. Document `base_dir`
       and `fallback_dir` as **compatibility projections**. `failure` uses stable
       snake_case slugs (invalid syntax / missing context / no match /
       permission-I/O / unsupported remote).
-- [ ] **[D3]** Project the **full object shape always**. Fields the current
+- [x] **[D3]** Project the **full object shape always**. Fields the current
       private resolver cannot supply are `null` — **never invented, never parsed
       out of `Display`**. The downstream file-resolution feature replaces those
       nulls; this feature must not reverse-engineer them.
-- [ ] *(parallelizable)* **[L1]** Test: snapshot round-trips every facet,
+- [x] *(parallelizable)* **[L1]** Test: snapshot round-trips every facet,
       detail, message, and one-level cause; unknown additive code/detail values
       survive a read/write cycle.
-- [ ] *(parallelizable)* **[L1]** Test: `null_detail_for` and the extended
+- [x] *(parallelizable)* **[L1]** Test: `null_detail_for` and the extended
       catalog agree — every declared field is a *present* key, absent optionals
       are `null`, and no registered code returns top-level `null`.
 

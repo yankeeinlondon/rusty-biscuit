@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 2
+phase: 3
 status: ratified
 ---
 
@@ -158,3 +158,56 @@ candidate" are therefore unreachable through the public `as_diagnostic` — not
 untrue, just not constructible from shipped types. The walk takes its discovery
 function as a parameter so tests can supply a probe registry and exercise the
 rules the spec ratified. Production always passes `as_diagnostic`.
+
+---
+
+## D-5 — `failure` stays `null`; it is not back-derived from `kind`
+
+**Decision.** The new `composition.invalid_file_reference` `failure` field
+projects `null` for every error this feature can construct, even though a
+`FileRefFailure` value is sitting right there in the `FileReferenceDiagnostic`.
+
+**Authority.** [`spec.md`](./spec.md) §D3 — "fields unavailable from the current
+private resolver are `null`, not invented or parsed from `Display`".
+
+**Why it looks available but is not.** Darkmatter's `FileRefFailure::classify`
+is a three-arm match with a catch-all: `InvalidSyntax → Malformed`,
+`RemoteNotLocal → RemoteNotEnabled`, and **everything else** — filesystem I/O,
+permission denial, missing env/git/workspace context, relative-path computation
+— `→ NotFound`. Mapping `NotFound → no_match` would therefore assert
+"no candidate matched" for a permission error that never probed a candidate.
+That is exactly the invented classification D3 forbids, and it is the specific
+distinction the file-resolution feature exists to make
+(`permission_io` / `missing_context` vs `no_match`).
+
+**Consequence.** `kind` (`not_found`, `malformed`, `found_elsewhere`,
+`remote_not_enabled`) and `failure` (`invalid_syntax`, `missing_context`,
+`no_match`, `permission_io`, `unsupported_remote`) are *different vocabularies*
+and both are declared. `kind` keeps its current values unchanged, which is what
+keeps this catalog change additive.
+
+**Reversal condition.** When file-resolution lands a resolver that distinguishes
+absence from permission/I/O failure, `failure` is populated from that typed
+result — never from `kind`.
+
+---
+
+## D-6 — The snapshot's one-level cause is a distinct type
+
+**Decision.** `DiagnosticSnapshot::cause` is `Option<DiagnosticCause>`, where
+`DiagnosticCause` carries no `cause` field of its own — rather than
+`Option<Box<DiagnosticSnapshot>>` with a convention that the nested value's
+cause is always `None`.
+
+**Authority.** [`spec.md`](./spec.md) §D4 — "It is a one-level projection in v1;
+`err.cause.cause` is not exposed."
+
+**Rationale.** A self-referential type would make the v1 boundary a rule
+reviewers must remember and tests must police. A separate type makes
+`err.cause.cause` *unrepresentable*: the constraint is discharged by the type
+checker at every future call site, including ones this feature never sees.
+Widening to recursion later is additive if it is ever ratified.
+
+**Consequence accepted.** Seven facet fields are declared twice. That is the
+price of the structural guarantee, and the two types are asserted equal
+field-for-field by the round-trip suite.
