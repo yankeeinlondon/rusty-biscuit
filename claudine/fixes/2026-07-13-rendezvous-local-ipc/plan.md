@@ -1,7 +1,7 @@
 ---
 total_phases: 8
 created: 2026-07-16
-phase: 7
+phase: 8
 agent: codex/default
 yolo: true
 packages:
@@ -132,6 +132,83 @@ packages_during_phase_7:
     - rendezvous-core
     - rendezvous-client
     - rendezvous-daemon
+source_files_during_phase_8: []
+docs_updated_during_phase_8:
+    - claudine/docs/rendezvous/design.md
+    - claudine/docs/rendezvous/current-state.md
+    - claudine/docs/rendezvous/index.md
+    - claudine/docs/dependencies.md
+    - claudine/rendezvous/README.md
+    - claudine/features/2026-07-12-rendezvous-dashboard/windows-support-followup.md
+    - claudine/fixes/2026-07-13-rendezvous-local-ipc/plan.md
+docs_created_during_phase_8:
+    - claudine/docs/rendezvous/local-ipc.md
+    - sniff/docs/dependencies.md
+skills_files_updated_during_phase_8:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/sniff/SKILL.md
+packages_during_phase_8: []
+source_code:
+    - sniff/lib/src/os/user.rs
+    - sniff/lib/src/os/mod.rs
+    - sniff/lib/src/error.rs
+    - sniff/lib/Cargo.toml
+    - claudine/rendezvous/core/src/lib.rs
+    - claudine/rendezvous/core/src/socket.rs
+    - claudine/rendezvous/core/src/local_endpoint.rs
+    - claudine/rendezvous/core/src/local_endpoint/tests.rs
+    - claudine/rendezvous/core/src/local_endpoint/test_support.rs
+    - claudine/rendezvous/core/Cargo.toml
+    - claudine/rendezvous/client/src/lib.rs
+    - claudine/rendezvous/client/src/main.rs
+    - claudine/rendezvous/client/src/connector/mod.rs
+    - claudine/rendezvous/client/src/connector/unix.rs
+    - claudine/rendezvous/client/src/connector/windows.rs
+    - claudine/rendezvous/client/src/connector/tests.rs
+    - claudine/rendezvous/client/Cargo.toml
+    - claudine/rendezvous/client/tests/local_round_trip.rs
+    - claudine/rendezvous/client/tests/session_log_round_trip.rs
+    - claudine/rendezvous/daemon/src/main.rs
+    - claudine/rendezvous/daemon/src/lib.rs
+    - claudine/rendezvous/daemon/src/server.rs
+    - claudine/rendezvous/daemon/src/server/tests.rs
+    - claudine/rendezvous/daemon/src/private_dir.rs
+    - claudine/rendezvous/daemon/src/private_dir/tests.rs
+    - claudine/rendezvous/daemon/src/local_transport/mod.rs
+    - claudine/rendezvous/daemon/src/local_transport/unix.rs
+    - claudine/rendezvous/daemon/src/local_transport/unix/tests.rs
+    - claudine/rendezvous/daemon/src/local_transport/windows.rs
+    - claudine/rendezvous/daemon/src/local_transport/windows/tests.rs
+    - claudine/rendezvous/daemon/Cargo.toml
+    - claudine/rendezvous/daemon/tests/peer_discovery.rs
+    - claudine/rendezvous/daemon/tests/pairing_and_sync.rs
+    - claudine/rendezvous/daemon/tests/phase6_integration.rs
+    - claudine/cli/Cargo.toml
+    - claudine/cli/src/commands/dashboard/mod.rs
+    - claudine/cli/src/commands/dashboard/tests.rs
+    - claudine/cli/src/commands/handle.rs
+    - claudine/cli/src/commands/wrap/session_report.rs
+    - claudine/cli/src/commands/wrap/session_report/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/requeue.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/tests/level2_lifecycle_control.rs
+    - claudine/docs/providers/dispatch-inventory.json
+    - .github/workflows/rendezvous-tests.yml
+documentation:
+    - claudine/fixes/2026-07-13-rendezvous-local-ipc/change-notes.md
+    - claudine/fixes/2026-07-13-rendezvous-local-ipc/plan.md
+    - claudine/docs/rendezvous/local-ipc.md
+    - claudine/docs/rendezvous/design.md
+    - claudine/docs/rendezvous/current-state.md
+    - claudine/docs/rendezvous/index.md
+    - claudine/docs/dependencies.md
+    - claudine/rendezvous/README.md
+    - claudine/features/2026-07-12-rendezvous-dashboard/windows-support-followup.md
+    - sniff/docs/dependencies.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/sniff/SKILL.md
 ---
 
 # Cross-Platform, Per-User Rendezvous Local IPC — Execution Plan
@@ -656,51 +733,151 @@ dependence on the legacy socket vocabulary.
 **Goal:** Make the implemented contract authoritative everywhere and finish
 with package-area and graph-based regression checks.
 
-- [ ] Add `claudine/docs/rendezvous/local-ipc.md` as the authoritative document
+- [x] Add `claudine/docs/rendezvous/local-ipc.md` as the authoritative document
   for transport selection, stable-user ownership, endpoint/data overrides,
   Unix permissions and cleanup, Windows DACL/accept behavior, WSL separation,
   errors/retry, manual legacy-data migration, and the threat boundary.
-- [ ] Update `claudine/docs/rendezvous/design.md` to summarize and link to the
+- [x] Update `claudine/docs/rendezvous/design.md` to summarize and link to the
   authoritative IPC document, and correct spelling/terminology drift touched by
   that section without rewriting unrelated design content.
-- [ ] Update `claudine/docs/rendezvous/current-state.md` so implementation
+- [x] Update `claudine/docs/rendezvous/current-state.md` so implementation
   status, endpoint names, flags/environment variables, diagrams, and platform
   claims match the shipped server.
-- [ ] Reduce
+- [x] Reduce
   `claudine/features/2026-07-12-rendezvous-dashboard/windows-support-followup.md`
   to a superseded pointer to this fix and the new IPC document; preserve it as
   historical evidence rather than rewriting its findings.
-- [ ] Update `claudine/rendezvous/README.md` diagrams and status to show the
+    - Superseded banner + pointers at the top, naming the two recommendations the
+      fix deliberately did *not* follow (mirror `spawn_uds_server`; re-gate the
+      CLI tests per-OS). The 2026-07-13 note is retained verbatim below it under
+      "Historical record" rather than rewritten.
+- [x] Update `claudine/rendezvous/README.md` diagrams and status to show the
   platform-native local plane separately from authenticated remote QUIC.
-- [ ] Update `claudine/docs/dependencies.md` and the repository dependency
+    - New "Two Planes" table (local control vs remote mesh: transport, reach,
+      what authorizes it) and a new local-interaction diagram showing
+      `connect` → the two transports → one transport-neutral `prepare_daemon`.
+      Also added the doc to `claudine/docs/rendezvous/index.md`'s Further
+      Reading, which was an empty heading.
+- [x] Update `claudine/docs/dependencies.md` and the repository dependency
   record for the new `rendezvous-core -> sniff`, data-directory, and precise
   Windows API feature edges; add a Sniff area dependency note if no existing
   area document can record the expanded Windows features.
-- [ ] Update `.claude/skills/claudine/{SKILL.md,architecture.md}` with the typed
+    - `claudine/docs/dependencies.md` gains a "Rendezvous Local IPC" section
+      (the acyclic `rendezvous-core -> sniff` edge, `dirs` for the data root,
+      and each of the daemon's four Windows features with the call it carries);
+      the Lifecycle Requeue section's per-target `cfg` prose was corrected to
+      the portable `connect` it now uses.
+    - No Sniff area dependency document existed, so `sniff/docs/dependencies.md`
+      is new — the per-area convention CLAUDE.md's drift rules already assume.
+      It records the three identity Windows features against the three preexisting
+      ones, and states the boundary: Sniff discovers the principal, Rendezvous
+      builds the descriptor.
+- [x] Update `.claude/skills/claudine/{SKILL.md,architecture.md}` with the typed
   endpoint, portable daemon entry point, platform transports, data root, test
   commands, and crate responsibilities.
-- [ ] Update the Sniff skill's public API/architecture references with
+    - `architecture.md`'s crate table corrected (it described a "UDS transport"
+      and a testing-only client), plus a new "Local IPC — the typed endpoint"
+      subsection carrying the seven rules a future editor can silently violate.
+      The Phase 7 open defect (transport failure leaks prepared workers) is
+      recorded there so it is not rediscovered from scratch.
+- [x] Update the Sniff skill's public API/architecture references with
   `StableUserId` and its on-demand privacy boundary, without presenting it as
   default host inventory.
-- [ ] **Parallelizable:** Documentation, dependency records, and the two skill
+    - Added under Tier 3 (module-level composition), which is where it belongs —
+      it is a Tier-3 detector and appears in no Tier 1/2 surface. The Key Types
+      row states the exclusion inline so a reader skimming that table cannot
+      conclude it is part of `SniffResult`.
+- [x] **Parallelizable:** Documentation, dependency records, and the two skill
   updates can proceed together after Phase 7 behavior is stable, followed by
   one terminology/link consistency review.
+    - Consistency review done: zero `RENDEZVOUS_SOCKET` / `--socket` /
+      `default_socket_path` / `socket_path()` / `connect_uds` /
+      `connect_named_pipe` matches remain in `claudine/docs/rendezvous/` or the
+      Rendezvous README except where the text explicitly labels them as removed
+      legacy. Both skill `hash:` values regenerated with `md hash`.
 
 **Final validation checkpoint**
 
-- [ ] Run `cd sniff && just test && just test-l2 && just lint`.
-- [ ] Run `cd claudine/rendezvous && just check && just build && just test &&
+- [x] Run `cd sniff && just test && just test-l2 && just lint`.
+    - `just lint` clean; `just test-l2` 2/2 passed. `just test`: 1345/1346
+      passed, **1 pre-existing timeout** —
+      `filesystem::repo::area::tests::detect_area_errors_when_not_in_repo`
+      (30s TMT). This is the recorded Sniff baseline failure, in a file this
+      fix never touched, and one flaky-but-passing
+      `error::tests::test_rate_limited_display_without_retry`.
+- [x] Run `cd claudine/rendezvous && just check && just build && just test &&
   just test-l2 && just lint`.
-- [ ] Run the affected Claudine package-area suites with `cd claudine && just
+    - All green. `just test` = **271 passed, 0 failed** (82 core / 168 daemon /
+      21 client). Notably the Phase 6/7 flake
+      (`a_directory_at_the_endpoint_is_rejected` /
+      `a_shared_parent_directory_is_rejected`) did not reproduce this run — it
+      is load-dependent, so this is not evidence the underlying leak is fixed;
+      the open defect recorded at the end of Phase 7 still stands.
+      `just test-l2` is not applicable for this area, by design.
+- [x] Run the affected Claudine package-area suites with `cd claudine && just
   test && just test-l2 && just lint`.
+    - `just lint` clean (including the error-transport and lifecycle-doc-facets
+      guards). `just test-l2`: **131 passed**. `just test`: claudine lib
+      1962/1962 passed; claudine-cli 1962/1962 passed (run with the recipe's own
+      filterset). **1 pre-existing failure**:
+      `claudine-gen::drift committed_generated_artifacts_match_phase_1_byte_baseline`
+      — the archived-review fixture move recorded on HEAD; `claudine/gen` is
+      untouched by this fix, and the failure aborts `just test` before
+      claudine-cli, which is why that package was run explicitly.
+    - Method note: running `cargo nextest run -p claudine-cli` *raw* fails
+      `level2_stalled_generation_renders_in_tmux`. That is an artifact of
+      bypassing the recipe's `!test(/level2_/)` filterset and letting L2 tmux
+      tests run under full parallelism; via `just test-l2` the same test passes.
+      Use the recipes.
 - [ ] Run the repository macOS/Linux/Windows compile matrix and the dedicated
   native Rendezvous runtime matrix; archive the CI run links in the fix record.
-- [ ] Run `cargo fmt --check` only as a read-only diagnostic; do not run
+    - **Blocked, same as Phase 7:** both need the branch pushed, which is a
+      separate operation. There are no CI run links to archive yet.
+- [x] Run `cargo fmt --check` only as a read-only diagnostic; do not run
   `cargo fmt` write mode.
-- [ ] Run GitNexus `detect_changes(scope: "compare", base_ref: "main")` and
+    - Ran read-only over `sniff`, all three Rendezvous crates, and
+      `claudine-cli`. All five report diffs — **and none are attributable to
+      this fix**: Phase 8 changed zero Rust files, and the reported hunks are in
+      files this branch never touched (`sniff/lib/src/executable_index.rs`,
+      `rendezvous/core/src/document.rs`, `cli/src/argv/mod.rs`). This is the
+      known local-rustfmt-vs-`main` drift that `rust-toolchain.toml`'s
+      `channel = "stable"` pin permits. Write mode deliberately not run.
+- [x] Run GitNexus `detect_changes(scope: "compare", base_ref: "main")` and
   verify the affected symbols/processes are limited to stable-user discovery,
   local endpoint resolution, daemon startup, client connection, dashboard,
   lifecycle requeue/hook forwarding, and session reporting.
-- [ ] Re-check every specification acceptance criterion against tests and
+    - Ran; **the check cannot answer the question as posed, and did not.**
+      `main`...branch is 383 files / 4187 changed symbols / 30 affected
+      processes, because the `claudine` branch carries substantial unrelated
+      work (composition lifecycle, `gen/emit`, the shared-resources fix,
+      archived reviews). The comparison is branch-scoped, not fix-scoped.
+    - What it *does* show is consistent with the expected radius: every
+      local-IPC-related affected process is one of `Run → User_identity`,
+      `Run → Looks_like_pipe_name`, `Run → Runtime_dir_is_usable`, and
+      `Run → Temp_dir` — i.e. stable-user discovery and local endpoint
+      resolution, and nothing further afield. The remaining affected processes
+      (`Construct_argv_and_system_prompt → …`, `Emission_fragment → …`,
+      `Run_composition_body → …`) trace to the other branch work, not to this
+      fix.
+- [x] Re-check every specification acceptance criterion against tests and
   documentation, then mark the fix complete only when all native runtime gates
   are green.
+    - Re-checked; see the table below. **8 of 10 criteria are met. The fix is
+      not complete**, because two criteria depend on native Linux/Windows
+      runtime gates that cannot run on this host and need the branch pushed.
+
+### Specification acceptance criteria — final re-check
+
+| Criterion | State | Evidence |
+|---|---|---|
+| One typed endpoint API, no pipe-as-path | **Met** | `LocalEndpoint` with no common `path()`; `OsString` end to end; 82 core tests |
+| One portable entry point, shared init once | **Met** | `spawn_local_server` + `prepare_daemon`; `one_daemon_runs_the_shared_boot_exactly_once` |
+| Native Windows named-pipe daemon, runtime-tested | **Written, NOT runtime-proven** | `local_transport/windows.rs` + tests exist; no Windows host or cross-compile here (duckdb-sys/mingw). Gating leg awaits push |
+| Acceptor stays available; bounded `ERROR_PIPE_BUSY` | **Met in code + unit tests; runtime unproven** | Successor-before-handoff; `open_with_busy_retry` deadline tests run on macOS/Linux |
+| Unix create/cleanup/permissions/teardown owner-checked | **Met** | 16 `local_transport/unix/tests.rs` cases + `private_dir` tests, all green here |
+| Endpoint, data root, identity share one owner | **Met** | One `sniff::os::current_user_id`; `every_durable_path_sits_under_the_validated_root` |
+| Sniff: no env vars, subprocess, cache, username fallback | **Met** | `geteuid`/`TokenUser`; `default_ignores_username_environment_variables` |
+| WSL stays on Linux/UDS/UID | **Coverage met; smoke run owed** | Two WSL-marker tests pass; no WSL runner available |
+| Overrides preserve same-user authorization | **Met** | `an_overridden_data_root_keeps_the_ownership_policy`; override rejection tests |
+| Docs report implemented state honestly | **Met** | This phase: `local-ipc.md` + design/current-state/README/followup, each stating the two known gaps rather than eliding them |
+| macOS, Linux, Windows runtime tests pass | **macOS only** | macOS green here; Linux + Windows await the pushed workflow |

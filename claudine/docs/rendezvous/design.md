@@ -11,9 +11,12 @@ features:
 The two modes of _interaction_ that take place with the **rendezvous** daemon are:
 
 1. **gRPC** API
-    - allows clients to communicates locally on the same host system to the **redezvous** daemon
-    - gRPC messaging is done over a Unix domain **sockets** (macOs, Linux) and **Named Pipes** (windows)
+    - allows clients to communicate locally, on the same host system, with the **rendezvous** daemon
+    - gRPC messaging is done over Unix domain **sockets** (macOS, Linux, WSL) and **named pipes** (Windows)
     - provides a strongly typed RPC protocol for clients and the daemon to communicate in near real-time
+    - the endpoint is per **stable OS user** — the effective UID on Unix, the process token's account SID on Windows — so one account's daemon, identity, and data root all share one owner, and other non-privileged users cannot reach them
+    - clients reach it through one portable `rendezvous_client::connect(&LocalEndpoint)`; the daemon binds it through one portable `spawn_local_server`
+    - **see [`local-ipc.md`](./local-ipc.md) for the authoritative contract**: transport selection, endpoint resolution and overrides, Unix permissions and cleanup, the Windows DACL and accept behavior, WSL separation, the client error/retry vocabulary, and the threat boundary
     
 2. **CRDT** syncing over Mesh Network
     - **rendezvous** daemons can communicate to other **rendezvous** daemons (on other hosts)
