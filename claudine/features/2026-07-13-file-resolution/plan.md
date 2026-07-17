@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 2
+phase: 3
 total_phases: 8
 agent: claude/default
 yolo: true
@@ -29,6 +29,17 @@ docs_updated_during_phase_2:
     - claudine/features/2026-07-13-file-resolution/plan.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - biscuit-file/lib/src/lib.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/src/file_reference/context.rs
+    - biscuit-file/lib/src/file_reference/error.rs
+    - biscuit-file/lib/tests/detailed_resolution.rs
+docs_updated_during_phase_3:
+    - claudine/features/2026-07-13-file-resolution/plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
     - biscuit-file
 ---
@@ -179,18 +190,18 @@ still passes. Nothing downstream is touched yet.
 Satisfies D3, D4, D8, D10. Still **no precedence change** — build the machinery,
 flip in Phase 4.
 
-- [ ] Extract a candidate/root **builder** separable from matching (D3), so diagnostics, completion, and tests can inspect the exact ordered candidates without reimplementing the algorithm
-- [ ] Candidate records retain root provenance (`repository`, `source`, `package`, `home`, `magic`, `vault`) alongside the path — provenance is **data**, never inferred from string prefixes
-- [ ] Dedupe duplicate lexical candidates **stably**, preserving first-seen order
-- [ ] Add the context-aware detailed resolve operation (name is an implementation decision; `resolve_detailed`/`resolve_with_context` are representative) returning classification + ordered plan + match/failure
-- [ ] Typed detailed outcome (D8) retains: raw authored reference, parsed kind, source/base, repository root when available, ordered candidates attempted, **per-candidate probe disposition** (missing / non-file / matched / I/O failure), failure classification, and underlying `FileReferenceError`. `NoMatch` is a typed outcome, not `Ok(None)`
-- [ ] Replace `Path::is_file()` probing with a fallible metadata operation: `NotFound` and non-regular-file **advance** the search; permission/invalid-path/other I/O **stop** with candidate path + typed source attached. `is_file()` collapses these into `false` and is insufficient
-- [ ] Preserve direct symlink-to-regular-file selection while `resolve_recursive` keeps `follow_links(false)` (`resolve.rs:141`) — these are distinct behaviors, both retained
-- [ ] Route recursive resolution's roots through the shared builder while retaining its **global lexical winner** (`resolve.rs:176-178`). Changing recursive winner selection is explicitly out of scope
-- [ ] Keep `resolve()`/`resolve_from()` at their `Result<Option<PathBuf>, _>` convenience shape; project them from the detailed outcome without changing order
-- [ ] Fix `FileReferenceError::Git`/`Workspace` (`error.rs:15,18`) to carry `#[source]` — they currently stringify, so gix/cargo_metadata causes are not chainable, which D8's "underlying error where one exists" requires
-- [ ] Request-scoped repository-root caching (D10): discovery keyed off base/source, never global mutable state; scoped so one worktree's root cannot leak into another. **Linked git worktrees must resolve to their own root**
-- [ ] L1 tests: detailed resolver retains candidate/root provenance on both success and `NoMatch`; legacy methods project without reordering; missing candidates fall through while permission/metadata errors stay typed and identify the candidate; linked-worktree anchoring
+- [x] Extract a candidate/root **builder** separable from matching (D3), so diagnostics, completion, and tests can inspect the exact ordered candidates without reimplementing the algorithm — **DONE** (`RootEntry` builder in `collect_roots`; public `FileReference::candidate_plan` shares the exact builder `resolve_core` probes)
+- [x] Candidate records retain root provenance (`repository`, `source`, `package`, `home`, `magic`, `vault`) alongside the path — provenance is **data**, never inferred from string prefixes — **DONE** (public `RootProvenance` enum, carried on `ResolutionCandidate`; `Absolute` added for the authored-absolute case)
+- [x] Dedupe duplicate lexical candidates **stably**, preserving first-seen order — **DONE** (`dedupe_candidates` keys on the `.`/`..`-normalized path; first-seen provenance wins)
+- [x] Add the context-aware detailed resolve operation (name is an implementation decision; `resolve_detailed`/`resolve_with_context` are representative) returning classification + ordered plan + match/failure — **DONE** (`FileReference::resolve_detailed(&FileResolutionContext) -> DetailedResolution`)
+- [x] Typed detailed outcome (D8) retains: raw authored reference, parsed kind, source/base, repository root when available, ordered candidates attempted, **per-candidate probe disposition** (missing / non-file / matched / I/O failure), failure classification, and underlying `FileReferenceError`. `NoMatch` is a typed outcome, not `Ok(None)` — **DONE** (`DetailedResolution` + `ProbedCandidate`/`ProbeDisposition` + `DetailedOutcome::Failed(ResolutionFailure::NoMatch)`; `error()` exposes the underlying `FileReferenceError`)
+- [x] Replace `Path::is_file()` probing with a fallible metadata operation: `NotFound` and non-regular-file **advance** the search; permission/invalid-path/other I/O **stop** with candidate path + typed source attached. `is_file()` collapses these into `false` and is insufficient — **DONE** (`probe_candidate` via `fs::metadata`; I/O stop returns `FileReferenceError::Io { path, source }`)
+- [x] Preserve direct symlink-to-regular-file selection while `resolve_recursive` keeps `follow_links(false)` (`resolve.rs:141`) — these are distinct behaviors, both retained — **DONE** (`metadata` follows the symlink to select it; recursive walker still `follow_links(false)`; both covered by tests)
+- [x] Route recursive resolution's roots through the shared builder while retaining its **global lexical winner** (`resolve.rs:176-178`). Changing recursive winner selection is explicitly out of scope — **DONE** (`resolve_recursive_core` sources roots from `build_search_roots`/`collect_roots`, still sorts and takes first; roots recorded as `SearchRoot`-disposition candidates)
+- [x] Keep `resolve()`/`resolve_from()` at their `Result<Option<PathBuf>, _>` convenience shape; project them from the detailed outcome without changing order — **DONE** (`resolve` projects `resolve_core`'s `CoreOutcome`; `resolve_in_context` = `resolve_detailed(..).into_convenience()`)
+- [x] Fix `FileReferenceError::Git`/`Workspace` (`error.rs:15,18`) to carry `#[source]` — they currently stringify, so gix/cargo_metadata causes are not chainable, which D8's "underlying error where one exists" requires — **DONE** (`Git(Box<gix::discover::Error>)`, `Workspace(Box<cargo_metadata::Error>)`, new `BareRepository` variant; chainable-source proven by `workspace_error_carries_a_chainable_source`)
+- [x] Request-scoped repository-root caching (D10): discovery keyed off base/source, never global mutable state; scoped so one worktree's root cannot leak into another. **Linked git worktrees must resolve to their own root** — **DONE** (repo root resolved **once** per `resolve_core`, only for kinds that anchor on it, and passed into `collect_roots`; the immutable `FileResolutionContext.repository_root` is the request-scoped cache, so a supplied linked-worktree root is used verbatim and never re-discovered up to an ancestor — proven by `supplied_repository_root_anchors_and_suppresses_ancestor_discovery`)
+- [x] L1 tests: detailed resolver retains candidate/root provenance on both success and `NoMatch`; legacy methods project without reordering; missing candidates fall through while permission/metadata errors stay typed and identify the candidate; linked-worktree anchoring — **DONE** (`tests/detailed_resolution.rs`, 12 tests)
 
 **Checkpoint 3:** `just test` + `just lint` green in `biscuit-file`. A test can
 assert the full ordered candidate plan. Downstream still untouched.
