@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 1
+phase: 2
 total_phases: 14
 agent: claude/default
 yolo: "true"
@@ -20,6 +20,20 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1:
     - claudine/features/2026-07-13-proxy-with/notes/baseline.md
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/coordinator/mod.rs
+    - claudine/lib/src/composition/coordinator/active.rs
+    - claudine/lib/src/composition/coordinator/document.rs
+    - claudine/lib/src/composition/coordinator/handoff.rs
+    - claudine/lib/src/composition/coordinator/invocation.rs
+    - claudine/lib/src/composition/coordinator/transition.rs
+    - claudine/lib/src/composition/coordinator/tests.rs
+docs_updated_during_phase_2:
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_2:
+    - claudine/features/2026-07-13-proxy-with/notes/state-migration.md
+skills_files_updated_during_phase_2: []
 ---
 
 # Execution Plan — Canonical Document Handoffs and Transient Proxy Frontmatter (`with:`)
@@ -260,22 +274,22 @@ behavior wired to it yet. Nothing in this phase may perform process, terminal,
 filesystem I/O/resolution, or provider-adapter work (R1); carrying a resolved
 `PathBuf` value in a handoff type is expected.
 
-- [ ] Define `DocumentTransition` in `lib/src/composition/` with the required
+- [x] Define `DocumentTransition` in `lib/src/composition/` with the required
       semantic surface: `Continue`, `Retry`, `Resume { session, message }`,
       `Proxy(EvaluatedProxyRequest)`, `Complete`, and a typed abort path. Rust
       names may differ from the spec; the surface may not. The abort path may be
       generic or use a source-preserving envelope/coordinator outcome, but it
       must not force CLI-only errors into `CompositionError`, erase them into a
       string/`eyre!`, or create a library-to-CLI dependency.
-- [ ] Define the two-stage handoff types: `EvaluatedProxyRequest { target: String,
+- [x] Define the two-stage handoff types: `EvaluatedProxyRequest { target: String,
       overlay: IndexMap<String, serde_json::Value>, provenance: ProxyProvenance }`
       and `ProxyHandoff { authored_target, resolved_target: PathBuf, overlay,
       provenance }`. The type system must make it impossible to construct a
       `ProxyHandoff` without a resolution step.
-- [ ] Define `ProxyProvenance` carrying source path, lifecycle signal,
+- [x] Define `ProxyProvenance` carrying source path, lifecycle signal,
       action/property location (reuse the dotted `"{event}.stack[{i}].action[{j}]"`
       form from `preflight.rs:280-286`), and the proxy chain.
-- [ ] Define the four ownership layers as distinct types (R2): invocation state
+- [x] Define the four ownership layers as distinct types (R2): invocation state
       (immutable inputs plus a coordinator-owned run ledger), handoff state,
       prepared document, and active-document execution state. Populate them from
       the spec's field inventories. Cross-check against
@@ -287,7 +301,7 @@ filesystem I/O/resolution, or provider-adapter work (R1); carrying a resolved
       (`loop_control.rs:177`), `LifecycleRunGuard` (`lifecycle/mod.rs:475`).
       Write the mapping into `notes/state-migration.md` — this table is the
       checklist Phases 5–9 execute against.
-- [ ] Split immutable invocation inputs from a coordinator-owned run ledger
+- [x] Split immutable invocation inputs from a coordinator-owned run ledger
       within the invocation layer. Put the invocation-wide proxy chain/hop
       accounting, exact-command approval cache, command/sequence timing
       anchors, command-wide performance accumulation, and transition
@@ -299,7 +313,7 @@ filesystem I/O/resolution, or provider-adapter work (R1); carrying a resolved
       test open-coded in four places (`loop_control.rs:203-208`,
       `control_dispatch.rs:89`, `:189`, `:246`). Provide **one** method; leave the
       call sites for Phase 6.
-- [ ] Model active-document execution state as a document-iteration slice that
+- [x] Model active-document execution state as a document-iteration slice that
       owns retry/resume budgets plus a replaceable provider-attempt slice. A
       retry or resume replaces only the provider-attempt slice and retains and
       decrements its budgets; proxy and the next document-loop iteration receive
@@ -307,12 +321,12 @@ filesystem I/O/resolution, or provider-adapter work (R1); carrying a resolved
       (R8 forbids an unlabeled shared counter). Today:
       `ControlBudgets { retry, resume }`
       (`control_dispatch.rs:14`) + `control_budget_for` (`control.rs:176`).
-- [ ] L1: model each layer separately and assert which fields survive initial,
+- [x] L1: model each layer separately and assert which fields survive initial,
       retry, resume, proxy, and loop transitions. Assert active-document
       execution state is discarded by proxy, retry/resume cannot reset their own
       budget by replacing a provider attempt, immutable invocation inputs expose
       no mutation, and transition-ledger mutation is coordinator-only.
-- [ ] Enforce construction boundaries with private fields and narrow
+- [x] Enforce construction boundaries with private fields and narrow
       constructors: lifecycle evaluation can construct only an
       `EvaluatedProxyRequest`; constructing `ProxyHandoff` requires the opaque
       resolved-reference value produced by the shared file-resolution authority
