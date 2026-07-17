@@ -1,8 +1,8 @@
 ---
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Kilo, Pi, Antigravity), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
-last_updated: 2026-07-15
-hash: 65dc854540ca152c-fe9cb1b674202d54
+last_updated: 2026-07-16
+hash: 65dc854540ca152c-f3f0ea7bc1000720
 ---
 
 ## Overview
@@ -13,7 +13,9 @@ The **10 providers** above are the compiled `Provider` enum (`PROVIDER_COUNT = 1
 
 The package follows the monorepo `lib` + `cli` split: library crate `claudine`, CLI crate `claudine-cli` (binary `claudine`). A third sub-crate, `claudine-contract` (`claudine/contract`), implements `biscuit_contract::inference::InferenceAdapter` by running a provider as a single non-interactive, **tool-free, filesystem-isolated** session and returning its final assistant text — letting deterministic consumers (Reaper, Darkmatter) delegate to an agentic CLI via `Arc<dyn InferenceAdapter>` without depending on `claudine` directly. It depends on `claudine` (lib) but **not** `claudine-cli`. v1 enables Claude and Codex; other providers are reported `Unsupported`. See `claudine/contract/README.md` for the provider support matrix and security posture, and the `biscuit-contract` skill for the contract itself.
 
-Alongside these, `claudine/rendezvous/` is a first-class package-area family of **three crates** backing `claudine dashboard` and the (unwired) lifecycle `defer` scheduler, in a `core → {daemon, client}` shape: `rendezvous-core` (leaf — protobuf/gRPC stubs, identity, signed envelopes, sync wire framing), `rendezvous-daemon` (the long-running service: gRPC over UDS, the `redb → Loro → DuckDB` session-log pipeline, register store, QUIC sync engine), and `rendezvous-client` (a thin gRPC test client). Both leaf crates depend on `rendezvous-core`, never on each other. Its area justfile (`cd claudine/rendezvous`) exposes `just check|build|test|lint`, each iterating all three crates. See [architecture.md](architecture.md) → Rendezvous Package-Area Family for the crate roles and the `SessionLogManager` module boundary.
+Alongside these, `claudine/rendezvous/` is a first-class package-area family of **three crates** backing `claudine dashboard` and the (unwired) lifecycle `defer` scheduler, in a `core → {daemon, client}` shape: `rendezvous-core` (leaf — protobuf/gRPC stubs, identity, signed envelopes, sync wire framing, and the typed `LocalEndpoint`), `rendezvous-daemon` (the long-running service: gRPC over the platform's local endpoint, the `redb → Loro → DuckDB` session-log pipeline, register store, QUIC sync engine), and `rendezvous-client` (the portable `connect(&LocalEndpoint)` plus a thin gRPC test client). Both leaf crates depend on `rendezvous-core`, never on each other. Its area justfile (`cd claudine/rendezvous`) exposes `just check|build|test|lint`, each iterating all three crates.
+
+The **local control plane** is platform-native and per stable OS user: a Unix-domain socket on macOS/Linux/WSL, a Windows named pipe on native Windows, qualified by the effective UID or process-token SID from `sniff::os::current_user_id()` — never a username. One portable `spawn_local_server` binds it to a transport-neutral daemon built exactly once. Read [`claudine/docs/rendezvous/local-ipc.md`](../../../claudine/docs/rendezvous/local-ipc.md) before changing endpoint, daemon-boot, or connector behavior; see [architecture.md](architecture.md) → Rendezvous Package-Area Family for the crate roles, the local-IPC rules, and the `SessionLogManager` module boundary.
 
 **Where to look next:**
 

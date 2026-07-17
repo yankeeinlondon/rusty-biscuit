@@ -538,11 +538,27 @@ Note: OpenCode also reads `.claude/skills/` directly
 
 | Crate | Path | Depends on | Public role |
 |-------|------|-----------|-------------|
-| `rendezvous-core` | `rendezvous/core` | *(leaf)* | Shared protobuf/gRPC stubs, `NodeIdentity`, `SignedEnvelope`/`EnvelopeSealer`/`EnvelopeInbox`, `DocumentId`/`ChunkId`, invitations, and the sync wire framing (`rendezvous_core::sync`). |
-| `rendezvous-daemon` | `rendezvous/daemon` | `rendezvous-core` | The long-running service: the `RendezvousService` gRPC impl over a UDS transport, the `redb → Loro → DuckDB` session-log pipeline, the register store, peer discovery/QUIC, and the direct-sync engine. Binary `main`; the gRPC and persistence layers live in library modules so integration tests exercise them without spawning a child. |
-| `rendezvous-client` | `rendezvous/client` | `rendezvous-core` | Thin tonic gRPC test client that drives the daemon over the UDS (testing/POC only). |
+| `rendezvous-core` | `rendezvous/core` | *(leaf)* + `sniff` | Shared protobuf/gRPC stubs, `NodeIdentity`, `SignedEnvelope`/`EnvelopeSealer`/`EnvelopeInbox`, `DocumentId`/`ChunkId`, invitations, the sync wire framing (`rendezvous_core::sync`), and the typed `LocalEndpoint` contract (`local_endpoint`). Models and resolves the endpoint; performs **no** filesystem mutation and contains no listener. |
+| `rendezvous-daemon` | `rendezvous/daemon` | `rendezvous-core`, `sniff` | The long-running service: the `RendezvousService` gRPC impl over the platform's local endpoint, the `redb → Loro → DuckDB` session-log pipeline, the register store, peer discovery/QUIC, and the direct-sync engine. Owns endpoint/data-root authorization, listener setup, and cleanup. Binary `main`; the gRPC and persistence layers live in library modules so integration tests exercise them without spawning a child. |
+| `rendezvous-client` | `rendezvous/client` | `rendezvous-core` | Thin tonic gRPC client. Exposes the portable `connect(&LocalEndpoint)` every Claudine CLI call site uses, plus the `rendezvous-test-client` binary. |
 
-Test commands run from the `claudine/rendezvous/` area justfile: `just check`, `just build`, `just test`, `just lint` each iterate all three crates (`test-l2` is a no-op — real-terminal tests do not apply). The root `cargo check --workspace --all-targets` includes all three.
+Test commands run from the `claudine/rendezvous/` area justfile: `just check`, `just build`, `just test`, `just lint` each iterate all three crates (`test-l2` is a no-op — real-terminal tests do not apply). The root `cargo check --workspace --all-targets` includes all three. Native runtime coverage on macOS/Linux/Windows is gated by `.github/workflows/rendezvous-tests.yml` (no `continue-on-error` on any leg — cross-compilation is explicitly **not** accepted as Windows evidence).
+
+### Local IPC — the typed endpoint
+
+Authoritative doc: [`claudine/docs/rendezvous/local-ipc.md`](../../../claudine/docs/rendezvous/local-ipc.md). Read it before touching endpoint, daemon-boot, or connector code.
+
+The load-bearing rules:
+
+- **`LocalEndpoint::{UnixSocket(PathBuf), WindowsNamedPipe(OsString)}`** carries its own transport. There is deliberately no common `path()` accessor — a Windows pipe name is not a filesystem path. Use `as_unix_path()` / `as_windows_pipe_name()`; `Display` is lossy and human-facing only.
+- **Per stable OS user.** `sniff::os::current_user_id()` supplies the effective UID (Unix/WSL) or process-token account SID (Windows). Never `$USER`/`%USERNAME%`. Resolution: `RENDEZVOUS_ENDPOINT` → `$XDG_RUNTIME_DIR/claudine/rendezvous/daemon.sock` (when the runtime dir passes inspection) → `<tempdir>/claudine-rendezvous-uid-<uid>/daemon.sock`; Windows: `\\.\pipe\claudine-rendezvous-sid-<sid>`. Failure is typed — **no username, `default`, or random fallback.**
+- **One portable entry point.** `spawn_local_server(LocalEndpoint, DaemonConfig)`. `prepare_daemon` builds storage/projection/batcher/identity/registers/QUIC/discovery/workers/service exactly once, transport-neutral; `local_transport/{unix,windows}.rs` own *only* listener, accept, permission, and cleanup. A new transport must not grow a parallel boot path. `spawn_uds_server` survives only as a Unix test seam.
+- **Data root** defaults to `<local-data-dir>/claudine/rendezvous` (`node.key`, `session.redb`, `projection.duckdb`), validated by the same `private_dir` contract as the Unix runtime directory. The legacy `<tempdir>/rendezvous-data` is never read or imported — a shared temp dir is not an ownership boundary, so an identity found there could be planted.
+- **Overrides change location, not policy.** `--endpoint`/`RENDEZVOUS_ENDPOINT`, `--data-dir`/`RENDEZVOUS_DATA_DIR`. Tests use private temp parents or the core `test-support` feature; never weaken production checks for a fixture.
+- **No production `cfg` branches at call sites.** Dashboard, requeue, hook forwarding, session reporting, and health probes all go through `rendezvous_client::connect`.
+- The legacy vocabulary (`RENDEZVOUS_SOCKET`, `--socket`, `default_socket_path`, `ServerHandle::socket_path()`, the `socket` module) is **gone with no aliases**. `ServerHandle::local_endpoint()` replaces the last.
+
+**Known open defect** (recorded in the fix's plan, deferred not forgotten): every `unix::serve` endpoint refusal runs *after* `prepare_daemon` has opened redb/DuckDB and spawned workers, and `PreparedDaemon` has no `Drop` — so a transport failure leaks those workers with storage handles open. Trips nextest's `leak-timeout` under parallel load (masked today by `retries = 3`) and risks the `DatabaseAlreadyOpen` trap in production. The fix is to bind before preparing.
 
 ### Session-log module boundary
 
