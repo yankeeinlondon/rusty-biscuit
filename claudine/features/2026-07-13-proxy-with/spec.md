@@ -3,7 +3,8 @@ created: 2026-07-13
 status: draft
 reviewed: true
 reviewed_by: codex/default
-reviewed_on: 2026-07-15
+reviewed_on: 2026-07-16
+review_iterations: 2
 depends_on:
     - ../_completed/2026-05-12-lifecycle/spec.md
     - ../_completed/2026-06-26-positional-and-key-value/spec.md
@@ -103,8 +104,8 @@ or performance timings are byte-identical.
   so it can own its provider setup, lifecycle, and loop.
 - Use one preparation/materialization service for direct execution and all
   later re-entry paths; no private reduced composer may claim equivalence.
-- Preserve immutable caller intent separately from document-scoped and
-  attempt-scoped state.
+- Preserve immutable caller intent separately from the invocation-run ledger,
+  document-scoped preparation, and active-document execution state.
 - Capture one explicit document context and use it consistently across body,
   frontmatter, lifecycle, and pre-flight evaluation.
 - Define retry and resume re-entry precisely, including what is refreshed and
@@ -239,9 +240,15 @@ pub enum DocumentTransition {
     },
     Proxy(EvaluatedProxyRequest),
     Complete,
-    Abort(CompositionError),
+    Abort(TypedTransitionError),
 }
 ```
+
+`TypedTransitionError` is illustrative: the implementation may use a generic
+payload, a source-preserving envelope, or a coordinator outcome alongside the
+provider-neutral enum. It must not force CLI-only resolution, launch, shell, or
+provider-adapter failures into `CompositionError`, erase them into `String`, or
+create a library-to-CLI dependency.
 
 The provider-attempt harness may request `Proxy`, but it must not replace its
 own source path and continue as though the target were another attempt. The
@@ -270,19 +277,32 @@ differ.
 
 #### Invocation state
 
-Immutable for the whole command:
+This command-lifetime layer contains immutable invocation inputs and a
+coordinator-owned run ledger. Keeping them in one lifetime layer does not make
+the ledger immutable.
+
+Immutable invocation inputs are:
 
 - authored CLI reference and caller `key=value` / `--set` overrides;
 - command mode (`compose`, `inline-compose`, or a particular sequence step),
   step-scoped overrides, and command-level output policy;
 - explicit provider/model/interactivity flags and provider arguments;
-- approval/yolo policy and the exact-command approval cache;
+- approval/yolo policy;
 - launch CWD and launch-workspace discovery inputs;
 - timeout, display, system-prompt, and MCP CLI intent;
 - environment inputs and installation/configuration snapshot.
 
-Proxy cannot mutate invocation state. Caller overrides remain authoritative at
-every document.
+The mutable invocation-run ledger contains:
+
+- the exact-command approval cache;
+- the proxy chain and hop accounting;
+- command/sequence timing anchors and command-wide performance accumulation;
+  and
+- transition provenance needed for final output and diagnostics.
+
+Only the coordinator, or an adapter holding a narrow capability supplied by the
+coordinator, may mutate the ledger. A proxy cannot mutate invocation inputs or
+reset the ledger. Caller overrides remain authoritative at every document.
 
 #### Handoff state
 
@@ -324,7 +344,7 @@ The complete canonical output for one active document:
 - composition mode, target-owned closure plan, and command output routing;
 - selection hints and the resolved provider/model/interactivity;
 - lifecycle configuration and lifecycle lookup context;
-- loop definition and loop state adapter;
+- loop definition and immutable loop-state plan/adapter;
 - workspace, child CWD, MCP plan, system prompt, argv, child environment,
   structured-output mode, and dispatch configuration;
 - shell discovery/approval plan and exact approved commands;
@@ -334,20 +354,26 @@ The complete canonical output for one active document:
 An optimization may move or borrow fields, but direct and transitioned
 documents must have the same semantic representation before provider launch.
 
-#### Attempt state
+#### Active-document execution state
 
-Mutable only within the current active document iteration:
+Mutable only within the current active document and loop iteration:
 
 - provider-attempt number and last outcome;
+- document-loop iteration number and in-memory loop mutations;
 - retry and resume budgets;
 - optional live provider session identifier;
 - a resume follow-up override;
 - per-attempt timing and performance records.
 
-Proxy discards attempt state and creates fresh target attempt state. Retry
-starts a new session attempt. Resume alone retains the compatible live session.
-The global proxy hop chain remains invocation-run state and is not reset by a
-handoff.
+This layer contains a replaceable provider-attempt slice inside a longer-lived
+document-iteration slice. Retry and resume replace the provider-attempt slice,
+but they retain and decrement the enclosing retry/resume budgets; otherwise a
+retry could reset its own limit indefinitely. Retry starts a fresh provider
+session, while resume alone retains a compatible live session. A proxy discards
+the complete active-document execution state and creates fresh state for the
+target. Advancing the target's document loop starts a fresh iteration budget.
+The proxy chain, hop accounting, exact-command approval cache, and command-wide
+timing remain in the invocation-run ledger and are not reset by a handoff.
 
 The immediate overlay stored at document scope is the immutable, evaluated,
 pre-schema handoff input. Schema defaults, coercion, and invalid-optional
@@ -498,12 +524,14 @@ extra iteration of the source loop.
 ### R8 — Retry and resume have explicit re-entry semantics
 
 `Retry` retains active document identity, caller overrides, immediate proxy
-overlay, prepared context, and proxy provenance. It creates a fresh provider
-attempt/session and refreshes mutable document material through the canonical
-preparation service. Whether it re-enters before or after a particular
+overlay, context-derivation inputs, and proxy provenance. It creates a fresh
+provider attempt/session and refreshes mutable document material through the
+canonical preparation service. The service derives a new coherent prepared
+context; it does not reuse a stale context snapshot merely because document
+identity is unchanged. Whether retry re-enters before or after a particular
 lifecycle/pre-flight stage continues to derive from `provider_launched`, but
-the refreshed body, lifecycle, and launch plan must come from one coherent
-prepared document.
+the refreshed body, lifecycle, context, and launch plan must come from one
+coherent prepared document.
 
 `Resume` retains the active document and compatible live provider session. It
 refreshes mutable document/lifecycle material through the same canonical
@@ -781,7 +809,8 @@ Add typed, source-aware diagnostics for:
 
 - `with:` being anything other than a mapping;
 - a dynamic/non-string `with:` key;
-- interpolation failure at a specific `with.<key>` path;
+- interpolation failure at the most specific representable path inside `with:`
+  (including nested object keys and array indices);
 - a proxy-only `with:` parameter used on another action;
 - target bootstrap/preparation failure with source and proxy provenance;
 - resume incompatibility after canonical refresh; and
@@ -790,8 +819,8 @@ Add typed, source-aware diagnostics for:
 
 Errors rooted in authored frontmatter use the existing `FrontmatterExcerpt`
 rendering path and highlight the most specific locatable line. Diagnostics name
-the lifecycle event, proxy action, target, and failing `with` key without
-dumping unrelated overlay values.
+the lifecycle event, proxy action, target, and failing nested `with` path
+without dumping unrelated overlay values.
 
 The existing ambiguous-action diagnostic remains correct for:
 
@@ -879,13 +908,16 @@ when the universal lifecycle contract supports other runtime events.
    matrix; in particular, loop iterations reuse the prepared source/validated
    structural plan while retry and resume are fresh-read boundaries.
 14. Retry canonically refreshes the current document and starts a fresh provider
-   attempt without losing its overlay or prepared context.
+   attempt without losing its overlay, context-derivation inputs, or proxy
+   provenance; it derives one fresh coherent prepared context rather than
+   reusing a stale snapshot.
 15. Resume canonically refreshes mutable document/lifecycle state, retains only
     a live session whose complete compatibility key still matches, and
     deliberately uses its follow-up message; incompatibility identifies changed
     facets and recommends retry.
-16. Retry/resume budgets are scoped to the active document iteration; proxy
-    resets them while preserving invocation-wide hop/cycle accounting.
+16. Retry/resume budgets persist across provider attempts within the active
+    document iteration; proxy or the next loop iteration resets them while
+    preserving invocation-wide hop/cycle accounting.
 17. Every fresh target receives complete shell discovery/approval, including
     lifecycle shell actions, and approved bytes equal executed bytes.
 18. Key/value `proxy` accepts an optional mapping-valued `with:` field with
@@ -924,9 +956,13 @@ when the universal lifecycle contract supports other runtime events.
 
 ### L1 — state and transition contracts
 
-- Model invocation, handoff, prepared-document, and attempt state separately;
+- Model invocation, handoff, prepared-document, and active-document execution
+  state separately;
   assert which fields survive initial, retry, resume, proxy, and loop
   transitions.
+- Assert retry/resume replace only their provider-attempt slice, retain and
+  decrement the current iteration's budgets, and cannot reset their own limit;
+  assert proxy and the next document-loop iteration receive fresh budgets.
 - Assert the provider harness cannot mutate active document identity.
 - Assert every supported proxy producer returns the shared typed handoff and
   every coordinator outcome consumes or explicitly rejects it.
@@ -941,9 +977,11 @@ when the universal lifecycle contract supports other runtime events.
 - Prove target-dependent provider/MCP/workspace/launch decisions refresh on
   proxy but immutable CLI inputs do not.
 - Prove retry starts a fresh session, resume retains only a session with an
-  identical compatibility key, and proxy clears session/attempt state.
-- Prove retry/resume budgets reset at the documented document boundary while
-  proxy hop/cycle state continues.
+  identical compatibility key, and proxy clears active-document execution
+  state.
+- Prove retry/resume budgets persist and decrement across provider attempts,
+  then reset for a proxy target or the next document-loop iteration while proxy
+  hop/cycle state continues.
 - Parse key/value proxy with omitted, empty, scalar-valued, and nested `with:`;
   reject non-mapping `with:` and proxy-only fields on other actions.
 - Prove literal, mixed, whole-value, and nested interpolation semantics.
