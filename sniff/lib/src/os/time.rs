@@ -227,19 +227,23 @@ fn detect_timezone_name() -> Option<String> {
 
 #[cfg(target_os = "windows")]
 fn detect_timezone_name() -> Option<String> {
-    performance::increment_counter(counters::PROC_SPAWNS, 1);
-    let raw_output = Command::new("tzutil")
-        .arg("/g")
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
+    let (program, args) = windows_timezone_command();
+    detect_windows_timezone_name_with_timeout(program, &args, timeouts::WINDOWS_TIMEZONE)
+}
 
-    if !raw_output.status.success() {
-        return None;
-    }
+#[cfg(any(target_os = "windows", test))]
+fn windows_timezone_command() -> (&'static str, [&'static str; 1]) {
+    ("tzutil", ["/g"])
+}
 
-    let windows_id = parse_windows_timezone_id_output(&raw_output.stdout)?;
+#[cfg(target_os = "windows")]
+fn detect_windows_timezone_name_with_timeout(
+    program: &str,
+    args: &[&str],
+    timeout: std::time::Duration,
+) -> Option<String> {
+    let raw_output = process::run_for_stdout(program, args, timeout)?;
+    let windows_id = parse_windows_timezone_id_output(raw_output.as_bytes())?;
     Some(
         crate::os::windows_timezone_map::map_windows_timezone_to_iana(&windows_id)
             .map(|s| s.to_string())
@@ -613,6 +617,48 @@ mod tests {
 
         assert_eq!(map_windows_timezone_to_iana("Nonexistent/Zone"), None);
         assert_eq!(map_windows_timezone_to_iana(""), None);
+    }
+
+    #[test]
+    fn test_windows_timezone_command_and_deadline_policy() {
+        assert_eq!(windows_timezone_command(), ("tzutil", ["/g"]));
+        assert_eq!(
+            timeouts::WINDOWS_TIMEZONE,
+            std::time::Duration::from_secs(3)
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_timezone_probe_drains_large_output() {
+        let command = "[Console]::Out.Write(('x' * 1048576 -join ''))";
+        let timezone = detect_windows_timezone_name_with_timeout(
+            "powershell",
+            &["-NoProfile", "-NonInteractive", "-Command", command],
+            std::time::Duration::from_secs(30),
+        )
+        .expect("verbose timezone probe should complete");
+
+        assert_eq!(timezone.len(), 1_048_576);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_timezone_probe_honors_injected_deadline() {
+        let started = std::time::Instant::now();
+        let timezone = detect_windows_timezone_name_with_timeout(
+            "powershell",
+            &[
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Start-Sleep -Seconds 30",
+            ],
+            std::time::Duration::from_millis(100),
+        );
+
+        assert!(timezone.is_none());
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 
     // ============================================================================

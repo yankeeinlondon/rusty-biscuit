@@ -1,12 +1,12 @@
 use crate::Result;
 use crate::performance;
+#[cfg(any(target_os = "windows", test))]
+use crate::process::{self, timeouts};
 use crate::request::NetworkRequest;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 #[cfg(feature = "network")]
 use std::net::IpAddr;
-#[cfg(any(target_os = "windows", test))]
-use std::process::Command;
 #[cfg(feature = "network")]
 use std::sync::Mutex;
 use std::time::Instant;
@@ -718,7 +718,8 @@ fn detect_default_route_interface(interfaces: &[NetworkInterface]) -> Option<Str
 
     #[cfg(target_os = "windows")]
     {
-        command_output("route", &["print", "0.0.0.0"])
+        let (program, args) = windows_default_route_command();
+        command_output(program, &args, timeouts::WINDOWS_DEFAULT_ROUTE)
             .and_then(|output| parse_windows_default_route_interface_ip(&output))
             .and_then(|ip| interface_name_for_ipv4(interfaces, ip))
     }
@@ -968,14 +969,18 @@ fn interface_name_from_index(index: u32) -> Option<String> {
 
 #[cfg(any(target_os = "windows", test))]
 #[allow(dead_code)]
-fn command_output(program: &str, args: &[&str]) -> Option<String> {
-    performance::increment_counter(crate::performance::counters::PROC_SPAWNS, 1);
-    let output = Command::new(program).args(args).output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
+fn windows_default_route_command() -> (&'static str, [&'static str; 2]) {
+    ("route", ["print", "0.0.0.0"])
+}
 
-    String::from_utf8(output.stdout).ok()
+#[cfg(any(target_os = "windows", test))]
+#[allow(dead_code)]
+fn command_output(
+    program: &str,
+    args: &[&str],
+    timeout: std::time::Duration,
+) -> Option<String> {
+    process::run_for_stdout(program, args, timeout)
 }
 
 #[cfg(test)]
@@ -2080,6 +2085,54 @@ garbage line";
     fn test_parse_windows_default_route_no_routes() {
         let output = "Active Routes:\nNetwork Destination Netmask Gateway Interface Metric";
         assert_eq!(parse_windows_default_route_interface_ip(output), None);
+    }
+
+    #[test]
+    fn test_windows_default_route_command_construction() {
+        assert_eq!(
+            windows_default_route_command(),
+            ("route", ["print", "0.0.0.0"])
+        );
+        assert_eq!(
+            timeouts::WINDOWS_DEFAULT_ROUTE,
+            std::time::Duration::from_secs(3)
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_default_route_probe_drains_large_output() {
+        let command = r#"[Console]::Out.Write(('x' * 1048576 -join '')); [Console]::Out.Write("`n0.0.0.0 0.0.0.0 192.168.1.1 192.168.1.100 25"); [Console]::Error.Write(('e' * 1048576 -join ''))"#;
+        let output = command_output(
+            "powershell",
+            &["-NoProfile", "-NonInteractive", "-Command", command],
+            std::time::Duration::from_secs(30),
+        )
+        .expect("verbose default-route probe should complete");
+
+        assert_eq!(
+            parse_windows_default_route_interface_ip(&output),
+            Some("192.168.1.100".parse().unwrap())
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_default_route_probe_honors_injected_deadline() {
+        let started = std::time::Instant::now();
+        let output = command_output(
+            "powershell",
+            &[
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Start-Sleep -Seconds 30",
+            ],
+            std::time::Duration::from_millis(100),
+        );
+
+        assert!(output.is_none());
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 
     #[test]
