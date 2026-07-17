@@ -989,6 +989,16 @@ struct SharedShellExpansionRuntime {
     /// Normalized commands for which a volatile-command discoverability warning
     /// has already been emitted, so the warning fires at most once per command.
     volatile_warned: HashSet<String>,
+    /// Per-command count of threads currently enqueued on `reservation_done`
+    /// inside [`ShellExpansionRuntime::reserve_allow_once`]. Incremented under
+    /// this mutex immediately before the atomic `wait_timeout_while` park and
+    /// decremented immediately after it returns, so any thread that acquires the
+    /// mutex and observes a positive count knows the waiter is provably enqueued
+    /// on the condvar. Exists only to let a notification test synchronize on a
+    /// parked peer instead of inferring it from a sleep; `#[cfg(test)]`-gated so
+    /// production builds carry neither the field nor its bookkeeping.
+    #[cfg(test)]
+    parked_waiters: HashMap<String, usize>,
 }
 
 /// Memoized stdout/stderr for one normalized command in [`SharedShellExpansionRuntime::command_cache`].
@@ -1125,6 +1135,19 @@ impl ShellExpansionRuntime {
             // waits before reserving anything), so blocking here cannot
             // deadlock. Wake when the peer either approves it (now in
             // `allow_once`) or releases it (no longer pending).
+            //
+            // The count bump happens under the still-held mutex, then
+            // `wait_timeout_while` atomically releases it as part of parking:
+            // an observer that acquires the mutex and sees a positive count has
+            // proof this thread is enqueued on the condvar. See
+            // `parked_waiters_for_test`.
+            #[cfg(test)]
+            {
+                *shared
+                    .parked_waiters
+                    .entry(normalized.to_string())
+                    .or_insert(0) += 1;
+            }
             let (guard, timeout) = self
                 .reservation_done
                 .wait_timeout_while(shared, RESERVATION_WAIT_TIMEOUT, |state| {
@@ -1133,6 +1156,15 @@ impl ShellExpansionRuntime {
                 })
                 .unwrap();
             shared = guard;
+            #[cfg(test)]
+            {
+                if let Some(count) = shared.parked_waiters.get_mut(normalized) {
+                    *count -= 1;
+                    if *count == 0 {
+                        shared.parked_waiters.remove(normalized);
+                    }
+                }
+            }
             if timeout.timed_out() {
                 return ReserveOutcome::Pending;
             }
@@ -1169,6 +1201,20 @@ impl ShellExpansionRuntime {
         let mut pending: Vec<String> = shared.pending_allow_once.iter().cloned().collect();
         pending.sort();
         pending
+    }
+
+    /// The number of threads currently parked in [`Self::reserve_allow_once`]
+    /// waiting on `normalized`.
+    ///
+    /// Reads the count under the same mutex the waiter incremented before
+    /// parking, so a positive result proves the waiter is enqueued on
+    /// `reservation_done` — the notification test uses this to release a
+    /// reservation only once a peer is provably parked, rather than after a
+    /// sleep that merely hopes it parked.
+    #[cfg(test)]
+    pub(crate) fn parked_waiters_for_test(&self, normalized: &str) -> usize {
+        let shared = self.shared.lock().unwrap();
+        shared.parked_waiters.get(normalized).copied().unwrap_or(0)
     }
 
     pub(crate) fn persist_whitelist_exact(&mut self, normalized: String) {

@@ -2851,7 +2851,7 @@ name: world
         use biscuit_terminal::errors::SourceContext;
         use std::path::{Path, PathBuf};
         use std::sync::{Condvar, Mutex};
-        use std::time::Duration;
+        use std::time::{Duration, Instant};
 
         /// Ceiling for a waiter that the failing flow's release must wake.
         ///
@@ -3057,14 +3057,36 @@ name: world
             assert_reservations_released(&mut runtime, &paths, "echo beta");
         }
 
+        /// Longest the approver will spin waiting for the peer to park before
+        /// declaring the test setup broken.
+        ///
+        /// This bounds a correctness precondition, not the behavior under test:
+        /// the waiter's fixtures are already built, so it reaches
+        /// `reserve_allow_once` and increments the parked-waiter count in
+        /// microseconds. Exceeding this means the waiter never parked — the
+        /// synchronization the test depends on failed — so we panic loudly here
+        /// rather than release early and silently stop exercising notification.
+        const WAITER_PARK_DEADLINE: Duration = Duration::from_secs(5);
+
         /// The release must also notify a peer already parked in
         /// `reserve_allow_once`, not merely leave a clean set behind for the
-        /// next caller: the waiter here is provably blocked on the reservation
-        /// before the handler errors.
+        /// next caller.
+        ///
+        /// The approver reserves `echo shared`, enters its handler, and does not
+        /// return its error until `parked_waiters_for_test` proves the waiter is
+        /// enqueued on `reservation_done`. Because that count is incremented
+        /// under the shared mutex immediately before `wait_timeout_while`'s
+        /// atomic park, a positive reading is proof of parking — not the
+        /// inference from a sleep the previous version relied on. Only then does
+        /// the handler error, releasing the reservation and firing `notify_all`;
+        /// a waiter that was merely late (having reserved the command itself)
+        /// can no longer make this test pass, so it cannot silently stop
+        /// exercising the notification path.
         #[test]
         fn handler_error_notifies_a_waiter_blocked_on_the_same_command() {
             struct SignalingHandler {
                 entered: Arc<(Mutex<bool>, Condvar)>,
+                probe: ShellExpansionRuntime,
             }
 
             impl ShellApprovalHandler for SignalingHandler {
@@ -3075,14 +3097,25 @@ name: world
                     let (lock, signal) = &*self.entered;
                     *lock.lock().unwrap() = true;
                     signal.notify_all();
-                    // Hold the reservation open long enough for the peer to
-                    // park on it. The waiter's fixtures are built before this
-                    // signal, so it reaches `reserve_allow_once` within
-                    // microseconds and 200ms is ample. A late peer would still
-                    // pass — it would simply reserve the command itself — so
-                    // this cannot flake; it would just stop exercising the
-                    // notification, which is why the hoisting matters.
-                    std::thread::sleep(Duration::from_millis(200));
+                    // Hold the reservation open until the peer is *provably*
+                    // parked on it, observed through the shared runtime the
+                    // probe handle points at. `parked_waiters_for_test` reads
+                    // the count under the same mutex the waiter incremented
+                    // before its atomic park, so a positive reading cannot
+                    // precede the park. Releasing before that would let the
+                    // waiter reserve the command itself and pass without ever
+                    // exercising notification — the defect this test exists to
+                    // catch.
+                    let deadline = Instant::now() + WAITER_PARK_DEADLINE;
+                    while self.probe.parked_waiters_for_test("echo shared") == 0 {
+                        assert!(
+                            Instant::now() < deadline,
+                            "the waiter never parked within {WAITER_PARK_DEADLINE:?}: the test \
+                             can no longer prove release wakes a parked peer, so it is failing \
+                             rather than silently degrading into a no-op"
+                        );
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
                     Err(handler_error())
                 }
             }
@@ -3094,21 +3127,23 @@ name: world
 
             // Build the waiter's fixtures up front. `ComposeOptions::new`
             // captures a runtime context — host and repo discovery costing
-            // seconds, far longer than the window the approver holds the
-            // reservation open. Paying it after the signal below would let the
-            // approver release before the waiter ever reached
-            // `reserve_allow_once`, so the test would pass without a waiter ever
-            // parking — proving nothing about notification. It also keeps that
-            // cost out of `NOTIFICATION_BUDGET`.
+            // seconds. Paying it after the signal below would delay the waiter's
+            // park and needlessly widen `WAITER_PARK_DEADLINE`; it also keeps
+            // that cost out of `NOTIFICATION_BUDGET`.
             let waiter_directive = directive("echo shared");
             let waiter_options = options(ShellApprovalDecision::AllowOnce);
 
             let mut approver_runtime = runtime.clone_for_child();
             let approver_paths = paths.clone();
             let approver_entered = Arc::clone(&entered);
+            // The probe shares the same `Arc<Mutex<..>>` as every other handle
+            // (via `clone_for_child`), so `parked_waiters_for_test` on it sees
+            // the count the waiter's own handle increments.
+            let approver_probe = runtime.clone_for_child();
             let approver = std::thread::spawn(move || {
                 let handler = Arc::new(SignalingHandler {
                     entered: approver_entered,
+                    probe: approver_probe,
                 });
                 let opts = ComposeOptions::new().with_shell_approval_handler(handler);
                 prepare_directive(
@@ -3120,7 +3155,9 @@ name: world
                 .expect_err("the handler's error must propagate unchanged")
             });
 
-            // Only park once the peer provably holds the reservation.
+            // Wait until the approver provably holds the reservation before
+            // starting the waiter, so the waiter parks on the approver's
+            // reservation rather than winning the race and reserving first.
             {
                 let (lock, signal) = &*entered;
                 let mut in_handler = lock.lock().unwrap();
@@ -3134,7 +3171,8 @@ name: world
             // 30s `RESERVATION_WAIT_TIMEOUT` — long enough that nextest's
             // terminate-after ceiling would kill the run first and report a
             // timeout instead of the real defect. Its fixtures are already
-            // built, so it reaches `reserve_allow_once` and parks immediately.
+            // built, so it reaches `reserve_allow_once` and parks immediately;
+            // the approver's handler is blocked until that park is observed.
             let (outcome_tx, outcome_rx) = std::sync::mpsc::channel();
             let mut waiter_runtime = runtime.clone_for_child();
             let waiter_paths = paths.clone();
