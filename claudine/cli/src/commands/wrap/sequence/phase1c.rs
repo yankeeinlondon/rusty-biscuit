@@ -547,25 +547,24 @@ mod tests {
         }
     }
 
-    /// Regression for the Phase 1c template-preflight fallback omission.
+    /// Regression for the Phase 1c template-preflight resolution.
     ///
     /// A sequence step with a `::shell` directive whose `{{ … }}` argument
-    /// depends on a read-side `file_exists` against a launch-area-relative file
-    /// must see
-    /// that file during the template SHELL preflight — exactly as the per-step
-    /// `pre_validate_schema` and the final `PrepareOptions.file_ref_fallback_dir`
-    /// already do. The launch-area-only file is reachable ONLY via the threaded
-    /// fallback, and the resolved/approved command must be CWD-independent.
+    /// depends on a read-side `file_exists` against a document-relative file
+    /// must see that file during the template SHELL preflight, resolving against
+    /// the document directory (`base_dir`) CWD-independently — exactly as the
+    /// per-step `pre_validate_schema` and the final prepare pass do. The
+    /// launch-area fallback is diagnostic-only and never a candidate (D2).
     #[test]
     #[serial_test::serial(preflight_cwd)]
-    fn template_preflight_resolves_via_launch_area_fallback() {
+    fn template_preflight_resolves_against_document_dir() {
         let doc_dir = tempfile::TempDir::new().unwrap();
         let launch_dir = tempfile::TempDir::new().unwrap();
         let unrelated = tempfile::TempDir::new().unwrap();
 
-        // `spec.md` exists ONLY under the launch-area fallback — not the prompt
-        // (document) directory, not the ambient CWD.
-        std::fs::write(launch_dir.path().join("spec.md"), "# Spec\n").unwrap();
+        // `spec.md` lives under the prompt (document) directory — the base a
+        // reference authored inside the document resolves against (D2).
+        std::fs::write(doc_dir.path().join("spec.md"), "# Spec\n").unwrap();
 
         let source_path = doc_dir.path().join("prompt.md");
         std::fs::write(
@@ -605,8 +604,8 @@ mod tests {
 
         assert!(
             result.approved_commands.contains("echo true"),
-            "template preflight must resolve file_exists(spec) via the launch-area \
-             fallback; approved: {:?}",
+            "template preflight must resolve file_exists(spec) against the document \
+             dir, CWD-independently; approved: {:?}",
             result.approved_commands,
         );
     }

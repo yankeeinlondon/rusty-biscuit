@@ -94,12 +94,11 @@ fn resolve_sequence_source(file_ref: &str) -> Result<ResolvedCompositionSource, 
     }
 
     // YAML sequence files are treated as frontmatter without a Markdown body.
-    let reference = biscuit_file::FileReference::new(file_ref)
-        .map_err(|e| CompositionError::InvalidReference {
-            reference: file_ref.to_string(),
-            source: e,
-        })?
-        .with_package_area_magic_path();
+    // Resolve through the SAME prompt magic roots as the Markdown path
+    // ([`composition::build_prompt_reference`]) so `@foo.yaml` and `@foo.md`
+    // resolve identically instead of the YAML fallback seeing only the
+    // package-area root.
+    let reference = composition::build_prompt_reference(file_ref)?;
     let resolved_path = reference
         .resolve()
         .map_err(|e| CompositionError::InvalidReference {
