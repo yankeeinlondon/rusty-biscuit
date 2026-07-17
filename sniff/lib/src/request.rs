@@ -1205,9 +1205,60 @@ mod tests {
     fn repo_request_structure_vs_full() {
         let structure = RepoRequest::structure();
         assert!(structure.structure_only);
+        assert!(structure.details.is_none());
+        assert!(!structure.wants_package_enrichment());
 
         let full = RepoRequest::full();
         assert!(!full.structure_only);
+        assert!(full.details.is_none());
+        assert!(full.wants_package_managers());
+        assert!(full.wants_dependencies());
+        assert!(full.wants_test_runners());
+    }
+
+    #[test]
+    fn focused_repo_details_narrow_package_enrichment() {
+        let cases = [
+            (
+                RepoDetailRequest::package_managers(),
+                (true, false, false),
+            ),
+            (RepoDetailRequest::dependencies(), (false, true, false)),
+            (RepoDetailRequest::test_runners(), (false, false, true)),
+            (RepoDetailRequest::all(), (true, true, true)),
+        ];
+
+        for (details, expected) in cases {
+            let request = RepoRequest::focused(details);
+            assert!(request.structure_only);
+            assert_eq!(
+                (
+                    request.wants_package_managers(),
+                    request.wants_dependencies(),
+                    request.wants_test_runners(),
+                ),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_repo_request_json_omits_and_defaults_focused_details() {
+        let structure_json = serde_json::to_value(RepoRequest::structure()).unwrap();
+        let full_json = serde_json::to_value(RepoRequest::full()).unwrap();
+        assert!(structure_json.get("details").is_none());
+        assert!(full_json.get("details").is_none());
+
+        let legacy: RepoRequest =
+            serde_json::from_str(r#"{"structure_only":true}"#).unwrap();
+        assert_eq!(legacy.details, None);
+        assert!(!legacy.wants_package_enrichment());
+
+        let focused = RepoRequest::focused(RepoDetailRequest::dependencies());
+        let roundtrip: RepoRequest =
+            serde_json::from_value(serde_json::to_value(focused).unwrap()).unwrap();
+        assert!(roundtrip.wants_dependencies());
+        assert!(!roundtrip.wants_package_managers());
     }
 
     #[test]
