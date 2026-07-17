@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 6
+phase: 7
 total_phases: 8
 agent: claude/default
 yolo: "true"
@@ -134,6 +134,19 @@ docs_updated_during_phase_6:
     - claudine/features/2026-07-13-error-propogation/decisions.md
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6: []
+packages_during_phase_7:
+    - claudine-cli
+source_files_during_phase_7:
+    - claudine/cli/tests/level2_typed_error_render_capture.rs
+    - claudine/cli/tests/effective_diagnostic_render.rs
+    - claudine/cli/tests/level2_lifecycle_control.rs
+    - claudine/cli/tests/level2_lifecycle_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+docs_updated_during_phase_7:
+    - claudine/features/2026-07-13-error-propogation/plan.md
+    - claudine/features/2026-07-13-error-propogation/decisions.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
 ---
 
 # Execution Plan — End-to-End Typed Error Propagation
@@ -474,33 +487,127 @@ pre-existing, see the leak-timeout note in the testing skill).
 Uses the package's existing L2 process harness; target-gated or portable across
 macOS, Windows, and Linux. Cases are **mutually parallelizable**.
 
-- [ ] **[L2]** Lifecycle proxy resolution from `initialize` (the motivating case).
-- [ ] **[L2]** Proxy resolution from a terminal/recovery event.
-- [ ] **[L2]** Composition source lookup.
-- [ ] **[L2]** Schema / file-reference failure.
-- [ ] **[L2]** Darkmatter transclusion failure.
-- [ ] **[L2]** Harness pre-flight failure.
-- [ ] **[L2]** A deliberately unstructured fallback error — this one **must**
+All cases land in `cli/tests/level2_typed_error_render_capture.rs` (tmux, `#![cfg(unix)]`).
+
+- [x] **[L2]** Lifecycle proxy resolution from `initialize` (the motivating case).
+- [x] **[L2]** Proxy resolution from a terminal/recovery event.
+      *This route was **broken** and Phase 7 found it: it reached the pane as a
+      generic `Error: failed to load Markdown: …`. See §D-13 — a live instance of
+      D-7's `Box` un-downcastability, entering via `Report::from(Box<…>)` rather
+      than a `#[source]` field. Fixed at the site; proven to fail on revert.*
+- [x] **[L2]** Composition source lookup.
+      *Its contract is genuinely terminal-dependent — piped reports autocomplete
+      *unavailable*; a real TTY runs autocomplete and reports **no matches**. The
+      TTY path had no coverage at all before this.*
+- [x] **[L2]** Schema / file-reference failure.
+      *Schema half here; the file-reference half keeps its existing dedicated
+      suite (`level2_invalid_file_reference_capture.rs`). The fixture supplies a
+      **wrong-typed present** value, not a required-missing one: missing values
+      open the biscuit-tui prompt loop on a real TTY, which hangs the capture
+      instead of rendering.*
+- [x] **[L2]** Darkmatter transclusion failure.
+      *The D-3 hazard detector: asserts Darkmatter's own path/hint survive the
+      `Semantic` Claudine wrapper rather than degrading to a flat `Display` line.*
+- [x] **[L2]** Harness pre-flight failure.
+- [x] **[L2]** A deliberately unstructured fallback error — this one **must**
       still hit the generic path; that path stays valid for truly unstructured
       errors.
-- [ ] Each typed case asserts a rendered `StatusBlock`, **never** the generic
+      *Uses argument-shape rejection per §D-10, **not** `--timeout`.*
+- [x] Each typed case asserts a rendered `StatusBlock`, **never** the generic
       `Error:` line.
-- [ ] Cover TTY, `NO_COLOR`, `FORCE_COLOR`, and piped-stderr variants **where
+- [x] Cover TTY, `NO_COLOR`, `FORCE_COLOR`, and piped-stderr variants **where
       their output contracts differ**. Assert plain/piped output carries the same
       information with no ANSI/OSC 8 bytes.
-- [ ] **Cross-route parity**: the two proxy routes assert **identical** code,
+      *Styled-TTY and `NO_COLOR`-TTY are asserted as a **pair** over the same
+      route, so the absence assertions cannot pass vacuously: the styled case
+      proves the red and the OSC 8 link are reachable, which is what makes their
+      absence under `NO_COLOR` a suppression rather than a block that never
+      rendered. Piped-stderr stays headless in `effective_diagnostic_render.rs`.*
+- [x] **Cross-route parity**: the two proxy routes assert **identical** code,
       headline, hint, and available typed resolution detail. Assert
       event/property context **separately**, so intentional route-specific detail
       is not mistaken for drift.
-- [ ] Each route re-asserts its pre-migration exit code, lifecycle event order,
+      *⚠️ **Not satisfiable as written** — the D-2 exit condition has fired. See
+      §D-12. Both routes are now typed and both render a block, but they fail at
+      different stages against different resolvers, so code/headline/hint cannot
+      agree without a routing change D10 forbids here. Phase 7 asserts parity on
+      what typing delivers and **pins the divergence**, so the file-resolution
+      feature's convergence trips the test rather than landing silently.*
+- [x] Each route re-asserts its pre-migration exit code, lifecycle event order,
       and exactly-once emission count.
-- [ ] Snapshots assert **actionable content**, not `to_string()` substrings.
+      *The exit code is read back **through the pane** (`; echo claudine_rc:$?`),
+      not from a child handle — the point is to observe what the interactive
+      surface did. The pane is resized to 200 rows first: `capture()` reads only
+      the visible region, and route 2 renders a full lifecycle ahead of its
+      block, so a default 40-row pane would scroll the earlier emission away and
+      let `emission_count` undercount a real duplicate-emission regression into a
+      pass.*
+- [x] Snapshots assert **actionable content**, not `to_string()` substrings.
       Beware the known L2 trap: a broad `38;2;` match falsely hits OSC 8 links —
       assert red SGR in both semicolon and ITU colon forms.
+      *Keyed on the block's specific red triple (`251;44;54`) in semicolon and
+      both ITU colon forms, never a bare `38;2;` prefix.*
 
 **⛔ Checkpoint 7** — `just test-l2` green. Run via `just` recipes, **not raw
 nextest** — a raw `-p` invocation drops the `!level2_` filterset and produces
 false failures.
+
+**Checkpoint 7 met.** `just test-l2` green (85 tests). The new suite's guards
+were proven against the real fault rather than assumed:
+
+| Guard | Injected fault | Result |
+|---|---|---|
+| `terminal_proxy_resolution_failure_renders_a_status_block` (headless) | reverted the `Report::from(*error)` unbox | FAILED with the exact reported symptom (`Error: failed to load Markdown: …`) |
+| `level2_terminal_proxy_renders_status_block_in_tmux` | same | FAILED |
+| `level2_proxy_routes_…_diverge_on_identity_in_tmux` | same | FAILED |
+
+The remaining L2 cases passed under the injection, which is correct — they
+exercise routes the defect never touched, and is why the terminal-proxy route
+needed its own case rather than trusting route 1's coverage.
+
+### Three pre-existing L2 failures fixed (Phase 5's err.* blast radius)
+
+`just test-l2` was **red on HEAD** before this phase. Phase 5's D7 migration
+flipped `err.kind`/`err.variant` (deprecated aliases of `err.category`/`err.code`)
+at the `from_action_failure` sites, but Checkpoint 5 gates only `just test` — and
+the entire err.* blast radius lands at L2. Phase 7 owns the L2 gate, so it owns
+these:
+
+| Test | Was | Now |
+|---|---|---|
+| `level2_lifecycle_blocked_stack_observes_err_payload` | `LifecycleAction` / `shell_approval` | `composition` / `composition.failed` |
+| `level2_lifecycle_finalize_stack_observes_err_after_blocked` | `shell_approval` | `composition.failed` |
+| `level2_lifecycle_post_start_setup_failure_routes_failure_finalize_with_err` | `LifecycleAction` / `harness_attempt` | `config` / `config.invalid` |
+
+Assertions were updated, not weakened — each still proves the payload reaches
+its stack, which is what the test exists for.
+
+**⚠️ One finding for Phase 8.** The two flips are not equal in quality:
+
+- `harness_attempt` → `config.invalid` is an **improvement**. A malformed
+  `exit_expressions` regex genuinely is a config-validation failure, and
+  `when: err.category == "config"` now matches it; under the synthesized label
+  no faceted clause could.
+- `shell_approval` → `composition.failed` is a **loss of specificity**.
+  `CompositionError::PreFlightFailed(String)` has no arm in `code()`, so it
+  inherits the `_ => "composition.failed"` catch-all. An author who wrote
+  `when: err.variant == "shell_approval"` loses the distinction with no faceted
+  replacement — a shell denial is now indistinguishable from any other
+  uncoded composition failure.
+
+Not fixed here (Rule 3 / D10 — it is a catalog change, not a test change). Phase
+8 should decide whether `PreFlightFailed` earns its own code (e.g.
+`composition.shell_approval`, alongside the existing
+`composition.shell_expansion`).
+
+### Three pre-existing L2 failures NOT fixed (out of scope)
+
+`level2_context_capture::level2_context_{default,values,side_effects}_at_140_fills_cap_in_tmux`
+fail on clean HEAD, verified by stashing all working-tree changes. They assert
+`claudine context` fills 140 columns *minus a 1ch right margin* (138..=139) and
+observe 140 — a `biscuit-terminal` `Table` width-fill drift, upstream of claudine
+and unrelated to error propagation. Left for a ruling on whether the right margin
+is still the contract.
 
 ---
 
@@ -527,6 +634,20 @@ false failures.
       renaming an existing field is out of scope.
 - [ ] Note in `features/2026-07-13-file-resolution/spec.md` that its typed
       transport dependency has landed and the reserved nulls are ready to fill.
+      **Also record the D-12 handoff**: AC5 is confirmed unsatisfiable without
+      converging the two proxy resolvers, and file-resolution is its home. The
+      pinning test `level2_proxy_routes_share_a_typed_surface_but_diverge_on_identity_in_tmux`
+      will fail when that convergence lands — by design; it is the prompt to
+      promote the assertions to full parity.
+- [ ] **Decide whether `CompositionError::PreFlightFailed` earns its own code.**
+      Phase 7 found it inherits the `composition.failed` catch-all, so a shell
+      denial lost the `shell_approval` distinction with no faceted replacement
+      (see Phase 7's finding). Compare `composition.shell_expansion`, which has
+      one.
+- [ ] **Widen D-7's requested reachability check** (per D-13): not just
+      `#[source] Box<T>` fields, but any `Box<T>` reaching `Report::from`/`.into()`
+      where `T` is a registered diagnostic. Phase 7 found that instance by hand
+      after every static guard passed on it.
 - [ ] Move the feature to `features/_completed/2026-07-13-error-propogation/`.
 
 **⛔ Final checkpoint** — `just test`, `just test-l2`, and `just lint` all green

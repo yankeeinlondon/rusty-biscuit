@@ -377,3 +377,76 @@ that work would silently re-open the hole.
 deleted, not extended. The verified rationales its allowlist carried (the
 `Result<_, String>` helper boundaries in `closure.rs` and `lifecycle/executor.rs`)
 are carried forward verbatim into the new entries' reasons.
+
+---
+
+## D-12 — AC5 is confirmed unsatisfiable; the D-2 exit condition has fired
+
+**Finding (Phase 7).** D-2 predicted from characterization that the two proxy
+routes could not be made to agree on identity by typing alone, and set an exit
+condition: "If Phase 7 finds AC5 unsatisfiable without converging the resolvers,
+that is the trigger to raise the separate spec." Phase 7 drove both routes
+through a real terminal and confirms it. After the full migration:
+
+| Route | Code | Headline | Fails at |
+|---|---|---|---|
+| `initialize` proxy | `composition.invalid_file_reference` | Unresolvable file reference | resolution |
+| terminal proxy | `composition.failed` | failed to load Markdown | the adopted-document read |
+
+Both are now typed and both render a `StatusBlock` — that part of AC5 landed.
+But they still report **different stages of different operations**, so code,
+headline, and hint cannot agree. No amount of wrapping changes this; only
+converging the resolvers does, and D10 forbids that routing change here.
+
+**Ruling.** Phase 7 asserts parity on everything typing delivers (block
+rendering, exit code, emission count, naming the unresolvable target) and
+**pins the divergence** in
+`level2_proxy_routes_share_a_typed_surface_but_diverge_on_identity_in_tmux`.
+Pinning beats omitting: when the file-resolution feature converges the
+resolvers, that test fails, and the failure is the prompt to promote the
+assertions to full AC5 parity. An omitted assertion would let the convergence
+land silently and leave AC5 unverified forever.
+
+**Handoff.** `features/2026-07-13-file-resolution/` is the natural home for the
+convergence (D-2's note). Phase 8 records the dependency there.
+
+---
+
+## D-13 — `Report::from(Box<CompositionError>)` was a live instance of D-7
+
+**Finding (Phase 7).** D-7 documented that a `Box<Concrete>` in the cause chain
+is undowncastable, listed the `#[source] Box<…>` fields it knew about, and asked
+Phase 6 for a companion reachability check. It did not anticipate the *other*
+way a `Box` enters a chain: as the **root** of the `Report` itself.
+
+`preflight_proxy_target` returns `Result<(), Box<CompositionError>>`, and
+`loop_control.rs`'s terminal-proxy arm did `error.into()` on it. `Report::from`
+accepts `Box<CompositionError>` — `Box<E: Error>` is itself `Error` — so the
+report's root had `TypeId` of `Box<CompositionError>`, and `as_diagnostic`'s
+downcast allowlist could not see the `CompositionError` inside. Worse, `Box`'s
+own `source()` delegates to the inner error's *source*, so the walk skipped past
+it at every depth.
+
+**Why every existing guard missed it.** This is the point worth keeping:
+
+- The **source-parity test** passed — the registry *did* list `CompositionError`.
+  Registration was never the problem; reachability was.
+- The **transport guard** passed — no typed value was collapsed to prose. The
+  typed value was retained perfectly, and still could not be found.
+- The **Phase 5 headless suite** passed — it exercised the `initialize` route,
+  which returns its error unboxed.
+
+The bug was invisible to every static check and only surfaced when a real
+terminal ran the second proxy route end-to-end. That is the argument for L2
+existing at all.
+
+**Ruling.** Fixed at the site (`Report::from(*error)`), which is behavior-neutral
+on the three pinned properties and is the same class of defect as the motivating
+incident. Locked by
+`effective_diagnostic_render::terminal_proxy_resolution_failure_renders_a_status_block`
+(headless, proven to fail on revert) and the L2 route capture.
+
+**Open for a follow-up.** D-7's requested Phase 6 companion check should be
+widened: not just `#[source] Box<T>` fields, but **any `Box<T>` reaching
+`Report::from`/`.into()` where `T` is a registered diagnostic**. This instance
+was found by hand; the next one should not have to be.
