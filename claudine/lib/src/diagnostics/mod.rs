@@ -46,13 +46,20 @@
 //! [`from_harness_error`]: crate::composition::lifecycle_context::LifecycleErrorInfo::from_harness_error
 //! [`LifecycleErrorInfo::from_action_failure`]: crate::composition::lifecycle_context::LifecycleErrorInfo::from_action_failure
 
+mod discovery;
 mod error_kind;
 mod facets;
 mod registry;
 
+pub use discovery::{
+    DiagnosticRole, EffectiveDiagnostic, MAX_SELECTION_DEPTH, as_diagnostic,
+    select_effective_diagnostic,
+};
 pub use error_kind::code_for_error_kind;
 pub use facets::{Category, Disposition, Origin, Severity};
 pub use registry::{CODES, CodeSpec, code_spec};
+
+use std::error::Error as StdError;
 
 use serde_json::{Map, Value};
 
@@ -98,6 +105,27 @@ pub trait Diagnostic: BlockError {
     /// catalog specifies a non-default (e.g. `provider.context_pressure`).
     fn severity(&self) -> Severity {
         self.disposition().default_severity()
+    }
+
+    /// Whether this value speaks for the failure or defers to its cause.
+    ///
+    /// Defaults to [`DiagnosticRole::Semantic`]: owning the classification is
+    /// the norm, and delegating it is the deliberate act. Override only for a
+    /// wrapper whose `code`/`detail`/`status_block` all forward to an inner
+    /// diagnostic.
+    fn role(&self) -> DiagnosticRole {
+        DiagnosticRole::Semantic
+    }
+
+    /// The next cause [`select_effective_diagnostic`] should visit.
+    ///
+    /// Defaults to [`Error::source`](StdError::source). Override where a
+    /// wrapper holds its meaningful cause in a field `thiserror` does not
+    /// expose as a source — `CompositionError`'s boxed wrappers keep `inner`
+    /// off `#[source]` so `color_eyre`'s cause-chain fallback does not print
+    /// the same `Display` text twice.
+    fn diagnostic_source(&self) -> Option<&(dyn StdError + 'static)> {
+        StdError::source(self)
     }
 }
 

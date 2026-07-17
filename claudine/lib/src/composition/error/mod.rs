@@ -21,7 +21,9 @@ use serde_json::{Value, json};
 
 use super::frontmatter_excerpt::FrontmatterExcerpt;
 use super::types::{ResolutionMode, ResolvedCompositionSource, SessionInteractivitySource};
-use crate::diagnostics::{Category, Diagnostic, Disposition, Origin, code_spec, null_detail_for};
+use crate::diagnostics::{
+    Category, Diagnostic, DiagnosticRole, Disposition, Origin, code_spec, null_detail_for,
+};
 use crate::provider::Provider;
 use thiserror::Error;
 

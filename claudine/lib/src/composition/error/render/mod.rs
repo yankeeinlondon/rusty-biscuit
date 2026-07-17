@@ -204,10 +204,36 @@ fn file_reference_detail(diagnostic: &FileReferenceDiagnostic) -> Value {
 }
 
 impl Diagnostic for CompositionError {
+    fn role(&self) -> DiagnosticRole {
+        match self {
+            // The only two variants that forward `code`, `detail`, *and*
+            // `status_block` to `inner` — they add a render appendix and an
+            // emission marker respectively, never an identity of their own.
+            CompositionError::WithFrontmatter { .. }
+            | CompositionError::LifecycleEvaluationAlreadyEmitted { .. } => {
+                DiagnosticRole::Transparent
+            }
+            // Every other variant owns its code, including the ones that carry
+            // a typed `MarkdownError`: a Darkmatter cause supplies no facets,
+            // so delegating to it would leave the failure unclassified.
+            _ => DiagnosticRole::Semantic,
+        }
+    }
+
+    fn diagnostic_source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            CompositionError::WithFrontmatter { inner, .. }
+            | CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => Some(inner.as_ref()),
+            other => std::error::Error::source(other),
+        }
+    }
+
     fn code(&self) -> &'static str {
         match self {
-            // Transparent wrapper: classify by the cause it carries (§6).
-            CompositionError::WithFrontmatter { inner, .. } => inner.code(),
+            // Transparent wrappers: classify by the cause they carry (§6), the
+            // same delegation their `status_block` and `Display` already do.
+            CompositionError::WithFrontmatter { inner, .. }
+            | CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => inner.code(),
             CompositionError::ComposeFailed(md) => compose_failed_code(md),
             CompositionError::InvalidReference { .. } | CompositionError::FileNotFound { .. } => {
                 "composition.invalid_file_reference"
@@ -271,7 +297,10 @@ impl Diagnostic for CompositionError {
         let mut base = null_detail_for(self.code());
 
         match self {
-            CompositionError::WithFrontmatter { inner, .. } => return inner.detail(),
+            CompositionError::WithFrontmatter { inner, .. }
+            | CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => {
+                return inner.detail();
+            }
             CompositionError::ComposeFailed(MarkdownError::Interpolation {
                 cause,
                 expression,
