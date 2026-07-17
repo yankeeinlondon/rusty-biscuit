@@ -186,6 +186,24 @@ docs_updated_during_phase_10:
     - claudine/features/2026-07-13-proxy-with/plan.md
 docs_created_during_phase_10: []
 skills_files_updated_during_phase_10: []
+# Phase 11 is PARTIAL: the budget-scoping group (tasks 5 and 7) is complete and
+# fixed a real proxy-boundary defect. The session-compatibility-key group (tasks
+# 1-4 and 6) is blocked on Phase 9's R6 — the key's facets are pre-loop launch
+# values, not document-derived ones, so no facet can move and the checkpoint's
+# per-facet L2s cannot be written. `phase` stays at 8.
+source_files_during_phase_11:
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/budget_scoping.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+docs_updated_during_phase_11:
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_11: []
+skills_files_updated_during_phase_11: []
 packages:
     - claudine-cli
 ---
@@ -1183,20 +1201,97 @@ second partial re-entry path.
 - [ ] On key change after a canonical refresh, fail resume with a typed
       diagnostic that **names the incompatible facets** and recommends retry.
       Never mix a live session with a newly prepared launch plan.
-- [ ] Scope retry/resume budgets to the active document iteration; proxy or the
+- [x] Scope retry/resume budgets to the active document iteration; proxy or the
       next loop iteration resets them while invocation-wide hop/cycle accounting
       continues. Replacing the provider-attempt slice must retain and decrement
       the current budgets, so a retry/resume cannot reset its own limit. Verify
       `ControlBudgets` / `control_budget_for` (`control.rs:176`) reset at the
       documented boundary.
+      **The verification found a real defect.** The proxy boundary did not reset:
+      `ControlBudgets` was built once in `HarnessLoopState::new` and none of the
+      six `coordinator.adopt` sites touched it. Because `budget_for` only
+      establishes a ceiling into an *empty* slot (`get_or_insert_with`), a
+      ceiling the router earned silently swallowed the target's own
+      `max_attempts` — a target's `retry: {max_attempts: 3}` at attempt 2 was
+      denied outright against the router's stale ceiling of 2. Fixed at the one
+      commit point: `adopt` now takes `&mut ControlBudgets` and calls
+      `reset_for_document()`, so a hand-off cannot be committed without retiring
+      the source's ceilings. The next-loop-iteration boundary already held —
+      each iteration calls `run_harness_loop` afresh.
 - [ ] L1: retry starts a fresh session; resume retains only an identical-key
       session; proxy clears session and active-document execution state.
-- [ ] L1: budgets persist across retry/resume attempts, then reset at the proxy
+- [x] L1: budgets persist across retry/resume attempts, then reset at the proxy
       or next-loop-iteration boundary while hop/cycle state continues.
+      `loop_control::tests::budget_scoping`, 5 tests. The three asserting the
+      reset were verified to fail with `reset_for_document()` removed (the
+      behavioral ones report `got Fallthrough`); the other two lock behavior
+      that already held — a retry cannot re-arm its own ceiling, and a refused
+      hop leaves the still-active source's ceilings intact.
 
-**Validation checkpoint 11**
-- `just test` green.
-- One L2 per compatibility-key facet asserts resume refuses and names that facet.
+**Validation checkpoint 11** — **NOT PASSED. The budget-scoping group landed and
+fixed a real defect; the session-compatibility-key group (tasks 1–4, 6) is
+blocked on Phase 9's R6, transitively via Phase 10.**
+
+- `just test` green for `claudine` (3510), `claudine-catalog-types` (21),
+  `claudine-contract` (47), and `claudine-cli` (2014); `just test-l2` green
+  (135); `just lint` green.
+- `claudine-gen::drift::committed_generated_artifacts_match_phase_1_byte_baseline`
+  still fails on its missing archived baseline fixture (`drift.rs:32` — "phase 1
+  artifact baseline must be readable: NotFound"). Absent at `HEAD`, untouched by
+  this phase, which changed no file under `claudine/gen` (`git status
+  claudine/gen` is empty). Same as checkpoints 6–9.
+- `dispatch-inventory.json` regenerated: sites 1357 → 1363. The six new sites are
+  all `Provider::Goose` `direct-ref`/`reference` rows in the new test file —
+  no new `match Provider` dispatch.
+- The checkpoint's named gate — one L2 per compatibility-key facet — is **not
+  written**, because no facet can move. See below.
+
+**Budgets (tasks 5, 7) — done, and the "verify" task found a live bug.** The
+proxy boundary did not reset budgets, so a proxy target's `retry`/`resume`
+`max_attempts` was silently ignored in favor of whatever ceiling the router had
+already earned (`get_or_insert_with` only fills an empty slot). A router that
+spent `retry: {max_attempts: 1}` handed its target a ceiling of 2; the target's
+own `retry: {max_attempts: 3}` at attempt 2 was denied outright. Fixed at the one
+commit point rather than at the six `adopt` call sites: `adopt` now takes
+`&mut ControlBudgets` and calls `reset_for_document()`, so the reset and the
+identity change are one operation and a hand-off cannot be committed without it.
+This is the same shape as the state `adopt` already discarded (tail, resume
+follow-up, session) — the budgets were simply the one piece of active-document
+execution state living on the loop rather than on `HarnessPromptState`.
+
+**The session compatibility key (tasks 1–4, 6) cannot be landed on R6-less
+state.** Not effort — the facets do not exist as document-derived values:
+
+- The key's required facets map one-to-one onto pre-loop `HarnessLoopCtx` fields
+  (`loop_control.rs:49-81`): `provider`, `profile`/`binary_path`, `child_cwd`,
+  `use_structured`, `base_args` (which carries model via
+  `resolve_model_and_validate` and system prompt/MCP via
+  `prepare_environment_and_mcp`), and `base_env`. Every one is computed **once,
+  before the loop**, and held as an `&'a` borrow or a `Copy` scalar. None is a
+  function of the prepared document.
+- Task 3 puts the key **on the prepared document**; task 4 fires when the key
+  changes **after a canonical refresh**. Recomputing the key from a refreshed
+  document *is* R6's rebuild. Without it the key is byte-identical by
+  construction across every refresh, task 4's branch is provably dead code, and
+  the checkpoint's per-facet L2s cannot be written — there is no input that makes
+  a facet move.
+- **The available shortcut is worse than the gap.** Deriving the key from the
+  materialized frontmatter (`agent:`/`model:`/`mcp:`) would make facets move, but
+  it is exactly the "second partial re-entry path" this phase's preamble bans:
+  the derived facets (effective MCP server set, system-prompt *content*, child
+  CWD, permission/tool mode) are outputs of the three pipeline phases, not raw
+  frontmatter, so the key would be honest about three facets and fabricated about
+  five. Worse, it would refuse a resume and recommend a retry that — R6 being
+  absent — relaunches with the *identical* stale plan. A diagnostic naming a
+  change the run cannot actually make is a worse failure than the silence it
+  replaces.
+
+Recommended order is unchanged from checkpoints 9 and 10: land R6 / the relaunch
+seam, then Phase 10, then tasks 1–4 and 6 here. Phase 9's candidate design 1
+(`LaunchInputs` + `TargetLaunchRebuilder`) is what task 3 needs specifically —
+it makes the launch properties functions of (immutable invocation state,
+prepared document), which is precisely the signature a document-scoped
+compatibility key requires.
 
 ---
 
