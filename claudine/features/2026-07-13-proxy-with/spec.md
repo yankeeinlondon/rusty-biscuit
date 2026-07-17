@@ -4,7 +4,7 @@ status: draft
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-07-16
-review_iterations: 2
+review_iterations: 3
 depends_on:
     - ../_completed/2026-05-12-lifecycle/spec.md
     - ../_completed/2026-06-26-positional-and-key-value/spec.md
@@ -1006,11 +1006,23 @@ then compare:
 - lifecycle event order and target initialize count;
 - loop iteration count and mutations;
 - closure target, sequence-step identity, and stdout/stderr routing;
-- shell approval/execution bytes; and
-- typed failure identity and rendered diagnostic.
+- shell approval/execution bytes;
+- typed failure identity and rendered diagnostic; and
+- overlay-value non-disclosure: a hand-off whose `with:` carries a
+  secret-shaped value renders its status through `TerminalRenderable`
+  components without the value reaching the pane, while the target lifecycle
+  still consumes it (acceptance criterion 30, asserted on captured pane text —
+  not a Level 1 `Debug`-redaction proxy).
 
-Use a fake provider and platform-neutral temporary paths so the matrix runs on
-macOS, Windows, and Linux.
+Use a fake provider and self-contained temporary paths. The equivalence matrix
+is a real-terminal (tmux) suite and therefore runs under the repository's
+ratified Level 2 platform policy (`docs/testing-strategy.md` → "Platform
+Coverage (CI)"): Linux (tmux) and macOS (opt-in). The whole
+`level2_lifecycle_control.rs` file is `#![cfg(unix)]` by construction — its fake
+providers are `#!/bin/sh` scripts and it drives a Unix PTY — so Windows does not
+run the L2 matrix (the harness is absent there by policy); Windows proxy
+coverage is the Level 1 suite, which is platform-neutral. Do not claim a
+cross-platform L2 leg the ratified policy does not provide.
 
 Include the shipped behavior that motivated the feature: route
 `prompts/implement.md` to `prompts/_implement/implement-plan.md` with a
