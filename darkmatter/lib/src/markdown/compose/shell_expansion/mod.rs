@@ -2837,22 +2837,30 @@ name: world
     /// Every early return from `prepare_directive`'s approval flow must release
     /// the allow-once reservations it took.
     ///
-    /// The user-observable failure of a leak is not a stray set entry: it is the
-    /// *next* composition of that same command blocking for
-    /// `RESERVATION_WAIT_TIMEOUT` (30s) and then failing as an approval conflict
-    /// the user never caused. Each test therefore drives a second, same-command
-    /// composition on the same runtime and asserts that waiter's outcome.
+    /// A leak is precisely a normalized command left in the runtime's
+    /// `pending_allow_once` set once the flow that reserved it has returned; its
+    /// user-observable cost is the *next* composition of that command blocking
+    /// for `RESERVATION_WAIT_TIMEOUT` (30s) and then failing as an approval
+    /// conflict the user never caused. These tests therefore assert the
+    /// reservation set itself and then compose the same command again to pin the
+    /// user-observable consequence. Neither oracle measures elapsed time: a
+    /// composition's own preparation cost is unrelated to whether a reservation
+    /// was released, so timing one conflates the two.
     mod reservation_cleanup {
         use super::*;
         use biscuit_terminal::errors::SourceContext;
         use std::path::{Path, PathBuf};
         use std::sync::{Condvar, Mutex};
-        use std::time::{Duration, Instant};
+        use std::time::Duration;
 
-        /// Ceiling for a waiter that must not be blocked at all. Well under
-        /// `RESERVATION_WAIT_TIMEOUT`, so a leak is unambiguous rather than
-        /// slow-machine noise.
-        const WAITER_BUDGET: Duration = Duration::from_secs(5);
+        /// Ceiling for a waiter that the failing flow's release must wake.
+        ///
+        /// Unlike a composition's total cost, the two outcomes here are far
+        /// apart and neither depends on host speed: a notified waiter resumes in
+        /// microseconds, an un-notified one parks for the full 30s
+        /// `RESERVATION_WAIT_TIMEOUT`. `prepare_directive` performs no I/O on
+        /// this path, so contention cannot push a healthy waiter near this bound.
+        const NOTIFICATION_BUDGET: Duration = Duration::from_secs(10);
 
         struct FixedHandler(ShellApprovalDecision);
 
@@ -2919,33 +2927,35 @@ name: world
             std::fs::set_permissions(path, perms).unwrap();
         }
 
-        /// Composes `command` again on the same runtime and asserts the waiter
-        /// outcome: prompt, and approved rather than rejected as a conflict.
-        fn assert_command_is_still_approvable(
+        /// Asserts the failed flow released every reservation it took, then that
+        /// composing `command` again still prompts and is approved rather than
+        /// rejected as a conflict.
+        ///
+        /// The reservation-set assertion is the oracle and runs first: it is the
+        /// exact definition of the defect, and failing on it reports the leaked
+        /// command by name instead of letting the second composition stall for
+        /// the full 30s `RESERVATION_WAIT_TIMEOUT`.
+        fn assert_reservations_released(
             runtime: &mut ShellExpansionRuntime,
             paths: &ShellPolicyPaths,
             command: &str,
         ) {
-            let start = Instant::now();
-            let prepared = prepare_directive(
+            let leaked = runtime.pending_allow_once_for_test();
+            assert!(
+                leaked.is_empty(),
+                "the failed flow left {leaked:?} reserved: the next composition of each would \
+                 block for RESERVATION_WAIT_TIMEOUT and then fail as an approval conflict the \
+                 user never caused"
+            );
+
+            if let Err(err) = prepare_directive(
                 &directive(command),
                 &options(ShellApprovalDecision::AllowOnce),
                 paths,
                 runtime,
-            );
-            let elapsed = start.elapsed();
-
-            if let Err(err) = prepared {
-                panic!(
-                    "a released command must not surface an approval conflict; got: {err} \
-                     (after {elapsed:?})"
-                );
+            ) {
+                panic!("a released command must not surface an approval conflict; got: {err}");
             }
-            assert!(
-                elapsed < WAITER_BUDGET,
-                "the second composition blocked for {elapsed:?}: a leaked reservation made it \
-                 wait on the failed flow"
-            );
         }
 
         /// Error class 1 — the approval handler returns an error before any
@@ -2970,7 +2980,7 @@ name: world
                 "got: {err}"
             );
 
-            assert_command_is_still_approvable(&mut runtime, &paths, "echo beta");
+            assert_reservations_released(&mut runtime, &paths, "echo beta");
         }
 
         /// Error class 2 — `append_whitelist_exact` fails mid-chain. `echo
@@ -2995,7 +3005,7 @@ name: world
                 "got: {err}"
             );
 
-            assert_command_is_still_approvable(&mut runtime, &paths, "echo beta");
+            assert_reservations_released(&mut runtime, &paths, "echo beta");
         }
 
         /// Error class 3 — `append_whitelist_prefix` fails. This arm releases
@@ -3021,7 +3031,7 @@ name: world
                 "got: {err}"
             );
 
-            assert_command_is_still_approvable(&mut runtime, &paths, "pwd");
+            assert_reservations_released(&mut runtime, &paths, "pwd");
         }
 
         /// Error class 4 — `append_blacklist_exact` fails mid-chain.
@@ -3044,7 +3054,7 @@ name: world
                 "got: {err}"
             );
 
-            assert_command_is_still_approvable(&mut runtime, &paths, "echo beta");
+            assert_reservations_released(&mut runtime, &paths, "echo beta");
         }
 
         /// The release must also notify a peer already parked in
@@ -3065,9 +3075,13 @@ name: world
                     let (lock, signal) = &*self.entered;
                     *lock.lock().unwrap() = true;
                     signal.notify_all();
-                    // Let the peer park on the reservation before the error
-                    // releases it. Parking later is also correct — it then
-                    // reserves the command itself — so this cannot flake.
+                    // Hold the reservation open long enough for the peer to
+                    // park on it. The waiter's fixtures are built before this
+                    // signal, so it reaches `reserve_allow_once` within
+                    // microseconds and 200ms is ample. A late peer would still
+                    // pass — it would simply reserve the command itself — so
+                    // this cannot flake; it would just stop exercising the
+                    // notification, which is why the hoisting matters.
                     std::thread::sleep(Duration::from_millis(200));
                     Err(handler_error())
                 }
@@ -3077,6 +3091,17 @@ name: world
             let paths = policy_paths(&temp);
             let runtime = ShellExpansionRuntime::new();
             let entered = Arc::new((Mutex::new(false), Condvar::new()));
+
+            // Build the waiter's fixtures up front. `ComposeOptions::new`
+            // captures a runtime context — host and repo discovery costing
+            // seconds, far longer than the window the approver holds the
+            // reservation open. Paying it after the signal below would let the
+            // approver release before the waiter ever reached
+            // `reserve_allow_once`, so the test would pass without a waiter ever
+            // parking — proving nothing about notification. It also keeps that
+            // cost out of `NOTIFICATION_BUDGET`.
+            let waiter_directive = directive("echo shared");
+            let waiter_options = options(ShellApprovalDecision::AllowOnce);
 
             let mut approver_runtime = runtime.clone_for_child();
             let approver_paths = paths.clone();
@@ -3104,26 +3129,42 @@ name: world
                 }
             }
 
+            // The waiter runs on its own thread so a missed notification is
+            // reported here rather than stalling the test thread for the full
+            // 30s `RESERVATION_WAIT_TIMEOUT` — long enough that nextest's
+            // terminate-after ceiling would kill the run first and report a
+            // timeout instead of the real defect. Its fixtures are already
+            // built, so it reaches `reserve_allow_once` and parks immediately.
+            let (outcome_tx, outcome_rx) = std::sync::mpsc::channel();
             let mut waiter_runtime = runtime.clone_for_child();
-            let start = Instant::now();
-            let prepared = prepare_directive(
-                &directive("echo shared"),
-                &options(ShellApprovalDecision::AllowOnce),
-                &paths,
-                &mut waiter_runtime,
-            );
-            let elapsed = start.elapsed();
+            let waiter_paths = paths.clone();
+            std::thread::spawn(move || {
+                let prepared = prepare_directive(
+                    &waiter_directive,
+                    &waiter_options,
+                    &waiter_paths,
+                    &mut waiter_runtime,
+                );
+                let _ = outcome_tx.send(prepared.map(|_| ()).map_err(|err| err.to_string()));
+            });
+
+            match outcome_rx.recv_timeout(NOTIFICATION_BUDGET) {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => panic!(
+                    "the waiter must be notified and approved, not left to time out into a \
+                     conflict; got: {err}"
+                ),
+                Err(_) => panic!(
+                    "the waiter was still parked after {NOTIFICATION_BUDGET:?}: the failed flow \
+                     released its reservation without waking it, so the waiter is sitting out the \
+                     full RESERVATION_WAIT_TIMEOUT"
+                ),
+            }
             approver.join().unwrap();
 
-            if let Err(err) = prepared {
-                panic!(
-                    "the waiter must be notified and approved, not left to time out into a \
-                     conflict; got: {err} (after {elapsed:?})"
-                );
-            }
             assert!(
-                elapsed < WAITER_BUDGET,
-                "the waiter blocked for {elapsed:?}: the failed flow never notified it"
+                runtime.pending_allow_once_for_test().is_empty(),
+                "the notified waiter's own approval must leave the reservation set clean"
             );
         }
     }

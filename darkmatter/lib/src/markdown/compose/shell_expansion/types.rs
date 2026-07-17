@@ -1155,6 +1155,22 @@ impl ShellExpansionRuntime {
         self.reservation_done.notify_all();
     }
 
+    /// The normalized commands currently held as pending allow-once
+    /// reservations, sorted.
+    ///
+    /// Test seam for the exact definition of a leaked reservation: a command
+    /// left in `pending_allow_once` after the flow that reserved it has
+    /// returned, with no owner left to complete it. Asserting this set beats
+    /// timing a subsequent composition, which cannot distinguish a leak from
+    /// ordinary preparation cost.
+    #[cfg(test)]
+    pub(crate) fn pending_allow_once_for_test(&self) -> Vec<String> {
+        let shared = self.shared.lock().unwrap();
+        let mut pending: Vec<String> = shared.pending_allow_once.iter().cloned().collect();
+        pending.sort();
+        pending
+    }
+
     pub(crate) fn persist_whitelist_exact(&mut self, normalized: String) {
         let mut shared = self.shared.lock().unwrap();
         Arc::make_mut(&mut shared.whitelist)
