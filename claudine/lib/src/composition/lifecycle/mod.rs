@@ -50,7 +50,8 @@ pub use audio::*;
 use audio::run_blocking_with_timeout;
 pub use parse::{parse_lifecycle_config, scan_removed_validation_keys};
 pub use validate::{
-    collect_lifecycle_shell_commands, validate_no_err_in_no_error_events,
+    collect_lifecycle_shell_commands, collect_lifecycle_shell_commands_for,
+    validate_no_err_in_no_error_events,
     validate_no_interpolation_leaks, validate_no_undefined_lifecycle_variables,
 };
 pub(crate) use validate::first_undefined_stack_variable;

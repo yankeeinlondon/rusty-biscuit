@@ -95,7 +95,7 @@ pub use looping::{
 };
 pub use looping::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
 pub use mismatch::{capture_frontmatter_yaml, is_inline_sequence_mismatch};
-pub use preflight::{PreFlightResult, resolve_shell_approvals};
+pub use preflight::{PreFlightResult, resolve_lifecycle_shell_approvals, resolve_shell_approvals};
 pub use hints::{parse_interactive_hint, parse_selection_hints_from_frontmatter};
 pub use prepare::{
     DocumentEntryReason, DocumentPreparation, LoopOwnership, PrepareOptions, PreparationStages,

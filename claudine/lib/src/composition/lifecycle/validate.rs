@@ -761,6 +761,28 @@ pub fn collect_lifecycle_shell_commands(
     commands
 }
 
+/// [`collect_lifecycle_shell_commands`], restricted to `signals`.
+///
+/// The property path a surface carries is rooted at its event
+/// (`initialize.stack[0].action[1].command`), so the event name is the filter.
+pub fn collect_lifecycle_shell_commands_for(
+    lifecycle: &LifecycleConfig,
+    signals: &[LifecycleSignal],
+) -> Vec<(String, String)> {
+    let prefixes: Vec<String> = signals
+        .iter()
+        .map(|signal| format!("{}.", signal.property_name()))
+        .collect();
+    collect_lifecycle_shell_commands(lifecycle)
+        .into_iter()
+        .filter(|(_, property)| {
+            prefixes
+                .iter()
+                .any(|prefix| property.starts_with(prefix.as_str()))
+        })
+        .collect()
+}
+
 /// Render an [`Expr`] to its literal string value when it is a string
 /// literal, a bare variable, or a number/bool literal. `None` otherwise
 /// (complex expressions are not collected — they depend on runtime state
