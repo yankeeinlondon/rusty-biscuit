@@ -83,6 +83,12 @@ pub mod terminal;
 
 pub mod testing;
 
+/// Retained, test-only measurement harness for the 2026-07-15 performance
+/// follow-up's crate-private checkpoints. Adds no public API; see the module
+/// docs for why a `benches/*` target cannot reach those functions.
+#[cfg(test)]
+mod perf_harness;
+
 pub use markdown::schemas::{
     darkmatter_base_json_schema, darkmatter_base_json_schema_ref, darkmatter_base_schema,
 };

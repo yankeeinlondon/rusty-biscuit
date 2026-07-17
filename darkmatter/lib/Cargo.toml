@@ -200,3 +200,7 @@ harness = false
 [[bench]]
 name = "phase10_residuals"
 harness = false
+
+[[bench]]
+name = "phase11_evidence"
+harness = false
