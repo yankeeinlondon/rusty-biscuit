@@ -167,11 +167,24 @@ mod unix {
         );
     }
 
-    /// Record repeated-construction latency (warm-up + samples + dispersion)
-    /// for the feature-local evidence index. The probe absorbs the one-time
-    /// cold OSC round-trip in its warm-up loop, then times cached repeated
-    /// constructions. This test emits the statistics on stdout for evidence
-    /// harvesting and sanity-asserts that repeated construction is cheap.
+    /// Fifty-three `Terminal` constructions (3 warm-up + 50 timed) in one
+    /// process emit exactly one OSC 10 request. Scales the sibling test's
+    /// three-construction proof up to the sample count the evidence index
+    /// quotes, so the numbers it prints are demonstrably cache-hit costs.
+    ///
+    /// This test **does not gate on wall-clock time.** A duration threshold
+    /// measured on a contended host tests the host, not the cache: the earlier
+    /// `median < 50 ms` bound made this test flaky under parallel area-test
+    /// load. The cache's user-observable contract is "construction N+1 does no
+    /// tty I/O", and the request count asserts that directly and
+    /// deterministically — it cannot be perturbed by scheduler noise, and it
+    /// still goes red the moment the cache is removed (53 requests, not 1).
+    ///
+    /// The latency statistics are still printed for evidence harvesting; the
+    /// retained measurement of record (warm-up, sample count, and dispersion,
+    /// per spec Work 2.3) lives in the feature's benchmark run directory
+    /// `benchmarks/raw/f2f3f21-terminal-evidence/run-20260716T065617/`, not in
+    /// this assertion.
     #[test]
     fn terminal_repeated_construction_latency() {
         let mut session = spawn_with_env(&[
@@ -191,23 +204,34 @@ mod unix {
             &mut session,
             &mut answers,
             "terminal_latency_done",
-            Duration::from_secs(20),
+            // Liveness bound, not a performance gate: 53 cached constructions
+            // are ~50 ms of work, so this is ~600x headroom. It is generous
+            // enough that a broken cache still reaches the count assertion
+            // below (53 unanswered round-trips at the 100 ms query timeout)
+            // and fails there, with the diagnostic, rather than here.
+            Duration::from_secs(30),
         );
 
         let text = String::from_utf8_lossy(&collected);
+        // Locate the key anywhere in the line, not at the start: the probe's
+        // first stdout line is preceded on the wire by the raw `ESC ] 10 ; ?
+        // BEL` query bytes the library wrote to the same PTY.
         let field = |key: &str| -> Option<String> {
-            text.lines()
-                .find_map(|line| line.trim().strip_prefix(key).map(|v| v.to_string()))
+            text.lines().find_map(|line| {
+                let idx = line.find(key)?;
+                Some(line[idx + key.len()..].trim().to_string())
+            })
         };
 
         let samples: usize = field("terminal_latency_samples=")
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
-        let median_ns: f64 = field("terminal_latency_median_ns=")
+        let warmup: usize = field("terminal_latency_warmup=")
             .and_then(|v| v.parse().ok())
-            .unwrap_or(f64::INFINITY);
+            .unwrap_or(0);
 
         assert_eq!(samples, 50, "expected 50 timed samples; raw: {text}");
+        assert_eq!(warmup, 3, "expected 3 warm-up constructions; raw: {text}");
 
         // Emit the whole stats block for evidence harvesting (visible with
         // `--no-capture`).
@@ -217,14 +241,26 @@ mod unix {
             }
         }
 
-        // Sanity: repeated (cached) construction must be far cheaper than a
-        // single un-cached OSC round-trip (two 100 ms timeouts). A regression
-        // that dropped the cache would re-pay the tty round-trip on every
-        // construction and blow past this loose bound.
-        assert!(
-            median_ns < 50_000_000.0,
-            "repeated-construction median {median_ns} ns is implausibly high — cache may be broken; \
-             raw: {text}"
+        // The gate: 53 constructions, one request. Without `TEXT_COLOR_CACHE`
+        // every construction re-queries `/dev/tty`, so this reads 53.
+        let constructions = warmup + samples;
+        let osc10_requests = count_occurrences(&collected, OSC10_QUERY);
+        assert_eq!(
+            osc10_requests,
+            1,
+            "expected exactly one OSC 10 request across {constructions} Terminal constructions, \
+             saw {osc10_requests} — the foreground-color cache is not being reused; raw: {text}"
+        );
+
+        // Cross-check the probe's in-process tally against this test's
+        // master-side count, for the same reason the sibling test does: it
+        // proves the tracing-event counter the Level-2 proof depends on is live
+        // in this build rather than silently stuck at its initial value.
+        let probe_osc10 = probe_actual_queries(&collected, 10);
+        assert_eq!(
+            probe_osc10, osc10_requests,
+            "probe counted {probe_osc10} OSC 10 round-trips but the PTY master saw \
+             {osc10_requests}; raw: {text}"
         );
     }
 }
