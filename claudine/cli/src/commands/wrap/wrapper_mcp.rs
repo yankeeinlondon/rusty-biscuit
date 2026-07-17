@@ -42,9 +42,8 @@ pub(crate) fn merge_injected_env_into_plan(
                 .env
                 .get(std::ffi::OsStr::new(KEY))
                 .map(|v| v.as_os_str());
-            let overlay = serde_json::from_str(&v).map_err(|e| {
-                eyre!("MCP injection produced invalid OPENCODE_CONFIG_CONTENT: {e}")
-            })?;
+            let overlay = serde_json::from_str(&v)
+                .wrap_err("MCP injection produced invalid OPENCODE_CONFIG_CONTENT")?;
             let merged = claudine::opencode_config::merge_overlay(current, overlay)
                 .wrap_err("failed to merge OPENCODE_CONFIG_CONTENT")?;
             env_plan.env.insert(k.into(), merged.into());

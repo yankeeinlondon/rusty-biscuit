@@ -92,11 +92,14 @@ fn rendering_lifecycle_err_and_snapshot_agree_on_one_diagnostic() {
         .expect("a diagnostic is selected");
     let snapshot = DiagnosticSnapshot::from_diagnostic(selected);
     let info = LifecycleErrorInfo::from_composition_error(&err);
-    let facets = info.facets.as_ref().expect("typed error projects facets");
+    let embedded = info.snapshot.as_ref().expect("typed error projects a snapshot");
 
     // One code across all three surfaces.
-    assert_eq!(facets.code, selected.code());
+    assert_eq!(embedded.code, selected.code());
     assert_eq!(snapshot.code, selected.code());
+    // `err.*` embeds exactly the snapshot the selection produced — one
+    // projection, not a parallel rebuild that could drift.
+    assert_eq!(**embedded, snapshot);
     // One message across `err.msg` and the snapshot.
     assert_eq!(info.msg, snapshot.message);
     // And the terminal rendering is that same diagnostic's own block — not a

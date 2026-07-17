@@ -161,9 +161,8 @@ pub(crate) fn detect_wrap_startup_or_fallback(
         Ok(startup) => Ok(startup),
         Err(error) => {
             if repo_requested {
-                return Err(eyre!(
-                    "--repo requires startup repo detection, but startup detection failed: {error}"
-                ));
+                return Err(error)
+                    .wrap_err("--repo requires startup repo detection, but startup detection failed");
             }
             deferred_warnings.push(format!(
                 "startup detection failed; continuing without repo/package context: {error}"

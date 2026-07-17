@@ -662,7 +662,13 @@ fn construct_argv_and_system_prompt(
 
         record_substage(perf_collector, last_checkpoint, "argv assembly");
 
-        enforce_repo_launch_detection(request.repo, request.prep_launch_detection_error.as_deref())?;
+        enforce_repo_launch_detection(
+            request.repo,
+            request
+                .prep_launch_detection_error
+                .as_ref()
+                .map(|snapshot| snapshot.message.as_str()),
+        )?;
         let mut launch_context = if let Some(prep) = request.prep_launch_context.as_ref() {
             // Phase fix (2026-05-09-slow-prep): reuse the launch_context computed
             // by the shared sniff scan in `CompositionPrepContext` instead of
@@ -673,9 +679,9 @@ fn construct_argv_and_system_prompt(
                 Ok(context) => context,
                 Err(error) => {
                     if request.repo {
-                        return Err(eyre!(
-                            "--repo requires startup repo detection, but launch-context detection failed: {error}"
-                        ));
+                        return Err(error).wrap_err(
+                            "--repo requires startup repo detection, but launch-context detection failed",
+                        );
                     }
                     if !silent && !quiet {
                         log::warn(&format!(
