@@ -636,7 +636,11 @@ fn preflight_pending_proxy_phase(
             loop_start,
         )
         .map(color_eyre::eyre::Report::from)
-        .unwrap_or_else(|| error.into()));
+        // Unbox before the `Report` conversion: `Report::from(Box<CompositionError>)`
+        // publishes `Box<CompositionError>` to the cause chain, and `as_diagnostic`'s
+        // downcast allowlist is keyed on the concrete type — so the boxed form is
+        // invisible to selection and the block silently degrades to `Error:` (D-7).
+        .unwrap_or_else(|| color_eyre::eyre::Report::from(*error)));
     }
     Ok(())
 }

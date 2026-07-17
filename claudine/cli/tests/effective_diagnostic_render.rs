@@ -41,6 +41,17 @@ const PROVIDER_SHIM: &str = "@echo off\r\nexit /b 0\r\n";
 #[cfg(not(windows))]
 const PROVIDER_SHIM: &str = "#!/bin/sh\nexit 0\n";
 
+/// A provider that fails, so the `failure` lifecycle stack runs.
+#[cfg(windows)]
+fn failing_provider_shim() -> String {
+    "@echo off\r\nexit /b 3\r\n".to_string()
+}
+
+#[cfg(not(windows))]
+fn failing_provider_shim() -> String {
+    "#!/bin/sh\nexit 3\n".to_string()
+}
+
 /// Run `claudine compose --claude <doc>` in an isolated workspace, returning
 /// plain (escape-stripped) stderr.
 fn compose_stderr(doc_body: &str, extra_args: &[&str]) -> String {
@@ -142,6 +153,75 @@ Body
     assert!(
         !stderr.contains("lifecycle initialize proxy:"),
         "the pre-migration flattened report text survived; stderr:\n{stderr}"
+    );
+}
+
+/// Proxy hand-off from a terminal (`failure`) event — the second proxy route.
+///
+/// Regression test for the `Box` un-downcastability recorded in `decisions.md`
+/// D-7, caught at Phase 7 by driving this route through a real terminal.
+///
+/// `preflight_proxy_target` returns `Result<(), Box<CompositionError>>`, and
+/// `loop_control.rs` handed that straight to `Report::from`. A `Report` built
+/// from `Box<E>` publishes **`Box<E>`** to the cause chain — `Box<E>` is itself
+/// an `Error` — so `as_diagnostic`'s downcast allowlist, which is keyed on the
+/// concrete type, could not see the `CompositionError` inside. Worse, `Box<E>`'s
+/// own `source()` delegates to `E::source()`, so the walk skipped past `E`
+/// entirely and it was never a chain member at any depth.
+///
+/// The registry listed the type and the source-parity guard passed; the error
+/// was simply unreachable, and the route degraded to:
+///
+/// ```text
+/// Error: failed to load Markdown: …: No such file or directory (os error 2)
+/// ```
+///
+/// This is the same failure shape as the motivating incident — a typed error
+/// present in the chain but invisible to selection — reached by a different
+/// mechanism, which is why it survived Phase 5.
+#[test]
+fn terminal_proxy_resolution_failure_renders_a_status_block() {
+    let workspace = TestWorkspace::named("claudine-terminal-proxy");
+    let root = workspace.path();
+    let bin_dir = root.join("bin");
+    // Exit non-zero so the `failure` stack — and its proxy hand-off — runs.
+    write_executable(&bin_dir.join(shim_name("claude")), &failing_provider_shim());
+
+    let doc = root.join("route.md");
+    write(
+        &doc,
+        r#"---
+title: terminal proxy
+failure:
+  stack:
+    - action: {proxy: "no/such/target.md"}
+---
+Body
+"#,
+    );
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", augmented_path(&bin_dir))
+        .current_dir(root)
+        .args(["compose", "--claude", doc.to_str().unwrap()])
+        .output()
+        .expect("spawn claudine");
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+
+    assert!(
+        has_status_block(&stderr),
+        "the terminal-proxy failure must render a StatusBlock; stderr:\n{stderr}"
+    );
+    assert!(
+        !has_generic_error_line(&stderr),
+        "the terminal-proxy failure must not fall back to the generic `Error:` \
+         line — a `Box<CompositionError>` reaching `Report::from` unboxed is how \
+         this regresses; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("target.md"),
+        "the adopted target must be named; stderr:\n{stderr}"
     );
 }
 
