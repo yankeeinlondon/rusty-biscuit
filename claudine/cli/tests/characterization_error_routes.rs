@@ -407,20 +407,24 @@ start:
     );
 }
 
-// --- Route 5: deliberately unstructured fallback --------------------------
+// --- Route 5: pre-document argument failure -------------------------------
 
-/// The generic fallback path, which stays valid for truly unstructured errors
-/// (spec §D5: "When no registered diagnostic exists anywhere in the chain, the
-/// generic fallback remains valid").
-///
 /// An unparsable `--timeout` fails during argument preparation, before any
 /// document or lifecycle work.
 ///
-/// This route is the control: it must **still** reach the generic `Error:` line
-/// after Phase 5. If it starts rendering a block, the walker has become too
-/// eager and the fallback path has lost its test.
+/// Phase 1 filed this as the "deliberately unstructured" control on the
+/// assumption that an argument-shape failure carries no typed error. That was
+/// **wrong**: it carries a typed `HarnessError::InvalidTimeout`, which Phase 5
+/// makes discoverable, so it correctly renders a `StatusBlock` rather than the
+/// generic `Error:` line. The three pinned properties below are unaffected —
+/// emission count sums both surfaces precisely so a route may migrate between
+/// them (§D5) — so this route keeps its baseline value; only the mistaken
+/// rationale is corrected.
+///
+/// The genuine unstructured control lives in `effective_diagnostic_render.rs`,
+/// which asserts the render contract this file deliberately does not pin.
 #[test]
-fn characterize_unstructured_fallback() {
+fn characterize_pre_document_argument_failure() {
     let outcome = run_route(
         r#"---
 title: characterize unstructured fallback
@@ -476,7 +480,7 @@ fn characterize_all_failure_routes_exit_one_and_emit_once() {
             ),
         ),
         (
-            "unstructured-fallback",
+            "pre-document-argument-failure",
             run_route(
                 "---\ntitle: t\n---\nBody\n",
                 0,
