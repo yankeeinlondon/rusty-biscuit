@@ -1,0 +1,644 @@
+# D8 lossy-boundary exceptions, read by `cli/tests/error_guards.rs`.
+#
+# Each entry suppresses one shape in one enclosing symbol in one file. Keying on
+# the symbol — not, as the predecessor grep guard did, on a trimmed source line —
+# is deliberate: a line is not unique, so an exception granted to one boundary
+# used to silently cover an identical line anywhere else in the tree.
+#
+# Three tests keep this file honest: an entry naming no live site fails as
+# stale, an entry with an unknown shape or tag fails, and an entry without a
+# substantive reason fails.
+#
+# ## Tags
+#
+# `retained` — permanent. The value genuinely has no typed source (a panic
+# payload, arbitrary user text, a ratified String-carrying cross-package
+# contract), or the site is downstream of the final render boundary.
+#
+# `error-propagation-followup` — burn-down, following the grandfather convention
+# of `dispatch_inventory.rs`'s GUARD_ALLOWLIST. The Phase 1 inventory
+# (`features/2026-07-13-error-propogation/inventory.md`) was produced by grep and
+# classified 51 Category-1 sites; this guard parses the sources and sees 77
+# symbols. The extra ones were never in the Phase 4/5 work list because nothing
+# could see them, and spec §D10 requires an out-of-scope discovery be split into
+# its own spec rather than fixed opportunistically. They are recorded here so the
+# set is frozen: a *new* collapse still fails the guard.
+#
+# A typed error in hand, inside this feature's scope, is a defect to fix — never
+# an entry here.
+
+[[allow]]
+shape = "error_text_field"
+file = "cli/src/commands/compose/prep.rs"
+symbol = "build_and_run_loop"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "error_text_field"
+file = "lib/src/composition/lifecycle/parse.rs"
+symbol = "parse_lifecycle_stack_item"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "error_text_field"
+file = "lib/src/composition/lifecycle/parse.rs"
+symbol = "parse_long_form_action_object"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "error_text_field"
+file = "lib/src/composition/preflight.rs"
+symbol = "resolve_shell_command_expr"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "error_text_field"
+file = "lib/src/harness/audit.rs"
+symbol = "audit_shell_commands"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "error_text_field"
+file = "lib/src/harness/audit.rs"
+symbol = "collect_auditable_commands"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "error_text_field"
+file = "lib/src/harness/shell.rs"
+symbol = "execute_approved_command"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "error_text_field"
+file = "lib/src/mcp/import.rs"
+symbol = "McpImporter::import_provider"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "error_text_field"
+file = "lib/src/permissions/mutation.rs"
+symbol = "PolicyMutationPlan::apply"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "error_text_field"
+file = "lib/src/permissions/providers/claude.rs"
+symbol = "ClaudePolicyBackend::load_native_layers"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "error_text_field"
+file = "lib/src/permissions/providers/claude.rs"
+symbol = "ClaudePolicyBackend::parse_cli_overrides"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "error_text_field"
+file = "lib/src/permissions/providers/codex.rs"
+symbol = "CodexPolicyBackend::load_native_layers"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "error_text_field"
+file = "lib/src/permissions/providers/gemini.rs"
+symbol = "GeminiPolicyBackend::load_native_layers"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "error_text_field"
+file = "lib/src/permissions/providers/goose.rs"
+symbol = "GoosePolicyBackend::load_native_layers"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "error_text_field"
+file = "lib/src/permissions/providers/kimi.rs"
+symbol = "KimiPolicyBackend::load_native_layers"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "error_text_field"
+file = "lib/src/permissions/providers/opencode.rs"
+symbol = "OpenCodePolicyBackend::load_native_layers"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "error_text_field"
+file = "lib/src/permissions/providers/qwen.rs"
+symbol = "QwenPolicyBackend::load_native_layers"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "error_text_field"
+file = "lib/src/reporting/ingest.rs"
+symbol = "sync_file"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/cli_utils.rs"
+symbol = "parse_naive_date"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/actions.rs"
+symbol = "run"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/config_tui/mod.rs"
+symbol = "run_tui"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/init_wizard.rs"
+symbol = "register_hooks_all_providers"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/init/mod.rs"
+symbol = "run_interactive"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/init/mod.rs"
+symbol = "run_quick"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/logs/mod.rs"
+symbol = "best_effort_sync"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/signals.rs"
+symbol = "check_provider"
+tag = "retained"
+reason = """
+The signals research corpus reads hand-authored YAML describing external documents. The failure is authoring prose about a research file, not a Claudine operation, and the subcommand is maintainer-facing."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/uninstall.rs"
+symbol = "run"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/wrap/composition/pipeline.rs"
+symbol = "construct_argv_and_system_prompt"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/wrap/env/mod.rs"
+symbol = "build_child_env_with_launch"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/wrap/env/mod.rs"
+symbol = "detect_wrap_startup_or_fallback"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/wrap/exec/wiring/dispatch.rs"
+symbol = "dispatch_hook_request"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/wrap/inline.rs"
+symbol = "try_inline_closure"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/wrap/runaway_guard.rs"
+symbol = "extract_frontmatter_guard_settings"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "contract/src/structured.rs"
+symbol = "compile_schema"
+tag = "retained"
+reason = """
+biscuit-contract's InferenceError is a ratified cross-package contract with a String message and a closed kind. Provider detail is treated as secret-bearing and reaches tracing only, never the message."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/actions/bash_executor.rs"
+symbol = "validate_js_ts"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/composition/closure.rs"
+symbol = "rewrite_inline_document"
+tag = "error-propagation-followup"
+reason = """
+The enclosing signature returns `Result<_, String>`, so there is no typed slot for the cause to land in. Typing it means changing that signature — the ShellRunner trait, the side-effect dispatch seam, or a messaging route — which is its own workstream. Carried over from the retired scripts/check-error-transport.allow, which recorded the same rationale."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/composition/lifecycle/action_shape.rs"
+symbol = "action_value_to_expr"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/composition/lifecycle/executor.rs"
+symbol = "StackExecutionContext::run_shell_action"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/composition/looping/actions.rs"
+symbol = "render_string_with_lookup"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/composition/looping/config.rs"
+symbol = "resolve_loop_config"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/composition/looping/expression.rs"
+symbol = "evaluate_condition"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/composition/preflight.rs"
+symbol = "resolve_lifecycle_shell_commands"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/composition/resolve.rs"
+symbol = "validate_file_permissions"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/dispatch/loader.rs"
+symbol = "compile_canonical_mapper"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/dispatch/loader.rs"
+symbol = "parse_json5_to_value"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/dispatch/runner/mod.rs"
+symbol = "execute_actions"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/mcp/session.rs"
+symbol = "compute_session_set"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/messaging/send.rs"
+symbol = "register_webhook_provider"
+tag = "error-propagation-followup"
+reason = """
+The enclosing signature returns `Result<_, String>`, so there is no typed slot for the cause to land in. Typing it means changing that signature — the ShellRunner trait, the side-effect dispatch seam, or a messaging route — which is its own workstream. Carried over from the retired scripts/check-error-transport.allow, which recorded the same rationale."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/messaging/send.rs"
+symbol = "send_desktop_notification"
+tag = "error-propagation-followup"
+reason = """
+The enclosing signature returns `Result<_, String>`, so there is no typed slot for the cause to land in. Typing it means changing that signature — the ShellRunner trait, the side-effect dispatch seam, or a messaging route — which is its own workstream. Carried over from the retired scripts/check-error-transport.allow, which recorded the same rationale."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/messaging/send.rs"
+symbol = "send_payload"
+tag = "error-propagation-followup"
+reason = """
+The enclosing signature returns `Result<_, String>`, so there is no typed slot for the cause to land in. Typing it means changing that signature — the ShellRunner trait, the side-effect dispatch seam, or a messaging route — which is its own workstream. Carried over from the retired scripts/check-error-transport.allow, which recorded the same rationale."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/messaging/send.rs"
+symbol = "test_webhook_connection"
+tag = "error-propagation-followup"
+reason = """
+The enclosing signature returns `Result<_, String>`, so there is no typed slot for the cause to land in. Typing it means changing that signature — the ShellRunner trait, the side-effect dispatch seam, or a messaging route — which is its own workstream. Carried over from the retired scripts/check-error-transport.allow, which recorded the same rationale."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/runaway/config.rs"
+symbol = "extract_frontmatter_exit_expressions"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "formatted_report"
+file = "cli/src/cli_utils.rs"
+symbol = "parse_provider"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "formatted_report"
+file = "cli/src/commands/compose/setters.rs"
+symbol = "parse_set_json"
+tag = "retained"
+reason = """
+--set text is arbitrary user input. serde carries only line and column, which the message already reproduces, so no typed cause is lost."""
+
+[[allow]]
+shape = "formatted_report"
+file = "cli/src/commands/handle.rs"
+symbol = "run_inner"
+tag = "retained"
+reason = """
+The binding is a tokio JoinError wrapping a panic payload. There is no domain error to preserve; the panic message is the only information."""
+
+[[allow]]
+shape = "formatted_report"
+file = "cli/src/commands/init/prompts.rs"
+symbol = "prompt_log_target"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "formatted_report"
+file = "cli/src/commands/signals.rs"
+symbol = "load_exclusions"
+tag = "retained"
+reason = """
+The signals research corpus reads hand-authored YAML describing external documents. The failure is authoring prose about a research file, not a Claudine operation, and the subcommand is maintainer-facing."""
+
+[[allow]]
+shape = "formatted_report"
+file = "cli/src/commands/signals.rs"
+symbol = "load_validated_frontmatter"
+tag = "retained"
+reason = """
+The signals research corpus reads hand-authored YAML describing external documents. The failure is authoring prose about a research file, not a Claudine operation, and the subcommand is maintainer-facing."""
+
+[[allow]]
+shape = "formatted_report"
+file = "cli/src/commands/wrap/composition/pipeline.rs"
+symbol = "construct_argv_and_system_prompt"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "formatted_report"
+file = "cli/src/commands/wrap/env/mod.rs"
+symbol = "detect_wrap_startup_or_fallback"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "formatted_report"
+file = "cli/src/commands/wrap/mod.rs"
+symbol = "run_provider_wrapper_inner"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "formatted_report"
+file = "cli/src/commands/wrap/wrapper_mcp.rs"
+symbol = "merge_injected_env_into_plan"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "cli/src/commands/sync.rs"
+symbol = "run"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "cli/src/commands/wrap/composition/prep_context.rs"
+symbol = "CompositionPrepContext::new"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "cli/src/commands/wrap/sequence/iterate.rs"
+symbol = "run_sequence_steps"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/composition/lifecycle/executor.rs"
+symbol = "StackExecutionContext::dispatch_side_effect"
+tag = "error-propagation-followup"
+reason = """
+The enclosing signature returns `Result<_, String>`, so there is no typed slot for the cause to land in. Typing it means changing that signature — the ShellRunner trait, the side-effect dispatch seam, or a messaging route — which is its own workstream. Carried over from the retired scripts/check-error-transport.allow, which recorded the same rationale."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/composition/lifecycle/executor.rs"
+symbol = "StackExecutionContext::eval_expr"
+tag = "error-propagation-followup"
+reason = """
+The enclosing signature returns `Result<_, String>`, so there is no typed slot for the cause to land in. Typing it means changing that signature — the ShellRunner trait, the side-effect dispatch seam, or a messaging route — which is its own workstream. Carried over from the retired scripts/check-error-transport.allow, which recorded the same rationale."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/composition/lifecycle/executor.rs"
+symbol = "StackExecutionContext::resolve_string_value"
+tag = "error-propagation-followup"
+reason = """
+The enclosing signature returns `Result<_, String>`, so there is no typed slot for the cause to land in. Typing it means changing that signature — the ShellRunner trait, the side-effect dispatch seam, or a messaging route — which is its own workstream. Carried over from the retired scripts/check-error-transport.allow, which recorded the same rationale."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/composition/lifecycle/executor.rs"
+symbol = "SystemShellRunner::run"
+tag = "error-propagation-followup"
+reason = """
+The enclosing signature returns `Result<_, String>`, so there is no typed slot for the cause to land in. Typing it means changing that signature — the ShellRunner trait, the side-effect dispatch seam, or a messaging route — which is its own workstream. Carried over from the retired scripts/check-error-transport.allow, which recorded the same rationale."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/composition/preflight.rs"
+symbol = "resolve_shell_approvals"
+tag = "error-propagation-followup"
+reason = """
+Pre-existing lossy boundary that predates the Phase 6 Rust-aware guard: the Phase 1 grep inventory could not see it, so it never entered the Phase 4/5 work list. Recorded to freeze the set — spec D10 requires an out-of-scope discovery be split into its own spec rather than fixed here."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/stream/providers/claude.rs"
+symbol = "ClaudeSemanticStreamParser::feed_line"
+tag = "retained"
+reason = """
+Provider stdout is external text. The parser keeps the raw line — which is the actual diagnostic — and drops the serde error, which only reports where the JSON stopped. Recovery continues; no error is returned."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/stream/providers/codex.rs"
+symbol = "CodexSemanticStreamParser::feed_line"
+tag = "retained"
+reason = """
+Provider stdout is external text. The parser keeps the raw line — which is the actual diagnostic — and drops the serde error, which only reports where the JSON stopped. Recovery continues; no error is returned."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/stream/providers/gemini.rs"
+symbol = "GeminiSemanticStreamParser::feed_line"
+tag = "retained"
+reason = """
+Provider stdout is external text. The parser keeps the raw line — which is the actual diagnostic — and drops the serde error, which only reports where the JSON stopped. Recovery continues; no error is returned."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/stream/providers/kimi.rs"
+symbol = "KimiSemanticStreamParser::feed_line"
+tag = "retained"
+reason = """
+Provider stdout is external text. The parser keeps the raw line — which is the actual diagnostic — and drops the serde error, which only reports where the JSON stopped. Recovery continues; no error is returned."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/stream/providers/opencode.rs"
+symbol = "OpenCodeSemanticStreamParser::feed_line"
+tag = "retained"
+reason = """
+Provider stdout is external text. The parser keeps the raw line — which is the actual diagnostic — and drops the serde error, which only reports where the JSON stopped. Recovery continues; no error is returned."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/stream/providers/pi.rs"
+symbol = "PiSemanticStreamParser::feed_line"
+tag = "retained"
+reason = """
+Provider stdout is external text. The parser keeps the raw line — which is the actual diagnostic — and drops the serde error, which only reports where the JSON stopped. Recovery continues; no error is returned."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/stream/providers/qwen.rs"
+symbol = "QwenSemanticStreamParser::feed_line"
+tag = "retained"
+reason = """
+Provider stdout is external text. The parser keeps the raw line — which is the actual diagnostic — and drops the serde error, which only reports where the JSON stopped. Recovery continues; no error is returned."""

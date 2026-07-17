@@ -161,11 +161,19 @@ test-real *args="":
     CLAUDINE_CONTRACT_REAL=1 cargo test -p claudine-cli --test real_opencode_yolo_subagent {{ args }} || rc=$?
     exit $rc
 
-# Guard against typed lower-layer errors collapsing to strings at the
-# Darkmatter→Claudine / BlockError transport boundary (real-errors Phase 6).
-# Pure grep heuristic — no cargo — so it runs even when the toolchain is gated.
+# Guard against typed errors collapsing to prose anywhere in lib/src, cli/src,
+# or contract/src, and against the diagnostic registry and code catalog drifting
+# from the sources (error-propagation Phase 6, D2/D7/D8).
+#
+# A `syn` scan, not a grep: a binding is only lossy when the syntax tree proves
+# it is an error *and* proves the typed value does not survive alongside the
+# prose. This needs cargo — the predecessor grep did not, but it also could not
+# tell `eyre!("unknown server {id}")` from a real collapse.
+#
+# `just test` runs these too; the recipe exists so `just lint` fails on a
+# transport regression without waiting for the full suite.
 lint-transport:
-    @../scripts/check-error-transport.sh
+    @just _test claudine-cli --test error_guards
 
 # Guard new lifecycle docs onto the faceted `err.*` contract, keeping the
 # deprecated err.kind/err.variant/err.msg aliases out of fresh examples.
