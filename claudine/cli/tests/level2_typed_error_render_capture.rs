@@ -75,10 +75,14 @@ finalize:
 Body
 ";
 
-/// Route 2 — proxy hand-off from a terminal event. Per `decisions.md` D-2 this
-/// route uses a *different resolver* (`harness::resolve_harness_path`), which
-/// succeeds on a missing target, so the run announces the hand-off, completes
-/// its terminal lifecycle, and fails later reading the adopted document.
+/// Route 2 — proxy hand-off from a terminal (`failure`) event. Since the
+/// file-resolution feature converged the proxy routes, terminal-control dispatch
+/// resolves the target through the same existence-checking `resolve_proxy_target`
+/// as the initialize route, so a missing target fails *at* resolution. The
+/// terminal lifecycle still runs to `finalize` (the abort path fires `finalize`
+/// once before propagating), so this route keeps its full `start`/`failure`/
+/// `finalize` marker sequence while now failing with the shared
+/// `InvalidFileReference` block rather than a later adopted-document read.
 const TERMINAL_PROXY_DOC: &str = "\
 ---
 title: failure proxy
@@ -536,12 +540,13 @@ fn level2_terminal_proxy_renders_status_block_in_tmux() {
         capture.frame.plain
     );
 
-    capture.assert_contains("target.md", "the adopted target must be named");
+    capture.assert_contains("target.md", "the unresolvable target must be named");
 
-    // Pinned by the Phase 1 characterization baseline: this route resolves the
-    // missing target successfully and fails later, so its full terminal
-    // lifecycle fires. Collapsing it into route 1's shape would be a routing
-    // change, which D10 forbids inside this feature.
+    // Pinned by the Phase 1 characterization baseline: the `failure` stack's
+    // proxy fails at resolution, but the abort path still fires `finalize` once
+    // before propagating, so the full terminal marker sequence
+    // (`start`/`failure`/`finalize`) is preserved. The exactly-once emission and
+    // exit code stay pinned so the resolver convergence cannot perturb them.
     assert_eq!(
         capture.exit_code, 1,
         "terminal-proxy failure must exit 1.\nplain:\n{}",
@@ -560,24 +565,33 @@ fn level2_terminal_proxy_renders_status_block_in_tmux() {
     );
 }
 
-/// Cross-route parity, and the divergence it cannot close.
+/// Cross-route parity — AC5, now satisfied.
 ///
-/// Spec Acceptance Criterion 5 asks the two proxy routes to agree on code,
-/// headline, hint, and typed resolution detail. `decisions.md` D-2 found — before
-/// any code moved — that they do not share a resolver: `initialize` fails *at*
-/// resolution with `composition.invalid_file_reference`, while the terminal route
-/// resolves successfully and fails later reading the adopted document
-/// (`composition.failed`). D-2's ruling is that converging them is a **routing
-/// change**, which D10 splits into a separate spec rather than fixing here.
+/// Error-propagation's Acceptance Criterion 5 asks the two proxy routes to agree
+/// on code, headline, hint, and typed resolution detail. Its `decisions.md` D-2
+/// found the routes did not yet share a resolver: `initialize` failed *at*
+/// resolution with `composition.invalid_file_reference`, while the terminal
+/// route resolved a missing target successfully (via the old
+/// `resolve_harness_path` private grammar) and only failed later reading the
+/// adopted document (`failed to load Markdown`). That divergence was pinned by
+/// the earlier form of this test, which asserted the two different failure
+/// stages so the convergence could not land silently.
 ///
-/// So this test asserts parity on everything typing *can* deliver, and pins the
-/// divergence explicitly. Pinning it is the point: when the file-resolution
-/// feature converges the resolvers, this test **fails**, and that failure is the
-/// prompt to promote these assertions to full AC5 parity rather than a silent
-/// drift nobody notices.
+/// The file-resolution feature converged them: the terminal-control dispatch now
+/// routes through the same existence-checking `resolve_proxy_target` as the
+/// initialize route (Phase 6), so **both** fail at resolution with the identical
+/// `CompositionError::InvalidFileReference` — same code, same
+/// "Unresolvable file reference" headline, and the same `PROXY_TARGET_HINT`
+/// (identical by construction: both routes build the block from one constant).
+///
+/// This test is the promotion the pin demanded: it asserts full AC5 identity
+/// across both routes, and keeps the one route-specific difference — the
+/// `initialize` route names its authoring event, the terminal route does not
+/// (its `event` is `None`) — as a separate, intentional assertion so that
+/// structured context is not mistaken for identity drift.
 #[test]
 #[serial(level2_terminal)]
-fn level2_proxy_routes_share_a_typed_surface_but_diverge_on_identity_in_tmux() {
+fn level2_proxy_routes_share_identity_across_routes_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
@@ -587,7 +601,7 @@ fn level2_proxy_routes_share_a_typed_surface_but_diverge_on_identity_in_tmux() {
     let term_staged = stage("claudine-l2-parity-term", TERMINAL_PROXY_DOC, 3);
     let term = run_in_pane(&mut harness, &term_staged, &TTY_COLOR, &[]);
 
-    // What both routes DO agree on, and what typing bought.
+    // Full AC5 identity: both routes render the SAME typed failure.
     for (name, capture) in [("initialize", &init), ("terminal", &term)] {
         assert!(
             capture.has_status_block(),
@@ -615,23 +629,50 @@ fn level2_proxy_routes_share_a_typed_surface_but_diverge_on_identity_in_tmux() {
             "proxy route `{name}` must name the unresolvable target.\nplain:\n{}",
             capture.frame.plain
         );
+        // Identical code + headline: both routes fail AT resolution with
+        // `CompositionError::InvalidFileReference`. The terminal route no longer
+        // reaches the adopted-document read — its old `failed to load Markdown`
+        // stage is gone.
+        assert!(
+            capture.frame.plain.contains("Unresolvable file reference"),
+            "proxy route `{name}` must fail AT resolution with the shared \
+             `Unresolvable file reference` headline.\nplain:\n{}",
+            capture.frame.plain
+        );
+        assert!(
+            !capture.frame.plain.contains("failed to load Markdown"),
+            "proxy route `{name}` must not fall through to the adopted-document \
+             read — the routes converged on the resolution-time failure.\nplain:\n{}",
+            capture.frame.plain
+        );
+        // Identical typed detail: the `proxy` property and the resolution
+        // failure reason ("does not exist") both reach the block.
+        assert!(
+            capture.frame.plain.contains("proxy"),
+            "proxy route `{name}` must name the `proxy` property.\nplain:\n{}",
+            capture.frame.plain
+        );
+        assert!(
+            capture.frame.plain.contains("does not exist"),
+            "proxy route `{name}` must state the resolution failure.\nplain:\n{}",
+            capture.frame.plain
+        );
+        // Identical hint: the shared `PROXY_TARGET_HINT` (a distinctive early
+        // fragment that fits on one wrapped line at COLUMNS=100).
+        assert!(
+            capture.frame.plain.contains("must name an existing"),
+            "proxy route `{name}` must carry the shared proxy-target hint.\nplain:\n{}",
+            capture.frame.plain
+        );
     }
 
-    // The divergence AC5 asks to close, pinned rather than asserted away.
-    // Route-specific context (`event`, `property`) is intentional and lives in
-    // structured detail; these two headlines are NOT that — they are two
-    // different failure stages, which is exactly what D-2 flagged.
+    // The one intentional route-specific difference, kept separate from identity:
+    // the initialize route names its authoring event; the terminal route does
+    // not (its `FileReferenceContext.event` is `None`).
     assert!(
-        init.frame.plain.contains("Unresolvable file reference"),
-        "the initialize route must fail AT resolution.\nplain:\n{}",
+        init.frame.plain.contains("initialize"),
+        "the initialize route must name its authoring event in the surface.\nplain:\n{}",
         init.frame.plain
-    );
-    assert!(
-        term.frame.plain.contains("failed to load Markdown"),
-        "the terminal route must still fail at the adopted-document read — \
-         converging it onto the initialize resolver is a routing change that \
-         `decisions.md` D-12 defers to the file-resolution feature.\nplain:\n{}",
-        term.frame.plain
     );
 }
 

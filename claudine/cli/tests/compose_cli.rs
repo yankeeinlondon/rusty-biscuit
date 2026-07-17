@@ -7,7 +7,7 @@ use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 mod common;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{augmented_path, init_git_repo, strip_ansi, write, write_executable};
 
 // ============================================================================
 // Phase 1: convergence between non-harness and harness-enabled direct compose
@@ -146,5 +146,86 @@ fn compose_dry_run_malformed_whole_value_spec_path_aborts_without_leaking() {
     assert!(
         !count_path.exists(),
         "no provider session should have been launched; stub recorded a call"
+    );
+}
+
+// ============================================================================
+// Cross-surface repository-first parity (2026-07-13-file-resolution, AC6)
+// ============================================================================
+
+/// A Darkmatter `::file` transclusion run by Claudine resolves a bare implicit
+/// reference **repository-first** on a real collision.
+///
+/// This is the cross-surface half of the file-resolution feature (AC6): the
+/// lifecycle-proxy surface is proven end-to-end by the L2 file-resolution
+/// capture; this proves the *transclusion* surface obeys the identical
+/// repository-first contract when Claudine composes the document.
+///
+/// The fixture is a genuine collision — the transcluded basename exists at
+/// **both** the repository root and the source document's directory — so the
+/// outcome discriminates precedence rather than mere existence. A CLI spawn (not
+/// a terminal capture) is the right level: the assertion is on the *content*
+/// delivered to the provider, which needs the real binary + filesystem but no
+/// TTY. The provider stub records everything it receives (argv, any file-valued
+/// argument, and stdin), so the composed prompt is captured regardless of the
+/// wrapper's delivery mechanism.
+#[cfg(unix)]
+#[test]
+fn compose_transclusion_resolves_repository_first_on_collision() {
+    let workspace = tempdir().unwrap();
+    let root = workspace.path();
+    assert!(
+        init_git_repo(root),
+        "repository-first transclusion needs a real git worktree root"
+    );
+
+    let path_dir = root.join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let capture = root.join("delivered-prompt.txt");
+    // Capture argv, file-valued args (the wrapper may pass the prompt as a
+    // tmpfile), and stdin — the composed prompt lands in one of them.
+    write_executable(
+        &path_dir.join("claude"),
+        r#"#!/bin/sh
+{
+  for a in "$@"; do
+    if [ -f "$a" ]; then cat "$a"; else printf '%s\n' "$a"; fi
+  done
+  cat
+} >> "$CLAUDINE_PROMPT_CAPTURE" 2>/dev/null
+exit 0
+"#,
+    );
+
+    // Genuine collision: same basename at the repository root and beside the
+    // source document. Repository-first must transclude the root copy.
+    write(&root.join("shared.md"), "REPO_ROOT_TRANSCLUSION_MARKER\n");
+    write(
+        &root.join("prompts/shared.md"),
+        "SOURCE_LOCAL_TRANSCLUSION_MARKER\n",
+    );
+    let doc = root.join("prompts/doc.md");
+    write(&doc, "---\n---\n::file shared.md\n");
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", root)
+        .env("PATH", augmented_path(&path_dir))
+        .env("CLAUDINE_PROMPT_CAPTURE", &capture)
+        .current_dir(root)
+        .args(["compose", "--claude", doc.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let delivered = fs::read_to_string(&capture).unwrap_or_default();
+    assert!(
+        delivered.contains("REPO_ROOT_TRANSCLUSION_MARKER"),
+        "the bare `::file shared.md` transclusion must resolve repository-first \
+         to <repo>/shared.md.\ndelivered prompt:\n{delivered}"
+    );
+    assert!(
+        !delivered.contains("SOURCE_LOCAL_TRANSCLUSION_MARKER"),
+        "repository-first must win the collision — the source-local copy must \
+         not be transcluded.\ndelivered prompt:\n{delivered}"
     );
 }
