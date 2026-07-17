@@ -34,7 +34,7 @@ Behavior:
 
 - both switches are file-only
 - they are mutually exclusive
-- explicit files are resolved as plain paths relative to the launch CWD unless already absolute
+- explicit files are resolved through the shared `biscuit-file::FileReference` grammar against the launch context: a bare implicit reference is repository-root first, then the launch directory; an explicit `./`/`../` reference is the launch directory only; `@` is a magic-root search, `~/` is home-pinned, and absolute paths resolve to themselves
 - if an explicit file is selected, standard `system-prompt.md` discovery is skipped
 - direct provider wrappers additionally accept `--edit`, which opens the **user prompt** (not the system prompt) in an external editor before launch; composition entry points do not
 

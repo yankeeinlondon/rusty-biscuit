@@ -193,6 +193,16 @@ Lifecycle flow control actions terminate the current event's stack and influence
 
 At most one flow-control action may appear in a stack item, and it must be the last action.
 
+**Proxy target resolution.** A `proxy` target resolves through the shared
+`biscuit-file::FileReference` contract, anchored on the document that authored
+it: a bare implicit path (`other.md`) is repository-root first, then next to the
+authoring document; an explicit `./`/`../` path is source-relative only; `@` is a
+magic-root search (repository root, configured roots, home — **not** a repo-root
+join); and `~/` is home-pinned. The target must name an existing document, so a
+missing target fails loudly with a typed `Unresolvable file reference` rather than
+handing off to a nonexistent path. When a proxied target authors its own proxy,
+the target becomes the new source for that reference.
+
 **Flow control is universal.** Flow control reacts to **state** — an error, a missing file, an `env` value, frontmatter — and an error is just one kind of state. So `error`/`stop`/`retry`/`resume`/`defer`/`proxy` are valid in **every** event. The headline example: a `success` stack can `resume: "you finished but never wrote abc.md — create it as instructed"` when the agent completed cleanly but an expected artifact is missing. The only placement rule is `skip` (`initialize`-only). Apparent event-specific behavior is **runtime capability**, not placement: `resume` needs a live session (pre-launch → `ResumeWithoutSession`) and `retry`'s re-entry point is derived from whether the provider had launched. This is enforced once, at parse time (`LifecycleControlAction::is_valid_for` → `LifecycleActionPlacement`); at runtime every event's stack dispatches its control through the same event-agnostic path (`decide_control` + `dispatch_terminal_control`). The iteration `loop:` (while/until) is a separate mechanism and is never coupled to handler dispatch.
 
 The provider run-loop events — `start`, `success`, `failure`, `finalize` — dispatch `retry`/`resume`/`proxy` fully (this is where `success` + `resume` lives). The events that sit *outside* that loop — `initialize`, a compose pre-flight `blocked`, and the `loop` gate — handle `error`/`stop` (and `proxy`/`skip` at `initialize`) directly, but `retry`/`proxy` from those events have no re-entry loop to act on yet, so they surface a clear typed error (`LifecycleSetupPhaseRecoveryUnsupported`) rather than a silent no-op. Put recovery on a post-launch event, or use `initialize` `proxy` for pre-launch routing. `defer` (deferred re-execution) is **not implemented in any event yet** — it always surfaces `LifecycleDeferNotImplemented` until its rendezvous backend lands.

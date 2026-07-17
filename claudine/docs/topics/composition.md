@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-4d16a4d593030242
-last_updated: 2026-07-15
+hash: ef46db3751d8e999-9feef357d846d4b8
+last_updated: 2026-07-17
 ---
 # Claudine Composition
 
@@ -123,7 +123,7 @@ claudine compose --codex @commit.md
 
 Steps:
 
-1. **Resolve** — resolve the file reference using `biscuit-file::FileReference` (supports `@` magic paths, repo-relative, monorepo-package-relative, and absolute paths)
+1. **Resolve** — resolve the file reference using `biscuit-file::FileReference`. A bare **implicit** path (`foo.md`, `dir/foo.md`) resolves repository-root first, then the source document's directory; an **explicit** `./`/`../` path resolves from the source directory only; `@` is a magic-root search, `!` a monorepo-package path, `~/` the user's home, `vault:` a configured vault, `%` a recursive modifier, and absolute paths resolve to themselves
 2. **Compose** — run the Markdown through Darkmatter's compose pipeline (transclusion, interpolation, shell commands, conditionals)
 3. **Prepare** — extract the effective (composed) frontmatter; this is the single source of truth for all downstream decisions
 4. **Select provider** — choose which agentic CLI to use (see Provider Selection below)
@@ -476,7 +476,7 @@ A frontmatter `loop:` block turns the prompt into a repeating run. The first ite
 
 ### Authoring
 
-`$schema` accepts the same forms Darkmatter accepts: inline `SimplifiedSchema` mappings, references to external YAML/JSON schema files (resolved relative to the prompt document's parent directory), and root-level unions. Raw JSON Schema also validates, but it does not expose typed property metadata, so it does not feed the interactive prompts or shell completion described below.
+`$schema` accepts the same forms Darkmatter accepts: inline `SimplifiedSchema` mappings, references to external YAML/JSON schema files (resolved through the shared `FileReference` contract — a bare implicit reference is repository-root first, then the prompt document's parent directory; an explicit `./`/`../` reference is the document's parent only), and root-level unions. Raw JSON Schema also validates, but it does not expose typed property metadata, so it does not feed the interactive prompts or shell completion described below.
 
 ```yaml
 $schema:
@@ -785,7 +785,7 @@ sequence:
 
 ### External YAML Sequence Definition
 
-When the `sequence` frontmatter property is a string, Claudine resolves it as a file reference relative to the source document.
+When the `sequence` frontmatter property is a string, Claudine resolves it through the shared `FileReference` contract: a bare implicit reference is repository-root first, then the source document's directory; an explicit `./`/`../` reference is the source directory only; `@` is a magic-root search and `~/` is home-pinned.
 
 **Plain list form** — the external file contains a `sequence:` key:
 
