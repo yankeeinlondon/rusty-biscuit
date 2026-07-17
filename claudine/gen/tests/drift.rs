@@ -23,15 +23,22 @@ fn area() -> &'static Path {
 /// Phase 1 byte baseline for every committed artifact owned by the provider
 /// generator. The normal drift tests prove regeneration convergence; this
 /// inventory separately records the exact pre-refactor bytes.
+///
+/// The baseline is a permanent pin consumed by this test, so it lives with the
+/// crate's fixtures rather than under `reviews/` — archiving a review moves
+/// that tree, and the pin must not move with it.
 #[test]
 fn committed_generated_artifacts_match_phase_1_byte_baseline() {
-    let baseline_path = area().join(
-        "reviews/2026-07-14-module-assessment/generated-artifact-baseline.json",
-    );
-    let baseline: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(&baseline_path).expect("phase 1 artifact baseline must be readable"),
-    )
-    .expect("phase 1 artifact baseline must be valid JSON");
+    let baseline_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/generated-artifact-baseline.json");
+    let raw = std::fs::read(&baseline_path).unwrap_or_else(|err| {
+        panic!(
+            "phase 1 artifact baseline must be readable at {}: {err}",
+            baseline_path.display()
+        )
+    });
+    let baseline: serde_json::Value =
+        serde_json::from_slice(&raw).expect("phase 1 artifact baseline must be valid JSON");
 
     assert_eq!(baseline["algorithm"], "xxh64");
     assert_eq!(baseline["seed"], 0);
