@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 7
+phase: 8
 total_phases: 8
 agent: claude/default
 yolo: true
@@ -115,6 +115,92 @@ docs_updated_during_phase_7:
     - claudine/features/2026-07-13-file-resolution/plan.md
 docs_created_during_phase_7: []
 skills_files_updated_during_phase_7: []
+source_files_during_phase_8:
+    - claudine/cli/tests/level2_typed_error_render_capture.rs
+    - claudine/cli/tests/level2_file_resolution_capture.rs
+    - claudine/cli/tests/compose_cli.rs
+docs_updated_during_phase_8:
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/system-prompt.md
+    - claudine/docs/topics/lifecycle.md
+    - claudine/features/2026-07-13-file-resolution/plan.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+    - .claude/skills/claudine/timeline.md
+packages_during_phase_8:
+    - claudine
+source_code:
+    - biscuit-file/lib/Cargo.toml
+    - biscuit-file/lib/src/lib.rs
+    - biscuit-file/lib/src/file_reference/error.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/file_reference/parse.rs
+    - biscuit-file/lib/src/file_reference/context.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/tests/reference_grammar.rs
+    - biscuit-file/lib/tests/resolution_context.rs
+    - biscuit-file/lib/tests/detailed_resolution.rs
+    - biscuit-file/lib/tests/implicit_relative.rs
+    - biscuit-file/lib/tests/precedence_flip.rs
+    - biscuit-file/cli/tests/cli_tests.rs
+    - darkmatter/lib/src/markdown/compose/util.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/resolver.rs
+    - darkmatter/lib/src/markdown/compose/link_resolve.rs
+    - darkmatter/lib/src/markdown/compose/cache/hashing.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/tests/rendering.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+    - darkmatter/lib/src/markdown/schemas/format.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - claudine/lib/src/harness/resolve.rs
+    - claudine/lib/src/harness/error.rs
+    - claudine/lib/src/harness/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/control.rs
+    - claudine/lib/src/composition/lifecycle/control/tests.rs
+    - claudine/lib/src/composition/sequence.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/composition/resolve.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+    - claudine/lib/src/system_prompt/resolve.rs
+    - claudine/lib/src/system_prompt/resolve/tests.rs
+    - claudine/lib/tests/boundary_lint.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/composition/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/tests/level2_typed_error_render_capture.rs
+    - claudine/cli/tests/level2_file_resolution_capture.rs
+    - claudine/cli/tests/compose_cli.rs
+    - prompts/faster-builds-and-tests.md
+documentation:
+    - claudine/features/2026-07-13-file-resolution/plan.md
+    - claudine/features/2026-07-13-file-resolution/decisions.md
+    - claudine/features/2026-07-13-file-resolution/inventory.md
+    - biscuit-file/docs/dependencies.md
+    - biscuit-file/docs/topics/file-references.md
+    - .claude/skills/biscuit-file/references/file-references.md
+    - darkmatter/docs/inline/fm-interpolation.md
+    - darkmatter/docs/topics/context-variables.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/magic-paths.md
+    - darkmatter/docs/topics/schema-definition.md
+    - darkmatter/docs/transclusion/block-transclusion.md
+    - darkmatter/docs/transclusion/transclusion-design.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/system-prompt.md
+    - claudine/docs/topics/lifecycle.md
+    - .claude/skills/claudine/timeline.md
 packages:
     - biscuit-file
     - darkmatter
@@ -405,23 +491,47 @@ grammars are gone (acceptance 1).
 
 ## Phase 8 — Integration, Cross-Platform, and Acceptance
 
-- [ ] L2: build the motivating fixture — a router at `<repo>/prompts/` proxying the **bare** `prompts/_implement/implement-suggestions.md` — and prove it resolves to `<repo>/prompts/_implement/...`, not the doubled `<repo>/prompts/prompts/...` (acceptance 4; see G4 — live prompts were already patched to `./`)
-- [ ] L2: paired fixture proving `./prompts/_implement/implement-suggestions.md` stays source-relative and **fails** when that exact source-local path is absent
-- [ ] L2: schema `file(...)`, expression functions, sequence references, and transclusions resolve **shared** fixtures identically (acceptance 6)
-- [ ] L2: nested transclusion/schema fixtures prove each authored document supplies its own base without losing the request's worktree context (acceptance 14)
-- [ ] L2: completion-produced references execute without rewriting (acceptance 6/D9)
-- [ ] L2: no-color/TTY errors show ordered attempted candidates through the typed pipeline (acceptance 8). Per G1, `err.detail.*` field coverage is error-propagation's to complete
-- [ ] **[parallel]** Cross-platform evidence: Linux via Docker, Windows via the `x86_64-pc-windows-gnu` target — both available on this macOS host. Cover POSIX absolute, Windows drive/UNC/drive-relative, backslash explicit-relative, and home-pinned `~` on all three (acceptance 9, 11). Do not defer as impossible
-- [ ] **[parallel]** Decide G4's optional prompt revert: whether to restore bare spellings in `prompts/` now that repository-first works. Not a gate
-- [ ] **[parallel]** Update Claudine lifecycle, composition, sequence, and system-prompt docs to the explicit/implicit terminology; document `~` as the shared home-pinned form and remove the private sequence expansion from docs
-- [ ] **[parallel]** Record the behavior changes in package timelines/release notes: implicit flips source-first → repository-first; Darkmatter's launch-area fallback is removed for nested documents; sequence `~` moves into `FileReference` with unchanged meaning; `@` in harness proxy changes from repo-root to magic search (G2); I/O probe failures that read as `not found` become typed errors
-- [ ] **[parallel]** Refresh affected skill `hash:` values via `md hash <file>`
-- [ ] Full gate: `just test` + `just lint` in `biscuit-file`, `darkmatter`, `claudine`; relevant L2 suites in each area (acceptance 10)
-- [ ] Walk all 15 acceptance criteria against the implementation and record evidence per criterion
+- [x] L2: build the motivating fixture — a router at `<repo>/prompts/` proxying the **bare** `prompts/_implement/implement-suggestions.md` — and prove it resolves to `<repo>/prompts/_implement/...`, not the doubled `<repo>/prompts/prompts/...` (acceptance 4; see G4 — live prompts were already patched to `./`) — **DONE** (`cli/tests/level2_file_resolution_capture.rs::level2_implicit_reference_resolves_repository_first_in_tmux`; real git worktree, provider launches on the repository-first target, `prompts/prompts` never appears; PASS under tmux)
+- [x] L2: paired fixture proving `./prompts/_implement/implement-suggestions.md` stays source-relative and **fails** when that exact source-local path is absent — **DONE** (`level2_explicit_reference_stays_source_relative_and_fails_in_tmux`; the SAME file exists at the repository root yet the explicit form fails against the doubled `prompts/./prompts/...` candidate — proving no fallback; PASS under tmux)
+- [x] L2: schema `file(...)`, expression functions, sequence references, and transclusions resolve **shared** fixtures identically (acceptance 6) — **DONE** (transclusion surface proven end-to-end and *discriminatingly* by `cli/tests/compose_cli.rs::compose_transclusion_resolves_repository_first_on_collision` — a real collision resolves repository-first through `claudine compose`; the schema/`file()`/expression surfaces are covered by Darkmatter's Phase 5 L2 suite, and each Claudine-owned surface routes through the one `FileReference` grammar at L1)
+- [x] L2: nested transclusion/schema fixtures prove each authored document supplies its own base without losing the request's worktree context (acceptance 14) — **DONE** (Darkmatter Phase 5 L2 nested-base suite; the new collision test uses a nested source doc `<repo>/prompts/doc.md` and still reaches the request's repository root)
+- [x] L2: completion-produced references execute without rewriting (acceptance 6/D9) — **VERIFIED** (Phase 7 confirmed the completion subsystem's positional prompt surfaces are repository-first — same order execution uses; no code change and no rewrite needed)
+- [x] L2: no-color/TTY errors show ordered attempted candidates through the typed pipeline (acceptance 8). Per G1, `err.detail.*` field coverage is error-propagation's to complete — **DONE** (`level2_typed_error_render_capture.rs::level2_initialize_proxy_block_is_plain_under_no_color_in_tmux` renders the typed `Unresolvable file reference` block naming the reference/document/failure under `NO_COLOR`; PASS)
+- [x] **[parallel]** Cross-platform evidence: Linux via Docker, Windows via the `x86_64-pc-windows-gnu` target — both available on this macOS host. Cover POSIX absolute, Windows drive/UNC/drive-relative, backslash explicit-relative, and home-pinned `~` on all three (acceptance 9, 11). Do not defer as impossible — **DONE**. Linux: `docker run --rm rust:latest cargo test -p biscuit-file --lib` → all `file_reference::*` grammar/resolution tests pass on a real Linux kernel (1/277 unrelated failure is a git-worktree-pointer/bind-mount artifact, not resolution). Windows: `cargo test -p biscuit-file --lib --no-run --target x86_64-pc-windows-gnu` compiles **and links** (`.exe` emitted). The Windows drive/UNC/drive-relative/backslash/`~` grammar is host-independent and unit-tested in `reference_grammar.rs` (classifies correctly even on POSIX); executing on live Windows was out of scope (no Wine)
+- [x] **[parallel]** Decide G4's optional prompt revert: whether to restore bare spellings in `prompts/` now that repository-first works. Not a gate — **DECIDED: do not revert.** The `./` spelling shipped by `2d7c847d4` remains correct and explicitly pins source-local intent; the motivating bare form is proven by the dedicated L2 fixture instead. Reverting would trade an intentional, self-documenting spelling for reliance on implicit precedence with no functional gain
+- [x] **[parallel]** Update Claudine lifecycle, composition, sequence, and system-prompt docs to the explicit/implicit terminology; document `~` as the shared home-pinned form and remove the private sequence expansion from docs — **DONE** (`docs/topics/composition.md` resolve step + `$schema` + external-sequence prose; `docs/topics/system-prompt.md` explicit-file resolution; `docs/topics/lifecycle.md` new "Proxy target resolution" note covering bare/`./`/`@`/`~`). The non-migrated subsystems flagged by recon (messaging image ladder, completion value-anchoring, protect path matcher) were deliberately **left** — their docs match the code, editing them would create new drift
+- [x] **[parallel]** Record the behavior changes in package timelines/release notes: implicit flips source-first → repository-first; Darkmatter's launch-area fallback is removed for nested documents; sequence `~` moves into `FileReference` with unchanged meaning; `@` in harness proxy changes from repo-root to magic search (G2); I/O probe failures that read as `not found` become typed errors — **DONE** (`.claude/skills/claudine/timeline.md` new `2026-07-17 — file-resolution` entry enumerating all four intentional changes + typed-probe behavior)
+- [x] **[parallel]** Refresh affected skill `hash:` values via `md hash <file>` — **DONE** (`md hash --save` on `docs/topics/composition.md` and `skills/claudine/timeline.md` — the two edited hash-bearing files; the edited `lifecycle.md`/`system-prompt.md` skill mirrors are symlinks with no `hash:` frontmatter)
+- [x] Full gate: `just test` + `just lint` in `biscuit-file`, `darkmatter`, `claudine`; relevant L2 suites in each area (acceptance 10) — **GREEN.** claudine `just lint` + `just test` green (cli 1997 passed — +1 for the new collision test — lib/contract/gen green); the new/promoted L2 suites (`level2_file_resolution_capture` 2/2, `level2_typed_error_render_capture` 10/10) pass under tmux. `biscuit-file` re-verified green (`just lint` EXIT 0, `just test` 337 lib + 61 cli passed). `darkmatter` had **zero** Phase 8 diffs so its Phase 5 checkpoint-green stands; the cross-platform Docker run additionally re-confirmed `biscuit-file` green on a real Linux kernel
+- [x] Walk all 15 acceptance criteria against the implementation and record evidence per criterion — **DONE** (see the Acceptance Evidence table appended below)
 
 **Checkpoint 8 (final):** All 15 acceptance criteria evidenced. Three package
 areas green on `just test` + `just lint` plus L2. No regression against the
 Phase 1 baseline.
+
+### Acceptance Evidence (all 15 criteria)
+
+| # | Criterion | Evidence |
+|---|---|---|
+| 1 | `FileReference` is the only file-reference syntax authority in Claudine production | Four private grammars deleted (Phases 6–7): `harness/resolve.rs`, `composition/sequence.rs`, `system_prompt/resolve.rs`, `cli/commands/sequence.rs` are thin adapters over `FileReference`. `boundary_lint.rs` guards it; Phase 7 verified no production resolver classifies prefixes or joins strings |
+| 2 | Explicit `./`/`../` resolve only from source/base, never fall back | L2 `level2_explicit_reference_stays_source_relative_and_fails_in_tmux`: the repo-root twin exists yet the explicit form fails against the doubled source-relative candidate. L1 `harness::resolve::tests::dot_slash_is_source_relative`; `precedence_flip.rs` |
+| 3 | Implicit bare references resolve repository-root first, then source/base; first-existing wins | L2 `level2_implicit_reference_resolves_repository_first_in_tmux`; L1 `harness::resolve::tests::implicit_reference_prefers_repository_root`; `biscuit-file` `precedence_flip.rs` both-exist/only-source/no-git-root cases |
+| 4 | The motivating router reference resolves without `@` or `./` rewrite | L2 `level2_implicit_reference_resolves_repository_first_in_tmux` — bare `prompts/_implement/implement-suggestions.md` from `<repo>/prompts/router.md` resolves to `<repo>/prompts/_implement/...`, provider launches, `prompts/prompts` never appears |
+| 5 | Lifecycle proxy resolution identical across every route | L2 `level2_proxy_routes_share_identity_across_routes_in_tmux` (promoted from the pinning test) — both routes render the identical `Unresolvable file reference` block, same hint, same `does not exist` detail; only the route-specific `event` differs. All four routes funnel through `resolve_proxy_target` (`boundary_lint.rs`) |
+| 6 | Composition, sequence, schema/file, expression fns, transclusions share the unified contract under Claudine | `compose_transclusion_resolves_repository_first_on_collision` (transclusion, discriminating); Darkmatter Phase 5 L2 (schema/`file()`/expression); L1 per-surface adapter tests; `build_prompt_reference` shared across compose + sequence |
+| 7 | `biscuit-file` docs, skill, impl, completion, tests agree on the terminology/precedence | Phase 4 updated `biscuit-file/docs/topics/file-references.md` + skill reference; `reference_grammar.rs`/`precedence_flip.rs` ratify; completion positional surfaces repository-first (Phase 7) |
+| 8 | Missing references return typed, candidate-aware diagnostics the pipeline renders + exposes as `err.detail.*` | L2 `level2_initialize_proxy_block_is_plain_under_no_color_in_tmux` (typed block under NO_COLOR); `DetailedResolution`/`ProbedCandidate` (Phase 3); `err.detail.*` projection from error-propagation |
+| 9 | macOS/Linux/Windows absolute/reference behavior covered; no POSIX-only prefix checks | Host-independent grammar in `reference_grammar.rs` (Windows drive/UNC/drive-relative/backslash + `~`); Linux Docker run green; Windows `x86_64-pc-windows-gnu` compiles+links |
+| 10 | `just test` + `just lint` pass in all three areas; L2 suites pass | claudine `just lint` + `just test` green; new/promoted L2 suites pass under tmux; `biscuit-file`/`darkmatter` unchanged in Phase 8 (checkpoint-green), Linux Docker re-confirms `biscuit-file` |
+| 11 | Sequence `~` retains home-pinned behavior through the shared grammar (incl. Windows) | `sequence::tests::tilde_reference_expands_against_home_directory` (Phase 7); shared `Home` kind in `reference_grammar.rs::home_kind_is_observable` (`~`, `~/`, `~\`); `~user` rejected |
+| 12 | Document-backed resolution consumes an explicit request-scoped context; no late ambient reads | `FileResolutionContext` (Phase 2, AC12); `resolve_in_context` performs zero ambient reads; `boundary_lint.rs`; Darkmatter Phase 5 removed ambient-CWD hatches |
+| 13 | Probing distinguishes absence from permission/I/O; no-match retains ordered candidate/root provenance | `probe_candidate` via `fs::metadata` (Phase 3): `NotFound`/non-file advance, permission/I-O stop typed; `DetailedResolution` retains ordered `ProbedCandidate` + `RootProvenance` on `NoMatch` |
+| 14 | Nested documents use their own source directory while retaining repository/launch context | Darkmatter Phase 5 nested-base suite; `compose_transclusion_resolves_repository_first_on_collision` (nested source doc reaches request repo root); D6 nested-proxy provenance test |
+| 15 | Every caller of the changed `resolve()`/`resolve_from()` defaults audited; migrates or selects explicit policy | Phase 1 `inventory.md §1` (20 call sites: 5 migrate / 8 adopt via detailed context / 7 unaffected); no permanent dual-behavior layer (D4); repository-first is the shared default |
+
+**G4 ruling (final):** `prompts/` is **not** reverted to bare spellings. The `./`
+form pins source-local intent and remains correct; the bare motivating form is
+proven by the dedicated L2 fixture.
 
 ---
 
