@@ -1539,6 +1539,47 @@ struct ComposeOptionsClassification {
     remote_fetch: Option<RemoteFetchWeakId>,
 }
 
+/// Process cache for the Darkmatter default baseline schema's canonical JSON.
+static DEFAULT_BASELINE_CANONICAL_JSON: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Canonical JSON encoding of a baseline schema, for identity fingerprinting.
+///
+/// `is_darkmatter_default` selects a process-cached encoding derived from the
+/// process-cached compiled baseline (`schemas::darkmatter_base_json_schema_ref`)
+/// rather than re-running `to_json_schema`, which dominates this whole
+/// classification (~534 µs, vs ~74 µs to canonicalize and ~2 µs for every other
+/// option field combined). Compose already populates that cache for the default
+/// baseline via `schema_validation`'s F9 fast path, so the marked arm adds no
+/// conversion at all.
+///
+/// The marker is only ever set by `with_darkmatter_baseline_schema`, which
+/// assigns `schemas::darkmatter_base_schema()` in the same call;
+/// `with_baseline_schema` clears it unconditionally. So the marker implies the
+/// schema *is* the default, and the cached bytes are exactly what converting it
+/// would produce — hence the same fingerprint.
+///
+/// ## Notes
+///
+/// A caller-supplied schema that happens to equal the default takes the uncached
+/// arm and still fingerprints identically; the marker is a fast path, never a
+/// semantic distinction.
+fn baseline_canonical_json(
+    schema: &crate::markdown::schemas::SimplifiedSchema,
+    is_darkmatter_default: bool,
+) -> std::borrow::Cow<'static, str> {
+    use super::super::cache::hashing::canonical_json_sorted;
+
+    if is_darkmatter_default {
+        return std::borrow::Cow::Borrowed(DEFAULT_BASELINE_CANONICAL_JSON.get_or_init(|| {
+            canonical_json_sorted(crate::markdown::schemas::darkmatter_base_json_schema_ref())
+        }));
+    }
+
+    let json = crate::markdown::schemas::to_json_schema(schema)
+        .unwrap_or_else(|_| serde_json::json!({"baseline_schema_error": true}));
+    std::borrow::Cow::Owned(canonical_json_sorted(&json))
+}
+
 impl ComposeOptions {
     /// Exhaustively classifies every field into the two identity products.
     ///
@@ -1597,6 +1638,14 @@ impl ComposeOptions {
 
         use super::super::cache::hashing::canonical_json_sorted;
         use serde_json::Value;
+
+        // Both identity domains below encode the baseline schema, and the
+        // conversion-plus-canonicalization dominates this whole function
+        // (~600 µs vs ~2 µs for every other field combined). Compute it once
+        // here and lend it to both encoders rather than paying it per domain.
+        let baseline_canonical: Option<std::borrow::Cow<'static, str>> = baseline_schema
+            .as_ref()
+            .map(|schema| baseline_canonical_json(schema, *baseline_is_darkmatter_default));
 
         // ── Graph identity: conservative, covers every value-representable
         //    field (stateful fields are handled by weak instance handles).
@@ -1807,12 +1856,10 @@ impl ComposeOptions {
         enc.bool(*interpolate_code_blocks);
 
         enc.field("baseline_schema");
-        match baseline_schema {
-            Some(schema) => {
+        match &baseline_canonical {
+            Some(canonical) => {
                 enc.tag(1);
-                let json = crate::markdown::schemas::to_json_schema(schema)
-                    .unwrap_or_else(|_| serde_json::json!({"baseline_schema_error": true}));
-                enc.str(&canonical_json_sorted(&json));
+                enc.str(canonical);
             }
             None => enc.tag(0),
         }
@@ -1974,12 +2021,10 @@ impl ComposeOptions {
             None => cenc.tag(0),
         }
         cenc.field("baseline_schema");
-        match baseline_schema {
-            Some(schema) => {
+        match &baseline_canonical {
+            Some(canonical) => {
                 cenc.tag(1);
-                let json = crate::markdown::schemas::to_json_schema(schema)
-                    .unwrap_or_else(|_| serde_json::json!({"baseline_schema_error": true}));
-                cenc.str(&canonical_json_sorted(&json));
+                cenc.str(canonical);
             }
             None => cenc.tag(0),
         }
@@ -2673,6 +2718,49 @@ mod tests {
         assert_eq!(
             a.compose_cache_fingerprint(),
             super::super::super::cache::hashing::options_hash(&a)
+        );
+    }
+
+    /// The cached-default fast path must be a pure speedup: an identical schema
+    /// supplied by hand (marker cleared, uncached arm) must fingerprint exactly
+    /// as the marked default does. If `with_darkmatter_baseline_schema` ever
+    /// stops assigning `darkmatter_base_schema()`, the marker would start lying
+    /// about which schema is encoded and this fails.
+    #[test]
+    fn default_baseline_fast_path_fingerprints_as_the_uncached_schema() {
+        let marked = fixed_opts().with_darkmatter_baseline_schema();
+        let by_hand = fixed_opts().with_baseline_schema(crate::markdown::schemas::darkmatter_base_schema());
+
+        assert!(marked.baseline_is_darkmatter_default);
+        assert!(!by_hand.baseline_is_darkmatter_default);
+
+        // The marker itself is encoded into the graph identity, so only the
+        // cache fingerprint (which omits it) can compare the schema encoding.
+        assert_eq!(
+            marked.compose_cache_fingerprint(),
+            by_hand.compose_cache_fingerprint(),
+            "cached default encoding must equal the freshly converted one"
+        );
+        assert_eq!(
+            baseline_canonical_json(&crate::markdown::schemas::darkmatter_base_schema(), true),
+            baseline_canonical_json(&crate::markdown::schemas::darkmatter_base_schema(), false),
+            "cached and uncached arms must produce identical canonical bytes"
+        );
+    }
+
+    /// A non-default baseline must not collide with the cached default.
+    #[test]
+    fn non_default_baseline_does_not_read_the_default_cache() {
+        let default = fixed_opts().with_darkmatter_baseline_schema();
+        let custom = fixed_opts().with_baseline_schema(
+            crate::markdown::schemas::parse_yaml_schema(
+                &serde_yaml_ng::from_str::<serde_yaml_ng::Value>("zzz_probe: string").unwrap(),
+            )
+            .unwrap(),
+        );
+        assert_ne!(
+            default.compose_cache_fingerprint(),
+            custom.compose_cache_fingerprint(),
         );
     }
 
