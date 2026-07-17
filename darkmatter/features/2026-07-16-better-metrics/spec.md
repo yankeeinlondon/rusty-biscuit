@@ -1,10 +1,12 @@
 ---
 status: draft
-reviewed: false
+reviewed: true
+reviewed_by: codex/default
+reviewed_on: 2026-07-16
 created: 2026-07-16
 inputs:
-  - ../2026-07-15-reference-graph/results.md
-  - ../2026-07-15-reference-graph/review-2.md
+  - ../_completed/2026-07-15-reference-graph/results.md
+  - ../_completed/2026-07-15-reference-graph/review-2.md
   - ../2026-07-15-performance-followup/results.md
   - ../2026-07-15-performance-followup/benchmarks/README.md
   - ../2026-07-15-performance-followup/benchmarks/manifest.yaml
@@ -13,7 +15,7 @@ inputs:
   - ../../cli/src/commands/compose.rs
   - ../../justfile
 related:
-  - ../2026-07-15-reference-graph
+  - ../_completed/2026-07-15-reference-graph
   - ../2026-07-15-performance-followup
 ---
 
@@ -27,7 +29,7 @@ we optimize. No optimization may land under this feature's charter.
 
 ## Summary
 
-Darkmatter is not short of benchmarks. It has 14 Criterion bench targets, seven
+Darkmatter is not short of benchmarks. It has 15 Criterion bench targets, seven
 `just bench*` recipes, a deterministic fixture generator, an immutable fixture
 manifest, a manifest-drift guard test, and a dated run-record contract. That
 machinery was built by the 2026-07-15 performance follow-up and it works.
@@ -37,13 +39,14 @@ part of that machinery was capable of noticing. This feature exists because of
 that specific failure, and its success is measured against it: the same
 regression, replayed, must fail the gate.
 
-Two structural defects produced it:
+Two structural defects allowed it:
 
 1. **Benchmarks measure a workload nobody runs.** Bench fixtures pin *document*
-   bytes but leave `ComposeOptions` near-default — no baseline schema, an empty
-   `ctx.*` context. Real CLI invocations populate both. A cost proportional to
-   options/context size is therefore invisible to the bench and fully visible to
-   the user.
+   bytes but leave `ComposeOptions` near-default — no baseline schema and an
+   empty context. A real CLI invocation applies the Darkmatter baseline schema
+   and captures the always-on datetime context plus any `ctx.*` groups the
+   document requests. The benchmark therefore exercised a materially different
+   options identity from the command it was used to represent.
 2. **Evidence is feature-local and dies with the feature.** Fixtures, manifest,
    thresholds, and baselines live under
    `features/2026-07-15-performance-followup/benchmarks/`. Nothing carries
@@ -62,7 +65,7 @@ just shipped, and it is the acceptance test for this one.
 
 The Opaque Reference Graph feature measured its own construction cost
 cross-commit on an idle host and **passed** its declared gate
-(`2026-07-15-reference-graph/results.md`):
+(`../_completed/2026-07-15-reference-graph/results.md`):
 
 | Fixture | Baseline | Candidate | Δ median | Verdict |
 |---|---|---|---:|---|
@@ -73,17 +76,21 @@ cross-commit on an idle host and **passed** its declared gate
 The rule — *fail only when a regression exceeds **both** 5 % **and** 100 µs* —
 was applied correctly. No fixture tripped both gates.
 
-The performance follow-up then measured the **same two commits** at the CLI
-level and found four compose cases regressed **+14 % to +35 %**, with
-`compose_trivial` moving 10.49 → 13.67 ms
-(`2026-07-15-performance-followup/results.md`). Same code. Same host. Opposite
-verdict.
+The performance follow-up then measured the code-equivalent pre-opacity audit
+revision `51c1f16e1` against `b425fb466` at the CLI level and found four compose
+cases regressed **+14 % to +35 %**, with `compose_trivial` moving
+10.49 → 13.67 ms (`../2026-07-15-performance-followup/results.md`). The commits
+between `51c1f16e1` and `db7e46792` are documentation/planning-only, so this is
+the same production baseline as the construction comparison. Same host.
+Opposite verdict.
 
 Neither measurement is wrong. They disagree because the Criterion fixture builds
 near-default `ComposeOptions`, while the CLI applies the Darkmatter baseline
-schema by default (`cli/src/commands/compose.rs:657`) and carries a fully
-populated `ctx.*` context. The new per-capture work scales with exactly those
-two inputs. The bench could not see the cost it was gating.
+schema by default (`cli/src/commands/compose.rs`) and uses a captured,
+demand-driven context. The regression was localized to reference-graph/options
+identity construction in the command setup envelope; the microbenchmark neither
+constructed the same identity nor measured that envelope. The bench could not
+see the cost it was used to gate.
 
 Three properties of the platform failed at once, and each maps to a problem
 below:
@@ -103,8 +110,9 @@ below:
    feature.
 3. Express regression thresholds against user-visible operations, not against a
    microbenchmark's incidental scale.
-4. Detect regressions continuously against a committed baseline, rather than
-   only when a feature goes looking.
+4. Make every performance-sensitive change runnable against a declared
+   known-good revision in the same measurement session, rather than requiring a
+   later feature to reconstruct the comparison.
 5. Make measurement refuse to run — loudly — on a host too noisy to produce a
    trustworthy number.
 6. Make per-phase attribution (`--perf`) structurally unambiguous.
@@ -128,7 +136,7 @@ below:
 
 ### What exists and is worth keeping
 
-- **14 Criterion bench targets** in `lib/benches/` registered in `lib/Cargo.toml`.
+- **15 Criterion bench targets** in `lib/benches/` registered in `lib/Cargo.toml`.
 - **Seven `just bench*` recipes**: `bench`, `bench-schema`, `bench-compose`,
   `bench-render`, `bench-baseline`, `bench-compare`, `bench-dmls`.
 - **A deterministic fixture generator** (`generate.sh`, versioned) plus 13
@@ -141,6 +149,9 @@ below:
 - **A dated run-record contract** — `raw/<checkpoint>/<run-id>/` owning commits,
   commands, host facts, environment, TTY mode, warm-up, sample count,
   dispersion, predeclared thresholds, and raw samples.
+- **A retained in-crate harness** (`lib/src/perf_harness.rs`) for crate-private
+  targets. It writes Criterion-compatible sample vectors without widening the
+  production API and is part of the platform that must be promoted.
 
 The fixture-identity and run-record discipline is genuinely good work. This
 feature's job is to promote it, not to redesign it.
@@ -156,23 +167,24 @@ half is the half that didn't vary.
 **P2 — Thresholds are anchored to the fixture, not the user.** The 5 %/100 µs
 rule is reasonable for a microbenchmark and produces a wrong answer at `small`'s
 scale: a fixed per-invocation cost is absorbed as noise because the fixture is
-cheap, then reappears as +3.3 ms on every real compose.
+cheap, then appears as +3.3 ms in the measured `md compose` command workload.
 
-**P3 — No baseline outlives a feature.** Criterion's `--save-baseline` writes to
-a local `target/`, which is not committed, is wiped by `cargo-sweep`, and is
-per-worktree. There is no persistent number that a change can be measured
-against, so regressions are found by archaeology (as here: two features and a
-bisect) rather than by a gate.
+**P3 — No comparison anchor outlives a feature.** Criterion's
+`--save-baseline` writes to a local `target/`, which is not committed, is wiped
+by `cargo-sweep`, and is per-worktree. No durable record names the known-good
+revision and workload contract to rebuild in a later same-session comparison,
+so regressions are found by archaeology (as here: two features and a bisect)
+rather than by a gate.
 
 **P4 — Bench targets are named after project archaeology.** `phase6_interpolation`,
 `phase8_render`, `phase9_remote`, `phase10_residuals` name the phases of a
 completed plan. A newcomer cannot tell what they cover, whether they overlap, or
 which is authoritative for a given operation.
 
-**P5 — Host fitness is assumed, never checked.** Every result depends on an idle
-machine, and nothing verifies it. Measurements taken under load are silently
-recorded as facts. (This is live: the current worktree cannot be trusted to
-measure while other work runs.)
+**P5 — Host fitness is assumed, never checked.** Every result depends on a
+stable-enough measurement window, and nothing verifies it. Measurements taken
+under noisy or drifting load are silently recorded as facts. (This is live: the
+current worktree cannot be trusted to measure while other work runs.)
 
 **P6 — `--perf` spans are nested but read as flat.** `build options`
 (`compose.rs:230`–`386`) fully encloses `validate references`
@@ -187,202 +199,294 @@ permanent home.
 
 ## Proposed Design
 
-### AD-1 — Workload profiles are first-class fixture identity
+### AD-1 — A workload identifies the full execution recipe
 
-A benchmark case is a **workload**: `(document fixture × options profile)`. Both
-halves get recorded identity in the manifest; neither may be constructed ad hoc
-in bench code.
+A benchmark case is a **workload**: a manifest entry that references a document
+fixture, an execution profile, and a measurement boundary. Fixture identity
+alone is insufficient, and an arbitrary Cartesian product of every fixture and
+profile is not implied.
 
-Define a small, named, committed set of options profiles. At minimum:
+Execution profiles are committed JSON documents. The initial set is:
 
-- `minimal` — `ComposeOptions::new()`, empty context. What today's benches
-  measure. Retained as the isolation profile for mechanism work.
-- `cli-default` — exactly what `md compose` builds for a plain invocation:
-  Darkmatter baseline schema applied, trigger schemas on, real `ctx.*` context
-  shape. **This is the default profile for any user-facing claim.**
-- `cli-rich` — `cli-default` plus `--state`/`--set` overrides and a populated
-  magic-path set, representing a Claudine-style invocation.
+- `micro-minimal` — `ComposeOptions::new()` with an empty context. This retains
+  today's isolation workload for mechanism analysis.
+- `micro-cli-frozen` — the Darkmatter baseline schema, a committed trigger
+  registry, and a frozen representative context. This lets Criterion attribute
+  costs under a CLI-shaped options value without pretending to measure process
+  startup or live discovery.
+- `command-cli-default` — the release `md compose` binary with the ordinary
+  baseline schema, trigger discovery, and normal demand-driven context capture.
+  No benchmark-only context injection is allowed on this path. The runner
+  materializes the declared workspace fixture into one temporary root used by
+  both binaries, so discovery does not depend on either source worktree.
+- `command-cli-stateful` — `command-cli-default` plus representative public
+  `--state` and `--set` inputs. It does not claim to model Claudine-only library
+  configuration such as `magic_paths`, which `md compose` cannot express.
 
-Requirements:
+This distinction is intentional. Freezing the command context would make the
+run reproducible by changing the user-visible operation being measured. Command
+profiles therefore freeze the **recipe** and record the resolved context group
+names and redacted shape in each run; micro profiles may freeze concrete
+`ComposeOptions` values for attribution.
 
-1. Profiles are constructed by one committed, crate-visible builder shared by
-   benches and run records. No bench hand-rolls options.
-2. The context in a profile is a **frozen snapshot**, not a live capture. A
-   profile that captures a live `ctx.*` is not reproducible across hosts or
-   across seconds, and would make the fingerprint below meaningless.
-3. The manifest records each profile's identity alongside fixture identity, and
-   the guard test verifies it the same way it verifies fixture bytes.
-4. A workload case declares its profile explicitly. A bench with no declared
-   profile is a build error, not a silent `minimal`.
+Every profile declares:
 
-> **Open question O1** — the natural identity for a profile is the very
-> `compose_cache_fingerprint` / options-identity machinery whose cost this whole
-> investigation is about. Reusing it is elegant and self-checking; it also
-> couples the measurement platform to code under active change, and a
-> fingerprint change would invalidate every recorded profile identity. The
-> alternative is an independent, simpler encoding owned by the manifest. **This
-> needs a ruling before implementation.**
+- runner and boundary;
+- argument vector, working-directory fixture, stdin/TTY mode, and output mode;
+- an environment allowlist plus explicit overrides (`NO_COLOR`, locale, and
+  timezone included);
+- context policy (`frozen` or `live-demand-driven`), trigger-root policy, and
+  cache state (`cold`, `warm`, or `not-applicable`);
+- network, shell, and prompt policy — default deny for all three;
+- expected exit status and output-identity policy.
 
-### AD-2 — Two tiers, explicitly declared
+Paths in a profile are logical, repository-relative references. The runner
+resolves them through `biscuit_file::FileReference`; absolute checkout paths are
+run facts and never profile identity.
 
-Every measurement declares its tier, and the tiers answer different questions:
+Profile identity is independent of production cache/graph identity. The
+manifest records the profile file's byte count and a `biscuit-hash` xxHash64 of
+its committed bytes. Reusing `compose_cache_fingerprint` or
+`ReferenceGraphOptionsIdentity` would couple the measuring instrument to the
+implementation under measurement and would invalidate profiles whenever an
+internal identity domain changes.
 
-- **Micro (Criterion, `lib/benches/`)** — establishes *mechanism*. May use
-  `minimal`. Never authoritative for a user-facing claim.
-- **Command (release CLI, `hyperfine`)** — establishes *user impact*. Uses
-  `cli-default` or `cli-rich`.
+One non-production Rust support module under `benchmarks/support/` owns
+construction of the two micro profiles and is included by the Criterion targets
+and manifest guard. Runner adapters consume the same manifest/profile schema.
+An authoritative benchmark or command run missing a workload/profile
+declaration is a manifest validation error. Rust cannot make arbitrary
+hand-written bench code a compile error, so the earlier draft's stronger claim
+is not enforceable and is removed.
 
-A finding may only claim a win or pass a regression gate on the strength of a
-**command-tier** result. A micro-tier result is supporting evidence for *why*.
-The reference-graph case is exactly the failure this rule prevents: a micro-tier
-PASS was treated as the gate.
+### AD-2 — Three boundaries, matched to the claim
 
-Explicitly retained from follow-up AD-A: this does **not** funnel CLI or PTY
-evidence through `just bench`. Each tier keeps its own runner and writes its own
-run record.
+Every workload declares one of three boundaries:
 
-### AD-3 — Thresholds anchor to a user-visible operation
+- **Component** — Criterion or the retained in-crate harness around a focused
+  mechanism. It explains *why* a result moved and is never sufficient for a
+  broader operation claim.
+- **Library operation** — an end-to-end public Darkmatter library operation,
+  normally measured in-process with Criterion. It may gate a claim specifically
+  about that library API.
+- **Command** — a release CLI process measured with `hyperfine`. It is the
+  authority for `md` latency and other command-level user claims.
 
-Replace the per-fixture 5 %/100 µs rule with a threshold expressed against the
-end-to-end operation the fixture stands in for.
+The rule is not "Criterion can never gate." The rule is that the authoritative
+boundary must contain the operation named by the claim. The reference-graph
+failure used a component result to pass an `md compose` claim; the command
+boundary would have prevented that category error.
 
-Proposed default: **a change is a regression when it costs more than 2 % of the
-command-tier median for that workload, or more than 1 ms absolute, whichever is
-larger — measured at the command tier.**
+Explicitly retained from follow-up AD-A: CLI and PTY evidence do not run through
+`just bench`. Each runner writes the common run-record shape, and interactive
+and piped workloads remain distinct.
 
-Under this rule the reference-graph cost (+3.3 ms on a 10.49 ms
-`compose_trivial`, ≈+31 %) fails clearly, which is the required outcome. The
-`minimal`-profile micro number that passed is no longer eligible to be the gate.
+Before timing two implementations, the runner executes each once outside the
+timed samples and requires equal exit status and output identity. Markdown
+outputs use Darkmatter's frontmatter/body hash; other outputs use
+`biscuit-hash`. A faster command that changed output is a correctness failure,
+not a performance result.
 
-Retained unchanged from the follow-up's evidence contract: thresholds are
-declared **before** the baseline is captured; raw samples are retained; a no-win
-disposition is a legitimate close.
+### AD-3 — Workload budgets plus a measured noise bound
 
-> **Open question O2** — 2 %/1 ms is a starting proposal, chosen to fail the
-> known case with margin. It should be calibrated against the measured run-to-run
-> dispersion of `cli-default` on an idle host before it is ratified; a threshold
-> tighter than the noise floor produces false failures and trains people to
-> ignore the gate. **Needs a ruling, informed by AD-5's measured noise floor.**
+There is no universal 2 %/1 ms threshold. Different operations have different
+user budgets and noise floors. Each authoritative workload records, before
+capture:
+
+- a relative regression budget;
+- an absolute regression budget;
+- maximum admissible sample dispersion and bracket drift;
+- minimum warm-up and sample counts; and
+- the required confidence rule.
+
+Command comparisons use a same-session `candidate A → baseline → candidate B`
+drift bracket. Let `B` be the baseline median and let `C` be the lower (more
+conservative) of the two candidate medians. `measured_drift` is the absolute
+difference between the two candidate medians. A regression fails only when:
+
+1. `C - B` exceeds `max(relative_budget × B, absolute_budget, measured_drift)`;
+2. the bootstrap 95 % interval for the baseline does not overlap either
+   candidate interval; and
+3. the baseline and both candidate arms produced equivalent output.
+
+The initial `compose_trivial × command-cli-default` workload declares 5 % and
+1 ms. The known +3.3 ms / approximately +31 % regression clears both product
+budgets, the observed drift bracket, and the confidence rule. The exact budget
+is now attached to the user-visible command workload rather than borrowed from
+a microbenchmark with a different scale.
+
+Raw observation vectors remain mandatory. Thresholds are declared before the
+baseline is captured, and a no-win disposition remains a legitimate close.
 
 ### AD-4 — One durable, area-level evidence home
 
-Promote the follow-up's `benchmarks/` layout to `darkmatter/benchmarks/`, owned
-by the area rather than by a feature:
+Promote the follow-up's layout to `darkmatter/benchmarks/`, owned by the area:
 
-```
+```text
 darkmatter/benchmarks/
-├── README.md            # manifest schema, profiles, runners, run-record contract
-├── generate.sh          # deterministic fixture generator (versioned)
-├── manifest.yaml        # fixtures AND options profiles — one identity authority
-├── fixtures/            # committed, byte-identical documents
-├── profiles/            # committed options-profile definitions (AD-1)
-├── baselines/           # committed rolling baselines (AD-6)
+├── README.md              # schemas, boundary rules, and run-record contract
+├── generate.sh            # deterministic document-fixture generator
+├── manifest.yaml          # fixture, profile, and workload identity authority
+├── fixtures/              # committed, byte-identical documents and roots
+├── profiles/              # committed execution-profile JSON
+├── baselines/             # known-good refs and advisory historical observations
+├── run-command.ts         # portable hyperfine orchestration; no shell pipelines
+├── recompute.ts           # statistics from retained observation vectors
 └── raw/<checkpoint>/<run-id>/
 ```
 
-The follow-up's feature-local evidence stays where it is, as its historical
-record. Migration copies conventions forward; it does not move or rewrite that
-feature's recorded results.
+The follow-up's feature-local directory remains its historical record. Promotion
+copies fixture bytes once, verifies byte and Darkmatter-hash equality, and makes
+the area manifest authoritative for future work; historical paths and results
+are not rewritten.
 
-`lib/tests/benchmark_fixtures.rs` moves with the manifest and extends to verify
-profile identity.
+`lib/tests/benchmark_fixtures.rs` becomes the area-manifest guard and validates
+fixtures, profiles, workload references, budgets, and generator version. It also
+rejects duplicate ids and a command workload whose profile permits network,
+shell execution, or prompts without an explicit workload-level exception.
 
-### AD-5 — Host fitness gate
+### AD-5 — Fitness is a same-session quality check
 
-Measurement must refuse to produce a number on a host it cannot trust.
+The strict gate is based on measurements every supported OS can provide:
+warm-up stabilization, sample dispersion, and pre/post drift calibration. A run
+with excessive dispersion, failed calibration, or a drift bracket larger than
+the workload's admissible noise aborts and writes an **invalid** run record. An
+invalid record retains its observations for diagnosis but is inadmissible as a
+pass or fail.
 
-Before any run, the harness records and checks: load average, active core count,
-thermal/throttling state where the OS exposes it, and the dispersion of a short
-calibration workload against a committed expected range.
+Use `sniff` for the static host fingerprint: OS, architecture, CPU identity,
+logical core count, and memory. `sniff` does not currently expose portable load
+average, active-core, or thermal-throttling state, so this feature must not
+silently introduce hand-rolled platform probes. If those signals become
+available through `sniff`, record them as supplementary context; absence is not
+an error and they are not a hard gate in v1.
 
-On failure the run **aborts with a diagnostic**. It does not warn-and-continue —
-a warned-past result becomes a cited fact three documents later.
+No committed absolute calibration range is used. Such a range would be an
+Apple-M4-Max-specific policy masquerading as a cross-platform invariant. The
+fitness decision comes from within-run dispersion and drift, while the host
+fingerprint explains and groups historical observations.
 
-The fitness reading is recorded in the run record. A run record without one is
-not admissible evidence.
+Fitness logic accepts an injected probe result so fit/unfit/unsupported cases
+are deterministic unit tests. Real macOS, Linux, and Windows smoke runs prove
+the platform adapters and record shape; a synthetic-load test is supporting
+evidence, not a reliable automated assertion on every scheduler.
 
-Use `sniff` for host facts rather than hand-rolled probes.
+### AD-6 — Committed references, same-session hard baselines
 
-> **Open question O3** — the calibration workload's expected range is itself
-> host-specific, and Ken's host (Apple M4 Max) is the only one this has ever run
-> on. Committing a range calibrated on one machine may make the gate useless
-> elsewhere. Options: commit per-host-class ranges, derive the range from
-> dispersion alone (host-independent), or gate on dispersion only and record the
-> rest as context. **Needs a ruling.**
+`benchmarks/baselines/` commits the known-good revision and workload/profile
+revision for each gate, plus historical observations for trend analysis. The
+committed absolute median is **advisory**: even identical code has drifted by
+approximately 50 % across sessions on the current host, so an old number cannot
+be a hard gate.
 
-### AD-6 — Rolling committed baselines
+For a hard comparison, the runner builds the declared known-good revision and
+the candidate into isolated target directories, then measures both in one
+session under AD-5. Command workloads place both absolute binaries against the
+same fixture root, working directory, environment, and cache policy. The run
+record captures the commits, dirty candidate diff identity, Cargo lockfiles,
+toolchain, build commands, and binary hashes.
 
-Commit a baseline per `(workload, tier)` to `benchmarks/baselines/`, recorded on
-a known-good host under a passing fitness gate, with its commit, host facts, and
-dispersion.
+The candidate is bracketed around the baseline within one `hyperfine`
+invocation. Component comparisons should prefer the retained harness's
+sample-by-sample interleaving; where that is impossible they use the same
+bracket rule. A baseline revision that no longer builds is a blocked gate, not
+permission to advance the reference automatically.
 
-This is the missing piece behind P3. A change compares against a committed
-number rather than against whatever happens to be in a local `target/`. It makes
-"did this regress?" answerable at the time of the change instead of by a later
-bisect.
+Baseline refs are refreshed only by an explicit owner decision backed by a
+passing comparison, equivalent output, and a recorded reason. This prevents
+slow regressions from ratcheting into the platform while still allowing an
+intentional product-budget change.
 
-Baselines are refreshed deliberately, never automatically: an automatic refresh
-would ratchet in exactly the kind of slow regression this exists to catch.
+### AD-7 — `--perf` separates structural time from breakdowns
 
-> **Open question O4** — baselines are host-specific, and this repo has one
-> reachable host. A committed baseline is therefore honest only for that host,
-> and a second developer would see false failures. Scope options: (a) accept
-> single-host baselines and gate them on matching host facts, skipping elsewhere;
-> (b) store per-host-class baselines; (c) treat baselines as advisory trend data
-> and keep the gate same-session. **Needs a ruling — this decides whether AD-6
-> is a gate or a trend line.**
+`--perf` remains diagnostic attribution; `hyperfine` wall time is the command
+gate. Its command envelope becomes a non-overlapping structural tree:
 
-### AD-7 — `--perf` spans form an explicit tree
+```text
+compose command (run_compose envelope)
+├── resolve input
+├── load input
+├── capture context
+├── prepare options
+├── validate references
+├── compose pipeline
+├── emit output and diagnostics
+└── unattributed
+```
 
-Fix P6 at the instrument. Spans must be either non-overlapping, or explicitly
-parent/child with nesting visible in the output — a child indented under its
-parent, and a parent's self-time distinguished from its inclusive time.
+`prepare options` is self time and explicitly excludes `validate references`.
+This intentionally corrects the old inclusive `build options` meaning; keeping
+that meaning would preserve the double count that caused P6. Historical reports
+retain their original interpretation and are not rewritten.
 
-The current output invites summing `build options` and `validate references`,
-which double-counts a single cost. Any consumer reading two numbers as two costs
-is reading the instrument as designed; the design is wrong.
+Context-group timings and compose-stage timings remain **breakdowns** beneath
+their structural parent. They may overlap or run concurrently and therefore do
+not participate in reconciliation. `unattributed` is
+`max(0, envelope total - sum(structural children))`, making missing coverage
+visible without manufacturing negative time.
 
-This is a change to `--perf` output shape. It is user-visible and needs a
-compatibility note, but `--perf` is a diagnostic surface rather than a data
-contract.
+The public `ComposePerfReport` / `ComposePerfMetric` flat library contract stays
+source-compatible. Claudine already consumes those types and builds a richer
+tree; changing the public struct has a HIGH downstream blast radius and is not
+required to fix the Darkmatter CLI envelope. The CLI-private projection renders
+with `biscuit_terminal::MetricsTree` (a `TerminalRenderable` component) rather
+than hand-built spacing or ANSI strings.
 
-### AD-8 — Benches named for what they measure
+### AD-8 — Catalog now; archaeology renames later
 
-Retire archaeology names (`phase6_*`, `phase8_*`, `phase9_*`, `phase10_*`) in
-favor of operation names. Audit the 14 targets for overlap and redundant
-coverage, and record one authoritative target per operation.
+Audit all 15 Criterion targets and the retained in-crate harnesses into the area
+manifest. For each, record boundary, workloads, owner, and whether it is
+authoritative, diagnostic, redundant, or historical.
 
-This is the lowest-value item here and the easiest to defer. It is listed last
-deliberately — if scope must be cut, cut this first.
+Do **not** rename `phase6_*`, `phase8_*`, `phase9_*`, or `phase10_*` in this
+feature. Renaming has no bearing on the known failure, touches historical
+commands and scripts, and is the first scope item that should be deferred. A
+later cleanup may rename active targets from the catalog with coordinated link
+updates.
 
 ## Compatibility and Correctness Invariants
 
 1. No optimization and no behavior change to compose, render, hash, or
-   validation lands under this feature. A `git diff` that touches those paths
-   for reasons other than `--perf` span structure is out of scope.
+   validation lands under this feature. Production-path edits are limited to
+   additive measurement/profile support and the `--perf` envelope correction.
 2. Fixture bytes already committed by the follow-up do not change. If a promoted
    fixture must change, it gets a new id and a generator version bump.
 3. The follow-up's and the 2026-07-12 review's recorded evidence is not
    rewritten. Cross-links only.
-4. `--perf` span *content* is preserved; only its structure and presentation
-   change.
+4. The public `ComposePerfReport`, `ComposePerfMetric`, and `ComposeStage`
+   contracts remain source-compatible. The CLI-private inclusive `build options`
+   measurement is deliberately replaced by non-overlapping `prepare options`
+   self time.
 5. The platform runs on macOS, Linux, and Windows. Host-fitness probing is
-   OS-divergent by nature and any platform split must be target-gated. Windows
-   compile evidence plus a real Linux behavioral run is the minimum bar for the
-   fitness gate.
-6. No write-mode formatter is authorized.
+   target-gated where necessary, but unsupported load/thermal signals never
+   prevent a platform from running the portable calibration and drift checks.
+6. Command profiles are non-interactive and side-effect-denying by default. A
+   workload that intentionally exercises a side effect must use an isolated
+   local fake and declare the exception in the manifest.
+7. The command runner passes argument arrays, uses `hyperfine --shell=none`, and
+   does not depend on Unix redirection or `/dev/null`.
+8. No write-mode formatter is authorized.
 
 ## Verification
 
 ### Platform behavior
 
 - The manifest guard fails when a fixture byte changes, when a profile
-  definition changes, and when a profile is added without identity.
-- A bench declaring no profile fails to compile.
-- The fitness gate aborts under synthetic load and passes on an idle host.
-- Run records without a fitness reading are rejected.
-- Profile construction is byte-identical across processes and across clones
-  (a profile whose identity is unstable is not a fixture).
+  definition changes without a manifest update, when a workload references a
+  missing id, or when a profile is added without identity.
+- The registry validator rejects an authoritative workload without a declared
+  profile, boundary, budgets, output policy, or effects policy.
+- Injected fit, unfit, excessive-drift, and unsupported-signal probe cases have
+  deterministic tests.
+- Run records without a fitness verdict or raw observations are rejected; an
+  invalid run is retained but cannot produce a pass/fail verdict.
+- Frozen micro-profile construction is byte-identical across processes and
+  clones. Command-profile **recipe** identity is byte-identical; live resolved
+  context is recorded as a per-run fact and is not required to be identical.
+- Baseline and candidate output mismatch aborts before timed sampling.
+- Structural `--perf` children never exceed the command-envelope total;
+  concurrent/overlapping details are marked as breakdowns and excluded from
+  reconciliation.
 
 ### The acceptance test — replay the failure
 
@@ -390,55 +494,83 @@ This is the test that decides whether this feature was worth building.
 
 Reconstruct the reference-graph regression: measure `db7e46792` (pre-opacity)
 against `b425fb466` (post-opacity) on `compose_trivial` at the **command tier**
-with the **`cli-default` profile**, under a passing fitness gate.
+with the **`command-cli-default` profile**, under a passing fitness gate and the
+same-session drift bracket.
 
 **The new gate must fail.** If it passes, the platform has reproduced the
 original defect and the design is wrong.
 
-Additionally, the `minimal`-profile micro measurement must still show the small
-delta it originally showed — demonstrating that the two tiers disagree *by
-design*, and that the platform's contribution is knowing which one is the gate.
+Additionally, the `micro-minimal` component measurement must reproduce the much
+smaller delta that originally passed. The result demonstrates that both
+measurements are valid for their declared boundaries and that only the command
+measurement can decide the `md compose` claim.
 
 ### Required gates
 
-- Darkmatter `just test`, `just lint`, `just build`.
+- Use `sniff repo packages` and GitNexus impact analysis to record the affected
+  packages, package areas, and downstream consumers before selecting gates.
+- Darkmatter `just test`, `just lint`, and `just build` for the affected area;
+  use Nextest through the `just` recipes, never `cargo test`.
 - `git diff --check`.
-- GitNexus `detect_changes()` before commit; scope must show no compose/render
-  behavior change (invariant 1).
-- Linux behavioral run for the host-fitness probe; Windows compile evidence.
+- GitNexus `detect_changes({ scope: "compare", base_ref: "main" })` before
+  commit; scope must show no compose/render behavior change beyond invariant 1.
+- Real command-runner/fitness smoke records on macOS, Linux, and Windows.
 
 ## Acceptance Criteria
 
-1. A workload is `(fixture × options profile)`, both with recorded manifest
-   identity, both verified by the guard test.
-2. `cli-default` exists, matches what `md compose` actually builds, and is the
-   default profile for user-facing claims.
-3. A user-facing performance claim or regression gate cites a **command-tier**
-   result. A micro-tier result alone cannot pass a gate.
-4. Thresholds anchor to a user-visible operation and are declared before the
-   baseline is captured.
+1. Every authoritative workload references a fixture, execution profile, and
+   measurement boundary with recorded manifest identity and a passing guard.
+2. `command-cli-default` invokes ordinary release `md compose` with live
+   demand-driven context capture and is authoritative for default CLI compose
+   claims; `micro-cli-frozen` is explicitly diagnostic.
+3. A performance claim cites a measurement whose boundary contains the named
+   operation. A component result alone cannot pass a command claim.
+4. Each workload declares relative and absolute budgets before capture, and a
+   hard verdict also clears its same-session drift and confidence rules.
 5. `darkmatter/benchmarks/` is the area-level evidence home; the follow-up's
    conventions are promoted intact and its historical evidence is untouched.
-6. Measurement aborts on an unfit host and records its fitness reading.
-7. `--perf` output makes nesting unambiguous; `build options` and
-   `validate references` can no longer be read as two independent costs.
-8. **The replayed reference-graph regression fails the new gate.**
-9. No optimization landed under this feature.
+6. Fitness uses portable dispersion/drift checks, records a `sniff` host
+   fingerprint, and marks inadmissible runs invalid rather than warning past
+   them.
+7. A hard gate rebuilds and measures its declared known-good revision in the
+   same session. Committed absolute medians are advisory trend data only.
+8. `--perf` structural timings reconcile without double counting;
+   `prepare options` excludes `validate references`, while detailed concurrent
+   timings are labeled breakdowns.
+9. The public compose-performance report remains compatible, and terminal
+   presentation uses `MetricsTree` through `TerminalRenderable`.
+10. All 15 Criterion targets and retained in-crate harnesses are cataloged;
+    phase-name renames are deferred.
+11. **The replayed reference-graph regression fails the new gate.**
+12. No optimization landed under this feature.
 
-## Open Questions for the Owner
+## Review Decisions
 
-Consolidated from the design above. These are blocking for implementation, not
-for this draft:
+> **Reader's note:** review changed four draft proposals that looked attractive
+> in isolation but conflicted with existing evidence or repository contracts.
 
-- **O1** — should profile identity reuse the existing options-identity
-  machinery, or get an independent encoding owned by the manifest? (AD-1)
-- **O2** — is 2 %/1 ms the right threshold, and what is the measured `cli-default`
-  noise floor on an idle host? (AD-3)
-- **O3** — how does host fitness calibrate on a repo with one reachable host?
-  (AD-5)
-- **O4** — are committed baselines a **gate** or a **trend line**? This is the
-  most consequential question here: it decides whether AD-6 catches regressions
-  automatically or merely records them. (AD-6)
-- **O5** — scope. AD-1/AD-3/AD-4 are the core and directly address the known
-  failure. AD-5 through AD-8 are valuable but severable. Should this land as one
-  feature or as a core feature plus follow-ups?
+- **Independent profile hashes, not production fingerprints.** Production
+  identity reuse would be self-checking, but it would make the instrument change
+  identity whenever the measured implementation changes. Raw committed profile
+  bytes plus `biscuit-hash` give stable ownership and a simpler guard.
+- **Live command context, frozen micro context.** Freezing both is maximally
+  reproducible but stops measuring the ordinary CLI. Making both live is
+  representative but makes mechanism attribution unstable. Splitting the
+  profiles preserves both purposes without calling them equivalent.
+- **Same-session hard baseline, committed trend reference.** A single-host hard
+  median is simple but produced up to approximately 50 % drift on identical
+  code; per-host-class medians multiply maintenance without removing session
+  drift. Rebuilding the declared baseline in the candidate session costs more
+  time but is the only option supported by the existing evidence.
+- **CLI-private tree, public flat report.** Replacing `ComposePerfReport` with a
+  tree would centralize structure, but GitNexus reports HIGH impact (17 direct
+  dependents and 23 affected symbols), including Claudine's existing tree.
+  Correcting Darkmatter's non-overlapping command envelope solves P6 without a
+  cross-area migration.
+- **Catalog before rename.** Immediate phase-target renames improve discovery
+  but churn historical commands and do not affect correctness. A catalog closes
+  the ownership gap now and makes any later rename evidence-driven.
+
+No blocking design questions remain after review. Workload-specific budgets may
+be tuned only through the explicit baseline-refresh decision in AD-6; that is a
+recorded product decision, not an implementation-time open question.
