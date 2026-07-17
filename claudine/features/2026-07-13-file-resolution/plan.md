@@ -7,6 +7,14 @@ yolo: true
 spec: ./spec.md
 depends_on:
     - ../2026-07-13-error-propogation/spec.md
+source_files_during_phase_1: []
+docs_updated_during_phase_1:
+    - claudine/features/2026-07-13-file-resolution/plan.md
+docs_created_during_phase_1:
+    - claudine/features/2026-07-13-file-resolution/decisions.md
+    - claudine/features/2026-07-13-file-resolution/inventory.md
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Unified File-Reference Resolution — Execution Plan
@@ -112,13 +120,13 @@ correct and pins source-local intent. Do **not** treat the revert as a gate.
 No production code. Output is `decisions.md` plus a written inventory that D12
 requires **before** the precedence switch. Tasks 1–5 are parallelizable.
 
-- [ ] Record rulings for G1–G4 in `claudine/features/2026-07-13-file-resolution/decisions.md`, each with rationale
-- [ ] Re-verify G2's zero-usage claim: `grep -rn --include='*.md' -E '(proxy|sequence):[[:space:]]*@' prompts .claudine` returns empty
-- [ ] **[parallel]** D12 audit: classify all 20 `resolve()`/`resolve_from()` call-site files as *migrates to repo-first* / *needs explicit transition policy* / *unaffected*. Files: `biscuit-file/cli/src/main.rs`, `biscuit-file/lib/src/{file_reference/mod.rs,lib.rs}`, `claudine/cli/src/commands/{schema_interactive/mod.rs,sequence.rs}`, `claudine/gen/src/agent_errors_check.rs`, `claudine/lib/src/composition/{resolve.rs,sequence.rs}`, `claudine/lib/src/stream/providers/opencode.rs`, `darkmatter/cli/src/{commands/frontmatter.rs,io/mod.rs}`, `darkmatter/lib/src/markdown/compose/{expression/resolve_ctx.rs,link_resolve.rs,transclusion/resolver.rs}`, `darkmatter/lib/src/markdown/schemas/{detect.rs,format.rs,resolve.rs}`
-- [ ] **[parallel]** Fixture collision inventory: for every committed Claudine/Darkmatter fixture and prompt authoring a bare reference, determine whether **both** repo-root and source-relative candidates exist. Classify each collision by author intent; list source-local intents for `./` rewrite
-- [ ] **[parallel]** Extend the migration inventory beyond the spec's named list (D5 calls it a minimum, not an allowlist): sweep for fallback `PathBuf::join`, `canonicalize`, tilde expansion, prefix classification, and resolver-error suppression across `claudine/` and `darkmatter/`
-- [ ] **[parallel]** Confirm whether `darkmatter/lib/Cargo.toml:90`'s `sniff` entry is a real dependency or dev-only (it sits below `[dev-dependencies]`). If dev-only, Phase 5 must promote it to supply `repository_root`
-- [ ] **[parallel]** Capture baseline: `just test` + `just lint` in `biscuit-file`, `darkmatter`, `claudine`; record pre-existing failures so later phases do not misattribute them
+- [x] Record rulings for G1–G4 in `claudine/features/2026-07-13-file-resolution/decisions.md`, each with rationale
+- [x] Re-verify G2's zero-usage claim: `grep -rn --include='*.md' -E '(proxy|sequence):[[:space:]]*@' prompts .claudine` returns empty
+- [x] **[parallel]** D12 audit: classify all 20 `resolve()`/`resolve_from()` call-site files as *migrates to repo-first* / *needs explicit transition policy* / *unaffected*. Files: `biscuit-file/cli/src/main.rs`, `biscuit-file/lib/src/{file_reference/mod.rs,lib.rs}`, `claudine/cli/src/commands/{schema_interactive/mod.rs,sequence.rs}`, `claudine/gen/src/agent_errors_check.rs`, `claudine/lib/src/composition/{resolve.rs,sequence.rs}`, `claudine/lib/src/stream/providers/opencode.rs`, `darkmatter/cli/src/{commands/frontmatter.rs,io/mod.rs}`, `darkmatter/lib/src/markdown/compose/{expression/resolve_ctx.rs,link_resolve.rs,transclusion/resolver.rs}`, `darkmatter/lib/src/markdown/schemas/{detect.rs,format.rs,resolve.rs}` — **DONE** (`inventory.md` §1). 20 files confirmed (17 named + 3 additional `reference/{mod,graph,validate}.rs`). Tally: 5 migrate / 8 need-policy / 7 unaffected.
+- [x] **[parallel]** Fixture collision inventory: for every committed Claudine/Darkmatter fixture and prompt authoring a bare reference, determine whether **both** repo-root and source-relative candidates exist. Classify each collision by author intent; list source-local intents for `./` rewrite — **DONE** (`inventory.md` §2). No LIVE collisions; one shipped source-local bare ref (`prompts/faster-builds-and-tests.md:8`) flagged for `./` rewrite.
+- [x] **[parallel]** Extend the migration inventory beyond the spec's named list (D5 calls it a minimum, not an allowlist): sweep for fallback `PathBuf::join`, `canonicalize`, tilde expansion, prefix classification, and resolver-error suppression across `claudine/` and `darkmatter/` — **DONE** (`inventory.md` §3). Notable new sites: `expression/functions/mod.rs:1604+` (`resolve_path_shape` full parallel grammar), `messaging/resolve.rs` (5-rung image ladder), the `linking/` family, `darkmatter/effects` + `style/bespoke.rs` (pure `FileReference` bypass), `reference/graph.rs` (bypass + error suppression). Scope-caution note recorded for adjacent non-document-reference sites.
+- [x] **[parallel]** Confirm whether `darkmatter/lib/Cargo.toml:90`'s `sniff` entry is a real dependency or dev-only (it sits below `[dev-dependencies]`). If dev-only, Phase 5 must promote it to supply `repository_root` — **RESOLVED: real dependency.** `[dependencies]` starts `Cargo.toml:28`, `sniff` is `:90`, `[dev-dependencies]` starts `:108`. Confirmed used in 46 non-test src sites (e.g. `compose/context/capture/snapshot.rs`, `editor/mod.rs`). Phase 5 does **not** need to promote it.
+- [x] **[parallel]** Capture baseline: `just test` + `just lint` in `biscuit-file`, `darkmatter`, `claudine`; record pre-existing failures so later phases do not misattribute them — **DONE** (`inventory.md` §4). All three areas GREEN, zero pre-existing failures. Infra note: recipes need the Bash sandbox disabled (exit 144 otherwise) and must run sequentially (build-lock contention).
 
 **Checkpoint 1:** `decisions.md` exists with G1–G4 ruled. Collision inventory
 written. Baseline recorded. **No precedence change may begin until this passes.**
