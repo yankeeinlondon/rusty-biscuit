@@ -153,6 +153,22 @@ leak-timeout = { period = "1s", result = "fail" }
 filter = 'package(claudine-cli) & test(/level2_/)'
 leak-timeout = { period = "1s", result = "fail" }
 
+# The error-propagation D10 characterization baseline
+# (`claudine/features/2026-07-13-error-propogation/`) spawns the real claudine
+# binary once per route, which in turn forks short-lived children (git
+# discovery, the provider shim, terminal capability probes). Under parallel
+# load their teardown lags nextest's 100ms post-test pipe-drain check and flags
+# a spurious LEAK-FAIL on whichever route finishes fastest — reliably
+# `characterize_unstructured_fallback`, which fails during argument parsing in
+# ~0.1s and so loses the race. Same situation as the worktree / tts-audio /
+# level2_ groups above; the test itself exits code 0 with every assertion
+# passing. Give a 1s grace window; keep `result = "fail"` so a genuinely leaked
+# child still fails. This baseline must be non-flaky by Checkpoint 1 — a flaky
+# baseline cannot prove the migration was behavior-neutral.
+[[profile.default.overrides]]
+filter = 'package(claudine-cli) & binary(characterization_error_routes)'
+leak-timeout = { period = "1s", result = "fail" }
+
 [profile.ci]
 # Same behavior for CI environment
 retries = 3
@@ -234,4 +250,12 @@ leak-timeout = { period = "1s", result = "fail" }
 # a genuine leak.
 [[profile.ci.overrides]]
 filter = 'package(claudine-cli) & test(/level2_/)'
+leak-timeout = { period = "1s", result = "fail" }
+
+# See the default-profile note: the error-propagation characterization baseline
+# spawns the real claudine binary per route and draws spurious LEAK-FAILs from
+# child teardown lag under parallel load. CI hosts may be slower, so the same 1s
+# grace applies; `result = "fail"` still catches a genuine leak.
+[[profile.ci.overrides]]
+filter = 'package(claudine-cli) & binary(characterization_error_routes)'
 leak-timeout = { period = "1s", result = "fail" }
