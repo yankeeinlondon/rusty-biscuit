@@ -72,18 +72,104 @@
 //! simple string containment.
 //!
 //! The `terminal_cache` and `terminal_latency` modes additionally print
-//! `osc10_actual_queries=` / `osc11_actual_queries=` — the library's count of
-//! real tty round-trips — but only when built with the `osc-query-counter`
-//! feature. A real emulator consumes the query and answers on the wire, so
-//! there is no master side for a Level-2 test to count bytes on; the count has
-//! to come from inside the process.
+//! `osc10_actual_queries=` / `osc11_actual_queries=` — this probe's count of
+//! real tty round-trips. A real emulator consumes the query and answers on the
+//! wire, so there is no master side for a Level-2 test to count bytes on; the
+//! count has to come from inside the process. The probe therefore counts them
+//! itself, off the library's OSC-attempt tracing event, so the library exports
+//! no counter of its own. See [`OSC_QUERY_ATTEMPT_TARGET`].
 //!
 //! ```text
 //! bg_color=Some(RgbValue { r: 128, g: 128, b: 128 })
 //! bg_color=None
 //! ```
 
+// ---------------------------------------------------------------------------
+// OSC round-trip counting
+// ---------------------------------------------------------------------------
+
+/// Tracing target of the library's per-round-trip OSC attempt event.
+///
+/// Duplicated from `discovery::osc_queries::query::OSC_QUERY_ATTEMPT_TARGET`,
+/// which is crate-private on purpose: counting round-trips is test scaffolding,
+/// not library API, so the library does not export a counter for this probe to
+/// read. Drift is not silent — the target no longer matching makes every count
+/// zero, and the Level-2 proof asserts an exact count of 1.
+const OSC_QUERY_ATTEMPT_TARGET: &str = "biscuit_terminal::osc_query_attempt";
+
+static OSC_ATTEMPTS: [std::sync::atomic::AtomicUsize; 3] = [
+    std::sync::atomic::AtomicUsize::new(0),
+    std::sync::atomic::AtomicUsize::new(0),
+    std::sync::atomic::AtomicUsize::new(0),
+];
+
+/// Slot index for OSC codes 10/11/12.
+fn osc_slot(code: u64) -> Option<usize> {
+    match code {
+        10 => Some(0),
+        11 => Some(1),
+        12 => Some(2),
+        _ => None,
+    }
+}
+
+fn osc_attempts(code: u64) -> usize {
+    match osc_slot(code) {
+        Some(slot) => OSC_ATTEMPTS[slot].load(std::sync::atomic::Ordering::Relaxed),
+        None => 0,
+    }
+}
+
+/// Pulls the `code` field out of an OSC attempt event.
+#[derive(Default)]
+struct CodeVisitor(Option<u64>);
+
+impl tracing::field::Visit for CodeVisitor {
+    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+        if field.name() == "code" {
+            self.0 = Some(value);
+        }
+    }
+
+    fn record_debug(&mut self, _field: &tracing::field::Field, _value: &dyn std::fmt::Debug) {}
+}
+
+/// Counts one OSC round-trip attempt per [`OSC_QUERY_ATTEMPT_TARGET`] event.
+struct OscAttemptCounter;
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for OscAttemptCounter {
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        if event.metadata().target() != OSC_QUERY_ATTEMPT_TARGET {
+            return;
+        }
+        let mut visitor = CodeVisitor::default();
+        event.record(&mut visitor);
+        if let Some(slot) = visitor.0.and_then(osc_slot) {
+            OSC_ATTEMPTS[slot].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+}
+
+/// Install the counter before any `Terminal` is built, or the first — and only,
+/// when the cache works — round-trip goes uncounted.
+fn install_osc_attempt_counter() {
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    // No filter layer: an unfiltered `Layer` hints no maximum level, so the
+    // registry admits the library's `debug`-level attempt event.
+    let _ = tracing_subscriber::registry()
+        .with(OscAttemptCounter)
+        .try_init();
+}
+
 fn main() {
+    install_osc_attempt_counter();
+
     // Apply env overrides so the library sees the terminal we want.
     if let Ok(v) = std::env::var("PROBE_TERM_PROGRAM") {
         // SAFETY: this is a single-threaded example binary; no other
@@ -279,20 +365,15 @@ fn construction_count() -> usize {
         .max(2)
 }
 
-/// Print the actual-OSC-round-trip counts when the library was built with the
-/// `osc-query-counter` feature.
+/// Print the actual-OSC-round-trip counts this process observed.
 ///
 /// Under a manufactured PTY the test can count `\x1b]10;?\x07` on the master
 /// side directly; under a real emulator it cannot (the terminal consumes the
-/// query and answers on the wire), so the count is read from the library.
-/// Silent when the feature is off — callers that need it assert on its absence.
+/// query and answers on the wire), so the count has to be taken from inside the
+/// process. [`OscAttemptCounter`] does that; the library exports no counter.
 fn print_osc_query_counts() {
-    #[cfg(feature = "osc-query-counter")]
-    {
-        use biscuit_terminal::discovery::osc_queries::actual_query_count;
-        println!("osc10_actual_queries={}", actual_query_count(10));
-        println!("osc11_actual_queries={}", actual_query_count(11));
-    }
+    println!("osc10_actual_queries={}", osc_attempts(10));
+    println!("osc11_actual_queries={}", osc_attempts(11));
 }
 
 /// Construct N `Terminal` values in one process and print each one's

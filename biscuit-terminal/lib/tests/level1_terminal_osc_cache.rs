@@ -73,6 +73,24 @@ mod unix {
             .collect()
     }
 
+    /// Read the probe's own `osc{code}_actual_queries=` tally.
+    ///
+    /// Absent means the probe never printed it — the OSC-attempt tracing event
+    /// or the probe's counting layer is broken. That must fail, not read as 0.
+    fn probe_actual_queries(collected: &[u8], code: u8) -> usize {
+        let text = String::from_utf8_lossy(collected);
+        let key = format!("osc{code}_actual_queries=");
+        let raw = text
+            .lines()
+            .find_map(|line| {
+                let idx = line.find(&key)?;
+                Some(line[idx + key.len()..].trim().to_string())
+            })
+            .unwrap_or_else(|| panic!("probe printed no {key:?} line; raw: {text:?}"));
+        raw.parse()
+            .unwrap_or_else(|e| panic!("unparseable {key:?} value {raw:?}: {e}"))
+    }
+
     /// Three `Terminal` constructions in one process emit exactly one OSC 10
     /// request, and every construction reports the same cached foreground
     /// response. Proves the `TEXT_COLOR_CACHE` reuse (Findings 2 & 21).
@@ -130,6 +148,23 @@ mod unix {
                  {OSC10_EXPECTED:?}",
             );
         }
+
+        // (3) the probe's in-process tally agrees with this test's independent
+        //     master-side count. This is the anti-vacuity guard for the Level-2
+        //     sibling: there, a real emulator consumes the query, so the probe's
+        //     tally is the *only* oracle and a silently-broken counter would
+        //     read 0 forever. Here both oracles exist, so cross-checking them
+        //     proves the library's OSC-attempt tracing event, the probe's
+        //     counting layer, and its printout are all live in this build.
+        let probe_osc10 = probe_actual_queries(&collected, 10);
+        assert_eq!(
+            probe_osc10,
+            osc10_requests,
+            "probe counted {probe_osc10} OSC 10 round-trips but the PTY master saw \
+             {osc10_requests} — the probe's OSC-attempt counter disagrees with the wire, so the \
+             Level-2 proof's only oracle is untrustworthy; raw: {:?}",
+            String::from_utf8_lossy(&collected)
+        );
     }
 
     /// Record repeated-construction latency (warm-up + samples + dispersion)

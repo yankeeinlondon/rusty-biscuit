@@ -67,13 +67,8 @@ test *args="":
 
 # Level-2 real-terminal tests. Skips cleanly if the harness is unavailable
 # unless `BISCUIT_TEST_LEVEL_REQUIRED=2` is set in the environment.
-#
-# The library tier enables `osc-query-counter`: the real-terminal OSC 10 cache
-# proof asserts that repeated `Terminal` construction issues exactly one tty
-# round-trip, and a real emulator consumes the query (no PTY master to count
-# bytes on), so the count has to come from the library itself.
 test-l2 *args="":
-    @just _test_l2 {{ LIBRARY }} --features osc-query-counter {{ args }}
+    @just _test_l2 {{ LIBRARY }} {{ args }}
     @just _test_l2 {{ CLI }} {{ args }}
 
 # not applicable: biscuit-terminal has no OS-keyboard-injection (Level-3) tests

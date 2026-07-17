@@ -23,12 +23,6 @@ clap = ["dep:clap", "renderable/clap"]
 serde = []
 # Enables SVG rasterization via resvg for terminal image rendering.
 image = ["dep:resvg", "dep:biscuit-visualized", "biscuit-visualized/image"]
-# Test-only instrumentation: counts actual OSC tty round-trips so the
-# real-terminal (Level-2) cache proof can assert that N `Terminal`
-# constructions issue exactly one OSC 10 query. A real emulator answers on the
-# wire but consumes the query, so the count cannot be observed from outside the
-# process. Enabled by the `test-l2` recipe; off for normal builds.
-osc-query-counter = []
 
 [dependencies]
 base64 = "0.22"

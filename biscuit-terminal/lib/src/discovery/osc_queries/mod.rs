@@ -65,8 +65,6 @@ pub mod support;
 pub mod types;
 
 pub use parse::parse_osc_color_response;
-#[cfg(any(test, feature = "osc-query-counter"))]
-pub use query::actual_query_count;
 pub use query::query_osc_actual;
 pub use support::{osc10_support, osc11_support, osc12_support};
 pub use types::{DEFAULT_TIMEOUT, OscQueryError, RgbValue};

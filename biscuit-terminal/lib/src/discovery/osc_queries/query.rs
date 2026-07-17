@@ -13,57 +13,20 @@ use super::parse::parse_osc_color_response;
 use super::parse::{ansi_index_to_rgb, parse_colorfgbg};
 use super::types::{DEFAULT_TIMEOUT, OscQueryError, RgbValue};
 
-// Counts *actual* tty round-trips attempted per OSC code (10/11/12), i.e. calls
-// that reach `query_osc_actual`. This is the quantity the per-process colour
-// caches exist to suppress, and it cannot be observed from outside the process
-// when the terminal is a real emulator (WezTerm/Kitty answer on the wire but
-// consume the query, so no PTY master is available to count it).
-//
-// Active under `cfg(test)` and under the `osc-query-counter` feature, which the
-// `test-l2` recipe enables so the real-terminal cache proof
-// (`tests/level2_terminal_osc_wezterm.rs`) can read the count out of the
-// `discovery_probe` example. Not part of the released API.
-#[cfg(any(test, feature = "osc-query-counter"))]
-static ACTUAL_QUERY_COUNTS: [std::sync::atomic::AtomicUsize; 3] = [
-    std::sync::atomic::AtomicUsize::new(0),
-    std::sync::atomic::AtomicUsize::new(0),
-    std::sync::atomic::AtomicUsize::new(0),
-];
-
-/// Slot index for OSC codes 10/11/12.
-// `dead_code`: the only recording call site is Unix-gated (the actual query path
-// does not exist on Windows), so these are unreferenced on non-Unix targets.
-#[allow(dead_code)]
-#[cfg(any(test, feature = "osc-query-counter"))]
-fn counter_slot(code: u8) -> Option<usize> {
-    match code {
-        10 => Some(0),
-        11 => Some(1),
-        12 => Some(2),
-        _ => None,
-    }
-}
-
-#[allow(dead_code)]
-#[cfg(any(test, feature = "osc-query-counter"))]
-fn record_actual_query(code: u8) {
-    if let Some(slot) = counter_slot(code) {
-        ACTUAL_QUERY_COUNTS[slot].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }
-}
-
-/// Returns how many actual tty round-trips have been attempted for `code`.
+/// Tracing target marking one *actual* tty round-trip attempt for an OSC code.
 ///
-/// Test-only instrumentation gated behind the `osc-query-counter` feature (and
-/// `cfg(test)`); not part of the released API. Returns 0 for codes other than
-/// 10, 11, and 12.
-#[cfg(any(test, feature = "osc-query-counter"))]
-pub fn actual_query_count(code: u8) -> usize {
-    match counter_slot(code) {
-        Some(slot) => ACTUAL_QUERY_COUNTS[slot].load(std::sync::atomic::Ordering::Relaxed),
-        None => 0,
-    }
-}
+/// Round-trip attempts are the quantity the per-process colour caches exist to
+/// suppress, and they cannot be counted from outside the process when the
+/// terminal is a real emulator: WezTerm/Kitty consume the query and answer on
+/// the wire, so there is no PTY master to tally request bytes on. Emitting the
+/// attempt as its own tracing event lets an in-repo observer — currently
+/// `examples/discovery_probe.rs`, which feeds the Level-2 cache proof in
+/// `tests/level2_terminal_osc_wezterm.rs` — count attempts with a local layer
+/// instead of the library exporting a counter as public API.
+///
+/// The event carries a `code` field; a dedicated target keeps it distinguishable
+/// from the outcome/fallback events this module also logs at `debug`.
+pub(super) const OSC_QUERY_ATTEMPT_TARGET: &str = "biscuit_terminal::osc_query_attempt";
 
 /// Human-readable name for an OSC color query code.
 fn osc_color_name(code: u8) -> &'static str {
@@ -119,8 +82,12 @@ pub(super) fn query_osc_color_with_timeout(code: u8, timeout: Duration) -> Optio
         );
 
         if supports_osc && detect_multiplexer().is_none() {
-            #[cfg(any(test, feature = "osc-query-counter"))]
-            record_actual_query(code);
+            tracing::debug!(
+                target: OSC_QUERY_ATTEMPT_TARGET,
+                code,
+                "OSC{} actual query attempted",
+                code
+            );
 
             match query_osc_actual(code, timeout) {
                 Ok(color) => {
