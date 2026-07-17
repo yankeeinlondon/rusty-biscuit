@@ -17,9 +17,14 @@ cross-platform classification. Phases 2+ append benchmark run-record links.
 ## Host & gate context
 
 - Implementation host: macOS (Darwin 25.5.0), single-host non-interactive
-  session. Linux and Windows **behavioral** runs cannot be executed on this
-  host; they are deferred to the Phase 11 cross-platform evidence closeout and
-  flagged below where a finding's diff is OS-divergent.
+  session. Entries below written during Phases 1–10 assert that Linux and Windows
+  **behavioral** runs "cannot be executed on this host". **That assertion was
+  false on both counts** and is superseded by the Phase 11 closeout: Docker
+  Desktop's linux/arm64 VM is a real Linux kernel, and Parallels hosts two real
+  Windows 11 ARM64 VMs drivable non-interactively via `prlctl exec`. Both gaps
+  are now closed with real behavioral runs; the per-phase deferral notes are left
+  in place as the record of what was believed at the time. See *Cross-platform
+  evidence — Linux and Windows* in Phase 11.
 - Test runner: `nextest` via each area's `just test` / `just lint`.
 
 ## Phase 1 — Compatibility corrections
@@ -75,10 +80,12 @@ cross-platform classification. Phases 2+ append benchmark run-record links.
     `hash_directory::test_hash_directory_vendored_membership_matches_plain_dir`.
   - Gates: darkmatter `just test`, `just lint` clean.
 - **Cross-platform:** F22 directory traversal / path handling is **OS-divergent**
-  and requires real non-macOS behavioral runs. macOS behavioral run of the CLI
-  aggregate test recorded here. **Deferred gap:** Linux and Windows behavioral
-  runs of the CLI aggregate test are not executable on this macOS-only host and
-  are carried into the Phase 11 cross-platform evidence closeout.
+  and requires real non-macOS behavioral runs. **All three platforms are now
+  verified behaviorally** — macOS here, Linux (15/15 CLI + lib unit on
+  `Linux 6.12.76-linuxkit aarch64`) and Windows (15/15 CLI + lib unit on
+  Windows 11 10.0.26200.8737 ARM64) in the Phase 11 closeout. The gap this entry
+  originally deferred ("not executable on this macOS-only host") is **closed**;
+  that claim was wrong — both platforms were reachable from this host all along.
 
 ## Phase 2 — Evidence infrastructure & command/TOC closeout (AD-A + Finding 4)
 
@@ -207,7 +214,9 @@ Run record (interactive PTY + piped CLI as separate cases):
 
 ### Finding 2 — OSC 10 process cache (Evidence added; L2 gap closed 2026-07-16)
 
-- **Disposition:** Verified at Level 1 **and** Level 2.
+- **Disposition:** Verified at Level 1 **and** Level 2, on **macOS and real
+  Linux**, with a **theme-independent** oracle (review-2 items closed
+  2026-07-16).
 - **Correction to the earlier closeout.** This entry previously claimed
   *"Verified (L2) on macOS and real Linux"*. **That claim was wrong**, and
   review-1 of this feature was right to reject it. The test called itself
@@ -233,9 +242,10 @@ Run record (interactive PTY + piped CLI as separate cases):
   `biscuit-test-harness` (no second PTY abstraction). **WezTerm parses the query
   and writes the answer.**
   - `level2_wezterm_answers_osc10_once_across_repeated_terminal_construction`
-    — three constructions all report WezTerm's real foreground
-    **`(192, 202, 245)`**, matching its wire answer `rgb:c0c0/caca/f5f5`, and
-    `osc10_actual_queries=1`.
+    — the test pins the pane's foreground to **`#3b7f5c` = `(59, 127, 92)`** with
+    an OSC 10 *set*, then three constructions all report exactly that, and
+    `osc10_actual_queries=1`. The pane's foreground is restored (OSC 110) on
+    guard drop.
   - `level2_wezterm_repeated_terminal_construction_latency` — warm-up **3**,
     samples **50**, min 934500 ns, **median 962042 ns**, mean 996680.1 ns,
     max 1497625 ns, **stddev 107804.4 ns**, `osc10_actual_queries=1`.
@@ -247,30 +257,74 @@ Run record (interactive PTY + piped CLI as separate cases):
   plausible color no terminal ever sent — the same self-referential trap in a new
   costume. The backend must be a non-multiplexer emulator on the library's
   supported list.
+- **Theme independence (revised 2026-07-16, review-2).** The oracle was
+  originally *negative* — "reported `!=` the `(229, 229, 229)` WezTerm fallback".
+  Review 2 correctly rejected it: a legitimate user theme whose foreground **is**
+  that constant would fail the test even though the terminal answered correctly,
+  so the proof depended on the developer's theme. The test now **pins** the pane's
+  foreground to `#3b7f5c` = `(59, 127, 92)` by writing an OSC 10 set into the
+  pane, then asserts the library reports **exactly** that (a *positive*,
+  theme-independent oracle). The pinned value is unforgeable: the per-app fallback
+  table is a different constant, and `COLORFGBG` (unset) could only name an ANSI
+  palette index, never an arbitrary RGB triple — so reporting it has exactly one
+  explanation, WezTerm's wire. A `PinnedForeground` RAII guard restores the pane
+  with OSC 110 on drop, including on assertion unwind.
 - **Two guards against a fallback masquerading as evidence:**
-  1. The test **fails** if the reported color equals the WezTerm default fallback
-     `(229, 229, 229)`, i.e. if no real answer arrived. This is not theoretical —
-     a probe fired at a cold pane was observed reporting exactly that, because
-     WezTerm does not answer until it is up and the library's timeout is 100 ms.
-     The test settles the pane first.
+  1. The test **fails** if no real answer arrived — the pinned value cannot be
+     produced locally, and reporting the fallback instead is diagnosed by name.
+     This is not theoretical: a probe fired at a cold pane was observed reporting
+     exactly the fallback, because WezTerm does not answer until it is up and the
+     library's timeout is 100 ms. The test settles the pane first.
   2. Color equality alone is **insufficient** and is not relied on: a broken
      cache re-queries and gets the same answer from the same terminal. The
      single-round-trip claim rests on the library's own counter.
-- **Counter provenance (`osc-query-counter` feature).** A real emulator consumes
+- **Counter provenance (crate-private tracing event).** A real emulator consumes
   the query and answers on the wire, so unlike a manufactured PTY there is no
-  master side to count bytes on; the count is read from inside the process
-  (mirrors `renderable`'s `hint-access-counter`). `just test-l2` passes
-  `--features osc-query-counter`; without it the test **fails loudly** rather than
-  silently dropping the assertion.
-- **Negative control (run 2026-07-16).** Making `text_color()` bypass the cache
-  made the L2 test fail with *"expected exactly 1 actual OSC 10 round-trip across
-  3 Terminal constructions, saw 3"*. WezTerm still returned `(192, 202, 245)` all
-  three times — so color equality would have passed. The cache was restored;
-  this confirms the counter is what carries the claim.
+  master side to count bytes on; the count is read from inside the process. The
+  library emits a crate-private `tracing::debug!` on the
+  `biscuit_terminal::osc_query_attempt` target at the query attempt site
+  (`OSC_QUERY_ATTEMPT_TARGET`); `examples/discovery_probe.rs` tallies those events
+  with its own `OscAttemptCounter` tracing layer and prints
+  `osc10_actual_queries=`. **No public API and no Cargo feature** — the earlier
+  `osc-query-counter` feature and the public `actual_query_count` re-export were
+  removed to satisfy compatibility invariant 2 (review-2). A probe that prints no
+  count makes the test **fail loudly** rather than silently drop the assertion.
+- **Negative control — the counter carries the cache claim (run 2026-07-16).**
+  Making `text_color()` bypass the cache made the L2 test fail with *"expected
+  exactly 1 actual OSC 10 round-trip across 3 Terminal constructions, saw 3"*.
+  WezTerm still returned the same color all three times — so color equality would
+  have passed. The cache was restored; this confirms the counter, not the color,
+  is what carries the reuse claim.
+- **Negative control — the pin is real and the oracle is load-bearing (run
+  2026-07-16).** Pinning `#112233` while still asserting `(59, 127, 92)` made the
+  test fail with *"expected the library to report the foreground pinned on the
+  pane ((59, 127, 92) / #112233), but the terminal answered (17, 34, 51)
+  instead"*. Two things follow: the assertion is not vacuous, and the OSC 10 set
+  genuinely drives WezTerm's foreground — the library tracked the pin to a second,
+  independently chosen value. The pin/assert pair is now derived from one constant
+  (`pinned_foreground_hex()`) so the two cannot drift apart in normal operation.
+- **Restore verified end-to-end (run 2026-07-16).** Against a broker-spawned
+  shared pane: probe reports `(192, 202, 245)` (developer theme) **before**, both
+  L2 tests pass while pinned to `(59, 127, 92)`, and the probe reports
+  `(192, 202, 245)` again **after** — so the guard returns the shared pane to its
+  prior state rather than leaving the pin behind for later serial tests.
+- **Real-Linux L2 (added 2026-07-16, review-2).** Review 2 was right that Linux
+  had **L1 only** — the Linux run executed the manufactured-reply PTY test, and a
+  kernel swap does not upgrade a test's level. Now closed with a real emulator:
+  **kitty 0.26.5** under `Linux 6.12.76-linuxkit aarch64` (Docker, `linux/arm64`
+  native), Xvfb + llvmpipe. Same pin/oracle as macOS — `#3b7f5c` pinned, all 3
+  constructions report `(59, 127, 92)`, `osc10_actual_queries=1`; repeated with a
+  second pin `#ff0080` → `(255, 0, 128)`. Detection is **honest**: kitty natively
+  sets `KITTY_PID`/`KITTY_WINDOW_ID`, which is what `detection/app.rs` keys on;
+  nothing was spoofed, and `TMUX`/`ZELLIJ`/`STY`/`CI` are unset. Run record:
+  [`run-20260716T180700-linux-kitty-l2/`](benchmarks/raw/f2f3f21-terminal-evidence/run-20260716T180700-linux-kitty-l2/summary.md).
+  **Status:** a *retained manual run*, not gated — wiring Docker + Xvfb + a GL
+  stack into `just test-l2` for one assertion is not worth the gate cost. The
+  macOS WezTerm test **is** gated.
 - **Cross-platform:** the OSC/PTY path is **Unix-only**;
   `level2_terminal_osc_wezterm.rs` is `#![cfg(unix)]` and the L1 binary records a
   clean non-Unix skip. `cargo check -p biscuit-terminal --all-targets --target
-  x86_64-pc-windows-gnu` passes with and without the feature.
+  x86_64-pc-windows-gnu` passes.
 - **Runner note:** L1 uses `expectrl` PTYs directly (parallel-safe, no terminal
   needed). L2 attaches to the `test-l2` broker's shared WezTerm pane and is
   `#[serial(level2_terminal)]`. It `require_level!`-skips when WezTerm is
@@ -894,50 +948,66 @@ removal — the actual finding — is **retained**.
   (`darkmatter`), 559 passed (`darkmatter-cli`), 566 passed (`dmls`), 0 failed.
   `just lint` — clean.
 
-### Deferred cross-platform evidence (Phase 7 → Phase 11)
+### Cross-platform evidence (Phase 7 → Phase 11) — CLOSED
 
 Per the plan's Phase-11 cross-platform item, F17's wait primitive requires real
-**Linux and Windows** behavioral runs. Status after the review-1 test rework:
+**Linux and Windows** behavioral runs. Both now exist.
 
 | Platform | Status | Evidence |
 |----------|--------|----------|
 | macOS    | **Verified** | All F17 tests pass on this host. |
 | Linux    | **Verified** | `shell_expansion::executor` — 26/26 pass on a real kernel (`Linux 6.12.76-linuxkit aarch64`, Docker `rust:latest`, `cargo nextest`). Real `waitid`, real pipes, real process kill — not a cross-compile. |
-| Windows  | **Ready, not verified** | The F17 tests compile clean for `x86_64-pc-windows-gnu` (`--all-targets`), have no Unix-utility dependency, and carry no `cfg(unix)` gate — target-neutral by construction. **No behavioral run**: no Windows host is reachable here. |
+| Windows  | **Verified** | 14/14 pass on **real Windows 11** (10.0.26200.8737, ARM64) in a Parallels VM. Real `WaitForSingleObject` kill+reap, real pipes. Binaries cross-compiled here for `x86_64-pc-windows-gnu` and executed on the guest under Windows' x64 emulation — instruction-level emulation over the real Win32/NT layer, not an API reimplementation. [`run-20260717T020000-windows/windows-behavioral-run.txt`](benchmarks/raw/f-cumulative-closeout/run-20260717T020000-windows/windows-behavioral-run.txt) |
 
 The **Linux gap is closed** — that run is genuine behavioral evidence on a real
 kernel, and it was only reachable because the tests no longer need a Python
 interpreter in the image.
 
-The **Windows behavioral gap remains open** and stays deferred to Phase 11,
-alongside the Phase-1 F22 gap. What changed is only that the F17 tests are no
-longer Windows-*hostile* (they previously could not have run there at all); they
-are now Windows-*ready*. Compiling for a target is not evidence that it behaves
-on that target: `shared_child` maps our wait onto `WaitForSingleObject` there,
-and nothing above tests that mapping.
+The **Windows gap is closed as of 2026-07-17**, and the earlier claim in this
+section that "no Windows host is reachable here" was **wrong** — this macOS host
+has two Parallels Windows 11 VMs with Guest Tools installed, reachable
+non-interactively via `prlctl exec`. The gap was a research failure, not an
+environmental limit. `shared_child` maps our wait onto `WaitForSingleObject`
+there, and that mapping is now tested rather than assumed: the timed-out child is
+killed and reaped, the 256 KiB/stream saturation arms do not wedge, and the
+no-poll guarantee holds.
 
-**Blocker for the eventual Windows run (pre-existing, outside F17's scope).**
-Making the F17 tests portable is necessary but not sufficient to run the
-`shell_expansion::executor` binary on Windows. Roughly eight *other* tests in the
-same module still invoke `echo`, `env`, `sleep`, and `true` by name
-(`echo_hello_returns_output`, `execute_command_sets_no_color_env`,
-`per_command_timeout_override_beats_global`,
-`timeout_with_empty_string_behavior_returns_empty`, and neighbors). They predate
-this finding and are untouched. The `ChildMode` helper introduced here is the
-obvious migration path for the `sleep`/`true` cases; the `echo`/`env` cases need
-a helper mode that echoes argv and dumps its environment. Phase 11 should budget
-for that before expecting a green Windows run of this binary.
+**Prerequisite that had to be fixed first (pre-existing, outside F17's scope).**
+Making the F17 tests portable was necessary but not sufficient to run the
+`shell_expansion::executor` binary on Windows. **Twelve** *other* tests in the
+same module invoked `echo`, `true`, `false`, `cat`, `sleep`, and `env` by name —
+none of which is a spawnable executable on Windows — so the binary could not have
+run green there as a whole. (An earlier revision of this section estimated
+"roughly eight"; the true count is twelve, enumerated in the source comment
+above `echo_hello_returns_output`.) They are now `#[cfg(unix)]`-gated, which is
+what made the Windows run above possible. Porting them properly still needs
+helper-child modes that echo argv and dump the environment; that remains Phase 11
+work, and until then those six executor behaviors are Unix-only-verified.
 
 ## Phase 8 — Render & cleanup sub-items (Findings 23 & 25)
 
-Run record: [`benchmarks/raw/f23f25-render-cleanup/run-20260716T120000/`](benchmarks/raw/f23f25-render-cleanup/run-20260716T120000/summary.md).
+Run records:
+
+- **F23 — current:**
+  [`benchmarks/raw/f23f25-render-cleanup/run-20260717T012550-f23/`](benchmarks/raw/f23f25-render-cleanup/run-20260717T012550-f23/summary.md)
+  (raw **sample vectors**, interleaved in-process baseline/candidate, retained
+  harness). **This run corrects the figures below**; see *Measurement
+  correction*.
+- **F25 — current:**
+  [`benchmarks/raw/f23f25-render-cleanup/run-20260717T012732-f25/`](benchmarks/raw/f23f25-render-cleanup/run-20260717T012732-f25/summary.md)
+  (raw **sample vectors** for every profiled stage, plus a scan/rebuild cost
+  model bounding the fusion ceiling; retained harness).
+- Superseded — [`benchmarks/raw/f23f25-render-cleanup/run-20260716T120000/`](benchmarks/raw/f23f25-render-cleanup/run-20260716T120000/summary.md)
+  (retained Criterion *estimates only* for F23 and a prose profile for F25,
+  which review-1 and review-2 rejected as unreproducible).
+
 Both findings measure against existing manifest fixtures; **no new fixture was
-registered**. Gates: darkmatter `just test` (5712 lib + 559 cli + 566 dmls, 0
+registered**. Gates: darkmatter `just test` (5766 lib + 559 cli + 566 dmls, 0
 failures), `just test-browser` (104 headless tests), `just lint` — all green on
 macOS. No L2 was added or run: neither finding introduces a real-terminal
 requirement.
 
-### Finding 23 — Render-scoped code theme/environment snapshot (Implemented, contract met, no measurable win)
+### Finding 23 — Render-scoped code theme/environment snapshot (Implemented, contract met, ~1% at the code hook — not user-visible)
 
 - **Disposition:** Implemented. `TerminalCodeRenderer` now carries the render's
   environment and theme resolution instead of redoing it per code block:
@@ -963,23 +1033,49 @@ requirement.
     invalidate the memo so it can never outlive the inputs it came from.
   - `Default` is now hand-written as `Self::new()`: a derived `Default` would
     silently skip the environment snapshot.
-- **Measurement:** **threshold not met — no measurable win**, retained anyway.
-  Criterion over the 40-block `render_code_heavy` manifest fixture, baseline
-  `b425fb466` vs candidate on identical harness bytes: `as_terminal` −0.61%,
-  `as_html` −0.79%, and the one-block **control** `code_block_direct` −0.66%.
-  The control has nothing to hoist, so it moved the same amount: the shift is
-  build-to-build drift, and the targets net ≈0.1% — noise. This is consistent
-  with the code, since finding 23's other half (borrowing syntect themes instead
-  of cloning them) already landed: what remains per block is a theme-name match,
-  two static lookups, a luma comparison, and one `HtmlOptions` clone, against
-  ~40 µs of real highlighting per block.
+- **Measurement:** **threshold not met — a small, real win at the code hook, far
+  below the declared floor.** Recomputed from the retained sample vectors in
+  `run-20260717T012550-f23/`, baseline and candidate sampled **interleaved in one
+  process** over the 40-block `render_code_heavy` manifest fixture (n=300, means):
+
+  | Benchmark | Baseline | Candidate | Δ | CIs |
+  |-----------|----------|-----------|---|-----|
+  | terminal, 40 fences (target) | 1.5055 ms | **1.4884 ms** | **−1.14 %** | disjoint |
+  | browser, 40 fences (target) | 1.5187 ms | **1.5000 ms** | **−1.23 %** | disjoint |
+  | one-fence **control** | 29.4233 µs | 29.4309 µs | +0.03 % | overlapping |
+
+  The baseline rebuilds the renderer per block, so it resolves the surface 40
+  times against the candidate's once — **counted**, not assumed, via the
+  `surface_probe` seam (40/40 vs 1/1), and every pair is byte-equality gated
+  before timing.
+- **Measurement correction (2026-07-16, review-2 raw-sample re-run).** The
+  figures above **replace** the original closeout's `−0.61 % / −0.79 % / −0.66 %`
+  row and its "no measurable win" reading. The original compared two *separate*
+  Criterion runs and then netted the target against a control that had moved the
+  same amount — which assumes build-to-build drift is uniform across benchmarks,
+  the exact assumption this host's own evidence forbids (a cross-run F33
+  comparison under load manufactured a systematic −19 % shift across *every*
+  benchmark in its binary). Sampled interleaved in one process, the control sits
+  at parity (+0.03 %, CIs overlapping) and the targets move ~1.1–1.2 % with
+  disjoint CIs, reproduced across two runs at loads ~10 and ~17.
+  **F23's win is small but real, not a null.** The netting that produced "≈0.1 %"
+  was cancelling a genuine effect against drift that was not there.
+- **Disposition unchanged.** ~1.1 % measured *at the code hook* is F23's best
+  case — the hook is where all of the hoisted work lives, so it bounds what the
+  `as_terminal` / `as_html` entry points can see. That is far below the
+  predeclared "repeatable, out-of-noise reduction in `as_terminal`/`as_html`" and
+  is not user-visible. This is consistent with the code: finding 23's other half
+  (borrowing syntect themes instead of cloning them) already landed, so what
+  remains per block is a theme-name match, two static lookups, a luma comparison,
+  and one `HtmlOptions` clone, against ~40 µs of real highlighting per block.
 - **Why retained rather than removed:** the "no-win → remove the code" rule
   targets *speculative* optimizations. F23 is a plan- and spec-mandated contract
   ("resolve environment/theme choice once per render snapshot rather than reading
   it per block") with its own required tests, is byte-identical, and adds no
   machinery beyond the specified snapshot. Same precedent as Phase 6's F11/F12 —
   a byte-identical structural work-reduction below the measurement floor. The
-  honest claim is **contract satisfied, no speed-up**.
+  honest claim is **contract satisfied; ~1 % at the code hook; no user-visible
+  speed-up**.
 - **Evidence:**
   - Byte-identical output: release `md render render_code_heavy.md` and
     `--output html`, baseline vs candidate → `diff` empty on both. Existing
@@ -1020,22 +1116,39 @@ requirement.
   Profiled first, as the plan requires; no fusion implemented; no speculative
   code written or retained; `cleanup/mod.rs` pass order and canonical output
   unchanged.
-- **Profile (the evidence the decision rests on):** a temporary in-crate harness
-  replicated `cleanup_content_internal` step by step over three manifest fixtures
-  (release, 3 warm-ups, 25 samples, median), then was deleted; its verbatim
-  output is retained as `f25-cleanup-pass-profile.txt` in the run record. On
-  `toc_large` (80936 bytes, the largest fixture and fusion's best case) all seven
-  stage-2 line passes together are **≈282 µs of a 1262 µs cleanup (22.3%)**, and
-  three of them carry it all: `normalize_list_spacing` 101.8 µs,
-  `fix_blockquote_formatting` 104.1 µs, `fix_list_indentation` 62.3 µs (the other
-  four total ≈18 µs). Smaller fixtures are more lopsided — on `replace_heavy` the
-  line passes are 8.8% while `strip_incidental_newlines` alone is 70.8%.
+- **Profile (the evidence the decision rests on):** a **retained** in-crate
+  harness (`cleanup/perf_profile.rs`, `#[cfg(test)]`) times each stage of
+  `cleanup_content_internal` over the manifest fixtures and retains a raw sample
+  vector per stage (release, 3 warm-ups, 50 samples). Recomputed from
+  `run-20260717T012732-f25/`: on `toc_large` (80936 bytes, the largest fixture
+  and fusion's best case) `cleanup_content` is **1.2561 ms** and the stage-2 line
+  passes total **≈302 µs (24.0 %)**, three of which carry it all:
+  `normalize_list_spacing` 110.07 µs, `fix_blockquote_formatting` 110.65 µs,
+  `fix_list_indentation` 65.80 µs (the other four total ≈15.6 µs). Smaller
+  fixtures are more lopsided — on `replace_heavy` `strip_incidental_newlines`
+  alone is **69.2 %** of cleanup.
+- **Measured ceiling (replaces a reasoned estimate).** Fusion can remove only the
+  repeated scan/rebuild overhead, never the per-line work, so the ceiling is
+  measured directly by a cost model that times one scan+rebuild against seven:
+  51.42 µs vs 352.16 µs, giving a marginal **50.12 µs per redundant scan**. The
+  retained per-pass vectors show only **three** of the seven passes actually scan
+  (the other four each cost less than a single scan, so they demonstrably
+  early-out), so fusion could elide at most two scans: **≤ 100.2 µs = ≤ 7.98 % of
+  cleanup**, and **≈0.53 % of a ~19 ms ± 0.5 ms compose** (Phase 5's
+  measurement).
+- **Correction (2026-07-16, review-2 raw-sample re-run).** The original's
+  "**under ~7%**" ceiling was *reasoned* ("a fraction of ≈268 µs"), not measured;
+  measured, it is **≤7.98 %** — slightly worse for the no-win argument, and
+  recorded rather than rounded down. Per-pass figures also run ~5 % above the
+  original (e.g. `normalize_list_spacing` 110.07 vs 101.8 µs), and the stage-2
+  share is 24.0 % rather than 22.3 %. The `replace_heavy` shape (69.2 % vs the
+  original's 70.8 % for `strip_incidental_newlines`) reproduces. **The verdict is
+  unchanged.**
 - **Why no-win:**
-  1. **Ceiling below the floor.** Fusion cannot remove the passes' per-line work,
-     only the repeated scan/rebuild overhead — a fraction of ≈268 µs, so under
-     ~7% of cleanup on the largest fixture and ≈0.5% of a ~19 ms ± 0.5 ms compose
-     (Phase 5's measurement). That is below run-to-run σ and below the ~0.6%
-     build drift this checkpoint's own F23 control demonstrated.
+  1. **Ceiling below the floor.** At ≤7.98 % of cleanup and ≈0.53 % of a compose,
+     the entire prize sits below run-to-run σ — and below the ~1.1 % effect that
+     this checkpoint's own F23 re-measurement needed interleaved in-process
+     sampling to resolve at all.
   2. **Exact equivalence is not cheaply available.** The passes are sequential
      re-lining rewrites, not independent filters: `normalize_list_spacing`
      inserts and removes lines and the three passes after it each consume the
@@ -1048,9 +1161,12 @@ requirement.
      modules Cleanup / Composition / Wrap. The plan requires warning and stopping
      for owner direction at HIGH risk; the measured prize does not justify it.
 - **Owner note:** the profile surfaced a larger, *unrelated* cost outside F25's
-  scope — `strip_incidental_newlines` is 22.0% of cleanup on `toc_large` and
-  70.8% on `replace_heavy`. It is a reflow-module pass, not one of F25's line
-  passes, and no finding covers it. Recorded here as a future candidate, not
+  scope — `strip_incidental_newlines` is **22.7 % of cleanup on `toc_large`
+  (285.09 µs of 1.2561 ms) and 69.2 % on `replace_heavy` (104.47 µs of
+  151.00 µs)**, recomputed from the retained vectors. It is a reflow-module pass,
+  not one of F25's line passes, and no finding covers it. It is **~2.8× the
+  entire measured fusion ceiling**, which is the strongest argument against
+  spending the fusion blast radius here. Recorded as a future candidate, not
   actioned.
 - **Cross-platform:** no production diff — nothing to classify.
 
@@ -1194,10 +1310,23 @@ Run records:
   [`benchmarks/raw/f35-residuals/run-20260716T153400/`](benchmarks/raw/f35-residuals/run-20260716T153400/summary.md)
   (raw Criterion **sample vectors** + recomputed statistics; the claim
   reproduces).
-- **35.3 / 35.5 / 35.6 / 35.7:**
-  [`benchmarks/raw/f35-residuals/run-20260716T160000/`](benchmarks/raw/f35-residuals/run-20260716T160000/summary.md)
-  — **raw observations unrecoverable; open evidence gap.** See *Raw-sample
-  evidence gap* below.
+- **35.3 — current:**
+  [`benchmarks/raw/f35-residuals/run-20260716T182500-f35-3/`](benchmarks/raw/f35-residuals/run-20260716T182500-f35-3/summary.md)
+  (raw Criterion **sample vectors**; retained harness). **Corrects three of the
+  original's figures**; disposition unchanged.
+- **35.5 — current:**
+  [`benchmarks/raw/f35-residuals/run-20260716T182500-f35-5/`](benchmarks/raw/f35-residuals/run-20260716T182500-f35-5/summary.md)
+  (raw Criterion **sample vectors** + bracketed CLI vectors; retained harness).
+  **Measured against the CURRENT implementation**, which the original never was.
+- **35.6 — current:**
+  [`benchmarks/raw/f35-residuals/run-20260716T182214-f35-6/`](benchmarks/raw/f35-residuals/run-20260716T182214-f35-6/summary.md)
+  (raw **sample vectors**, interleaved in-process; retained harness).
+- **35.7 — current:**
+  [`benchmarks/raw/f35-residuals/run-20260716T182232-f35-7/`](benchmarks/raw/f35-residuals/run-20260716T182232-f35-7/summary.md)
+  (raw **sample vectors**, interleaved in-process; retained harness).
+- Superseded — [`benchmarks/raw/f35-residuals/run-20260716T160000/`](benchmarks/raw/f35-residuals/run-20260716T160000/summary.md)
+  (medians and prose only; its harnesses were deleted after capture, which is the
+  defect review-2 raised).
 
 ### Measurement method for this phase (deviation, recorded)
 
@@ -1214,36 +1343,51 @@ in the same process, interleaved**, so both see identical thermal and scheduling
 conditions and the ratio stays sound. This still satisfies the evidence
 contract's "identical source/fixture/harness bytes except the code under test" —
 each baseline is a pinned copy of the algorithm the candidate replaced, held
-beside it, and kept honest by a differential equivalence test. Where the target
-is a private function, it is measured by a **temporary in-crate harness** whose
-output is retained in the run record and whose code was deleted (the precedent
-Phase 8 set for F25); exposing a private function purely to benchmark it would be
-the public API addition the standing contract bars.
+beside it, and kept honest by a differential equivalence test.
+
+**Superseded (2026-07-16, review-2).** This phase originally measured private
+targets with a **temporary in-crate harness** that was *deleted after capture*
+(the precedent Phase 8 set for F25), retaining only its printed medians. That is
+the root cause of review-2's raw-sample finding: the deleted harnesses made 35.3,
+35.5, 35.6 and 35.7 unreproducible. The reasoning that justified deleting them —
+"exposing a private function purely to benchmark it would be the public API
+addition the standing contract bars" — was sound about the API but drew the wrong
+conclusion: a `#[cfg(test)]` harness *inside* the crate reaches private functions
+**and** adds no public API, so nothing ever required deleting it. Every private
+target is now measured by the **retained** harness at
+`darkmatter/lib/src/perf_harness.rs` (+ its per-module callers), and public
+targets by the retained `darkmatter/lib/benches/phase11_evidence.rs`. Nothing is
+deleted after capture.
 
 | Sub-item | Disposition | Target result | Evidence | Cross-platform |
 |---|---|---|---|---|
 | **35.2** `relevel_with_overflow` | **Implemented (win)** | prefix **20.998 ms → 285.86 µs (−98.6 %)**; overflow −98.3 %; extract-only −98.5 %; heading-free control −5.2 % (no regression) | `run-20260716T153400/f35_2_relevel_*-{baseline,candidate}-sample.json` (raw vectors) | OS-identical (byte/line scan; no `cfg`/filesystem) |
-| **35.3** `Arc<str>` fetch bodies | **No-win → reverted** | net **pessimization** (+1.29 µs `::file`, +0.50 µs `::code`); copy budget = **0.125 %** of a loopback fetch vs a ≥5 % floor | `f35_3-copy-cost-model.txt` | OS-identical (path inspected, not preclassified); moot — nothing shipped |
-| **35.5** `md hash --diff`/`--save` | **Implemented (win)**, residual recorded | CLI **17.2 ms → 14.1 ms (−18.0 %, ≈4σ)**; library sequence −29.3 %; controls within σ | `f35_5-hash-artifact-profile.txt` | OS-identical (call-graph only; CLI still owns `fs::write`) |
-| **35.6** `normalize_body_rhythm` | **Implemented (win)** | decorated **164.8 → 14.8 µs (−91.1 %)**; code panel −93.3 %; escape-free control −30.3 %; decorated render ≈**20 % faster** | `f35_6-rhythm-profile.txt` | OS-identical (in-memory regex predicate) |
-| **35.7** link/image policy appliers | **Implemented (win)** at the target operation | empty policy/no title **72.6 → 58.2 µs (−19.9 %)**; all four shapes improved, none regressed; ≈0.44 % of a full render | `f35_7-link-policy-profile.txt` | OS-identical (borrow-vs-clone) |
+| **35.3** `Arc<str>` fetch bodies | **No-win → reverted** | net **pessimization for 4 of 5 call sites** (+794.73 ns `::file`/preflight/expression); `::code` **break-even** (−0.35 ns), *not* +0.50 µs worse; win unreachable — the whole fetch would have to cost <16 µs to hit the ≥5 % floor | `run-…-f35-3/` (raw vectors) | OS-identical (path inspected, not preclassified); moot — nothing shipped |
+| **35.5** `md hash --diff`/`--save` | **Implemented (win)**, residual **now closed** | CLI **17.61 ms → 10.99 ms (−37.6 %** vs pre-F35.5, drift 3.4 %**)** — *not* the recorded −18.0 %, which measured a superseded state; library `--diff` sequence −50.1 / −50.2 / −42.0 % (CIs disjoint) | `run-…-f35-5/` (raw vectors) | OS-identical (call-graph only; CLI still owns `fs::write`) |
+| **35.6** `normalize_body_rhythm` | **Implemented (win)** | decorated **169.87 → 15.54 µs (−90.9 %)**; code panel −93.1 %; escape-free control −23.2 % (no regression) | `run-…-f35-6/` (raw vectors) | OS-identical (in-memory regex predicate) |
+| **35.7** link/image policy appliers | **Implemented (win)** at the target operation | empty policy/no title **80.58 → 62.87 µs (−22.0 %)**; empty/with title −12.3 %; hyperlink/no title **−2.1 % (CIs overlap — not a result)**; hyperlink/with title −3.5 %; none regressed | `run-…-f35-7/` (raw vectors) | OS-identical (borrow-vs-clone) |
 
-### Raw-sample evidence gap (review-1, High — partially closed 2026-07-16)
+### Raw-sample evidence gap (review-1 High → review-2 High — CLOSED 2026-07-16)
 
 Review-1 found that no retained artifact carried Criterion **sample vectors**;
 the `criterion-*.json` files are copies of `estimates.json` (derived `mean` /
 `median` / `slope` / `std_dev` only), so no reported statistic could be
-independently recomputed. Confirmed. Status after the raw-sample re-run:
+independently recomputed. Review-2 then found the finding had been **wrongly
+marked closed** while six checkpoints still had no raw observations at all.
+Both are now closed. Status:
 
-| Claim | Raw samples now retained? | Statistic |
+| Claim | Raw samples retained? | Statistic |
 |---|---|---|
 | **F13** replacement matcher | **Yes** — `run-20260716T153700/` | Reproduces (27.0×) |
 | **F14** scan fast-path | **Yes** — `run-20260716T153700/` | Reproduces (106.5×) |
 | **F33** remote discovery | **Yes** — `run-20260716T153200/` | **Corrected** (−77.5 %, controls at parity) |
 | **35.2** `relevel_with_overflow` | **Yes** — `run-20260716T153400/` | Reproduces (−98.6 %) |
-| **F23** render theme snapshot | **No** — estimates only | Unverified; claim is *no measurable win* |
-| **F25** cleanup-pass profile | **No** — harness deleted | Unverified |
-| **35.3 / 35.5 / 35.6 / 35.7** | **No** — harnesses deleted | Unverified |
+| **F23** render theme snapshot | **Yes** — `run-20260717T012550-f23/` | **Corrected** (−1.14 % / −1.23 %, control at parity — a small *real* win, not the recorded null) |
+| **F25** cleanup-pass profile | **Yes** — `run-20260717T012732-f25/` | **Corrected** (measured ceiling ≤7.98 %, not the reasoned "<7 %") |
+| **35.3** `Arc<str>` fetch bodies | **Yes** — `run-20260716T182500-f35-3/` | **Corrected** (store == clone; `::code` break-even, not +0.50 µs worse) |
+| **35.5** `md hash --diff`/`--save` | **Yes** — `run-20260716T182500-f35-5/` | **Superseded** — the −18.0 % measured an *older* implementation; current code re-measured |
+| **35.6** `normalize_body_rhythm` | **Yes** — `run-20260716T182214-f35-6/` | Reproduces (−90.9 % vs −91.1 %) |
+| **35.7** link/image policy appliers | **Yes** — `run-20260716T182232-f35-7/` | Reproduces on 3 of 4 shapes; hyperlink/no-title **downgraded** (−2.1 %, CIs overlap) |
 
 **Correction to review-1's list.** The review named "Findings 13, 14, 23, 33, and
 35, including 35.5–35.7". Two adjustments, both from reading the artifacts rather
@@ -1253,25 +1397,74 @@ than the review:
   win in Phase 10 (−98.6 %). It had the same defect (estimates only). Now closed.
 - **F25 was missing** from the raw-samples finding, though the review does flag it
   separately under "measured no-win dispositions". Its profile harness was
-  deleted, so it has the same unrecoverable-observations defect as 35.3–35.7.
+  deleted, so it had the same unrecoverable-observations defect as 35.3–35.7.
 
-**Unrecoverable observations — recorded, not fabricated.** F25, 35.3, 35.5, 35.6
-and 35.7 were measured by temporary in-crate harnesses (`f35_5_profile` in
-`hash/explain.rs`, `f35_6_profile` in `layout/page/tests.rs`, `f35_7_profile` in
+**Root cause and the fix.** F25, 35.3, 35.5, 35.6 and 35.7 were measured by
+*temporary* in-crate harnesses (`f35_5_profile` in `hash/explain.rs`,
+`f35_6_profile` in `layout/page/tests.rs`, `f35_7_profile` in
 `render_tree/build_context.rs`, plus the F25 cleanup profiler and the 35.3
-copy-cost model), each **deleted after capture**. The retained `.txt` files
-record medians and prose only. Nothing in the repository can reproduce or
-recompute them; their raw observations are **gone**. Regenerating them requires
-rebuilding each harness against a pinned baseline — the pattern F13 now
-demonstrates — which this session did not have the budget to complete. This is an
-**open gap**, not a closed one. The affected claims (35.5 −18.0 % CLI, 35.6
-−91.1 %, 35.7 −19.9 %) should be treated as unverified pending that work.
+copy-cost model), each **deleted after capture**, retaining medians and prose
+only. Those original observations are genuinely **gone** and were not
+recoverable. They have therefore been **re-measured from scratch**, not
+reconstructed: every checkpoint above now has a **retained** harness and raw
+per-observation vectors.
+
+The deletions were justified at the time by "exposing a private function purely
+to benchmark it would be the public API addition the standing contract bars".
+That was right about the API and wrong about the remedy: a `#[cfg(test)]` harness
+*inside* the crate reaches private functions **and** adds no public API, so
+deleting was never necessary. The retained harnesses are:
+
+| Harness | Reaches | Checkpoints |
+|---|---|---|
+| `darkmatter/lib/src/perf_harness.rs` (+ per-module callers) | crate-private targets, `#[cfg(test)]` | F23, F25, 35.6, 35.7 |
+| `darkmatter/lib/benches/phase11_evidence.rs` | public API targets | 35.3, 35.5 |
+| `darkmatter/lib/benches/phase6_interpolation.rs` (`f13_scan_and_replace`) | public API targets | F13, F14 |
+
+Harness tests are `#[ignore]`d and gated on `DM_PERF_RAW_DIR`, so the ordinary
+`just test` gate neither runs nor is slowed by them; they emit Criterion's
+`sample.json` shape, so `benchmarks/recompute.ts` re-derives every quoted
+statistic from the committed vectors through the same tool as the Criterion runs.
+
+**What re-measuring changed.** Five of the ten claims did not survive contact
+with reproducible evidence — which is the point of the contract:
+
+- **F23** was recorded as a *null* ("≈0.1 %, noise"). It is a small **real** win
+  (−1.14 % / −1.23 %, disjoint CIs, control at parity). The null came from
+  netting the target against a control under the assumption that cross-build
+  drift is uniform — the assumption this host's own F33 evidence disproves.
+- **F25**'s ceiling is **≤7.98 %**, not the reasoned "<7 %".
+- **35.3**'s store cost equals a clone (not 1.75×), so `::code` is **break-even**
+  rather than +0.50 µs worse; the no-win verdict survives on a different, more
+  robust argument.
+- **35.5**'s −18.0 % CLI figure measured an implementation that **no longer
+  exists** — see that sub-item.
+- **35.7**'s hyperlink/no-title shape is **−2.1 % with overlapping CIs**, not the
+  recorded −7.9 %: not a result.
+
+In every case the **disposition** is unchanged; only the evidence and the honest
+magnitude moved.
 
 **Contract change adopted:** a benchmark harness that carries a pinned baseline
-is now **retained** rather than deleted (see `f13_scan_and_replace` in
-`phase6_interpolation.rs`). Deleting the harness is what made these observations
-unrecoverable; the "delete the temporary harness" precedent set in Phase 8 is the
-root cause of this finding and should not be repeated.
+is **retained**, never deleted (see `f13_scan_and_replace` in
+`phase6_interpolation.rs`, and the retained harnesses above). Deleting the
+harness is what made these observations unrecoverable; the "delete the temporary
+harness" precedent set in Phase 8 is the root cause of this finding and is now
+formally retired in `benchmarks/README.md` → *Harnesses are retained, not
+deleted*, which also records where a harness belongs for a private vs public
+target (the false dilemma — "widen the API or delete the harness" — that caused
+the deletions).
+
+**Residual claims still unretained (recorded, not closed).** The re-run covered
+every *target-operation* claim. Three subordinate figures remain quoted from the
+deleted harnesses and are **not** substantiated by any committed vector; they are
+context, not thresholds, and no disposition rests on them:
+
+| Unretained figure | Where quoted | Status |
+|---|---|---|
+| `DarkmatterPage::render` = 582.5 µs; rhythm share 2.55 %; "decorated render ≈20 % faster" | 35.6 | **Unverified.** The 35.6 disposition rests on the pass-level −90.9 %, which reproduces. |
+| `as_terminal(toc_large)` = 3237 µs; "≈0.44 % of a full render" | 35.7 | **Unverified.** Restated as "≈0.5 % of a ~3.2 ms render"; the disposition rests on the target-operation win. |
+| `apply_image_policy` timings | 35.7 | **Never measured — in either run.** It is named in 35.7's predeclared target operation, but only `apply_link_policy` was ever sampled. Its differential correctness test (`image_policy_matches_the_pre_optimization_applier`) does exist and passes; the change is the same borrow-vs-clone edit as the link path. |
 
 ### 35.2 — `relevel_with_overflow` (Implemented)
 
@@ -1307,22 +1500,64 @@ removal of the unnecessary code").
 - **Why it cannot win:** `FetchSlot::Ready` is populated by *moving*
   `RemoteFetchOutcome.body` (a `String` from `String::from_utf8`). `Arc<str>`
   cannot reuse that allocation (the refcount header is inline), so it **adds**
-  one full body copy per URL (**+1.167 µs**) the old code never paid. The public
+  one full body copy per URL (**+791.37 ns**) the old code never paid. The public
   owned `get_content` facade must keep returning `String`, and
-  `Arc<str>::to_string` is *slower* than `String::clone` (0.791 vs 0.667 µs), so
-  all four owned consumers (`::file`, preflight, `resolve_ctx` ×2) regress
-  unconditionally. Only `::code` (`wrap_in_code_block(&body, ..)`, `&str`-only)
-  can take the refcount bump; it breaks even at ≈2 consumers of the same URL.
-- **Scale:** one body copy is **0.125 %** of a *loopback* fetch (0.667 µs of
-  534.5 µs) — the most favorable case possible; a real network fetch is 10–100×
-  slower. The entire copy budget is two orders of magnitude below the declared
-  ≥5 % floor.
+  `Arc<str>::to_string` (798.75 ns) is *marginally slower* than `String::clone`
+  (795.39 ns), so all four owned consumers (`::file`, preflight, `resolve_ctx`
+  ×2) regress unconditionally by **+794.73 ns** each. Only `::code`
+  (`wrap_in_code_block(&body, ..)`, `&str`-only) can take the refcount bump
+  (3.67 ns).
+- **Measurement correction (2026-07-16, review-2 raw-sample re-run).** Recomputed
+  from the retained vectors in `run-20260716T182500-f35-3/`, three of the
+  original's figures do **not** reproduce:
+  - **Store is not 1.75× a clone — it is the same cost** (791.37 ns vs
+    795.39 ns). The original's 1.167 µs vs 0.667 µs was host noise; both
+    operations are one allocation plus one 79 KB memcpy, so parity is the
+    mechanically expected result.
+  - **`::code` is therefore break-even at one consumer** (−0.35 ns), **not
+    +0.50 µs worse**. Break-even is at `store / clone` ≈ **1.0** consumer, not
+    the ≈1.75 the original derived; at ≥2 consumers of the same URL `::code`
+    would be a small win. The blanket "net pessimization" claim is **withdrawn
+    for `::code`** and survives only for the four owned-facade call sites.
+  - **`Arc::clone` is 3.67 ns, not "0.000 µs"** (a reporting-resolution
+    artifact).
+- **Scale — the argument that actually carries the verdict.** For the copy budget
+  to reach the declared **≥5 %** floor, the *entire* register + fetch +
+  `get_content` operation would have to cost under **≈15.9 µs**
+  (795.39 ns / 0.05). The original measured that operation at **534.5 µs on
+  loopback** — the most favorable case that exists and ~34× above the break-even;
+  a real network fetch is 10–100× slower still. The no-win therefore holds for
+  any fetch above ~16 µs and does **not** depend on the loopback figure, which
+  this re-run did not reproduce (treat the original's `0.125 %` share as
+  unverified; on the corrected copy cost it would be ≈0.149 %).
+- **Verdict unchanged.** Four of five call sites regress unconditionally against
+  a predeclared **0 % control-regression** budget — that alone rejects it — and
+  no arrangement reaches the ≥5 % floor.
 - **State:** `remote_fetch.rs` is byte-identical to its pre-phase state; the
-  `::code` call site is restored; the temporary harness was deleted.
+  `::code` call site is restored. The cost model is now a **retained** harness
+  (`benches/phase11_evidence.rs` → `bench_f35_3_copy_model`); the revert stands.
 
-### 35.5 — `md hash --diff` / `--save` artifact duplication (Implemented, residual recorded)
+### 35.5 — `md hash --diff` / `--save` artifact duplication (Implemented in two steps; residual now closed)
 
-- **What was duplicated:** a `detailed --diff` hashed the document **three
+**This sub-item shipped in two commits, and the recorded −18.0 % measured only
+the first.** Review-2 found "the newly changed F35.5 implementation has no
+reproducible measurement against its current code"; that is confirmed and now
+fixed. Three states exist:
+
+| State | Commit | `--diff` artifact computations | Measured by |
+|---|---|---|---|
+| **S0** | `8f604c5a3` (pre-F35.5) | 2, or **3** for `detailed` | — |
+| **S1** | `540262812` | **2** (`compare_hash` + `explain_hash_diff`) | the original `run-20260716T160000` record → **−18.0 % CLI** |
+| **S2** | `b8ecb88cb` (**current**) | **1** (`diff_hash`) | `run-20260716T182500-f35-5` (this re-run) |
+
+The original record's own *"Honest residual (NOT fixed, and why)"* section states
+that at S1 `--diff` **still computed the artifact twice**, and that this is
+"why the `simple` and `structured` rows above are unchanged". Commit `b8ecb88cb`
+then closed exactly that residual by adding `diff_hash`. So the retained −18.0 %
+is a genuine S0→S1 measurement that is now **superseded**, and the prose below
+describing the residual as open was **stale**.
+
+- **What was duplicated (S0):** a `detailed --diff` hashed the document **three
   times** — `compare_hash`, then `explain_hash_diff`'s own `compare_hash`, then
   `detailed_body`'s third recompute.
 - **What changed:** new `compare_options` (names the like-for-like identity) and
@@ -1340,17 +1575,82 @@ removal of the unnecessary code").
 - **Stored hash semantics unchanged:** proven by the write → read → re-save round
   trip `saved_baseline_reads_back_as_unchanged` across 5 kinds × 2 ignore
   policies.
-- **Recorded residual (not fixed, deliberately):** `--diff` still computes twice
-  — the CLI's `compare_hash` (needed for the exit-2 decision) plus
-  `explain_hash_diff`. Closing it requires either **(a)** a new public accessor on
-  `HashExplanation` (its `ExplanationBody`/`FmConcern`/`StructuredBody`/`DetailedBody`
-  are all private and only `render()` is exposed) — barred by the standing
-  no-new-public-API contract; or **(b)** an interior-mutability memo on
-  `Markdown`, a `Clone`/`PartialEq` value shared across rayon threads in
-  `run_hash_directory` — a Sync obligation plus a staleness hazard on a mutable
-  document, disproportionate to the remaining ~2.3 ms. This is why the `simple`
-  and `structured` rows show no change. Candidate for a future owner-approved API
-  addition, not an oversight.
+- **The S1 residual is now CLOSED (`b8ecb88cb`), by a third route the original
+  did not consider.** The original recorded the last duplicate as unfixable
+  without either **(a)** a new public accessor on `HashExplanation` — barred by
+  the no-new-public-API contract — or **(b)** an interior-mutability memo on
+  `Markdown`, rejected as a Sync/staleness hazard. `b8ecb88cb` instead returns
+  **both products from one call** (`diff_hash -> (HashComparison,
+  HashExplanation)`), so the CLI gets its exit-2 decision *and* its explanation
+  from a single artifact with no accessor and no memo. `--save` gets the same
+  treatment via `plan_hash_save_explained`.
+- **⚠ This closure is itself under an open review-2 finding.** `diff_hash` and
+  `plan_hash_save_explained` are **new public inherent methods**, which review-2
+  flags as violating compatibility invariant 2 ("no new public Rust API shape").
+  The mechanism is sound and the measurement below is real, but the *shape* awaits
+  an owner ruling — keep the operation crate-private behind a non-public seam, or
+  record an explicit exception. **Not resolved here; evidence only.**
+- **Measurement against the CURRENT implementation (S1 → S2).** Baseline and
+  candidate are both current public API — the baseline *is* the two-call path the
+  CLI used at S1 — so this needs no pinned copy and no cross-build comparison.
+  Recomputed from `run-20260716T182500-f35-5/` (Criterion, n=100, means; every
+  pair equivalence-gated on identical comparison **and** identical rendered
+  explanation before timing):
+
+  | Fixture / kind | Baseline (`compare_hash` + `explain_hash_diff`) | Candidate (`diff_hash`) | Δ |
+  |---|---|---|---|
+  | `toc_large` / Simple | 427.39 µs | **213.13 µs** | **−50.1 %** |
+  | `toc_large` / Structured | 4.2690 ms | **2.1247 ms** | **−50.2 %** |
+  | `toc_large` / Detailed | 5.5128 ms | **3.1952 ms** | **−42.0 %** |
+
+  All three CIs are disjoint. The mechanism predicts the number: S1 computed the
+  artifact exactly twice, so removing one compute halves the sequence — **−50 %**
+  is what 2→1 must produce, and it is what was measured. `Detailed` lands at
+  −42 % rather than −50 % because its `detailed_body` alignment is not part of the
+  duplicated artifact.
+- **Correction to the recorded rows.** The original's *"`simple` and `structured`
+  … (noise, unchanged)"* rows were true **of S1** and are now wrong of the
+  shipped code: those are exactly the shapes `b8ecb88cb` fixed, and they are the
+  biggest movers (−50 %). The `toc_large`/Simple baseline re-measured at
+  427.39 µs against the original's 426.3 µs — a 0.3 % agreement that
+  cross-validates the two runs and isolates the delta to the code change.
+- **CLI measurement (bracketed hyperfine, 100 runs/arm, means).** Cross-build, so
+  the candidate is run on **each side** of both baselines and the observed drift
+  bounds what counts as a result. Host load held at **5.85–6.29** across all four
+  arms. S0, S1 and S2 emit **byte-identical** `--diff` stdout and exit status on
+  all three inputs, verified before timing.
+
+  | Case | S0 (pre) | S1 (recorded) | **S2 = HEAD** | drift | S0→S2 | S1→S2 |
+  |---|---|---|---|---|---|---|
+  | `large_fm_detailed` **[target]** | 17.61 ms | 14.67 ms | **10.99 ms** | 3.4 % | **−37.6 %** | **−25.1 %** |
+  | `large_fm_simple` [control] | 5.64 ms | 5.75 ms | 5.20 ms | 4.7 % | −7.8 % | −9.6 % |
+  | `small_detailed` [control] | 4.88 ms | 5.33 ms | 4.91 ms | 3.8 % | +0.6 % (< drift — parity) | −7.9 % |
+
+- **⚠ The headline CLI number changes: −18.0 % → −37.6 %.**
+  1. **The recorded −18.0 % reproduces** — as an **S0→S1** measurement: 17.61 →
+     14.67 ms = **−16.7 %**, inside the original's stated `17.2 ± 0.5` →
+     `14.1 ± 0.7` σ. The original was honest work describing a **superseded**
+     implementation.
+  2. **It materially understates the shipped code.** The current implementation is
+     **−37.6 %** against pre-F35.5 (17.61 → 10.99 ms), because `b8ecb88cb` closed
+     the residual the original recorded as unfixable. Quoting −18.0 % for the
+     shipped code would be wrong in the *conservative* direction, but it is still
+     a claim about code that does not exist.
+  3. **No control regressed.** `small_detailed` is at parity (+0.6 %, inside its
+     3.8 % drift); `large_fm_simple` *improves* (−7.8 %), and a control that gets
+     faster cannot breach a 0 %-regression budget. The ≥5 % target floor is met at
+     −37.6 % against 3.4 % drift.
+- **Rejected runs retained beside the accepted one** (per the contract's raw-vector
+  rule, including for runs that fail their own gate):
+  `invalid-run-load46-69/` — rejected by its own drift bracket at host load 46→69,
+  where the `large_fm_simple` control reported a mechanically impossible +76.7 %
+  "regression"; retained as the negative control proving the quiet-host run was
+  necessary. `superseded-3arm-load11/` — an earlier attempt whose controls failed
+  the drift gate.
+- **`hash_basic` (small-document) shapes are reported but not relied on.** Their
+  vectors are retained, but dispersion swamps the effect (e.g. detailed baseline
+  40.70 µs median with a 31.35 µs σ and a 182 µs max, captured under concurrent
+  load). Direction matches the large-document result; no claim is made from them.
 
 ### 35.6 — `normalize_body_rhythm` (Implemented)
 
@@ -1364,8 +1664,23 @@ removal of the unnecessary code").
 - **Evidence:** differential against the pre-change predicate over 19 line shapes
   (escape-free, SGR, background fill, OSC 8 BEL and ST, Unicode, reset-only) and
   **all 361 adjacent pairs**, exercising blank-run collapsing and trailing-blank
-  stripping. Every measured case improved; the escape-free control improved too
-  (−30.3 %), so the 0 % control-regression budget held.
+  stripping.
+- **Measurement (retained raw vectors, review-2 re-run).** Recomputed from
+  `run-20260716T182214-f35-6/`; baseline (`naive_normalize`, the pinned
+  pre-change algorithm) and candidate sampled **interleaved in one process**,
+  n=100, medians, every body equivalence-gated before timing:
+
+  | Case | Baseline | Candidate | Δ | Recorded | Verdict |
+  |---|---|---|---|---|---|
+  | decorated prose (SGR), 549 lines | 169.87 µs | **15.54 µs** | **−90.9 %** | −91.1 % | reproduces |
+  | code panel (bg fill), 329 lines | 134.33 µs | **9.25 µs** | **−93.1 %** | −93.3 % | reproduces |
+  | plain, escape-free, 531 lines (**control**) | 28.10 µs | **21.58 µs** | **−23.2 %** | −30.3 % | direction holds; magnitude **corrected** |
+
+  Every measured case improved, so the predeclared 0 % control-regression budget
+  held and the ≥10 % target floor is cleared by a wide margin. The two target
+  cases reproduce within 0.2 pp. The escape-free control's improvement is
+  **−23.2 %, not −30.3 %** — a correction that does not affect the disposition
+  (a control that improves cannot breach a regression budget).
 
 ### 35.7 — Link/image policy appliers (Implemented)
 
@@ -1377,7 +1692,7 @@ removal of the unnecessary code").
   parsers are pure, so computing them earlier is equivalent. Owned public
   `RenderNode` output retained; compose-time link normalization and image-literal
   escaping untouched (different paths, per the plan).
-- **Honest scope:** 14.4 µs saved on 1000 links is only ≈0.44 % of a 3237 µs
+- **Honest scope:** ~17.7 µs saved on 1000 links is only ≈0.5 % of a ~3.2 ms
   `as_terminal(toc_large)` render. Retained on its **target-operation** win and
   because it is a *strict* improvement with no added complexity (two clones
   removed, no new state or branch) — the opposite of 35.3, which was rejected as
@@ -1385,6 +1700,26 @@ removal of the unnecessary code").
 - **Evidence:** differential against the pre-change appliers over 14 URL/title
   shapes × 5 context shapes for links **and** images, plus a non-link/image
   no-mutation case.
+- **Measurement (retained raw vectors, review-2 re-run).** Recomputed from
+  `run-20260716T182232-f35-7/`; baseline (`baseline_apply_link_policy`, pinned
+  verbatim) and candidate sampled **interleaved in one process** over 1000
+  synthetic link nodes, n=50, medians, `Debug`-equality gated before timing:
+
+  | Case | Baseline | Candidate | Δ | Recorded | Verdict |
+  |---|---|---|---|---|---|
+  | empty policy, no title (**target**) | 80.58 µs | **62.87 µs** | **−22.0 %** | −19.9 % | reproduces |
+  | empty policy, with title | 255.02 µs | **223.58 µs** | **−12.3 %** | −12.1 % | reproduces |
+  | hyperlink policy, no title | 116.71 µs | 114.21 µs | **−2.1 %** | −7.9 % | **downgraded — CIs overlap; not a result** |
+  | hyperlink policy, with title | 946.00 µs | **913.06 µs** | **−3.5 %** | −3.7 % | reproduces |
+
+  The **target** shape (empty policy / no title — the common case for ordinary
+  documents, and the shape where the clones were previously *all* of the work)
+  clears the predeclared ≥5 % floor at −22.0 %.
+- **Correction (2026-07-16).** The recorded claim *"all four shapes improved"* is
+  **downgraded**: `hyperlink policy / no title` measures −2.1 % with **overlapping
+  CIs** ([116.50, 119.52] vs [113.82, 116.22] µs), so on this evidence it is not
+  a demonstrated win — it is parity. No shape **regressed**, so the predeclared
+  0 % control-regression budget still holds and the disposition is unchanged.
 
 ### Phase 10 gates
 
@@ -1484,10 +1819,11 @@ its own gate** — it would have rotted silently.
 file it made reachable was mis-tiered: `level2_terminal_osc_cache.rs` is now
 `level1_terminal_osc_cache.rs` (see Finding 2). The library's `level2_` tests are
 now the real-terminal `level2_terminal_osc_wezterm.rs`. `just test-l2` still runs
-`_test_l2 {{ LIBRARY }}` then `_test_l2 {{ CLI }}` — the library arm now
-additionally passes `--features osc-query-counter`. Latest run:
-`2 tests run: 2 passed` (library, both WezTerm tests) + `76 tests run: 76 passed`
-(CLI).
+`_test_l2 {{ LIBRARY }}` then `_test_l2 {{ CLI }}`, with **no extra features** —
+an interim revision had the library arm pass `--features osc-query-counter`, but
+that feature was removed (compatibility invariant 2; see *Counter provenance*
+above) and the recipe no longer references it. Latest run: `2 tests run: 2 passed`
+(library, both WezTerm tests) + `76 tests run: 76 passed` (CLI).
 
 ### Cumulative closeout run
 
@@ -1640,11 +1976,49 @@ exist and compile: `level2_terminal_osc_cache_unsupported_on_this_platform`
 (`cfg(not(target_os = "macos"))`). This satisfies the matrix's "Windows
 compilation + clean skip/unsupported behavior" requirement.
 
-**⚠ Windows *behavioral* runs for F17 and F22: STILL OPEN.** A cross-compile is
-explicitly **not** a behavioral run. No Windows host or emulator is reachable
-from this session. This is the feature's **only** remaining cross-platform gap —
-narrowed from "all Linux + all Windows" to "Windows behavior for two findings".
-See *Open at closeout*.
+**Windows *behavioral* runs for F17 and F22: OBTAINED (2026-07-17). Gap CLOSED.**
+Evidence:
+[`run-20260717T020000-windows/windows-behavioral-run.txt`](benchmarks/raw/f-cumulative-closeout/run-20260717T020000-windows/windows-behavioral-run.txt).
+
+**30/30 pass on real Windows 11 Home 10.0.26200.8737 (ARM64)**, reproduced across
+three independent runs:
+
+| Finding | Windows result |
+|---|---|
+| **F17** — shell wait primitive | ✅ **14/14 pass** — `timed_out_child_process_is_killed_and_reaped` (the `WaitForSingleObject` kill+reap actually lands), all three 256 KiB/stream saturation arms, both no-poll granularity guards, error selection. |
+| **F22** — directory-hash membership | ✅ **15/15 CLI** (incl. `test_hash_directory_includes_vendored_dirs` and `…_vendored_membership_matches_plain_dir`) **+ the lib unit**. Windows agrees with macOS and Linux on membership — this retires the separator/path-semantics unknown flagged below. |
+
+**Correction to this section's earlier claim.** It previously read "No Windows
+host or emulator is reachable from this session." That was **false**, in the same
+way the Linux claim was found to be false: this macOS host runs Parallels Desktop
+with two Windows 11 ARM64 VMs (`Winny`, `Winny WSL1`), Guest Tools installed,
+drivable non-interactively via `prlctl exec`, with the host home already shared
+into the guest as `\\Mac\Home`. Nothing was installed to obtain this run.
+
+**Scope of the evidence, stated precisely.** The guest has no Rust toolchain, so
+the test binaries were cross-compiled here (mingw-w64) and executed on the guest
+under Windows' built-in x64 emulation. The emulation is instruction-level; the
+Win32/NT syscall layer is the real OS, so the wait/kill/reap and `read_dir`
+semantics under test are Windows' own. This is **not** Wine (an API
+reimplementation, which would not have been admissible for these two findings)
+and **not** a cross-compile-only result. It is also not a `just test` / `cargo
+nextest` run on the guest — same binaries and assertions, driven by libtest
+directly.
+
+Two prerequisites had to be fixed to get here, both test-only:
+1. **12 Unix-utility fixture tests** in `shell_expansion::executor` (`echo`,
+   `true`, `false`, `cat`, `sleep`, `env`) are now `#[cfg(unix)]`-gated; without
+   this the F17 binary could not run green on Windows as a whole.
+2. **`darkmatter-cli`'s test-support code did not compile for Windows at all.**
+   `tests/common/level2.rs::is_same_binary` used `MetadataExt::{volume_serial_number,
+   file_index}` — the **unstable** `windows_by_handle` feature — inside a
+   `#[cfg(windows)]` block. `rust-toolchain.toml` pins stable, so that arm could
+   never have compiled; it was written but never built, because no one had ever
+   compiled this crate's tests for Windows. (`cargo check -p darkmatter-cli
+   --target x86_64-pc-windows-gnu` **without** `--tests` passes, which is why the
+   earlier compile-evidence claim above missed it.) The Windows fast path is
+   deleted; the pre-existing portable content-comparison fallback returns the
+   same answer.
 
 ### ⚠ Pre-existing: sniff's test suite does not compile on Linux (not this feature's)
 
@@ -1743,25 +2117,52 @@ absorbed, consistent with Phase 9's HIGH disclosure.
 
 Carried to the owner. None is a defect in this feature's shipped code.
 
-1. **Windows behavioral runs — F17 (shell wait primitive) and F22 (directory
-   hash CLI).** The **only** remaining cross-platform gap (Linux is fully
-   closed — both findings pass there). The matrix classifies both as OS-divergent
-   and requires real behavioral runs. Windows **compilation** is now evidenced
-   (`cargo check --target x86_64-pc-windows-gnu`, including test targets), but no
-   Windows host/emulator is reachable from this session, and a cross-compile is
-   not a behavioral run. **To close:** run `just test` for `darkmatter` +
-   `darkmatter-cli` on a Windows host and confirm
-   `hash_directory::test_hash_directory_includes_vendored_dirs`,
+1. ~~**Windows behavioral runs — F17 (shell wait primitive) and F22 (directory
+   hash CLI).**~~ — **CLOSED 2026-07-17; no longer a residual.** Both findings
+   now have real Windows-host behavioral runs: **30/30 pass on Windows 11
+   10.0.26200.8737 (ARM64)** via Parallels `prlctl exec`. See *Cross-platform
+   evidence* above and
+   [`run-20260717T020000-windows/windows-behavioral-run.txt`](benchmarks/raw/f-cumulative-closeout/run-20260717T020000-windows/windows-behavioral-run.txt).
+   F22's "Windows separator/path semantics remain the genuine unknown" risk is
+   **retired** — `…_vendored_membership_matches_plain_dir` agrees with macOS and
+   Linux on the real OS.
+
+   **Reproducing it** (the guest has no Rust toolchain, so build here and execute
+   there):
+
+   ```sh
+   cargo test -p darkmatter --lib --no-run --target x86_64-pc-windows-gnu
+   cargo test -p darkmatter-cli --test hash_directory --no-run --target x86_64-pc-windows-gnu
+   cargo build -p darkmatter-cli --bin md --target x86_64-pc-windows-gnu
+   prlctl resume Winny            # Windows 11 ARM64, Guest Tools installed
+   # Stage md.exe at its compile-time path: `cargo_bin_cmd!("md")` bakes in the
+   # macOS build path, and Windows resolves a leading `/` against the current
+   # drive -> C:\Users\ken\...  Without this, all 15 F22 CLI tests fail with
+   # ERROR_PATH_NOT_FOUND at spawn (a transfer artifact, not Windows behavior).
+   prlctl exec Winny cmd.exe /c "mkdir C:\Users\ken\.claudine\worktrees\rusty-biscuit\darkmatter\target\x86_64-pc-windows-gnu\debug"
+   prlctl exec Winny cmd.exe /c "copy /Y \\Mac\Home\...\debug\md.exe C:\Users\ken\...\debug\md.exe"
+   prlctl exec Winny cmd.exe /c "\\Mac\Home\...\deps\darkmatter-<hash>.exe markdown::compose::shell_expansion::executor:: --test-threads=4"
+   prlctl exec Winny cmd.exe /c "\\Mac\Home\...\deps\hash_directory-<hash>.exe --test-threads=4"
+   ```
+
+   The suites to confirm are `hash_directory::test_hash_directory_includes_vendored_dirs`,
    `…_vendored_membership_matches_plain_dir`, and the F17 executor tests
    (`saturated_*`, `timed_out_child_process_is_killed_and_reaped`,
-   `pipeline_executor_timeout_selects_timeout_error`,
-   `fast_command_completion_is_not_delayed_by_a_poll_interval`) pass.
-   Residual risk is now **low**: F17's OS divergence is vendored inside
-   `shared_child` (Darkmatter adds no `cfg`-gated wait path of its own) and the
-   Unix half of that divergence is now proven on two different Unix kernels;
-   F22's traversal is `std::fs::read_dir` + a `starts_with('.')` check with no
-   `cfg` branch. Windows separator/path semantics remain the genuine unknown for
-   F22.
+   `pipeline_executor_timeout_selects_timeout_error`, and the no-poll granularity
+   guards `wait_hands_the_full_budget_to_one_blocking_span` +
+   `pipeline_wait_hands_the_full_budget_to_one_blocking_span`). An earlier
+   revision of this runbook named
+   `fast_command_completion_is_not_delayed_by_a_poll_interval`; that test was
+   **retired at review-1** and replaced by the two `wait_probe` seam tests just
+   listed. It no longer exists, so the command as previously written could not
+   have been run.
+
+   **Still Unix-only-verified** (not a Windows behavioral gap in F17/F22, but be
+   precise about what the Windows run covers): the 12 `#[cfg(unix)]`-gated
+   Unix-utility fixture tests in the same executor module — ANSI stripping, the
+   `NO_COLOR` child env, per-command timeout override, non-zero exit, and null
+   stdin. Porting them needs helper-child modes that echo argv and dump the
+   environment.
 2. **sniff's test suite does not compile on Linux** —
    `sniff/lib/tests/integration.rs:1800` calls `detect_linux_package_managers`
    with a stale arity inside a `#[cfg(target_os = "linux")]` test, so it is
@@ -1777,13 +2178,17 @@ Carried to the owner. None is a defect in this feature's shipped code.
 4. **Compose setup regression owned by the Opaque Reference Graph feature** —
    +13–27 % on every compose case, from `a8e5e98d9` + `16ed1e57a`. Evidence and
    bisect in the cumulative run record. Not fixed here (scope boundary).
-5. **Finding 35.5 residual** — `md hash --diff` still computes its artifact
-   twice; closing it needs either a new public `HashExplanation` accessor (barred
-   by the no-new-public-API contract) or an interior-mutability memo on a
-   `Clone`/`PartialEq` value shared across rayon threads. Deliberate, ~2.3 ms.
+5. **~~Finding 35.5 residual~~ — CLOSED by `b8ecb88cb`, but its *shape* is now
+   the open item.** The double-compute is gone: `diff_hash` returns both products
+   from one artifact, which needed neither of the two routes this list called
+   barred. What is open instead is that `diff_hash` and
+   `plan_hash_save_explained` are **new public API**, which review-2 flags against
+   compatibility invariant 2. Needs an owner ruling: crate-private seam, or a
+   recorded exception. See the 35.5 section above.
 6. **`strip_incidental_newlines` cost** — surfaced by F25's profile, covered by
-   **no** finding: 22.0 % of cleanup on `toc_large`, 70.8 % on `replace_heavy`.
-   A future candidate, not actioned.
+   **no** finding: **22.7 %** of cleanup on `toc_large`, **69.2 %** on
+   `replace_heavy` (recomputed from retained vectors). It is ~2.8× F25's entire
+   measured fusion ceiling. A future candidate, not actioned.
 7. **Stray newline-named directory** — see immediately below. It **was
    committed**, making it a live Windows checkout hazard; removed at review-1.
 

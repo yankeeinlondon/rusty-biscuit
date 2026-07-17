@@ -23,7 +23,7 @@ so `implemented` stays `false`.
 | High — F21 redirected-output test is red | **Closed.** Already fixed by `74e0fdc90` before this pass; verified green. |
 | High — F2 has no Level-2 proof | **Closed.** Genuine L2 test added under WezTerm; the manufactured-PTY test reclassified as L1. |
 | High — nine checkout-hostile fixture paths | **Closed.** Removed from the index and working tree; `results.md` provenance corrected. |
-| High — raw benchmark samples not retained | **Closed with corrections.** 1,950 real observations retained; F33's headline corrected. |
+| High — raw benchmark samples not retained | ~~**Closed with corrections.** 1,950 real observations retained; F33's headline corrected.~~ **[Correction, 2026-07-16] This row was wrong when written** — it contradicted this review's own body, which correctly listed F23, F25, 35.3, 35.5, 35.6 and 35.7 as still unverified. Review-2 re-raised the finding. It is **now genuinely closed**: all six were re-measured against retained harnesses with raw vectors. See `results.md` → *Raw-sample evidence gap*. |
 | High — Windows behavior open / F17 tests not Windows-ready | **Partially closed.** Tests are now Windows-*ready* (Unix-utility deps removed) and Linux-verified on a real kernel. Windows **behavioral** run remains **OPEN** — no Windows host reachable. |
 | High — F32 unapproved prompt-frequency change | **Closed.** Prior prompt behavior restored; clone removal retained. |
 | High — F35.5 computes the same artifact twice | **Closed.** Also fixed an unreported `--save` defect (three artifacts, not two). |
@@ -63,6 +63,14 @@ corrected in `results.md`:
 Additionally, **F35.5/35.6/35.7, F23, and F25** rest on temporary harnesses that
 were deleted after capture; their raw observations are unrecoverable and those
 claims should be treated as **unverified** pending a rebuilt harness.
+
+> **[Correction, 2026-07-16]** This paragraph was right and the status row above
+> was wrong; the two contradicted each other, which review-2 flagged. The
+> harnesses have since been rebuilt and **retained**, and all six checkpoints
+> re-measured from raw vectors. Five recorded claims changed as a result —
+> including F23 (a recorded *null* that is a real ~1.1 % win) and F35.5 (whose
+> −18.0 % measured a superseded implementation; the shipped code is −37.6 %). See
+> `results.md` → *Raw-sample evidence gap*.
 
 ## Verdict
 

@@ -3,7 +3,7 @@ status: draft
 reviewed: true
 reviewed_by: claude/default
 reviewed_on: 2026-07-15
-review_iterations: 2
+review_iterations: 3
 created: 2026-07-15
 source_review: ../../reviews/2026-07-12-perf/spec.md
 source_assessment: ../../reviews/2026-07-12-perf/review-3.md
@@ -85,7 +85,7 @@ and cross-platform classification — is in
 | Finding | Status | Current implementation | Work retained here | Final (2026-07-16) |
 |---:|---|---|---|---|
 | 1 | Partial | Darkmatter explicitly calls `detect_timezone_with_options(false)`, removing its unused NTP request. | Restore bare `sniff::detect_timezone()` to its compatible full-report behavior by delegating to `true`; retain Darkmatter's explicit `false` call. | **Corrected.** Bare API delegates to `true` again; Darkmatter keeps `false` via a local seam. |
-| 2 | Partial | OSC 10 text-color results are process-cached. | Add L2 proof that repeated terminal construction emits one OSC 10 request and record repeated-construction latency. | **Verified (L2)** on macOS **and real Linux**. 3 constructions → exactly 1 OSC 10; median 0.970 ms. ⚠ Its gate never ran it — `test-l2` omitted the library package; fixed at closeout. |
+| 2 | Partial | OSC 10 text-color results are process-cached. | Add L2 proof that repeated terminal construction emits one OSC 10 request and record repeated-construction latency. | **Verified (L2)** on macOS (real WezTerm, **gated**) **and real Linux** (real kitty under a Linux kernel in Docker, **retained manual run**). 3 constructions → exactly 1 OSC 10; macOS median 0.970 ms. Oracle is theme-independent: the pane's foreground is pinned and demanded back verbatim. ⚠ An earlier revision of this row claimed real-Linux L2 on the strength of a **manufactured-PTY (L1)** run; corrected 2026-07-16 (review-2). |
 | 3 | Partial | The compose CLI shares a terminal through a per-invocation `OnceCell`. | Add an end-to-end CLI case exercising verbose, performance, and warning-report branches and prove one detection per invocation. | **Verified.** Detections *counted* = 1 across verbose + perf + warning branches. |
 | 4 | Partial | TOC line lookup uses an offset table and binary search; compatibility tests cover line/span behavior. | Replace the non-comparable closeout with identical, hashed fixtures, predeclared thresholds, and retained raw samples. | **Closed.** Reconstructed on identical hashed bytes: `toc_large` 488 → 23 ms. |
 | 5 | Complete | Schema validation uses the already resolved effective schema rather than resolving and coercing twice. | No implementation work. Protect in the final benchmark and regression gates. | **Unchanged**; held by the final gates. |
@@ -100,12 +100,12 @@ and cross-platform classification — is in
 | 14 | Partial | Literal conversion now skips its scan when `{{{` is absent. | Reduce repeated Markdown-aware scans and full-body copies when interpolation is present; benchmark nested and no-expression cases separately. | **Implemented — measured win ≈104× on skipped work** (240.1 µs → 2.3 µs) for `{{`-free bodies. Nested/rescan path untouched. |
 | 15 | Complete | Parent headings and line offsets are parsed once and queried through memoized/indexed structures. | No implementation work. | **Unchanged.** |
 | 16 | Partial | Some graph/preflight data is shared through `Arc`, but visited documents may still be composed again. | Solve the remaining condition-aware prepared-content duplication without reusing bodies whose output depends on parent state or directive position. | **No safe broadening remained** (see Finding 7). Parent state / directive position / conditions already yield distinct keys. |
-| 17 | Partial | Parallel body-shell execution was correctly rejected because commands must retain source-order side effects. | Replace or avoid the independent 10 ms completion polling loop and prove unchanged timeout, output, and failure semantics. Arbitrary directive parallelism remains prohibited. | **Implemented.** Both loops → one blocking `wait_with_timeout`. ⚠ **Linux + Windows behavioral runs OPEN** (macOS-only host). |
+| 17 | Partial | Parallel body-shell execution was correctly rejected because commands must retain source-order side effects. | Replace or avoid the independent 10 ms completion polling loop and prove unchanged timeout, output, and failure semantics. Arbitrary directive parallelism remains prohibited. | **Implemented.** Both loops → one blocking `wait_with_timeout`. ✅ **Linux + Windows behavioral runs DONE** — 14/14 on real Windows 11 ARM64, 26/26 on a real Linux kernel. |
 | 18 | Complete / Separated | Graph construction is reused and fragment slug lookup is memoized. | No performance work. Document/options/mode identity and graph opacity belong exclusively to the linked `ReferenceGraph` feature. | **Separated — nothing landed here.** Only the shared field classification is *consumed*, from that feature's commit `a8e5e98d9`. |
 | 19 | Complete | Protected-range parsing is gated behind a plausible delimiter scan. | No implementation work. | **Unchanged.** |
 | 20 | Complete | Text events without disclosure directives retain their borrowed/event representation instead of being unconditionally reallocated. | No implementation work. | **Unchanged.** |
 | 21 | Partial | The macOS appearance probe is cached and gated away from non-TTY paths. | Verify it together with Findings 2 and 3 in real-terminal L2 coverage; piped CLI timing is insufficient. | **Verified.** PATH-shim sentinel proves no `defaults` fork on redirected output. |
-| 22 | Open / Correction | Directory hashing now unconditionally excludes `node_modules`, `target`, and `vendor`, changing aggregate membership. | Restore prior membership. A future exclusion policy requires a separately approved compatibility ruling, migration semantics for persisted hashes, and an end-to-end aggregate/exit-status test. | **Reverted.** Only dot-prefixed dirs pruned; no migration needed (never released). ⚠ **Linux + Windows behavioral runs OPEN**. |
+| 22 | Open / Correction | Directory hashing now unconditionally excludes `node_modules`, `target`, and `vendor`, changing aggregate membership. | Restore prior membership. A future exclusion policy requires a separately approved compatibility ruling, migration semantics for persisted hashes, and an end-to-end aggregate/exit-status test. | **Reverted.** Only dot-prefixed dirs pruned; no migration needed (never released). ✅ **Linux + Windows behavioral runs DONE** — 15/15 CLI + lib unit on both; Windows agrees on membership. |
 | 23 | Partial | Syntect themes are borrowed instead of deep-cloned per code block. | Resolve environment/theme choice once per render snapshot rather than reading it per block; retain dynamic behavior across separate renders. | **Implemented — contract met, no measurable win** (≈0.1 % net vs a control that moved the same). Retained as plan-mandated, byte-identical; honest claim recorded. |
 | 24 | Complete | Code-block emission writes directly into the output buffer instead of allocating per-token formatted strings. | No implementation work. | **Unchanged.** |
 | 25 | Partial | Four placeholder replacements are fused into one scan. | Measure and, when beneficial, combine compatible ordered line-based cleanup passes; preserve exact pass ordering and canonical output. | **No-win — profiled, not implemented.** Ceiling <7 % of cleanup ≈0.5 % of compose, below σ; exact equivalence unavailable; `cleanup_content_internal` impact HIGH. No code written or retained. |
@@ -137,12 +137,24 @@ Of the 18 findings carrying retained work (1–4, 7, 11–14, 16, 17, 21–23, 2
   — 25 (profiled, not implemented), 35.3 (implemented, measured, **reverted**),
   and 7/16 (existing reuse already safe; no speculative code added).
 - **1 reverted as a forbidden behavior change** — 22.
-- **Cross-platform evidence** — Finding 2's Linux L2 gap is **closed** (its PTY
-  tests pass under a real Linux kernel), and Windows **compilation** including
+- **Cross-platform evidence** — Finding 2's Linux L2 gap is **closed**, but *not*
+  for the reason this bullet previously gave. It claimed the gap was closed
+  because "its PTY tests pass under a real Linux kernel"; that is the exact
+  fallacy `results.md` documents at length — those PTY tests **manufacture their
+  own OSC reply bytes**, so they are Level 1 regardless of which kernel runs them.
+  The gap is closed by a **real kitty emulator** under a real Linux kernel
+  parsing and answering the query, with the library reporting the pinned
+  foreground back and `osc10_actual_queries=1`
+  ([run record](./benchmarks/raw/f2f3f21-terminal-evidence/run-20260716T180700-linux-kitty-l2/summary.md)).
+  Windows **compilation** including
   target-gated test code is evidenced for all four packages. Windows
-  **behavioral** runs for 17's wait primitive and 22's directory CLI case remain
-  **open** — a cross-compile is not a behavioral run and no Windows host is
-  reachable. See *Open at closeout* in [`results.md`](./results.md).
+  **behavioral** runs for 17's wait primitive and 22's directory CLI case are
+  **closed as of 2026-07-17**: 30/30 pass on real Windows 11 (10.0.26200.8737,
+  ARM64) via a Parallels VM driven by `prlctl exec`
+  ([run record](./benchmarks/raw/f-cumulative-closeout/run-20260717T020000-windows/windows-behavioral-run.txt)).
+  The earlier claim here that "no Windows host is reachable" was **wrong** — two
+  Windows 11 VMs were present on the implementation host throughout. See
+  *Cross-platform evidence* in [`results.md`](./results.md).
 - **1 deliberate behavior change awaiting owner acceptance** — 32's mid-stage
   prompt frequency.
 

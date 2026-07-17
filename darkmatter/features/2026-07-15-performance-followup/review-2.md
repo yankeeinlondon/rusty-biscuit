@@ -4,10 +4,11 @@ ready: false
 agent: codex/default
 created: 2026-07-16T16:30:01-07:00
 spec: 2026-07-15-performance-followup/spec.md
-implemented: false
+implemented: true
 description: "A **feature** review of `2026-07-15-performance-followup/spec.md`"
 feature: 2026-07-15-performance-followup/review-2.md
 previous: 2026-07-15-performance-followup/review-1.md
+next: 2026-07-15-performance-followup/review-3.md
 ---
 
 # Review 2 — Performance Follow-up
@@ -163,4 +164,3 @@ Level-3 test is required.
 - retained raw vectors recomputed cleanly for F13, F14, F33, and F35.2; and
 - GitNexus impact/change analysis and Sniff package/dependency discovery were
   used to establish the affected Darkmatter and Biscuit Terminal scope.
-
