@@ -12,6 +12,8 @@ mod support {
     pub mod fixtures;
     pub mod network_fixture;
     pub mod plans;
+    #[cfg(feature = "remote")]
+    pub mod remote_report_fixture;
     pub mod util;
 }
 
@@ -25,6 +27,7 @@ mod cases {
     pub mod programs;
     pub mod repo;
     pub mod system;
+    pub mod workload_matrix;
 }
 
 fn register_all(c: &mut Criterion) {
@@ -42,6 +45,7 @@ fn register_all(c: &mut Criterion) {
     cases::programs::register(c);
     cases::repo::register(c);
     cases::network::register(c);
+    cases::workload_matrix::register(c);
 }
 
 criterion_group!(perf, register_all);

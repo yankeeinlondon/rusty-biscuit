@@ -79,6 +79,68 @@ pub fn git_repo_with_dirty_files(dirty_count: usize) -> Fixture {
     Fixture { dir, path: root }
 }
 
+/// Dirty Git fixture with an exact per-file payload size.
+pub fn git_repo_with_dirty_files_of_size(dirty_count: usize, bytes_per_file: usize) -> Fixture {
+    let dir = TempDir::new().expect("tempdir for sized dirty git fixture");
+    let root = dir.path().to_path_buf();
+    builder::build_git_repo_with_dirty_files_of_size(&root, dirty_count, bytes_per_file);
+    Fixture { dir, path: root }
+}
+
+/// Deep/wide formatting-only fixture.
+pub fn deep_wide_formatting_tree(depth: usize, width: usize) -> Fixture {
+    let dir = TempDir::new().expect("tempdir for formatting fixture");
+    let root = dir.path().to_path_buf();
+    builder::build_deep_wide_formatting_tree(&root, depth, width);
+    Fixture { dir, path: root }
+}
+
+/// Parameterized mixed-ecosystem monorepo fixture.
+pub fn mixed_monorepo(package_count: usize) -> Fixture {
+    let dir = TempDir::new().expect("tempdir for mixed monorepo fixture");
+    let root = dir.path().to_path_buf();
+    builder::build_mixed_monorepo(&root, package_count);
+    Fixture { dir, path: root }
+}
+
+/// Parameterized over-cap inventory and documentation fixture.
+pub fn inventory_docs_tree(file_count: usize, doc_count: usize) -> Fixture {
+    let dir = TempDir::new().expect("tempdir for inventory/docs fixture");
+    let root = dir.path().to_path_buf();
+    builder::build_inventory_docs_tree(&root, file_count, doc_count);
+    Fixture { dir, path: root }
+}
+
+/// Mixed monorepo carrying package-owned Markdown documents.
+pub fn documented_mixed_monorepo(package_count: usize, document_count: usize) -> Fixture {
+    let fixture = mixed_monorepo(package_count);
+    builder::add_package_documents(fixture.path(), package_count, document_count);
+    fixture
+}
+
+/// Large mixed monorepo with a distinct nested workspace authority.
+pub fn nested_mixed_monorepo(package_count: usize) -> Fixture {
+    let fixture = mixed_monorepo(package_count);
+    builder::add_nested_workspace(fixture.path());
+    fixture
+}
+
+/// Sparse-prefix path-history fixture.
+pub fn sparse_path_history_repo(commits: usize, match_every: usize) -> Fixture {
+    let dir = TempDir::new().expect("tempdir for sparse path history fixture");
+    let root = dir.path().to_path_buf();
+    builder::build_sparse_path_history_repo(&root, commits, match_every);
+    Fixture { dir, path: root }
+}
+
+/// Case-variant filesystem fixture.
+pub fn case_variant_tree(files_per_variant: usize) -> Fixture {
+    let dir = TempDir::new().expect("tempdir for filesystem case fixture");
+    let root = dir.path().to_path_buf();
+    builder::build_case_variant_tree(&root, files_per_variant);
+    Fixture { dir, path: root }
+}
+
 /// Docs-parser fixture: a git repo with a configurable number of markdown
 /// documents, only some of which declare a `blast_radius` frontmatter list.
 ///

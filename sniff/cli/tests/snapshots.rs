@@ -101,13 +101,22 @@ fn normalized_os_summary(output: &str) -> Value {
         .and_then(Value::as_array)
         .map_or(0, Vec::len);
 
+    for field in ["kernel", "long_version", "version"] {
+        assert!(
+            json.get(field)
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.is_empty()),
+            "{field} should be a non-empty string"
+        );
+    }
+
     json!({
         "distribution": json.get("distribution"),
-        "kernel": json.get("kernel"),
-        "long_version": json.get("long_version"),
+        "kernel": "[KERNEL]",
+        "long_version": "[LONG_VERSION]",
         "name": json.get("name"),
         "os_type": json.get("os_type"),
-        "version": json.get("version"),
+        "version": "[VERSION]",
         "manager_count": manager_count
     })
 }
@@ -144,7 +153,9 @@ fn os_json_snapshot() {
 // ============================================================================
 
 fn init_git_repo(path: &std::path::Path) -> git2::Repository {
-    let repo = git2::Repository::init(path).unwrap();
+    let mut options = git2::RepositoryInitOptions::new();
+    options.initial_head("main");
+    let repo = git2::Repository::init_opts(path, &options).unwrap();
     let mut config = repo.config().unwrap();
     config.set_str("user.email", "test@test.com").unwrap();
     config.set_str("user.name", "Test").unwrap();

@@ -170,6 +170,33 @@ Parameterised by package count (10, 100, optionally 500).
 |-----------|------------------|
 | `package_boundary_refresh/<count>` | `refresh_package_boundaries()` on a Cargo workspace with `<count>` packages. Structure and inventory are prepared outside the timed loop. Measures only boundary-assignment logic. Throughput: `<count>` elements. |
 
+## specification workload matrix
+
+The `workloads_*` groups are the production-shaped families required by the
+2026-07-16 performance specification. Their fixtures are constructed lazily by
+the selected benchmark and outside its timed `b.iter` loop.
+
+| Specification family | Benchmark definition | Deterministic work bound |
+|----------------------|----------------------|--------------------------|
+| Formatting-only, deep/wide | `workloads_filesystem/formatting_only_deep_24_wide_32` | `formatting_only_request_starts_no_walker` pins zero walker starts and entries. |
+| Package-scoped inventory + Git in a large monorepo | `workloads_filesystem/package_scoped_git_inventory_in_500_package_monorepo` | `walk_scope_table` pins Git + inventory to `WalkScope::Package`; Git is not a repository-wide walk consumer. |
+| Standalone versus integrated observation; nested discovery with/without supplied evidence | `workloads_repo_observation/{standalone_detect_repo_nested_500,integrated_full_supplied_observation_nested_500}` | `standalone_full_detection_enumerates_the_tree_once`, `integrated_and_standalone_full_detection_agree`, and `nested_workspaces_are_discovered_from_observed_markers` pin one observation and output parity. |
+| Mixed-ecosystem structure-only scaling | `workloads_repo_structure_mixed/{100,500,2000}` | Structure-mode tests pin zero package enrichments and inventory acceptance. |
+| Inventory-only and inventory+docs above the cap | `workloads_inventory_over_cap/{inventory_only_10500_files,inventory_and_docs_10500_files_2000_docs}` | `inventory_only_walk_stops_at_the_cap_and_reports_truncation` and `combined_walk_keeps_going_past_saturation_for_its_other_observers` pin the 10,000 accepted-file cap and observer behavior. |
+| Final assembly and Markdown package-prefix assignment | `workloads_final_assembly/full_500_packages_2000_docs`, `workloads_document_attribution/package_prefix_assignment/{500,2000}` | Ownership/document tests pin deepest component-prefix selection and zero lookup canonicalizations. |
+| Dirty Git payload sizes | `workloads_git_dirty_sizes/100_files/{1024,102400,2097152}` | `each_dirty_side_loads_and_diffs_once` pins one blob load and diff per dirty side independent of payload size. |
+| Branch-heavy/divergent and many-tip containment | `workloads_git_branches/{branch_heavy_divergent_32_tips,deep_containment_100_remote_tips}` | `focused_ref_consumers_share_one_observation` pins one ref snapshot; containment shares the `git.commit_visits` bound used by the path-history and ref-walk tests. |
+| Sparse path history | `workloads_git_path_history/2000_commits_sparse_prefix_every_200` | `commit_visits_are_bounded_by_the_scan_limit` pins visits at the explicit scan bound. |
+| Remote provider request counts | `workloads_remote_report/github_provider_request_count_fixture` (requires `remote`) | `github_fetch_report_resolves_metadata_and_tree_once` pins one metadata and one root-tree request. |
+| Case-sensitive/case-insensitive, warm/cold-ish | `workloads_filesystem_case/{warm_case_variant_tree,coldish_fresh_case_variant_tree}` | The fixture uses native `Path` components and therefore exercises the host filesystem's actual case behavior without emulation. |
+
+The remaining service-listing row cannot currently be represented by a
+deterministic Criterion fixture: the public service API intentionally observes
+the host init system, while synthetic backend parsers and command injection are
+crate-private. Production Level-1 tests already pin chunk size, partial failure,
+timeouts, and reaping. Exposing a production injection API solely for a timing
+fixture would broaden the public contract without improving regression evidence.
+
 ---
 
 ## Environment Variables
