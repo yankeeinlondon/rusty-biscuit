@@ -241,6 +241,21 @@ docs_updated_during_phase_12:
     - claudine/features/2026-07-13-proxy-with/plan.md
 docs_created_during_phase_12: []
 skills_files_updated_during_phase_12: []
+# Phase 13 is PARTIAL: the equivalence harness, both passive corpus guards, the
+# suite triage, and the acceptance map (26/30 criteria mapped) all landed, and
+# the corpus guard found a real seventh ambient-capture site Phase 5 missed. Four
+# criteria (7, 9-launch, 10, 15) remain blocked on Phase 9's R6, transitively via
+# Phases 10-11 — the same wall as checkpoints 9-12. Tasks 2-3 (cross-platform CI)
+# conflict with ratified repo policy and need an owner decision. `phase` stays
+# at 8.
+source_files_during_phase_13:
+    - claudine/cli/tests/composition_seams.rs
+    - claudine/cli/tests/level2_lifecycle_control.rs
+docs_updated_during_phase_13:
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_13:
+    - claudine/features/2026-07-13-proxy-with/notes/acceptance-map.md
+skills_files_updated_during_phase_13: []
 packages:
     - claudine
     - claudine-cli
@@ -1575,14 +1590,71 @@ enabled only after Phase 12.
       initialize count; loop iteration count and mutations; closure target,
       sequence-step identity, and stdout/stderr routing; shell approval and
       execution bytes; typed failure identity and rendered diagnostic.
+      **PARTIAL — the harness is built; the launch facets have one reproduction
+      row and are blocked on R6.** `stage_equivalence_arm` / `normalize_arm` /
+      `equivalence_arms` live at the end of `cli/tests/level2_lifecycle_control.rs`,
+      generalizing the Phase 1 pattern. Both arms execute the **same file**
+      (`target.md`), differing only in the route to it, so a copy under a second
+      name cannot make path-derived facets diverge for non-routing reasons;
+      `normalize_arm` rewrites each arm's own tempdir path/basename, since each
+      arm owns a separate workspace.
+      - **Landed and green** (`level2_lifecycle_equivalence_probe_matches_direct_run`):
+        authored frontmatter, a computed property, the `ctx.*` snapshot,
+        lifecycle signal order, and the target `initialize` count are
+        byte-identical across the two routes.
+      - **Blocked (R6), reproduced**
+        (`level2_lifecycle_equivalence_target_pinned_model_matches_direct_run`,
+        `#[ignore]`d): this is the row checkpoint 9 declared unwritable. It is
+        written and fails for exactly the documented reason — routed
+        `env.MODEL=` empty vs direct `env.MODEL=llamacpp/probe-model-x`. Its
+        fixture check passes, proving the target's own `model:` reaches the
+        launch environment when it is the invoked document and not when it is
+        proxied to. It probes `model:` because `--goose` pins the provider on
+        both arms (explicit CLI intent R6 must keep authoritative), so `model:`
+        is the one launch input free to move without a second provider stub or
+        an interactive selection prompt; the id rides Goose's declared
+        `llamacpp` namespace because frontmatter models are catalog-validated
+        and an invalid one is dropped silently — which would have emptied the
+        facet for a reason unrelated to routing. (Discovered the hard way: the
+        first attempt used an invented id and failed its *direct* arm.)
+      - **Not covered**: MCP, argv, system prompt, child environment, child CWD,
+        interactivity, structured mode, stdout/stderr routing, sequence-step
+        identity. The launch facets all move together on the same rebuild, so
+        one reproduction row pins the gap; adding rows per facet is redundant
+        until R6 exists. Loop iteration count is AC7's, blocked on Phase 10.
 - [ ] Use a fake provider and platform-neutral temporary paths so the matrix runs
       on macOS, Windows, and Linux. Do not hardcode `/tmp` or POSIX separators.
       Note the recorded hazard: `tempfile` creates `0755` dirs and some endpoint
       fixtures require `0700` — build the dir explicitly if permissions matter.
+      **PARTIAL — the rows are platform-neutral; the suite around them is not,
+      by ratified policy.** The new rows use the existing fake `goose`, `tempdir()`,
+      and no hardcoded `/tmp` or separators. The fixture check deliberately does
+      **not** pin `ctx.os`'s text (the first draft did, which would have made the
+      matrix macOS-only); it asserts only that it resolved, and the cross-arm
+      equality carries the comparison. But `cli/tests/level2_lifecycle_control.rs`
+      is `#![cfg(unix)]` at file level with `#!/bin/sh` fake providers, so the
+      whole suite is Unix-only **by construction** — and
+      `docs/testing-strategy.md` ratifies that L2 "skips (harness absent)" on
+      Windows. This task, as written, cannot be satisfied without reversing that
+      policy. See `notes/acceptance-map.md` → Cross-platform status.
 - [ ] Run the matrix in the repository's existing macOS, Windows, and Linux CI
       coverage. If a platform cannot be exercised from the implementation host,
       record the CI job and result in `notes/acceptance-map.md`; local macOS-only
       success is not cross-platform sign-off.
+      **BLOCKED — the premise is false: that CI coverage does not exist.**
+      Verified: `claudine-tests.yml` runs `ubuntu-latest` only and does not call
+      the reusable `_area-ci.yml`, so claudine has no Windows or macOS **test**
+      leg at all (`claudine-windows-ctrl-c.yml` is one specific L3 test). And no
+      CI job runs `just test-l2` for claudine on any platform — the only
+      `test-l2` invocations in `.github/workflows/` are `test.yml` (sniff) and
+      `_area-ci.yml`'s opt-in `l2` job, which claudine does not use. So the
+      matrix's CI result today is *not run anywhere*, and per ratified policy it
+      can never run on Windows and is opt-in on macOS.
+      Three resolutions are recorded in `notes/acceptance-map.md` (wire claudine
+      into `_area-ci.yml` with `l2: true`; amend the plan to match policy; or
+      reverse the policy). **None was taken**: each is either an owner decision
+      or a policy reversal, and a phase is not authorized to make either
+      unilaterally. This needs Ken's call.
 - [ ] Author the remaining L2 cases: caller-override precedence over `with:`;
       target schema/computed-property/initialize/body observation of typed overlay
       values; failure/finalize proxy using `err.*` inside `with:`; retry, resume,
@@ -1597,25 +1669,185 @@ enabled only after Phase 12.
       and approval still running; `inline-compose` proxy closure ownership and a
       proxy inside a sequence step; dry-run proving no lifecycle side effect and
       no dynamic proxy traversal.
-- [ ] Add passive corpus tests proving every production proxy route carries the
+      **PARTIAL — most of this list was already discharged by Phases 6–12; the
+      remainder splits into blocked and genuinely missing.** The audit is in
+      `notes/acceptance-map.md`, which maps all 30 criteria to named tests.
+      - **Already covered** (verified to exist, not assumed): caller-override
+        precedence (`level2_lifecycle_proxy_with_overlay_loses_to_a_caller_set_and_beats_the_target`
+        plus 21 L1s in `overlay_layering`); typed overlay observation by schema,
+        computed properties, initialize, and body (`overlay_layering`);
+        `err.*` inside `with:` (`proxy_with_evaluation::err_global_is_readable_in_a_failure_with`
+        and its out-of-scope sibling); cycle/hop (`level2_lifecycle_initialize_proxy_cycle_guarded`
+        + 5 coordinator L1s); missing target
+        (`adopt_rejects_a_missing_target_without_activating_it`); invalid
+        overlay/schema failure (`an_invalid_overlay_fails_the_targets_schema_before_any_launch`);
+        shell denial (`level2_lifecycle_proxy_target_initialize_shell_is_gated_before_dispatch`,
+        `..._later_event_shell_is_audited_after_stabilization`); library-loop
+        proxy not silently dropped (`loop_initialize_proxy_hands_off_without_iterating`
+        + the new `composition_seams` endpoint census); initialize-time mutation
+        then stabilized reread (`level2_lifecycle_proxy_target_rereads_after_initialize_mutation`);
+        control-plane overlays with target-side validation and policy
+        (`a_control_plane_overlay_is_reparsed_by_the_target`,
+        `a_shell_command_installed_by_the_overlay_stays_subject_to_target_side_policy`);
+        `inline-compose` closure ownership (`inline_closure_ownership_follows_the_adopted_target`);
+        dry-run (`compose_dry_run_does_not_traverse_a_proxy_handoff`).
+      - **Blocked**: resume incompatibility per facet (AC15 — the compatibility
+        key does not exist; Phase 11, via R6); target-authored provider/model and
+        target-specific MCP tags (AC10 — R6; the one reproduction row above is
+        the pin); retry/loop-refresh overlay retention end-to-end (AC26 — a
+        proxied target has no loop until Phase 10; the L1 refresh half is
+        covered).
+      - **Genuinely missing, and honestly so**: a three-document chain with
+        explicit vs omitted forwarding (the L1 halves exist —
+        `a_second_hop_replaces_the_overlay_rather_than_merging_it`,
+        `a_hop_that_omits_with_installs_an_empty_overlay_rather_than_forwarding`,
+        `every_document_in_a_chain_gets_its_own_approval_window` — but no L2
+        drives three real documents); cross-repository proxy context and file
+        resolution; a proxy inside a sequence step; stdout/stderr routing.
+        None is blocked — they are unwritten, and should be written either here
+        on a follow-up pass or alongside Phase 10, whose relaunch seam changes
+        the chain-stabilization path they would assert on.
+- [x] Add passive corpus tests proving every production proxy route carries the
       complete handoff and every canonical-preparation caller supplies explicit
       context.
-- [ ] Triage the existing suites (proxy parser, lifecycle placement, cycle/hop,
+      Both landed in `composition_seams` alongside the Phase 1 guards, reusing
+      that file's scanner and site-identity model.
+      - `every_production_proxy_route_carries_the_typed_handoff` censuses all
+        five `DocumentTransition::Proxy` endpoints. It pins **both** ends — three
+        producers and two consumers — because AC3 is a claim about both
+        ("returned ... always consumed or rejected explicitly"); a
+        producers-only census would miss a consumer that drops a handoff. The
+        completeness half needs no scan: `EvaluatedProxyRequest` cannot be built
+        without target/overlay/provenance and `ProxyHandoff` cannot be built
+        without a resolution step, so the type system already carries it.
+      - `every_canonical_preparation_caller_supplies_explicit_context` bans the
+        ambient argument-less `ComposeContext::capture()`. **It found a real R5
+        gap Phase 5 missed**: `sequence::phase1c::build_template_preflight_options`
+        (`cli/src/commands/wrap/sequence/phase1c.rs:484`) still builds its base
+        context ambiently, so `ctx.*` in a sequence step's template shell
+        preflight resolves from the process CWD the wrapper has already moved to
+        the repo root. Phase 5's task named six capture sites and retired all
+        six; this seventh was never on the list. Its own docblock names the
+        hazard and patches one face of it (`with_file_ref_fallback_dir` anchors
+        file-ref resolution on the launch area) while leaving the context itself
+        ambient. Baselined as **debt, explicitly not a sanctioned owner**, so
+        the guard stops a second one; fixing it means choosing the correct
+        anchor for a sequence step, which is a behavior change a guard phase
+        should not make. Tracked in `notes/acceptance-map.md`.
+- [x] Triage the existing suites (proxy parser, lifecycle placement, cycle/hop,
       retry, resume, loop, caller override). Each must stay green **or** be
       rewritten with an explicit note that it encoded route drift intentionally
       corrected here. `level2_lifecycle_failure_proxy_runs_target_document_no_loop`
       (`cli/tests/level2_lifecycle_control.rs:889`) is the most likely candidate —
       its name asserts the exact behavior R7 changes.
-- [ ] Follow the L2 conventions: use `just test-l2`, never raw nextest. The
+      **Nothing needed rewriting, and that is the expected result rather than a
+      lucky one.** Phase 13 changes no production behavior — it adds tests and
+      guards — so every suite stayed green unmodified (3518 L1 + 136 L2).
+      The named candidate stays green for a reason worth recording: it asserts
+      `..._no_loop`, and a proxied target still gets no loop, because Phase 10 is
+      not landed. **It remains the right candidate, just not yet.** Whoever lands
+      Phase 10 must rewrite it in that phase — its name states the drift Phase 10
+      deletes, so a green `..._no_loop` after loop ownership moves would mean
+      Phase 10 did not work. The earlier phases that *did* change behavior
+      already did their own triage in-phase (checkpoint 6 rewrote
+      `loop_initialize_proxy_unresolvable_routes_to_failure`, checkpoint 7
+      rewrote the target-parse-failure L2, checkpoint 12 rewrote the invalid
+      overlay L2), which is why none of that work was left for this phase.
+- [x] Follow the L2 conventions: use `just test-l2`, never raw nextest. The
       recipe supplies the `level2_` filter, required-level environment, and
       bounded self-spawn concurrency. Harness capture has no scrollback, so long
       output needs a tall pane.
+      Every L2 invocation in this phase went through `just test-l2`. The new
+      rows reuse `run_until_settled`, which polls `events.log` rather than the
+      pane, so the no-scrollback constraint does not bind them: the assertion
+      surface is the side-effect log and the pane is carried only for
+      diagnostics.
 
-**Validation checkpoint 13**
-- `just test`, `just test-l2`, `just lint` all green in `claudine/`.
-- Every acceptance criterion 1–30 in the spec maps to at least one named test.
-  Write that mapping into `notes/acceptance-map.md` — it is the sign-off artifact.
-- Both Phase 1 drift guards are green at their final baselines.
+**Validation checkpoint 13** — **NOT PASSED. The sign-off artifact landed and
+26 of 30 criteria map to passing tests; 4 are blocked on Phase 9's R6, and the
+cross-platform CI task rests on a false premise that needs Ken's decision.**
+
+- `just test` green for `claudine-catalog-types` (21), `claudine` (3518 — see
+  the timeout note below), `claudine-contract` (47), and `claudine-cli`;
+  `just test-l2` green (**136**, up from 135: the new probe row; the R6
+  reproduction row is `#[ignore]`d and does not count); `just lint` green.
+- **One pre-existing load-induced timeout**, not a regression:
+  `composition::interpolation_conformance::loop_and_lifecycle_agree_on_shared_syntax`
+  times out at nextest's 30s ceiling under full-suite parallelism but **passes
+  in isolation** in 8.9s (nextest flags it `slow`). It is a `claudine` **library**
+  test; this phase changed only two `cli/tests/` files plus documentation, so it
+  cannot be reached by the diff. A concurrent background run of the same
+  `just test` exited 0, which is the corroboration: it is the recorded
+  concurrent-agent load hazard, not breakage.
+- `claudine-gen::drift::committed_generated_artifacts_match_phase_1_byte_baseline`
+  still fails on its missing archived baseline fixture. Absent at `HEAD`,
+  untouched here — `git status claudine/gen` is empty. Same as checkpoints 6–12.
+- All four Phase 1 + Phase 12 drift guards green, plus the two new corpus guards
+  (`composition_seams`, 15/15). Neither the `compose_with` allowlist nor the
+  optional-proxy-channel baseline (still zero) moved: this phase adds tests, not
+  composers or channels.
+
+**The checkpoint's three named gates.**
+
+*The acceptance map* is written (`notes/acceptance-map.md`) and is the artifact
+this checkpoint asks for. Every test name in it was verified to exist rather
+than recalled. **26 of 30 criteria map to passing tests.** The four that do not
+all trace to one root — R6 is unstarted — and are named rather than papered
+over: AC7 (loop ownership, Phase 10), AC9's launch half and AC10 (launch
+rebuild, R6), AC15 (resume compatibility key, Phase 11). AC26 is marked partial
+for the same reason: a proxied target has no loop to refresh yet.
+
+*Both drift guards at their final baselines* holds. The optional-proxy-channel
+baseline is zero and stays zero; the `compose_with` allowlist is at its
+post-Phase-5 four.
+
+*All three package checks green* holds modulo the load-induced timeout above.
+
+**The phase's real find was a guard finding a bug, which is the point of a guard
+phase.** `every_canonical_preparation_caller_supplies_explicit_context` caught a
+**seventh ambient `ComposeContext::capture()`** that Phase 5 never saw:
+`sequence::phase1c::build_template_preflight_options`. Phase 5's task enumerated
+six sites and retired all six; this one was not on the list, so no one looked at
+it. A sequence step's template shell preflight therefore builds its base context
+from the process CWD — which the wrapper deliberately moves to the repo root —
+so `ctx.*` there resolves against the wrong document. Its own docblock names the
+hazard and patches one face of it (`with_file_ref_fallback_dir` anchors file-ref
+resolution on the launch area) while leaving the context ambient, which is
+exactly how it survived review. It is baselined as **debt, explicitly not a
+sanctioned owner**, so the guard still stops a second one. Not fixed here:
+choosing the right anchor for a sequence step is a behavior change with L2 blast
+radius, and a guard phase should not make it. Recommend folding it into R6,
+which is already rebuilding per-document context.
+
+**Phase 13 wrote the row checkpoint 9 called unwritable.** Checkpoint 9 said its
+named test "cannot pass until R6 lands" and left it unwritten.
+`level2_lifecycle_equivalence_target_pinned_model_matches_direct_run` is that
+row, `#[ignore]`d against R6 exactly as Phase 1 ignored the motivating-bug
+reproduction. It is worth the ignore: it converts a prose claim into an
+executable one, fails today for precisely the documented reason (routed
+`env.MODEL=` empty vs direct `env.MODEL=llamacpp/probe-model-x`), and turns
+green the moment the launch rebuild lands. Checkpoint 9's instinct was right
+that a *provider*-pinned test cannot be written — `--codex` would be explicit CLI
+intent — but `model:` moves without one.
+
+**Tasks 2 and 3 conflict with ratified repo policy, and this is Ken's call, not
+a phase's.** The plan asks for a matrix that "runs on macOS, Windows, and Linux"
+inside "the repository's existing macOS, Windows, and Linux CI coverage".
+`docs/testing-strategy.md` ratifies that L2 **skips on Windows** (tmux harness
+absent) and is macOS opt-in, and `cli/tests/level2_lifecycle_control.rs` is
+`#![cfg(unix)]` with `#!/bin/sh` fakes — Unix-only by construction, not by
+neglect. Worse for task 3, the CI coverage it names **does not exist**:
+`claudine-tests.yml` is `ubuntu-latest`-only, does not use `_area-ci.yml`, and
+**no CI job runs `just test-l2` for claudine on any platform**. The matrix is
+therefore not run in CI at all today. Three resolutions are recorded in
+`notes/acceptance-map.md`; none was taken, because each is either an owner
+decision (wire claudine into `_area-ci.yml` with `l2: true`; amend the plan) or
+a policy reversal (make L2 cross-platform). Flagging rather than choosing.
+
+**Recommended order is unchanged from checkpoints 9–12**: land R6 / the relaunch
+seam, then Phase 10, then Phase 11's tasks 1–4 and 6, then Phase 12's one
+remaining diagnostic, then re-run this checkpoint — at which point both
+`#[ignore]`d rows should be enabled and the four blocked criteria close.
 
 ---
 
