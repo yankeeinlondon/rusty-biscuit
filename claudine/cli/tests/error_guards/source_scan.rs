@@ -148,11 +148,48 @@ pub struct TraitImpl {
     pub overrides_detail: bool,
 }
 
+/// Where a `Box<T>` sits in a type position that puts it on a cause chain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum BoxSite {
+    /// A `#[source]` / `#[from]` field typed `Box<T>` — D-7's original shape.
+    SourceField,
+    /// A `Result<_, Box<T>>` return type. `?` and `.into()` on one of these
+    /// hands `Report::from` a `Box<T>`, which is how D-13 entered.
+    ResultError,
+}
+
+impl BoxSite {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BoxSite::SourceField => "source_field",
+            BoxSite::ResultError => "result_error",
+        }
+    }
+}
+
+/// A `Box<T>` in a cause-chain type position.
+///
+/// The scan records every one and leaves *registered-ness* to the guard, so the
+/// policy ("a boxed **registered diagnostic** is unreachable") lives with the
+/// registry it depends on rather than being hard-coded into the reader.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct BoxedError {
+    pub site: BoxSite,
+    /// The `T` in `Box<T>`.
+    pub type_name: String,
+    pub file: String,
+    /// The enclosing symbol: `CompositionError::AtomicWriteFailed` for a field,
+    /// the function path for a return type.
+    pub symbol: String,
+    pub line: usize,
+}
+
 /// Everything one pass over the production sources yields.
 #[derive(Debug, Default)]
 pub struct ScanResult {
     pub findings: Vec<Finding>,
     pub trait_impls: Vec<TraitImpl>,
+    pub boxed_errors: Vec<BoxedError>,
 }
 
 /// The `claudine/` package-area root.
@@ -211,6 +248,7 @@ fn run_scan() -> ScanResult {
     }
 
     result.findings.sort();
+    result.boxed_errors.sort();
     result
 }
 
@@ -360,7 +398,71 @@ impl FileScan<'_> {
     }
 }
 
+impl FileScan<'_> {
+    /// Record a `Box<T>` return type on a function signature.
+    fn scan_result_error(&mut self, sig: &syn::Signature) {
+        let syn::ReturnType::Type(_, ty) = &sig.output else {
+            return;
+        };
+        let Some(error_ty) = result_error_type(ty) else {
+            return;
+        };
+        let Some(inner) = boxed_inner_name(error_ty) else {
+            return;
+        };
+        let symbol = self.symbol();
+        let line = line_of(error_ty.span());
+        self.result.boxed_errors.push(BoxedError {
+            site: BoxSite::ResultError,
+            type_name: inner,
+            file: self.file.clone(),
+            symbol,
+            line,
+        });
+    }
+
+    /// Record every `#[source]` / `#[from]` field typed `Box<T>` on a variant or
+    /// struct.
+    fn scan_source_fields(&mut self, owner: &str, fields: &syn::Fields) {
+        for field in fields {
+            if !has_source_or_from(&field.attrs) {
+                continue;
+            }
+            let Some(inner) = boxed_inner_name(&field.ty) else {
+                continue;
+            };
+            self.result.boxed_errors.push(BoxedError {
+                site: BoxSite::SourceField,
+                type_name: inner,
+                file: self.file.clone(),
+                symbol: owner.to_string(),
+                line: line_of(field.ty.span()),
+            });
+        }
+    }
+}
+
 impl<'ast> Visit<'ast> for FileScan<'_> {
+    fn visit_item_enum(&mut self, node: &'ast syn::ItemEnum) {
+        if is_cfg_test(&node.attrs) {
+            return;
+        }
+        for variant in &node.variants {
+            let owner = format!("{}::{}", node.ident, variant.ident);
+            self.scan_source_fields(&owner, &variant.fields);
+        }
+        syn::visit::visit_item_enum(self, node);
+    }
+
+    fn visit_item_struct(&mut self, node: &'ast syn::ItemStruct) {
+        if is_cfg_test(&node.attrs) {
+            return;
+        }
+        let owner = node.ident.to_string();
+        self.scan_source_fields(&owner, &node.fields);
+        syn::visit::visit_item_struct(self, node);
+    }
+
     fn visit_item_mod(&mut self, node: &'ast ItemMod) {
         if is_cfg_test(&node.attrs) {
             return;
@@ -375,6 +477,7 @@ impl<'ast> Visit<'ast> for FileScan<'_> {
             return;
         }
         self.stack.push(node.sig.ident.to_string());
+        self.scan_result_error(&node.sig);
         syn::visit::visit_item_fn(self, node);
         self.stack.pop();
     }
@@ -412,6 +515,7 @@ impl<'ast> Visit<'ast> for FileScan<'_> {
             return;
         }
         self.stack.push(node.sig.ident.to_string());
+        self.scan_result_error(&node.sig);
         syn::visit::visit_impl_item_fn(self, node);
         self.stack.pop();
     }
@@ -646,6 +750,55 @@ fn err_pattern_binding(pat: &Pat) -> Option<String> {
         return None;
     }
     pat_ident(&tuple.elems[0])
+}
+
+/// Whether a field carries `#[source]` or `#[from]` — the two attributes that
+/// publish it to `Error::source()`.
+fn has_source_or_from(attrs: &[Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        matches!(&attr.meta, Meta::Path(path) if path.is_ident("source") || path.is_ident("from"))
+    })
+}
+
+/// The `T` in `Box<T>`, when `ty` is exactly that.
+fn boxed_inner_name(ty: &syn::Type) -> Option<String> {
+    let syn::Type::Path(path) = ty else {
+        return None;
+    };
+    let segment = path.path.segments.last()?;
+    if segment.ident != "Box" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    let syn::GenericArgument::Type(inner) = args.args.first()? else {
+        return None;
+    };
+    type_name(inner)
+}
+
+/// The `E` in a `Result<_, E>` return type.
+fn result_error_type(ty: &syn::Type) -> Option<&syn::Type> {
+    let syn::Type::Path(path) = ty else {
+        return None;
+    };
+    let segment = path.path.segments.last()?;
+    if segment.ident != "Result" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    // `Result<T, E>`; a one-argument `Result<T>` is an aliased error type this
+    // scan cannot resolve and deliberately does not guess at.
+    if args.args.len() != 2 {
+        return None;
+    }
+    match args.args.last()? {
+        syn::GenericArgument::Type(error) => Some(error),
+        _ => None,
+    }
 }
 
 fn type_name(ty: &syn::Type) -> Option<String> {

@@ -36,7 +36,9 @@ use claudine::diagnostics::{CODES, code_spec};
 use serde::Deserialize;
 use serde_json::Value;
 
-use source_scan::{Finding, Shape, area_root, discovery_registry, scan_production_sources};
+use source_scan::{
+    BoxedError, Finding, Shape, area_root, discovery_registry, scan_production_sources,
+};
 
 /// Area-relative path of the D8 exception list.
 const ALLOWLIST_FILE: &str = "cli/tests/error_guards/transport-allow.toml";
@@ -271,6 +273,181 @@ fn the_scan_finds_the_diagnostic_impls_known_to_exist() {
 }
 
 // ---------------------------------------------------------------------------
+// D-13 — reachability of a registered diagnostic through a `Box`
+// ---------------------------------------------------------------------------
+
+/// Area-relative path of the boxed-diagnostic exception list.
+const BOXED_ALLOWLIST_FILE: &str = "cli/tests/error_guards/boxed-diagnostic-allow.toml";
+
+#[derive(Debug, Deserialize)]
+struct BoxedAllowlist {
+    #[serde(default)]
+    allow: Vec<BoxedAllowEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BoxedAllowEntry {
+    site: String,
+    file: String,
+    symbol: String,
+    /// The boxed type, so an entry cannot widen to cover a second `Box<T>` that
+    /// later lands in the same symbol.
+    boxed: String,
+    tag: String,
+    reason: String,
+}
+
+impl BoxedAllowEntry {
+    fn covers(&self, boxed: &BoxedError) -> bool {
+        self.site == boxed.site.as_str()
+            && self.file == boxed.file
+            && self.symbol == boxed.symbol
+            && self.boxed == boxed.type_name
+    }
+}
+
+fn load_boxed_allowlist() -> Vec<BoxedAllowEntry> {
+    let path = area_root().join(BOXED_ALLOWLIST_FILE);
+    let text = fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("failed to read {BOXED_ALLOWLIST_FILE}: {error}"));
+    let parsed: BoxedAllowlist = toml::from_str(&text)
+        .unwrap_or_else(|error| panic!("failed to parse {BOXED_ALLOWLIST_FILE}: {error}"));
+    parsed.allow
+}
+
+/// Every `Box<T>` on a cause chain where `T` is a registered diagnostic.
+fn boxed_registered_diagnostics() -> Vec<&'static BoxedError> {
+    let registered = discovery_registry();
+    scan_production_sources()
+        .boxed_errors
+        .iter()
+        .filter(|boxed| registered.contains(&boxed.type_name))
+        .collect()
+}
+
+#[test]
+fn no_registered_diagnostic_is_reachable_only_through_a_box() {
+    // D-7 proved that a `Box<E>` publishes `Box<E>` to the cause chain, not `E`:
+    // `downcast_ref::<E>()` returns `None`, and `Box`'s own `source()` delegates
+    // to `E::source()`, so the walk skips `E` at every depth. `as_diagnostic` is
+    // a downcast allowlist over concrete types, so a registered diagnostic
+    // behind a `Box` is invisible however correctly it is registered.
+    //
+    // D-13 widened the shape D-7 asked for. Its live instance was not a
+    // `#[source] Box<T>` field but a `Result<_, Box<CompositionError>>` whose
+    // error went `.into()` a `Report` — making the *report's root* a `Box`. The
+    // source-parity, transport, and headless-render guards all passed on it; a
+    // real terminal found it. Hence both sites are scanned.
+    let unexpected: Vec<&BoxedError> = boxed_registered_diagnostics()
+        .into_iter()
+        .filter(|boxed| {
+            !load_boxed_allowlist()
+                .iter()
+                .any(|entry| entry.covers(boxed))
+        })
+        .collect();
+
+    let rendered: Vec<String> = unexpected
+        .iter()
+        .map(|boxed| {
+            format!(
+                "  [{}] {}:{} in `{}` — Box<{}>",
+                boxed.site.as_str(),
+                boxed.file,
+                boxed.line,
+                boxed.symbol,
+                boxed.type_name
+            )
+        })
+        .collect();
+
+    assert!(
+        unexpected.is_empty(),
+        "{} boxed registered diagnostic(s) with no allowlist entry:\n{}\n\
+         `as_diagnostic` cannot downcast through a `Box`, so these render as a generic \
+         `Error:` line. Carry the diagnostic unboxed (box a context struct instead, as \
+         `CompositionError::InvalidFileReference` does), or unbox at the boundary \
+         (`Report::from(*error)`). If neither is possible, add an entry to \
+         {BOXED_ALLOWLIST_FILE} naming the site, file, symbol, and boxed type, with a \
+         reason and the test that proves the value still resolves.",
+        unexpected.len(),
+        rendered.join("\n")
+    );
+}
+
+#[test]
+fn every_boxed_allowlist_entry_still_matches_a_live_site() {
+    let live = boxed_registered_diagnostics();
+    let stale: Vec<String> = load_boxed_allowlist()
+        .iter()
+        .filter(|entry| !live.iter().any(|boxed| entry.covers(boxed)))
+        .map(|entry| {
+            format!(
+                "  [{}] {} in `{}` — Box<{}>",
+                entry.site, entry.file, entry.symbol, entry.boxed
+            )
+        })
+        .collect();
+
+    assert!(
+        stale.is_empty(),
+        "{} boxed-diagnostic allowlist entr(y/ies) match no live site — delete them:\n{}",
+        stale.len(),
+        stale.join("\n")
+    );
+}
+
+#[test]
+fn every_boxed_allowlist_entry_names_a_known_site_tag_and_reason() {
+    for entry in load_boxed_allowlist() {
+        assert!(
+            ["source_field", "result_error"].contains(&entry.site.as_str()),
+            "boxed allowlist entry for `{}` names unknown site `{}`",
+            entry.symbol,
+            entry.site
+        );
+        assert!(
+            KNOWN_TAGS.contains(&entry.tag.as_str()),
+            "boxed allowlist entry [{}] {} in `{}` claims unknown tag `{}`; known tags: \
+             {KNOWN_TAGS:?}",
+            entry.site,
+            entry.file,
+            entry.symbol,
+            entry.tag
+        );
+        assert!(
+            entry.reason.split_whitespace().count() >= 5,
+            "boxed allowlist entry [{}] {} in `{}` has no substantive reason: {:?}",
+            entry.site,
+            entry.file,
+            entry.symbol,
+            entry.reason
+        );
+    }
+}
+
+#[test]
+fn the_boxed_scan_finds_the_sites_known_to_exist() {
+    // Anchors the guard against a scan that silently matches nothing — the
+    // failure mode that would make every assertion above vacuously true.
+    let boxed = boxed_registered_diagnostics();
+    assert!(
+        boxed.iter().any(|b| b.site == source_scan::BoxSite::SourceField
+            && b.symbol == "CompositionError::AtomicWriteFailed"
+            && b.type_name == "ClaudineError"),
+        "scan did not find `CompositionError::AtomicWriteFailed`'s `#[source] \
+         Box<ClaudineError>`, which D-7 recorded; found {boxed:?}"
+    );
+    assert!(
+        boxed
+            .iter()
+            .any(|b| b.site == source_scan::BoxSite::ResultError),
+        "scan found no `Result<_, Box<RegisteredDiagnostic>>`, but D-13's \
+         `preflight_proxy_target` is one; found {boxed:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // D7 — catalog parity
 // ---------------------------------------------------------------------------
 
@@ -454,7 +631,7 @@ fn the_corpus_covers_every_code_a_diagnostic_can_return() {
 mod corpus {
     use std::path::PathBuf;
 
-    use claudine::composition::CompositionError;
+    use claudine::composition::{CompositionError, ShellApprovalFailure};
     use claudine::diagnostics::Diagnostic;
     use claudine::error::ClaudineError;
     use claudine::harness::error::{HarnessError, PathResolutionFailure};
@@ -572,6 +749,15 @@ mod corpus {
             (
                 "CompositionError::PreFlightFailed",
                 Box::new(CompositionError::PreFlightFailed("preflight".to_string())),
+            ),
+            (
+                "CompositionError::ShellApprovalUnavailable",
+                Box::new(CompositionError::ShellApprovalUnavailable {
+                    command: "rm -rf /".to_string(),
+                    source_file: PathBuf::from("run.md"),
+                    line: 4,
+                    failure: ShellApprovalFailure::Blacklisted("destructive".to_string()),
+                }),
             ),
             (
                 "CompositionError::SchemaLoad",

@@ -1,0 +1,30 @@
+# Exceptions for `no_registered_diagnostic_is_reachable_only_through_a_box`.
+#
+# A `Box<T>` on a cause chain publishes `Box<T>`, not `T`: `downcast_ref::<T>()`
+# returns `None`, and `Box`'s own `source()` delegates to `T::source()`, so the
+# selection walk skips `T` at every depth. `as_diagnostic` is a downcast
+# allowlist over concrete types, so a boxed registered diagnostic is invisible
+# however correctly it is registered (decisions.md §D-7, §D-13).
+#
+# An entry is keyed `(site, file, symbol, boxed)` and must say why the box is
+# unavoidable *and* what proves the diagnostic still resolves. `tag` mirrors the
+# transport allowlist's burn-down convention: `retained` is permanent, anything
+# else is debt some future feature closes.
+
+[[allow]]
+site = "result_error"
+file = "cli/src/commands/wrap/harness_orch/prompt.rs"
+symbol = "preflight_proxy_target"
+boxed = "CompositionError"
+tag = "retained"
+reason = """
+The box is required, not incidental: `CompositionError` is large enough that an unboxed `Result<_, CompositionError>` here trips `clippy::result_large_err` across the call graph — the same pressure that forced `InvalidFileReference` to box its *context* instead of its source. Reachability is preserved at the boundary rather than in the type: `loop_control.rs` unboxes with `Report::from(*error)` before the value reaches a `Report`, so the report's root is a `CompositionError` and `as_diagnostic` resolves it. This is exactly the site D-13 found broken — it did `error.into()`, making the root a `Box<CompositionError>` — so the discipline is load-bearing, and it is locked by `effective_diagnostic_render::terminal_proxy_resolution_failure_renders_a_status_block` and `level2_typed_error_render_capture::level2_terminal_proxy_renders_status_block_in_tmux`, both proven to fail when the unbox is reverted."""
+
+[[allow]]
+site = "source_field"
+file = "lib/src/composition/error/mod.rs"
+symbol = "CompositionError::AtomicWriteFailed"
+boxed = "ClaudineError"
+tag = "error-propagation-followup"
+reason = """
+A real instance of the D-7 defect, recorded rather than fixed: `io.write_failed`'s inner `ClaudineError` cause is invisible to `as_diagnostic` today. The box cannot simply be dropped — `ClaudineError` can itself contain a `CompositionError`, so an unboxed field makes the type infinitely sized. The fix is the shape `InvalidFileReference` uses (carry the source unboxed, box a context struct, restructure the recursion), which is a variant redesign with its own render and call-site blast radius; spec D10 requires a discovery outside the migration scope be split into its own spec rather than fixed mid-audit. No route is known to depend on the boxed cause today: `AtomicWriteFailed` is itself Semantic and owns `io.write_failed`, so selection stops at it before the box matters."""
