@@ -377,3 +377,134 @@ fn deflect_leaves_the_slot_empty_on_success() {
     assert_eq!(slot.deflect(Ok::<_, ConnectError>(7)).expect("success"), 7);
     assert!(slot.take().is_none());
 }
+
+// ---------------------------------------------------------------------------
+// Live named-pipe contention (Windows only)
+// ---------------------------------------------------------------------------
+//
+// Everything above fabricates `ERROR_PIPE_BUSY` and injects the sleep, which is
+// what makes the retry loop's decisions assertable on any host. What that
+// cannot show is whether Win32 *actually* reports a saturated pipe the way the
+// loop expects: the seam tests would pass unchanged if the real code were some
+// other number, or if it arrived as an `ErrorKind` rather than a raw code. These
+// close that gap by saturating a real pipe.
+
+#[cfg(windows)]
+mod live_pipe {
+    use super::*;
+    use tokio::net::windows::named_pipe::{ClientOptions, ServerOptions};
+
+    /// A pipe name unique to this test, so a parallel test cannot collide with
+    /// it on the machine-wide pipe namespace.
+    fn name(test: &str) -> OsString {
+        OsString::from(format!(
+            r"\\.\pipe\claudine-rendezvous-clienttest-{test}-{}",
+            std::process::id()
+        ))
+    }
+
+    /// A pipe with exactly one instance, already connected to a client — the
+    /// saturated state a daemon presents while it is between accepts.
+    ///
+    /// The returned client must be held: dropping it frees the instance.
+    fn saturated(name: &OsString) -> (tokio::net::windows::named_pipe::NamedPipeServer, tokio::net::windows::named_pipe::NamedPipeClient) {
+        let server = ServerOptions::new()
+            .first_pipe_instance(true)
+            .max_instances(1)
+            .create(name)
+            .expect("create the single instance");
+        let client = ClientOptions::new().open(name).expect("occupy it");
+        (server, client)
+    }
+
+    /// The constant the retry loop keys on, checked against the number Windows
+    /// itself produces. `ERROR_PIPE_BUSY` being wrong would not fail any seam
+    /// test — it would silently turn every busy open into a hard `Io` failure.
+    #[tokio::test]
+    async fn a_real_saturated_pipe_reports_the_code_the_retry_loop_recognizes() {
+        let name = name("recognized");
+        let (_server, _occupier) = saturated(&name);
+
+        let error = ClientOptions::new()
+            .open(&name)
+            .expect_err("a pipe with its only instance taken must refuse");
+
+        assert!(
+            is_busy(&error),
+            "the retry loop must recognize the real Win32 busy report; got {error:?} \
+             (raw code {:?})",
+            error.raw_os_error()
+        );
+    }
+
+    /// The recovery path against genuine contention: the instance frees up
+    /// mid-budget and the open succeeds rather than burning the whole deadline.
+    #[tokio::test]
+    async fn a_real_busy_pipe_is_connected_once_an_instance_frees_up() {
+        let name = name("recovers");
+        let (server, occupier) = saturated(&name);
+
+        // Free the instance after a couple of backoffs, so the loop has to
+        // actually retry rather than win on its first attempt.
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(120)).await;
+            drop(occupier);
+            drop(server);
+        });
+
+        let endpoint = LocalEndpoint::WindowsNamedPipe(name.clone());
+        let retry = BusyRetry {
+            budget: Duration::from_secs(5),
+            backoff: Duration::from_millis(50),
+        };
+        let opened = open_with_busy_retry(
+            &endpoint,
+            retry,
+            || async { ClientOptions::new().open(&name) },
+            tokio::time::sleep,
+        )
+        .await;
+
+        assert!(
+            opened.is_ok(),
+            "a pipe that frees up within the budget must connect; got {:?}",
+            opened.err()
+        );
+    }
+
+    /// Deadline exhaustion against a pipe that never frees: bounded means
+    /// bounded, and the reported wait must be the real one.
+    #[tokio::test]
+    async fn a_real_pipe_that_stays_busy_gives_up_at_the_deadline() {
+        let name = name("exhausts");
+        let (_server, _occupier) = saturated(&name);
+
+        let endpoint = LocalEndpoint::WindowsNamedPipe(name.clone());
+        let retry = BusyRetry {
+            budget: Duration::from_millis(150),
+            backoff: Duration::from_millis(50),
+        };
+        let started = std::time::Instant::now();
+        let error = open_with_busy_retry(
+            &endpoint,
+            retry,
+            || async { ClientOptions::new().open(&name) },
+            tokio::time::sleep,
+        )
+        .await
+        .expect_err("a permanently busy pipe must not connect");
+
+        let ConnectError::BusyTimeout { waited, .. } = &error else {
+            panic!("expected BusyTimeout, got: {error:?}");
+        };
+        assert!(
+            *waited <= retry.budget,
+            "the loop reported waiting {waited:?}, beyond its own {:?} budget",
+            retry.budget
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the budget must bound the wall clock, not merely the bookkeeping"
+        );
+    }
+}

@@ -15,30 +15,3 @@
 mod connector;
 
 pub use connector::{ConnectError, connect};
-
-#[cfg(unix)]
-use std::path::PathBuf;
-
-#[cfg(unix)]
-use rendezvous_core::RendezvousClient;
-#[cfg(unix)]
-use rendezvous_core::local_endpoint::LocalEndpoint;
-#[cfg(unix)]
-use tonic::transport::Channel;
-
-/// Connect to a Unix socket at `path`.
-///
-/// A Unix-only convenience for test fixtures that already hold a socket path
-/// and have no endpoint to hand. Production callers use [`connect`]; Phase 6
-/// migrates the daemon and client integration suites onto [`LocalEndpoint`]
-/// and removes this.
-///
-/// ## Errors
-///
-/// As [`connect`].
-#[cfg(unix)]
-pub async fn connect_uds(
-    path: impl Into<PathBuf>,
-) -> Result<RendezvousClient<Channel>, ConnectError> {
-    connect(&LocalEndpoint::UnixSocket(path.into())).await
-}

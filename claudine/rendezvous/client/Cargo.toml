@@ -28,4 +28,5 @@ thiserror = "2.0"
 
 [dev-dependencies]
 rendezvous-daemon = { path = "../daemon" }
+rendezvous-core = { path = "../core", features = ["test-support"] }
 tempfile = "3"
