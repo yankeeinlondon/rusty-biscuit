@@ -120,8 +120,8 @@ fn loop_initialize_skip_ends_run_with_zero_iterations() {
     assert_eq!(result.iteration_count, 0, "no iteration runs after skip");
     assert_eq!(*invocations.borrow(), 0, "the executor must never be invoked");
     assert!(
-        result.init_proxy_target.is_none(),
-        "skip is not a proxy hand-off"
+        matches!(result.transition, DocumentTransition::Complete),
+        "skip completes the run; it is not a proxy hand-off"
     );
     // Only `initialize` may have emitted (the stack control fires before any
     // terminal handling); no terminal/finalize/loop signal escaped.
@@ -225,9 +225,10 @@ fn loop_initialize_stop_proceeds_into_iterations() {
     assert_eq!(stop_result.iteration_count, stop_invocations);
 }
 
-/// `proxy(...)` at `initialize` resolves the target and hands off without
-/// running any iteration, terminal, `finalize`, or `loop` event — the
-/// caller re-enters with the target's own `initialize` (spec.md:340,607).
+/// `proxy(...)` at `initialize` hands off without running any iteration,
+/// terminal, `finalize`, or `loop` event — the caller's coordinator commits
+/// the request and re-enters with the target's own `initialize`
+/// (spec.md:340,607).
 #[test]
 fn loop_initialize_proxy_hands_off_without_iterating() {
     let dir = TempDir::new().unwrap();
@@ -256,10 +257,22 @@ fn loop_initialize_proxy_hands_off_without_iterating() {
     assert!(result.error.is_none(), "clean proxy hand-off: {result:?}");
     assert_eq!(result.iteration_count, 0, "no iteration runs on a proxy hand-off");
     assert_eq!(*invocations.borrow(), 0);
+    let DocumentTransition::Proxy(request) = &result.transition else {
+        panic!(
+            "the hand-off is surfaced as a transition the caller must consume; \
+             got {:?}",
+            result.transition
+        );
+    };
     assert_eq!(
-        result.init_proxy_target.as_deref(),
-        Some(target.as_path()),
-        "the resolved target is surfaced for the caller to re-enter"
+        request.target(),
+        "target.md",
+        "the authored reference rides on the request; the coordinator resolves it"
+    );
+    assert_eq!(request.provenance().source_path(), prompt);
+    assert!(
+        target.exists(),
+        "the fixture target exists; the engine neither reads nor resolves it"
     );
     let signals = emitter.signals();
     assert!(
@@ -270,11 +283,19 @@ fn loop_initialize_proxy_hands_off_without_iterating() {
     );
 }
 
-/// A `proxy(...)` target that cannot be resolved (missing file) is reported
-/// as an initialize failure (routed through failure + finalize), matching
-/// the non-loop path's behavior rather than silently iterating.
+/// An unresolvable `proxy(...)` target is **not** the engine's failure to
+/// report.
+///
+/// This deliberately reverses an earlier assertion. The engine used to resolve
+/// the target itself and route a miss through `failure` + `finalize`, which
+/// gave the loop route its own resolution semantics — and, because it could
+/// only see a single-element chain, its own cycle semantics too. Resolution now
+/// belongs to the coordinator, so an unresolvable target produces the same
+/// typed refusal from the same place whether the proxy came from a loop
+/// document, a single document, or terminal recovery. What the engine still
+/// owes is that no iteration runs and no terminal/finalize event fires.
 #[test]
-fn loop_initialize_proxy_unresolvable_routes_to_failure() {
+fn loop_initialize_proxy_defers_resolution_to_the_coordinator() {
     let dir = TempDir::new().unwrap();
     let prompt = dir.path().join("loop.md");
     std::fs::write(&prompt, "---\n---\nbody").unwrap();
@@ -296,15 +317,22 @@ fn loop_initialize_proxy_unresolvable_routes_to_failure() {
         &invocations,
     );
 
-    assert_eq!(*invocations.borrow(), 0, "no iteration runs on a failed proxy");
-    assert!(result.init_proxy_target.is_none());
+    assert_eq!(*invocations.borrow(), 0, "no iteration runs on a proxy hand-off");
     assert!(
-        matches!(
-            result.error,
-            Some(CompositionError::LifecycleInitializeFailed { .. })
-        ),
-        "an unresolvable proxy target is an initialize failure; got {:?}",
+        result.error.is_none(),
+        "the engine does not consult the filesystem, so it raises nothing here: {:?}",
         result.error
+    );
+    let DocumentTransition::Proxy(request) = &result.transition else {
+        panic!("the request is surfaced regardless of whether it resolves");
+    };
+    assert_eq!(request.target(), "does-not-exist.md");
+    let signals = emitter.signals();
+    assert!(
+        !signals.contains(&LifecycleSignal::Failure)
+            && !signals.contains(&LifecycleSignal::Finalize),
+        "the source's terminal events belong to the target once proxy is \
+         selected; got {signals:?}"
     );
 }
 

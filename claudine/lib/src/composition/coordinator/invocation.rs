@@ -332,9 +332,6 @@ impl RunLedger {
     /// Coordinator-only, and deliberately narrow: an adapter that needs to
     /// extend the ledger receives a [`LedgerMut`] for the duration of one
     /// call rather than a `&mut RunLedger` it could hold.
-    // Phase 6 of `features/2026-07-13-proxy-with` introduces the coordinator
-    // that calls this; until then only the layer tests do.
-    #[allow(dead_code)]
     pub(crate) fn access(&mut self) -> LedgerMut<'_> {
         LedgerMut(self)
     }

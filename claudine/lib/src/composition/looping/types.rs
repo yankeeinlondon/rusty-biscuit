@@ -5,10 +5,9 @@
 //! ([`super::engine`]); the engine module holds the execution/routing/gate
 //! logic proper.
 
-use std::path::PathBuf;
-
 use serde_json::{Map, Value};
 
+use super::super::coordinator::DocumentTransition;
 use super::super::error::CompositionError;
 use super::super::lifecycle::LifecycleSignal;
 use super::super::types::OnRateLimit;
@@ -182,11 +181,20 @@ pub struct LoopExecutionResult {
     pub last_output: String,
     /// Optional loop, action, or iteration execution error.
     pub error: Option<CompositionError>,
-    /// Resolved target document when `initialize` returned `Proxy`. The caller
-    /// re-enters with this document so the target's own `initialize` (and its
-    /// `Skip`/`Proxy`/`Error` controls) get a chance to run. `None` in every
-    /// other case.
-    pub init_proxy_target: Option<PathBuf>,
+    /// What the caller's coordinator must do with the active document next.
+    ///
+    /// [`DocumentTransition::Complete`] for an ordinary loop end, and
+    /// [`DocumentTransition::Proxy`] when the document's `initialize` handed
+    /// the run off. The engine resolves nothing: it has no run ledger, so it
+    /// cannot answer the hop/cycle question, and a resolved-but-unapproved
+    /// target is exactly the half-committed state the two-stage handoff
+    /// exists to prevent. The coordinator commits the request against the
+    /// invocation-wide chain.
+    ///
+    /// This is a transition, not an `Option<PathBuf>`: an unhandled variant is
+    /// a compile-time-visible omission, whereas an ignored optional target is
+    /// the silently-dropped proxy that motivated this feature.
+    pub transition: DocumentTransition,
 }
 
 impl LoopExecutionResult {
@@ -202,7 +210,7 @@ impl LoopExecutionResult {
             iteration_count,
             last_output,
             error: None,
-            init_proxy_target: None,
+            transition: DocumentTransition::Complete,
         }
     }
 
@@ -219,14 +227,14 @@ impl LoopExecutionResult {
             iteration_count,
             last_output,
             error: Some(error),
-            init_proxy_target: None,
+            transition: DocumentTransition::Complete,
         }
     }
 
-    /// Attach a resolved proxy target for the caller to hand off to.
+    /// Attach the transition the caller's coordinator must consume.
     #[must_use]
-    pub fn with_init_proxy_target(mut self, target: PathBuf) -> Self {
-        self.init_proxy_target = Some(target);
+    pub fn with_transition(mut self, transition: DocumentTransition) -> Self {
+        self.transition = transition;
         self
     }
 }

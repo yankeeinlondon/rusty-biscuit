@@ -165,10 +165,8 @@ pub struct ResolvedProxyTarget {
 impl ResolvedProxyTarget {
     /// Mint a resolved target. Reserved for the shared file-resolution
     /// authority — today [`resolve_proxy_target`][crate::composition::resolve_proxy_target],
-    /// which the file-resolution feature will replace in place.
-    // Phase 6 of `features/2026-07-13-proxy-with` makes the coordinator the
-    // sole caller; until then only the layer tests construct one.
-    #[allow(dead_code)]
+    /// which the file-resolution feature will replace in place. Its one caller
+    /// is [`commit_proxy`][super::commit_proxy].
     pub(crate) fn from_resolver(path: PathBuf) -> Self {
         Self { path }
     }

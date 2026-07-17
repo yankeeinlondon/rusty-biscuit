@@ -22,6 +22,7 @@
 //! → R1/R2 for the authoritative design.
 
 mod active;
+mod commit;
 mod document;
 mod handoff;
 mod invocation;
@@ -29,6 +30,8 @@ mod transition;
 
 #[cfg(test)]
 mod tests;
+
+pub use commit::{ProxyCommitError, commit_proxy};
 
 pub use active::{
     ActiveDocumentState, AttemptOutcome, ControlBudget, ControlBudgetKind, DocumentIteration,
