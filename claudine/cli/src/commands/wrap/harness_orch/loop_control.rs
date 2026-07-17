@@ -216,6 +216,10 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
             run.lifecycle_guard.context().source_path.to_path_buf(),
             run.shell_options.approval_cache.clone(),
         );
+        // Established before the initial commit rather than in the struct
+        // literal below: an upstream `initialize` proxy is committed here, and
+        // `adopt` retires the budgets of the document it replaces.
+        let mut control_budgets = ControlBudgets::default();
         if let DocumentTransition::Proxy(request) =
             std::mem::replace(&mut run.initial_transition, DocumentTransition::Continue)
         {
@@ -224,6 +228,7 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
                 run.repo_root,
                 run.prompt_state,
                 run.lifecycle_guard,
+                &mut control_budgets,
             )?;
         }
         let initial_materialized = run.initial_materialized.take();
@@ -235,7 +240,7 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
             initial_materialized,
             harness_perf: None,
             loop_start: std::time::Instant::now(),
-            control_budgets: ControlBudgets::default(),
+            control_budgets,
             coordinator,
         })
     }
@@ -465,7 +470,13 @@ fn start_lifecycle_phase(
                     return Ok(Some(LoopStep::NextAttempt));
                 }
                 TerminalControlAction::Proxy(request) => {
-                    coordinator.adopt(request, repo_root, prompt_state, lifecycle_guard)?;
+                    coordinator.adopt(
+                        request,
+                        repo_root,
+                        prompt_state,
+                        lifecycle_guard,
+                        control_budgets,
+                    )?;
                     // Re-enter at attempt 1: the target gets a clean
                     // pre-flight / freeze cycle rather than inheriting the
                     // proxying document's attempt count.
@@ -600,6 +611,7 @@ fn bootstrap_adopted_document_phase(
                 prompt.repo_root,
                 prompt.prompt_state,
                 lifecycle.guard,
+                control.budgets,
             )?;
             *control.attempt = 1;
             return Ok(Some(LoopStep::NextAttempt));
@@ -1228,7 +1240,13 @@ fn classify_attempt_phase(
                 return Ok(LoopStep::NextAttempt);
             }
             TerminalRecovery::Proxy(request) => {
-                coordinator.adopt(request, repo_root, prompt_state, lifecycle_guard)?;
+                coordinator.adopt(
+                    request,
+                    repo_root,
+                    prompt_state,
+                    lifecycle_guard,
+                    control_budgets,
+                )?;
                 state.attempt = 1;
                 return Ok(LoopStep::NextAttempt);
             }
@@ -1292,7 +1310,13 @@ fn classify_attempt_phase(
                 return Ok(LoopStep::NextAttempt);
             }
             TerminalRecovery::Proxy(request) => {
-                coordinator.adopt(request, repo_root, prompt_state, lifecycle_guard)?;
+                coordinator.adopt(
+                    request,
+                    repo_root,
+                    prompt_state,
+                    lifecycle_guard,
+                    control_budgets,
+                )?;
                 state.attempt = 1;
                 return Ok(LoopStep::NextAttempt);
             }
@@ -1331,7 +1355,13 @@ fn classify_attempt_phase(
             return Ok(LoopStep::NextAttempt);
         }
         TerminalRecovery::Proxy(request) => {
-            coordinator.adopt(request, repo_root, prompt_state, lifecycle_guard)?;
+            coordinator.adopt(
+                request,
+                repo_root,
+                prompt_state,
+                lifecycle_guard,
+                control_budgets,
+            )?;
             state.attempt = 1;
             return Ok(LoopStep::NextAttempt);
         }

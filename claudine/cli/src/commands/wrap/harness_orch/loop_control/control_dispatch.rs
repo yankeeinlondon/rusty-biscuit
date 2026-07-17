@@ -22,6 +22,19 @@ impl ControlBudgets {
     fn budget_for(slot: &mut Option<u32>, attempt: u32, max_attempts: u32) -> u32 {
         *slot.get_or_insert_with(|| control_budget_for(attempt, max_attempts))
     }
+
+    /// Retire the budgets of the document that just stopped being active.
+    ///
+    /// A ceiling is earned by the `retry`/`resume` control that declared it, so
+    /// it is scoped to that document's iteration. Because `budget_for` only
+    /// establishes a ceiling into an empty slot, a ceiling left behind here
+    /// would silently swallow the *next* document's `max_attempts` — a target
+    /// asking for five retries would get whatever the router had already spent.
+    /// Invocation-wide hop/cycle accounting lives in the ledger and is
+    /// deliberately not reset alongside this.
+    pub(super) fn reset_for_document(&mut self) {
+        *self = Self::default();
+    }
 }
 
 /// What the loop should do after dispatching a terminal-event control.

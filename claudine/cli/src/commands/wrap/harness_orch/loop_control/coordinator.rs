@@ -81,18 +81,24 @@ impl ActiveDocumentCoordinator {
     /// discarded, not carried. The target — not the source — owns the run's
     /// closure and output from here.
     ///
+    /// `budgets` is taken by `&mut` rather than reset by the caller so that a
+    /// hand-off cannot be committed without retiring the source's retry/resume
+    /// ceilings: the reset and the identity change are one operation.
+    ///
     /// ## Errors
     ///
     /// Returns the typed commit failure when the target cannot be resolved or
-    /// the ledger refuses the hop. `prompt_state` and `lifecycle_guard` are
-    /// untouched in that case: a refused hand-off never half-activates a
-    /// target.
+    /// the ledger refuses the hop. `prompt_state`, `lifecycle_guard`, and
+    /// `budgets` are untouched in that case: a refused hand-off never
+    /// half-activates a target, and the source it is still running keeps the
+    /// ceilings it earned.
     pub(super) fn adopt(
         &mut self,
         request: EvaluatedProxyRequest,
         repo_root: Option<&Path>,
         prompt_state: &mut HarnessPromptState,
         lifecycle_guard: &mut LifecycleRunGuard<'_>,
+        budgets: &mut super::ControlBudgets,
     ) -> Result<(), ProxyCommitError> {
         let handoff = commit_proxy(&mut self.ledger, request, repo_root)?;
 
@@ -111,6 +117,10 @@ impl ActiveDocumentCoordinator {
         prompt_state.prompt_tail.clear();
         prompt_state.next_prompt_override = None;
         prompt_state.next_resume_session_id = None;
+        // Same category as the state above, but it lives on the loop rather
+        // than on the prompt state: the retry/resume ceilings were earned by
+        // the document being replaced.
+        budgets.reset_for_document();
         lifecycle_guard.reset_for_proxy();
         // Clean-handoff semantics, applied to the guard's *config* and not just
         // its emission ledger: the source's stacks belong to the document being

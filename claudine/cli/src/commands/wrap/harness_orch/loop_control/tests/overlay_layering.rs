@@ -69,6 +69,7 @@ impl OverlayFixture {
                 Some(self.dir()),
                 state,
                 &mut guard,
+                &mut ControlBudgets::default(),
             )
             .expect("the hop is resolvable and uncontested");
     }
@@ -586,6 +587,7 @@ fn an_overlay_does_not_create_a_distinct_identity_for_cycle_detection() {
             Some(fx.dir()),
             &mut state,
             &mut guard,
+            &mut ControlBudgets::default(),
         )
         .expect("the first hop is uncontested");
     let _ = coord.take_bootstrap_pending();
@@ -598,6 +600,7 @@ fn an_overlay_does_not_create_a_distinct_identity_for_cycle_detection() {
             Some(fx.dir()),
             &mut state,
             &mut guard,
+            &mut ControlBudgets::default(),
         )
         .expect_err("a hop back to a document already in the chain is a cycle");
 

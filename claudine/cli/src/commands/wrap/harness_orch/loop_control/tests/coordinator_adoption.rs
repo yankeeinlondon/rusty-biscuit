@@ -68,6 +68,7 @@ fn adopt_commits_identity_and_discards_source_execution_state() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
+            &mut ControlBudgets::default(),
         )
         .expect("the hop is resolvable and uncontested");
 
@@ -136,6 +137,7 @@ fn adopt_rejects_a_missing_target_without_activating_it() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
+            &mut ControlBudgets::default(),
         )
         .expect_err("a proxy to a missing document must be refused");
 
@@ -196,6 +198,7 @@ fn adopt_rejects_a_hop_back_to_a_document_already_in_the_chain() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
+            &mut ControlBudgets::default(),
         )
         .expect("the first hop is uncontested");
     let _ = coord.take_bootstrap_pending();
@@ -212,6 +215,7 @@ fn adopt_rejects_a_hop_back_to_a_document_already_in_the_chain() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
+            &mut ControlBudgets::default(),
         )
         .expect_err("an A->B->A cycle must be refused");
 
@@ -273,6 +277,7 @@ fn a_committed_handoff_synthesizes_no_source_finalize() {
                 Some(fx._dir.path()),
                 &mut state,
                 &mut guard,
+                &mut ControlBudgets::default(),
             )
             .expect("the hop is resolvable and uncontested");
         // Guard drops here, at the end of the scope.
@@ -350,6 +355,7 @@ fn inline_closure_ownership_follows_the_adopted_target() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
+            &mut ControlBudgets::default(),
         )
         .expect("the hop is resolvable and uncontested");
 
@@ -415,6 +421,7 @@ fn adopt_discards_the_sources_lifecycle_config_so_the_boot_has_no_stale_catch() 
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
+            &mut ControlBudgets::default(),
         )
         .expect("the hop is resolvable and uncontested");
 
@@ -458,6 +465,7 @@ fn a_refused_hop_leaves_the_active_documents_lifecycle_config_installed() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
+            &mut ControlBudgets::default(),
         )
         .expect_err("an unresolvable target must be refused");
 
