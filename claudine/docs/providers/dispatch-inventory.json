@@ -18,10 +18,10 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 1357,
-    "provider_refs": 1459,
+    "sites": 1363,
+    "provider_refs": 1465,
     "by_form": {
-      "direct-ref": 1310,
+      "direct-ref": 1316,
       "eq-comparison": 18,
       "match-provider": 5,
       "matches-macro": 12,
@@ -30,7 +30,7 @@
     },
     "by_dispatch_class": {
       "conditional": 47,
-      "reference": 1310
+      "reference": 1316
     }
   },
   "sites": [
@@ -1362,6 +1362,66 @@
         "Codex"
       ],
       "exempt_candidate": false
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/budget_scoping.rs",
+      "line": 90,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Goose"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/budget_scoping.rs",
+      "line": 129,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Goose"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/budget_scoping.rs",
+      "line": 173,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Goose"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/budget_scoping.rs",
+      "line": 208,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Goose"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/budget_scoping.rs",
+      "line": 342,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Goose"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/budget_scoping.rs",
+      "line": 364,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Goose"
+      ],
+      "exempt_candidate": true
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs",
