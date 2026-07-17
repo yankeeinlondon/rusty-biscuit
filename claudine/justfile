@@ -175,8 +175,10 @@ test-real *args="":
 lint-transport:
     @just _test claudine-cli --test error_guards
 
-# Guard new lifecycle docs onto the faceted `err.*` contract, keeping the
-# deprecated err.kind/err.variant/err.msg aliases out of fresh examples.
+# Guard new lifecycle docs onto the faceted `err.*` contract: the deprecated
+# err.kind/err.variant aliases stay inside their documentation section, and
+# `err.msg` is never a match target (rendering it is correct and unrestricted —
+# it is the effective diagnostic's notification-safe projection, not an alias).
 # Pure grep heuristic — no cargo — so it runs even when the toolchain is gated.
 lint-lifecycle-doc-facets:
     @../scripts/check-lifecycle-doc-facets.sh
