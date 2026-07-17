@@ -6,6 +6,7 @@ use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::errors::{BlockError, ErrorHeader, StatusBlockExt};
 use biscuit_terminal::terminal::Terminal;
+use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 use serde_json::{Value, json};
 
 use crate::diagnostics::{Category, Diagnostic, Disposition, Origin, code_spec, null_detail_for};
@@ -69,6 +70,32 @@ fn path_resolution_detail(
     }
 }
 
+/// Why a shell command's execution failed.
+///
+/// The four arms are the four failure modes of
+/// [`crate::harness::shell::execute_approved_command`], each carrying the typed
+/// error that stage raised. No arm takes `#[from]`: the arm *is* the stage, and
+/// `Spawn` and `Wait` both hold an `io::Error` that cannot say which of the two
+/// produced it, so every construction names its stage explicitly.
+#[derive(Debug, thiserror::Error)]
+pub enum ShellExecCause {
+    /// The executable was not found on `PATH`.
+    #[error(transparent)]
+    Which(which::Error),
+
+    /// The child process could not be spawned.
+    #[error(transparent)]
+    Spawn(std::io::Error),
+
+    /// Waiting on the spawned child failed.
+    #[error(transparent)]
+    Wait(std::io::Error),
+
+    /// The command exceeded its timeout and was killed.
+    #[error(transparent)]
+    Timeout(tokio::time::error::Elapsed),
+}
+
 /// All errors that can occur within the harness subsystem.
 #[derive(Debug, thiserror::Error)]
 pub enum HarnessError {
@@ -91,7 +118,12 @@ pub enum HarnessError {
 
     /// A shell command failed during execution.
     #[error("shell command execution failed: {detail}")]
-    ShellCommandExecutionFailed { detail: String },
+    ShellCommandExecutionFailed {
+        detail: String,
+        /// Which stage failed, and the typed error it raised.
+        #[source]
+        source: ShellExecCause,
+    },
 
     // --- Shell approval failures ---
     /// A shell command was denied by the approval system.
@@ -126,7 +158,26 @@ pub enum HarnessError {
     // --- Shell audit ---
     /// Failed to parse shell directives from source page during audit.
     #[error("shell audit parse error: {detail}")]
-    ShellAuditParseError { detail: String },
+    ShellAuditParseError {
+        detail: String,
+        /// Darkmatter's structured directive-parse failure.
+        ///
+        /// Boxed, mirroring the otherwise-identical
+        /// `CompositionError::ShellExpansionFailed`, and for the same reason:
+        /// `ShellExpansionError` is ~160 bytes, and `CompositionError` holds a
+        /// `HarnessError` unboxed, so an unboxed field here trips
+        /// `clippy::result_large_err` on 376 call sites across both enums.
+        ///
+        /// The cost is the D-7 trap: a `Box<T>` publishes `Box<T>` to the cause
+        /// chain, so `Error::source()` cannot be downcast to
+        /// `ShellExpansionError` and a chain walk skips it. Recovery is by
+        /// matching this variant on the concrete `HarnessError` instead. No
+        /// discovery seam is harmed — `ShellExpansionError` is a Darkmatter
+        /// type, not a registered Claudine `Diagnostic`, so `as_diagnostic`
+        /// never needed to downcast it.
+        #[source]
+        source: Box<ShellExpansionError>,
+    },
 }
 
 impl BlockError for HarnessError {
@@ -188,14 +239,14 @@ impl Diagnostic for HarnessError {
             HarnessError::InvalidTimeout { detail, .. } => {
                 json!({ "property": "timeout", "message": detail })
             }
-            HarnessError::ShellCommandExecutionFailed { detail } => {
+            HarnessError::ShellCommandExecutionFailed { detail, .. } => {
                 json!({ "command": detail })
             }
             HarnessError::ShellCommandDenied { command }
             | HarnessError::ShellCommandBlacklisted { command, .. } => {
                 json!({ "command": command })
             }
-            HarnessError::ShellAuditParseError { detail } => json!({ "command": detail }),
+            HarnessError::ShellAuditParseError { detail, .. } => json!({ "command": detail }),
             HarnessError::RepoRootRequired { path } => json!({ "path": path }),
             // Seeded from the catalog so every declared key is present. Only
             // `reference`, `source_path`, and `failure` are things this
@@ -217,6 +268,142 @@ impl Diagnostic for HarnessError {
                 base
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod source_chain_tests {
+    use std::error::Error;
+
+    use super::*;
+
+    /// `HarnessError` had no `#[source]` on any variant before this: the enum
+    /// carried no cause chain at all, so every lower-layer failure reaching it
+    /// died at the `detail` string. These assert the chain now exists.
+    ///
+    /// `ShellExecCause` is `#[error(transparent)]`, so it *replaces* the stage's
+    /// error in the chain rather than adding a link above it. Downcasting to the
+    /// cause enum and matching its arm is the recovery path — and the arm is the
+    /// part that matters, since `Spawn` and `Wait` are indistinguishable from
+    /// their `io::Error` alone.
+    #[test]
+    fn shell_exec_failure_publishes_the_stage_that_failed() {
+        let err = HarnessError::ShellCommandExecutionFailed {
+            detail: "boom".to_owned(),
+            source: ShellExecCause::Spawn(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "denied",
+            )),
+        };
+
+        let published = (&err as &(dyn Error + 'static))
+            .source()
+            .expect("no source published");
+        let recovered = published
+            .downcast_ref::<ShellExecCause>()
+            .expect("source is not a `ShellExecCause`");
+
+        let ShellExecCause::Spawn(io) = recovered else {
+            panic!("wrong stage: {recovered:?}");
+        };
+        assert_eq!(io.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn a_wait_failure_is_distinguishable_from_a_spawn_failure() {
+        let err = HarnessError::ShellCommandExecutionFailed {
+            detail: "boom".to_owned(),
+            source: ShellExecCause::Wait(std::io::Error::other("wait")),
+        };
+
+        let recovered = (&err as &(dyn Error + 'static))
+            .source()
+            .and_then(|c| c.downcast_ref::<ShellExecCause>())
+            .expect("source is a `ShellExecCause`");
+        assert!(matches!(recovered, ShellExecCause::Wait(_)));
+    }
+
+    /// `Which` and `Timeout` were previously discarded outright (`|_|` and
+    /// `Err(_)`), so retaining them is the sharper win of the two.
+    #[test]
+    fn a_path_lookup_failure_is_retained_rather_than_discarded() {
+        let err = HarnessError::ShellCommandExecutionFailed {
+            detail: "executable 'nope' not found in PATH".to_owned(),
+            source: ShellExecCause::Which(which::Error::CannotFindBinaryPath),
+        };
+
+        let cause = (&err as &(dyn Error + 'static))
+            .source()
+            .and_then(|c| c.downcast_ref::<ShellExecCause>())
+            .expect("source is a `ShellExecCause`");
+        assert!(matches!(
+            cause,
+            ShellExecCause::Which(which::Error::CannotFindBinaryPath)
+        ));
+    }
+
+    /// Darkmatter's typed parse error must survive in the value. It is
+    /// deliberately *not* reachable by downcasting `Error::source()`: the field
+    /// is a `Box`, which publishes `Box<ShellExpansionError>` to the chain (the
+    /// D-7 trap), and the variant's rustdoc records why the box is forced. This
+    /// pins both halves of that trade so neither drifts silently.
+    #[test]
+    fn a_shell_audit_parse_failure_retains_darkmatters_typed_error() {
+        // The only construction site is `collect_auditable_commands`; drive the
+        // real parser rather than fabricating a `ShellExpansionError`.
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            std::path::PathBuf::from("<t>"),
+            std::path::PathBuf::from("<t>"),
+            String::new(),
+        );
+        let Err(parse_error) = darkmatter::markdown::compose::shell_expansion::parse_directives(
+            "::shell \"unterminated",
+            ctx,
+            0,
+        ) else {
+            panic!("fixture no longer produces a parse error");
+        };
+
+        let err = HarnessError::ShellAuditParseError {
+            detail: parse_error.to_string(),
+            source: Box::new(parse_error),
+        };
+
+        let HarnessError::ShellAuditParseError { detail, source } = &err else {
+            unreachable!()
+        };
+        // The typed value is retained beside the prose, not replaced by it.
+        assert_eq!(&source.to_string(), detail);
+
+        let published = (&err as &(dyn Error + 'static))
+            .source()
+            .expect("a source is published");
+        assert!(
+            published.downcast_ref::<ShellExpansionError>().is_none(),
+            "the box no longer hides the cause — if `ShellAuditParseError` was \
+             unboxed, drop this assertion and assert reachability instead"
+        );
+        assert!(
+            published.downcast_ref::<Box<ShellExpansionError>>().is_some(),
+            "the chain publishes neither `ShellExpansionError` nor its box"
+        );
+    }
+
+    /// Adding the `#[source]` fields must leave `Display` and the machine
+    /// surface exactly where they were (spec §D10).
+    #[test]
+    fn adding_a_source_leaves_display_and_detail_unmoved() {
+        let err = HarnessError::ShellCommandExecutionFailed {
+            detail: "failed to spawn 'ls': denied".to_owned(),
+            source: ShellExecCause::Spawn(std::io::Error::other("denied")),
+        };
+
+        assert_eq!(
+            err.to_string(),
+            "shell command execution failed: failed to spawn 'ls': denied"
+        );
+        assert_eq!(err.code(), "composition.shell_expansion");
+        assert_eq!(err.detail()["command"], json!("failed to spawn 'ls': denied"));
     }
 }
 

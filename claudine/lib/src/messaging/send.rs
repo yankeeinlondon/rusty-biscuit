@@ -21,8 +21,8 @@ use messenger::provider::{
 };
 use messenger::target::SignalAddress;
 use messenger::{
-    DesktopConfig, DesktopNotificationProvider, Dispatch, Message, MessageBody, ProviderKind,
-    Target,
+    DesktopConfig, DesktopNotificationProvider, Dispatch, Message, MessageBody, MessengerError,
+    ProviderKind, Target,
 };
 use secrecy::SecretString;
 use tracing::{debug, warn};
@@ -34,6 +34,76 @@ use super::resolve::{
 };
 use crate::dispatch::template::interpolate;
 use crate::events::EventMeta;
+
+/// A failure raised while constructing a messaging provider or dispatching an
+/// outbound message.
+///
+/// Every variant that wraps a [`MessengerError`] keeps it as a `#[source]`, so
+/// the classification the messenger crate already encoded — `RateLimited`'s
+/// `retry_after_ms`, `Authentication`'s `provider` — survives to the caller
+/// instead of being re-derived from prose.
+///
+/// ## Notes
+///
+/// The two webhook-carrying variants redact in their `Display`, not at their
+/// construction sites. A webhook URL's path segment is a bearer credential, and
+/// this type now reaches a TUI status field and stderr alike; redacting once, at
+/// the only point the text is produced, is what keeps every renderer safe
+/// without each having to remember.
+#[derive(Debug, thiserror::Error)]
+pub enum MessagingError {
+    /// A route secret (inline or environment-sourced) could not be resolved.
+    ///
+    /// `resolve_secret` reports prose it builds itself, so there is no typed
+    /// cause below this.
+    #[error("{context}: {message}")]
+    SecretUnavailable {
+        context: &'static str,
+        message: String,
+    },
+
+    /// A webhook provider rejected its configuration at construction time.
+    #[error("{context}: {}", redacted(.source))]
+    ProviderConstruction {
+        context: &'static str,
+        #[source]
+        source: MessengerError,
+    },
+
+    /// A non-webhook route reached a webhook-only helper.
+    #[error("Not a webhook route")]
+    NotAWebhookRoute,
+
+    /// The desktop notification provider failed to deliver.
+    #[error("Desktop notification failed: {source}")]
+    DesktopNotification {
+        #[source]
+        source: MessengerError,
+    },
+
+    /// The messenger could not build a send plan for the dispatch.
+    #[error("Failed to plan send: {source}")]
+    PlanSend {
+        #[source]
+        source: MessengerError,
+    },
+
+    /// The transport failed while delivering a planned message.
+    #[error("Send failed: {}", redacted(.source))]
+    Send {
+        #[source]
+        source: MessengerError,
+    },
+
+    /// A config-TUI test connection exceeded its deadline.
+    #[error("Connection test timed out")]
+    TestConnectionTimeout,
+}
+
+/// Render a messenger failure with any webhook URL replaced by a placeholder.
+fn redacted(error: &MessengerError) -> String {
+    redact_webhook_urls(&error.to_string())
+}
 
 /// Executes a message delivery by interpolating templates, resolving the route,
 /// and spawning an async task to send via the messenger library.
@@ -148,18 +218,25 @@ pub fn execute_resolved_message(
 fn register_webhook_provider(
     messenger: &mut Messenger,
     config: &MessagingRouteConfig,
-) -> Result<(Target, ProviderKind), String> {
+) -> Result<(Target, ProviderKind), MessagingError> {
     match config {
         MessagingRouteConfig::DiscordWebhook {
             webhook_url,
             webhook_url_env,
         } => {
-            let url = resolve_secret(webhook_url.as_deref(), webhook_url_env)
-                .map_err(|e| format!("Discord webhook URL: {}", e))?;
+            let url = resolve_secret(webhook_url.as_deref(), webhook_url_env).map_err(|e| {
+                MessagingError::SecretUnavailable {
+                    context: "Discord webhook URL",
+                    message: e,
+                }
+            })?;
             let provider = DiscordWebhookProvider::try_new(DiscordWebhookConfig {
                 webhook_url: SecretString::from(url),
             })
-            .map_err(|e| redact_webhook_urls(&format!("Discord webhook: {}", e)))?;
+            .map_err(|e| MessagingError::ProviderConstruction {
+                context: "Discord webhook",
+                source: e,
+            })?;
             messenger.register(Box::new(provider));
             Ok((Target::discord_webhook(), ProviderKind::DiscordWebhook))
         }
@@ -167,16 +244,23 @@ fn register_webhook_provider(
             webhook_url,
             webhook_url_env,
         } => {
-            let url = resolve_secret(webhook_url.as_deref(), webhook_url_env)
-                .map_err(|e| format!("Slack webhook URL: {}", e))?;
+            let url = resolve_secret(webhook_url.as_deref(), webhook_url_env).map_err(|e| {
+                MessagingError::SecretUnavailable {
+                    context: "Slack webhook URL",
+                    message: e,
+                }
+            })?;
             let provider = SlackWebhookProvider::try_new(SlackWebhookConfig {
                 webhook_url: SecretString::from(url),
             })
-            .map_err(|e| redact_webhook_urls(&format!("Slack webhook: {}", e)))?;
+            .map_err(|e| MessagingError::ProviderConstruction {
+                context: "Slack webhook",
+                source: e,
+            })?;
             messenger.register(Box::new(provider));
             Ok((Target::slack_webhook(), ProviderKind::SlackWebhook))
         }
-        _ => Err("Not a webhook route".to_string()),
+        _ => Err(MessagingError::NotAWebhookRoute),
     }
 }
 
@@ -190,9 +274,10 @@ fn register_webhook_provider(
 ///
 /// ## Returns
 ///
-/// `Ok(())` if the test message was dispatched successfully, or `Err(message)`
-/// with a redacted error string suitable for display in the TUI.
-pub async fn test_webhook_connection(config: &MessagingRouteConfig) -> Result<(), String> {
+/// `Ok(())` if the test message was dispatched successfully, or a
+/// [`MessagingError`] whose `Display` is already redacted and therefore safe to
+/// show in the TUI.
+pub async fn test_webhook_connection(config: &MessagingRouteConfig) -> Result<(), MessagingError> {
     let mut messenger = Messenger::new();
     let (target, _kind) = register_webhook_provider(&mut messenger, config)?;
 
@@ -201,7 +286,7 @@ pub async fn test_webhook_connection(config: &MessagingRouteConfig) -> Result<()
     messenger
         .send(dispatch, &message)
         .await
-        .map_err(|e| redact_webhook_urls(&format!("Send failed: {}", e)))?;
+        .map_err(|e| MessagingError::Send { source: e })?;
 
     Ok(())
 }
@@ -252,7 +337,10 @@ fn build_notification_message(title: &str, body: Option<&str>) -> Message {
 
 /// Build a transient messenger, register the desktop provider, and dispatch
 /// a notification to the current host OS.
-async fn send_desktop_notification(title: &str, body: Option<&str>) -> Result<(), String> {
+async fn send_desktop_notification(
+    title: &str,
+    body: Option<&str>,
+) -> Result<(), MessagingError> {
     let mut messenger = Messenger::new();
     let provider = DesktopNotificationProvider::new(DesktopConfig::default());
     messenger.register(Box::new(provider));
@@ -263,7 +351,7 @@ async fn send_desktop_notification(title: &str, body: Option<&str>) -> Result<()
     messenger
         .send(dispatch, &message)
         .await
-        .map_err(|e| format!("Desktop notification failed: {}", e))?;
+        .map_err(|e| MessagingError::DesktopNotification { source: e })?;
 
     debug!(title, "Desktop notification sent");
     Ok(())
@@ -275,10 +363,11 @@ async fn send_desktop_notification(title: &str, body: Option<&str>) -> Result<()
 /// the failure without propagating an error to callers. We deliberately mirror
 /// the Status rendering used by remote-messaging failures to keep warning
 /// styling consistent across all operational messaging surfaces.
-fn report_notification_failure(error: &str) {
+fn report_notification_failure(error: &MessagingError) {
+    let text = error.to_string();
     let body = format!(
         "Failed to send desktop notification: {}",
-        prose_escape(error)
+        prose_escape(&text)
     );
 
     let rendered = Status::from_prose(body)
@@ -286,7 +375,7 @@ fn report_notification_failure(error: &str) {
         .render(&Terminal::default());
     eprintln!("{rendered}");
 
-    debug!(error, "desktop notification send failed");
+    debug!(error = text, "desktop notification send failed");
 }
 
 /// Render a user-facing Status Warning describing a messaging send failure
@@ -297,11 +386,12 @@ fn report_notification_failure(error: &str) {
 /// `Status::Warning` line. We deliberately avoid the tracing WARN layer
 /// because this is operational feedback the user needs to see, not noise
 /// for log aggregators.
-fn report_send_failure(route: &ResolvedMessagingRoute, error: &str, kind: &str) {
+fn report_send_failure(route: &ResolvedMessagingRoute, error: &MessagingError, kind: &str) {
     let provider = provider_kind_label_from_config(&route.config);
-    // Defense in depth: even when callers already redact, run the regex here
-    // so webhook secrets cannot reach stderr or test snapshots.
-    let safe_error = redact_webhook_urls(error);
+    // Defense in depth: even though the webhook-carrying variants redact in
+    // their own Display, run the regex here so a variant added later without
+    // that treatment still cannot leak a secret to stderr or a test snapshot.
+    let safe_error = redact_webhook_urls(&error.to_string());
     let hint = failure_hint(&safe_error);
     let route_name = prose_escape(&route.name);
     let error_text = prose_escape(&safe_error);
@@ -513,7 +603,7 @@ fn empty_message() -> Message {
 async fn send_payload(
     route: &ResolvedMessagingRoute,
     payload: MessagePayload,
-) -> Result<(), String> {
+) -> Result<(), MessagingError> {
     let mut messenger = Messenger::new();
 
     // Build and register the provider based on route config
@@ -524,7 +614,10 @@ async fn send_payload(
             ..
         } => {
             let token = resolve_secret(bot_token.as_deref(), bot_token_env)
-                .map_err(|e| format!("Discord: {}", e))?;
+                .map_err(|e| MessagingError::SecretUnavailable {
+                    context: "Discord",
+                    message: e,
+                })?;
             let provider = DiscordProvider::new(DiscordConfig {
                 bot_token: SecretString::from(token),
             });
@@ -536,7 +629,10 @@ async fn send_payload(
             ..
         } => {
             let token = resolve_secret(bot_token.as_deref(), bot_token_env)
-                .map_err(|e| format!("Slack: {}", e))?;
+                .map_err(|e| MessagingError::SecretUnavailable {
+                    context: "Slack",
+                    message: e,
+                })?;
             let provider = SlackProvider::new(SlackConfig {
                 bot_token: SecretString::from(token),
                 api_base_url: None,
@@ -551,9 +647,15 @@ async fn send_payload(
             ..
         } => {
             let resolved_rpc_url = resolve_secret(rpc_url.as_deref(), rpc_url_env)
-                .map_err(|e| format!("Signal RPC URL: {}", e))?;
+                .map_err(|e| MessagingError::SecretUnavailable {
+                    context: "Signal RPC URL",
+                    message: e,
+                })?;
             let resolved_account = resolve_secret(account.as_deref(), account_env)
-                .map_err(|e| format!("Signal account: {}", e))?;
+                .map_err(|e| MessagingError::SecretUnavailable {
+                    context: "Signal account",
+                    message: e,
+                })?;
             let provider = SignalProvider::new(SignalConfig {
                 rpc_url: resolved_rpc_url,
                 account: resolved_account,
@@ -568,9 +670,15 @@ async fn send_payload(
             ..
         } => {
             let token = resolve_secret(access_token.as_deref(), access_token_env)
-                .map_err(|e| format!("WhatsApp access token: {}", e))?;
+                .map_err(|e| MessagingError::SecretUnavailable {
+                    context: "WhatsApp access token",
+                    message: e,
+                })?;
             let phone_id = resolve_secret(phone_number_id.as_deref(), phone_number_id_env)
-                .map_err(|e| format!("WhatsApp phone number ID: {}", e))?;
+                .map_err(|e| MessagingError::SecretUnavailable {
+                    context: "WhatsApp phone number ID",
+                    message: e,
+                })?;
             let provider = WhatsAppProvider::new(WhatsAppConfig {
                 access_token: SecretString::from(token),
                 phone_number_id: phone_id,
@@ -588,7 +696,7 @@ async fn send_payload(
     let dispatch = Dispatch::to(payload.target);
     let plan = messenger
         .plan_send(dispatch, &payload.message)
-        .map_err(|e| format!("Failed to plan send: {}", e))?;
+        .map_err(|e| MessagingError::PlanSend { source: e })?;
 
     // Log compatibility warnings
     if !plan.warnings.is_empty() {
@@ -606,7 +714,7 @@ async fn send_payload(
     messenger
         .send_planned(plan)
         .await
-        .map_err(|e| redact_webhook_urls(&format!("Send failed: {}", e)))?;
+        .map_err(|e| MessagingError::Send { source: e })?;
 
     debug!(
         route = route.name,

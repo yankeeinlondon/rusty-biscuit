@@ -502,8 +502,9 @@ async fn test_webhook_connection_rejects_non_webhook_route() {
         bot_token_env: "DISCORD_BOT_TOKEN".to_string(),
     };
     let result = test_webhook_connection(&route).await;
-    assert!(result.is_err());
-    assert!(result.unwrap_err().contains("Not a webhook route"));
+    let err = result.unwrap_err();
+    assert!(matches!(err, MessagingError::NotAWebhookRoute));
+    assert_eq!(err.to_string(), "Not a webhook route");
 }
 
 #[tokio::test]
@@ -513,10 +514,17 @@ async fn test_webhook_connection_rejects_invalid_discord_url() {
         webhook_url_env: "DISCORD_WEBHOOK_URL".to_string(),
     };
     let result = test_webhook_connection(&route).await;
-    assert!(result.is_err());
-    // The error should be redacted (no raw URL in output)
     let err = result.unwrap_err();
-    assert!(!err.contains("not-a-valid-url"));
+    // The error should be redacted (no raw URL in output)
+    assert!(!err.to_string().contains("not-a-valid-url"));
+
+    // L1: the contextual wrapper exposes the concrete messenger failure through
+    // `Error::source()` rather than only through its own prose.
+    let source = std::error::Error::source(&err).expect("provider construction keeps its cause");
+    assert!(
+        source.downcast_ref::<MessengerError>().is_some(),
+        "expected a MessengerError cause, got: {source}"
+    );
 }
 
 #[tokio::test]
@@ -526,9 +534,150 @@ async fn test_webhook_connection_rejects_missing_secret() {
         webhook_url_env: "DEFINITELY_UNSET_ENV_VAR_FOR_TEST".to_string(),
     };
     let result = test_webhook_connection(&route).await;
-    assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(err.contains("secret not found"));
+    assert!(err.to_string().contains("secret not found"));
+    // `resolve_secret` builds its own prose, so this variant is the one place
+    // the enum legitimately has no typed cause below it.
+    assert!(matches!(err, MessagingError::SecretUnavailable { .. }));
+    assert!(std::error::Error::source(&err).is_none());
+}
+
+// =====================================================================
+// MessagingError transport (burn-down batch 6)
+// =====================================================================
+
+/// Display parity: the typed enum must render exactly the strings the
+/// pre-migration `format!`/`redact_webhook_urls` call sites produced, because
+/// `failure_hint` still substring-matches this text at the render boundary.
+#[test]
+fn messaging_error_display_matches_the_pre_migration_strings() {
+    let rate_limited = || MessengerError::RateLimited {
+        provider: ProviderKind::Discord,
+        retry_after_ms: Some(3000),
+    };
+
+    assert_eq!(
+        MessagingError::SecretUnavailable {
+            context: "Discord webhook URL",
+            message: "secret not found".to_string(),
+        }
+        .to_string(),
+        "Discord webhook URL: secret not found"
+    );
+    assert_eq!(
+        MessagingError::ProviderConstruction {
+            context: "Discord webhook",
+            source: rate_limited(),
+        }
+        .to_string(),
+        format!("Discord webhook: {}", rate_limited())
+    );
+    assert_eq!(MessagingError::NotAWebhookRoute.to_string(), "Not a webhook route");
+    assert_eq!(
+        MessagingError::DesktopNotification {
+            source: rate_limited()
+        }
+        .to_string(),
+        format!("Desktop notification failed: {}", rate_limited())
+    );
+    assert_eq!(
+        MessagingError::PlanSend {
+            source: rate_limited()
+        }
+        .to_string(),
+        format!("Failed to plan send: {}", rate_limited())
+    );
+    assert_eq!(
+        MessagingError::Send {
+            source: rate_limited()
+        }
+        .to_string(),
+        format!("Send failed: {}", rate_limited())
+    );
+    assert_eq!(
+        MessagingError::TestConnectionTimeout.to_string(),
+        "Connection test timed out"
+    );
+}
+
+/// The load-bearing casualty the burn-down triage named: `retry_after_ms` is a
+/// machine-actionable delay that used to survive only as the prose
+/// `", retry after 3000ms"`. A caller can now read it off the typed cause.
+#[test]
+fn send_failure_preserves_the_rate_limit_retry_delay() {
+    let error = MessagingError::Send {
+        source: MessengerError::RateLimited {
+            provider: ProviderKind::Discord,
+            retry_after_ms: Some(3000),
+        },
+    };
+
+    let source = std::error::Error::source(&error).expect("Send keeps its cause");
+    let messenger = source
+        .downcast_ref::<MessengerError>()
+        .expect("the cause downcasts to the concrete messenger error");
+    assert!(matches!(
+        messenger,
+        MessengerError::RateLimited {
+            retry_after_ms: Some(3000),
+            ..
+        }
+    ));
+}
+
+/// Webhook URLs are bearer credentials. Redaction lives in `Display`, so every
+/// renderer — stderr warning and TUI status field alike — is covered without
+/// each having to remember to call the redactor.
+#[test]
+fn webhook_carrying_variants_redact_in_display() {
+    let url = "https://discord.com/api/webhooks/123/abc_secret";
+    let error = MessagingError::Send {
+        source: MessengerError::Transport {
+            provider: ProviderKind::DiscordWebhook,
+            message: format!("error sending request for url ({url})"),
+        },
+    };
+
+    let rendered = error.to_string();
+    assert!(!rendered.contains("abc_secret"), "leaked webhook URL: {rendered}");
+    assert!(rendered.contains("<redacted-webhook-url>"));
+
+    // The typed cause deliberately still holds the unredacted text: redaction is
+    // a rendering concern, and the cause is what a programmatic handler reads.
+    let source = std::error::Error::source(&error).expect("Send keeps its cause");
+    assert!(source.to_string().contains("abc_secret"));
+}
+
+/// `failure_hint` is left at the render boundary on purpose (rewriting it to
+/// match typed variants is a separate change). This pins the contract it
+/// depends on: the rendered text of a typed variant still carries the
+/// signatures it matches.
+#[test]
+fn failure_hint_still_matches_typed_variant_rendering() {
+    let rate_limited = MessagingError::Send {
+        source: MessengerError::RateLimited {
+            provider: ProviderKind::Discord,
+            retry_after_ms: Some(3000),
+        },
+    };
+    assert_eq!(
+        failure_hint(&rate_limited.to_string()),
+        Some(
+            "Discord rate limit hit. Wait a few seconds before retrying, \
+             or reduce message frequency."
+        )
+    );
+
+    let auth = MessagingError::Send {
+        source: MessengerError::Authentication {
+            provider: ProviderKind::Slack,
+            message: "invalid_auth".to_string(),
+        },
+    };
+    assert_eq!(
+        failure_hint(&auth.to_string()),
+        Some("Check the route's credentials — the provider rejected the token.")
+    );
 }
 
 #[test]

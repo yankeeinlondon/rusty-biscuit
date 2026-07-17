@@ -6,6 +6,7 @@ use chrono::Utc;
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::diagnostics::DiagnosticSnapshot;
 use crate::error::Result;
 use crate::provider::Provider;
 use crate::provider::provider_info;
@@ -54,11 +55,16 @@ pub struct SkippedEntry {
 }
 
 /// An error during import of a single server.
+///
+/// `reason` is the human line; `diagnostic` is the machine projection of the
+/// same failure. Per §D9 the report is a serialized boundary, so the concrete
+/// error is projected once here rather than carried as a Rust value.
 #[derive(Debug, Serialize)]
 pub struct ImportError {
     pub provider: Provider,
     pub native_name: String,
     pub reason: String,
+    pub diagnostic: DiagnosticSnapshot,
 }
 
 /// Report summarizing an import operation.
@@ -124,6 +130,7 @@ impl<'a> McpImporter<'a> {
                         provider,
                         native_name: config_path.to_string_lossy().into(),
                         reason: e.to_string(),
+                        diagnostic: DiagnosticSnapshot::from_diagnostic(&e),
                     });
                     continue;
                 }

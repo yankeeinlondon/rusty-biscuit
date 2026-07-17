@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::{
     ControlDispatch, DefaultLifecycleEmitter, LifecycleActionKind, LifecycleControlAction,
-    LifecycleSignal, RetryBackoff, ShellRunner, StackControl, StackExecutionContext,
+    LifecycleSignal, RetryBackoff, ShellRunError, ShellRunner, StackControl, StackExecutionContext,
     control_budget_for, decide_control, parse_lifecycle_config,
 };
 use claudine::events::GlobalSettings;
@@ -180,13 +180,16 @@ struct PersistentFindingsGate {
 }
 
 impl ShellRunner for PersistentFindingsGate {
-    fn run(&self, _command: &str) -> Result<i32, String> {
+    fn run(&self, command: &str) -> Result<i32, ShellRunError> {
         self.runs.fetch_add(1, Ordering::Relaxed);
         std::fs::write(
             &self.report_path,
             "---\nstatus: findings\nprovider: codex\nfindings:\n  - invalid research remains\n---\n",
         )
-        .map_err(|error| error.to_string())?;
+        .map_err(|source| ShellRunError::Spawn {
+            command: command.to_string(),
+            source,
+        })?;
         Ok(0)
     }
 }

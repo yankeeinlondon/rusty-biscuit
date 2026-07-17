@@ -237,6 +237,81 @@ fn unknown_detail_fields_survive_a_read_write_cycle() {
     assert_eq!(serde_json::to_value(&decoded).unwrap(), wire);
 }
 
+// -- forward compatibility through the real `err.*` consumer ----------------
+
+/// A snapshot projected from a locked catalog code stays catalog-shaped: the
+/// facets derive from the [`CodeSpec`](crate::diagnostics::CodeSpec), every
+/// declared detail key is present-and-null, and there is no cause. This is the
+/// label-only path `LifecycleErrorInfo::from_action_failure` reaches.
+#[test]
+fn from_code_projects_a_catalog_shaped_snapshot() {
+    let snapshot = DiagnosticSnapshot::from_code("cap.rate_limit", "slow down".to_string())
+        .expect("cap.rate_limit is a registered code");
+
+    assert_eq!(snapshot.schema_version, DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION);
+    assert_eq!(snapshot.category, "cap");
+    assert_eq!(snapshot.disposition, "throttled");
+    assert_eq!(snapshot.message, "slow down");
+    assert!(snapshot.detail.is_object(), "detail stays catalog-shaped, not null");
+    assert!(snapshot.cause.is_none(), "a label carries no typed cause");
+
+    assert!(DiagnosticSnapshot::from_code("no.such_code", String::new()).is_none());
+}
+
+/// An unknown code and unknown detail keys from a newer producer survive the
+/// read/write path of a **real** production consumer: deserialized into a
+/// snapshot, embedded in a [`LifecycleErrorInfo`], and projected to `err.*` and
+/// `err.cause.*`. A standalone snapshot round-trip cannot prove that the
+/// projection an older consumer actually runs preserves them (spec §D9).
+#[test]
+fn an_unknown_code_and_detail_survive_the_err_star_projection() {
+    use crate::composition::LifecycleErrorInfo;
+
+    let wire = json!({
+        "schema_version": DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION,
+        "category": "composition",
+        "code": "composition.not_a_code_we_know",
+        "disposition": "correctable",
+        "origin": "author",
+        "severity": "error",
+        "detail": {
+            "reference": "x.md",
+            "a_field_from_the_future": { "nested": [1, 2, 3] },
+        },
+        "message": "something newer went wrong",
+        "cause": {
+            "category": "io",
+            "code": "io.read_failed",
+            "disposition": "correctable",
+            "origin": "environment",
+            "severity": "error",
+            "detail": { "path": "/repo/x.md", "another_future_field": true },
+            "message": "no such file",
+        },
+    });
+    let snapshot: DiagnosticSnapshot = serde_json::from_value(wire).unwrap();
+    assert!(
+        code_spec(&snapshot.code).is_none(),
+        "test premise: the code is unknown to this consumer"
+    );
+
+    let info = LifecycleErrorInfo {
+        kind: "LifecycleAction",
+        variant: "when".to_string(),
+        msg: snapshot.message.clone(),
+        snapshot: Some(Box::new(snapshot)),
+    };
+    let value = info.to_value();
+
+    // The unknown code reaches `err.code` (and its deprecated `variant` alias)
+    // untouched — an older `when:` clause keying on it still matches.
+    assert_eq!(value["code"], json!("composition.not_a_code_we_know"));
+    assert_eq!(value["variant"], json!("composition.not_a_code_we_know"));
+    // The unknown detail keys survive into `err.detail.*` and `err.cause.detail.*`.
+    assert_eq!(value["detail"]["a_field_from_the_future"]["nested"], json!([1, 2, 3]));
+    assert_eq!(value["cause"]["detail"]["another_future_field"], json!(true));
+}
+
 // -- catalog parity --------------------------------------------------------
 
 #[test]

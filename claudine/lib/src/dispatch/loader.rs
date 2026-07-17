@@ -198,11 +198,11 @@ fn compile_canonical_mapper(mapper: &Mapper, event: AgenticEvent) -> Result<Comp
         Mapper::JsonObject => Ok(CompiledMapper::JsonObject),
         Mapper::ExitCode => Ok(CompiledMapper::ExitCode),
         Mapper::Regex { pattern } => {
-            let compiled = Regex::new(pattern).map_err(|error| {
-                ClaudineError::TemplateError(format!(
-                    "invalid mapper regex for event={event}: {error} ({pattern})"
-                ))
-            })?;
+            let compiled =
+                Regex::new(pattern).map_err(|error| ClaudineError::TemplateErrorWithCause {
+                    message: format!("invalid mapper regex for event={event}: {error} ({pattern})"),
+                    source: error,
+                })?;
             Ok(CompiledMapper::Regex { pattern: compiled })
         }
     }
@@ -494,8 +494,10 @@ pub fn save_repo_override_config(config: &RepoOverrideConfig, path: &Path) -> Re
 
 /// Parse a raw string as JSON5 and return a [`serde_json::Value`].
 fn parse_json5_to_value(raw: &str) -> Result<serde_json::Value> {
-    let json5 = Json5::from_str(raw)
-        .map_err(|e| ClaudineError::ConfigValidation(format!("JSON5 parse error: {e}")))?;
+    let json5 = Json5::from_str(raw).map_err(|error| ClaudineError::ConfigValidationWithCause {
+        message: format!("JSON5 parse error: {error}"),
+        source: ConfigCause::Json5(error),
+    })?;
     Ok(json5.as_json_value().clone())
 }
 

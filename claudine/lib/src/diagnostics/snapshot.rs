@@ -2,9 +2,10 @@
 //!
 //! Concrete Rust error values never cross a process, wire, or persistence
 //! boundary. At the last in-process boundary they project **once** into a
-//! [`DiagnosticSnapshot`], and every downstream consumer — `LifecycleErrorInfo`,
-//! machine output, recovery records — reads that shared shape rather than
-//! rebuilding facets from the error itself.
+//! [`DiagnosticSnapshot`], and every downstream consumer reads that shared
+//! shape rather than rebuilding facets from the error itself: the lifecycle
+//! `err.*` projection embeds one (`LifecycleErrorInfo`), and the MCP import
+//! report serializes one per failed config (`mcp::import::ImportError`).
 //!
 //! Two rules make the snapshot survive version skew in both directions
 //! (spec §D9):
@@ -38,7 +39,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{Diagnostic, next_registered_cause};
+use super::{Diagnostic, code_spec, next_registered_cause, null_detail_for};
 use crate::harness::runtime::concise_message;
 
 /// Schema version stamped into every [`DiagnosticSnapshot`].
@@ -126,6 +127,36 @@ impl DiagnosticSnapshot {
             message: concise_message(&diagnostic.to_string()),
             cause: next_registered_cause(diagnostic).map(DiagnosticCause::from_diagnostic),
         }
+    }
+
+    /// Project a snapshot from a locked catalog `code` and a `message`.
+    ///
+    /// The seam for a failure that reaches a boundary as a synthesized
+    /// `error_kind` label rather than a typed [`Diagnostic`] value (the
+    /// provider/cap/timeout/runaway path through
+    /// [`code_for_error_kind`](super::code_for_error_kind)). The
+    /// `category`/`disposition`/`origin`/`severity` derive from the code's
+    /// [`CodeSpec`](super::CodeSpec); the per-instance `detail` values are not
+    /// reconstructable from a label, so every declared key is seeded `null` via
+    /// [`null_detail_for`] — the object stays catalog-shaped rather than a
+    /// top-level `null` (spec §D7). There is no typed cause to project.
+    ///
+    /// ## Returns
+    ///
+    /// `None` for a code absent from the catalog.
+    pub fn from_code(code: &str, message: String) -> Option<Self> {
+        let spec = code_spec(code)?;
+        Some(Self {
+            schema_version: DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION,
+            category: spec.category.as_str().to_string(),
+            code: spec.code.to_string(),
+            disposition: spec.disposition.as_str().to_string(),
+            origin: spec.origin.as_str().to_string(),
+            severity: spec.severity().as_str().to_string(),
+            detail: null_detail_for(spec.code),
+            message,
+            cause: None,
+        })
     }
 }
 
