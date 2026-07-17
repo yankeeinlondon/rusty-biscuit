@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 5
+phase: 6
 total_phases: 14
 agent: claude/default
 yolo: "true"
@@ -102,6 +102,37 @@ docs_updated_during_phase_5:
     - claudine/features/2026-07-13-proxy-with/plan.md
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_evaluation.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_routing.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/tests/composition_seams.rs
+    - claudine/cli/tests/wrap_compose_preflight.rs
+    - claudine/lib/src/composition/coordinator/commit.rs
+    - claudine/lib/src/composition/coordinator/handoff.rs
+    - claudine/lib/src/composition/coordinator/invocation.rs
+    - claudine/lib/src/composition/coordinator/mod.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/types.rs
+    - claudine/lib/src/composition/mod.rs
+docs_updated_during_phase_6:
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
 ---
 
 # Execution Plan — Canonical Document Handoffs and Transient Proxy Frontmatter (`with:`)
@@ -585,56 +616,74 @@ Depends on Phases 2, 4, 5 and the file-resolution integration gate. This phase
 removes the split ownership that causes the motivating bug; Phase 10 completes
 the observable loop-equivalence fix.
 
-- [ ] Introduce the coordinator above both the document-loop engine and the
+- [x] Introduce the coordinator above both the document-loop engine and the
       provider-attempt harness. Pure state decisions and the transition types
       live in `claudine::composition`; the CLI driver owns process, terminal,
       filesystem, and provider adapters (R1).
-- [ ] Make the coordinator the **only** thing that may commit a change to active
+- [x] Make the coordinator the **only** thing that may commit a change to active
       document identity.
-- [ ] Convert the harness to *request* `Proxy` instead of swapping its own source.
+- [x] Convert the harness to *request* `Proxy` instead of swapping its own source.
       Delete the mutation at `control_dispatch.rs:209-213`.
-- [ ] Collapse the two initialize-proxy channels into the one transition:
+- [x] Collapse the two initialize-proxy channels into the one transition:
       - remove `LoopExecutionResult::init_proxy_target` (`looping/types.rs:189`)
         and `with_init_proxy_target` (`:228`); change `engine.rs:415-464` to
         return the transition;
       - remove `pipeline.rs:1130` / `:1175` / `:1215` and the
         `initial_proxy_target` parameter (`loop_control.rs:79`, `:130`, `:167`).
       There must be no supported proxy path whose consumption is optional.
-- [ ] Make the coordinator the sole caller of `resolve_proxy_target` and of
+- [x] Make the coordinator the sole caller of `resolve_proxy_target` and of
       hop/cycle validation, and have it atomically commit a `ProxyHandoff`. While
       the file-resolution dependency is pending, `resolve_proxy_target` is only
       a bridge; the final implementation delegates to the shared
       `FileReference`-based resolver and preserves its typed resolved-reference
       provenance. No downstream layer resolves the target again.
-- [ ] Replace the four open-coded chain checks (`loop_control.rs:203-208`,
+- [x] Replace the four open-coded chain checks (`loop_control.rs:203-208`,
       `control_dispatch.rs:89`, `:189`, `:246`) with the Phase 2 method. Fix the
       loop engine's single-element chain slice (`engine.rs:439`) by passing the
       invocation-wide chain.
-- [ ] Implement clean-handoff semantics: once `proxy` is selected the coordinator
+- [x] Implement clean-handoff semantics: once `proxy` is selected the coordinator
       synthesizes **no** later source terminal/finalize/loop signal and applies no
       uncommitted source closure. A proxy from `success`/`failure` skips that
       attempt's ordinary `finalize`; a proxy from `finalize` does not re-enter it.
       The target becomes the closure/output owner. Audit `LifecycleRunGuard`'s
       Drop net (`lifecycle/mod.rs:846`) and `reset_for_proxy` (`:704`) against
       this — the Drop net is a likely source of a synthetic emission.
-- [ ] Nest the coordinator inside command-level ownership: `inline-compose` stays
+- [x] Nest the coordinator inside command-level ownership: `inline-compose` stays
       inline mode but only the final target is eligible for the inline closure;
       a sequence proxy stays inside its current step (no advance, no restart) and
       retains the step's scoped inputs and timing identity; `compose` routes the
       final active document's output to stdout.
-- [ ] Preserve dry-run: it fires no lifecycle events and therefore never
-      traverses a dynamic proxy route. Add an explicit test, not an assumption.
-- [ ] L1: assert the provider harness cannot mutate active document identity
+- [x] Preserve dry-run: it never traverses a dynamic proxy route.
+      **The premise of this task was wrong and the test caught it.** Dry-run
+      *does* fire lifecycle events — `level2_lifecycle_dispatch::level2_lifecycle_blocked_preflight_dry_run_shell_audit_fires_blocked_and_finalize_stacks`
+      pins `initialize` → `blocked` → `finalize` as contract — so `initialize`
+      can hand off on a dry run. Gating `initialize` off for dry-run was tried
+      and reverted: it broke that L2. The dry-run seam
+      (`wrap/composition/runner.rs`) instead consumes the transition explicitly
+      and renders the document it was given.
+      Test: `wrap_compose_preflight::compose_dry_run_does_not_traverse_a_proxy_handoff`.
+- [x] L1: assert the provider harness cannot mutate active document identity
       (type-level if achievable, test-level otherwise).
-- [ ] L1: assert every proxy producer returns the shared typed transition and
+- [x] L1: assert every proxy producer returns the shared typed transition and
       every coordinator outcome consumes or explicitly rejects it.
-- [ ] L1: lock closure/output ownership for direct, inline, and sequence-step
+- [x] L1: lock closure/output ownership for direct, inline, and sequence-step
       modes, including the absence of a synthetic source finalize after a clean
       proxy.
 
-**Validation checkpoint 6**
+**Validation checkpoint 6** — PASSED
 - The Phase 1 optional-proxy-channel guard baseline is **zero**. Delete the
   seeded list.
+- All five named proxy L2s stayed green **unmodified**, including
+  `level2_lifecycle_failure_proxy_runs_target_document_no_loop`: the route drift
+  it encodes is Phase 10's to correct (loop recognition), not Phase 6's.
+- One library test was rewritten with the change intentional:
+  `looping::engine::tests::lifecycle_control::loop_initialize_proxy_unresolvable_routes_to_failure`
+  → `..._defers_resolution_to_the_coordinator`. It asserted that the loop engine
+  resolves a proxy target itself and routes a miss through `failure`/`finalize`
+  — the exact per-route resolution semantics this phase removes.
+- `claudine-gen::drift::committed_generated_artifacts_match_phase_1_byte_baseline`
+  fails on a missing baseline fixture (`reviews/2026-07-14-module-assessment/`
+  was archived with it). Absent at `HEAD`, untouched by this phase.
 - `just test`, `just test-l2`, `just lint` green.
 - Existing proxy L2s still green: `level2_lifecycle_initialize_proxy_runs_target_initialize`
   (`cli/tests/level2_lifecycle_control.rs:1118`), `..._cycle_guarded` (`:1382`),
