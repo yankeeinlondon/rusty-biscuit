@@ -16,6 +16,7 @@
 use crate::markdown::Markdown;
 use crate::markdown::compose::{ComposeSource, ReferenceGraphOptionsIdentity};
 use biscuit_hash::xx_hash_bytes;
+use std::collections::HashSet;
 
 /// Domain separator for the whole-represented-state document fingerprint.
 const DOCUMENT_IDENTITY_DOMAIN: &str = "dm.reference.document-identity.v1";
@@ -94,7 +95,8 @@ fn whole_state_fingerprint(md: &Markdown) -> u64 {
     for (key, value) in md.frontmatter().as_map() {
         buf.extend_from_slice(key.as_bytes());
         buf.push(b'=');
-        buf.extend_from_slice(serde_json::to_string(value).unwrap_or_default().as_bytes());
+        serde_json::to_writer(&mut buf, value)
+            .expect("serializing a JSON value into an in-memory buffer cannot fail");
         buf.push(0);
     }
     buf.push(0);
@@ -114,6 +116,24 @@ pub(crate) struct ReferenceDocumentDependency {
     pub(crate) document: ReferenceDocumentIdentity,
 }
 
+/// Hashable projection that preserves [`ComposeSource`] equality semantics.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ReferenceDependencyKey {
+    Unknown,
+    File(std::path::PathBuf),
+    Url(url::Url),
+}
+
+impl From<&ComposeSource> for ReferenceDependencyKey {
+    fn from(source: &ComposeSource) -> Self {
+        match source {
+            ComposeSource::Unknown => Self::Unknown,
+            ComposeSource::File(path) => Self::File(path.clone()),
+            ComposeSource::Url(url) => Self::Url(url.clone()),
+        }
+    }
+}
+
 /// Private build output: one compact identity per unique visited local child.
 ///
 /// Only production graph construction assembles a non-empty manifest; the
@@ -121,6 +141,7 @@ pub(crate) struct ReferenceDocumentDependency {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ReferenceDependencyManifest {
     documents: Vec<ReferenceDocumentDependency>,
+    seen_sources: HashSet<ReferenceDependencyKey>,
 }
 
 impl ReferenceDependencyManifest {
@@ -131,7 +152,10 @@ impl ReferenceDependencyManifest {
     /// their insertion order, which production construction drives in a
     /// deterministic traversal order so clones and diagnostics are stable.
     pub(crate) fn record(&mut self, source: ComposeSource, document: ReferenceDocumentIdentity) {
-        if self.documents.iter().any(|entry| entry.source == source) {
+        if !self
+            .seen_sources
+            .insert(ReferenceDependencyKey::from(&source))
+        {
             return;
         }
         self.documents
