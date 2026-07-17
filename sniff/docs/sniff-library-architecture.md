@@ -312,6 +312,15 @@ commits, because `commit_count: 0` wins. `full()` keeps paying for branch diverg
 preset's published `ahead`/`behind` values are contract — so only an explicit
 `branch_divergence(false)` skips the two reachability walks per non-current branch.
 
+One request-scoped `RefSnapshot` performs a single ref-store iteration and peels only the local,
+remote-tracking, and tag refs needed by that request. Recent-commit decorations, local branches,
+remote details, tracking status, and containment reuse that observation; focused combinations never
+re-glob remote tips. Linked-worktree paths, branches, detached state, and HEAD IDs come directly from
+gix worktree proxies and their administrative `HEAD` files. Metadata-only requests therefore open no
+linked checkout as a repository. Full worktree status/details retain a parallel repository-open
+fallback only for checkouts whose index and working tree are not represented by the already-open
+current handle.
+
 ### Bounded Path History
 
 `commits_for_path_at`/`get_commits_for_path` take `PathHistoryOptions` and return a

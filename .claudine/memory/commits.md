@@ -28,6 +28,9 @@ do not belong here.
   result means the working tree differs from the staged snapshot.
 - Do not commit unresolved conflict markers. If staged content contains them,
   leave that group staged and report it.
+- Scan staged blobs for all diff3 conflict-marker forms, including the base
+  marker `|||||||`; partial resolutions can leave it behind after deleting the
+  `=======` separator and `>>>>>>>` terminator.
 - Use `git log` for commit-history examples. `sniff git commits` is not valid.
 
 ## Path-Limited Commits

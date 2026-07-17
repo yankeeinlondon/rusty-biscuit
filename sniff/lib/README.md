@@ -97,8 +97,8 @@ use sniff::{
     network::detect_network,
     os::{detect_os, detect_os_with_request},
     filesystem::git::GitRepo,
-    filesystem::repo::detect_repo_structure,
-    request::OsRequest,
+    filesystem::repo::{detect_repo_structure, detect_repo_with_request},
+    request::{OsRequest, RepoDetailRequest, RepoRequest},
 };
 use std::path::Path;
 
@@ -123,6 +123,12 @@ println!("OS: {} {}", os.name, os.version);
 // Expert composition: discover a git repo and sniff workspace structure only
 let git = GitRepo::discover(Path::new("."))?;
 let repo = detect_repo_structure(Path::new("."))?;
+
+// Add one manifest-backed fact without enabling full inventory enrichment.
+let managers = detect_repo_with_request(
+    Path::new("."),
+    &RepoRequest::focused(RepoDetailRequest::package_managers()),
+)?;
 ```
 
 See [../docs/sniff-library-architecture.md](../docs/sniff-library-architecture.md) for a full breakdown of per-subsection costs, shared-work strategies, and common caller profiles.
