@@ -125,30 +125,21 @@ pub fn link_or_copy(target: &std::path::Path, link: &std::path::Path) -> std::io
 /// Returns `true` if `candidate` and `built` point at the same file or
 /// at content-equivalent copies.
 ///
-/// Fast path: file identity (inode on Unix, volume-serial + file-index
-/// on Windows). Works for symlinks (after `metadata` follows them) and
-/// for hard links.
+/// Fast path (Unix only): inode identity. Works for symlinks (after
+/// `metadata` follows them) and for hard links.
 ///
 /// Slow path: byte-for-byte content comparison. Handles the copy
 /// fallback from [`link_or_copy`] where shim and target are different
-/// inodes but identical content.
+/// inodes but identical content. This is the only path on Windows —
+/// `MetadataExt::{volume_serial_number, file_index}` are the unstable
+/// `windows_by_handle` feature, and `rust-toolchain.toml` pins stable, so
+/// the equivalent identity check cannot be written here. Content
+/// comparison returns the same answer; it is merely slower.
 pub fn is_same_binary(candidate: &std::path::Path, built: &std::path::Path) -> bool {
     #[cfg(unix)]
     if let (Ok(ma), Ok(mb)) = (fs::metadata(candidate), fs::metadata(built)) {
         use std::os::unix::fs::MetadataExt;
         if ma.ino() == mb.ino() && ma.dev() == mb.dev() {
-            return true;
-        }
-    }
-    #[cfg(windows)]
-    if let (Ok(ma), Ok(mb)) = (fs::metadata(candidate), fs::metadata(built)) {
-        use std::os::windows::fs::MetadataExt;
-        let va = ma.volume_serial_number();
-        let ia = ma.file_index();
-        // Identity is conclusive only when both fields are present and
-        // match. `None` means the filesystem did not report the field;
-        // fall through to the content comparison below.
-        if va.is_some() && va == mb.volume_serial_number() && ia == mb.file_index() {
             return true;
         }
     }
