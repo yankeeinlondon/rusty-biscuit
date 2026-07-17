@@ -7,9 +7,9 @@ use biscuit_file::toml_crate;
 use crate::package::{DependencyEntry, DependencyKind};
 use crate::performance;
 use crate::performance::counters;
-use crate::{Result, SniffError};
+use crate::Result;
 
-use super::detection::{DetectorOutcome, RepoEvidence, probe_exists};
+use super::detection::{DetectorOutcome, ManifestStore, RepoEvidence, probe_exists};
 use super::glob::expand_membership_globs;
 use super::manifest_index::CargoLockVersions;
 use super::standard::{GlobDialect, MonorepoStandard};
@@ -17,21 +17,14 @@ use super::standard::{GlobDialect, MonorepoStandard};
 pub(super) fn detect_cargo_workspace(
     root: &Path,
     evidence: RepoEvidence<'_>,
+    manifests: &ManifestStore,
 ) -> Result<Option<DetectorOutcome>> {
     let cargo_toml = root.join("Cargo.toml");
     if !probe_exists(&cargo_toml) {
         return Ok(None);
     }
 
-    performance::increment_counter(counters::FS_FILE_OPENS, 1);
-    let content = std::fs::read_to_string(&cargo_toml)?;
-    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
-    performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
-    let parsed: toml_crate::Value =
-        toml_crate::from_str(&content).map_err(|e| SniffError::SystemInfo {
-            domain: "repo",
-            message: e.to_string(),
-        })?;
+    let parsed = manifests.required_cargo(&cargo_toml)?;
 
     let workspace = match parsed.get("workspace") {
         Some(w) => w,
@@ -100,7 +93,7 @@ pub(super) fn detect_cargo_workspace(
 /// Parses Cargo.toml dependencies from an already-parsed TOML value.
 pub(super) fn cargo_dependencies_from_value(
     parsed: &toml_crate::Value,
-    lock_versions: &Option<CargoLockVersions>,
+    lock_versions: Option<&CargoLockVersions>,
 ) -> (
     Vec<DependencyEntry>,
     Vec<DependencyEntry>,
@@ -133,7 +126,7 @@ pub(super) fn parse_cargo_dep_section(
     parsed: &toml_crate::Value,
     section: &str,
     kind: DependencyKind,
-    lock_versions: &Option<CargoLockVersions>,
+    lock_versions: Option<&CargoLockVersions>,
 ) -> Vec<DependencyEntry> {
     let Some(deps) = parsed.get(section).and_then(|d| d.as_table()) else {
         return Vec::new();
@@ -164,7 +157,7 @@ pub(super) fn parse_cargo_dep_section(
                 _ => ("*".to_string(), Vec::new(), false),
             };
 
-            let actual_version = lock_versions.as_ref().and_then(|lv| lv.resolve(name));
+            let actual_version = lock_versions.and_then(|versions| versions.resolve(name));
 
             DependencyEntry {
                 name: name.clone(),
@@ -224,6 +217,41 @@ pub(crate) fn cargo_package_version_with_source(
     package_manifest: &Path,
     repo_root: &Path,
 ) -> Option<(String, String, bool)> {
+    if let Some(version) = cargo_package_version(parsed) {
+        return Some((
+            version,
+            repo_relative_manifest_path(package_manifest, repo_root),
+            false,
+        ));
+    }
+    let root_manifest = repo_root.join("Cargo.toml");
+    let root_manifest = if probe_exists(&root_manifest) {
+        root_manifest
+    } else {
+        package_manifest.to_path_buf()
+    };
+    let root_parsed = read_toml_at(&root_manifest);
+    cargo_package_version_with_root(
+        parsed,
+        package_manifest,
+        repo_root,
+        &root_manifest,
+        root_parsed.as_ref(),
+    )
+}
+
+/// Resolve a Cargo package version from caller-supplied workspace-root data.
+///
+/// This is the request-scoped counterpart to
+/// [`cargo_package_version_with_source`]: repository detection obtains the root
+/// value from its [`ManifestStore`] so every inheriting member shares one parse.
+pub(crate) fn cargo_package_version_with_root(
+    parsed: &toml_crate::Value,
+    package_manifest: &Path,
+    repo_root: &Path,
+    root_manifest: &Path,
+    root_parsed: Option<&toml_crate::Value>,
+) -> Option<(String, String, bool)> {
     let version = parsed.get("package").and_then(|p| p.get("version"))?;
     if let Some(s) = version.as_str() {
         return Some((
@@ -240,13 +268,11 @@ pub(crate) fn cargo_package_version_with_source(
     if !workspace_inherits {
         return None;
     }
-    let root_manifest = repo_root.join("Cargo.toml");
-    let root_manifest = if probe_exists(&root_manifest) {
-        root_manifest
+    let root_parsed = if root_manifest == package_manifest {
+        root_parsed.unwrap_or(parsed)
     } else {
-        package_manifest.to_path_buf()
+        root_parsed?
     };
-    let root_parsed = read_toml_at(&root_manifest)?;
     let inherited = root_parsed
         .get("workspace")
         .and_then(|w| w.get("package"))
@@ -255,14 +281,14 @@ pub(crate) fn cargo_package_version_with_source(
         .map(String::from)?;
     Some((
         inherited,
-        repo_relative_manifest_path(&root_manifest, repo_root),
+        repo_relative_manifest_path(root_manifest, repo_root),
         true,
     ))
 }
 
 /// Read and parse a TOML manifest at `path`, returning `None` on any I/O or
-/// parse failure. Used by the workspace-inheritance helper to peek at the
-/// root `Cargo.toml` without disturbing the caller's manifest cache.
+/// parse failure. Used by standalone aggregation; repository detection routes
+/// inherited workspace manifests through its request-scoped `ManifestStore`.
 fn read_toml_at(path: &Path) -> Option<toml_crate::Value> {
     performance::increment_counter(counters::FS_FILE_OPENS, 1);
     let content = std::fs::read_to_string(path).ok()?;

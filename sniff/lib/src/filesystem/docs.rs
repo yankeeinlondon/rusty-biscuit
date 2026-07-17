@@ -1,4 +1,5 @@
 use super::repo::detect_repo_structure;
+use super::repo::ownership::PackageOwnershipIndex;
 use crate::performance;
 use crate::performance::counters;
 use crate::{Result, SniffError};
@@ -100,6 +101,7 @@ pub struct RepoDocuments {
     repo_root: PathBuf,
     /// Monorepo package directories (name, relative path from repo root).
     packages: Vec<(String, PathBuf)>,
+    ownership_index: PackageOwnershipIndex,
 }
 
 impl RepoDocuments {
@@ -116,25 +118,33 @@ impl RepoDocuments {
             .ok_or_else(|| SniffError::NotARepository(path.to_path_buf()))?;
 
         let packages = detect_repo_packages(&repo_root);
+        let ownership_index = PackageOwnershipIndex::from_relative_paths(&repo_root, &packages);
 
         Ok(Self {
             repo_root,
             packages,
+            ownership_index,
         })
     }
 
     /// Create a `RepoDocuments` from an already-resolved repo root and
     /// pre-computed package list, skipping git discovery and repo detection.
     pub fn from_root(repo_root: PathBuf, packages: Vec<(String, PathBuf)>) -> Self {
+        let ownership_index = PackageOwnershipIndex::from_relative_paths(&repo_root, &packages);
         Self {
             repo_root,
             packages,
+            ownership_index,
         }
     }
 
     /// Returns metadata for all markdown documents in the repository.
     pub fn documents(&self) -> Vec<MarkdownMeta> {
-        collect_markdown_files(&self.repo_root, &self.packages)
+        collect_markdown_files_with_index(
+            &self.repo_root,
+            &self.packages,
+            &self.ownership_index,
+        )
     }
 
     /// Returns metadata for markdown documents that have a "prompt" property set.
@@ -318,6 +328,15 @@ pub fn detect_docs_with_packages(
 
 /// Collect all markdown files from repo root using .gitignore-aware walking.
 fn collect_markdown_files(repo_root: &Path, packages: &[(String, PathBuf)]) -> Vec<MarkdownMeta> {
+    let ownership_index = PackageOwnershipIndex::from_relative_paths(repo_root, packages);
+    collect_markdown_files_with_index(repo_root, packages, &ownership_index)
+}
+
+fn collect_markdown_files_with_index(
+    repo_root: &Path,
+    packages: &[(String, PathBuf)],
+    ownership_index: &PackageOwnershipIndex,
+) -> Vec<MarkdownMeta> {
     let walker = WalkBuilder::new(repo_root)
         .hidden(false)
         .git_ignore(true)
@@ -342,7 +361,13 @@ fn collect_markdown_files(repo_root: &Path, packages: &[(String, PathBuf)]) -> V
         .into_par_iter()
         .filter_map(|path| {
             let _worker = performance::pooled_worker(collector.as_ref());
-            parse_markdown_meta(&path, repo_root, packages)
+            parse_markdown_meta_with_ownership(
+                &path,
+                repo_root,
+                packages,
+                Some(ownership_index),
+                DocParseMode::Full,
+            )
         })
         .collect();
 
@@ -359,6 +384,7 @@ pub fn collect_markdown_files_filtered<F>(
 where
     F: Fn(&str) -> bool + Sync,
 {
+    let ownership_index = PackageOwnershipIndex::from_relative_paths(repo_root, packages);
     let walker = WalkBuilder::new(repo_root)
         .hidden(false)
         .git_ignore(true)
@@ -390,7 +416,13 @@ where
         .into_par_iter()
         .filter_map(|path| {
             let _worker = performance::pooled_worker(collector.as_ref());
-            parse_markdown_meta_with_mode(&path, repo_root, packages, mode)
+            parse_markdown_meta_with_ownership(
+                &path,
+                repo_root,
+                packages,
+                Some(&ownership_index),
+                mode,
+            )
         })
         .collect();
 
@@ -539,6 +571,7 @@ pub fn collect_markdown_files_from_dirs<F>(
 where
     F: Fn(&str) -> bool + Sync,
 {
+    let ownership_index = PackageOwnershipIndex::from_relative_paths(repo_root, packages);
     let mut all_paths = Vec::new();
     for dir in dirs {
         if !dir.is_dir() {
@@ -576,7 +609,13 @@ where
         .into_par_iter()
         .filter_map(|path| {
             let _worker = performance::pooled_worker(collector.as_ref());
-            parse_markdown_meta_with_mode(&path, repo_root, packages, mode)
+            parse_markdown_meta_with_ownership(
+                &path,
+                repo_root,
+                packages,
+                Some(&ownership_index),
+                mode,
+            )
         })
         .collect();
 
@@ -595,12 +634,19 @@ pub fn parse_markdown_files(
     packages: &[(String, PathBuf)],
     mode: DocParseMode,
 ) -> Vec<MarkdownMeta> {
+    let ownership_index = PackageOwnershipIndex::from_relative_paths(repo_root, packages);
     let collector = performance::current_collector();
     let mut docs: Vec<MarkdownMeta> = paths
         .into_par_iter()
         .filter_map(|path| {
             let _worker = performance::pooled_worker(collector.as_ref());
-            parse_markdown_meta_with_mode(path, repo_root, packages, mode)
+            parse_markdown_meta_with_ownership(
+                path,
+                repo_root,
+                packages,
+                Some(&ownership_index),
+                mode,
+            )
         })
         .collect();
     docs.sort_by(|a, b| a.relative.cmp(&b.relative));
@@ -628,13 +674,28 @@ pub(crate) fn parse_markdown_meta_with_mode(
     packages: &[(String, PathBuf)],
     mode: DocParseMode,
 ) -> Option<MarkdownMeta> {
-    let relative = path
-        .strip_prefix(repo_root)
-        .ok()?
-        .to_string_lossy()
-        .to_string();
-    let relative_path = Path::new(&relative);
-    let package = determine_package(relative_path, packages);
+    let ownership_index = (!packages.is_empty())
+        .then(|| PackageOwnershipIndex::from_relative_paths(repo_root, packages));
+    parse_markdown_meta_with_ownership(
+        path,
+        repo_root,
+        packages,
+        ownership_index.as_ref(),
+        mode,
+    )
+}
+
+fn parse_markdown_meta_with_ownership(
+    path: &Path,
+    repo_root: &Path,
+    packages: &[(String, PathBuf)],
+    ownership_index: Option<&PackageOwnershipIndex>,
+    mode: DocParseMode,
+) -> Option<MarkdownMeta> {
+    let relative_path = path.strip_prefix(repo_root).ok()?;
+    let relative = relative_path.to_string_lossy().to_string();
+    let package = ownership_index
+        .and_then(|index| determine_package_with_index(relative_path, packages, index));
 
     match mode {
         DocParseMode::Full => parse_markdown_meta_full(path, repo_root, package, relative),
@@ -1035,16 +1096,22 @@ fn file_mtime(path: &Path) -> DateTime<Utc> {
 ///
 /// Matches the file's relative path against known package directories.
 /// Returns `None` if the file is in the repo root or not in any package.
+#[cfg(test)]
 pub(crate) fn determine_package(
     relative_path: &Path,
     packages: &[(String, PathBuf)],
 ) -> Option<String> {
-    for (name, pkg_path) in packages {
-        if relative_path.starts_with(pkg_path) {
-            return Some(name.clone());
-        }
-    }
-    None
+    let index = PackageOwnershipIndex::from_relative_paths(Path::new("."), packages);
+    determine_package_with_index(relative_path, packages, &index)
+}
+
+fn determine_package_with_index(
+    relative_path: &Path,
+    packages: &[(String, PathBuf)],
+    index: &PackageOwnershipIndex,
+) -> Option<String> {
+    let package_index = index.lookup_relative(relative_path)?;
+    packages.get(package_index).map(|(name, _)| name.clone())
 }
 
 pub fn assign_packages(
@@ -1052,9 +1119,33 @@ pub fn assign_packages(
     packages: &[(String, PathBuf)],
     repo_root: &Path,
 ) {
+    let ownership_index = PackageOwnershipIndex::from_relative_paths(repo_root, packages);
     for doc in docs {
-        let relative_path = Path::new(&doc.relative);
-        doc.package = determine_package(relative_path, packages);
+        let relative_path = doc
+            .filepath
+            .strip_prefix(repo_root)
+            .unwrap_or_else(|_| Path::new(&doc.relative));
+        doc.package = determine_package_with_index(relative_path, packages, &ownership_index);
+        if doc.filepath.is_relative() {
+            doc.filepath = repo_root.join(&doc.relative);
+        }
+    }
+}
+
+pub(crate) fn assign_packages_from_repo(
+    docs: &mut [MarkdownMeta],
+    repo: &super::repo::RepoInfo,
+    ownership_index: &PackageOwnershipIndex,
+    repo_root: &Path,
+) {
+    for doc in docs {
+        let relative_path = doc
+            .filepath
+            .strip_prefix(repo_root)
+            .unwrap_or_else(|_| Path::new(&doc.relative));
+        doc.package = repo
+            .package_for_relative_path_with_index(ownership_index, relative_path)
+            .map(|package| package.name.clone());
         if doc.filepath.is_relative() {
             doc.filepath = repo_root.join(&doc.relative);
         }
@@ -1252,6 +1343,57 @@ mod tests {
                 determine_package(path, &packages),
                 Some("sniff".to_string())
             );
+        }
+
+        #[test]
+        fn chooses_deepest_package_and_respects_component_boundaries() {
+            use crate::performance::{counters, testing};
+
+            let packages = vec![
+                ("parent".to_string(), PathBuf::from("crates/pkg-a")),
+                (
+                    "nested".to_string(),
+                    PathBuf::from("crates/pkg-a/nested"),
+                ),
+                ("sibling".to_string(), PathBuf::from("crates/pkg-a2")),
+            ];
+
+            assert_eq!(
+                determine_package(
+                    Path::new("crates/pkg-a/nested/docs/design.md"),
+                    &packages,
+                ),
+                Some("nested".to_string())
+            );
+            assert_eq!(
+                determine_package(Path::new("crates/pkg-a2/README.md"), &packages),
+                Some("sibling".to_string())
+            );
+            assert_eq!(
+                determine_package(Path::new("crates/pkg-a20/README.md"), &packages),
+                None
+            );
+
+            let index = PackageOwnershipIndex::from_relative_paths(Path::new("."), &packages);
+            let ((), counts) = testing::measure(|| {
+                assert_eq!(
+                    determine_package_with_index(
+                        Path::new("crates/pkg-a/nested/docs/design.md"),
+                        &packages,
+                        &index,
+                    ),
+                    Some("nested".to_string())
+                );
+                assert_eq!(
+                    determine_package_with_index(
+                        Path::new("crates/pkg-a2/README.md"),
+                        &packages,
+                        &index,
+                    ),
+                    Some("sibling".to_string())
+                );
+            });
+            assert_eq!(counts.get(counters::FS_CANONICALIZATIONS), 0);
         }
 
         #[test]

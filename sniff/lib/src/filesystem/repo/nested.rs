@@ -36,6 +36,7 @@ use crate::performance;
 use crate::performance::counters;
 
 use super::cargo::detect_cargo_workspace;
+use super::detection::ManifestStore;
 use super::dotnet::detect_dotnet_solution;
 use super::go::detect_go_workspace;
 use super::gradle::detect_gradle_workspace;
@@ -147,6 +148,7 @@ pub(crate) fn discover_nested_workspace_outcomes(
     root: &Path,
     evidence: super::detection::RepoEvidence<'_>,
     forbids_nested_roots: &[(PathBuf, MonorepoStandard)],
+    manifests: &ManifestStore,
     seeds: &mut Vec<PackageSeed>,
     outcomes: &mut Vec<DetectorOutcome>,
 ) -> Result<()> {
@@ -184,7 +186,15 @@ pub(crate) fn discover_nested_workspace_outcomes(
                 continue;
             }
 
-            dispatch_detector_at(standard, &candidate.root, root, evidence, seeds, outcomes)?;
+            dispatch_detector_at(
+                standard,
+                &candidate.root,
+                root,
+                evidence,
+                manifests,
+                seeds,
+                outcomes,
+            )?;
         }
     }
 
@@ -384,11 +394,14 @@ fn dispatch_detector_at(
     target: &Path,
     repo_root: &Path,
     evidence: super::detection::RepoEvidence<'_>,
+    manifests: &ManifestStore,
     seeds: &mut Vec<PackageSeed>,
     outcomes: &mut Vec<DetectorOutcome>,
 ) -> Result<()> {
     let outcome = match standard {
-        MonorepoStandard::CargoWorkspace => detect_cargo_workspace(target, evidence)?,
+        MonorepoStandard::CargoWorkspace => {
+            detect_cargo_workspace(target, evidence, manifests)?
+        }
         MonorepoStandard::NpmWorkspaces => detect_npm_workspace(target, evidence)?,
         MonorepoStandard::PnpmWorkspaces => detect_pnpm_workspace(target, evidence)?,
         MonorepoStandard::YarnWorkspaces => detect_yarn_workspace(target, evidence)?,

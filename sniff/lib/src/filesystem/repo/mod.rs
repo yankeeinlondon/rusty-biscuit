@@ -13,6 +13,7 @@ pub mod maven;
 pub(crate) mod nested;
 pub mod npm;
 pub mod nx_turbo;
+pub(crate) mod ownership;
 pub mod polyglot;
 pub mod python;
 pub(crate) mod seed;

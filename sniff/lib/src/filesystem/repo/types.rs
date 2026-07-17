@@ -10,6 +10,7 @@ use crate::filesystem::file_types::{
     ProgrammingLanguageStats,
 };
 use crate::filesystem::repo::detection::canonicalize_path;
+use crate::filesystem::repo::ownership::PackageOwnershipIndex;
 use crate::filesystem::repo::standard::{
     DetectedStandard, MonorepoLayer, MonorepoStandard, PackageProvenance,
 };
@@ -271,13 +272,21 @@ impl RepoInfo {
     ///
     /// Returns `None` when `dir` is not inside any package.
     pub fn package_for_dir(&self, dir: &Path) -> Option<&Package> {
-        let packages = self.packages.as_ref()?;
+        let packages = self.packages.as_deref()?;
+        let ownership_index = PackageOwnershipIndex::from_packages(&self.root, packages);
         let dir = canonicalize_path(dir);
+        let index = ownership_index.lookup_normalized(&dir)?;
+        packages.get(index)
+    }
 
-        packages
-            .iter()
-            .filter(|pkg| dir.starts_with(canonicalize_path(&pkg.path)))
-            .max_by_key(|pkg| canonicalize_path(&pkg.path).components().count())
+    /// Find the package owning a path already framed relative to the repo root.
+    pub(crate) fn package_for_relative_path_with_index(
+        &self,
+        ownership_index: &PackageOwnershipIndex,
+        path: &Path,
+    ) -> Option<&Package> {
+        let index = ownership_index.lookup_relative(path)?;
+        self.packages.as_ref()?.get(index)
     }
 
     /// Resolve the area name for `dir`, combining package and package-area into
@@ -549,6 +558,103 @@ mod tests {
             repo.package_for_dir(Path::new("/repo/crates/pkg-a/src"))
                 .map(|p| p.name.as_str()),
             Some("pkg-a")
+        );
+    }
+
+    #[test]
+    fn standalone_package_lookup_uses_a_transient_index() {
+        use crate::performance::{counters, testing};
+
+        let repo = RepoInfo {
+            root: PathBuf::from("/repo"),
+            packages: Some(vec![
+                Package {
+                    path: PathBuf::from("/repo/crates/pkg-a"),
+                    relative: "crates/pkg-a".to_string(),
+                    name: "pkg-a".to_string(),
+                    ..Package::default()
+                },
+                Package {
+                    path: PathBuf::from("/repo/crates/pkg-a2"),
+                    relative: "crates/pkg-a2".to_string(),
+                    name: "pkg-a2".to_string(),
+                    ..Package::default()
+                },
+            ]),
+            ..RepoInfo::default()
+        };
+
+        let ((), counts) = testing::measure(|| {
+            assert_eq!(
+                repo.package_for_dir(Path::new("/repo/crates/pkg-a/src"))
+                    .map(|package| package.name.as_str()),
+                Some("pkg-a")
+            );
+            assert_eq!(
+                repo.package_for_dir(Path::new("/repo/crates/pkg-a2/src"))
+                    .map(|package| package.name.as_str()),
+                Some("pkg-a2")
+            );
+            assert!(repo
+                .package_for_dir(Path::new("/repo/crates/pkg-a20/src"))
+                .is_none());
+        });
+
+        assert_eq!(
+            counts.get(counters::FS_CANONICALIZATIONS),
+            12,
+            "standalone lookups normalize the root, two candidates, and API query once per call"
+        );
+    }
+
+    #[test]
+    fn ownership_index_does_not_change_repo_info_json_shape() {
+        let repo = monorepo_with_areas();
+        let encoded = serde_json::to_value(&repo).unwrap();
+        assert!(encoded.get("ownership_index").is_none());
+
+        let decoded: RepoInfo = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&decoded).unwrap(), encoded);
+        assert_eq!(
+            decoded
+                .package_for_dir(Path::new("/repo/sniff/lib/src"))
+                .map(|package| package.name.as_str()),
+            Some("sniff-lib")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn package_lookup_preserves_resolved_symlink_semantics() {
+        use std::os::unix::fs::symlink;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("target/pkg");
+        std::fs::create_dir_all(target.join("src")).unwrap();
+        let alias = dir.path().join("alias");
+        symlink(&target, &alias).unwrap();
+
+        let repo = RepoInfo {
+            root: dir.path().to_path_buf(),
+            packages: Some(vec![Package {
+                path: alias.clone(),
+                relative: "alias".to_string(),
+                name: "linked".to_string(),
+                ..Package::default()
+            }]),
+            ..RepoInfo::default()
+        };
+
+        assert_eq!(
+            repo.package_for_dir(&alias.join("src"))
+                .map(|package| package.name.as_str()),
+            Some("linked")
+        );
+        assert_eq!(
+            repo.package_for_dir(&target.join("src"))
+                .map(|package| package.name.as_str()),
+            Some("linked")
         );
     }
 

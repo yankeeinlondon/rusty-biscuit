@@ -4,8 +4,10 @@ use crate::performance::counters;
 use crate::request::RepoRequest;
 use biscuit_file::serde_yaml_ng;
 use biscuit_file::toml_crate;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use crate::filesystem::file_types::{
     FileAssociation, FileInventory, FrameworkAccumulator, FrameworkKind, LanguageAccumulator,
@@ -15,7 +17,7 @@ use crate::filesystem::file_types::{
 
 use super::cargo::{
     cargo_dependencies_from_value, cargo_features_from_value, cargo_package_name,
-    cargo_package_version_with_source, detect_cargo_workspace,
+    cargo_package_version_with_root, detect_cargo_workspace,
 };
 use super::dotnet::{detect_dotnet_solution, root_has_solution_file};
 use super::go::{
@@ -28,13 +30,14 @@ use super::manifest_index::{
 };
 use super::maven::detect_maven_workspace;
 use super::nested::discover_nested_workspace_outcomes;
-use super::seed::{PackageSeed, merge_seeds};
+use super::seed::{PackageSeed, merge_seeds, normalized_key};
 use super::npm::{
     detect_bun_workspace, detect_npm_workspace, detect_pnpm_workspace, detect_rush_workspace,
     detect_yarn_workspace, npm_package_name, npm_package_version,
     package_json_dependencies_from_value, parse_package_json_workspace_patterns,
     parse_pnpm_workspace_patterns, resolve_js_package_manager,
 };
+use super::ownership::PackageOwnershipIndex;
 use super::nx_turbo::{detect_lerna, detect_nx, detect_turborepo, parse_lerna_workspace_patterns};
 use super::polyglot::{detect_bazel_workspace, detect_buck2_workspace, detect_pants_workspace};
 use super::python::{
@@ -155,8 +158,9 @@ pub(crate) fn synthesize_root_package_repo_with_request(
     if detect_package_ecosystem(root) == PackageEcosystem::Unknown {
         return None;
     }
+    let manifests = ManifestStore::default();
     let lock_versions = if request.wants_dependencies() {
-        CargoLockVersions::parse(&root.join("Cargo.lock"))
+        manifests.cargo_lock(&root.join("Cargo.lock"))
     } else {
         None
     };
@@ -165,8 +169,9 @@ pub(crate) fn synthesize_root_package_repo_with_request(
         root,
         MonorepoStandard::Unknown,
         PackageProvenance::ManifestScan,
-        &lock_versions,
+        lock_versions.as_deref(),
         request,
+        &manifests,
     );
     Some(RepoInfo {
         is_monorepo: false,
@@ -176,48 +181,98 @@ pub(crate) fn synthesize_root_package_repo_with_request(
     })
 }
 
-/// Cache for parsed manifest files to avoid redundant I/O during repo detection.
+/// Request-scoped store for parsed manifests, lockfiles, and root configuration.
 ///
-/// Each manifest file is read and parsed at most once per `create_package`
-/// invocation. Returned values are owned so multiple downstream helpers can
-/// inspect them without re-reading from disk.
+/// Paths are normalized as native [`PathBuf`] keys. Cached values use [`Rc`]
+/// because detection is single-threaded and callers must retain a parsed value
+/// while asking the store for another input (notably a member and its owning
+/// workspace manifest).
 #[derive(Default)]
-pub(crate) struct ManifestCache {
-    cargo: HashMap<PathBuf, Option<toml_crate::Value>>,
-    npm: HashMap<PathBuf, Option<serde_json::Value>>,
-    pyproject: HashMap<PathBuf, Option<toml_crate::Value>>,
-    go_mod: HashMap<PathBuf, Option<String>>,
-    raw_text: HashMap<PathBuf, Option<String>>,
+pub(crate) struct ManifestStore {
+    cargo: RefCell<HashMap<PathBuf, Option<Rc<toml_crate::Value>>>>,
+    npm: RefCell<HashMap<PathBuf, Option<Rc<serde_json::Value>>>>,
+    pyproject: RefCell<HashMap<PathBuf, Option<Rc<toml_crate::Value>>>>,
+    go_mod: RefCell<HashMap<PathBuf, Option<Rc<String>>>>,
+    raw_text: RefCell<HashMap<PathBuf, Option<Rc<String>>>>,
+    cargo_locks: RefCell<HashMap<PathBuf, Option<Rc<CargoLockVersions>>>>,
+    pnpm_locks: RefCell<HashMap<PathBuf, Option<Rc<serde_yaml_ng::Value>>>>,
+    uv_locks: RefCell<HashMap<PathBuf, Option<Rc<toml_crate::Value>>>>,
+    root_configs: RefCell<HashMap<PathBuf, bool>>,
 }
 
-impl ManifestCache {
-    pub(crate) fn cargo(&mut self, path: &Path) -> Option<&toml_crate::Value> {
-        let entry = self.cargo.entry(path.to_path_buf()).or_insert_with(|| {
-            read_counted_manifest(path).and_then(|c| toml_crate::from_str(&c).ok())
-        });
-        entry.as_ref()
+impl ManifestStore {
+    pub(crate) fn cargo(&self, path: &Path) -> Option<Rc<toml_crate::Value>> {
+        let key = normalized_key(path);
+        if let Some(cached) = self.cargo.borrow().get(&key) {
+            return cached.clone();
+        }
+        let parsed = read_counted_manifest(path)
+            .and_then(|content| toml_crate::from_str(&content).ok())
+            .map(Rc::new);
+        self.cargo.borrow_mut().insert(key, parsed.clone());
+        parsed
     }
 
-    pub(crate) fn npm(&mut self, path: &Path) -> Option<&serde_json::Value> {
-        let entry = self.npm.entry(path.to_path_buf()).or_insert_with(|| {
-            read_counted_manifest(path).and_then(|c| serde_json::from_str(&c).ok())
-        });
-        entry.as_ref()
+    /// Parse a required Cargo manifest while preserving detector error
+    /// propagation. Successful parses populate the same cache used by package
+    /// identity and workspace-inheritance resolution.
+    pub(crate) fn required_cargo(&self, path: &Path) -> Result<Rc<toml_crate::Value>> {
+        let key = normalized_key(path);
+        if let Some(cached) = self.cargo.borrow().get(&key) {
+            return cached.clone().ok_or_else(|| crate::SniffError::SystemInfo {
+                domain: "repo",
+                message: format!("could not parse {}", path.display()),
+            });
+        }
+
+        performance::increment_counter(counters::FS_FILE_OPENS, 1);
+        let content = std::fs::read_to_string(path)?;
+        performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+        performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
+        let parsed = Rc::new(toml_crate::from_str(&content).map_err(|error| {
+            crate::SniffError::SystemInfo {
+                domain: "repo",
+                message: error.to_string(),
+            }
+        })?);
+        self.cargo
+            .borrow_mut()
+            .insert(key, Some(Rc::clone(&parsed)));
+        Ok(parsed)
     }
 
-    pub(crate) fn pyproject(&mut self, path: &Path) -> Option<&toml_crate::Value> {
-        let entry = self.pyproject.entry(path.to_path_buf()).or_insert_with(|| {
-            read_counted_manifest(path).and_then(|c| toml_crate::from_str(&c).ok())
-        });
-        entry.as_ref()
+    pub(crate) fn npm(&self, path: &Path) -> Option<Rc<serde_json::Value>> {
+        let key = normalized_key(path);
+        if let Some(cached) = self.npm.borrow().get(&key) {
+            return cached.clone();
+        }
+        let parsed = read_counted_manifest(path)
+            .and_then(|content| serde_json::from_str(&content).ok())
+            .map(Rc::new);
+        self.npm.borrow_mut().insert(key, parsed.clone());
+        parsed
     }
 
-    pub(crate) fn go_mod(&mut self, path: &Path) -> Option<&str> {
-        let entry = self
-            .go_mod
-            .entry(path.to_path_buf())
-            .or_insert_with(|| read_counted_manifest(path));
-        entry.as_deref()
+    pub(crate) fn pyproject(&self, path: &Path) -> Option<Rc<toml_crate::Value>> {
+        let key = normalized_key(path);
+        if let Some(cached) = self.pyproject.borrow().get(&key) {
+            return cached.clone();
+        }
+        let parsed = read_counted_manifest(path)
+            .and_then(|content| toml_crate::from_str(&content).ok())
+            .map(Rc::new);
+        self.pyproject.borrow_mut().insert(key, parsed.clone());
+        parsed
+    }
+
+    pub(crate) fn go_mod(&self, path: &Path) -> Option<Rc<String>> {
+        let key = normalized_key(path);
+        if let Some(cached) = self.go_mod.borrow().get(&key) {
+            return cached.clone();
+        }
+        let content = read_counted_manifest(path).map(Rc::new);
+        self.go_mod.borrow_mut().insert(key, content.clone());
+        content
     }
 
     /// Generic raw-text cache for manifests that do not warrant a typed parser
@@ -225,20 +280,68 @@ impl ManifestCache {
     /// mix.exs, *.csproj, *.gemspec, requirements.txt). Used by test-runner
     /// repo detection to do substring searches over the declared dependency
     /// keys without re-reading the file per runner.
-    pub(crate) fn raw_text(&mut self, path: &Path) -> Option<&str> {
-        let entry = self
-            .raw_text
-            .entry(path.to_path_buf())
-            .or_insert_with(|| read_counted_manifest(path));
-        entry.as_deref()
+    pub(crate) fn raw_text(&self, path: &Path) -> Option<Rc<String>> {
+        let key = normalized_key(path);
+        if let Some(cached) = self.raw_text.borrow().get(&key) {
+            return cached.clone();
+        }
+        let content = read_counted_manifest(path).map(Rc::new);
+        self.raw_text.borrow_mut().insert(key, content.clone());
+        content
+    }
+
+    pub(crate) fn cargo_lock(&self, path: &Path) -> Option<Rc<CargoLockVersions>> {
+        let key = normalized_key(path);
+        if let Some(cached) = self.cargo_locks.borrow().get(&key) {
+            return cached.clone();
+        }
+        let parsed = CargoLockVersions::parse(path).map(Rc::new);
+        self.cargo_locks.borrow_mut().insert(key, parsed.clone());
+        parsed
+    }
+
+    fn pnpm_lock(&self, path: &Path) -> Option<Rc<serde_yaml_ng::Value>> {
+        let key = normalized_key(path);
+        if let Some(cached) = self.pnpm_locks.borrow().get(&key) {
+            return cached.clone();
+        }
+        let parsed = read_counted_lockfile(path)
+            .and_then(|content| serde_yaml_ng::from_str(&content).ok())
+            .map(Rc::new);
+        self.pnpm_locks.borrow_mut().insert(key, parsed.clone());
+        parsed
+    }
+
+    fn uv_lock(&self, path: &Path) -> Option<Rc<toml_crate::Value>> {
+        let key = normalized_key(path);
+        if let Some(cached) = self.uv_locks.borrow().get(&key) {
+            return cached.clone();
+        }
+        let parsed = read_counted_lockfile(path)
+            .and_then(|content| toml_crate::from_str(&content).ok())
+            .map(Rc::new);
+        self.uv_locks.borrow_mut().insert(key, parsed.clone());
+        parsed
+    }
+
+    /// Observe one workspace-root test-runner configuration path once.
+    pub(crate) fn root_config_exists(&self, path: &Path) -> bool {
+        let key = normalized_key(path);
+        if let Some(cached) = self.root_configs.borrow().get(&key) {
+            return *cached;
+        }
+        performance::increment_counter(counters::REPO_ROOT_CONFIG_PROBES, 1);
+        let exists = probe_exists(path);
+        self.root_configs.borrow_mut().insert(key, exists);
+        exists
     }
 }
 
 /// Read a manifest and record the work against the repo and filesystem
 /// counters.
 ///
-/// Every [`ManifestCache`] accessor funnels its miss path through here, and the
-/// `or_insert_with` closures only run on a miss, so the counters measure unique
+/// Every [`ManifestStore`] manifest accessor funnels its miss path through here,
+/// so the counters measure unique
 /// manifests read rather than the far larger number of accessor calls. Counting
 /// at the accessor call sites instead would multiply-count every manifest that
 /// name, version, dependency, and test-runner resolution each ask for.
@@ -247,6 +350,14 @@ fn read_counted_manifest(path: &Path) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
     performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
     performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
+    Some(content)
+}
+
+fn read_counted_lockfile(path: &Path) -> Option<String> {
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
+    let content = std::fs::read_to_string(path).ok()?;
+    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+    performance::increment_counter(counters::REPO_LOCKFILE_PARSES, 1);
     Some(content)
 }
 
@@ -268,19 +379,20 @@ pub(crate) fn probe_is_dir(path: &Path) -> bool {
 
 /// Build context shared while constructing `Package` values.
 ///
-/// Bundles a per-call manifest cache with the optional `Cargo.lock` version
-/// resolver so each manifest file is read at most once per `create_package`
-/// invocation. The `ManifestCache` is cleared for each package so cache
-/// growth is bounded by the manifests of a single package.
+/// Borrows the detection's manifest store and the owning workspace's optional
+/// `Cargo.lock` projection while one package is built.
 pub(crate) struct PackageBuildContext<'a> {
-    pub(crate) manifests: ManifestCache,
-    pub(crate) lock_versions: &'a Option<CargoLockVersions>,
+    pub(crate) manifests: &'a ManifestStore,
+    pub(crate) lock_versions: Option<&'a CargoLockVersions>,
 }
 
 impl<'a> PackageBuildContext<'a> {
-    pub(crate) fn new(lock_versions: &'a Option<CargoLockVersions>) -> Self {
+    pub(crate) fn new(
+        manifests: &'a ManifestStore,
+        lock_versions: Option<&'a CargoLockVersions>,
+    ) -> Self {
         Self {
-            manifests: ManifestCache::default(),
+            manifests,
             lock_versions,
         }
     }
@@ -324,6 +436,7 @@ fn has_workspace_marker(root: &Path) -> bool {
 
 /// `evidence` carries whatever a shared observation walk already learned about
 /// `root`'s tree. Absent fields fall back to a specialized walk.
+#[cfg(test)]
 pub(crate) fn detect_repo_inner_with_shared(
     root: &Path,
     structure_only: bool,
@@ -344,11 +457,27 @@ pub(crate) fn detect_repo_inner_with_shared_request(
     request: &RepoRequest,
     evidence: RepoEvidence<'_>,
 ) -> Result<(Option<RepoInfo>, Option<FileInventory>)> {
+    let (repo, inventory, _) =
+        detect_repo_inner_with_shared_request_and_ownership(root, request, evidence)?;
+    Ok((repo, inventory))
+}
+
+/// Internal detection form that retains the request's package ownership index.
+pub(crate) fn detect_repo_inner_with_shared_request_and_ownership(
+    root: &Path,
+    request: &RepoRequest,
+    evidence: RepoEvidence<'_>,
+) -> Result<(
+    Option<RepoInfo>,
+    Option<FileInventory>,
+    Option<PackageOwnershipIndex>,
+)> {
+    let manifests = ManifestStore::default();
     let mut seeds: Vec<PackageSeed> = Vec::new();
     let mut outcomes: Vec<DetectorOutcome> = Vec::new();
 
     collect_outcome(
-        detect_cargo_workspace(root, evidence)?,
+        detect_cargo_workspace(root, evidence, &manifests)?,
         &mut seeds,
         &mut outcomes,
     );
@@ -435,12 +564,13 @@ pub(crate) fn detect_repo_inner_with_shared_request(
         root,
         evidence,
         &forbids_nested_roots,
+        &manifests,
         &mut seeds,
         &mut outcomes,
     )?;
 
     if outcomes.is_empty() {
-        return Ok((None, None));
+        return Ok((None, None, None));
     }
 
     // Full-mode nested package enrichment requires the manifest index.
@@ -462,7 +592,7 @@ pub(crate) fn detect_repo_inner_with_shared_request(
 
     // Build the topology from membership-declaring detectors. `is_monorepo` is
     // now the honest predicate: at least one layer must resolve non-degenerately.
-    let mut monorepo_layers = build_monorepo_layers(&outcomes);
+    let mut monorepo_layers = build_monorepo_layers(&outcomes, &manifests);
     let is_monorepo = layers_imply_monorepo(&monorepo_layers);
     let mut monorepo_standards =
         build_detected_standards(root, &outcomes, &monorepo_layers, is_monorepo);
@@ -478,7 +608,7 @@ pub(crate) fn detect_repo_inner_with_shared_request(
     // Upgrade provenance to `Lockfile` for ecosystems where the committed
     // lockfile is a high-fidelity membership source.
     for layer in &mut monorepo_layers {
-        upgrade_provenance_with_lockfile(layer, &mut seeds);
+        upgrade_provenance_with_lockfile(layer, &mut seeds, &manifests);
     }
 
     if !request.structure_only {
@@ -503,19 +633,34 @@ pub(crate) fn detect_repo_inner_with_shared_request(
     // Discovery is complete. Collapse duplicate boundaries *before* enrichment:
     // every seed surviving here is enriched exactly once (R5).
     let seeds = merge_seeds(seeds);
-    let mut locks = LockStore::default();
-    let mut packages: Vec<Package> = seeds
+    let mut packages_and_keys: Vec<(Package, PathBuf)> = seeds
         .iter()
         .map(|seed| {
             let lock_versions = if request.wants_dependencies() {
-                locks.for_seed(seed)
+                lock_versions_for_seed(seed, &manifests)
             } else {
-                &NO_LOCK_VERSIONS
+                None
             };
-            create_package_from_seed(seed, lock_versions, request)
+            (
+                create_package_from_seed(seed, lock_versions.as_deref(), request, &manifests),
+                seed.key.clone(),
+            )
         })
         .collect();
-    packages.sort_by(|a, b| a.relative.cmp(&b.relative));
+    packages_and_keys.sort_by(|(a, _), (b, _)| a.relative.cmp(&b.relative));
+    let ownership_index = PackageOwnershipIndex::from_normalized_keys(
+        normalized_key(root),
+        packages_and_keys
+            .iter()
+            .enumerate()
+            .map(|(index, (package, key))| {
+                (key.as_path(), Path::new(&package.relative), index)
+            }),
+    );
+    let mut packages: Vec<Package> = packages_and_keys
+        .into_iter()
+        .map(|(package, _)| package)
+        .collect();
 
     let repo_inventory = if !request.structure_only {
         // Build shared repo-level file inventory once for all packages
@@ -523,7 +668,11 @@ pub(crate) fn detect_repo_inner_with_shared_request(
             .inventory
             .cloned()
             .or_else(|| crate::filesystem::file_types::scan_file_inventory(root).ok());
-        refresh_package_boundaries(&mut packages, inventory.as_ref());
+        refresh_package_boundaries_with_index(
+            &mut packages,
+            inventory.as_ref(),
+            Some(&ownership_index),
+        );
         inventory
     } else {
         None
@@ -545,6 +694,7 @@ pub(crate) fn detect_repo_inner_with_shared_request(
             packages: Some(packages),
         }),
         repo_inventory,
+        Some(ownership_index),
     ))
 }
 
@@ -601,12 +751,16 @@ fn collect_outcomes(
 ///
 /// The manifest remains the authority when lockfile and manifest disagree; the
 /// mismatch is recorded in `lockfile_match` so consumers can spot stale lockfiles.
-fn upgrade_provenance_with_lockfile(layer: &mut MonorepoLayer, seeds: &mut [PackageSeed]) {
+fn upgrade_provenance_with_lockfile(
+    layer: &mut MonorepoLayer,
+    seeds: &mut [PackageSeed],
+    manifests: &ManifestStore,
+) {
     let authority = layer.authority;
     let lockfile_result = match authority {
-        MonorepoStandard::PnpmWorkspaces => pnpm_lockfile_matches(layer, seeds),
-        MonorepoStandard::UvWorkspace => uv_lockfile_matches(layer, seeds),
-        MonorepoStandard::CargoWorkspace => cargo_lockfile_matches(layer, seeds),
+        MonorepoStandard::PnpmWorkspaces => pnpm_lockfile_matches(layer, seeds, manifests),
+        MonorepoStandard::UvWorkspace => uv_lockfile_matches(layer, seeds, manifests),
+        MonorepoStandard::CargoWorkspace => cargo_lockfile_matches(layer, seeds, manifests),
         _ => return,
     };
 
@@ -650,13 +804,13 @@ fn layer_relative_path(path: &Path, layer_root: &Path) -> Option<String> {
 /// The pnpm root importer key `"."` is normalized away because the manifest
 /// globs never list the root — both sides are compared as member sets without
 /// the workspace root.
-fn pnpm_lockfile_matches(layer: &MonorepoLayer, seeds: &[PackageSeed]) -> Option<bool> {
+fn pnpm_lockfile_matches(
+    layer: &MonorepoLayer,
+    seeds: &[PackageSeed],
+    manifests: &ManifestStore,
+) -> Option<bool> {
     let lock_path = layer.root.join("pnpm-lock.yaml");
-    performance::increment_counter(counters::FS_FILE_OPENS, 1);
-    let content = std::fs::read_to_string(&lock_path).ok()?;
-    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
-    performance::increment_counter(counters::REPO_LOCKFILE_PARSES, 1);
-    let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).ok()?;
+    let parsed = manifests.pnpm_lock(&lock_path)?;
 
     let importers = parsed.get("importers")?.as_mapping()?;
     let lock_members: std::collections::HashSet<String> = importers
@@ -697,13 +851,13 @@ fn pnpm_lockfile_matches(layer: &MonorepoLayer, seeds: &[PackageSeed]) -> Option
 /// The uv root member (`"."`) is kept on both sides because uv's
 /// `RootMembership::Always` adds the root to `layer.packages`, so both sets
 /// include the root.
-fn uv_lockfile_matches(layer: &MonorepoLayer, seeds: &[PackageSeed]) -> Option<bool> {
+fn uv_lockfile_matches(
+    layer: &MonorepoLayer,
+    seeds: &[PackageSeed],
+    manifests: &ManifestStore,
+) -> Option<bool> {
     let lock_path = layer.root.join("uv.lock");
-    performance::increment_counter(counters::FS_FILE_OPENS, 1);
-    let content = std::fs::read_to_string(&lock_path).ok()?;
-    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
-    performance::increment_counter(counters::REPO_LOCKFILE_PARSES, 1);
-    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
+    let parsed = manifests.uv_lock(&lock_path)?;
 
     let members = parsed.get("workspace")?.get("members")?.as_array()?;
 
@@ -742,16 +896,20 @@ fn uv_lockfile_matches(layer: &MonorepoLayer, seeds: &[PackageSeed]) -> Option<b
 
 /// Check that every globbed Cargo member has a `[package].name` present in the
 /// root `Cargo.lock` `[[package]]` table.
-fn cargo_lockfile_matches(layer: &MonorepoLayer, seeds: &[PackageSeed]) -> Option<bool> {
+fn cargo_lockfile_matches(
+    layer: &MonorepoLayer,
+    seeds: &[PackageSeed],
+    manifests: &ManifestStore,
+) -> Option<bool> {
     let lock_path = layer.root.join("Cargo.lock");
-    let lock_versions = CargoLockVersions::parse(&lock_path)?;
+    let lock_versions = manifests.cargo_lock(&lock_path)?;
 
     for relative in &layer.packages {
         let key = normalize_layer_package_relative(relative);
         let seed = seeds.iter().find(|s| s.relative == key)?;
         let cargo_toml = seed.path.join("Cargo.toml");
-        let name = read_counted_manifest(&cargo_toml)
-            .and_then(|content| toml_crate::from_str::<toml_crate::Value>(&content).ok())
+        let name = manifests
+            .cargo(&cargo_toml)
             .and_then(|parsed| {
                 parsed
                     .get("package")?
@@ -856,6 +1014,7 @@ fn resolve_package_name(ctx: &mut PackageBuildContext<'_>, path: &Path, root: &P
         && let Some(name) = ctx
             .manifests
             .cargo(&cargo_toml)
+            .as_deref()
             .and_then(cargo_package_name)
     {
         return name;
@@ -863,7 +1022,11 @@ fn resolve_package_name(ctx: &mut PackageBuildContext<'_>, path: &Path, root: &P
 
     let package_json = path.join("package.json");
     if probe_exists(&package_json)
-        && let Some(name) = ctx.manifests.npm(&package_json).and_then(npm_package_name)
+        && let Some(name) = ctx
+            .manifests
+            .npm(&package_json)
+            .as_deref()
+            .and_then(npm_package_name)
     {
         return name;
     }
@@ -873,6 +1036,7 @@ fn resolve_package_name(ctx: &mut PackageBuildContext<'_>, path: &Path, root: &P
         && let Some(name) = ctx
             .manifests
             .pyproject(&pyproject_toml)
+            .as_deref()
             .and_then(pyproject_package_name)
     {
         return name;
@@ -883,7 +1047,8 @@ fn resolve_package_name(ctx: &mut PackageBuildContext<'_>, path: &Path, root: &P
         && let Some(name) = ctx
             .manifests
             .go_mod(&go_mod)
-            .and_then(go_module_name_from_content)
+            .as_deref()
+            .and_then(|content| go_module_name_from_content(content))
     {
         return name;
     }
@@ -904,11 +1069,17 @@ fn resolve_package_version(
         // package catalog reports inherited versions, matching what
         // `aggregate_versions` reports for `sniff repo version`. The source and
         // `inherited` flag are unused here; the catalog stores only the string.
-        return ctx
-            .manifests
-            .cargo(&cargo_toml)
-            .and_then(|parsed| cargo_package_version_with_source(parsed, &cargo_toml, root))
-            .map(|(version, _, _)| version);
+        let parsed = ctx.manifests.cargo(&cargo_toml)?;
+        let root_manifest = root.join("Cargo.toml");
+        let root_parsed = ctx.manifests.cargo(&root_manifest);
+        return cargo_package_version_with_root(
+            &parsed,
+            &cargo_toml,
+            root,
+            &root_manifest,
+            root_parsed.as_deref(),
+        )
+        .map(|(version, _, _)| version);
     }
 
     let package_json = path.join("package.json");
@@ -916,6 +1087,7 @@ fn resolve_package_version(
         if let Some(version) = ctx
             .manifests
             .npm(&package_json)
+            .as_deref()
             .and_then(npm_package_version)
         {
             return Some(version);
@@ -926,6 +1098,7 @@ fn resolve_package_version(
                 return ctx
                     .manifests
                     .npm(&root_package_json)
+                    .as_deref()
                     .and_then(npm_package_version);
             }
         }
@@ -936,6 +1109,7 @@ fn resolve_package_version(
         && let Some(version) = ctx
             .manifests
             .pyproject(&pyproject_toml)
+            .as_deref()
             .and_then(pyproject_package_version)
     {
         return Some(version);
@@ -1185,6 +1359,16 @@ pub fn refresh_package_boundaries(
     packages: &mut [Package],
     repo_inventory: Option<&FileInventory>,
 ) {
+    let ownership_index = repo_inventory
+        .map(|inventory| PackageOwnershipIndex::from_packages(&inventory.scope.root, packages));
+    refresh_package_boundaries_with_index(packages, repo_inventory, ownership_index.as_ref());
+}
+
+fn refresh_package_boundaries_with_index(
+    packages: &mut [Package],
+    repo_inventory: Option<&FileInventory>,
+    ownership_index: Option<&PackageOwnershipIndex>,
+) {
     if packages.is_empty() {
         return;
     }
@@ -1224,18 +1408,10 @@ pub fn refresh_package_boundaries(
             .collect();
         let mut per_pkg_total: Vec<usize> = vec![0; packages.len()];
 
+        let ownership_index = ownership_index
+            .expect("an inventory-backed refresh requires a package ownership index");
         for classification in inventory.classifications.iter() {
-            let mut assigned_pkg = None;
-            let mut current = classification.path.as_path();
-            while let Some(parent) = current.parent() {
-                if let Some(&pkg_idx) = package_rel_to_index.get(parent) {
-                    assigned_pkg = Some(pkg_idx);
-                    break;
-                }
-                current = parent;
-            }
-
-            let Some(pkg_idx) = assigned_pkg else {
+            let Some(pkg_idx) = ownership_index.lookup_relative(&classification.path) else {
                 continue;
             };
 
@@ -1353,42 +1529,18 @@ pub(crate) fn discover_seeds_with_optional_index(
     mi_discover_seeds_with_optional_index(root, standard, provenance, index)
 }
 
-/// `Cargo.lock` versions, parsed at most once per workspace root per detection.
-///
-/// ## Notes
-///
-/// Which lockfile resolves a member's dependency versions is a property of the
-/// *owning* workspace, not the repository: a Cargo workspace nested under a pnpm
-/// root resolves against its own `Cargo.lock`. Keying by `owner_root` preserves
-/// that, and collapses what was previously one parse per detector plus one more
-/// for the full-mode manifest scan.
-#[derive(Default)]
-struct LockStore {
-    by_root: HashMap<PathBuf, Option<CargoLockVersions>>,
+/// Resolve the lockfile owned by `seed` without reframing it to the outer repo.
+fn lock_versions_for_seed(
+    seed: &PackageSeed,
+    manifests: &ManifestStore,
+) -> Option<Rc<CargoLockVersions>> {
+    matches!(
+        seed.standard,
+        MonorepoStandard::CargoWorkspace | MonorepoStandard::Unknown
+    )
+    .then(|| manifests.cargo_lock(&seed.owner_root.join("Cargo.lock")))
+    .flatten()
 }
-
-impl LockStore {
-    /// The lockfile versions to enrich `seed` with.
-    ///
-    /// Only Cargo-owned and manifest-scanned boundaries consult a lockfile;
-    /// every other standard enriches with `None`, which is the contract each
-    /// detector expressed by passing a `None` lockfile of its own.
-    fn for_seed(&mut self, seed: &PackageSeed) -> &Option<CargoLockVersions> {
-        if !matches!(
-            seed.standard,
-            MonorepoStandard::CargoWorkspace | MonorepoStandard::Unknown
-        ) {
-            return &NO_LOCK_VERSIONS;
-        }
-        self.by_root
-            .entry(seed.owner_root.clone())
-            .or_insert_with(|| CargoLockVersions::parse(&seed.owner_root.join("Cargo.lock")))
-    }
-}
-
-/// The absent-lockfile constant [`LockStore::for_seed`] hands to standards that
-/// never resolved versions from one.
-static NO_LOCK_VERSIONS: Option<CargoLockVersions> = None;
 
 /// Enrich one deduplicated boundary into a catalog [`Package`].
 ///
@@ -1402,8 +1554,9 @@ static NO_LOCK_VERSIONS: Option<CargoLockVersions> = None;
 /// detector's root, then `rebase_package_to_root`".
 fn create_package_from_seed(
     seed: &PackageSeed,
-    lock_versions: &Option<CargoLockVersions>,
+    lock_versions: Option<&CargoLockVersions>,
     request: &RepoRequest,
+    manifests: &ManifestStore,
 ) -> Package {
     let mut package = create_package_with_request(
         &seed.path,
@@ -1412,6 +1565,7 @@ fn create_package_from_seed(
         seed.provenance,
         lock_versions,
         request,
+        manifests,
     );
     package.relative = seed.relative.clone();
     package.package_area = make_package_area(&seed.relative);
@@ -1429,6 +1583,7 @@ fn create_package_from_seed(
 /// [`refresh_package_boundaries`] deliberately does not count: it re-derives
 /// languages for packages this function already produced, so counting there too
 /// would report every boundary twice.
+#[cfg(test)]
 pub(crate) fn create_package(
     path: &Path,
     root: &Path,
@@ -1436,13 +1591,15 @@ pub(crate) fn create_package(
     provenance: PackageProvenance,
     lock_versions: &Option<CargoLockVersions>,
 ) -> Package {
+    let manifests = ManifestStore::default();
     create_package_with_request(
         path,
         root,
         standard,
         provenance,
-        lock_versions,
+        lock_versions.as_ref(),
         &RepoRequest::full(),
+        &manifests,
     )
 }
 
@@ -1452,13 +1609,14 @@ fn create_package_with_request(
     root: &Path,
     standard: MonorepoStandard,
     provenance: PackageProvenance,
-    lock_versions: &Option<CargoLockVersions>,
+    lock_versions: Option<&CargoLockVersions>,
     request: &RepoRequest,
+    manifests: &ManifestStore,
 ) -> Package {
     if request.wants_package_enrichment() {
         performance::increment_counter(counters::REPO_PACKAGE_ENRICHMENTS, 1);
     }
-    let mut ctx = PackageBuildContext::new(lock_versions);
+    let mut ctx = PackageBuildContext::new(manifests, lock_versions);
     let relative = make_relative_path(path, root);
     let package_area = make_package_area(&relative);
     let ecosystem = detect_package_ecosystem(path);
@@ -1478,7 +1636,7 @@ fn create_package_with_request(
         crate::filesystem::repo::test_runner_usage::detect_test_runners(
             path,
             root,
-            &mut ctx.manifests,
+            ctx.manifests,
         )
     } else {
         Vec::new()
@@ -1490,6 +1648,7 @@ fn create_package_with_request(
     let features = if !request.structure_only && probe_exists(&cargo_toml) {
         ctx.manifests
             .cargo(&cargo_toml)
+            .as_deref()
             .map(cargo_features_from_value)
             .unwrap_or_default()
     } else {
@@ -1505,7 +1664,8 @@ fn create_package_with_request(
         && probe_exists(&cargo_toml)
         && let Some(parsed) = ctx.manifests.cargo(&cargo_toml)
     {
-        let (normal, dev, build) = cargo_dependencies_from_value(parsed, ctx.lock_versions);
+        let (normal, dev, build) =
+            cargo_dependencies_from_value(&parsed, ctx.lock_versions);
         let mut all_deps = normal;
         all_deps.extend(build);
 
@@ -1523,7 +1683,7 @@ fn create_package_with_request(
             resolve_js_package_manager(standard, root, &detected_package_managers);
         if let Some(parsed) = ctx.manifests.npm(&package_json) {
             let (normal, dev, peer, optional) =
-                package_json_dependencies_from_value(parsed, js_package_manager);
+                package_json_dependencies_from_value(&parsed, js_package_manager);
             dependencies.extend(normal);
             dev_dependencies.extend(dev);
             peer_dependencies.extend(peer);
@@ -1538,6 +1698,7 @@ fn create_package_with_request(
         && let Some((normal, optional)) = ctx
             .manifests
             .pyproject(&pyproject_toml)
+            .as_deref()
             .and_then(pyproject_dependencies_from_value)
     {
         dependencies.extend(normal);
@@ -1558,7 +1719,8 @@ fn create_package_with_request(
         && let Some(go_deps) = ctx
             .manifests
             .go_mod(&go_mod)
-            .and_then(go_mod_dependencies_from_content)
+            .as_deref()
+            .and_then(|content| go_mod_dependencies_from_content(content))
     {
         dependencies.extend(go_deps);
     };
@@ -1623,6 +1785,7 @@ mod tests {
     use super::*;
     use crate::filesystem::repo::cargo::cargo_package_version;
     use crate::package::{DependencyEntry, DependencyKind};
+    use crate::performance::testing;
 
     fn make_test_package(name: &str, deps: Vec<DependencyEntry>) -> Package {
         Package {
@@ -1791,11 +1954,11 @@ mod tests {
     }
 
     // ============================================================================
-    // ManifestCache tests
+    // ManifestStore tests
     // ============================================================================
 
     #[test]
-    fn manifest_cache_parses_cargo_toml_once() {
+    fn manifest_store_parses_cargo_toml_once() {
         use std::io::Write;
         use tempfile::tempdir;
 
@@ -1810,9 +1973,9 @@ mod tests {
         .unwrap();
         drop(file);
 
-        let mut cache = ManifestCache::default();
+        let manifests = ManifestStore::default();
 
-        let parsed = cache.cargo(&cargo_toml);
+        let parsed = manifests.cargo(&cargo_toml);
         assert!(parsed.is_some());
         assert_eq!(
             parsed
@@ -1823,7 +1986,7 @@ mod tests {
             Some("test-pkg")
         );
 
-        let parsed = cache.cargo(&cargo_toml);
+        let parsed = manifests.cargo(&cargo_toml);
         assert!(parsed.is_some());
         assert_eq!(
             parsed
@@ -1836,7 +1999,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_cache_parses_package_json_once() {
+    fn manifest_store_parses_package_json_once() {
         use std::io::Write;
         use tempfile::tempdir;
 
@@ -1849,16 +2012,16 @@ mod tests {
         .unwrap();
         drop(file);
 
-        let mut cache = ManifestCache::default();
+        let manifests = ManifestStore::default();
 
-        let parsed = cache.npm(&package_json);
+        let parsed = manifests.npm(&package_json);
         assert!(parsed.is_some());
         assert_eq!(
             parsed.unwrap().get("name").and_then(|n| n.as_str()),
             Some("test-app")
         );
 
-        let parsed = cache.npm(&package_json);
+        let parsed = manifests.npm(&package_json);
         assert!(parsed.is_some());
         assert_eq!(
             parsed.unwrap().get("name").and_then(|n| n.as_str()),
@@ -1867,7 +2030,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_cache_parses_pyproject_toml_once() {
+    fn manifest_store_parses_pyproject_toml_once() {
         use std::io::Write;
         use tempfile::tempdir;
 
@@ -1878,9 +2041,9 @@ mod tests {
             .unwrap();
         drop(file);
 
-        let mut cache = ManifestCache::default();
+        let manifests = ManifestStore::default();
 
-        let parsed = cache.pyproject(&pyproject);
+        let parsed = manifests.pyproject(&pyproject);
         assert!(parsed.is_some());
         assert_eq!(
             parsed
@@ -1891,7 +2054,7 @@ mod tests {
             Some("test-py")
         );
 
-        let parsed = cache.pyproject(&pyproject);
+        let parsed = manifests.pyproject(&pyproject);
         assert!(parsed.is_some());
         assert_eq!(
             parsed
@@ -1904,7 +2067,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_cache_reads_go_mod_once() {
+    fn manifest_store_reads_go_mod_once() {
         use std::io::Write;
         use tempfile::tempdir;
 
@@ -1915,19 +2078,38 @@ mod tests {
             .unwrap();
         drop(file);
 
-        let mut cache = ManifestCache::default();
+        let manifests = ManifestStore::default();
 
-        let content = cache.go_mod(&go_mod);
+        let content = manifests.go_mod(&go_mod);
         assert!(content.is_some());
         assert!(content.unwrap().contains("example.com/test"));
 
-        let content = cache.go_mod(&go_mod);
+        let content = manifests.go_mod(&go_mod);
         assert!(content.is_some());
         assert!(content.unwrap().contains("example.com/test"));
     }
 
     #[test]
-    fn package_build_context_derives_all_fields_from_cached_manifests() {
+    fn manifest_store_caches_parse_failures() {
+        use crate::performance::testing;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let cargo_toml = dir.path().join("Cargo.toml");
+        std::fs::write(&cargo_toml, "[package\ninvalid = true\n").unwrap();
+        let manifests = ManifestStore::default();
+
+        let (_, counts) = testing::measure(|| {
+            assert!(manifests.cargo(&cargo_toml).is_none());
+            assert!(manifests.cargo(&cargo_toml).is_none());
+        });
+
+        assert_eq!(counts.get(counters::FS_FILE_OPENS), 1);
+        assert_eq!(counts.get(counters::REPO_MANIFEST_PARSES), 1);
+    }
+
+    #[test]
+    fn package_build_context_derives_all_fields_from_manifest_store() {
         use std::io::Write;
         use tempfile::tempdir;
 
@@ -1942,31 +2124,35 @@ mod tests {
         .unwrap();
         drop(file);
 
-        let lock_versions: Option<CargoLockVersions> = None;
-        let mut ctx = PackageBuildContext::new(&lock_versions);
+        let manifests = ManifestStore::default();
+        let ctx = PackageBuildContext::new(&manifests, None);
 
         let name = ctx
             .manifests
             .cargo(&cargo_toml)
+            .as_deref()
             .and_then(cargo_package_name);
         assert_eq!(name, Some("ctx-pkg".to_string()));
 
         let version = ctx
             .manifests
             .cargo(&cargo_toml)
+            .as_deref()
             .and_then(cargo_package_version);
         assert_eq!(version, Some("0.5.0".to_string()));
 
         let features = ctx
             .manifests
             .cargo(&cargo_toml)
+            .as_deref()
             .map(cargo_features_from_value)
             .unwrap_or_default();
         assert!(features.contains(&"default".to_string()));
         assert!(features.contains(&"std".to_string()));
 
         if let Some(parsed) = ctx.manifests.cargo(&cargo_toml) {
-            let (normal, _dev, _build) = cargo_dependencies_from_value(parsed, ctx.lock_versions);
+            let (normal, _dev, _build) =
+                cargo_dependencies_from_value(&parsed, ctx.lock_versions);
             assert_eq!(normal.len(), 1);
             assert_eq!(normal[0].name, "serde");
         }
@@ -2058,7 +2244,15 @@ mod tests {
             },
         ];
 
-        refresh_package_boundaries(&mut packages, Some(&inventory));
+        let ((), counts) = testing::measure(|| {
+            refresh_package_boundaries(&mut packages, Some(&inventory));
+        });
+
+        assert_eq!(
+            counts.get(counters::FS_CANONICALIZATIONS),
+            3,
+            "the root and two package keys normalize once; five file lookups stay lexical"
+        );
 
         assert_eq!(packages[0].languages.len(), 1);
         assert_eq!(packages[0].languages[0].language, ProgrammingLanguage::Rust);
@@ -2239,9 +2433,14 @@ mod observation_index {
         for name in ["alpha", "beta"] {
             let pkg = root.join("crates").join(name);
             fs::create_dir_all(pkg.join("src")).expect("create member");
+            let details = if name == "alpha" {
+                "\n[features]\nfast = []\n\n[dependencies]\nserde = \"1\"\n"
+            } else {
+                ""
+            };
             fs::write(
                 pkg.join("Cargo.toml"),
-                format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n"),
+                format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n{details}"),
             )
             .expect("write member manifest");
             fs::write(pkg.join("src").join("lib.rs"), "pub fn f() {}\n").expect("write source");
@@ -2279,6 +2478,69 @@ mod observation_index {
         )
         .expect("write nested member");
 
+        dir
+    }
+
+    fn inherited_cargo_workspace(member_count: usize, nextest_config: bool) -> TempDir {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"crates/*\"]\nresolver = \"2\"\n\n\
+             [workspace.package]\nversion = \"9.9.9\"\n",
+        )
+        .expect("write root manifest");
+
+        for index in 0..member_count {
+            let name = format!("member-{index}");
+            let member = root.join("crates").join(&name);
+            fs::create_dir_all(&member).expect("create member");
+            fs::write(
+                member.join("Cargo.toml"),
+                format!(
+                    "[package]\nname = \"{name}\"\nversion.workspace = true\n\n\
+                     [dependencies]\nserde = \"1\"\n"
+                ),
+            )
+            .expect("write member manifest");
+        }
+
+        if nextest_config {
+            fs::create_dir_all(root.join(".config")).expect("create config dir");
+            fs::write(
+                root.join(".config").join("nextest.toml"),
+                "[profile.default]\n",
+            )
+            .expect("write nextest config");
+        }
+
+        dir
+    }
+
+    fn nested_cargo_workspaces() -> TempDir {
+        let dir = TempDir::new().expect("tempdir");
+        for (workspace, member, version) in
+            [("rust", "core", "1.2.3"), ("tools", "xtask", "7.8.9")]
+        {
+            let root = dir.path().join(workspace);
+            let package = root.join(member);
+            fs::create_dir_all(&package).expect("create nested member");
+            fs::write(
+                root.join("Cargo.toml"),
+                format!(
+                    "[workspace]\nmembers = [\"{member}\"]\n\n\
+                     [workspace.package]\nversion = \"{version}\"\n"
+                ),
+            )
+            .expect("write nested root manifest");
+            fs::write(
+                package.join("Cargo.toml"),
+                format!(
+                    "[package]\nname = \"{member}\"\nversion.workspace = true\n"
+                ),
+            )
+            .expect("write nested member manifest");
+        }
         dir
     }
 
@@ -2360,25 +2622,231 @@ mod observation_index {
         );
     }
 
-    /// Structure-only detection enriches each boundary once too, and full mode
-    /// must not enrich more boundaries than structure mode discovers.
-    ///
-    /// The two modes disagreeing here would mean full mode is counting a
-    /// boundary structure mode never resolved — the doubling defect's signature.
+    /// R5.5-R5.6 — every inheriting member shares the root manifest parse.
     #[test]
-    fn full_mode_enriches_no_more_boundaries_than_structure_mode() {
-        let dir = workspace_fixture();
-        let (_, structure) = testing::measure(|| detect_repo_inner(dir.path(), true));
-        let (_, full) = testing::measure(|| detect_repo_inner(dir.path(), false));
+    fn inherited_cargo_root_manifest_is_parsed_once_per_detection() {
+        const MEMBERS: usize = 4;
+        let dir = inherited_cargo_workspace(MEMBERS, false);
+        let (result, counts) = testing::measure(|| detect_repo_inner(dir.path(), true));
+        let (repo, _) = result.expect("detection should succeed");
+        let repo = repo.expect("fixture is a Cargo workspace");
+        let packages = repo.packages.as_deref().expect("package catalog");
+
+        assert_eq!(packages.len(), MEMBERS);
+        assert!(
+            packages
+                .iter()
+                .all(|package| package.version.as_deref() == Some("9.9.9"))
+        );
+        assert_eq!(
+            counts.get(counters::REPO_MANIFEST_PARSES),
+            MEMBERS as u64 + 1,
+            "the root and each member manifest must each parse once: {:?}",
+            counts.all()
+        );
+        assert_eq!(
+            counts.get(counters::FS_FILE_OPENS),
+            MEMBERS as u64 + 2,
+            "unique manifests plus the one absent Cargo.lock observation: {:?}",
+            counts.all()
+        );
+    }
+
+    #[test]
+    fn cargo_lock_is_shared_by_provenance_and_dependency_enrichment() {
+        use crate::request::RepoDetailRequest;
+
+        let dir = inherited_cargo_workspace(2, false);
+        fs::write(
+            dir.path().join("Cargo.lock"),
+            "version = 3\n\n\
+             [[package]]\nname = \"member-0\"\nversion = \"9.9.9\"\n\n\
+             [[package]]\nname = \"member-1\"\nversion = \"9.9.9\"\n\n\
+             [[package]]\nname = \"serde\"\nversion = \"1.0.0\"\n",
+        )
+        .expect("write Cargo.lock");
+        let request = RepoRequest::focused(RepoDetailRequest::dependencies());
+
+        let (result, counts) =
+            testing::measure(|| detect_repo_inner_with_request(dir.path(), &request));
+        let (repo, _) = result.expect("detection should succeed");
+        let repo = repo.expect("fixture is a Cargo workspace");
+
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PARSES), 1);
+        assert!(repo.packages.as_deref().expect("packages").iter().all(
+            |package| package.dependencies.as_deref().is_some_and(|dependencies| {
+                dependencies.iter().any(|dependency| {
+                    dependency.name == "serde"
+                        && dependency.actual_version.as_deref() == Some("1.0.0")
+                })
+            })
+        ));
+    }
+
+    #[test]
+    fn root_scoped_test_runner_config_is_observed_once_per_detection() {
+        use crate::programs::enums::TestRunner;
+        use crate::request::RepoDetailRequest;
+
+        let dir = inherited_cargo_workspace(4, true);
+        let request = RepoRequest::focused(RepoDetailRequest::test_runners());
+        let (result, counts) =
+            testing::measure(|| detect_repo_inner_with_request(dir.path(), &request));
+        let (repo, _) = result.expect("detection should succeed");
+        let repo = repo.expect("fixture is a Cargo workspace");
+
+        assert_eq!(counts.get(counters::REPO_ROOT_CONFIG_PROBES), 1);
+        assert!(repo.packages.as_deref().expect("packages").iter().all(
+            |package| package.test_runners.iter().any(|usage| {
+                usage.runner == TestRunner::Nextest
+                    && matches!(
+                        &usage.source,
+                        crate::filesystem::repo::test_runner_usage::TestRunnerSource::Config {
+                            path,
+                            ..
+                        } if path == ".config/nextest.toml"
+                    )
+            })
+        ));
+    }
+
+    #[test]
+    fn absent_root_scoped_test_runner_config_is_cached_for_the_detection() {
+        use crate::programs::enums::TestRunner;
+        use crate::request::RepoDetailRequest;
+
+        let dir = inherited_cargo_workspace(4, false);
+        let request = RepoRequest::focused(RepoDetailRequest::test_runners());
+        let (result, counts) =
+            testing::measure(|| detect_repo_inner_with_request(dir.path(), &request));
+        let (repo, _) = result.expect("detection should succeed");
+        let repo = repo.expect("fixture is a Cargo workspace");
 
         assert_eq!(
-            full.get(counters::REPO_PACKAGE_ENRICHMENTS),
-            structure.get(counters::REPO_PACKAGE_ENRICHMENTS),
-            "full mode discovers the same boundaries as structure mode, so it must \
-             enrich the same number; structure {:?} vs full {:?}",
-            structure.all(),
-            full.all()
+            counts.get(counters::REPO_ROOT_CONFIG_PROBES),
+            2,
+            "nextest has two root config candidates; each must be observed once, not once per member"
         );
+        assert!(repo.packages.as_deref().expect("packages").iter().all(
+            |package| package.test_runners.iter().any(|usage| {
+                usage.runner == TestRunner::CargoTest
+                    && matches!(
+                        usage.source,
+                        crate::filesystem::repo::test_runner_usage::TestRunnerSource::EcosystemDefault
+                    )
+            })
+        ));
+    }
+
+    #[test]
+    fn nested_cargo_inheritance_uses_each_seed_owner_root() {
+        let dir = nested_cargo_workspaces();
+        let (result, counts) = testing::measure(|| detect_repo_inner(dir.path(), true));
+        let (repo, _) = result.expect("detection should succeed");
+        let repo = repo.expect("nested Cargo workspaces should be detected");
+        let packages = repo.packages.as_deref().expect("packages");
+
+        let version = |name: &str| {
+            packages
+                .iter()
+                .find(|package| package.name == name)
+                .and_then(|package| package.version.as_deref())
+        };
+        assert_eq!(version("core"), Some("1.2.3"));
+        assert_eq!(version("xtask"), Some("7.8.9"));
+        assert_eq!(
+            counts.get(counters::REPO_MANIFEST_PARSES),
+            4,
+            "two roots and two members must each parse once: {:?}",
+            counts.all()
+        );
+    }
+
+    /// R5.4 — structure mode stops before every enrichment-only detail phase.
+    #[test]
+    fn structure_mode_performs_zero_enrichment_work() {
+        let dir = workspace_fixture();
+        let (result, counts) = testing::measure(|| detect_repo_inner(dir.path(), true));
+        let (repo, inventory) = result.expect("structure detection should succeed");
+        let repo = repo.expect("fixture is a workspace");
+        let packages = repo.packages.as_ref().expect("package catalog");
+
+        assert_eq!(
+            counts.get(counters::REPO_PACKAGE_ENRICHMENTS),
+            0,
+            "structure must not enter package enrichment: {:?}",
+            counts.all()
+        );
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PARSES), 0);
+        assert_eq!(counts.get(counters::REPO_CONFIG_PARSES), 0);
+        assert_eq!(counts.get(counters::FS_INVENTORY_ACCEPTED), 0);
+        assert!(inventory.is_none());
+
+        for package in packages {
+            assert!(!package.name.is_empty(), "identity must remain populated");
+            assert_eq!(package.primary_language, None);
+            assert!(package.secondary_languages.is_empty());
+            assert!(package.languages.is_empty());
+            assert!(package.frameworks.is_empty());
+            assert!(package.file_associations.is_empty());
+            assert!(package.configuration.is_empty());
+            assert!(package.documentation.is_empty());
+            assert!(package.command_runner.is_empty());
+            assert!(package.package_managers.is_empty());
+            assert!(package.test_runners.is_empty());
+            assert!(package.features.is_empty());
+            assert!(package.depends_on.is_empty());
+            assert!(package.used_by.is_empty());
+            assert!(package.dependencies.is_none());
+            assert!(package.dev_dependencies.is_none());
+            assert!(package.peer_dependencies.is_none());
+            assert!(package.optional_dependencies.is_none());
+        }
+    }
+
+    #[test]
+    fn focused_requests_populate_only_the_selected_package_detail() {
+        use crate::request::RepoDetailRequest;
+
+        let dir = workspace_fixture();
+        let cases = [
+            (
+                RepoDetailRequest::package_managers(),
+                (true, false, false),
+            ),
+            (RepoDetailRequest::dependencies(), (false, true, false)),
+            (RepoDetailRequest::test_runners(), (false, false, true)),
+        ];
+
+        for (details, expected) in cases {
+            let request = RepoRequest::focused(details);
+            let (result, counts) =
+                testing::measure(|| detect_repo_inner_with_request(dir.path(), &request));
+            let (repo, inventory) = result.expect("focused detection should succeed");
+            let repo = repo.expect("fixture is a workspace");
+            let alpha = repo
+                .packages
+                .as_deref()
+                .expect("packages")
+                .iter()
+                .find(|package| package.name == "alpha")
+                .expect("alpha package");
+
+            assert_eq!(
+                (
+                    !alpha.package_managers.is_empty(),
+                    alpha.dependencies.as_ref().is_some_and(|deps| !deps.is_empty()),
+                    !alpha.test_runners.is_empty(),
+                ),
+                expected
+            );
+            assert!(alpha.features.is_empty());
+            assert!(alpha.languages.is_empty());
+            assert!(alpha.frameworks.is_empty());
+            assert!(alpha.file_associations.is_empty());
+            assert!(inventory.is_none());
+            assert_eq!(counts.get(counters::FS_INVENTORY_ACCEPTED), 0);
+        }
     }
 
     /// R4.2 — integrated and standalone full detection must agree.

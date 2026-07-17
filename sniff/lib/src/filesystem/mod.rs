@@ -137,23 +137,34 @@ impl WalkScope {
 
 /// Run repository detection for the shared repo context, reusing walk evidence.
 ///
-/// Returns `Ok(None)` when no consumer needs repository context, so callers can
+/// Returns an empty context when no consumer needs repository context, so callers can
 /// keep one call site per walk scope rather than repeating the `need` check.
+#[derive(Default)]
+struct DetectedRepoContext {
+    info: Option<RepoInfo>,
+    ownership_index: Option<repo::ownership::PackageOwnershipIndex>,
+}
+
 fn detect_repo_context(
     need_repo_context: bool,
     root: &Path,
     request: &RepoRequest,
     view: Option<&system_view::FilesystemSystemView>,
-) -> Result<Option<RepoInfo>> {
+) -> Result<DetectedRepoContext> {
     if !need_repo_context {
-        return Ok(None);
+        return Ok(DetectedRepoContext::default());
     }
     let evidence = view
         .map(repo::detection::RepoEvidence::from_view)
         .unwrap_or_default();
-    let (repo_info, _) =
-        repo::detection::detect_repo_inner_with_shared_request(root, request, evidence)?;
-    Ok(repo_info)
+    let (info, _, ownership_index) =
+        repo::detection::detect_repo_inner_with_shared_request_and_ownership(
+            root, request, evidence,
+        )?;
+    Ok(DetectedRepoContext {
+        info,
+        ownership_index,
+    })
 }
 
 /// Detect filesystem information according to the given request.
@@ -269,6 +280,7 @@ pub fn detect_filesystem_with_request(
                 let repo_context =
                     detect_repo_context(need_repo_context, &shared_root, repo_request, None)?;
                 let walk_root = repo_context
+                    .info
                     .as_ref()
                     .and_then(|repo| repo.package_for_dir(root))
                     .map(|package| package.path.clone())
@@ -287,9 +299,14 @@ pub fn detect_filesystem_with_request(
 
         let inventory_started = Instant::now();
         let (files, languages) = if request.include_file_inventory {
-            let inventory = match repo_context.as_ref().and_then(|r| r.package_for_dir(root)) {
+            let inventory = match repo_context
+                .info
+                .as_ref()
+                .and_then(|repo| repo.package_for_dir(root))
+            {
                 Some(package) => {
                     let exclude_roots = repo_context
+                        .info
                         .as_ref()
                         .and_then(|r| r.packages.as_ref())
                         .map(|packages| {
@@ -356,15 +373,16 @@ pub fn detect_filesystem_with_request(
                 .and_then(|view| view.docs.take())
                 .unwrap_or_default();
 
-            if let Some(packages) = repo_context
-                .as_ref()
-                .and_then(|repo| repo.packages.as_ref())
-            {
-                let package_paths: Vec<(String, PathBuf)> = packages
-                    .iter()
-                    .map(|package| (package.name.clone(), PathBuf::from(&package.relative)))
-                    .collect();
-                docs::assign_packages(&mut docs, &package_paths, &docs_root);
+            if let (Some(repo), Some(ownership_index)) = (
+                repo_context.info.as_ref(),
+                repo_context.ownership_index.as_ref(),
+            ) {
+                docs::assign_packages_from_repo(
+                    &mut docs,
+                    repo,
+                    ownership_index,
+                    &docs_root,
+                );
             }
 
             if docs.is_empty() { None } else { Some(docs) }
@@ -376,7 +394,7 @@ pub fn detect_filesystem_with_request(
         // Move the completed `RepoInfo` out; a request that only needed it as
         // docs context drops it here instead of returning it.
         let repo = match request.repo.is_some() {
-            true => repo_context.take(),
+            true => repo_context.info.take(),
             false => None,
         };
 

@@ -261,7 +261,7 @@ pub(crate) fn read_json(path: &Path) -> Option<serde_json::Value> {
 
 /// Read a manifest for identity resolution, recording the work.
 ///
-/// The identity path deliberately bypasses `ManifestCache`: it resolves one
+/// The identity path deliberately bypasses `ManifestStore`: it resolves one
 /// root and exits, so it reads each manifest at most once anyway.
 fn read_counted(path: &Path) -> Option<String> {
     performance::increment_counter(counters::FS_FILE_OPENS, 1);

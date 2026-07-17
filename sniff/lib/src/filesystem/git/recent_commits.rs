@@ -8,6 +8,7 @@ use tracing::debug;
 use crate::filesystem::git::ConventionalCommit;
 use crate::filesystem::git::discovery::DeltaKind;
 use crate::filesystem::path_kind::{is_documentation_path, is_source_code_path};
+use crate::filesystem::repo::ownership::PackageOwnershipIndex;
 use crate::filesystem::repo::{Package, RepoInfo, detect_repo};
 use crate::performance::{self, counters};
 use crate::{Result, SniffError};
@@ -384,6 +385,35 @@ pub fn get_recent_commits_by_count(base_dir: &Path, count: usize) -> Result<Comm
 // Internal commit walker
 // ---------------------------------------------------------------------------
 
+fn attribute_commit_files(
+    repo_info: Option<&RepoInfo>,
+    ownership_index: Option<&PackageOwnershipIndex>,
+    files: &[(PathBuf, DeltaKind)],
+) -> (Option<Vec<String>>, Option<Vec<String>>) {
+    let Some(repo_info) = repo_info.filter(|info| info.is_monorepo) else {
+        return (None, None);
+    };
+    let Some(ownership_index) = ownership_index else {
+        return (Some(Vec::new()), Some(Vec::new()));
+    };
+
+    let mut packages = BTreeSet::new();
+    let mut package_areas = BTreeSet::new();
+    for (path, _) in files {
+        if let Some(package) =
+            repo_info.package_for_relative_path_with_index(ownership_index, path)
+        {
+            packages.insert(package.name.clone());
+            package_areas.insert(package.package_area.clone());
+        }
+    }
+
+    (
+        Some(packages.into_iter().collect()),
+        Some(package_areas.into_iter().collect()),
+    )
+}
+
 fn collect_commits_in_range(
     repo: &gix::Repository,
     since: DateTime<Utc>,
@@ -408,9 +438,11 @@ fn collect_commits_in_range(
     let mut diff_cache = repo
         .diff_resource_cache_for_tree_diff()
         .map_err(|e| SniffError::git("diff", e))?;
-
-    let packages = repo_info_opt.and_then(|ri| ri.packages.as_ref());
-    let is_monorepo = repo_info_opt.is_some_and(|ri| ri.is_monorepo);
+    let ownership_index = repo_info_opt.and_then(|info| {
+        info.packages
+            .as_deref()
+            .map(|packages| PackageOwnershipIndex::from_packages(&info.root, packages))
+    });
 
     for info_result in walk {
         let info = info_result.map_err(|e| SniffError::git("revwalk", e))?;
@@ -449,31 +481,8 @@ fn collect_commits_in_range(
         let message = String::from_utf8_lossy(message_raw.trim());
         let (description, bullet_points) = parse_commit_message(&message);
 
-        let (commit_packages, commit_package_areas) = if is_monorepo {
-            if let Some(pkgs) = packages {
-                let mut pkg_set: BTreeSet<String> = BTreeSet::new();
-                let mut area_set: BTreeSet<String> = BTreeSet::new();
-
-                for file_path in &files_raw {
-                    let file_path_buf = &file_path.0;
-                    for pkg in pkgs.iter() {
-                        if file_path_buf.starts_with(&pkg.relative) {
-                            pkg_set.insert(pkg.name.clone());
-                            area_set.insert(pkg.package_area.clone());
-                        }
-                    }
-                }
-
-                (
-                    Some(pkg_set.into_iter().collect()),
-                    Some(area_set.into_iter().collect()),
-                )
-            } else {
-                (Some(vec![]), Some(vec![]))
-            }
-        } else {
-            (None, None)
-        };
+        let (commit_packages, commit_package_areas) =
+            attribute_commit_files(repo_info_opt, ownership_index.as_ref(), &files_raw);
 
         commits.push(CommitDesc {
             hash: sha,
@@ -515,9 +524,11 @@ fn collect_commits_from_hash_to_head(
     let mut diff_cache = repo
         .diff_resource_cache_for_tree_diff()
         .map_err(|e| SniffError::git("diff", e))?;
-
-    let packages = repo_info_opt.and_then(|ri| ri.packages.as_ref());
-    let is_monorepo = repo_info_opt.is_some_and(|ri| ri.is_monorepo);
+    let ownership_index = repo_info_opt.and_then(|info| {
+        info.packages
+            .as_deref()
+            .map(|packages| PackageOwnershipIndex::from_packages(&info.root, packages))
+    });
 
     for info_result in walk {
         let info = info_result.map_err(|e| SniffError::git("revwalk", e))?;
@@ -543,31 +554,8 @@ fn collect_commits_from_hash_to_head(
         let message = String::from_utf8_lossy(message_raw.trim());
         let (description, bullet_points) = parse_commit_message(&message);
 
-        let (commit_packages, commit_package_areas) = if is_monorepo {
-            if let Some(pkgs) = packages {
-                let mut pkg_set: BTreeSet<String> = BTreeSet::new();
-                let mut area_set: BTreeSet<String> = BTreeSet::new();
-
-                for file_path in &files_raw {
-                    let file_path_buf = &file_path.0;
-                    for pkg in pkgs.iter() {
-                        if file_path_buf.starts_with(&pkg.relative) {
-                            pkg_set.insert(pkg.name.clone());
-                            area_set.insert(pkg.package_area.clone());
-                        }
-                    }
-                }
-
-                (
-                    Some(pkg_set.into_iter().collect()),
-                    Some(area_set.into_iter().collect()),
-                )
-            } else {
-                (Some(vec![]), Some(vec![]))
-            }
-        } else {
-            (None, None)
-        };
+        let (commit_packages, commit_package_areas) =
+            attribute_commit_files(repo_info_opt, ownership_index.as_ref(), &files_raw);
 
         commits.push(CommitDesc {
             hash: sha,
@@ -612,9 +600,11 @@ fn collect_commits_by_count(
     let mut diff_cache = repo
         .diff_resource_cache_for_tree_diff()
         .map_err(|e| SniffError::git("diff", e))?;
-
-    let packages = repo_info_opt.and_then(|ri| ri.packages.as_ref());
-    let is_monorepo = repo_info_opt.is_some_and(|ri| ri.is_monorepo);
+    let ownership_index = repo_info_opt.and_then(|info| {
+        info.packages
+            .as_deref()
+            .map(|packages| PackageOwnershipIndex::from_packages(&info.root, packages))
+    });
 
     for info_result in walk {
         if commits.len() >= count {
@@ -643,31 +633,8 @@ fn collect_commits_by_count(
         let message = String::from_utf8_lossy(message_raw.trim());
         let (description, bullet_points) = parse_commit_message(&message);
 
-        let (commit_packages, commit_package_areas) = if is_monorepo {
-            if let Some(pkgs) = packages {
-                let mut pkg_set: BTreeSet<String> = BTreeSet::new();
-                let mut area_set: BTreeSet<String> = BTreeSet::new();
-
-                for file_path in &files_raw {
-                    let file_path_buf = &file_path.0;
-                    for pkg in pkgs.iter() {
-                        if file_path_buf.starts_with(&pkg.relative) {
-                            pkg_set.insert(pkg.name.clone());
-                            area_set.insert(pkg.package_area.clone());
-                        }
-                    }
-                }
-
-                (
-                    Some(pkg_set.into_iter().collect()),
-                    Some(area_set.into_iter().collect()),
-                )
-            } else {
-                (Some(vec![]), Some(vec![]))
-            }
-        } else {
-            (None, None)
-        };
+        let (commit_packages, commit_package_areas) =
+            attribute_commit_files(repo_info_opt, ownership_index.as_ref(), &files_raw);
 
         commits.push(CommitDesc {
             hash: sha,
@@ -1028,6 +995,71 @@ impl CommitDescSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn commit_attribution_uses_deepest_component_ownership() {
+        use crate::performance::testing;
+
+        let repo = RepoInfo {
+            is_monorepo: true,
+            root: PathBuf::from("/repo"),
+            packages: Some(vec![
+                Package {
+                    path: PathBuf::from("/repo/crates/pkg-a"),
+                    relative: "crates/pkg-a".to_string(),
+                    package_area: "crates".to_string(),
+                    name: "parent".to_string(),
+                    ..Package::default()
+                },
+                Package {
+                    path: PathBuf::from("/repo/crates/pkg-a/nested"),
+                    relative: "crates/pkg-a/nested".to_string(),
+                    package_area: "crates/pkg-a".to_string(),
+                    name: "nested".to_string(),
+                    ..Package::default()
+                },
+                Package {
+                    path: PathBuf::from("/repo/crates/pkg-a2"),
+                    relative: "crates/pkg-a2".to_string(),
+                    package_area: "crates".to_string(),
+                    name: "sibling".to_string(),
+                    ..Package::default()
+                },
+            ]),
+            ..RepoInfo::default()
+        };
+        let files = vec![
+            (
+                PathBuf::from("crates/pkg-a/nested/src/lib.rs"),
+                DeltaKind::Modified,
+            ),
+            (
+                PathBuf::from("crates/pkg-a2/src/lib.rs"),
+                DeltaKind::Modified,
+            ),
+            (
+                PathBuf::from("crates/pkg-a20/src/lib.rs"),
+                DeltaKind::Modified,
+            ),
+        ];
+
+        let ownership_index = PackageOwnershipIndex::from_packages(
+            &repo.root,
+            repo.packages.as_deref().unwrap(),
+        );
+        let ((packages, areas), counts) = testing::measure(|| {
+            attribute_commit_files(Some(&repo), Some(&ownership_index), &files)
+        });
+        assert_eq!(
+            packages,
+            Some(vec!["nested".to_string(), "sibling".to_string()])
+        );
+        assert_eq!(
+            areas,
+            Some(vec!["crates".to_string(), "crates/pkg-a".to_string()])
+        );
+        assert_eq!(counts.get(counters::FS_CANONICALIZATIONS), 0);
+    }
 
     mod parse_period_tests {
         use super::*;
