@@ -1,5 +1,4 @@
 ---
-agent: codex/
 total_phases: 13
 created: 2026-07-12
 phase: 1
