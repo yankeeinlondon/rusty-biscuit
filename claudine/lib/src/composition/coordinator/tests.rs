@@ -509,6 +509,8 @@ fn prepared_composition() -> crate::composition::types::PreparedComposition {
         dropped_optionals: Vec::new(),
         warnings: Vec::new(),
         deferred_lifecycle_keys: Vec::new(),
-        rematerialize: Default::default(),
+        input_layers: Default::default(),
+        entry: crate::composition::DocumentEntryReason::Direct,
+        compose_context: darkmatter::markdown::compose::ComposeContext::capture_for_content(std::path::Path::new("."), ""),
     }
 }

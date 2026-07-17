@@ -96,7 +96,11 @@ pub use looping::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
 pub use mismatch::{capture_frontmatter_yaml, is_inline_sequence_mismatch};
 pub use preflight::{PreFlightResult, resolve_shell_approvals};
 pub use hints::{parse_interactive_hint, parse_selection_hints_from_frontmatter};
-pub use prepare::{PrepareOptions, bind_agent_workspace, prepare_direct, prepare_inline};
+pub use prepare::{
+    DocumentEntryReason, DocumentPreparation, LoopOwnership, PrepareOptions, PreparationStages,
+    PromptSource, SourceBasis, bind_agent_workspace, prepare_direct, prepare_document,
+    prepare_inline, preflight_document_shell,
+};
 pub use resolve::{
     enrich_composition_source_load_error, resolve_composition_source, validate_file_permissions,
 };
@@ -114,11 +118,10 @@ pub use select::{
 };
 pub use sequence::{build_step_overlay, resolve_sequence_plan};
 pub use types::{
-    AgentHint, AgentResolutionState, AmbientVariable, CompositionClosurePlan,
+    AgentHint, AgentResolutionState, AmbientVariable, CallerInputLayers, CompositionClosurePlan,
     CompositionExecutionRequest, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
     InstalledProviderSnapshot, LoopAction, LoopCondition, LoopConfig, ModelHint,
     ModelResolutionReason, OnRateLimit, OutputFormat, PickerInfluence, PreparedComposition,
-    RematerializeInputs,
     ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
     ResolvedCompositionSource, ResolvedExecutionTarget, ResolvedSessionInteractivity,
     SelectedProvider, SelectionReason, SessionInteractivitySource, SequenceExecutionOptions,

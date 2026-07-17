@@ -411,7 +411,7 @@ where
             StackControl::Error { reason } => {
                 unreachable!("the catch protocol consumes initialize error control: {reason:?}");
             }
-            StackControl::Proxy { target } => {
+            StackControl::Proxy { target, .. } => {
                 let resolved = match resolve_proxy_target(
                     &target,
                     prompt_path,
