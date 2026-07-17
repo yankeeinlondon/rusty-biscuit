@@ -7,7 +7,7 @@ use super::*;
 use claudine::composition::{
     DocumentTransition, EvaluatedProxyRequest, LifecycleCatchProtocol, LifecycleCatchResult,
     LifecycleCatchState, LifecycleTransitionAbort, LifecycleTransitionDecision,
-    LifecycleTransitionError, LifecycleTransitionInput, ProxyProvenance,
+    LifecycleTransitionError, LifecycleTransitionInput, ProxyProvenance, SurfacedHandoff,
     decide_lifecycle_transition,
 };
 
@@ -1400,80 +1400,38 @@ fn provider_run_handoff(
         term,
     ));
 
-    // R7 — loop recognition follows document identity. When an `initialize`
-    // proxy names a *looping* target, hoist the handoff out of the provider
-    // harness up to the composition command's active-document coordinator
-    // (`compose/prep.rs`), which re-prepares the target as a fresh document and
-    // gives it the same document loop it would receive when invoked directly.
-    // The router's `initialize` has fired; a clean handoff skips the source's
-    // terminal/finalize (the guard is dropped here), so the source is
-    // transferred, not completed.
+    // R1/R7 — every committed `initialize` proxy on a live (non-dry-run,
+    // non-sequence) run surfaces its handoff out of the provider harness up to
+    // the composition command's active-document coordinator (`compose/prep.rs`),
+    // which re-prepares the target as a fresh document through the *same*
+    // canonical launch pipeline a direct invocation uses. That is what rebuilds
+    // the target's complete launch bundle — provider/profile/binary, argv, MCP,
+    // system prompt, child CWD, structured mode, dispatch — rather than
+    // inheriting the router's, and it gives the target the same loop recognition
+    // it would receive when invoked directly. The router's `initialize` has
+    // fired; a clean handoff skips the source's terminal/finalize (the guard is
+    // dropped here), so the source is transferred, not completed.
     //
-    // A *non-looping* target keeps the in-harness canonical proxy bootstrap —
-    // its narrow initialize-shell safety gate, stabilized reread, and
-    // blocked/finalize routing (R4/AC12) — so those paths are unchanged.
-    // `--dry-run` (which reports the named document, never a traversed handoff)
-    // and sequence steps (a sequence proxy is contained within its step, R1)
-    // also stay in-harness.
+    // The routing decision no longer peeks at whether the target loops: a
+    // looping and a non-looping target take the same route, so one path decides
+    // loop ownership from the fully prepared target. `--dry-run` reports the
+    // named document and never traverses a handoff; a sequence proxy is
+    // contained within its step (R1) and stays on the in-harness coordinator.
     match initial_transition {
-        DocumentTransition::Proxy(handoff)
-            if !request.dry_run
-                && !request.sequence
-                && proxy_target_declares_loop(
-                    &handoff,
-                    &request.prepared.resolved_path,
-                    effective_repo_root,
-                ) =>
-        {
+        DocumentTransition::Proxy(handoff) if !request.dry_run && !request.sequence => {
             Ok(SingleCompositionOutcome {
                 exit_code: 0,
                 provider,
                 agent_perf: None,
                 iteration_signals: None,
                 terminal_signal: None,
-                initialize_handoff: Some(handoff),
+                initialize_handoff: Some(SurfacedHandoff::Request(handoff)),
             })
         }
-        // Non-looping proxy targets (and every other transition) stay on the
-        // in-harness coordinator, which owns the canonical proxy bootstrap.
+        // Dry-run and sequence-contained proxies (and every other transition)
+        // stay on the in-harness coordinator.
         other => runner::run_composition_body(&ctx, &mut guard, perf_collector, false, other),
     }
-}
-
-/// Whether an `initialize` proxy's target declares a document `loop:` once its
-/// overlay is applied.
-///
-/// Loop recognition follows document identity (R7): a looping target must
-/// acquire the same document loop it would receive when invoked directly, which
-/// the composition command's coordinator drives. A non-looping target keeps the
-/// provider harness's canonical proxy bootstrap (its narrow initialize-shell
-/// safety gate and stabilized reread, R4/AC12), so only a looping target is
-/// hoisted. A resolution or read failure answers `false`: the harness then
-/// commits the handoff and surfaces the same typed error it always would, so
-/// this peek never changes which errors a bad target produces.
-pub(super) fn proxy_target_declares_loop(
-    handoff: &EvaluatedProxyRequest,
-    source_path: &Path,
-    repo_root: Option<&Path>,
-) -> bool {
-    let Ok(resolved) =
-        claudine::composition::resolve_proxy_target(handoff.target(), source_path, repo_root)
-    else {
-        return false;
-    };
-    let Ok(mut source) =
-        claudine::composition::resolve_composition_source(&resolved.to_string_lossy())
-    else {
-        return false;
-    };
-    super::super::overlay::merge_frontmatter_overlay(
-        source.markdown.frontmatter_mut().as_map_mut(),
-        handoff.overlay(),
-    );
-    matches!(
-        claudine::composition::resolve_loop_config(&source),
-        Ok(Some(_))
-    )
 }
 
 #[cfg(test)]

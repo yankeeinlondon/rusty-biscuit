@@ -166,6 +166,12 @@ pub(super) fn run_sequence_steps(
                 // regardless of the provider each step resolves to.
                 provider_args: shared.provider_args.clone(),
                 provider_args_explicit: shared.provider_args_explicit,
+                // A sequence step's proxy stays contained within the step (R1):
+                // it adopts on the in-harness coordinator rather than surfacing
+                // to a command-level ledger, so no overlay or shared ledger is
+                // threaded here.
+                proxy_overlay: indexmap::IndexMap::new(),
+                handoff_ledger: None,
             }
         };
 

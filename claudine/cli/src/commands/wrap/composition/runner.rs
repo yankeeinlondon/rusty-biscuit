@@ -444,7 +444,14 @@ pub(super) fn run_composition_body(
         source_path: request.prepared.resolved_path.clone(),
         original_ref: request.file_ref.clone(),
         base_prompt: None,
-        overlay: indexmap::IndexMap::new(),
+        // The immediate proxy overlay for a proxied target (empty for a directly
+        // invoked document). Re-applied on every re-materialization by
+        // `materialize_harness_prompt`, so a retry/resume of a proxied target
+        // keeps the pre-schema handoff input rather than losing it once the first
+        // prepared composition is spent (AC26). The first attempt uses the seed
+        // built from `request.prepared` (overlay already baked in during canonical
+        // preparation), so the overlay is applied exactly once per attempt.
+        overlay: request.proxy_overlay.clone(),
         prompt_tail: Vec::new(),
         // Carried so a `retry`/`resume`/`proxy` re-materialization re-applies
         // the caller's `--set` params, launch-area file-ref anchor, and
@@ -459,7 +466,7 @@ pub(super) fn run_composition_body(
         profile.prepare_captured_output(&mut harness_base_args);
     }
 
-    let (exit_code, harness_perf, harness_signals) = run_harness_loop(
+    let (exit_code, harness_perf, harness_signals, surfaced_handoff) = run_harness_loop(
         provider,
         profile,
         binary_path.as_path(),
@@ -490,6 +497,7 @@ pub(super) fn run_composition_body(
         term,
         guard,
         initial_transition,
+        request.handoff_ledger.clone(),
         true,
     )?;
     if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {

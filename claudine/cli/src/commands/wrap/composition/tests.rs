@@ -1800,76 +1800,9 @@ mod projected_rate_limit_bridge {
     }
 }
 
-/// R7 — loop recognition follows the *adopted* document, not the router. The
-/// pipeline peek [`proxy_target_declares_loop`] decides, before committing an
-/// `initialize` hand-off, whether the target owns a `loop:` (and so must be
-/// hoisted to the composition coordinator for its own document loop) or is a
-/// single-run document (and so keeps the in-harness canonical proxy bootstrap).
-#[test]
-fn proxy_target_declares_loop_follows_the_adopted_target() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let source = dir.path().join("router.md");
-    std::fs::write(&source, "---\n---\nrouter body\n").unwrap();
-    std::fs::write(
-        dir.path().join("loop.md"),
-        "---\nphase: 1\nloop:\n  until: \"phase > 2\"\n  action: \"increment(phase)\"\n  \
-         max: 5\n---\nbody\n",
-    )
-    .unwrap();
-    std::fs::write(dir.path().join("plain.md"), "---\n---\nbody\n").unwrap();
-
-    let request = |target: &str, overlay: indexmap::IndexMap<String, serde_json::Value>| {
-        claudine::composition::EvaluatedProxyRequest::new(
-            target.to_string(),
-            overlay,
-            claudine::composition::ProxyProvenance::new(
-                source.clone(),
-                claudine::composition::ActionLocation::new(
-                    claudine::composition::lifecycle::LifecycleSignal::Initialize,
-                    0,
-                    0,
-                ),
-                vec![source.clone()],
-            ),
-        )
-    };
-
-    assert!(
-        pipeline::proxy_target_declares_loop(
-            &request("loop.md", indexmap::IndexMap::new()),
-            &source,
-            None
-        ),
-        "a proxied target that owns a `loop:` is recognized as looping"
-    );
-    assert!(
-        !pipeline::proxy_target_declares_loop(
-            &request("plain.md", indexmap::IndexMap::new()),
-            &source,
-            None
-        ),
-        "a non-looping target keeps the in-harness proxy bootstrap"
-    );
-    // An unresolvable target is never looping: the peek defers to the harness,
-    // which surfaces the same typed resolution error it always would.
-    assert!(
-        !pipeline::proxy_target_declares_loop(
-            &request("nope.md", indexmap::IndexMap::new()),
-            &source,
-            None
-        ),
-        "an unresolvable target is not treated as looping"
-    );
-
-    // The `with:` overlay participates in loop recognition: an overlay that adds
-    // a `loop:` to an otherwise single-run target makes it loop.
-    let mut overlay = indexmap::IndexMap::new();
-    overlay.insert(
-        "loop".to_string(),
-        serde_json::json!({ "until": "phase > 2", "action": "increment(phase)", "max": 5 }),
-    );
-    assert!(
-        pipeline::proxy_target_declares_loop(&request("plain.md", overlay), &source, None),
-        "a `with:` overlay that adds a `loop:` is recognized before commit"
-    );
-}
+// The former `proxy_target_declares_loop_follows_the_adopted_target` test was
+// removed with the pipeline peek it exercised: every committed `initialize`
+// proxy on a live run now surfaces up to the composition coordinator regardless
+// of whether the target loops, so there is no pre-commit loop peek to test. Loop
+// ownership is decided from the fully prepared target after re-entry (R7),
+// covered by the harness-orchestration and L2 equivalence suites.

@@ -180,13 +180,6 @@ const PROXY_TRANSITION_SITE_BASELINE: &[AllowedSite] = &[
                  recognition reruns for the target (R7)",
     },
     AllowedSite {
-        site: "looping::engine::execute_loop_with_lifecycle",
-        calls: 1,
-        reason: "PRODUCER — the library loop route returns the handoff on its \
-                 `LoopExecutionResult` rather than the retired \
-                 `init_proxy_target` channel",
-    },
-    AllowedSite {
         site: "coordinator::transition::map_abort",
         calls: 1,
         reason: "PRODUCER — maps the lifecycle control outcome onto the shared \
@@ -195,15 +188,9 @@ const PROXY_TRANSITION_SITE_BASELINE: &[AllowedSite] = &[
     AllowedSite {
         site: "harness_orch::loop_control::new",
         calls: 1,
-        reason: "CONSUMER — the harness loop hands the request to \
-                 `ActiveDocumentCoordinator::adopt`, the only committer of \
-                 document identity",
-    },
-    AllowedSite {
-        site: "compose::prep::execute_loop_or_single",
-        calls: 1,
-        reason: "CONSUMER — the command-level owner consumes the loop route's \
-                 handoff so a library-loop proxy cannot be dropped silently",
+        reason: "CONSUMER — the harness loop commits a dry-run/sequence-contained \
+                 `initialize` proxy in place; every live (non-sequence) proxy is \
+                 hoisted to the command coordinator before the harness begins",
     },
 ];
 

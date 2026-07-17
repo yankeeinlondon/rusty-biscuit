@@ -15,7 +15,8 @@ use claudine::composition::{
     CompositionError, DocumentTransition, EvaluatedProxyRequest, IterationSummarySignals,
     LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchState, ProxyProvenance,
     LifecycleTransitionAbort, LifecycleTransitionDecision, LifecycleTransitionError,
-    LifecycleTransitionInput, RunLedger, decide_lifecycle_transition,
+    LifecycleTransitionInput, RunLedger, SharedRunLedger, SurfacedHandoff,
+    commit_proxy, decide_lifecycle_transition,
 };
 use claudine::events::EnvironmentContext;
 use claudine::provider::Provider;
@@ -37,6 +38,12 @@ type HarnessLoopResult = (
     i32,
     Option<crate::perf::AgentExecutionPerf>,
     Option<IterationSummarySignals>,
+    // A proxy handoff the harness surfaced (compose path): a terminal-recovery /
+    // start-stack proxy the harness committed against the shared invocation
+    // ledger, for the command coordinator to re-prepare through the full
+    // canonical launch pipeline. `None` on an ordinary run and on the
+    // sequence-contained path (which adopts in place instead).
+    Option<SurfacedHandoff>,
 );
 
 #[allow(dead_code)]
@@ -83,6 +90,12 @@ struct HarnessLoopCtx<'a, 'guard> {
     term: &'a Terminal,
     lifecycle_guard: &'a mut claudine::composition::LifecycleRunGuard<'guard>,
     initial_transition: DocumentTransition,
+    // The one invocation-wide ledger, shared with the command coordinator, when
+    // this run has one (compose / inline-compose). A terminal-event proxy commits
+    // against it and surfaces the committed handoff up rather than adopting in
+    // place. `None` for a sequence step (its proxy stays contained) and for the
+    // direct wrapper passthrough.
+    handoff_ledger: Option<SharedRunLedger>,
     emit_prompt_timing: bool,
 }
 
@@ -141,6 +154,9 @@ pub(crate) fn run_harness_loop(
     // commits a proxy raised by a terminal event — one commit point, one set
     // of resolution and cycle semantics, no second channel.
     initial_transition: DocumentTransition,
+    // The shared invocation ledger (compose/inline-compose), or `None` for a
+    // sequence step / direct passthrough. See [`HarnessLoopCtx::handoff_ledger`].
+    handoff_ledger: Option<SharedRunLedger>,
     // When `true`, every structured-stream attempt in the harness loop
     // emits the prompt-scoped timing header and — if the parsed plan
     // carries `timeout_warn` / `step_timeout_warn` — their fire-once
@@ -180,6 +196,7 @@ pub(crate) fn run_harness_loop(
         term,
         lifecycle_guard,
         initial_transition,
+        handoff_ledger,
         emit_prompt_timing,
     };
     match run_harness_loop_inner(ctx)? {
@@ -295,6 +312,10 @@ struct AttemptRetryProxyControl<'a> {
     /// stays authoritative over any target frontmatter `model:`.
     cli_model: Option<&'a str>,
     yolo: bool,
+    /// The shared invocation ledger (compose path) a terminal-event proxy commits
+    /// against before surfacing up, or `None` for the sequence-contained path
+    /// (which adopts in place on the harness-local coordinator).
+    handoff_ledger: Option<&'a SharedRunLedger>,
 }
 
 struct ExecutedHarnessAttempt {
@@ -352,6 +373,7 @@ fn prepare_attempt_phase(
         profile: state.run.profile,
         cli_model: state.run.cli_model.as_deref(),
         yolo: state.run.yolo,
+        handoff_ledger: state.run.handoff_ledger.as_ref(),
     };
     let _attempt_cycle_span = info_span!(
         "harness_attempt_cycle",
@@ -405,6 +427,7 @@ fn start_lifecycle_phase(
     let attempt = control.active.iteration().attempt().number();
     let profile = control.profile;
     let provider = control.provider;
+    let handoff_ledger = control.handoff_ledger;
     let active = &mut *control.active;
     let coordinator = &mut *control.coordinator;
     let prompt_state = &mut *prompt.prompt_state;
@@ -471,48 +494,57 @@ fn start_lifecycle_phase(
                 unreachable!("the catch protocol consumes start error control")
             }
             StackControl::Stop => {}
-            _ => match dispatch_terminal_control(
-                &start_outcome,
-                attempt,
-                active.iteration_mut(),
-                None,
-                profile,
-                provider,
-                prompt_state,
-                materialized,
-                lifecycle_guard,
-                coordinator.ledger(),
-                term,
-                show_checks,
-            ) {
+            _ => {
+                // Provenance and the hop/cycle check use the shared invocation
+                // ledger on the compose path (so a hop back to an invocation
+                // ancestor is checked against the complete chain), and the
+                // harness-local coordinator ledger on the sequence path. The lock
+                // guard is dropped before the surface/adopt commit re-locks.
+                let dispatch = {
+                    let shared_guard = handoff_ledger.map(|l| l.lock().unwrap());
+                    let ledger_ref: &RunLedger =
+                        shared_guard.as_deref().unwrap_or_else(|| coordinator.ledger());
+                    dispatch_terminal_control(
+                        &start_outcome,
+                        attempt,
+                        active.iteration_mut(),
+                        None,
+                        profile,
+                        provider,
+                        prompt_state,
+                        materialized,
+                        lifecycle_guard,
+                        ledger_ref,
+                        term,
+                        show_checks,
+                    )
+                };
+                match dispatch {
                 TerminalControlAction::Continue => {
                     // The attempt slice was advanced on `active` by the dispatch;
                     // the next iteration reads its number from there.
                     return Ok(Some(LoopStep::NextAttempt));
                 }
                 TerminalControlAction::Proxy(request) => {
-                    if let Err(error) = coordinator.adopt(
+                    // Compose: commit against the shared ledger and surface up so
+                    // the command coordinator re-prepares the target through the
+                    // full canonical launch pipeline. Sequence: adopt in place. No
+                    // attempt has run at `start`, so no perf/signals ride along.
+                    return Ok(Some(surface_or_adopt_terminal_proxy(
+                        handoff_ledger,
+                        coordinator,
                         request,
                         repo_root,
                         prompt_state,
                         lifecycle_guard,
                         active,
-                    ) {
-                        return Err(route_handoff_failure(
-                            lifecycle_guard,
-                            materialized,
-                            &prompt_state.source_path,
-                            repo_root,
-                            term,
-                            effect_engine,
-                            error,
-                            loop_start,
-                        ));
-                    }
-                    // `adopt` reset `active` to iteration 1 / attempt 1: the
-                    // target gets a clean pre-flight / freeze cycle rather than
-                    // inheriting the proxying document's attempt count.
-                    return Ok(Some(LoopStep::NextAttempt));
+                        materialized,
+                        term,
+                        effect_engine,
+                        loop_start,
+                        None,
+                        None,
+                    )?));
                 }
                 TerminalControlAction::Abort(err) => {
                     let finalize_outcome = run_lifecycle_event(
@@ -542,7 +574,8 @@ fn start_lifecycle_phase(
                     return Err(err);
                 }
                 TerminalControlAction::Fallthrough => {}
-            },
+                }
+            }
         }
     }
     Ok(None)
@@ -631,7 +664,7 @@ fn bootstrap_adopted_document_phase(
     ) {
         TargetInitializeAction::Proceed => {}
         TargetInitializeAction::ExitCleanly => {
-            return Ok(Some(LoopStep::Return((0, None, None))));
+            return Ok(Some(LoopStep::Return((0, None, None, None))));
         }
         TargetInitializeAction::Abort(error) => return Err(error),
         TargetInitializeAction::Reproxy(request) => {
@@ -737,6 +770,75 @@ fn bootstrap_adopted_document_phase(
         );
     }
     Ok(None)
+}
+
+/// Resolve a terminal-event proxy request either by surfacing it up to the
+/// command coordinator (compose path) or by adopting it in place (sequence path).
+///
+/// This is the one place a terminal-recovery / `start`-stack proxy is turned
+/// into a loop step, so the two ownership models converge here:
+///
+/// - **Compose** (`handoff_ledger` is `Some`): the harness commits the request
+///   against the *one* invocation-wide ledger while the source document's stacks
+///   are still live to catch a refused hop, then surfaces the committed handoff
+///   up as a [`LoopStep::Return`] carrying it. The harness never repoints its own
+///   active document; the command coordinator re-prepares the resolved target
+///   through the full canonical launch pipeline — the same rebuild a direct
+///   invocation performs (R6).
+/// - **Sequence** (`handoff_ledger` is `None`): the proxy stays contained within
+///   the current step and adopts in place on the harness-local coordinator (R1).
+///
+/// A refused hop routes through the source's `blocked`/`finalize` with the typed
+/// commit error in both models, since the source is still the active document.
+#[allow(clippy::too_many_arguments)]
+fn surface_or_adopt_terminal_proxy(
+    handoff_ledger: Option<&SharedRunLedger>,
+    coordinator: &mut ActiveDocumentCoordinator,
+    request: EvaluatedProxyRequest,
+    repo_root: Option<&Path>,
+    prompt_state: &mut HarnessPromptState,
+    lifecycle_guard: &mut claudine::composition::LifecycleRunGuard<'_>,
+    active: &mut claudine::composition::ActiveDocumentState,
+    materialized: &MaterializedHarnessPrompt,
+    term: &Terminal,
+    effect_engine: &EffectEngine,
+    loop_start: std::time::Instant,
+    perf: Option<crate::perf::AgentExecutionPerf>,
+    iteration_signals: Option<IterationSummarySignals>,
+) -> Result<LoopStep> {
+    match handoff_ledger {
+        Some(shared) => match commit_proxy(&mut shared.lock().unwrap(), request, repo_root) {
+            Ok(handoff) => Ok(LoopStep::Return((
+                0,
+                perf,
+                iteration_signals,
+                Some(SurfacedHandoff::Committed(Box::new(handoff))),
+            ))),
+            Err(error) => Err(route_handoff_failure(
+                lifecycle_guard,
+                materialized,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                effect_engine,
+                error,
+                loop_start,
+            )),
+        },
+        None => match coordinator.adopt(request, repo_root, prompt_state, lifecycle_guard, active) {
+            Ok(()) => Ok(LoopStep::NextAttempt),
+            Err(error) => Err(route_handoff_failure(
+                lifecycle_guard,
+                materialized,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                effect_engine,
+                error,
+                loop_start,
+            )),
+        },
+    }
 }
 
 /// Overlay the rebuilt target launch-identity env onto a materialized prompt's
@@ -1287,7 +1389,9 @@ fn classify_attempt_phase(
     let repo_root = state.run.repo_root;
     let show_checks = state.run.show_checks;
     let term = state.run.term;
+    let handoff_ledger = state.run.handoff_ledger.clone();
     let attempt = state.active.iteration().attempt().number();
+    let harness_perf = &mut state.harness_perf;
     let prompt_state = &mut *state.run.prompt_state;
     let lifecycle_guard = &mut *state.run.lifecycle_guard;
     let effect_engine = &state.effect_engine;
@@ -1362,8 +1466,9 @@ fn classify_attempt_phase(
         }
         return Ok(LoopStep::Return((
             outcome.exit_code,
-            state.harness_perf.take(),
+            harness_perf.take(),
             iteration_signals,
+            None,
         )));
     }
 
@@ -1380,49 +1485,50 @@ fn classify_attempt_phase(
             outcome.error_kind.as_deref().unwrap_or("agent_failure"),
             message.as_str(),
         );
-        match drive_terminal_recovery(
-            lifecycle_guard,
-            LifecycleSignal::Failure,
-            Some(&err_info),
-            &materialized,
-            repo_root,
-            term,
-            effect_engine,
-            loop_start,
-            attempt,
-            active.iteration_mut(),
-            outcome.session_id.as_deref(),
-            profile,
-            provider,
-            prompt_state,
-            coordinator.ledger(),
-            show_checks,
-        )? {
+        let recovery = {
+            let shared_guard = handoff_ledger.as_ref().map(|l| l.lock().unwrap());
+            let ledger_ref: &RunLedger =
+                shared_guard.as_deref().unwrap_or_else(|| coordinator.ledger());
+            drive_terminal_recovery(
+                lifecycle_guard,
+                LifecycleSignal::Failure,
+                Some(&err_info),
+                &materialized,
+                repo_root,
+                term,
+                effect_engine,
+                loop_start,
+                attempt,
+                active.iteration_mut(),
+                outcome.session_id.as_deref(),
+                profile,
+                provider,
+                prompt_state,
+                ledger_ref,
+                show_checks,
+            )?
+        };
+        match recovery {
             TerminalRecovery::NextAttempt => {
                 // The attempt slice was advanced on `active` by the dispatch.
                 return Ok(LoopStep::NextAttempt);
             }
             TerminalRecovery::Proxy(request) => {
-                if let Err(error) = coordinator.adopt(
+                return surface_or_adopt_terminal_proxy(
+                    handoff_ledger.as_ref(),
+                    coordinator,
                     request,
                     repo_root,
                     prompt_state,
                     lifecycle_guard,
                     active,
-                ) {
-                    return Err(route_handoff_failure(
-                        lifecycle_guard,
-                        &materialized,
-                        &prompt_state.source_path,
-                        repo_root,
-                        term,
-                        effect_engine,
-                        error,
-                        loop_start,
-                    ));
-                }
-                // `adopt` reset `active` to attempt 1 for the target.
-                return Ok(LoopStep::NextAttempt);
+                    &materialized,
+                    term,
+                    effect_engine,
+                    loop_start,
+                    harness_perf.take(),
+                    iteration_signals,
+                );
             }
             TerminalRecovery::Completed => {}
         }
@@ -1433,8 +1539,9 @@ fn classify_attempt_phase(
         // `LoopIterationFailed` cause.
         return Ok(LoopStep::Return((
             outcome.exit_code,
-            state.harness_perf.take(),
+            harness_perf.take(),
             iteration_signals,
+            None,
         )));
     }
 
@@ -1461,49 +1568,50 @@ fn classify_attempt_phase(
         }
         let err_info =
             LifecycleErrorInfo::from_action_failure("inline_closure", fail_msg.as_str());
-        match drive_terminal_recovery(
-            lifecycle_guard,
-            LifecycleSignal::Failure,
-            Some(&err_info),
-            &materialized,
-            repo_root,
-            term,
-            effect_engine,
-            loop_start,
-            attempt,
-            active.iteration_mut(),
-            outcome.session_id.as_deref(),
-            profile,
-            provider,
-            prompt_state,
-            coordinator.ledger(),
-            show_checks,
-        )? {
+        let recovery = {
+            let shared_guard = handoff_ledger.as_ref().map(|l| l.lock().unwrap());
+            let ledger_ref: &RunLedger =
+                shared_guard.as_deref().unwrap_or_else(|| coordinator.ledger());
+            drive_terminal_recovery(
+                lifecycle_guard,
+                LifecycleSignal::Failure,
+                Some(&err_info),
+                &materialized,
+                repo_root,
+                term,
+                effect_engine,
+                loop_start,
+                attempt,
+                active.iteration_mut(),
+                outcome.session_id.as_deref(),
+                profile,
+                provider,
+                prompt_state,
+                ledger_ref,
+                show_checks,
+            )?
+        };
+        match recovery {
             TerminalRecovery::NextAttempt => {
                 // The attempt slice was advanced on `active` by the dispatch.
                 return Ok(LoopStep::NextAttempt);
             }
             TerminalRecovery::Proxy(request) => {
-                if let Err(error) = coordinator.adopt(
+                return surface_or_adopt_terminal_proxy(
+                    handoff_ledger.as_ref(),
+                    coordinator,
                     request,
                     repo_root,
                     prompt_state,
                     lifecycle_guard,
                     active,
-                ) {
-                    return Err(route_handoff_failure(
-                        lifecycle_guard,
-                        &materialized,
-                        &prompt_state.source_path,
-                        repo_root,
-                        term,
-                        effect_engine,
-                        error,
-                        loop_start,
-                    ));
-                }
-                // `adopt` reset `active` to attempt 1 for the target.
-                return Ok(LoopStep::NextAttempt);
+                    &materialized,
+                    term,
+                    effect_engine,
+                    loop_start,
+                    harness_perf.take(),
+                    iteration_signals,
+                );
             }
             TerminalRecovery::Completed => {}
         }
@@ -1517,58 +1625,59 @@ fn classify_attempt_phase(
     // downgrades the run to failure (handled inside `execute_terminal_event`,
     // which then carries an `err` into `finalize`). Both surface as
     // `success.outcome.control`, so dispatch it uniformly.
-    match drive_terminal_recovery(
-        lifecycle_guard,
-        LifecycleSignal::Success,
-        None,
-        &materialized,
-        repo_root,
-        term,
-        effect_engine,
-        loop_start,
-        attempt,
-        active.iteration_mut(),
-        outcome.session_id.as_deref(),
-        profile,
-        provider,
-        prompt_state,
-        coordinator.ledger(),
-        show_checks,
-    )? {
+    let recovery = {
+        let shared_guard = handoff_ledger.as_ref().map(|l| l.lock().unwrap());
+        let ledger_ref: &RunLedger =
+            shared_guard.as_deref().unwrap_or_else(|| coordinator.ledger());
+        drive_terminal_recovery(
+            lifecycle_guard,
+            LifecycleSignal::Success,
+            None,
+            &materialized,
+            repo_root,
+            term,
+            effect_engine,
+            loop_start,
+            attempt,
+            active.iteration_mut(),
+            outcome.session_id.as_deref(),
+            profile,
+            provider,
+            prompt_state,
+            ledger_ref,
+            show_checks,
+        )?
+    };
+    match recovery {
         TerminalRecovery::NextAttempt => {
             // The attempt slice was advanced on `active` by the dispatch.
             return Ok(LoopStep::NextAttempt);
         }
         TerminalRecovery::Proxy(request) => {
-            if let Err(error) = coordinator.adopt(
+            return surface_or_adopt_terminal_proxy(
+                handoff_ledger.as_ref(),
+                coordinator,
                 request,
                 repo_root,
                 prompt_state,
                 lifecycle_guard,
                 active,
-            ) {
-                return Err(route_handoff_failure(
-                    lifecycle_guard,
-                    &materialized,
-                    &prompt_state.source_path,
-                    repo_root,
-                    term,
-                    effect_engine,
-                    error,
-                    loop_start,
-                ));
-            }
-            // `adopt` reset `active` to attempt 1 for the target.
-            return Ok(LoopStep::NextAttempt);
+                &materialized,
+                term,
+                effect_engine,
+                loop_start,
+                harness_perf.take(),
+                iteration_signals,
+            );
         }
         TerminalRecovery::Completed => {}
     }
     Ok(LoopStep::Return((
         outcome.exit_code,
-        state.harness_perf.take(),
+        harness_perf.take(),
         iteration_signals,
+        None,
     )))
-
 }
 
 

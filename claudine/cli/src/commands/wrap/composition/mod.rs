@@ -112,9 +112,20 @@ pub(crate) struct SingleCompositionOutcome {
     /// `initialize` is evaluated here, and if it hands off, the coordinator
     /// re-prepares the target as a fresh document and decides loop-vs-single on
     /// the *target*. `None` on every ordinary run. Only the owned-guard
-    /// (non-sequence, non-dry-run) `compose`/`inline-compose` path populates it;
-    /// sequence steps and terminal-recovery proxies remain harness-committed.
-    pub initialize_handoff: Option<claudine::composition::EvaluatedProxyRequest>,
+    /// (non-sequence, non-dry-run) `compose`/`inline-compose` path populates it.
+    ///
+    /// Carries a [`SurfacedHandoff`]: an `initialize`-route proxy arrives as a
+    /// [`SurfacedHandoff::Request`] awaiting commit by the command ledger; a
+    /// terminal-recovery / target-initialize-chain proxy arrives as a
+    /// [`SurfacedHandoff::Committed`] the harness already committed against the
+    /// shared invocation ledger. Either way the composition command's
+    /// active-document coordinator re-prepares the resolved target through the
+    /// same canonical launch pipeline a direct invocation uses.
+    ///
+    /// [`SurfacedHandoff`]: claudine::composition::SurfacedHandoff
+    /// [`SurfacedHandoff::Request`]: claudine::composition::SurfacedHandoff::Request
+    /// [`SurfacedHandoff::Committed`]: claudine::composition::SurfacedHandoff::Committed
+    pub initialize_handoff: Option<claudine::composition::SurfacedHandoff>,
 }
 
 /// Execute a composition request through the wrapper-grade pipeline, returning

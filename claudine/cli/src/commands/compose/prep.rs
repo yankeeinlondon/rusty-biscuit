@@ -20,11 +20,11 @@ use std::sync::{Arc, Mutex};
 
 use claudine::composition::{
     CompositionError, CompositionExecutionRequest, CompositionMode, DefaultLifecycleEmitter,
-    DocumentTransition, EvaluatedProxyRequest, LIFECYCLE_EVENT_KEYS, LifecycleRuntimeContext,
+    LIFECYCLE_EVENT_KEYS, LifecycleRuntimeContext,
     LoopExecutionOptions, LoopExecutionResult,
-    PrepareOptions, PreparedComposition, ResolvedCompositionSource, ResolvedExecutionTarget,
-    RunLedger, SharedApprovalCache, SystemShellRunner, build_loop_seed_with_lifecycle,
-    commit_proxy, resolve_loop_config,
+    PrepareOptions, PreparedComposition, ProxyHandoff, ResolvedCompositionSource,
+    ResolvedExecutionTarget, RunLedger, SharedApprovalCache, SharedRunLedger, SurfacedHandoff,
+    SystemShellRunner, build_loop_seed_with_lifecycle, commit_proxy, resolve_loop_config,
 };
 use claudine::system_prompt::SystemPromptArgs;
 use color_eyre::eyre::{Result, eyre};
@@ -77,10 +77,15 @@ fn enrich_report(
 enum ActiveDocumentOutcome {
     /// The active document (and any loop it owned) ran to completion.
     Done(i32),
-    /// The document's `initialize` handed the run off before its first provider
-    /// attempt. The coordinator commits the target and reruns loop-vs-single on
+    /// A proxy handed the run off to a target. The coordinator re-prepares the
+    /// target through the canonical launch pipeline and reruns loop-vs-single on
     /// it.
-    Handoff(EvaluatedProxyRequest),
+    ///
+    /// A [`SurfacedHandoff::Request`] arrived from an `initialize` route awaiting
+    /// commit by this command's ledger; a [`SurfacedHandoff::Committed`] arrived
+    /// from a terminal-recovery / target-initialize-chain route the provider
+    /// harness already committed against the shared invocation ledger.
+    Handoff(SurfacedHandoff),
 }
 
 /// Shared implementation for `compose` and `inline-compose`.
@@ -208,7 +213,15 @@ pub(crate) fn run_composition_inner(
     // seeded with the caller's document so a self-proxy is a cycle from the
     // first hop.
     let shared_approval_cache: SharedApprovalCache = Arc::new(Mutex::new(HashMap::new()));
-    let mut ledger = RunLedger::new(source.resolved_path.clone(), Arc::clone(&shared_approval_cache));
+    // One invocation-wide ledger, shared with the provider harness (R1/R2). The
+    // command loop owns it; the harness receives a clone of the `Arc` so a
+    // terminal-event proxy commits against this same chain rather than a
+    // harness-local copy. Both the command-level `initialize`-route commit below
+    // and the harness's terminal-route commit reach the one hop/cycle accounting.
+    let ledger: SharedRunLedger = Arc::new(Mutex::new(RunLedger::new(
+        source.resolved_path.clone(),
+        Arc::clone(&shared_approval_cache),
+    )));
 
     // The active document. `compose`/`inline-compose` begin at the caller's
     // document; an `initialize` proxy replaces it with the target and loop
@@ -221,6 +234,14 @@ pub(crate) fn run_composition_inner(
     let mut inline_state = inline_state;
     let mut startup_timings = startup_timings;
     let mut first = true;
+    // The immediate proxy overlay for the active document. Empty for the caller's
+    // document; set to the committed handoff's overlay after a proxy so the
+    // adopted target carries it through every re-materialization (retry/resume),
+    // matching the pre-schema handoff input exactly as canonical preparation left
+    // it (AC26). Replaced — never merged — on each handoff: forwarding is
+    // explicit, so a downstream hop that omits `with:` starts from empty.
+    let mut current_overlay: indexmap::IndexMap<String, serde_json::Value> =
+        indexmap::IndexMap::new();
 
     loop {
         // Running a document switches the process CWD to that document's child
@@ -410,16 +431,26 @@ pub(crate) fn run_composition_inner(
             startup_timings.take(),
             std::mem::take(&mut prep_substages),
             compose_entry,
+            current_overlay.clone(),
         )?;
 
         match outcome {
             ActiveDocumentOutcome::Done(code) => return Ok(code),
-            ActiveDocumentOutcome::Handoff(request) => {
-                // The one place a proxy request becomes a committed handoff: the
-                // ledger resolves the target and decides the hop/cycle question
-                // once for every proxy producer, whichever route surfaced it.
-                let handoff = commit_proxy(&mut ledger, request, commit_repo_root.as_deref())
-                    .map_err(color_eyre::eyre::Report::from)?;
+            ActiveDocumentOutcome::Handoff(surfaced) => {
+                // Resolve the surfaced handoff to a committed one against the one
+                // invocation ledger. An `initialize`-route request is committed
+                // here (the source's stacks already fired); a terminal-route
+                // handoff was already committed by the harness against this same
+                // shared ledger while the source's stacks were still live to
+                // catch a refusal, so it is used directly — the target is never
+                // resolved or hop-checked twice.
+                let handoff: ProxyHandoff = match surfaced {
+                    SurfacedHandoff::Request(request) => {
+                        commit_proxy(&mut ledger.lock().unwrap(), request, commit_repo_root.as_deref())
+                            .map_err(color_eyre::eyre::Report::from)?
+                    }
+                    SurfacedHandoff::Committed(handoff) => *handoff,
+                };
                 let target_ref = handoff.resolved_target().to_string_lossy().into_owned();
                 let mut target_source = resolve_composition_source(&target_ref, kind, &shared)?;
                 // Precedence, low→high: target-authored frontmatter < the proxy's
@@ -434,6 +465,12 @@ pub(crate) fn run_composition_inner(
                 );
                 source = target_source;
                 current_file = handoff.authored_target().to_string();
+                // Carry the committed overlay onto the target's request so it is
+                // re-applied on every re-materialization of the target
+                // (retry/resume), not just baked once into the first prepared
+                // composition. Replaced, not merged: an omitted downstream `with:`
+                // starts the next target from empty (forwarding is explicit).
+                current_overlay = handoff.overlay().clone();
                 first = false;
             }
         }
@@ -554,6 +591,7 @@ fn build_and_run_loop(
     prepared_context: &darkmatter::markdown::compose::ComposeContext,
     verbose: u8,
     shared: &SharedComposeArgs,
+    proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
 ) -> std::result::Result<Option<LoopExecutionResult>, CompositionError> {
     let config = resolve_loop_config(source)?;
     let Some(config) = config else {
@@ -675,6 +713,7 @@ fn build_and_run_loop(
                 header_emitted,
                 kind.mode(),
                 prep_context,
+                proxy_overlay,
             );
 
             let outcome = execute_composition_attempt(
@@ -723,6 +762,7 @@ fn build_execution_request(
     header_emitted: bool,
     mode: CompositionMode,
     prep_context: &CompositionPrepContext,
+    proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
 ) -> CompositionExecutionRequest {
     let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
     CompositionExecutionRequest {
@@ -762,6 +802,13 @@ fn build_execution_request(
         header_emitted,
         provider_args: shared.provider_args.clone(),
         provider_args_explicit: shared.provider_args_explicit,
+        // The immediate proxy overlay for a proxied target (empty for a
+        // directly-invoked document), re-applied on every re-materialization so a
+        // retry/resume keeps the pre-schema handoff input (AC26). The shared
+        // invocation ledger the harness commits terminal-route proxies against is
+        // not yet threaded here.
+        proxy_overlay: proxy_overlay.clone(),
+        handoff_ledger: None,
     }
 }
 
@@ -797,6 +844,10 @@ fn execute_loop_or_single(
     mut startup_timings: Option<crate::perf::StartupTimings>,
     prep_substages: Vec<crate::perf::SubstageTiming>,
     compose_entry: std::time::Instant,
+    // The immediate proxy overlay for this active document (empty for the
+    // caller's document), re-applied on every re-materialization of a proxied
+    // target so a retry/resume keeps the pre-schema handoff input (AC26).
+    proxy_overlay: indexmap::IndexMap<String, serde_json::Value>,
 ) -> Result<ActiveDocumentOutcome> {
     let loop_options = build_loop_options(shared);
 
@@ -858,6 +909,7 @@ fn execute_loop_or_single(
             &prepared_context,
             verbose,
             shared,
+            &proxy_overlay,
         )?;
         if let Some(loop_result) = loop_result {
             if let Some(error) = loop_result.error {
@@ -889,13 +941,13 @@ fn execute_loop_or_single(
                 );
                 return Err(error.enrich_frontmatter(&source, stderr_is_tty).into());
             }
-            // The engine's transition is consumed here, never dropped (R1). A
-            // loop document whose `initialize` proxies ends the source and hands
-            // the run to the active-document coordinator, which reruns
-            // loop-vs-single for the target (R7). It is not an extra iteration of
-            // the source loop; the loop never began.
-            if let DocumentTransition::Proxy(request) = loop_result.transition {
-                return Ok(ActiveDocumentOutcome::Handoff(request));
+            // The engine's surfaced handoff is consumed here, never dropped
+            // (R1). A loop document whose `initialize`, an iteration's terminal
+            // stack, or the loop gate proxies ends the source and hands the run
+            // to the active-document coordinator, which reruns loop-vs-single for
+            // the target (R7). It is not an extra iteration of the source loop.
+            if let Some(handoff) = loop_result.handoff {
+                return Ok(ActiveDocumentOutcome::Handoff(handoff));
             }
             return Ok(ActiveDocumentOutcome::Done(loop_result.final_exit_code));
         }
@@ -942,6 +994,7 @@ fn execute_loop_or_single(
         header_emitted,
         kind.mode(),
         &prep_context,
+        &proxy_overlay,
     );
 
     if let Some(ref mut timings) = startup_timings {
@@ -951,12 +1004,13 @@ fn execute_loop_or_single(
 
     let outcome =
         execute_composition_request_inner(request, verbose, startup_timings, shared.perf)?;
-    // The single route surfaces an `initialize` proxy the same way the loop
-    // route surfaces its engine transition: the pipeline hoists it here rather
-    // than committing it inside the provider harness, so the coordinator reruns
-    // loop-vs-single for the target (R7).
+    // The single route surfaces a proxy the same way the loop route surfaces its
+    // handoff: the pipeline (for an `initialize` route) or the provider harness
+    // (for a terminal-recovery / target-initialize-chain route) hoists it here
+    // rather than adopting it in place, so the coordinator re-prepares the target
+    // through the canonical launch pipeline and reruns loop-vs-single (R6/R7).
     match outcome.initialize_handoff {
-        Some(request) => Ok(ActiveDocumentOutcome::Handoff(request)),
+        Some(handoff) => Ok(ActiveDocumentOutcome::Handoff(handoff)),
         None => Ok(ActiveDocumentOutcome::Done(outcome.exit_code)),
     }
 }
