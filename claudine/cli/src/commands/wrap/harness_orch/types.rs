@@ -28,13 +28,15 @@ pub(crate) struct HarnessPromptState {
     pub(crate) prompt_tail: Vec<String>,
     pub(crate) next_prompt_override: Option<String>,
     pub(crate) next_resume_session_id: Option<String>,
-    /// Caller-supplied compose inputs re-applied on every re-materialization
-    /// (retry/resume/proxy), so a re-composed document keeps the caller's
-    /// `--set` params, launch-area file-ref anchor, and pre-approved shell
-    /// commands. Sourced from
-    /// [`PreparedComposition::rematerialize`][claudine::composition::PreparedComposition].
+    /// The caller's input layers, reapplied at every canonical preparation of
+    /// this document. Sourced from
+    /// [`PreparedComposition::input_layers`][claudine::composition::PreparedComposition].
     /// Empty for direct-wrapper passthrough runs, which have no compose params.
-    pub(crate) rematerialize: claudine::composition::RematerializeInputs,
+    pub(crate) input_layers: claudine::composition::CallerInputLayers,
+    /// Why the next preparation of this document is happening — stamped by the
+    /// control dispatch that decided the re-entry, so preparation reads the
+    /// stage row rather than re-deriving it from loop-local state.
+    pub(crate) entry: claudine::composition::DocumentEntryReason,
 }
 
 #[derive(Debug, Clone)]

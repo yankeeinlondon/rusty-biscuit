@@ -25,6 +25,8 @@ fn dispatch_proxy_swaps_source_and_resets_guard_for_fresh_run() {
     // Use an absolute target so resolution is unambiguous.
     let outcome = outcome_with(StackControl::Proxy {
         target: target.display().to_string(),
+        overlay: indexmap::IndexMap::new(),
+        location: claudine::composition::ActionLocation::new(LifecycleSignal::Failure, 0, 0),
     });
     let action = dispatch_terminal_control(
         &outcome,
@@ -85,6 +87,8 @@ fn dispatch_proxy_to_missing_target_aborts_without_adopting_it() {
     let mut tracking = ProxyTracking::default();
     let outcome = outcome_with(StackControl::Proxy {
         target: missing.display().to_string(),
+        overlay: indexmap::IndexMap::new(),
+        location: claudine::composition::ActionLocation::new(LifecycleSignal::Failure, 0, 0),
     });
     let action = dispatch_terminal_control(
         &outcome,

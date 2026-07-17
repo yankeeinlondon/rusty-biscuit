@@ -249,15 +249,22 @@ pub(crate) fn run_composition_inner(
 
     // ── Pre-flight shell approval ────────────────────────────────────────
     //
-    // `ComposeContext::capture()` + `env_mut().insert(...)` installs the
-    // resolved `AGENT` (and any other composition env overrides) into
-    // the same Darkmatter compose pipeline that the preflight pass
-    // walks. Without this, frontmatter values that derive from env
-    // (e.g. `runtime_agent: '{{ env.AGENT }}'`) fail Darkmatter's
-    // built-in schema validation during preflight, before reaching
-    // `prepare_direct_with_schema`.
+    // The snapshot carries the resolved `AGENT` (and any other composition env
+    // overrides) into the same Darkmatter compose pipeline the preflight pass
+    // walks. Without it, frontmatter values that derive from env (e.g.
+    // `runtime_agent: '{{ env.AGENT }}'`) fail Darkmatter's built-in schema
+    // validation during preflight, before reaching `prepare_direct_with_schema`.
+    //
+    // Anchored on the launch area, never the process CWD: the wrapper mutates
+    // the parent CWD to the repo root, so an ambient capture would answer
+    // `ctx.area` differently depending on when it ran — and would disagree with
+    // the launch-area-anchored snapshot the body compose uses, so the audit
+    // could discover different commands than the compose expands.
     let compose_options = {
-        let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
+        let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_for_document(
+            prep_context.launch_workspace.launch_cwd.as_path(),
+            &source.markdown,
+        );
         for (key, value) in &env_overrides {
             ctx.env_mut().insert(key.clone(), value.clone());
         }
@@ -706,12 +713,16 @@ fn execute_loop_or_single(
 
     // Capture the early-binding context ONCE, against the launch area (the
     // package area the caller launched from), and reuse the same snapshot for
-    // body compose, shell preflight, and lifecycle events. This is the single
-    // source of truth for `ctx.*`/`env.*`: the body and the lifecycle can no
-    // longer diverge, and there is no per-event re-scan. `capture_for_document`
-    // is demand-driven over both frontmatter and body, so the lifecycle
-    // `{{ctx.*}}` strings in frontmatter pull in the groups they need.
-    // `current.*` stays event-time and is captured separately.
+    // body compose and lifecycle events. This is the single source of truth for
+    // `ctx.*`/`env.*`: the body and the lifecycle can no longer diverge, and
+    // there is no per-event re-scan. `capture_for_document` is demand-driven
+    // over both frontmatter and body, so the lifecycle `{{ctx.*}}` strings in
+    // frontmatter pull in the groups they need. `current.*` stays event-time and
+    // is captured separately.
+    //
+    // Constructed exactly as the pre-flight snapshot in `prepare_composition`
+    // is, so the commands the audit discovered are the commands this compose
+    // expands.
     let prepared_context = {
         let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_for_document(
             prep_context.launch_workspace.launch_cwd.as_path(),

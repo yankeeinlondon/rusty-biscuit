@@ -452,7 +452,8 @@ pub(crate) fn run_execution_stage(
             next_prompt_override: None,
             next_resume_session_id: None,
             // Direct-wrapper passthrough runs carry no compose params.
-            rematerialize: Default::default(),
+            input_layers: Default::default(),
+            entry: claudine::composition::DocumentEntryReason::Direct,
         };
 
         let mut harness_base_args = child_args.to_vec();

@@ -200,7 +200,8 @@ fn prompt_state(source: &Path) -> HarnessPromptState {
         prompt_tail: Vec::new(),
         next_prompt_override: None,
         next_resume_session_id: None,
-        rematerialize: Default::default(),
+        input_layers: Default::default(),
+        entry: claudine::composition::DocumentEntryReason::Direct,
     }
 }
 

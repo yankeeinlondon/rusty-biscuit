@@ -8,9 +8,14 @@
 //!
 //! - [`compose_with_allowlist_holds_the_line`] enumerates every production
 //!   caller of Darkmatter's `compose_with`. The feature's R1 bans a second
-//!   composition implementation; Phase 5 retires the two
-//!   `harness_orch::prompt::materialize_harness_prompt` arms and must shrink
-//!   [`COMPOSE_WITH_ALLOWLIST`] by exactly those two.
+//!   composition implementation; Phase 5 retired the two
+//!   `harness_orch::prompt::materialize_harness_prompt` arms — that function now
+//!   routes through `composition::prepare::prepare_document` — so
+//!   [`COMPOSE_WITH_ALLOWLIST`] shrank by exactly those two.
+//! - [`subtree_compose_baseline_holds_the_line`] enumerates every production
+//!   entry point to Darkmatter's event-time subtree composition (DM2). Phase 4
+//!   routes `proxy.with` values through the executor's existing one; the guard
+//!   is what proves no *second* interpolator grew to serve them.
 //! - [`no_new_optional_proxy_target_channel`] enumerates every
 //!   `Option<PathBuf>`-shaped proxy-target carrier. Two exist today; the spec's
 //!   R1 bans a second channel, and Phase 6 drives
@@ -50,9 +55,11 @@ use std::path::{Path, PathBuf};
 /// `composition::prepare`.
 const COMPOSE_WITH_ALLOWLIST: &[AllowedSite] = &[
     AllowedSite {
-        site: "composition::prepare::prepare_direct",
+        site: "composition::prepare::prepare_direct_with_prompt",
         calls: 1,
-        reason: "the canonical direct-document composer (the sanctioned owner)",
+        reason: "the canonical direct-document composer (the sanctioned owner); \
+                 `prepare_direct` and the canonical service's every entry \
+                 delegate here",
     },
     AllowedSite {
         site: "composition::prepare::prepare_inline",
@@ -69,14 +76,6 @@ const COMPOSE_WITH_ALLOWLIST: &[AllowedSite] = &[
         site: "wrap::overlay::materialize_passthrough_harness_seed",
         calls: 1,
         reason: "passthrough seed materialization for the harness overlay",
-    },
-    AllowedSite {
-        site: "harness_orch::prompt::materialize_harness_prompt",
-        calls: 2,
-        reason: "PHASE 5 REMOVES THIS. The banned second composer, one call per \
-                 `Passthrough`/`Compose` arm. The `Inline` arm already delegates \
-                 to `composition::prepare::prepare_inline` — follow it. When \
-                 Phase 5 lands, delete this entry.",
     },
 ];
 
@@ -98,6 +97,37 @@ const PROXY_TARGET_CHANNEL_BASELINE: &[AllowedSite] = &[
         calls: 1,
         reason: "PHASE 6 REMOVES THIS. The CLI single-document pipeline's \
                  parallel initialize-proxy channel.",
+    },
+];
+
+/// Every production entry point to Darkmatter's event-time subtree composition
+/// (DM2).
+///
+/// This is the counterpart to [`COMPOSE_WITH_ALLOWLIST`] one layer down: that
+/// guard bans a second *document* composer, this one bans a second
+/// *interpolator*. Behavioral tests can show that `proxy.with` resolves
+/// correctly; only a structural scan can show it does so by delegating to the
+/// shared substrate rather than through a bespoke Claudine grammar grown
+/// alongside it.
+const SUBTREE_COMPOSE_BASELINE: &[AllowedSite] = &[
+    AllowedSite {
+        site: "composition::interpolation_conformance::dm2_render",
+        calls: 1,
+        reason: "the conformance harness that pins DM1/DM2 agreement; not a \
+                 production evaluation path",
+    },
+    AllowedSite {
+        site: "composition::preflight::resolve_shell_command_expr",
+        calls: 1,
+        reason: "pre-flight shell-command resolution — early-binding only, \
+                 before any event fires",
+    },
+    AllowedSite {
+        site: "lifecycle::executor::resolve_string_value",
+        calls: 1,
+        reason: "THE event-time interpolator for every lifecycle surface, \
+                 `proxy.with` values included. A second site here would be a \
+                 second interpolation grammar.",
     },
 ];
 
@@ -134,6 +164,20 @@ fn compose_with_allowlist_holds_the_line() {
          new semantic owner of composition: either route it through \
          `claudine::composition::prepare` or add it to `COMPOSE_WITH_ALLOWLIST` \
          with a reason saying why it is not a duplicate.");
+}
+
+#[test]
+fn subtree_compose_baseline_holds_the_line() {
+    let found = scan_all(find_subtree_compose_calls);
+    assert_baseline(
+        &found,
+        SUBTREE_COMPOSE_BASELINE,
+        "SubtreeCompose entry point",
+        "Event-time interpolation has one owner: `lifecycle::executor::resolve_string_value`. \
+         A new `SubtreeCompose::new` site is a second interpolator — route the value through \
+         the executor's existing resolution instead, or add the site to \
+         `SUBTREE_COMPOSE_BASELINE` with a reason saying why it is not a duplicate grammar.",
+    );
 }
 
 #[test]
@@ -288,6 +332,14 @@ fn module_identity(rel: &str) -> String {
 /// identity is its enclosing function alone.
 fn find_compose_with_calls(src: &[u8]) -> Vec<Occurrence> {
     find_all(src, b".compose_with(")
+        .into_iter()
+        .map(|offset| Occurrence { offset, name: None })
+        .collect()
+}
+
+/// Every `SubtreeCompose::new(` constructor call — the entry point to DM2.
+fn find_subtree_compose_calls(src: &[u8]) -> Vec<Occurrence> {
+    find_all(src, b"SubtreeCompose::new(")
         .into_iter()
         .map(|offset| Occurrence { offset, name: None })
         .collect()

@@ -666,8 +666,16 @@ fn materialize_attempt_prompt_phase(
     )
     .in_scope(|| materialize_harness_prompt(prompt_state, repo_root, child_cwd))
     .map_err(|error| {
-        let err_info =
-            LifecycleErrorInfo::from_action_failure("materialize", error.to_string());
+        // Canonical preparation returns concrete `CompositionError`s (a target's
+        // malformed lifecycle stack, a schema failure, a shell denial). Keep the
+        // typed identity rather than flattening it to a generic "materialize"
+        // action failure: a target's parse error must present the same
+        // `err.category`/`err.code` whether the target was invoked directly or
+        // proxied to.
+        let err_info = match error.downcast_ref::<claudine::composition::CompositionError>() {
+            Some(composition) => LifecycleErrorInfo::from_composition_error(composition),
+            None => LifecycleErrorInfo::from_action_failure("materialize", error.to_string()),
+        };
         let empty = empty_materialized_prompt();
         match emit_blocked_finalize_with_err(
             lifecycle_guard,

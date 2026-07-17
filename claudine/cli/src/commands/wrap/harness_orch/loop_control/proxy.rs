@@ -78,7 +78,7 @@ pub(super) fn run_target_initialize(
             StackControl::Error { .. } => {
                 unreachable!("the catch protocol consumes initialize error control")
             }
-            StackControl::Proxy { target } => {
+            StackControl::Proxy { target, .. } => {
                 let resolved = match claudine::composition::resolve_proxy_target(
                     target,
                     source_path,

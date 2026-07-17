@@ -129,6 +129,7 @@ pub(super) fn dispatch_terminal_control(
             if !delay.is_zero() {
                 std::thread::sleep(delay);
             }
+            prompt_state.entry = claudine::composition::DocumentEntryReason::Retry;
             // The terminal event already fired for this iteration; reset the
             // guard's per-iteration state so the retried attempt can emit its
             // own start/terminal/finalize without the terminal slot being
@@ -149,6 +150,7 @@ pub(super) fn dispatch_terminal_control(
             ) {
                 return TerminalControlAction::Abort(eyre!("{e}"));
             }
+            prompt_state.entry = claudine::composition::DocumentEntryReason::Resume;
             prompt_state.next_resume_session_id = session_id.map(|id| id.to_string());
             prompt_state.next_prompt_override = Some(message);
             prompt_state.prompt_tail.clear();
@@ -212,6 +214,7 @@ pub(super) fn dispatch_terminal_control(
             // guard state so the target runs a fresh `initialize`/pre-flight.
             prompt_state.source_path = resolved.clone();
             prompt_state.original_ref = target.clone();
+            prompt_state.entry = claudine::composition::DocumentEntryReason::ProxyTarget;
             prompt_state.prompt_tail.clear();
             prompt_state.next_prompt_override = None;
             prompt_state.next_resume_session_id = None;
@@ -253,7 +256,7 @@ pub(super) fn dispatch_terminal_control(
             TerminalControlAction::Abort(CompositionError::LifecycleProxyCycle {
                 source_path: prompt_state.source_path.clone(),
                 target: match control {
-                    StackControl::Proxy { target } => target.clone(),
+                    StackControl::Proxy { target, .. } => target.clone(),
                     _ => String::new(),
                 },
                 chain: chain.iter().map(|path| path.display().to_string()).collect(),

@@ -57,59 +57,50 @@ pub(crate) fn find_wrapper_harness_source(
         })
 }
 
-/// Re-apply the caller's compose inputs onto a re-materialization's
-/// [`ComposeOptions`], mirroring [`prepare_direct`]/[`prepare_inline`].
+/// Read the document at `state.source_path` and merge the caller overlay into
+/// its authored frontmatter, yielding the source the canonical service prepares.
 ///
-/// Without this a `retry`/`resume`/`proxy` re-composition drops the caller's
-/// `--set` params, launch-area file-ref anchor, and pre-approved shell
-/// commands, so a `$schema`-bearing target validates against inputs it was
-/// never handed.
-///
-/// [`prepare_direct`]: claudine::composition::prepare_direct
-/// [`prepare_inline`]: claudine::composition::prepare_inline
-fn apply_rematerialize_inputs(
-    mut options: darkmatter::markdown::compose::ComposeOptions,
-    inputs: &claudine::composition::RematerializeInputs,
-) -> darkmatter::markdown::compose::ComposeOptions {
-    if let Some(overrides) = inputs.set_overrides.clone() {
-        options = options.with_set_overrides(overrides);
-    }
-    if let Some(approved) = inputs.pre_approved_commands.clone() {
-        options = options.with_pre_approved_commands(approved);
-    }
-    if let Some(fallback) = inputs.file_ref_fallback_dir.clone() {
-        options = options.with_file_ref_fallback_dir(fallback);
-    }
-    options
+/// Every re-entry (`retry`/`resume`/`proxy`) reads fresh from disk rather than
+/// reusing the first attempt's prepared prompt, so an `initialize`-time or
+/// loop-time mutation of the document is visible.
+fn load_overlaid_source(
+    state: &HarnessPromptState,
+) -> Result<claudine::composition::ResolvedCompositionSource> {
+    let source_text = fs::read_to_string(&state.source_path)
+        .map_err(|e| eyre!("failed to read '{}': {e}", state.source_path.display()))?;
+    let mut markdown: darkmatter::markdown::Markdown = source_text.clone().into();
+    super::super::overlay::merge_frontmatter_overlay(
+        markdown.frontmatter_mut().as_map_mut(),
+        &state.overlay,
+    );
+    Ok(claudine::composition::ResolvedCompositionSource {
+        original_ref: state.original_ref.clone(),
+        resolved_path: state.source_path.clone(),
+        original_text: source_text,
+        markdown,
+    })
 }
 
-/// Build the base [`ComposeOptions`] for a re-materialization, seeding its
-/// [`ComposeContext`][darkmatter::markdown::compose::ComposeContext] with the
-/// caller's env overrides (`AGENT`/`MODEL`/`YOLO`).
+/// Assemble this document's canonical [`PrepareOptions`] from the invocation's
+/// input layers plus the target-specific workspace.
 ///
-/// The env is what backs `ctx.agent`/`ctx.model`; without it a
-/// `retry`/`resume`/`proxy` re-composition captures a fresh env-less context and
-/// those values collapse to `unknown`/`default`.
-fn rematerialize_compose_options(
-    inputs: &claudine::composition::RematerializeInputs,
-) -> darkmatter::markdown::compose::ComposeOptions {
-    let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
-    for (key, value) in &inputs.env_overrides {
-        ctx.env_mut().insert(key.clone(), value.clone());
-    }
-    darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
+/// This is the single input-layer assembly point the harness re-entry uses; the
+/// composition commands' first preparation assembles the same shape in
+/// `compose/prep.rs`.
+fn harness_prepare_options(
+    state: &HarnessPromptState,
+    child_cwd: &Path,
+) -> claudine::composition::PrepareOptions {
+    state
+        .input_layers
+        .apply_to(claudine::composition::PrepareOptions {
+            shell_working_directory: Some(child_cwd.to_path_buf()),
+            ..claudine::composition::PrepareOptions::default()
+        })
 }
 
 /// Run the proxied target document's own pre-flight shell audit and fold any
-/// newly-approved commands into `rematerialize.pre_approved_commands`.
-///
-/// The lifecycle spec treats a `proxy` hand-off as "a fresh prompt run,
-/// including pre-flight": the target's frontmatter `$(...)` / template `::shell`
-/// commands are the target's own, and the proxying document's pre-flight never
-/// saw them. Without re-auditing the target here, the subsequent re-materialize
-/// compose expands those commands against the (proxying document's) pre-approved
-/// set and fails with `NotPreApproved` — even for whitelisted commands the audit
-/// would have auto-approved.
+/// newly-approved commands into the invocation's approved set.
 ///
 /// Only [`HarnessPromptMode::Compose`] re-runs a body compose that expands
 /// shell; `Inline` runs its own `prepare_inline` audit and `Passthrough` has no
@@ -117,10 +108,10 @@ fn rematerialize_compose_options(
 ///
 /// ## Errors
 ///
-/// Propagates a shell-audit denial (blacklisted command, denied approval, or —
-/// after the approval handler is frozen — an un-whitelisted, un-cached command)
-/// as a [`CompositionError`] so the caller routes it through the standard
-/// `blocked`/`finalize` path.
+/// Propagates a shell-audit denial as a [`CompositionError`] so the caller
+/// routes it through the standard `blocked`/`finalize` path.
+///
+/// [`CompositionError`]: claudine::composition::CompositionError
 pub(crate) fn preflight_proxy_target(
     state: &mut HarnessPromptState,
     approval_options: &claudine::harness::ShellApprovalOptions,
@@ -129,61 +120,16 @@ pub(crate) fn preflight_proxy_target(
     if state.mode != HarnessPromptMode::Compose {
         return Ok(());
     }
-    let source_text = fs::read_to_string(&state.source_path).map_err(|e| {
+    let source = load_overlaid_source(state).map_err(|e| {
         Box::new(claudine::composition::CompositionError::PreFlightFailed(format!(
-            "proxy target pre-flight: failed to read '{}': {e}",
-            state.source_path.display()
+            "proxy target pre-flight: {e}"
         )))
     })?;
-    let markdown: darkmatter::markdown::Markdown = source_text.into();
-
-    // Mirror the primary compose pre-flight (`compose/prep.rs`): defer the
-    // lifecycle event keys, anchor `file`-typed reads on the launch area, and
-    // apply the caller's `--set` / env so the discovered commands match exactly
-    // what the re-materialize compose will expand.
-    let mut options = claudine::composition::bind_agent_workspace(
-        rematerialize_compose_options(&state.rematerialize),
-        &state.source_path,
-        Some(child_cwd),
-    )
-    .with_exclude_keys(
-        claudine::composition::LIFECYCLE_EVENT_KEYS
-            .iter()
-            .copied(),
-    );
-    if let Some(fallback) = state.rematerialize.file_ref_fallback_dir.clone() {
-        options = options.with_file_ref_fallback_dir(fallback);
-    }
-    if let Some(overrides) = state.rematerialize.set_overrides.clone() {
-        options = options.with_set_overrides(overrides);
-    }
-
-    let result = match claudine::composition::resolve_shell_approvals(
-        Some(&markdown),
-        Some(&options),
-        approval_options,
-        None,
-        None,
-    ) {
-        Ok(result) => result,
-        // A discovery-walk failure (bad `::file` transclusion, unparsable graph)
-        // is not a shell rejection — there are no commands to approve, and the
-        // re-materialize compose below will surface the authoritative typed error
-        // (e.g. a styled `TransclusionError` block). Defer to it rather than
-        // preempting with a coarser preflight error.
-        Err(claudine::composition::CompositionError::PreFlightDiscoveryFailed(_)) => {
-            return Ok(());
-        }
-        Err(e) => return Err(Box::new(e)),
-    };
-
-    if !result.approved_commands.is_empty() {
-        state
-            .rematerialize
-            .pre_approved_commands
-            .get_or_insert_with(std::collections::HashSet::new)
-            .extend(result.approved_commands);
-    }
+    let options = harness_prepare_options(state, child_cwd);
+    let approved =
+        claudine::composition::preflight_document_shell(&source, &options, approval_options)
+            .map_err(Box::new)?;
+    state.input_layers.add_approved_commands(approved);
     Ok(())
 }
 
@@ -192,116 +138,50 @@ pub(crate) fn materialize_harness_prompt(
     _repo_root: Option<&Path>,
     child_cwd: &Path,
 ) -> Result<MaterializedHarnessPrompt> {
-    let source_text = fs::read_to_string(&state.source_path)
-        .map_err(|e| eyre!("failed to read '{}': {e}", state.source_path.display()))?;
-    let mut effective_markdown: darkmatter::markdown::Markdown = source_text.clone().into();
-    super::super::overlay::merge_frontmatter_overlay(
-        effective_markdown.frontmatter_mut().as_map_mut(),
-        &state.overlay,
-    );
+    let source = load_overlaid_source(state)?;
+    let options = harness_prepare_options(state, child_cwd);
 
-    let (mut prompt, frontmatter, env_overrides, inline_closure_plan) = match state.mode {
-        HarnessPromptMode::Passthrough => {
-            let options = apply_rematerialize_inputs(
-                claudine::composition::bind_agent_workspace(
-                    rematerialize_compose_options(&state.rematerialize),
-                    &state.source_path,
-                    Some(child_cwd),
-                )
-                .with_exclude_keys(
-                    claudine::composition::LIFECYCLE_EVENT_KEYS
-                        .iter()
-                        .copied(),
-                ),
-                &state.rematerialize,
-            );
-            let (composed, _report) = effective_markdown.compose_with(options)?;
-            let prompt = state.base_prompt.clone().ok_or_else(|| {
+    let prompt_source = match state.mode {
+        // The prompt came from argv or stdin; the document is a provider memory
+        // file whose body is context, not the request.
+        HarnessPromptMode::Passthrough => claudine::composition::PromptSource::Supplied(
+            state.base_prompt.clone().ok_or_else(|| {
                 eyre!(
                     "missing passthrough prompt seed for '{}'",
                     state.source_path.display()
                 )
-            })?;
-            (
-                prompt,
-                super::super::overlay::frontmatter_map_to_value(composed.frontmatter()),
-                Vec::new(),
-                None,
-            )
+            })?,
+        ),
+        HarnessPromptMode::Compose | HarnessPromptMode::Inline => {
+            claudine::composition::PromptSource::ComposedBody
         }
-        HarnessPromptMode::Compose => {
-            // Defer the seven lifecycle event subtrees so their authored `{{ }}`
-            // spans survive raw in the materialized frontmatter for event-time
-            // interpolation — mirroring the prep-time seed (`prepare.rs`). This
-            // is the re-materialization path (retries and proxy hand-offs);
-            // without the deferral a proxy target's lifecycle `{{ err.* }}`
-            // spans resolve here, before the run, and bake to empty.
-            let options = apply_rematerialize_inputs(
-                claudine::composition::bind_agent_workspace(
-                    rematerialize_compose_options(&state.rematerialize),
-                    &state.source_path,
-                    Some(child_cwd),
-                )
-                .with_exclude_keys(
-                    claudine::composition::LIFECYCLE_EVENT_KEYS
-                        .iter()
-                        .copied(),
-                )
-                // Preserve authored line breaks in the delivered body, mirroring
-                // `prepare_direct`. Without this the re-materialized body (a proxy
-                // hand-off / retry) is stripped of incidental single newlines, so
-                // an author's line-structured prompt — e.g. a block-quoted list —
-                // collapses into one paragraph and the agent prompt mis-renders.
-                .with_incidental_newline_mode(
-                    darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve,
-                ),
-                &state.rematerialize,
-            );
-            let (composed, _report) = effective_markdown.compose_with(options)?;
-            let body = composed.content().to_string();
-
-            let env_overrides = Vec::new();
-
-            (
-                body,
-                super::super::overlay::frontmatter_map_to_value(composed.frontmatter()),
-                env_overrides,
-                None,
-            )
-        }
+    };
+    let mode = match state.mode {
         HarnessPromptMode::Inline => {
             claudine::composition::validate_file_permissions(&state.source_path)
                 .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
-            let source = claudine::composition::ResolvedCompositionSource {
-                original_ref: state.source_path.display().to_string(),
-                resolved_path: state.source_path.clone(),
-                original_text: source_text.clone(),
-                markdown: effective_markdown.clone(),
-            };
-            let prepared = claudine::composition::prepare_inline(
-                &source,
-                claudine::composition::PrepareOptions {
-                    set_overrides: state.rematerialize.set_overrides.clone(),
-                    pre_approved_commands: state.rematerialize.pre_approved_commands.clone(),
-                    file_ref_fallback_dir: state.rematerialize.file_ref_fallback_dir.clone(),
-                    // Carry the resolved `AGENT`/`MODEL` env so `ctx.agent`/
-                    // `ctx.model` in the re-materialized body resolve to the run's
-                    // provider instead of the `unknown`/`default` fallbacks.
-                    env_overrides: state.rematerialize.env_overrides.clone(),
-                    ..claudine::composition::PrepareOptions::default()
-                },
-            )?;
-            (
-                prepared.prompt,
-                prepared.effective_frontmatter,
-                Vec::new(),
-                match prepared.closure {
-                    claudine::composition::CompositionClosurePlan::Inline(plan) => Some(plan),
-                    claudine::composition::CompositionClosurePlan::Direct => None,
-                },
-            )
+            claudine::composition::CompositionMode::InlineFrontmatterPrompt
+        }
+        HarnessPromptMode::Compose | HarnessPromptMode::Passthrough => {
+            claudine::composition::CompositionMode::ChainedDocument
         }
     };
+
+    let prepared = claudine::composition::prepare_document(claudine::composition::DocumentPreparation {
+        entry: state.entry,
+        mode,
+        source: &source,
+        prompt_source,
+        options,
+    })?;
+
+    let inline_closure_plan = match prepared.closure {
+        claudine::composition::CompositionClosurePlan::Inline(plan) => Some(plan),
+        claudine::composition::CompositionClosurePlan::Direct => None,
+    };
+    let mut prompt = prepared.prompt;
+    let frontmatter = prepared.effective_frontmatter;
+    let env_overrides: Vec<(String, String)> = Vec::new();
 
     if let Some(ref override_prompt) = state.next_prompt_override {
         prompt = override_prompt.clone();
@@ -325,10 +205,10 @@ pub(crate) fn materialize_harness_prompt(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claudine::composition::RematerializeInputs;
+    use claudine::composition::{CallerInputLayers, DocumentEntryReason};
     use std::collections::BTreeMap;
 
-    fn compose_state(source_path: &Path, rematerialize: RematerializeInputs) -> HarnessPromptState {
+    fn compose_state(source_path: &Path, input_layers: CallerInputLayers) -> HarnessPromptState {
         HarnessPromptState {
             mode: HarnessPromptMode::Compose,
             source_path: source_path.to_path_buf(),
@@ -338,7 +218,8 @@ mod tests {
             prompt_tail: Vec::new(),
             next_prompt_override: None,
             next_resume_session_id: None,
-            rematerialize,
+            input_layers,
+            entry: DocumentEntryReason::ProxyTarget,
         }
     }
 
@@ -358,9 +239,9 @@ mod tests {
         env.insert("MODEL".to_string(), "gpt-5".to_string());
         let state = compose_state(
             &target,
-            RematerializeInputs {
+            CallerInputLayers {
                 env_overrides: env,
-                ..RematerializeInputs::default()
+                ..CallerInputLayers::default()
             },
         );
 
@@ -392,9 +273,9 @@ mod tests {
 
         let mut state = compose_state(
             &target,
-            RematerializeInputs {
+            CallerInputLayers {
                 set_overrides: Some(serde_json::json!({ "spec": "features/x/spec.md" })),
-                ..RematerializeInputs::default()
+                ..CallerInputLayers::default()
             },
         );
 
@@ -406,13 +287,13 @@ mod tests {
 
         // Before hand-off pre-flight, the carried set has no approval for the
         // target's own frontmatter shell command.
-        assert!(state.rematerialize.pre_approved_commands.is_none());
+        assert!(state.input_layers.pre_approved_commands.is_none());
 
         preflight_proxy_target(&mut state, &approval_options, dir.path())
             .expect("whitelisted proxy-target command must pre-flight cleanly");
 
         let approved = state
-            .rematerialize
+            .input_layers
             .pre_approved_commands
             .as_ref()
             .expect("pre-approved set must be populated after target pre-flight");

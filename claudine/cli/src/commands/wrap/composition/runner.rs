@@ -444,7 +444,8 @@ pub(super) fn run_composition_body(
         // the caller's `--set` params, launch-area file-ref anchor, and
         // pre-approved shell commands (a proxy target with a `$schema` needs
         // the same inputs the original document was prepared with).
-        rematerialize: request.prepared.rematerialize.clone(),
+        input_layers: request.prepared.input_layers.clone(),
+        entry: request.prepared.entry,
     };
 
     let mut harness_base_args = args_before_prompt.clone();
