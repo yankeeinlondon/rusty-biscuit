@@ -47,7 +47,8 @@ impl BlockError for CompositionError {
             | CompositionError::LifecycleMultipleLifecycleActions { .. }
             | CompositionError::LifecycleActionOrder { .. }
             | CompositionError::LifecycleInvalidArgs { .. }
-            | CompositionError::LifecycleErrNotAvailable { .. } => lifecycle::status_block(self),
+            | CompositionError::LifecycleErrNotAvailable { .. }
+            | CompositionError::InvalidFileReference { .. } => lifecycle::status_block(self),
 
             // Schema / frontmatter validation family.
             CompositionError::SchemaLoad { .. }
@@ -245,7 +246,9 @@ impl Diagnostic for CompositionError {
             CompositionError::WithFrontmatter { inner, .. }
             | CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => inner.code(),
             CompositionError::ComposeFailed(md) => compose_failed_code(md),
-            CompositionError::InvalidReference { .. } | CompositionError::FileNotFound { .. } => {
+            CompositionError::InvalidReference { .. }
+            | CompositionError::FileNotFound { .. }
+            | CompositionError::InvalidFileReference { .. } => {
                 "composition.invalid_file_reference"
             }
             CompositionError::SchemaLoad { .. } => "composition.schema_load",
@@ -331,6 +334,25 @@ impl Diagnostic for CompositionError {
                     base["message"] = json!(other.to_string());
                 }
             },
+            // The semantic wrapper owns the code, so its payload is the union
+            // of what the resolver knew (`reference`, `failure`, `source_path`
+            // — taken from the typed source's own projection, never re-derived)
+            // and the authoring context only this layer has. `event` and
+            // `property` are what tell the surfaces apart, which is why no
+            // surface needs a code of its own.
+            CompositionError::InvalidFileReference { context, source } => {
+                if let Value::Object(from_source) = source.detail() {
+                    for (key, value) in from_source {
+                        if !value.is_null() {
+                            base[&key] = value;
+                        }
+                    }
+                }
+                base["reference"] = json!(context.reference);
+                base["source_path"] = json!(context.source_path.to_string_lossy());
+                base["property"] = json!(context.property);
+                base["event"] = json!(context.event);
+            }
             // The remaining `composition.invalid_file_reference` constructors
             // (the typed-source and resolved-not-found variants) carry no
             // `FileReferenceDiagnostic`, so only `reference` is recoverable.

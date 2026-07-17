@@ -482,6 +482,37 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                      `doc.err` explicitly.",
                 )
         }
+        CompositionError::InvalidFileReference { context, source } => {
+            let FileReferenceContext {
+                source_path,
+                event,
+                property,
+                reference,
+                hint,
+            } = context.as_ref();
+            let file_link = render_file_link(source_path);
+            let surface = match event {
+                Some(event) => format!(
+                    "<cyan>`{property}`</cyan> in the <cyan>`{event}`</cyan> event of {file_link}"
+                ),
+                None => format!("<cyan>`{property}`</cyan> in {file_link}"),
+            };
+            // `escape_prose_path` escapes `"` for `<a href="…">` attributes;
+            // it over-escapes body text, and this source's `Display` quotes
+            // the reference. `Prose::escape_text` is the body-text escape.
+            let body = format!(
+                "Cannot resolve <cyan>`{}`</cyan>, referenced by {surface}.\n\n{}",
+                escape_prose_path(reference),
+                Prose::escape_text(&source.to_string())
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "Unresolvable file reference",
+                ))
+                .body(body)
+                .hint(escape_prose_path(hint))
+        }
         // The dispatcher only routes lifecycle-family variants here.
         _ => unreachable!("non-lifecycle CompositionError routed to lifecycle renderer"),
     }

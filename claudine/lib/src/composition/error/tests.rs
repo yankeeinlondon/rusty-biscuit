@@ -1543,3 +1543,131 @@ fn phase_11_family_dispatch_routes_to_family_renderers() {
         );
     }
 }
+
+// -- typed transport (Phase 4) --------------------------------------------
+//
+// The wrapper's whole purpose is that the concrete cause stays reachable. A
+// test that only asserts `Display` text would pass against the `eyre!("{e}")`
+// flattening these replaced.
+
+fn proxy_reference_error() -> CompositionError {
+    CompositionError::InvalidFileReference {
+        context: Box::new(FileReferenceContext {
+            source_path: PathBuf::from("/repo/run.md"),
+            event: Some("initialize".to_string()),
+            property: "initialize".to_string(),
+            reference: "nope.md".to_string(),
+            hint: "A `proxy` target must name an existing Markdown document.".to_string(),
+        }),
+        source: crate::harness::HarnessError::PathResolutionFailed {
+            raw: "nope.md".to_string(),
+            failure: crate::harness::PathResolutionFailure::TargetMissing,
+            source_path: Some(PathBuf::from("/repo/run.md")),
+            resolved: Some(PathBuf::from("/repo/nope.md")),
+        },
+    }
+}
+
+#[test]
+fn invalid_file_reference_exposes_its_concrete_source() {
+    let err = proxy_reference_error();
+    let source = std::error::Error::source(&err).expect("wrapper must expose a source");
+    let concrete = source
+        .downcast_ref::<crate::harness::HarnessError>()
+        .expect("the concrete typed error must survive the wrapper");
+    assert!(matches!(
+        concrete,
+        crate::harness::HarnessError::PathResolutionFailed { .. }
+    ));
+}
+
+#[test]
+fn invalid_file_reference_owns_the_shared_code_for_every_surface() {
+    // The wrapper must not coin a proxy-specific code: one identity, with the
+    // surface told apart by `event` / `property` in detail.
+    use crate::diagnostics::Diagnostic;
+    let err = proxy_reference_error();
+    assert_eq!(err.code(), "composition.invalid_file_reference");
+    assert_eq!(err.role(), crate::diagnostics::DiagnosticRole::Semantic);
+}
+
+#[test]
+fn invalid_file_reference_detail_unions_authoring_context_over_the_source() {
+    use crate::diagnostics::Diagnostic;
+    let detail = proxy_reference_error().detail();
+
+    // Authoring context only this layer has.
+    assert_eq!(detail["property"], serde_json::json!("initialize"));
+    assert_eq!(detail["event"], serde_json::json!("initialize"));
+    assert_eq!(detail["reference"], serde_json::json!("nope.md"));
+    assert_eq!(detail["source_path"], serde_json::json!("/repo/run.md"));
+    // Carried up from the typed source's own projection, not re-derived.
+    assert_eq!(detail["failure"], serde_json::json!("no_match"));
+    // Still unavailable: not invented to fill the shape.
+    assert_eq!(detail["kind"], serde_json::Value::Null);
+    assert_eq!(detail["candidates"], serde_json::Value::Null);
+}
+
+#[test]
+fn invalid_file_reference_detail_declares_every_catalog_field() {
+    use crate::diagnostics::Diagnostic;
+    let detail = proxy_reference_error().detail();
+    let spec = crate::diagnostics::code_spec("composition.invalid_file_reference").unwrap();
+    for field in spec.detail {
+        assert!(
+            detail.get(*field).is_some(),
+            "declared field `{field}` absent from the wrapper's projection"
+        );
+    }
+    assert!(!detail.is_null(), "a registered code must not project top-level null");
+}
+
+#[test]
+fn invalid_file_reference_without_an_event_still_renders_and_classifies() {
+    // A non-lifecycle surface (schema, transclusion) has no event; the shared
+    // code and the `null` event are both part of the contract.
+    use crate::diagnostics::Diagnostic;
+    let err = CompositionError::InvalidFileReference {
+        context: Box::new(FileReferenceContext {
+            source_path: PathBuf::from("/repo/run.md"),
+            event: None,
+            property: "$schema.plan".to_string(),
+            reference: "@missing/plan.md".to_string(),
+            hint: "hint".to_string(),
+        }),
+        source: crate::harness::HarnessError::RepoRootRequired {
+            path: "@missing/plan.md".to_string(),
+        },
+    };
+    assert_eq!(err.code(), "composition.invalid_file_reference");
+    assert_eq!(err.detail()["event"], serde_json::Value::Null);
+    assert!(err.to_string().contains("$schema.plan"), "got: {err}");
+    let term = biscuit_terminal::terminal::Terminal::default();
+    assert!(!err.status_block(&term).render(&term).is_empty());
+}
+
+#[test]
+fn invalid_file_reference_anchors_its_frontmatter_excerpt_on_the_property() {
+    let source = source_from("---\ninitialize:\n    proxy: nope.md\n---\nbody\n");
+    let enriched = proxy_reference_error().enrich_frontmatter(&source, true);
+    assert!(
+        matches!(enriched, CompositionError::WithFrontmatter { .. }),
+        "the wrapper is frontmatter-rooted and must capture an excerpt"
+    );
+    // The transparent wrapper still reaches the concrete cause underneath.
+    assert!(enriched.to_string().contains("nope.md"), "got: {enriched}");
+}
+
+#[test]
+fn invalid_file_reference_body_does_not_leak_escape_backslashes() {
+    // Regression: the source's `Display` quotes the reference (`"nope.md"`),
+    // and the href-oriented `escape_prose_path` escapes `"` — which Prose does
+    // not treat as special, so the backslash rendered literally as `\"`.
+    let term = biscuit_terminal::terminal::Terminal::default();
+    let rendered = proxy_reference_error().status_block(&term).render(&term);
+    assert!(
+        !rendered.contains(r#"\""#),
+        "escape backslash leaked into rendered body:\n{rendered}"
+    );
+    assert!(rendered.contains("nope.md"), "{rendered}");
+}

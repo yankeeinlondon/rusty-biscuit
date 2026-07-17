@@ -414,7 +414,9 @@ fn role_defaults_to_semantic() {
     // Owning the classification is the norm; delegating is the deliberate act.
     let err = HarnessError::PathResolutionFailed {
         raw: "@/missing".to_string(),
-        detail: "no such file".to_string(),
+        failure: crate::harness::PathResolutionFailure::TargetMissing,
+        source_path: None,
+        resolved: None,
     };
     assert_eq!(err.role(), DiagnosticRole::Semantic);
 }

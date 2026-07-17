@@ -130,10 +130,10 @@ pub(crate) fn preflight_proxy_target(
         return Ok(());
     }
     let source_text = fs::read_to_string(&state.source_path).map_err(|e| {
-        Box::new(claudine::composition::CompositionError::PreFlightFailed(format!(
-            "proxy target pre-flight: failed to read '{}': {e}",
-            state.source_path.display()
-        )))
+        Box::new(claudine::composition::CompositionError::MarkdownLoad {
+            path: state.source_path.clone(),
+            source: claudine::composition::MarkdownLoadCause::Read(e),
+        })
     })?;
     let markdown: darkmatter::markdown::Markdown = source_text.into();
 
@@ -192,8 +192,12 @@ pub(crate) fn materialize_harness_prompt(
     _repo_root: Option<&Path>,
     child_cwd: &Path,
 ) -> Result<MaterializedHarnessPrompt> {
-    let source_text = fs::read_to_string(&state.source_path)
-        .map_err(|e| eyre!("failed to read '{}': {e}", state.source_path.display()))?;
+    let source_text = fs::read_to_string(&state.source_path).map_err(|e| {
+        claudine::composition::CompositionError::MarkdownLoad {
+            path: state.source_path.clone(),
+            source: claudine::composition::MarkdownLoadCause::Read(e),
+        }
+    })?;
     let mut effective_markdown: darkmatter::markdown::Markdown = source_text.clone().into();
     super::super::overlay::merge_frontmatter_overlay(
         effective_markdown.frontmatter_mut().as_map_mut(),
@@ -270,8 +274,7 @@ pub(crate) fn materialize_harness_prompt(
             )
         }
         HarnessPromptMode::Inline => {
-            claudine::composition::validate_file_permissions(&state.source_path)
-                .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
+            claudine::composition::validate_file_permissions(&state.source_path)?;
             let source = claudine::composition::ResolvedCompositionSource {
                 original_ref: state.source_path.display().to_string(),
                 resolved_path: state.source_path.clone(),

@@ -421,7 +421,7 @@ fn destructure_semantic(event: &SemanticEvent) -> EventMetaSlots {
 /// trigger user-configured hooks.
 pub fn write_summary_event(meta: &EventMeta) -> Result<(), std::io::Error> {
     let path = paths::resolve_file_log_path(None, true)
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
+        .map_err(std::io::Error::other)?;
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;

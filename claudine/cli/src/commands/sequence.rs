@@ -7,7 +7,7 @@ use claudine::composition::{
     self, CompositionError, MarkdownLoadCause, ResolvedCompositionSource, SequenceExecutionOptions,
     parse_interactive_hint,
 };
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 use tracing::info_span;
 
 use super::compose::SharedComposeArgs;
@@ -180,7 +180,7 @@ fn run_sequence_inner(
     // Early validation: both flags share the same duration grammar.
     if let Some(ref raw) = shared.timeout {
         claudine::harness::parse_timeout(raw, std::path::Path::new("<--timeout>"))
-            .map_err(|e| eyre!("invalid --timeout value: {e}"))?;
+            .wrap_err("invalid --timeout value")?;
     }
     shared.step_timeout_secs()?;
     shared.stall_timeout_secs()?;

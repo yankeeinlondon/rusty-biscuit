@@ -321,7 +321,9 @@ fn typed_errors() -> Vec<Box<dyn Diagnostic>> {
         Box::new(ClaudineError::ProviderNotAvailable("codex".to_string())),
         Box::new(HarnessError::PathResolutionFailed {
             raw: "@/missing".to_string(),
-            detail: "proxy target does not exist".to_string(),
+            failure: crate::harness::PathResolutionFailure::TargetMissing,
+            source_path: None,
+            resolved: None,
         }),
     ]
 }

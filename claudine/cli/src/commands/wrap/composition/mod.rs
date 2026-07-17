@@ -44,6 +44,15 @@ use super::{
 use super::exec::switch_process_cwd;
 use crate::log;
 
+/// Remediation for an unresolvable lifecycle `proxy(...)` target.
+///
+/// Names the reference grammar `resolve_harness_path` actually implements, so
+/// the hint stays accurate to the contract rather than to one failure's text.
+pub(crate) const PROXY_TARGET_HINT: &str =
+    "A `proxy` target must name an existing Markdown document: an absolute path, \
+     a path relative to the document that declares it, or `@`-prefixed for a \
+     repo-root-relative path.";
+
 pub(crate) mod dry_run;
 pub(crate) mod launch;
 mod preflight;

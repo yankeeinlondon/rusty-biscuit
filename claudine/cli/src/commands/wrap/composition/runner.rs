@@ -177,7 +177,7 @@ pub(super) fn run_composition_body(
             PreflightBlockedOutcome::Control(control) => {
                 match preflight_blocked_control_error(control, &request.prepared.resolved_path) {
                     Some(ce) => ce.into(),
-                    None => color_eyre::eyre::eyre!("{e}"),
+                    None => color_eyre::Report::from(e),
                 }
             }
         }
@@ -228,7 +228,7 @@ pub(super) fn run_composition_body(
                         &request.prepared.resolved_path,
                     ) {
                         Some(ce) => ce.into(),
-                        None => color_eyre::eyre::eyre!("{e}"),
+                        None => color_eyre::Report::from(e),
                     }
                 }
             }

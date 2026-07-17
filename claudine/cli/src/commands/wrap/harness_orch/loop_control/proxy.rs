@@ -86,9 +86,23 @@ pub(super) fn run_target_initialize(
                 ) {
                     Ok(path) => path,
                     Err(e) => {
-                        return TargetInitializeAction::Abort(eyre!(
-                            "lifecycle initialize proxy: {e}"
-                        ))
+                        return TargetInitializeAction::Abort(
+                            claudine::composition::CompositionError::InvalidFileReference {
+                                context: Box::new(
+                                    claudine::composition::FileReferenceContext {
+                                        source_path: source_path.to_path_buf(),
+                                        event: Some("initialize".to_string()),
+                                        property: "initialize".to_string(),
+                                        reference: target.clone(),
+                                        hint:
+                                            crate::commands::wrap::composition::PROXY_TARGET_HINT
+                                                .to_string(),
+                                    },
+                                ),
+                                source: e,
+                            }
+                            .into(),
+                        );
                     }
                 };
                 TargetInitializeAction::Repoint { resolved }

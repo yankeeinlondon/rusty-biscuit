@@ -1,5 +1,6 @@
 //! Ordered setup pipeline for one composition attempt.
 
+use color_eyre::eyre::WrapErr;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -400,7 +401,7 @@ fn prepare_environment_and_mcp(
             let repo_root_ref = source_repo_root.or(env_plan.repo_root.as_deref());
             let _ = super::super::bootstrap_mcp_state(repo_root_ref)?;
             let catalog =
-                McpCatalogStore::load().map_err(|e| eyre!("failed to load MCP catalog: {e}"))?;
+                McpCatalogStore::load().wrap_err("failed to load MCP catalog")?;
             let (cleaned_prompt, prompt_tags) = lex_tags(&effective_prompt);
             let prompt_is_interactive = request.session_interactive
                 && std::io::stdin().is_terminal()
@@ -422,7 +423,7 @@ fn prepare_environment_and_mcp(
                     .ok()
                 },
             )
-            .map_err(|e| eyre!("MCP session error: {e}"))?;
+            .wrap_err("MCP session error")?;
 
             if !session.missing_tags.is_empty() {
                 if request.strict {
@@ -476,7 +477,7 @@ fn prepare_environment_and_mcp(
                     let mut string_env = std::collections::HashMap::new();
                     let result = injector
                         .inject(&session.servers, &mut string_env, shadow)
-                        .map_err(|e| eyre!("MCP injection failed: {e}"))?;
+                        .wrap_err("MCP injection failed")?;
 
                     // The OpenCode inline config is shared with the system-prompt
                     // and YOLO producers, so it must merge into any value already on
@@ -1159,7 +1160,16 @@ fn route_initialize(
                         source_path,
                         effective_repo_root,
                     )
-                    .map_err(|e| eyre!("lifecycle initialize proxy: {e}"))?;
+                    .map_err(|e| CompositionError::InvalidFileReference {
+                        context: Box::new(claudine::composition::FileReferenceContext {
+                            source_path: source_path.to_path_buf(),
+                            event: Some("initialize".to_string()),
+                            property: "initialize".to_string(),
+                            reference: target.clone(),
+                            hint: PROXY_TARGET_HINT.to_string(),
+                        }),
+                        source: e,
+                    })?;
                     if !claudine::composition::proxy_handoff_allowed(
                         std::slice::from_ref(&source_path.to_path_buf()),
                         &resolved,

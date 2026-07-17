@@ -147,7 +147,7 @@ pub(super) fn dispatch_terminal_control(
                 profile.supports_resume(),
                 session_id,
             ) {
-                return TerminalControlAction::Abort(eyre!("{e}"));
+                return TerminalControlAction::Abort(e);
             }
             prompt_state.next_resume_session_id = session_id.map(|id| id.to_string());
             prompt_state.next_prompt_override = Some(message);
@@ -180,7 +180,26 @@ pub(super) fn dispatch_terminal_control(
             };
             let resolved = match claudine::harness::resolve_harness_path(&target, &resolve_ctx) {
                 Ok(path) => path,
-                Err(e) => return TerminalControlAction::Abort(eyre!("lifecycle proxy: {e}")),
+                // D-2: this route resolves without probing existence, so a
+                // missing target still fails later in pre-flight — converging
+                // the two routes is a routing change and out of scope here.
+                // Typing *this* failure is not.
+                Err(e) => {
+                    return TerminalControlAction::Abort(
+                        CompositionError::InvalidFileReference {
+                            context: Box::new(claudine::composition::FileReferenceContext {
+                                source_path: prompt_state.source_path.clone(),
+                                event: None,
+                                property: "proxy".to_string(),
+                                reference: target.clone(),
+                                hint: crate::commands::wrap::composition::PROXY_TARGET_HINT
+                                    .to_string(),
+                            }),
+                            source: e,
+                        }
+                        .into(),
+                    );
+                }
             };
             // Cycle / hop-limit guard: a `failure` stack that proxies back to a
             // document whose own `failure` stack proxies again would loop

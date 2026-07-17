@@ -246,7 +246,9 @@ pub fn resolve_proxy_target(
     if !resolved.is_file() {
         return Err(crate::harness::HarnessError::PathResolutionFailed {
             raw: target.to_string(),
-            detail: format!("proxy target does not exist: {}", resolved.display()),
+            failure: crate::harness::error::PathResolutionFailure::TargetMissing,
+            source_path: Some(source_path.to_path_buf()),
+            resolved: Some(resolved),
         });
     }
     Ok(resolved)

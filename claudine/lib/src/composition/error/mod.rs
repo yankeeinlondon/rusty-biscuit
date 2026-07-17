@@ -59,6 +59,38 @@ pub enum CompositionError {
         source: biscuit_file::FileReferenceError,
     },
 
+    /// A file reference the author wrote in their prompt document could not be
+    /// resolved to a usable file.
+    ///
+    /// The semantic boundary between a lower-layer resolution failure and the
+    /// authoring surface that asked for it: the typed [`source`] says *why*
+    /// resolution failed, and this wrapper says *which authored value* asked,
+    /// *where* it was written, and *which lifecycle event* was running.
+    ///
+    /// It owns `composition.invalid_file_reference` for **every** such surface
+    /// — proxying, expressions, schemas, transclusion. A surface is told apart
+    /// by the `event` and `property` keys in structured detail, never by a
+    /// surface-specific code, so one `when: err.code == "…"` clause keeps
+    /// matching as new surfaces adopt it.
+    ///
+    #[error("{}: cannot resolve `{}`: {source}", context.property, context.reference)]
+    InvalidFileReference {
+        /// Where the reference was authored. Boxed so the context's five
+        /// fields do not widen every `Result<_, CompositionError>` in the
+        /// crate — the *context* is the safe thing to box, not the `source`.
+        context: Box<FileReferenceContext>,
+        /// The typed resolution failure.
+        ///
+        /// Deliberately **not** boxed: `#[source]` on a `Box<ConcreteError>`
+        /// publishes `Box<ConcreteError>` to the cause chain, and `Box`'s own
+        /// `Error::source` skips straight to the inner error's *source* — so
+        /// the concrete error would never be a chain member and
+        /// [`as_diagnostic`](crate::diagnostics::as_diagnostic) could never
+        /// downcast to it.
+        #[source]
+        source: crate::harness::HarnessError,
+    },
+
     /// The resolved file does not exist.
     #[error("file not found: {0}")]
     FileNotFound(String),
@@ -1297,6 +1329,27 @@ pub enum CompositionError {
     },
 }
 
+/// Where a file reference was authored, for
+/// [`CompositionError::InvalidFileReference`].
+///
+/// `event` and `property` are what tell one authoring surface from another in
+/// `err.detail.*`, which is why the wrapper needs no surface-specific code.
+#[derive(Debug, Clone)]
+pub struct FileReferenceContext {
+    /// The document that authored the reference.
+    pub source_path: PathBuf,
+    /// The lifecycle event that was running, when the reference was authored
+    /// inside a lifecycle stack. `None` for a non-lifecycle surface.
+    pub event: Option<String>,
+    /// Dotted property path naming the authored value, e.g.
+    /// `"initialize.stack[0].proxy"`.
+    pub property: String,
+    /// The reference exactly as authored, before any resolution.
+    pub reference: String,
+    /// Remediation naming the contract the reference violated.
+    pub hint: String,
+}
+
 /// Heterogeneous lower-layer cause of a Markdown source-load failure.
 ///
 /// Carried as the typed `#[source]` of [`CompositionError::MarkdownLoad`] so a
@@ -1702,6 +1755,9 @@ impl CompositionError {
             | CompositionError::LifecycleInvalidArgs { property, .. }
             | CompositionError::LifecycleErrNotAvailable { property, .. } => {
                 Some(FrontmatterHighlight::Property(property.clone()))
+            }
+            CompositionError::InvalidFileReference { context, .. } => {
+                Some(FrontmatterHighlight::Property(context.property.clone()))
             }
             CompositionError::LifecycleSayConflict(property)
             | CompositionError::LifecycleUnknownEffect(property, _) => {

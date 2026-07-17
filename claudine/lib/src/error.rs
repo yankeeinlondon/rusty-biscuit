@@ -223,8 +223,11 @@ pub enum ClaudineError {
 
     // --- System prompt errors ---
     /// Launch context detection failed (git or repo detection error).
+    ///
+    /// Carries the typed `sniff` failure as its `#[source]` rather than a
+    /// flattened message, so a caller can recover which probe failed.
     #[error("launch context detection failed: {0}")]
-    LaunchContextDetection(String),
+    LaunchContextDetection(#[source] Box<sniff::SniffError>),
 
     /// System prompt file not found.
     #[error("system prompt file not found: {0}")]
@@ -423,9 +426,11 @@ impl Diagnostic for ClaudineError {
             }
             // `internal.bug` declares `message`.
             ClaudineError::TemplateError(message)
-            | ClaudineError::LaunchContextDetection(message)
             | ClaudineError::ReportingPathUnavailable(message) => {
                 base["message"] = json!(message);
+            }
+            ClaudineError::LaunchContextDetection(source) => {
+                base["message"] = json!(source.to_string());
             }
             ClaudineError::InvalidReportingDateRange { .. } => {
                 base["message"] = json!(self.to_string());

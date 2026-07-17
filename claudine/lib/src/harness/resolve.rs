@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::harness::error::HarnessError;
+use crate::harness::error::{HarnessError, PathResolutionFailure};
 
 /// Context for resolving harness-internal paths.
 #[derive(Debug, Clone)]
@@ -31,7 +31,9 @@ pub fn resolve_harness_path(
     if trimmed.is_empty() {
         return Err(HarnessError::PathResolutionFailed {
             raw: raw.to_string(),
-            detail: "path is empty".to_string(),
+            failure: PathResolutionFailure::EmptyReference,
+            source_path: Some(ctx.source_path.to_path_buf()),
+            resolved: None,
         });
     }
 
@@ -58,10 +60,9 @@ pub fn resolve_harness_path(
             .parent()
             .ok_or_else(|| HarnessError::PathResolutionFailed {
                 raw: raw.to_string(),
-                detail: format!(
-                    "source path \"{}\" has no parent directory",
-                    ctx.source_path.display()
-                ),
+                failure: PathResolutionFailure::NoSourceParent,
+                source_path: Some(ctx.source_path.to_path_buf()),
+                resolved: None,
             })?;
 
     Ok(source_dir.join(trimmed))

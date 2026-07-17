@@ -524,7 +524,7 @@ fn adopt_proxy_lifecycle_phase(
                 loop_start,
             )
             .map(color_eyre::eyre::Report::from)
-            .unwrap_or_else(|| eyre!("{error}")));
+            .unwrap_or_else(|| color_eyre::eyre::Report::from(error)));
         }
     }
     match run_target_initialize(
@@ -637,7 +637,7 @@ fn preflight_pending_proxy_phase(
             loop_start,
         )
         .map(color_eyre::eyre::Report::from)
-        .unwrap_or_else(|| eyre!("{error}")));
+        .unwrap_or_else(|| error.into()));
     }
     Ok(())
 }
@@ -724,7 +724,7 @@ fn prepare_harness_plan_phase(
             loop_start,
         )
         .map(color_eyre::eyre::Report::from)
-        .unwrap_or_else(|| eyre!("{error}"))
+        .unwrap_or_else(|| color_eyre::eyre::Report::from(error))
     })?;
 
     if show_checks {
@@ -876,7 +876,7 @@ fn execute_attempt_phase(
             loop_start,
         ) {
             Some(ce) => ce.into(),
-            None => eyre!("{e}"),
+            None => e,
         }
     })?;
     let _launch_span = info_span!(
@@ -967,7 +967,7 @@ fn execute_attempt_phase(
             loop_start,
         ) {
             Some(ce) => ce.into(),
-            None => eyre!("{e}"),
+            None => e,
         }
     })?;
     if let Some(p) = perf {

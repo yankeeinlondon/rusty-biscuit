@@ -25,7 +25,7 @@ use claudine::composition::{
     SharedApprovalCache, SystemShellRunner, build_loop_seed_with_lifecycle, resolve_loop_config,
 };
 use claudine::system_prompt::SystemPromptArgs;
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 use tracing::info_span;
 
 use super::interrupt::{USER_INTERRUPT_EXIT_CODE, install_user_interrupt_guard};
@@ -360,7 +360,7 @@ fn validate_timeout_flags(shared: &SharedComposeArgs) -> Result<()> {
     }
     if let Some(ref raw) = shared.timeout {
         claudine::harness::parse_timeout(raw, std::path::Path::new("<--timeout>"))
-            .map_err(|e| eyre!("invalid --timeout value: {e}"))?;
+            .wrap_err("invalid --timeout value")?;
     }
     Ok(())
 }
