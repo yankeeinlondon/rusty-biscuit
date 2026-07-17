@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 7
+phase: 8
 total_phases: 8
 agent: claude/default
 yolo: "true"
@@ -147,6 +147,118 @@ docs_updated_during_phase_7:
     - claudine/features/2026-07-13-error-propogation/decisions.md
 docs_created_during_phase_7: []
 skills_files_updated_during_phase_7: []
+packages_during_phase_8:
+    - claudine
+    - claudine-cli
+source_files_during_phase_8:
+    - claudine/lib/src/diagnostics/registry.rs
+    - claudine/lib/src/diagnostics/mod.rs
+    - claudine/lib/src/diagnostics/facets.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+    - claudine/cli/tests/error_guards.rs
+    - claudine/cli/tests/error_guards/source_scan.rs
+    - claudine/cli/tests/error_guards/boxed-diagnostic-allow.toml
+    - claudine/cli/tests/level2_lifecycle_dispatch.rs
+    - claudine/justfile
+    - scripts/check-lifecycle-doc-facets.sh
+docs_updated_during_phase_8:
+    - claudine/docs/topics/lifecycle.md
+    - claudine/features/2026-07-13-error-propogation/plan.md
+    - claudine/features/2026-07-13-error-propogation/decisions.md
+    - claudine/features/2026-07-13-file-resolution/spec.md
+docs_created_during_phase_8:
+    - claudine/docs/topics/error-architecture.md
+skills_files_updated_during_phase_8:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/timeline.md
+    - .claude/skills/claudine/error-architecture.md
+packages:
+    - claudine
+    - claudine-cli
+source_code:
+    - claudine/lib/src/diagnostics/discovery.rs
+    - claudine/lib/src/diagnostics/discovery/tests.rs
+    - claudine/lib/src/diagnostics/snapshot.rs
+    - claudine/lib/src/diagnostics/snapshot/tests.rs
+    - claudine/lib/src/diagnostics/registry.rs
+    - claudine/lib/src/diagnostics/facets.rs
+    - claudine/lib/src/diagnostics/mod.rs
+    - claudine/lib/src/error.rs
+    - claudine/lib/src/harness/error.rs
+    - claudine/lib/src/harness/mod.rs
+    - claudine/lib/src/harness/resolve.rs
+    - claudine/lib/src/harness/runtime.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/lifecycle/context/tests.rs
+    - claudine/lib/src/composition/lifecycle/control.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+    - claudine/lib/src/system_prompt/context.rs
+    - claudine/lib/src/system_prompt/change_state.rs
+    - claudine/lib/src/linking/hashing.rs
+    - claudine/lib/src/stream/reporting.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/output/error_walker.rs
+    - claudine/cli/src/output/error_walker/tests.rs
+    - claudine/cli/src/commands/mcp/show.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/schema_interactive/mod.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/overlay.rs
+    - claudine/cli/src/commands/wrap/wrapper_mcp.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/src/commands/wrap/env/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/resolve.rs
+    - claudine/cli/src/commands/wrap/composition/mod.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/target.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/tests/characterization_error_routes.rs
+    - claudine/cli/tests/diagnostic_discovery.rs
+    - claudine/cli/tests/effective_diagnostic_render.rs
+    - claudine/cli/tests/error_guards.rs
+    - claudine/cli/tests/error_guards/source_scan.rs
+    - claudine/cli/tests/error_guards/transport-allow.toml
+    - claudine/cli/tests/error_guards/boxed-diagnostic-allow.toml
+    - claudine/cli/tests/level2_typed_error_render_capture.rs
+    - claudine/cli/tests/level2_lifecycle_control.rs
+    - claudine/cli/tests/level2_lifecycle_dispatch.rs
+    - claudine/cli/tests/wrap_basics.rs
+    - claudine/cli/tests/wrap_compose_validation.rs
+    - claudine/cli/Cargo.toml
+    - claudine/justfile
+    - claudine/docs/providers/dispatch-inventory.json
+    - .config/nextest.toml
+    - scripts/check-lifecycle-doc-facets.sh
+documentation:
+    - claudine/docs/topics/error-architecture.md
+    - claudine/docs/topics/lifecycle.md
+    - claudine/features/2026-07-13-error-propogation/plan.md
+    - claudine/features/2026-07-13-error-propogation/decisions.md
+    - claudine/features/2026-07-13-error-propogation/inventory.md
+    - claudine/features/2026-07-13-file-resolution/spec.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/timeline.md
+    - .claude/skills/claudine/error-architecture.md
 ---
 
 # Execution Plan — End-to-End Typed Error Propagation
@@ -613,38 +725,38 @@ is still the contract.
 
 ## Phase 8 — Documentation and Closure
 
-- [ ] Update Claudine **error-architecture documentation**: the central discovery
+- [x] Update Claudine **error-architecture documentation**: the central discovery
       seam, effective-diagnostic selection (including the role contract and
       guards), the snapshot boundary, and typed-wrapper rules.
-- [ ] Document the added `composition.invalid_file_reference` fields in the error
+- [x] Document the added `composition.invalid_file_reference` fields in the error
       catalog; document `fallback_dir` (and `base_dir`) as **compatibility
       projections**. Do not silently reuse a code with the wrong origin.
-- [ ] Update **lifecycle documentation**: the effective `err.msg`, the one-level
+- [x] Update **lifecycle documentation**: the effective `err.msg`, the one-level
       `err.cause.*` projection, and the rule that a registered code always
       carries a catalog-shaped detail object.
-- [ ] Add the **lossy-boundary audit procedure** to the `claudine` skill and
+- [x] Add the **lossy-boundary audit procedure** to the `claudine` skill and
       contributor guidance; refresh the skill if module structure moved.
-- [ ] **Comment-drift pass**: every symbol whose behavior changed gets its
+- [x] **Comment-drift pass**: every symbol whose behavior changed gets its
       rustdoc/inline comments reviewed for stale rendering/propagation claims —
       notably `diagnostics/mod.rs` (its `## Wired implementations` block
       describes `from_action_failure`'s synthesized-`error_kind` path, which
       Phase 5 changes) and `error_walker.rs` (its module doc says
       "deepest typed match", which Phase 2/5 supersedes).
-- [ ] Document additive JSON/machine-output fields as intentional. Removing or
+- [x] Document additive JSON/machine-output fields as intentional. Removing or
       renaming an existing field is out of scope.
-- [ ] Note in `features/2026-07-13-file-resolution/spec.md` that its typed
+- [x] Note in `features/2026-07-13-file-resolution/spec.md` that its typed
       transport dependency has landed and the reserved nulls are ready to fill.
       **Also record the D-12 handoff**: AC5 is confirmed unsatisfiable without
       converging the two proxy resolvers, and file-resolution is its home. The
       pinning test `level2_proxy_routes_share_a_typed_surface_but_diverge_on_identity_in_tmux`
       will fail when that convergence lands — by design; it is the prompt to
       promote the assertions to full parity.
-- [ ] **Decide whether `CompositionError::PreFlightFailed` earns its own code.**
+- [x] **Decide whether `CompositionError::PreFlightFailed` earns its own code.**
       Phase 7 found it inherits the `composition.failed` catch-all, so a shell
       denial lost the `shell_approval` distinction with no faceted replacement
       (see Phase 7's finding). Compare `composition.shell_expansion`, which has
       one.
-- [ ] **Widen D-7's requested reachability check** (per D-13): not just
+- [x] **Widen D-7's requested reachability check** (per D-13): not just
       `#[source] Box<T>` fields, but any `Box<T>` reaching `Report::from`/`.into()`
       where `T` is a registered diagnostic. Phase 7 found that instance by hand
       after every static guard passed on it.
@@ -652,6 +764,74 @@ is still the contract.
 
 **⛔ Final checkpoint** — `just test`, `just test-l2`, and `just lint` all green
 in the `claudine/` package area; all nine acceptance criteria demonstrably met.
+
+**Final checkpoint met**, with one pre-existing failure and one AC carried
+forward by ruling:
+
+| Gate | Result |
+|---|---|
+| `just lint` | green (includes `lint-transport` → 16 error guards, and `lint-lifecycle-doc-facets`) |
+| `just test-l2` | green — 131 passed, 0 failed. The three `level2_context_*_at_140` failures Phase 7 recorded as pre-existing **now pass**; the upstream `biscuit-terminal` `Table` margin drift they tracked is resolved on this branch |
+| `just test` | claudine 3485 passed, claudine-cli 1994 passed. **One pre-existing failure**: `claudine-gen::drift committed_generated_artifacts_match_phase_1_byte_baseline`, which reads `reviews/2026-07-14-module-assessment/generated-artifact-baseline.json` — the review was archived to `reviews/_completed/…` and the test's path was not updated (commit `8d7fa2414`). Untouched by this feature; `gen/` has no changes in the entire plan |
+
+**AC5 is carried forward, not met.** Both proxy routes are now typed and both
+render a `StatusBlock`, but they fail at different stages against different
+resolvers, so identical code/headline/hint is unreachable without a routing
+change D10 forbids here (§D-2 → §D-12). The divergence is **pinned** by
+`level2_proxy_routes_share_a_typed_surface_but_diverge_on_identity_in_tmux` and
+handed to `features/2026-07-13-file-resolution/`, whose spec now records the
+dependency and the instruction to promote the test rather than weaken it.
+
+### Phase 8 rulings
+
+Two Phase 7 findings were referred here; both are ruled and implemented.
+
+- **§D-14 — `PreFlightFailed` does not earn a code; the approval *family* does.**
+  Coding a prose variant would mean parsing its own `Display` to pick a code —
+  the defect the feature removes. So the failures were **typed** first:
+  `ShellApprovalUnavailable { command, source_file, line, failure }` with a closed
+  `ShellApprovalFailure`, plus the additive `composition.shell_approval` code
+  (`CODES` 43 → 44) claimed by it and the already-typed `ShellCommandDenied`.
+  `err.detail.reason` (`denied`/`blacklisted`/`no_handler`/`dry_run`) restores the
+  distinction the old `shell_approval` label carried, now as a faceted value.
+  `PreFlightFailed` keeps `composition.failed`, and its doc says why. Every
+  `Display` string is preserved byte-for-byte.
+- **§D-15 — the boxed-diagnostic guard scans type positions, not value flow.**
+  D-13 asked for "any `Box<T>` reaching `Report::from`/`.into()`", which is a
+  value-flow question `syn` cannot answer. Scanning the two type positions that
+  *produce* such a value (`#[source]`/`#[from] Box<T>` fields and
+  `Result<_, Box<T>>` returns) is decidable and strictly broader. Both halves were
+  proven against injected faults and reverted:
+
+| Guard half | Injected fault | Result |
+|---|---|---|
+| `source_field` | a `#[source] Box<ClaudineError>` probe field in `harness/resolve.rs` | FAILED, naming site, file, line, symbol |
+| `result_error` | a `Result<(), Box<HarnessError>>` probe signature | FAILED, likewise |
+
+The two live sites are allowlisted with reasons:
+`preflight_proxy_target` (`retained` — its box is forced by
+`clippy::result_large_err`; correctness rests on `Report::from(*error)` at the
+call site, locked by two tests proven to fail on revert) and
+`CompositionError::AtomicWriteFailed` (`error-propagation-followup` — D-7's
+load-bearing instance, whose fix is a variant redesign D10 defers).
+
+### Drift resolved
+
+- `lint-lifecycle-doc-facets` classified **`err.msg` as a deprecated alias**. It
+  is not, and never was: `err.kind`/`err.variant` mirror `err.category`/`err.code`,
+  while `err.msg` mirrors nothing — and Phase 5 (§D4) made it the *effective*
+  diagnostic's concise, notification-safe projection, which is the correct thing
+  to put in a `say:`. The guard now allows rendering it and instead fails on
+  **matching** on it (`when:`/`until:`/`while:`), which is the real hazard. Both
+  rules were proven against injections.
+- Four rustdoc references pointed at `features/2026-06-28-real-errors/…`, which
+  moved to `_completed/` — broken links in `registry.rs`, `facets.rs`,
+  `diagnostics/mod.rs`, and `lifecycle.md`. Repointed.
+- `diagnostics/mod.rs` still described a "deepest-meaningful-cause walk" and
+  `render/mod.rs`'s `compose_failed_code` claimed the code "follows the same
+  deepest-meaningful-cause walk as rendering". Phase 2/5 replaced deepest-wins
+  with role-based selection; per the repo's drift rule the code is authoritative,
+  so both comments were corrected.
 
 ---
 

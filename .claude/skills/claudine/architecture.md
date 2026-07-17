@@ -464,6 +464,50 @@ Attempt preparation exposes separate prompt-preparation,
 lifecycle-execution, and retry/proxy-control contracts so each transition can
 mutate only the state family it owns.
 
+## Error Handling — the audit before you commit
+
+Full model in [error-architecture.md](error-architecture.md). The rules a change
+to any error path must satisfy, and the guards that check them (`just test`,
+`just lint-transport`):
+
+1. **Retain the typed cause.** Concrete typed error, `#[from]`, a `#[source]`
+   field, or `wrap_err` where the concrete source stays in the chain. Never
+   `format!("…{e}")`, `map_err(|e| e.to_string())`, or a prose
+   `reason`/`message` field that drops the value. `no_unallowlisted_typed_error_collapses`
+   is provenance- and retention-aware, so `Foo { message: e.to_string(), source: e }`
+   is *not* a defect — the chain is intact.
+2. **Register a new `Diagnostic` impl** in `as_diagnostic`
+   (`lib/src/diagnostics/discovery.rs`). `registry_lists_every_diagnostic_impl`
+   re-derives the truth from the sources and fails in both directions. An
+   unregistered impl is the motivating incident and is never allowlistable.
+3. **Do not box a registered diagnostic you need to reach.** `Box<E>` on a chain
+   publishes `Box<E>`; the walk skips `E` at every depth. Box the *context*
+   instead, or unbox at the boundary (`Report::from(*error)`).
+   `no_registered_diagnostic_is_reachable_only_through_a_box` covers both
+   `#[source] Box<T>` fields and `Result<_, Box<T>>` returns.
+4. **Set `role()` from what the variant forwards**, never from what it wraps. A
+   wrapper over a typed Darkmatter cause is `Semantic` (a Darkmatter cause has no
+   facets) — and must delegate `status_block` to that cause, or it replaces a
+   rich block with one line of `Display`.
+5. **Seed `detail()` from `null_detail_for(code)`.** Every declared key present;
+   unavailable optionals `null`; never a top-level `null` for a registered code;
+   never a key the catalog does not declare.
+6. **Never invent a field.** A value the resolver cannot supply is `null` — not
+   parsed from `Display`, not back-derived from a neighbouring facet.
+7. **Extend the catalog additively.** New code or new detail field: non-breaking.
+   Rename or removal: breaking — it silently kills author `when:` clauses.
+   `code → disposition` stays 1:1; if two failures need different dispositions
+   they are different codes.
+
+**Adding an exception.** Both allowlists (`cli/tests/error_guards/*.toml`) key on
+an enclosing **symbol** and require a `tag` and a substantive `reason`.
+`retained` is permanent; any other tag is burn-down debt a follow-up spec closes.
+A stale entry fails its own guard.
+
+**Changing an error's behavior** means a pass over its rustdoc in the same
+change, per the repo's authoring discipline — the rendering and propagation
+claims in these doc comments are exactly the kind that drift.
+
 ## Test Placement
 
 **Inline tests** (`#[cfg(test)] mod tests { … }`) are the default for small files. Once a file exceeds **~800 production lines** or its test module exceeds **~300 lines**, move tests to a sibling file declared via `#[cfg(test)] mod tests;` at the bottom of the parent. This pattern is already established in `lib/src/provider/`, `cli/…/wrap/composition/`, and `cli/…/wrap/exec/wiring/`.

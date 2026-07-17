@@ -6,8 +6,12 @@
 //! error so a *program reacts* to it well — a Rust caller or a prompt-document
 //! author writing a `when:` clause. The two are one chain, not two: `Diagnostic`
 //! is a **supertrait** of `BlockError`, so render and classify resolve through
-//! the same deepest-meaningful-cause walk (see
-//! `claudine/features/2026-06-28-real-errors/error-structure.md` §2 and §6).
+//! one walk — [`select_effective_diagnostic`], whose rule is role-based (the
+//! first [`Semantic`](DiagnosticRole::Semantic) diagnostic wins; a chain of only
+//! [`Transparent`](DiagnosticRole::Transparent) wrappers falls through to its
+//! deepest candidate). See
+//! `claudine/features/_completed/2026-06-28-real-errors/error-structure.md` §2
+//! and §6 for the model, and `docs/topics/error-architecture.md` for the seam.
 //!
 //! Every handleable error exposes five facets plus a default-derived severity:
 //!

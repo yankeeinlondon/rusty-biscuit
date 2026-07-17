@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 6
+phase: 8
 status: ratified
 ---
 
@@ -450,3 +450,109 @@ incident. Locked by
 widened: not just `#[source] Box<T>` fields, but **any `Box<T>` reaching
 `Report::from`/`.into()` where `T` is a registered diagnostic**. This instance
 was found by hand; the next one should not have to be.
+
+*Closed by [D-15](#d-15--the-boxed-diagnostic-guard-scans-type-positions-not-value-flow) (Phase 8).*
+
+---
+
+## D-14 — `PreFlightFailed` does not earn a code; the approval *family* does
+
+**Question (raised by Phase 7).** Phase 5's D7 migration flipped a shell denial's
+`err.variant` from the synthesized label `shell_approval` to
+`composition.failed`, because `CompositionError::PreFlightFailed(String)` has no
+arm in `code()` and inherits the `_ => "composition.failed"` catch-all. An author
+who wrote `when: err.variant == "shell_approval"` lost the distinction with no
+faceted replacement. Phase 7 asked Phase 8 whether `PreFlightFailed` should get
+its own code, comparing `composition.shell_expansion`, which has one.
+
+**Decision.** No — and the question contains the defect. `PreFlightFailed` is
+**prose covering unrelated failures**: three shell-approval refusals, plus the
+early-binding state builder, plus any other shell-audit error. Giving *that
+variant* a code would either mis-classify the state-builder failure as a shell
+approval, or require reading its own `Display` to decide which code to claim.
+Parsing `Display` to recover a classification is the exact defect this feature
+exists to remove; a guard that forbids it at every other boundary cannot make an
+exception for the catalog.
+
+The distinction was real, so the fix is to **type the failures, then code them**:
+
+- New variant `CompositionError::ShellApprovalUnavailable { command, source_file,
+  line, failure }`, carrying a closed `ShellApprovalFailure`
+  (`Blacklisted(String)` / `NoHandler` / `DryRun`). It replaces the three
+  `PreFlightFailed(format!(…))` sites in `preflight.rs`.
+- New catalog code **`composition.shell_approval`** (additive; `CODES` 43 → 44),
+  claimed by `ShellApprovalUnavailable` **and** the already-typed
+  `ShellCommandDenied`, with detail `command`, `source_path`, `line`, `reason`.
+- `PreFlightFailed` keeps `composition.failed`, and its doc comment now says why.
+
+**Why one code for four reasons, not four codes.** `code → disposition` must stay
+1:1 (error-catalog §7.5), and all four resolve the same way: change the document
+or change the approval configuration — a different action that will not
+self-resolve, i.e. `correctable`/`author`, matching its sibling
+`composition.shell_expansion`. Where they differ is *which* fix, which is
+per-instance data, so it belongs in `err.detail.reason`
+(`denied` / `blacklisted` / `no_handler` / `dry_run`). This is the §7.5
+"one variant + discriminant" trade, resolved the way the catalog resolved
+`cap.plan_limit`: merge when the disposition is uniform.
+
+**Behavior change accepted.** `err.code` / `err.variant` for the blocked-route
+shell-audit failure moves `composition.failed` → `composition.shell_approval`.
+This is strictly finer than what Phase 5 shipped and restores what the
+pre-migration label carried, now as a matchable facet with structured detail
+instead of an internal Rust label. Two L2 assertions in
+`level2_lifecycle_dispatch.rs` were updated; the pinned characterization
+properties (exit code, event order, emission count) are untouched — this is a
+projection change, not a routing one. Every `Display` string is preserved
+byte-for-byte: the prose is a user-visible surface, and typing an error is not a
+licence to reword it.
+
+**Reversal condition.** If a `dry_run` refusal ever needs a different
+disposition from a `blacklisted` one — e.g. `needs_input` because an interactive
+retry would succeed — then `reason` is carrying a disposition and the code must
+split. Nothing today distinguishes them that way.
+
+---
+
+## D-15 — The boxed-diagnostic guard scans type positions, not value flow
+
+**Decision (Phase 8).** D-13's requested widening landed as
+`no_registered_diagnostic_is_reachable_only_through_a_box`
+(`cli/tests/error_guards.rs`), which fails on a `Box<T>` in **either** cause-chain
+type position where `T` is a registered diagnostic:
+
+| Site | Shape | Why it is on a chain |
+|---|---|---|
+| `source_field` | `#[source]` / `#[from]` field typed `Box<T>` | D-7's original ask: publishes `Box<T>` to `Error::source()` |
+| `result_error` | `Result<_, Box<T>>` return type | D-13's live instance: `?`/`.into()` hands `Report::from` a `Box<T>`, making the *report's root* undowncastable |
+
+**Why type positions rather than the literal ask.** D-13 asked for "any `Box<T>`
+reaching `Report::from`/`.into()`". That is a **value-flow** question, and `syn`
+has no type inference — it cannot know what `error.into()` receives. Scanning the
+two type positions that *produce* such a value is decidable from the syntax tree
+alone, and it is strictly broader: it catches the boxed error before it reaches
+any conversion, including conversions this feature has not imagined. The scan
+records every `Box<T>` and the guard filters by `discovery_registry()`, so the
+policy lives with the registry rather than being hard-coded into the reader.
+
+**What it cannot prove.** It cannot see that a call site *does* unbox correctly —
+which is why `preflight_proxy_target` is allowlisted rather than clean. Its box
+is forced (an unboxed `CompositionError` there trips `clippy::result_large_err`
+across the call graph, the same pressure that shaped `InvalidFileReference`), and
+its correctness rests on `loop_control.rs` calling `Report::from(*error)`. That
+discipline is invisible to the scan, so it is carried by the entry's reason and
+locked by the two tests proven to fail when the unbox is reverted. An allowlist
+entry naming a test is weaker than a guard, and honest about being weaker.
+
+**Proven, not assumed.** Both halves were injected and observed to fail: a
+`#[source] Box<ClaudineError>` probe field and a `Result<(), Box<HarnessError>>`
+probe signature, each flagged with its site, file, line, and symbol. Both
+injections were reverted.
+
+**Debt recorded, not closed.** `CompositionError::AtomicWriteFailed`'s
+`#[source] Box<ClaudineError>` — the load-bearing instance D-7 named — is
+allowlisted under `error-propagation-followup`, not fixed. Its box is not
+removable (a `ClaudineError` can contain a `CompositionError`, so an unboxed field
+is infinitely sized); the fix is `InvalidFileReference`'s shape, which is a
+variant redesign with its own blast radius, and D10 forbids taking it here. No
+route is known to depend on the boxed cause: `AtomicWriteFailed` is `Semantic` and
+owns `io.write_failed`, so selection stops at it before the box matters.
