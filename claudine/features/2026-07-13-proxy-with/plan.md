@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 2
+phase: 3
 total_phases: 14
 agent: claude/default
 yolo: "true"
@@ -34,6 +34,23 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2:
     - claudine/features/2026-07-13-proxy-with/notes/state-migration.md
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/actions/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+docs_updated_during_phase_3:
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Execution Plan — Canonical Document Handoffs and Transient Proxy Frontmatter (`with:`)
@@ -350,36 +367,36 @@ filesystem I/O/resolution, or provider-adapter work (R1); carrying a resolved
 
 Goal: accept the authoring surface. No evaluation, no runtime.
 
-- [ ] Add the typed `proxy` descriptor exception so the parser recognizes `with:`
+- [x] Add the typed `proxy` descriptor exception so the parser recognizes `with:`
       **before** the generic sibling-key rule fires. The rule lives at
       `parse.rs:438-483` (allowed siblings today: `when`, `action`, `no_error`);
       the key/value proxy branch is `action_shape.rs:518-521`. The exception is
       exact — it must not make nested maps valid for another proxy field or any
       other action.
-- [ ] Accept `with:` only on key/value form. `with: {}` parses and is equivalent
+- [x] Accept `with:` only on key/value form. `with: {}` parses and is equivalent
       to omission.
-- [ ] Reject a non-mapping `with:` with a typed, source-aware error.
-- [ ] Reject dynamic or non-string `with:` keys with a source-aware diagnostic
+- [x] Reject a non-mapping `with:` with a typed, source-aware error.
+- [x] Reject dynamic or non-string `with:` keys with a source-aware diagnostic
       rooted at `{event}.stack[i].action[j].with`; append `.key` only when the
       key has a safe string representation. Never invent a misleading dotted
       path for an unrepresentable YAML key.
-- [ ] Reject `with: "{{ payload }}"` (whole-mapping interpolation) in v1 with an
+- [x] Reject `with: "{{ payload }}"` (whole-mapping interpolation) in v1 with an
       actionable message pointing at explicit-key authoring. This is a named
       out-of-scope follow-up, so the error must say so.
-- [ ] Reject a proxy-only `with:` on any other action.
-- [ ] Confirm — with a test, do not just assume — that positional `proxy:` plus a
+- [x] Reject a proxy-only `with:` on any other action.
+- [x] Confirm — with a test, do not just assume — that positional `proxy:` plus a
       sibling `with:` still produces the existing `LifecycleStackAmbiguous`
       (`parse.rs:642-650`) with its actionable key/value rewrite. This is
       acceptance criterion 19 and the spec asserts the *existing* diagnostic is
       already correct.
-- [ ] Add the new error variants to `lib/src/composition/error/mod.rs` and map
+- [x] Add the new error variants to `lib/src/composition/error/mod.rs` and map
       each to `FrontmatterHighlight::Property` in `frontmatter_block_spec()`
       (`error/mod.rs:1685-1703`) so the `FrontmatterExcerpt` path highlights the
       most specific locatable line.
-- [ ] Add styled renderers in `lib/src/composition/error/render/lifecycle.rs`
+- [x] Add styled renderers in `lib/src/composition/error/render/lifecycle.rs`
       alongside the existing ones (`:254`, `:276`, `:297`, `:318`, `:340`, `:358`).
       Use `StatusBlock`/`Prose` — no raw `println!`/`eprintln!`.
-- [ ] L1 in `lib/src/composition/lifecycle/tests/action_shape_control.rs`: parse
+- [x] L1 in `lib/src/composition/lifecycle/tests/action_shape_control.rs`: parse
       key/value proxy with omitted/empty mappings and mappings containing scalar
       and nested values;
       reject non-mapping, dynamic-key, whole-mapping, and wrong-action cases.
