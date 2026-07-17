@@ -24,6 +24,20 @@ pub(crate) struct HarnessPromptState {
     /// The original file reference string (for reporting).
     pub(crate) original_ref: String,
     pub(crate) base_prompt: Option<String>,
+    /// The evaluated `proxy.with` mapping for this document — immutable,
+    /// pre-schema, and never written to disk.
+    ///
+    /// Merged into the target's *authored* frontmatter at every read of it, so
+    /// it participates in frontmatter interpolation, selection hints,
+    /// `initialize` conditions, schema validation, lifecycle parsing, loop
+    /// configuration, and the body alike. Pre-schema is what makes a refresh
+    /// deterministic: schema coercion and invalid-optional drops shape the
+    /// prepared effective frontmatter, and if they could write back here, each
+    /// refresh would reapply a different overlay than the one the source
+    /// authored.
+    ///
+    /// Empty for a directly invoked document. Replaced wholesale — never merged
+    /// — when this document proxies on.
     pub(crate) overlay: indexmap::IndexMap<String, serde_json::Value>,
     pub(crate) prompt_tail: Vec<String>,
     pub(crate) next_prompt_override: Option<String>,

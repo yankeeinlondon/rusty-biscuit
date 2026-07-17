@@ -96,11 +96,12 @@ impl ActiveDocumentCoordinator {
     ) -> Result<(), ProxyCommitError> {
         let handoff = commit_proxy(&mut self.ledger, request, repo_root)?;
 
-        // The handoff's `with:` overlay is deliberately not installed yet:
-        // overlay layering, precedence, and lifetime are one contract owned by
-        // Phase 8 of `features/2026-07-13-proxy-with`, and installing it here
-        // ahead of the target's input-layer assembly point would create the
-        // second overlay-specific read path that phase exists to prevent.
+        // Assignment, not merge: the overlay is document-scoped, so the source's
+        // is discarded with the rest of its state and the target gets only what
+        // its own `with:` evaluated to. Forwarding is explicit — an omitted
+        // `with:` commits an empty map and installs it, which is what makes a
+        // three-hop chain's middle document unable to leak into the third.
+        prompt_state.overlay = handoff.overlay().clone();
         prompt_state.source_path = handoff.resolved_target().to_path_buf();
         prompt_state.original_ref = handoff.authored_target().to_string();
         prompt_state.entry = DocumentEntryReason::ProxyTarget;

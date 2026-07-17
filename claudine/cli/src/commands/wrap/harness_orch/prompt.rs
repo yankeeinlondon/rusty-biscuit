@@ -58,8 +58,21 @@ pub(crate) fn find_wrapper_harness_source(
         })
 }
 
-/// Read the document at `state.source_path` and merge the caller overlay into
-/// its authored frontmatter, yielding the source the canonical service prepares.
+/// Read the document at `state.source_path` and merge its overlay into that
+/// document's authored frontmatter, yielding the source the canonical service
+/// prepares.
+///
+/// The one place the overlay is layered, so the bootstrap read before target
+/// `initialize` and the stabilized reread after it see the same immutable
+/// mapping. It runs before composition, which is what lets an overlay value
+/// participate in the target's own interpolation and schema stages rather than
+/// arriving after them.
+///
+/// Precedence, low to high: authored frontmatter < `proxy.with` < the caller's
+/// `key=value`/`--set`. The overlay lands here, in the authored layer's own map;
+/// the caller's `set_overrides` ride on the compose options
+/// ([`harness_prepare_options`]) and are applied by Darkmatter on top. A router
+/// therefore cannot silently replace a value the caller pinned explicitly.
 ///
 /// Every re-entry (`retry`/`resume`/`proxy`) reads fresh from disk rather than
 /// reusing the first attempt's prepared prompt, so an `initialize`-time or
