@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 use tracing::info;
 
-use super::super::coordinator::{DocumentTransition, EvaluatedProxyRequest, ProxyProvenance};
+use super::super::coordinator::{EvaluatedProxyRequest, ProxyProvenance, SurfacedHandoff};
 use super::super::error::CompositionError;
 use super::super::lifecycle::{LifecycleConfig, LifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal};
 use super::super::lifecycle_context::LifecycleErrorInfo;
@@ -441,7 +441,7 @@ where
                     String::new(),
                     0,
                 )
-                .with_transition(DocumentTransition::Proxy(request)));
+                .with_handoff(SurfacedHandoff::Request(request)));
             }
             StackControl::Resume { .. } => {
                 // Pre-launch: no provider session to resume.
@@ -547,6 +547,23 @@ where
                 continue;
             }
         };
+
+        // A proxy surfaced by the iteration's own lifecycle ends the source
+        // document *now*: the target is not an extra iteration of this loop
+        // (R7), so no loop gate runs and no further iteration begins. Checked
+        // before fail-fast handling on purpose — a proxy selected by a
+        // `failure` stack is a clean handoff, not a failed iteration.
+        if let Some(handoff) = output.handoff {
+            iteration_count += 1;
+            let exit_code = output.exit_code;
+            return Ok(LoopExecutionResult::success(
+                frontmatter,
+                iteration_count,
+                output.output,
+                exit_code,
+            )
+            .with_handoff(handoff));
+        }
 
         last_output = output.output;
         last_exit_code = output.exit_code;

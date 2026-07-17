@@ -120,7 +120,7 @@ fn loop_initialize_skip_ends_run_with_zero_iterations() {
     assert_eq!(result.iteration_count, 0, "no iteration runs after skip");
     assert_eq!(*invocations.borrow(), 0, "the executor must never be invoked");
     assert!(
-        matches!(result.transition, DocumentTransition::Complete),
+        result.handoff.is_none(),
         "skip completes the run; it is not a proxy hand-off"
     );
     // Only `initialize` may have emitted (the stack control fires before any
@@ -257,11 +257,11 @@ fn loop_initialize_proxy_hands_off_without_iterating() {
     assert!(result.error.is_none(), "clean proxy hand-off: {result:?}");
     assert_eq!(result.iteration_count, 0, "no iteration runs on a proxy hand-off");
     assert_eq!(*invocations.borrow(), 0);
-    let DocumentTransition::Proxy(request) = &result.transition else {
+    let Some(SurfacedHandoff::Request(request)) = &result.handoff else {
         panic!(
-            "the hand-off is surfaced as a transition the caller must consume; \
+            "the hand-off is surfaced as a request the caller must consume; \
              got {:?}",
-            result.transition
+            result.handoff
         );
     };
     assert_eq!(
@@ -323,7 +323,7 @@ fn loop_initialize_proxy_defers_resolution_to_the_coordinator() {
         "the engine does not consult the filesystem, so it raises nothing here: {:?}",
         result.error
     );
-    let DocumentTransition::Proxy(request) = &result.transition else {
+    let Some(SurfacedHandoff::Request(request)) = &result.handoff else {
         panic!("the request is surfaced regardless of whether it resolves");
     };
     assert_eq!(request.target(), "does-not-exist.md");
