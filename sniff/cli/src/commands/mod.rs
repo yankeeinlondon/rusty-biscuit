@@ -1164,11 +1164,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         )
     );
 
+    let bare_repo_aggregate =
+        matches!(&repo_action, Some(crate::args::RepoAction::Default)) && cli.json;
+
     // Build git request based on deep/commit_count flags
     let git_request = select_git_request(
         refresh_remotes_enabled,
         lightweight_repo_action,
         changes_only_repo_action,
+        bare_repo_aggregate,
         history_count,
     );
 
@@ -1212,6 +1216,16 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .without_filesystem()
             .hardware(HardwareRequest::summary().include_audio(true)),
         OutputFilter::Repo => match &repo_action {
+            Some(crate::args::RepoAction::Default) if cli.json => DetectionPlan::new()
+                .without_os()
+                .without_hardware()
+                .without_network()
+                .filesystem(
+                    FilesystemRequest::new()
+                        .git(git_request.clone())
+                        .repo(RepoRequest::focused(RepoDetailRequest::all()))
+                        .without_file_inventory(),
+                ),
             Some(crate::args::RepoAction::Language { breakdown: true }) => DetectionPlan::new()
                 .without_os()
                 .without_hardware()
@@ -1658,17 +1672,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // participating children. It must run after the full detection pass so the
     // library observation can reuse the shared `SniffResult`'s `GitInfo` and
     // `RepoInfo` rather than re-observing them, and so the builder stays a pure
-    // projection (umbrella spec R2).
-    if matches!(repo_action, Some(crate::args::RepoAction::Default)) && cli.json {
+    // projection (umbrella spec R2) — the cwd-relative `context` facts are
+    // resolved by `observe_repo_aggregate`, not by the builder.
+    if bare_repo_aggregate {
         let dir = base_dir
             .as_deref()
             .unwrap_or_else(|| std::path::Path::new("."));
         let aggregate =
             sniff::filesystem::repo::observe_repo_aggregate(dir, result.filesystem.as_ref())?;
-        let options = output::repo_json::AggregateRenderOptions {
-            base_dir: base_dir.as_deref(),
-        };
-        let value = output::repo_json::build_aggregate_value(&result, &aggregate, &options);
+        let value = output::repo_json::build_aggregate_value(&result, &aggregate);
         output::print_json_value(value, result.performance.as_ref());
         perf.emit_for_json(result.performance.as_ref());
         return Ok(());
@@ -2112,10 +2124,19 @@ fn select_git_request(
     refresh_remotes: bool,
     lightweight: bool,
     changes_only: bool,
+    aggregate_json: bool,
     history_count: usize,
 ) -> GitRequest {
     if refresh_remotes {
         GitRequest::deep().commit_count(history_count)
+    } else if aggregate_json {
+        // Aggregate-only branches, worktrees, and history come from the one
+        // library aggregate observation. Detection supplies detailed status
+        // plus the Git config rendered under `git_status`; enumerating its
+        // current linked worktree here would walk the same status twice.
+        GitRequest::full()
+            .commit_count(history_count)
+            .metadata(GitMetadataRequest::none().config(true))
     } else if lightweight {
         GitRequest::summary()
     } else if changes_only {
@@ -2149,7 +2170,7 @@ mod tests {
         // Mapping staged/unstaged/dirty files to packages must never enable
         // `include_worktrees` — that is the per-worktree status/merge fan-out
         // that made `staged-packages` take seconds on a many-worktree checkout.
-        let req = select_git_request(false, false, true, 10);
+        let req = select_git_request(false, false, true, false, 10);
         assert!(
             !req.include_worktrees,
             "change-only actions must not enumerate worktrees"
@@ -2167,8 +2188,19 @@ mod tests {
     #[test]
     fn full_repo_action_keeps_worktrees() {
         // The default repo summary still renders the worktree table.
-        let req = select_git_request(false, false, false, 10);
+        let req = select_git_request(false, false, false, false, 10);
         assert!(req.include_worktrees);
+    }
+
+    #[test]
+    fn aggregate_json_requests_status_and_config_without_worktree_status() {
+        let req = select_git_request(false, false, false, true, 10);
+
+        assert!(req.include_file_changes);
+        assert!(req.wants_config());
+        assert!(!req.wants_commits());
+        assert!(!req.wants_branches());
+        assert!(!req.wants_worktrees());
     }
 
     #[test]

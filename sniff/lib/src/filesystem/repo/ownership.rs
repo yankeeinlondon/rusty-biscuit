@@ -92,6 +92,12 @@ impl PackageOwnershipIndex {
         let absolute = normalize_path(&self.root.join(path));
         self.lookup_normalized(&absolute)
     }
+
+    /// The canonicalized observation root, for lexical prefix fallbacks that
+    /// would otherwise re-canonicalize it per query.
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
 }
 
 #[cfg(test)]

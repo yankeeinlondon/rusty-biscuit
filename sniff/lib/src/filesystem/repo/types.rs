@@ -275,8 +275,7 @@ impl RepoInfo {
         let packages = self.packages.as_deref()?;
         let ownership_index = PackageOwnershipIndex::from_packages(&self.root, packages);
         let dir = canonicalize_path(dir);
-        let index = ownership_index.lookup_normalized(&dir)?;
-        packages.get(index)
+        self.package_for_dir_with_index(&ownership_index, &dir)
     }
 
     /// Find the package owning a path already framed relative to the repo root.
@@ -286,6 +285,18 @@ impl RepoInfo {
         path: &Path,
     ) -> Option<&Package> {
         let index = ownership_index.lookup_relative(path)?;
+        self.packages.as_ref()?.get(index)
+    }
+
+    /// [`package_for_dir`](Self::package_for_dir) against a caller-held index
+    /// and an already-canonicalized `dir`, so a batch of lookups pays one
+    /// index build and one canonicalization.
+    pub(crate) fn package_for_dir_with_index(
+        &self,
+        ownership_index: &PackageOwnershipIndex,
+        dir: &Path,
+    ) -> Option<&Package> {
+        let index = ownership_index.lookup_normalized(dir)?;
         self.packages.as_ref()?.get(index)
     }
 
@@ -312,13 +323,30 @@ impl RepoInfo {
     ///
     /// [`directory_area_fallback`]: Self::directory_area_fallback
     pub fn area_for_dir(&self, dir: &Path) -> Cow<'_, str> {
-        if let Some(pkg) = self.package_for_dir(dir) {
+        let Some(packages) = self.packages.as_deref() else {
+            return self
+                .directory_area_fallback(dir)
+                .map_or(Cow::Borrowed("root"), Cow::Owned);
+        };
+        let ownership_index = PackageOwnershipIndex::from_packages(&self.root, packages);
+        let dir = canonicalize_path(dir);
+        self.area_for_dir_with_index(&ownership_index, &dir)
+    }
+
+    /// [`area_for_dir`](Self::area_for_dir) against a caller-held index and an
+    /// already-canonicalized `dir`.
+    pub(crate) fn area_for_dir_with_index(
+        &self,
+        ownership_index: &PackageOwnershipIndex,
+        dir: &Path,
+    ) -> Cow<'_, str> {
+        if let Some(pkg) = self.package_for_dir_with_index(ownership_index, dir) {
             return Cow::Borrowed(&pkg.name);
         }
-        if let Some(area) = self.package_area_for_dir(dir) {
+        if let Some(area) = self.package_area_for_dir_with_index(ownership_index, dir) {
             return Cow::Borrowed(area);
         }
-        self.directory_area_fallback(dir)
+        self.directory_area_fallback_with_index(ownership_index, dir)
             .map_or(Cow::Borrowed("root"), Cow::Owned)
     }
 
@@ -330,10 +358,26 @@ impl RepoInfo {
     /// member yet — e.g. a freshly scaffolded area not listed in
     /// `[workspace] members`. Returns `None` at the repo root or outside the repo.
     pub fn package_area_label_for_dir(&self, dir: &Path) -> Option<Cow<'_, str>> {
-        if let Some(area) = self.package_area_for_dir(dir) {
+        let Some(packages) = self.packages.as_deref() else {
+            return self.directory_area_fallback(dir).map(Cow::Owned);
+        };
+        let ownership_index = PackageOwnershipIndex::from_packages(&self.root, packages);
+        let dir = canonicalize_path(dir);
+        self.package_area_label_for_dir_with_index(&ownership_index, &dir)
+    }
+
+    /// [`package_area_label_for_dir`](Self::package_area_label_for_dir)
+    /// against a caller-held index and an already-canonicalized `dir`.
+    pub(crate) fn package_area_label_for_dir_with_index(
+        &self,
+        ownership_index: &PackageOwnershipIndex,
+        dir: &Path,
+    ) -> Option<Cow<'_, str>> {
+        if let Some(area) = self.package_area_for_dir_with_index(ownership_index, dir) {
             return Some(Cow::Borrowed(area));
         }
-        self.directory_area_fallback(dir).map(Cow::Owned)
+        self.directory_area_fallback_with_index(ownership_index, dir)
+            .map(Cow::Owned)
     }
 
     /// Derive an area name for `dir` from the directory structure alone.
@@ -359,22 +403,51 @@ impl RepoInfo {
         }
     }
 
+    /// [`directory_area_fallback`](Self::directory_area_fallback) against a
+    /// caller-held index and an already-canonicalized `dir`; the index root is
+    /// the canonical repo root.
+    fn directory_area_fallback_with_index(
+        &self,
+        ownership_index: &PackageOwnershipIndex,
+        dir: &Path,
+    ) -> Option<String> {
+        if !self.is_monorepo {
+            return None;
+        }
+        let rel = dir.strip_prefix(ownership_index.root()).ok()?;
+        match rel.components().next()? {
+            std::path::Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
+            _ => None,
+        }
+    }
+
     /// Find the package area that contains `dir`.
     ///
     /// First checks if `dir` is inside a specific package, then falls back to
     /// checking whether it sits anywhere within a package area directory.
     /// Returns `None` when `dir` is outside every known package area.
     pub fn package_area_for_dir(&self, dir: &Path) -> Option<&str> {
-        let packages = self.packages.as_ref()?;
+        let packages = self.packages.as_deref()?;
+        let ownership_index = PackageOwnershipIndex::from_packages(&self.root, packages);
         let dir = canonicalize_path(dir);
+        self.package_area_for_dir_with_index(&ownership_index, &dir)
+    }
+
+    /// [`package_area_for_dir`](Self::package_area_for_dir) against a
+    /// caller-held index and an already-canonicalized `dir`.
+    pub(crate) fn package_area_for_dir_with_index(
+        &self,
+        ownership_index: &PackageOwnershipIndex,
+        dir: &Path,
+    ) -> Option<&str> {
+        let packages = self.packages.as_ref()?;
 
         // Check if inside a specific package first
-        if let Some(pkg) = self.package_for_dir(&dir) {
+        if let Some(pkg) = self.package_for_dir_with_index(ownership_index, dir) {
             return Some(&pkg.package_area);
         }
 
         // Fall back to checking package area directories
-        let root = canonicalize_path(&self.root);
         let areas: HashSet<&str> = packages
             .iter()
             .map(|p| p.package_area.as_str())
@@ -382,7 +455,7 @@ impl RepoInfo {
             .collect();
 
         for area in &areas {
-            let area_path = root.join(area);
+            let area_path = ownership_index.root().join(area);
             if dir.starts_with(&area_path) {
                 // Return a reference with the right lifetime by finding the
                 // original &str in the packages vec

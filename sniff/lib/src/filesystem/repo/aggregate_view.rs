@@ -1,15 +1,17 @@
 //! The library-owned aggregate observation behind bare `sniff repo --json`.
 //!
 //! Everything bare `sniff repo --json` renders is either already on the
-//! `FilesystemInfo` its detection pass produced, or is one of the six facts
+//! `FilesystemInfo` its detection pass produced, or is one of the facts
 //! [`RepoAggregate`] supplies here. The CLI therefore discovers no repository,
-//! lists no worktrees, queries no branches, reads no conflicts, and walks no
-//! history of its own — see the Phase 2 sub-spec, contract C2.
+//! lists no worktrees, queries no branches, reads no conflicts, walks no
+//! history, and resolves no cwd-relative context of its own — see the Phase 2
+//! sub-spec, contract C2.
 //!
 //! Cost contract: one `GitRepo::discover` and zero additional status walks per
 //! call. Every working-tree scope bucket is a projection over the
 //! `GitInfo.file_changes` the detection pass already collected (contract C1),
-//! not a fresh observation.
+//! not a fresh observation, and the cwd-relative `context` facts resolve over
+//! a single package ownership index (R2.7).
 
 use std::path::Path;
 
@@ -21,9 +23,11 @@ use crate::filesystem::git::{
     BranchInfo, FileStatus, GitInfo, GitRepo, WorktreeEntry, current_worktree_name_with_repo,
     get_recent_commits_by_duration_with_repo, list_worktrees_with_repo,
 };
-use crate::filesystem::repo::types::{RepoInfo, detect_repo_with_request_or_root_package};
+use crate::filesystem::path_kind::is_source_code_path;
+use crate::filesystem::repo::detection::canonicalize_path;
+use crate::filesystem::repo::ownership::PackageOwnershipIndex;
+use crate::filesystem::repo::types::RepoInfo;
 use crate::filesystem::repo::{RepoIdentity, detect_repo_identity_with_repo};
-use crate::request::{RepoDetailRequest, RepoRequest};
 use crate::{Result, SniffError};
 
 /// The default commit window for the bare aggregate.
@@ -39,9 +43,12 @@ const DEFAULT_COMMIT_WINDOW_DAYS: i64 = 3;
 #[derive(Debug, Clone)]
 pub struct RepoAggregate {
     pub identity: RepoIdentity,
-    /// The detected repository, or the root-package fallback for a
-    /// single-package repo that yielded no `RepoInfo`.
+    /// The detected repository, including the standalone root-package
+    /// projection produced by the original filesystem detection pass.
     pub repo: Option<RepoInfo>,
+    /// The repo-wide collapse of versions already attributed to packages by
+    /// detection. One distinct version is retained; zero or several are not.
+    pub version: Option<String>,
     /// Branches with ahead/behind measured against each branch's **upstream**.
     ///
     /// A different fact from `GitInfo.branches`, whose `LocalBranchInfo`
@@ -58,6 +65,35 @@ pub struct RepoAggregate {
     /// (`recent_commits`, `source_code_changes`, `documentation_changes`) are
     /// filters over this set rather than three separate history walks.
     pub commits: CommitDescSet,
+    /// The cwd-relative `context` block facts, resolved once over a shared
+    /// package ownership index so the projection performs no lookups of its
+    /// own (R2.7).
+    pub context: AggregateCwdContext,
+}
+
+/// The cwd-relative facts behind the aggregate's `context` block.
+///
+/// Unresolvable facts carry the focused commands' "empty" rendering: an empty
+/// string or `false`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AggregateCwdContext {
+    /// Name of the package containing the invoking directory.
+    pub package: String,
+    /// Package-area label for the invoking directory, including the monorepo
+    /// directory-structure fallback.
+    pub package_area: String,
+    /// Package name when inside a package, otherwise the area label; empty
+    /// outside a monorepo.
+    pub area: String,
+    /// Root directory of the package containing the invoking directory.
+    pub package_root: String,
+    /// Root directory of the containing package area; empty for the `"root"`
+    /// area, which has no real directory of its own.
+    pub package_area_root: String,
+    /// Whether the invoking directory's package area has uncommitted changes.
+    pub is_current_package_area_dirty: bool,
+    /// Whether those changes include a source-code file.
+    pub package_area_has_source_code_changes: bool,
 }
 
 /// Observe the facts bare `sniff repo --json` needs beyond its detection pass.
@@ -102,16 +138,8 @@ pub fn observe_repo_aggregate(
         ensure_detailed_status(git)?;
     }
 
-    // A single-package repo (a bare `Cargo.toml` / `package.json` with no
-    // workspace) yields no `RepoInfo` from the detection pass, which would
-    // leave every repo-wide fact empty. Recover the root package's facts.
-    let repo = match filesystem.and_then(|fs| fs.repo.as_ref()) {
-        Some(repo) => Some(repo.clone()),
-        None => detect_repo_with_request_or_root_package(
-            git_repo.repo_root(),
-            &RepoRequest::focused(RepoDetailRequest::all()),
-        )?,
-    };
+    let repo = filesystem.and_then(|fs| fs.repo.clone());
+    let version = collapse_detected_repo_version(repo.as_ref());
 
     let file_changes = detected_git.map(|git| git.file_changes.as_slice()).unwrap_or(&[]);
 
@@ -121,6 +149,12 @@ pub fn observe_repo_aggregate(
         &format!("last {DEFAULT_COMMIT_WINDOW_DAYS}d"),
         repo.as_ref(),
     )?;
+
+    let context = observe_cwd_context(
+        dir,
+        repo.as_ref(),
+        detected_git,
+    );
 
     Ok(RepoAggregate {
         identity: detect_repo_identity_with_repo(&git_repo)?,
@@ -132,8 +166,127 @@ pub fn observe_repo_aggregate(
             .iter()
             .any(|change| change.status == FileStatus::Conflicted),
         repo,
+        version,
         commits,
+        context,
     })
+}
+
+/// Collapse versions that package detection already resolved from manifests.
+///
+/// This intentionally consumes `Package.version` rather than resolving source
+/// manifests again: the aggregate needs only the repo-wide string/null value,
+/// not the focused `repo version` command's source-attribution detail.
+fn collapse_detected_repo_version(repo: Option<&RepoInfo>) -> Option<String> {
+    let mut versions = repo?
+        .packages
+        .as_deref()?
+        .iter()
+        .filter_map(|package| package.version.as_deref());
+    let first = versions.next()?;
+    versions.all(|version| version == first).then(|| first.to_string())
+}
+
+/// Resolve the cwd-relative `context` facts for one aggregate observation.
+///
+/// `repo` is the detection pass's `RepoInfo` and `git` its `GitInfo`; both are
+/// borrowed, never re-observed. Every lookup shares one ownership index and
+/// one canonicalization of `dir`, which is what lets the downstream projection
+/// stay counter-free (R2.7).
+fn observe_cwd_context(
+    dir: &Path,
+    repo: Option<&RepoInfo>,
+    git: Option<&GitInfo>,
+) -> AggregateCwdContext {
+    let mut context = AggregateCwdContext::default();
+    let Some(repo) = repo else {
+        return context;
+    };
+
+    let ownership_index =
+        PackageOwnershipIndex::from_packages(&repo.root, repo.packages.as_deref().unwrap_or(&[]));
+    let dir = canonicalize_path(dir);
+
+    if let Some(pkg) = repo.package_for_dir_with_index(&ownership_index, &dir) {
+        context.package = pkg.name.clone();
+        context.package_root = pkg.path.display().to_string();
+    }
+    if let Some(label) = repo.package_area_label_for_dir_with_index(&ownership_index, &dir) {
+        context.package_area = label.into_owned();
+    }
+    if repo.is_monorepo {
+        context.area = repo
+            .area_for_dir_with_index(&ownership_index, &dir)
+            .into_owned();
+    }
+    if let Some(area) = repo.package_area_for_dir_with_index(&ownership_index, &dir) {
+        if area != "root" {
+            context.package_area_root = repo.root.join(area).display().to_string();
+        }
+        let (dirty, has_source_changes) = area_change_facts(repo, area, git);
+        context.is_current_package_area_dirty = dirty;
+        context.package_area_has_source_code_changes = has_source_changes;
+    }
+    context
+}
+
+/// The `dirty` / `has_source_code_changes` pair for one resolved package
+/// area, projected from the already-observed status and file changes.
+///
+/// A path counts when its components place it under the area path — or, for
+/// the `"root"` area, when it sits under no other area. Without a computed
+/// status (an identity-only request) both facts are indeterminate and report
+/// `false`, mirroring the focused commands.
+fn area_change_facts(repo: &RepoInfo, area: &str, git: Option<&GitInfo>) -> (bool, bool) {
+    let Some(git) = git else {
+        return (false, false);
+    };
+    let Some(status) = git.status.as_ref() else {
+        return (false, false);
+    };
+
+    let area_path = (area != "root").then(|| Path::new(area));
+    let in_area = |path: &Path| {
+        if let Some(area_path) = area_path {
+            path.starts_with(area_path)
+        } else {
+            !repo.packages.as_ref().is_some_and(|packages| {
+                packages
+                    .iter()
+                    .any(|p| {
+                        p.package_area != "root"
+                            && path.starts_with(Path::new(&p.package_area))
+                    })
+            })
+        }
+    };
+
+    let mut dirty = false;
+    let mut has_source_changes = false;
+    let paths = status
+        .dirty
+        .iter()
+        .map(|d| d.filepath.as_path())
+        .chain(
+            status
+                .untracked
+                .iter()
+                .map(|u| u.filepath.as_path()),
+        )
+        .chain(
+            git.file_changes
+                .iter()
+                .map(|change| change.path.as_path()),
+        );
+    for path in paths {
+        if in_area(path) {
+            dirty = true;
+            if is_source_code_path(path) {
+                has_source_changes = true;
+            }
+        }
+    }
+    (dirty, has_source_changes)
 }
 
 /// Reject a `GitInfo` whose request did not collect per-file changes.
@@ -206,6 +359,7 @@ mod tests {
     use super::*;
     use crate::filesystem::blast_radius::ChangeScope;
     use crate::filesystem::git::{FileAction, FileChange, GitConfig, RepoStatus};
+    use crate::filesystem::repo::Package;
     use std::path::PathBuf;
 
     fn change(path: &str, status: FileStatus) -> FileChange {
@@ -239,6 +393,42 @@ mod tests {
             tracking: Vec::new(),
             file_changes,
         }
+    }
+
+    fn repo_with_versions(versions: &[Option<&str>]) -> RepoInfo {
+        RepoInfo {
+            packages: Some(
+                versions
+                    .iter()
+                    .enumerate()
+                    .map(|(index, version)| Package {
+                        name: format!("package-{index}"),
+                        version: version.map(str::to_string),
+                        ..Package::default()
+                    })
+                    .collect(),
+            ),
+            ..RepoInfo::default()
+        }
+    }
+
+    #[test]
+    fn detected_versions_collapse_only_when_uniform() {
+        let uniform = repo_with_versions(&[Some("1.2.3"), Some("1.2.3")]);
+        assert_eq!(
+            collapse_detected_repo_version(Some(&uniform)),
+            Some("1.2.3".to_string())
+        );
+
+        let variant = repo_with_versions(&[Some("1.2.3"), Some("2.0.0")]);
+        assert_eq!(collapse_detected_repo_version(Some(&variant)), None);
+    }
+
+    #[test]
+    fn missing_detected_versions_do_not_create_an_aggregate_version() {
+        let missing = repo_with_versions(&[None, None]);
+        assert_eq!(collapse_detected_repo_version(Some(&missing)), None);
+        assert_eq!(collapse_detected_repo_version(None), None);
     }
 
     /// The C1 truth table. `Dirty` takes every status including `Untracked`;
@@ -337,7 +527,7 @@ mod tests {
         use super::*;
         use crate::filesystem::{FilesystemRequest, detect_filesystem_with_request};
         use crate::performance::{counters, testing::measure};
-        use crate::request::GitRequest;
+        use crate::request::{GitMetadataRequest, GitRequest};
         use tempfile::TempDir;
 
         /// A repository with one file per working-tree scope, so a projection
@@ -371,12 +561,27 @@ mod tests {
             dir
         }
 
-        /// The request bare `sniff repo --json` builds: `GitRequest::full()`,
-        /// which is the floor at which `include_file_changes` is set (C1).
+        /// The focused request bare `sniff repo --json` builds. Detailed status
+        /// and config come from detection; aggregate observation supplies the
+        /// branches, worktrees, and history without repeating them here.
         fn aggregate_request() -> FilesystemRequest {
             FilesystemRequest::new()
-                .git(GitRequest::full().commit_count(10))
+                .git(
+                    GitRequest::full()
+                        .commit_count(10)
+                        .metadata(GitMetadataRequest::none().config(true)),
+                )
                 .without_file_inventory()
+        }
+
+        /// Add a real linked checkout using libgit2's portable fixture API.
+        fn linked_fixture() -> (TempDir, PathBuf) {
+            let dir = fixture();
+            let repo = git2::Repository::open(dir.path()).unwrap();
+            let linked_path = dir.path().join("current-linked");
+            repo.worktree("current-linked", &linked_path, None)
+                .unwrap();
+            (dir, linked_path)
         }
 
         /// Arm 1 — detection's git stage walks status exactly once. Measured
@@ -388,7 +593,11 @@ mod tests {
                 let repo = GitRepo::discover(dir.path())
                     .expect("discovery succeeds")
                     .expect("fixture is a repository");
-                repo.detect_with_request(&GitRequest::full().commit_count(10))
+                repo.detect_with_request(
+                    &GitRequest::full()
+                        .commit_count(10)
+                        .metadata(GitMetadataRequest::none().config(true)),
+                )
                     .expect("git detection succeeds")
             });
 
@@ -396,6 +605,31 @@ mod tests {
                 counts.get(counters::GIT_STATUS_WALKS),
                 1,
                 "counters: {:?}",
+                counts.all()
+            );
+        }
+
+        /// A linked checkout used to walk status once for detailed detection
+        /// and again while projecting the current worktree. Focused aggregate
+        /// metadata keeps the command-wide bound at one discovery and one walk.
+        #[test]
+        fn linked_worktree_aggregate_walks_status_and_discovers_once() {
+            let (_dir, linked_path) = linked_fixture();
+            let (_, counts) = measure(|| {
+                detect_filesystem_with_request(&linked_path, &aggregate_request())
+                    .expect("aggregate detection succeeds")
+            });
+
+            assert_eq!(
+                counts.get(counters::GIT_STATUS_WALKS),
+                1,
+                "linked aggregate status must be observed exactly once: {:?}",
+                counts.all()
+            );
+            assert_eq!(
+                counts.get(counters::GIT_DISCOVERIES),
+                1,
+                "linked aggregate detection must share one discovery: {:?}",
                 counts.all()
             );
         }
@@ -490,6 +724,220 @@ mod tests {
                 result.is_err(),
                 "a dirty tree with no file changes must not yield empty buckets"
             );
+        }
+    }
+
+    mod cwd_context {
+        //! The R2.7 counterpart on the observation side: the seven
+        //! cwd-relative `context` facts resolve once, here, over a single
+        //! package ownership index — never inside the CLI projection.
+
+        use super::*;
+        use crate::filesystem::repo::types::Package;
+        use crate::filesystem::{FilesystemRequest, detect_filesystem_with_request};
+        use crate::request::GitRequest;
+        use tempfile::TempDir;
+
+        /// A Cargo workspace with one member in each of two areas plus a
+        /// root-level member, committed clean.
+        fn workspace_fixture() -> (TempDir, PathBuf) {
+            let dir = TempDir::new().unwrap();
+            let root = dir.path();
+            std::fs::write(
+                root.join("Cargo.toml"),
+                "[workspace]\nmembers = [\"alpha/pkg-a\", \"beta/pkg-b\", \"rootpkg\"]\n",
+            )
+            .unwrap();
+            for (area, name) in [("alpha", "pkg-a"), ("beta", "pkg-b"), (".", "rootpkg")] {
+                let pkg_dir = root.join(area).join(name);
+                std::fs::create_dir_all(pkg_dir.join("src")).unwrap();
+                std::fs::write(
+                    pkg_dir.join("Cargo.toml"),
+                    format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n"),
+                )
+                .unwrap();
+                std::fs::write(pkg_dir.join("src/lib.rs"), "pub fn f() {}\n").unwrap();
+            }
+
+            let repo = git2::Repository::init(root).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            let mut index = repo.index().unwrap();
+            index
+                .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+                .unwrap();
+            index.write().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            {
+                let tree = repo.find_tree(tree_id).unwrap();
+                repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+                    .unwrap();
+            }
+            let root = root.to_path_buf();
+            (dir, root)
+        }
+
+        fn detect(root: &Path) -> FilesystemInfo {
+            let request = FilesystemRequest::new()
+                .git(GitRequest::full().commit_count(10))
+                .without_file_inventory();
+            detect_filesystem_with_request(root, &request).expect("detection succeeds")
+        }
+
+        #[test]
+        fn observation_resolves_context_facts_for_the_invoking_directory() {
+            let (_temp, root) = workspace_fixture();
+            let fs = detect(&root);
+
+            let aggregate = observe_repo_aggregate(&root.join("alpha/pkg-a"), Some(&fs))
+                .expect("observation succeeds");
+            let context = &aggregate.context;
+
+            assert_eq!(context.package, "pkg-a");
+            assert_eq!(context.package_area, "alpha");
+            assert_eq!(context.area, "pkg-a");
+            assert!(
+                Path::new(&context.package_root).ends_with(Path::new("alpha").join("pkg-a")),
+                "package_root must be the member directory: {}",
+                context.package_root
+            );
+            assert_eq!(
+                context.package_area_root,
+                aggregate
+                    .repo
+                    .as_ref()
+                    .expect("workspace detection yields a repo")
+                    .root
+                    .join("alpha")
+                    .display()
+                    .to_string()
+            );
+            assert!(!context.is_current_package_area_dirty);
+            assert!(!context.package_area_has_source_code_changes);
+        }
+
+        #[test]
+        fn area_changes_attribute_to_the_owning_area() {
+            let (_temp, root) = workspace_fixture();
+            std::fs::write(root.join("alpha/pkg-a/src/lib.rs"), "pub fn f() { }\n").unwrap();
+            let fs = detect(&root);
+
+            let in_a = observe_repo_aggregate(&root.join("alpha/pkg-a"), Some(&fs))
+                .expect("observation succeeds");
+            assert!(in_a.context.is_current_package_area_dirty);
+            assert!(in_a.context.package_area_has_source_code_changes);
+
+            let in_b = observe_repo_aggregate(&root.join("beta/pkg-b"), Some(&fs))
+                .expect("observation succeeds");
+            assert!(!in_b.context.is_current_package_area_dirty);
+            assert!(!in_b.context.package_area_has_source_code_changes);
+        }
+
+        #[test]
+        fn documentation_changes_are_not_source_changes() {
+            let (_temp, root) = workspace_fixture();
+            std::fs::write(root.join("alpha/pkg-a/notes.md"), "# notes\n").unwrap();
+            let fs = detect(&root);
+
+            let in_a = observe_repo_aggregate(&root.join("alpha/pkg-a"), Some(&fs))
+                .expect("observation succeeds");
+            assert!(in_a.context.is_current_package_area_dirty);
+            assert!(!in_a.context.package_area_has_source_code_changes);
+        }
+
+        #[test]
+        fn root_area_excludes_paths_under_named_areas() {
+            let (_temp, root) = workspace_fixture();
+            std::fs::write(root.join("alpha/pkg-a/src/lib.rs"), "pub fn f() { }\n").unwrap();
+            let fs = detect(&root);
+
+            let at_root_pkg = observe_repo_aggregate(&root.join("rootpkg"), Some(&fs))
+                .expect("observation succeeds");
+            assert_eq!(at_root_pkg.context.package, "rootpkg");
+            assert_eq!(at_root_pkg.context.package_area, "root");
+            assert!(!at_root_pkg.context.is_current_package_area_dirty);
+        }
+
+        #[test]
+        fn root_area_counts_paths_outside_named_areas() {
+            let (_temp, root) = workspace_fixture();
+            std::fs::write(root.join("rootpkg/src/lib.rs"), "pub fn f() { }\n").unwrap();
+            let fs = detect(&root);
+
+            let at_root_pkg = observe_repo_aggregate(&root.join("rootpkg"), Some(&fs))
+                .expect("observation succeeds");
+            assert!(at_root_pkg.context.is_current_package_area_dirty);
+            assert!(at_root_pkg.context.package_area_has_source_code_changes);
+            assert_eq!(at_root_pkg.context.package_area_root, "");
+        }
+
+        #[test]
+        fn area_membership_compares_whole_path_components() {
+            let (_temp, root) = workspace_fixture();
+            std::fs::create_dir_all(root.join("alpha2")).unwrap();
+            std::fs::write(root.join("alpha2/collision.rs"), "pub fn collision() {}\n")
+                .unwrap();
+            let fs = detect(&root);
+
+            let in_alpha = observe_repo_aggregate(&root.join("alpha/pkg-a"), Some(&fs))
+                .expect("observation succeeds");
+            assert!(!in_alpha.context.is_current_package_area_dirty);
+            assert!(!in_alpha.context.package_area_has_source_code_changes);
+
+            let at_root_pkg = observe_repo_aggregate(&root.join("rootpkg"), Some(&fs))
+                .expect("observation succeeds");
+            assert!(at_root_pkg.context.is_current_package_area_dirty);
+            assert!(at_root_pkg.context.package_area_has_source_code_changes);
+        }
+
+        #[test]
+        fn context_facts_default_without_repo_detection() {
+            let (_temp, root) = workspace_fixture();
+
+            let aggregate = observe_repo_aggregate(&root, None).expect("observation succeeds");
+
+            assert_eq!(aggregate.context, AggregateCwdContext::default());
+        }
+
+        #[test]
+        fn area_fact_stays_empty_outside_a_monorepo() {
+            let dir = TempDir::new().unwrap();
+            let root = dir.path();
+            let repo = git2::Repository::init(root).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            let tree_id = repo.index().unwrap().write_tree().unwrap();
+            {
+                let tree = repo.find_tree(tree_id).unwrap();
+                repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+                    .unwrap();
+            }
+
+            let fs = FilesystemInfo {
+                repo: Some(RepoInfo {
+                    is_monorepo: false,
+                    root: root.to_path_buf(),
+                    packages: Some(vec![Package {
+                        path: root.to_path_buf(),
+                        relative: String::new(),
+                        package_area: "root".to_string(),
+                        name: "solo".to_string(),
+                        ..Package::default()
+                    }]),
+                    ..RepoInfo::default()
+                }),
+                git: Some(git_info(Vec::new(), false)),
+                ..Default::default()
+            };
+
+            let aggregate = observe_repo_aggregate(root, Some(&fs)).expect("observation succeeds");
+            let context = &aggregate.context;
+
+            assert_eq!(context.package, "solo");
+            assert_eq!(context.package_area, "root");
+            assert_eq!(context.area, "");
+            assert_eq!(context.package_root, root.display().to_string());
+            assert_eq!(context.package_area_root, "");
+            assert!(!context.is_current_package_area_dirty);
+            assert!(!context.package_area_has_source_code_changes);
         }
     }
 }

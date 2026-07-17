@@ -29,7 +29,7 @@ pub use aggregate::{
     aggregate_versions, attribute_paths, bare_aggregate_version, collect_external_dependencies,
     resolve_directory_version, resolve_scope, resolve_scope_with_overrides,
 };
-pub use aggregate_view::{RepoAggregate, observe_repo_aggregate, scope_paths};
+pub use aggregate_view::{AggregateCwdContext, RepoAggregate, observe_repo_aggregate, scope_paths};
 pub use area::{AreaError, detect_area};
 pub use identity::{RepoIdentity, detect_repo_identity, detect_repo_identity_with_repo};
 pub use standard::{
