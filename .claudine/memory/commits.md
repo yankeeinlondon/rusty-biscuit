@@ -108,6 +108,14 @@ do not belong here.
 - A truncated body is not corruption. Per the Concurrency rule, do not amend
   mid-batch — accept the loss, note it in the orchestrator's summary, and let
   the developer decide whether to rewrite the message after the batch settles.
+- A sub-agent's *return report* can come back empty even when the commit
+  itself landed cleanly with a fully intact body. This is distinct from the
+  body-truncation pattern above (which corrupts the commit) — here the
+  committed `git log -1 --format=%B <hash>` shows all bullets, but the
+  agent's final message to the orchestrator is blank. Treat an empty
+  report as "unknown, verify independently" rather than "failed". The
+  existing Verification section already mandates this; the lesson is that
+  it can happen even when the sub-agent had nothing to report as a problem.
 
 ## Verification
 
