@@ -37,11 +37,48 @@ pub use error::FetchError;
 /// callers can register convention magic search roots (e.g. a tool's
 /// `prompts/` directories) computed from the same git-root / package-area /
 /// home anchors the resolver itself uses.
-pub use context::{find_git_root, find_package_area, home_dir};
+pub use context::{FileResolutionContext, find_git_root, find_package_area, home_dir};
+
+/// The classified kind of a file reference.
+///
+/// Exposed publicly so callers can branch on reference semantics without
+/// re-deriving the grammar with prefix checks such as `starts_with('@')`.
+/// The recursive (`%`) modifier is carried separately by
+/// [`FileReferenceClass`] because it modifies a kind rather than competing
+/// with one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileReferenceKind {
+    /// `./foo`, `../foo` (and their `.\`/`..\` spellings). Pinned to the base.
+    ExplicitRelative,
+    /// A bare path (`foo`, `path/to/foo`) with no base-pinning sigil.
+    ImplicitRelative,
+    /// A platform-native absolute path.
+    Absolute,
+    /// `@foo` -- magic-root search.
+    Magic,
+    /// `!foo` -- package-area resolution.
+    Package,
+    /// `~foo` / `~/foo` -- pinned to the user's home directory.
+    Home,
+    /// `vault:foo` -- configured-vault resolution.
+    Vault,
+    /// `http://...` / `https://...` -- a remote URL, never a local path.
+    Url,
+}
+
+/// A file reference's public classification: its [`FileReferenceKind`] plus
+/// the recursive (`%`) modifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileReferenceClass {
+    /// The reference kind.
+    pub kind: FileReferenceKind,
+    /// Whether the reference carried the recursive (`%`) prefix.
+    pub recursive: bool,
+}
 
 /// Entry form for a partial completion token.
 ///
-/// Corresponds to the subset of [`ReferenceKind`] variants that
+/// Corresponds to the subset of [`FileReferenceKind`] variants that
 /// [`FileReference::complete_partial`] supports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompletionEntryForm {
@@ -199,6 +236,17 @@ impl FileReference {
         &self.raw
     }
 
+    /// The public classification of this reference.
+    ///
+    /// Callers must use this rather than re-parsing the raw string with prefix
+    /// checks; `FileReference` is the single grammar authority.
+    pub fn class(&self) -> FileReferenceClass {
+        FileReferenceClass {
+            kind: self.parsed.kind.public_kind(),
+            recursive: self.parsed.recursive,
+        }
+    }
+
     /// Add a custom search path for magic (`@`) references.
     pub fn add_magic_path(mut self, path: impl Into<PathBuf>, position: PathPosition) -> Self {
         match position {
@@ -283,6 +331,50 @@ impl FileReference {
     pub fn resolve_from(&self, base: &Path) -> Result<Option<PathBuf>, FileReferenceError> {
         let ctx = context::ResolutionContext::from_base(base)?;
         resolve::resolve(&self.parsed, &self.magic_paths, &self.vault_roots, &ctx)
+    }
+
+    /// Resolve the reference against an explicit [`FileResolutionContext`].
+    ///
+    /// Unlike [`resolve`] and [`resolve_from`], this reads **no** ambient
+    /// process state during candidate construction: the base directory, home
+    /// directory, environment snapshot, repository root, and magic/vault roots
+    /// all come from the context. This is the document-backed resolution entry
+    /// point that Claudine and Darkmatter drive with a `sniff`-discovered
+    /// worktree root.
+    ///
+    /// The context's magic and vault roots are authoritative here; any roots
+    /// configured on the `FileReference` itself (via [`add_magic_path`] /
+    /// [`add_vault`]) apply only to the ambient [`resolve`]/[`resolve_from`]
+    /// paths.
+    ///
+    /// ## Returns
+    ///
+    /// - `Ok(Some(path))` -- the reference resolved to an existing file
+    /// - `Ok(None)` -- the reference is well-formed but no matching file was found
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`FileReferenceError::RepositoryRootNotContainingSource`] when a
+    /// caller-supplied repository root does not contain the base, and typed
+    /// missing-context errors (e.g. [`FileReferenceError::MissingHomeContext`])
+    /// when a required anchor is absent.
+    ///
+    /// [`resolve`]: Self::resolve
+    /// [`resolve_from`]: Self::resolve_from
+    /// [`add_magic_path`]: Self::add_magic_path
+    /// [`add_vault`]: Self::add_vault
+    pub fn resolve_in_context(
+        &self,
+        ctx: &FileResolutionContext,
+    ) -> Result<Option<PathBuf>, FileReferenceError> {
+        ctx.validate()?;
+        let internal = context::ResolutionContext::from_context(ctx);
+        resolve::resolve(
+            &self.parsed,
+            ctx.magic_paths(),
+            ctx.vault_roots(),
+            &internal,
+        )
     }
 
     /// Expand a partial completion token into its implied roots and segments.
@@ -406,6 +498,7 @@ pub(crate) enum ReferenceKind {
     Absolute(PathTemplate),
     Magic(PathTemplate),
     Package(PathTemplate),
+    Home(PathTemplate),
     Vault(PathTemplate),
     Url(PathTemplate),
 }
@@ -418,8 +511,23 @@ impl ReferenceKind {
             | Self::Absolute(t)
             | Self::Magic(t)
             | Self::Package(t)
+            | Self::Home(t)
             | Self::Vault(t)
             | Self::Url(t) => t,
+        }
+    }
+
+    /// Project the internal kind onto the public [`FileReferenceKind`].
+    pub(crate) fn public_kind(&self) -> FileReferenceKind {
+        match self {
+            Self::Relative(_) => FileReferenceKind::ExplicitRelative,
+            Self::ImplicitRelative(_) => FileReferenceKind::ImplicitRelative,
+            Self::Absolute(_) => FileReferenceKind::Absolute,
+            Self::Magic(_) => FileReferenceKind::Magic,
+            Self::Package(_) => FileReferenceKind::Package,
+            Self::Home(_) => FileReferenceKind::Home,
+            Self::Vault(_) => FileReferenceKind::Vault,
+            Self::Url(_) => FileReferenceKind::Url,
         }
     }
 }

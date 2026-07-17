@@ -25,7 +25,7 @@ lopdf = ["dep:lopdf"]
 pdfium = ["dep:pdfium-render"]
 
 # File reference resolution
-file-reference = ["dep:gix", "dep:cargo_metadata", "dep:walkdir", "url"]
+file-reference = ["dep:gix", "dep:cargo_metadata", "dep:walkdir", "dep:dirs", "url"]
 
 # URL support (automatically enabled by file-reference)
 url = ["dep:url"]
@@ -70,6 +70,9 @@ gix = { version = "=0.84.0", optional = true, default-features = false, features
 cargo_metadata = { version = "0.19", optional = true }
 walkdir = { version = "2", optional = true }
 url = { version = "2.5", optional = true }
+
+# Cross-platform home directory (Windows-correct, unlike `$HOME` alone)
+dirs = { version = "6", optional = true }
 
 # Remote fetch
 reqwest = { version = "0.13", optional = true, features = ["json"] }

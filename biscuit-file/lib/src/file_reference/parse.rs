@@ -21,7 +21,7 @@ pub(crate) fn parse(raw: &str) -> Result<ParsedReference, FileReferenceError> {
             "`%` prefix requires a path".to_string(),
         ));
     }
-    let (kind, path_str) = detect_kind(remainder);
+    let (kind, path_str) = detect_kind(remainder)?;
     let template = parse_template(path_str)?;
 
     let parsed = ParsedReference {
@@ -32,6 +32,7 @@ pub(crate) fn parse(raw: &str) -> Result<ParsedReference, FileReferenceError> {
             DetectedKind::Absolute => ReferenceKind::Absolute(template),
             DetectedKind::Magic => ReferenceKind::Magic(template),
             DetectedKind::Package => ReferenceKind::Package(template),
+            DetectedKind::Home => ReferenceKind::Home(template),
             DetectedKind::Vault => ReferenceKind::Vault(template),
             DetectedKind::Url => ReferenceKind::Url(template),
         },
@@ -56,35 +57,103 @@ enum DetectedKind {
     Absolute,
     Magic,
     Package,
+    Home,
     Vault,
     Url,
 }
 
 /// Detect the reference kind from its prefix and return the remaining path string.
-fn detect_kind(s: &str) -> (DetectedKind, &str) {
-    if s.starts_with("http://") || s.starts_with("https://") {
-        return (DetectedKind::Url, s);
+///
+/// Classification is purely lexical and host-independent: Windows drive/UNC
+/// forms classify as absolute even when parsed on a POSIX host, so the grammar
+/// is portable and testable everywhere (resolution of a foreign-platform path
+/// is a separate, platform-gated concern).
+///
+/// ## Errors
+///
+/// Returns [`FileReferenceError::UnsupportedUserHome`] for a `~user` form,
+/// which is not portable and must never fall through to magic or implicit.
+fn detect_kind(s: &str) -> Result<(DetectedKind, &str), FileReferenceError> {
+    // URL scheme is matched ASCII case-insensitively and before any drive/path
+    // classifier so `HTTP://host` is never mistaken for a Windows path.
+    if starts_with_ignore_ascii_case(s, "http://") || starts_with_ignore_ascii_case(s, "https://") {
+        return Ok((DetectedKind::Url, s));
     }
     // vault:: (double colon) before vault: (single colon)
     if let Some(rest) = s.strip_prefix("vault::") {
-        return (DetectedKind::Vault, rest);
+        return Ok((DetectedKind::Vault, rest));
     }
     if let Some(rest) = s.strip_prefix("vault:") {
-        return (DetectedKind::Vault, rest);
+        return Ok((DetectedKind::Vault, rest));
     }
     if let Some(rest) = s.strip_prefix('@') {
-        return (DetectedKind::Magic, rest);
+        return Ok((DetectedKind::Magic, rest));
     }
     if let Some(rest) = s.strip_prefix('!') {
-        return (DetectedKind::Package, rest);
+        return Ok((DetectedKind::Package, rest));
     }
-    if s.starts_with('/') {
-        return (DetectedKind::Absolute, s);
+    if let Some(rest) = s.strip_prefix('~') {
+        return detect_home(s, rest);
     }
-    if s.starts_with("./") || s.starts_with("../") || s == "." || s == ".." {
-        return (DetectedKind::Relative, s);
+    if is_absolute_reference(s) {
+        return Ok((DetectedKind::Absolute, s));
     }
-    (DetectedKind::ImplicitRelative, s)
+    if is_explicit_relative(s) {
+        return Ok((DetectedKind::Relative, s));
+    }
+    Ok((DetectedKind::ImplicitRelative, s))
+}
+
+/// Classify the tail of a `~`-prefixed reference.
+///
+/// `~`, `~/...`, and `~\...` are home-pinned; `~user` is rejected. The stored
+/// path string is the portion after the home sigil and its separator, so
+/// resolution can simply join it onto the home directory.
+fn detect_home<'a>(
+    raw: &str,
+    rest: &'a str,
+) -> Result<(DetectedKind, &'a str), FileReferenceError> {
+    if rest.is_empty() {
+        return Ok((DetectedKind::Home, ""));
+    }
+    if let Some(tail) = rest.strip_prefix('/').or_else(|| rest.strip_prefix('\\')) {
+        return Ok((DetectedKind::Home, tail));
+    }
+    Err(FileReferenceError::UnsupportedUserHome(raw.to_string()))
+}
+
+/// ASCII case-insensitive prefix check.
+fn starts_with_ignore_ascii_case(s: &str, prefix: &str) -> bool {
+    s.as_bytes()
+        .get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix.as_bytes()))
+}
+
+/// Host-independent absolute-path classification for the reference grammar.
+///
+/// Recognizes POSIX roots (`/`), Windows drive-absolute paths (`C:\` or
+/// `C:/`), and UNC paths (`\\server\share`). A drive-relative path such as
+/// `C:foo.md` is deliberately **not** absolute.
+fn is_absolute_reference(s: &str) -> bool {
+    if s.starts_with('/') || s.starts_with("\\\\") {
+        return true;
+    }
+    let bytes = s.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/')
+}
+
+/// Explicit-relative classification, accepting Windows backslash spellings
+/// alongside the portable forward-slash forms.
+fn is_explicit_relative(s: &str) -> bool {
+    s.starts_with("./")
+        || s.starts_with("../")
+        || s.starts_with(".\\")
+        || s.starts_with("..\\")
+        || s == "."
+        || s == ".."
 }
 
 /// Parse a path string into a `PathTemplate` with literal and env-var segments.
@@ -356,5 +425,113 @@ mod tests {
             template.segments[0],
             TemplateSegment::Literal("https://cdn.example.com/assets/v2/spec.md".to_string())
         );
+    }
+
+    #[test]
+    fn tilde_bare_is_home_with_empty_path() {
+        let parsed = parse("~").unwrap();
+        assert!(matches!(parsed.kind, ReferenceKind::Home(_)));
+        // A bare `~` carries no path segments -- it pins to the home dir itself.
+        assert!(parsed.kind.template().segments.is_empty());
+    }
+
+    #[test]
+    fn tilde_slash_is_home_and_strips_sigil() {
+        let parsed = parse("~/foo.md").unwrap();
+        assert!(matches!(parsed.kind, ReferenceKind::Home(_)));
+        let template = parsed.kind.template();
+        // The stored path is the portion after `~/`, ready to join onto home.
+        assert_eq!(
+            template.segments[0],
+            TemplateSegment::Literal("foo.md".to_string())
+        );
+    }
+
+    #[test]
+    fn tilde_backslash_is_home() {
+        let parsed = parse(r"~\foo.md").unwrap();
+        assert!(matches!(parsed.kind, ReferenceKind::Home(_)));
+        let template = parsed.kind.template();
+        assert_eq!(
+            template.segments[0],
+            TemplateSegment::Literal("foo.md".to_string())
+        );
+    }
+
+    #[test]
+    fn tilde_user_is_rejected_typed() {
+        let err = parse("~alice/notes.md").unwrap_err();
+        assert!(
+            matches!(err, FileReferenceError::UnsupportedUserHome(ref s) if s == "~alice/notes.md"),
+            "expected UnsupportedUserHome, got: {err}"
+        );
+    }
+
+    #[test]
+    fn tilde_user_bare_is_rejected_typed() {
+        let err = parse("~alice").unwrap_err();
+        assert!(matches!(err, FileReferenceError::UnsupportedUserHome(_)));
+    }
+
+    #[test]
+    fn recursive_home_reference() {
+        let parsed = parse("~/notes.md").unwrap();
+        assert!(!parsed.recursive);
+        let parsed = parse("%~/notes.md").unwrap();
+        assert!(parsed.recursive);
+        assert!(matches!(parsed.kind, ReferenceKind::Home(_)));
+    }
+
+    #[test]
+    fn windows_drive_absolute_backslash() {
+        let parsed = parse(r"C:\work\a.md").unwrap();
+        assert!(matches!(parsed.kind, ReferenceKind::Absolute(_)));
+    }
+
+    #[test]
+    fn windows_drive_absolute_forward_slash() {
+        let parsed = parse("C:/work/a.md").unwrap();
+        assert!(matches!(parsed.kind, ReferenceKind::Absolute(_)));
+    }
+
+    #[test]
+    fn windows_unc_is_absolute() {
+        let parsed = parse(r"\\server\share\a.md").unwrap();
+        assert!(matches!(parsed.kind, ReferenceKind::Absolute(_)));
+    }
+
+    #[test]
+    fn windows_drive_relative_is_not_absolute() {
+        // `C:foo.md` is drive-relative, not absolute.
+        let parsed = parse("C:foo.md").unwrap();
+        assert!(
+            matches!(parsed.kind, ReferenceKind::ImplicitRelative(_)),
+            "drive-relative must not classify absolute; got {:?}",
+            parsed.kind
+        );
+    }
+
+    #[test]
+    fn backslash_explicit_relative() {
+        assert!(matches!(
+            parse(r".\foo.md").unwrap().kind,
+            ReferenceKind::Relative(_)
+        ));
+        assert!(matches!(
+            parse(r"..\foo.md").unwrap().kind,
+            ReferenceKind::Relative(_)
+        ));
+    }
+
+    #[test]
+    fn url_scheme_is_ascii_case_insensitive() {
+        for raw in ["HTTP://example.com/a.md", "HttpS://example.com/a.md", "HTTPS://x"] {
+            let parsed = parse(raw).unwrap();
+            assert!(
+                matches!(parsed.kind, ReferenceKind::Url(_)),
+                "expected Url for `{raw}`, got {:?}",
+                parsed.kind
+            );
+        }
     }
 }

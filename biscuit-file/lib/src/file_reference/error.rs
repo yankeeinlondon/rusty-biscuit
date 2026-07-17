@@ -20,6 +20,20 @@ pub enum FileReferenceError {
     #[error("vault reference used without any configured vault roots")]
     VaultNotConfigured,
 
+    #[error("`~user` home references are not supported: `{0}`")]
+    UnsupportedUserHome(String),
+
+    #[error("home reference used but no home directory is available in the resolution context")]
+    MissingHomeContext,
+
+    #[error(
+        "repository root `{repository_root}` does not contain the resolution source `{source_path}`"
+    )]
+    RepositoryRootNotContainingSource {
+        repository_root: PathBuf,
+        source_path: PathBuf,
+    },
+
     #[error("could not produce a relative path from `{from}` to `{to}`")]
     RelativePath { from: PathBuf, to: PathBuf },
 

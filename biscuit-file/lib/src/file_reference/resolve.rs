@@ -24,7 +24,7 @@ pub(crate) fn resolve(
 ) -> Result<Option<PathBuf>, FileReferenceError> {
     #[cfg(feature = "url")]
     if matches!(parsed.kind, ReferenceKind::Url(_)) {
-        let raw = interpolated_url_string(&parsed.kind)?;
+        let raw = interpolated_url_string(&parsed.kind, ctx)?;
         return Err(FileReferenceError::RemoteNotLocal(raw));
     }
 
@@ -38,14 +38,24 @@ pub(crate) fn resolve(
 }
 
 #[cfg(feature = "url")]
-fn interpolated_url_string(kind: &ReferenceKind) -> Result<String, FileReferenceError> {
+fn interpolated_url_string(
+    kind: &ReferenceKind,
+    ctx: &ResolutionContext,
+) -> Result<String, FileReferenceError> {
     let template = kind.template();
     let mut raw = String::new();
     for seg in &template.segments {
         match seg {
             TemplateSegment::Literal(l) => raw.push_str(l),
             TemplateSegment::EnvVar(name) => {
-                let val = std::env::var(name).unwrap_or_else(|_| format!("{{{{{name}}}}}"));
+                // Source from the captured env snapshot, not live process env,
+                // so `resolve_from`/`resolve_in_context` stay honest. A missing
+                // var re-emits `{{NAME}}` verbatim (unchanged URL behavior).
+                let val = ctx
+                    .env
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| format!("{{{{{name}}}}}"));
                 raw.push_str(&val);
             }
         }
@@ -60,8 +70,10 @@ pub(crate) fn resolve_target(
     magic_paths: &MagicPathList,
     vault_roots: &[PathBuf],
 ) -> Result<Option<Resolved>, FileReferenceError> {
+    let ctx = ResolutionContext::from_ambient()?;
+
     if let ReferenceKind::Url(_) = &parsed.kind {
-        let raw = interpolated_url_string(&parsed.kind)?;
+        let raw = interpolated_url_string(&parsed.kind, &ctx)?;
         let url = ::url::Url::parse(&raw)
             .map_err(|e| FileReferenceError::InvalidUrl(e.to_string()))?;
         let scheme = url.scheme();
@@ -73,7 +85,6 @@ pub(crate) fn resolve_target(
         return Ok(Some(Resolved::Remote(url)));
     }
 
-    let ctx = ResolutionContext::from_ambient()?;
     let local = resolve(parsed, magic_paths, vault_roots, &ctx)?;
     Ok(local.map(Resolved::Local))
 }
@@ -178,6 +189,20 @@ fn resolve_recursive(
     Ok(matches.into_iter().next())
 }
 
+/// Resolve the repository root for a resolution context.
+///
+/// A caller-supplied `repository_root` wins; otherwise the root is discovered
+/// live from `cwd` via `gix`. This is the single seam that makes the root
+/// caller-suppliable without `biscuit-file` depending on `sniff`.
+fn resolve_repository_root(
+    ctx: &ResolutionContext,
+) -> Result<Option<PathBuf>, FileReferenceError> {
+    match &ctx.repository_root {
+        Some(root) => Ok(Some(root.clone())),
+        None => find_git_root(&ctx.cwd),
+    }
+}
+
 /// Collect search root directories for a given reference kind.
 fn collect_roots(
     kind: &ReferenceKind,
@@ -189,7 +214,7 @@ fn collect_roots(
         ReferenceKind::Relative(_) => Ok(vec![ctx.cwd.clone()]),
         ReferenceKind::ImplicitRelative(_) => {
             let mut roots = vec![ctx.cwd.clone()];
-            if let Some(git_root) = find_git_root(&ctx.cwd)?
+            if let Some(git_root) = resolve_repository_root(ctx)?
                 && git_root != ctx.cwd
             {
                 roots.push(git_root);
@@ -200,7 +225,7 @@ fn collect_roots(
         ReferenceKind::Magic(_) => {
             let mut roots = Vec::new();
             roots.extend(magic_paths.prepend.iter().cloned());
-            if let Some(git_root) = find_git_root(&ctx.cwd)? {
+            if let Some(git_root) = resolve_repository_root(ctx)? {
                 roots.push(git_root);
             }
             if let Some(ref home) = ctx.home_dir {
@@ -210,13 +235,17 @@ fn collect_roots(
             Ok(roots)
         }
         ReferenceKind::Package(_) => {
-            let git_root = match find_git_root(&ctx.cwd)? {
+            let git_root = match resolve_repository_root(ctx)? {
                 Some(root) => root,
                 None => return Ok(vec![]),
             };
             let area = find_package_area(&git_root, &ctx.cwd)?;
             Ok(vec![area.unwrap_or(git_root)])
         }
+        ReferenceKind::Home(_) => match &ctx.home_dir {
+            Some(home) => Ok(vec![home.clone()]),
+            None => Err(FileReferenceError::MissingHomeContext),
+        },
         ReferenceKind::Vault(_) => {
             let mut roots: Vec<PathBuf> = vault_roots.to_vec();
             if let Some(vault_env) = ctx.env.get("VAULT") {
@@ -301,7 +330,7 @@ fn normalize_absolute(path: &Path, cwd: &Path) -> PathBuf {
 }
 
 /// Resolve `.` and `..` components without touching the filesystem.
-fn normalize_components(path: &Path) -> PathBuf {
+pub(crate) fn normalize_components(path: &Path) -> PathBuf {
     let mut components = Vec::new();
     for component in path.components() {
         match component {
@@ -376,8 +405,12 @@ pub(crate) fn complete_partial(
         ambient.join(base)
     };
 
+    // Capture home once (via the cross-platform provider) rather than reading
+    // it deep inside the magic-root helper.
+    let home = home_dir();
+
     let roots = match form {
-        CompletionEntryForm::Magic => magic_completion_roots(scope, &base_abs)?,
+        CompletionEntryForm::Magic => magic_completion_roots(scope, &base_abs, home.as_deref())?,
         CompletionEntryForm::ImplicitRelative => {
             implicit_relative_completion_roots(scope, &base_abs)?
         }
@@ -444,15 +477,20 @@ fn split_scope_and_active(path: &str) -> (&str, &str) {
 }
 
 /// Compute the absolute roots implied by a `@`-prefixed token at the given
-/// scope.
-fn magic_completion_roots(scope: &str, base: &Path) -> Result<Vec<PathBuf>, FileReferenceError> {
+/// scope. `home` is captured once by the caller so this helper performs no
+/// ambient home read of its own.
+fn magic_completion_roots(
+    scope: &str,
+    base: &Path,
+    home: Option<&Path>,
+) -> Result<Vec<PathBuf>, FileReferenceError> {
     let mut roots: Vec<PathBuf> = Vec::new();
 
     if let Some(git_root) = find_git_root(base)? {
         roots.push(append_scope(&git_root, scope));
     }
-    if let Some(home) = home_dir() {
-        let rooted = append_scope(&home, scope);
+    if let Some(home) = home {
+        let rooted = append_scope(home, scope);
         if !roots.iter().any(|r| r == &rooted) {
             roots.push(rooted);
         }
@@ -534,6 +572,7 @@ mod tests {
             cwd: PathBuf::from("/tmp"),
             home_dir: Some(PathBuf::from("/home/test")),
             env: std::collections::HashMap::new(),
+            repository_root: None,
         };
         let template = PathTemplate {
             segments: vec![TemplateSegment::Literal("foo/bar.md".to_string())],
@@ -550,6 +589,7 @@ mod tests {
             cwd: PathBuf::from("/tmp"),
             home_dir: None,
             env,
+            repository_root: None,
         };
         let template = PathTemplate {
             segments: vec![
@@ -567,6 +607,7 @@ mod tests {
             cwd: PathBuf::from("/tmp"),
             home_dir: None,
             env: std::collections::HashMap::new(),
+            repository_root: None,
         };
         let template = PathTemplate {
             segments: vec![TemplateSegment::EnvVar("MISSING".to_string())],
@@ -605,10 +646,65 @@ mod tests {
             cwd: PathBuf::from("/tmp"),
             home_dir: None,
             env: std::collections::HashMap::new(),
+            repository_root: None,
         };
         let roots = collect_roots(&parsed.kind, &MagicPathList::default(), &[], &ctx).unwrap();
         // /tmp has no git repo, so only CWD is returned.
         assert_eq!(roots, vec![PathBuf::from("/tmp")]);
+    }
+
+    #[test]
+    fn home_kind_uses_context_home_dir() {
+        let parsed = ReferenceKind::Home(PathTemplate {
+            segments: vec![TemplateSegment::Literal("cfg.toml".to_string())],
+        });
+        let ctx = ResolutionContext {
+            cwd: PathBuf::from("/tmp"),
+            home_dir: Some(PathBuf::from("/home/test")),
+            env: std::collections::HashMap::new(),
+            repository_root: None,
+        };
+        let roots = collect_roots(&parsed, &MagicPathList::default(), &[], &ctx).unwrap();
+        assert_eq!(roots, vec![PathBuf::from("/home/test")]);
+    }
+
+    #[test]
+    fn home_kind_without_home_is_typed_missing_context() {
+        let parsed = ReferenceKind::Home(PathTemplate {
+            segments: vec![TemplateSegment::Literal("cfg.toml".to_string())],
+        });
+        let ctx = ResolutionContext {
+            cwd: PathBuf::from("/tmp"),
+            home_dir: None,
+            env: std::collections::HashMap::new(),
+            repository_root: None,
+        };
+        let err = collect_roots(&parsed, &MagicPathList::default(), &[], &ctx).unwrap_err();
+        assert!(
+            matches!(err, FileReferenceError::MissingHomeContext),
+            "expected MissingHomeContext, got {err}"
+        );
+    }
+
+    #[test]
+    fn caller_supplied_repository_root_overrides_discovery() {
+        // With a supplied root, collect_roots must not perform live git
+        // discovery from cwd -- it uses the supplied root directly.
+        let parsed = ReferenceKind::ImplicitRelative(PathTemplate {
+            segments: vec![TemplateSegment::Literal("x.md".to_string())],
+        });
+        let ctx = ResolutionContext {
+            cwd: PathBuf::from("/tmp/base"),
+            home_dir: None,
+            env: std::collections::HashMap::new(),
+            repository_root: Some(PathBuf::from("/tmp/repo")),
+        };
+        let roots = collect_roots(&parsed, &MagicPathList::default(), &[], &ctx).unwrap();
+        assert_eq!(
+            roots,
+            vec![PathBuf::from("/tmp/base"), PathBuf::from("/tmp/repo")],
+            "base stays first; supplied repo root is the second candidate",
+        );
     }
 
     #[test]
