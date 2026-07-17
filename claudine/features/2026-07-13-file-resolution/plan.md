@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 4
+phase: 5
 total_phases: 8
 agent: claude/default
 yolo: true
@@ -56,8 +56,37 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/biscuit-file/references/file-references.md
+source_files_during_phase_5:
+    - darkmatter/lib/src/markdown/compose/util.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/resolver.rs
+    - darkmatter/lib/src/markdown/compose/link_resolve.rs
+    - darkmatter/lib/src/markdown/compose/cache/hashing.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/tests/rendering.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+    - darkmatter/lib/src/markdown/schemas/format.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+docs_updated_during_phase_5:
+    - darkmatter/docs/inline/fm-interpolation.md
+    - darkmatter/docs/topics/context-variables.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/magic-paths.md
+    - darkmatter/docs/topics/schema-definition.md
+    - darkmatter/docs/transclusion/block-transclusion.md
+    - darkmatter/docs/transclusion/transclusion-design.md
+    - claudine/features/2026-07-13-file-resolution/plan.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 packages:
     - biscuit-file
+    - darkmatter
 ---
 
 # Unified File-Reference Resolution — Execution Plan
@@ -254,19 +283,19 @@ document-first contract already exists on expression + schema-`file` surfaces;
 transclusion and link-resolve never received it — that asymmetry is the bulk of
 the work here.
 
-- [ ] Promote `sniff` to a real dependency in `darkmatter/lib/Cargo.toml` if Phase 1 confirms it is dev-only; supply `repository_root` via `sniff::filesystem::git::repo_root` / `GitRepo::discover` into the shared context
-- [ ] Migrate `resolve_file_ref_with_fallback` (`compose/expression/resolve_ctx.rs:200-211`) onto the detailed resolver. **Per D2 the launch-area fallback is removed for nested documents** — only repository and authoring-document candidates participate; launch dir stays a base only for top-level references
-- [ ] Close the legacy hatch at `compose/context/options.rs:331-332` where `file_ref_fallback_dir: None` preserves ambient-CWD behavior
-- [ ] Migrate `schemas/format.rs:324-343` — remove the `None`/`None` → `reference.resolve()` ambient-CWD escape at `:341`, and the CWD re-read at `:348-357` that leaks process CWD into diagnostics even for anchored paths
-- [ ] Migrate `schemas/rewrite.rs:308` (`rewrite_file_value`) and `schemas/validate.rs` `FileAnchors` (`:228-234`, `:572-582`) to the shared context
-- [ ] Migrate `$schema` resolution (`schemas/resolve.rs:305-358`): the sibling probe `base_dir.join(trimmed)` at `:337` and the `resolve_from(base_dir)` at `:356-358`. Reconcile the doc contradiction — `docs/topics/schema-definition.md:358` claims `$schema` uses "the same order" while `:758` says document-parent only
-- [ ] Migrate transclusion `resolve_path` (`compose/transclusion/resolver.rs:64`): delete the `is_file_reference_target` classifier (`:191-197`), replace the ambient `file_ref.resolve()` at `:128` with the context-aware resolver, remove the `~` arm at `:82-101` (now a shared kind), and remove the manual join at `:170-174`. Its doc-comment at `:58-63` already describes the intended contract rather than the shipped one
-- [ ] Migrate `link_resolve.rs`: the ambient `resolve()` at `:147` and the post-miss `dir.join(raw)` fallback at `:157-163` that bypasses shared classification and diagnostics. Note `:151`/`:160` silently degrade on `canonicalize` failure
-- [ ] Every nested file-backed document establishes a **new** `base_dir` (D2) — transcluded/included documents become the source for their own references; the entry document's directory must not leak inward, while request-level worktree data stays available
-- [ ] **[parallel]** Update the ~21 tests that ratify document-first/launch-fallback: `expression/resolve_ctx.rs:262,284,304`; `expression/functions/mod.rs:3296,3321,3347`; `schemas/mod.rs:1655,1681,1707,1740,1795,1820,1844,1869`; `compose/schema_validation.rs:1324`; `compose/tests/schema.rs:376`; `compose/cache/hashing.rs:692`; `compose/preflight/collect.rs:868`. Leaving them green-but-wrong is contract drift
-- [ ] **[parallel]** Update the load-bearing contract comments: `schemas/format.rs:8-10,306-315,334`; `schemas/rewrite.rs:16,60-63,323`; `schemas/validate.rs:228-234,572-582`; `schemas/mod.rs:211-216`; `compose/context/options.rs:324-332`; `expression/resolve_ctx.rs:26-30,177-199`; `expression/functions/mod.rs:1433-1440`
-- [ ] **[parallel]** Update Darkmatter docs claiming every plain relative path is source-relative: `docs/inline/file-links.md:22,61-65`; `docs/transclusion/transclusion-design.md:56,275,278,593`; `docs/transclusion/block-transclusion.md:40-42,56`; `docs/topics/schema-definition.md:358-360,758`; `docs/topics/darkmatter-expressions.md:438,472,487-488,852`; `docs/inline/fm-interpolation.md:132`; `docs/topics/magic-paths.md:9`. **`docs/topics/context-variables.md:67` directly contradicts the shipped order** and must be corrected
-- [ ] Verify `file_ref_fallback_dir` stays folded into `options_hash` (`compose/cache/hashing.rs:203`) — cache correctness depends on context identity
+- [x] Promote `sniff` to a real dependency in `darkmatter/lib/Cargo.toml` if Phase 1 confirms it is dev-only; supply `repository_root` via `sniff::filesystem::git::repo_root` / `GitRepo::discover` into the shared context — **DONE (no-op).** Phase 1 confirmed `sniff` is already a real dep. Worktree root is supplied via Darkmatter's in-crate `find_git_root_from` through the new shared `document_resolution_context` (`compose/util.rs`) — no `sniff` change needed
+- [x] Migrate `resolve_file_ref_with_fallback` (`compose/expression/resolve_ctx.rs:200-211`) onto the detailed resolver. **Per D2 the launch-area fallback is removed for nested documents** — only repository and authoring-document candidates participate; launch dir stays a base only for top-level references — **DONE** (renamed `resolve_document_file_ref`; single `resolve_in_context` over `document_resolution_context`; no launch fallback; callers in `functions/mod.rs` updated)
+- [x] Close the legacy hatch at `compose/context/options.rs:331-332` where `file_ref_fallback_dir: None` preserves ambient-CWD behavior — **DONE** (nested-document resolution never consults `file_ref_fallback_dir`; it is now diagnostic-only, threaded to the `fallback_dir` facet, not the resolution path; `repository_root` computed once per pass)
+- [x] Migrate `schemas/format.rs:324-343` — remove the `None`/`None` → `reference.resolve()` ambient-CWD escape at `:341`, and the CWD re-read at `:348-357` that leaks process CWD into diagnostics even for anchored paths — **DONE** (`Some(base)` routes through the shared context; `NoMatch { cwd }` → `{ resolved_from }`; the bare `None`-base API keeps ambient `resolve()` but is unreachable from compose)
+- [x] Migrate `schemas/rewrite.rs:308` (`rewrite_file_value`) and `schemas/validate.rs` `FileAnchors` (`:228-234`, `:572-582`) to the shared context — **DONE**
+- [x] Migrate `$schema` resolution (`schemas/resolve.rs:305-358`): the sibling probe `base_dir.join(trimmed)` at `:337` and the `resolve_from(base_dir)` at `:356-358`. Reconcile the doc contradiction — `docs/topics/schema-definition.md:358` claims `$schema` uses "the same order" while `:758` says document-parent only — **DONE** (`resolve_in_context` over shared context; both doc lines reconciled to repository-first, with bare-name → schema-roots clarified)
+- [x] Migrate transclusion `resolve_path` (`compose/transclusion/resolver.rs:64`): delete the `is_file_reference_target` classifier (`:191-197`), replace the ambient `file_ref.resolve()` at `:128` with the context-aware resolver, remove the `~` arm at `:82-101` (now a shared kind), and remove the manual join at `:170-174`. Its doc-comment at `:58-63` already describes the intended contract rather than the shipped one — **DONE** (every non-URL target flows through `FileReference` + `resolve_in_context`; `~` uses the shared `Home` kind; `@/`-normalization + `resolve_repo_root`-disabled `@` rejection preserved; canonicalization retained for transclusion identity)
+- [x] Migrate `link_resolve.rs`: the ambient `resolve()` at `:147` and the post-miss `dir.join(raw)` fallback at `:157-163` that bypasses shared classification and diagnostics. Note `:151`/`:160` silently degrade on `canonicalize` failure — **DONE** (`resolve_in_context` when a document base is known; missing-target absolutize retained so links to not-yet-created files still absolutize)
+- [x] Every nested file-backed document establishes a **new** `base_dir` (D2) — transcluded/included documents become the source for their own references; the entry document's directory must not leak inward, while request-level worktree data stays available — **DONE** (each surface derives `base_dir` from the current document; repository_root reused only when it lexically contains that base, else rediscovered)
+- [x] **[parallel]** Update the ~21 tests that ratify document-first/launch-fallback: `expression/resolve_ctx.rs:262,284,304`; `expression/functions/mod.rs:3296,3321,3347`; `schemas/mod.rs:1655,1681,1707,1740,1795,1820,1844,1869`; `compose/schema_validation.rs:1324`; `compose/tests/schema.rs:376`; `compose/cache/hashing.rs:692`; `compose/preflight/collect.rs:868`. Leaving them green-but-wrong is contract drift — **DONE** (fallback tests rewritten to assert repository-first / explicit-base-only / no-launch-fallback / no-ambient-CWD; not weakened)
+- [x] **[parallel]** Update the load-bearing contract comments: `schemas/format.rs:8-10,306-315,334`; `schemas/rewrite.rs:16,60-63,323`; `schemas/validate.rs:228-234,572-582`; `schemas/mod.rs:211-216`; `compose/context/options.rs:324-332`; `expression/resolve_ctx.rs:26-30,177-199`; `expression/functions/mod.rs:1433-1440` — **DONE**
+- [x] **[parallel]** Update Darkmatter docs claiming every plain relative path is source-relative: `docs/inline/file-links.md:22,61-65`; `docs/transclusion/transclusion-design.md:56,275,278,593`; `docs/transclusion/block-transclusion.md:40-42,56`; `docs/topics/schema-definition.md:358-360,758`; `docs/topics/darkmatter-expressions.md:438,472,487-488,852`; `docs/inline/fm-interpolation.md:132`; `docs/topics/magic-paths.md:9`. **`docs/topics/context-variables.md:67` directly contradicts the shipped order** and must be corrected — **DONE** (all corrected to repository-first; `context-variables.md` contradiction fixed; `file-links.md` left unchanged — verified it documents the `::file-links` glob *discovery* walk, not `FileReference` resolution, per inventory §3.1/§3.2 scope-caution)
+- [x] Verify `file_ref_fallback_dir` stays folded into `options_hash` (`compose/cache/hashing.rs:203`) — cache correctness depends on context identity — **DONE** (KEPT in `options_hash`; the anchor is now diagnostic-only but still part of context identity, so distinct anchors stay on distinct cache keys — conservative and safe)
 
 **Checkpoint 5:** `just test`, `just test-l2`, `just lint` green in `darkmatter`.
 No Darkmatter resolution path reads ambient CWD after context capture.
