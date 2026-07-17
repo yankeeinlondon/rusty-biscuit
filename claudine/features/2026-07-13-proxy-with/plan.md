@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 7
+phase: 8
 total_phases: 14
 agent: claude/default
 yolo: "true"
@@ -153,6 +153,18 @@ docs_updated_during_phase_7:
     - claudine/features/2026-07-13-proxy-with/plan.md
 docs_created_during_phase_7: []
 skills_files_updated_during_phase_7: []
+source_files_during_phase_8:
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/overlay.rs
+    - claudine/cli/tests/level2_lifecycle_control.rs
+docs_updated_during_phase_8:
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8: []
 ---
 
 # Execution Plan — Canonical Document Handoffs and Transient Proxy Frontmatter (`with:`)
@@ -788,57 +800,88 @@ end-to-end complete, and R4 is not signed off, until Phase 8 passes.
 
 Depends on Phases 4, 5, 7.
 
-- [ ] Merge the resolved overlay into **every** read of the target's authored
+- [x] Merge the resolved overlay into **every** read of the target's authored
       frontmatter: the bootstrap read before target `initialize` and the fresh
       read after initialize-time mutations. Reapply caller overrides after.
-- [ ] Close the deferred R4 sign-off from Phase 7: prove initialize conditions,
+- [x] Close the deferred R4 sign-off from Phase 7: prove initialize conditions,
       selection hints, and initialize actions observe the overlay on the
       bootstrap read, while full preparation observes the same immutable overlay
       after the stabilized reread.
-- [ ] Place this before full Darkmatter composition and schema validation so the
+- [x] Place this before full Darkmatter composition and schema validation so the
       overlay participates in target frontmatter interpolation and computed
       properties, selection hints and initialize conditions, `SimplifiedSchema`
       validation/coercion/defaults/eager-file handling, target lifecycle parsing
       and shell discovery, loop configuration, and the prompt body.
-- [ ] Implement precedence low→high: target-authored frontmatter < `proxy.with` <
+- [x] Implement precedence low→high: target-authored frontmatter < `proxy.with` <
       caller `key=value` / `--set`. The caller stays authoritative at every
       document; a router can never silently replace an explicit caller value.
-- [ ] Implement shallow top-level semantics: scalar or array replaces; object
+- [x] Implement shallow top-level semantics: scalar or array replaces; object
       replaces (no deep merge); `null` removes the target-authored top-level
       property before composition. Caller overrides may restore or replace any key.
-- [ ] Route file-valued properties through the target's canonical file-resolution
+- [x] Route file-valued properties through the target's canonical file-resolution
       context — `with:` adds no second path resolver.
-- [ ] Store the overlay at document scope as the **immutable, evaluated,
+- [x] Store the overlay at document scope as the **immutable, evaluated,
       pre-schema** input. Schema defaults, coercion, and invalid-optional drops
       affect prepared effective frontmatter only, never the stored overlay; a
       later refresh reapplies the same overlay deterministically.
-- [ ] Implement overlay lifetime: survives retry, resume, and loop refresh of the
+- [x] Implement overlay lifetime: survives retry, resume, and loop refresh of the
       same target; available to every lifecycle signal and body composition for
       that target; never written to disk; discarded when that target proxies on.
       A downstream proxy gets only its own `with:` plus caller overrides —
       forwarding is explicit; omitting `with:` installs an empty overlay.
-- [ ] Confirm cycle detection and `MAX_PROXY_HOPS` (`control.rs:204`) still key on
+- [x] Confirm cycle detection and `MAX_PROXY_HOPS` (`control.rs:204`) still key on
       resolved document paths — an overlay does not create a distinct identity.
-- [ ] Handle control-plane overlays: `with:` may set any top-level key including
+- [x] Handle control-plane overlays: `with:` may set any top-level key including
       selection, lifecycle, loop, schema, timeout, and MCP. The target reparses
       and validates all resulting structural configuration, and every shell,
       filesystem, network, messaging, and provider effect stays subject to normal
       target-side policy. A source-resolved string installed under a target
       lifecycle key is **literal target data** — raw `{{ ... }}` may not survive
       DM2 and become a second target-time evaluation.
-- [ ] L1: shallow replacement, null removal, precedence, atomic failure, and
+- [x] L1: shallow replacement, null removal, precedence, atomic failure, and
       immediate-target overlay replacement — each tested independently.
-- [ ] L1: schema normalization never mutates the stored overlay; control-plane
+- [x] L1: schema normalization never mutates the stored overlay; control-plane
       values are source-resolved once, reparsed by the target, and policy-bound.
 
-**Validation checkpoint 8**
-- `just test` green.
-- A test proves a caller `--set` beats a conflicting `with:` key.
-- A test proves a target schema `required` property can be satisfied by `with:`,
-  and that an invalid overlay produces the normal typed target schema error
-  **without invoking the provider**.
-- A byte/hash test proves neither source nor target Markdown bytes nor Darkmatter
-  hashes change solely because `with:` was used.
+**Validation checkpoint 8** — PASSED
+- `just test` green for `claudine` (3510) and `claudine-cli` (2003, 1 flaky —
+  the known spurious nextest LEAK-FAIL on `argv_normalization`, green on retry);
+  `just test-l2` green (135); `just lint` green.
+- `claudine-gen::drift::committed_generated_artifacts_match_phase_1_byte_baseline`
+  still fails on its missing archived fixture. Re-verified pre-existing this
+  phase by stashing the change and re-running: identical failure. Absent at
+  `HEAD`, untouched here (same as checkpoints 6 and 7).
+- Both Phase 1 drift guards unchanged and green
+  (`composition_seams`, 12/12): the overlay reuses the existing assembly point,
+  so no composer and no proxy-target channel appeared.
+- **The wiring was one line.** Phases 5–7 had already built the pieces: an
+  unused `HarnessPromptState::overlay` carrier, `merge_frontmatter_overlay`'s
+  shallow/null semantics, and `load_overlaid_source` as the single assembly
+  point both staged reads already went through. `adopt` had been dropping
+  `handoff.overlay()` on the floor with a comment naming this phase. Installing
+  it there is what closes R4.
+- Precedence falls out of *where* each layer lands rather than from ordering
+  logic: the overlay merges into the authored frontmatter map, and the caller's
+  `set_overrides` ride on the compose options and are applied by Darkmatter on
+  top (`effective_state::apply_set_overrides`). There is no third place to get
+  the order wrong.
+- All 21 new L1s in
+  `loop_control::tests::overlay_layering` were verified to **fail** with the
+  one-line wiring removed, as was the L2 (which reported `note=from-target`).
+  A caller `--set` beating a conflicting `with:` is proven end-to-end through
+  the shipped binary by
+  `level2_lifecycle_proxy_with_overlay_loses_to_a_caller_set_and_beats_the_target`,
+  which also asserts both documents' bytes are unchanged.
+- **Scope note for Phase 12.** The harness route (`prepare_document`) composes
+  through `prepare_direct_with_prompt`, not through the schema-aware
+  `prepare_direct_with_schema` the `compose` command uses. So an invalid overlay
+  surfaces the target's typed
+  `CompositionError::ComposeFailed(SchemaValidationFailed)` — pre-launch, as the
+  checkpoint requires — but *not* the `SchemaValidation`/`MissingProperties`
+  categorization, and invalid-**optional** drop-and-retry does not run on this
+  route. This drift predates Phase 5 (the deleted composer never categorized
+  either) and is cross-route typed identity, which Phase 12 owns. It is not
+  overlay-specific: it affects every proxied/retried target equally.
 
 ---
 
