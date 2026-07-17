@@ -214,6 +214,32 @@ pub fn scan_production_sources() -> &'static ScanResult {
     SCAN.get_or_init(run_scan)
 }
 
+/// Scan one file's text exactly as [`scan_production_sources`] scans each
+/// production file, attributing findings to `relative`.
+///
+/// Exposed so a guard arm with no live production instance can still be
+/// anchored against a synthetic fixture rather than asserting nothing.
+/// `CompositionError::AtomicWriteFailed` was the last `source_field` box in the
+/// tree; retiring it left that arm with no production site to prove it works.
+///
+/// ## Panics
+///
+/// Panics if `text` is not parseable Rust.
+pub fn scan_text(relative: &str, text: &str) -> ScanResult {
+    let ast = syn::parse_file(text).expect("fixture text parses as Rust");
+    let mut result = ScanResult::default();
+    let mut scan = FileScan {
+        file: relative.to_string(),
+        file_ast: &ast,
+        stack: Vec::new(),
+        result: &mut result,
+    };
+    scan.visit_file(&ast);
+    result.findings.sort();
+    result.boxed_errors.sort();
+    result
+}
+
 fn run_scan() -> ScanResult {
     let root = area_root();
     let mut result = ScanResult::default();

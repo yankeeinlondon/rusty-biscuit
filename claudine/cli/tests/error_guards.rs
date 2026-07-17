@@ -31,8 +31,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
 
-use claudine::composition::lifecycle_context::DiagnosticFacets;
-use claudine::diagnostics::{CODES, code_spec};
+use claudine::diagnostics::{CODES, DiagnosticSnapshot, code_spec};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -161,9 +160,11 @@ const KNOWN_TAGS: &[&str] = &[
     // Permanent: no typed source exists, or the boundary is downstream of the
     // final render.
     "retained",
-    // Pre-existing lossy boundaries outside this feature's migration scope,
-    // recorded so they cannot grow. Closed by a follow-up spec.
-    "error-propagation-followup",
+    // A ratified cross-spec deferral: a typed error is in hand, but typing it
+    // would move an authored `err.*` matching surface, which §D10 and D-2/D-12
+    // reserve for a separate versioned migration. Not a burn-down — the set
+    // does not grow. (The `error-propagation-followup` burn-down is closed.)
+    "d10-routing-change",
 ];
 
 #[test]
@@ -432,18 +433,45 @@ fn the_boxed_scan_finds_the_sites_known_to_exist() {
     // failure mode that would make every assertion above vacuously true.
     let boxed = boxed_registered_diagnostics();
     assert!(
-        boxed.iter().any(|b| b.site == source_scan::BoxSite::SourceField
-            && b.symbol == "CompositionError::AtomicWriteFailed"
-            && b.type_name == "ClaudineError"),
-        "scan did not find `CompositionError::AtomicWriteFailed`'s `#[source] \
-         Box<ClaudineError>`, which D-7 recorded; found {boxed:?}"
-    );
-    assert!(
         boxed
             .iter()
             .any(|b| b.site == source_scan::BoxSite::ResultError),
         "scan found no `Result<_, Box<RegisteredDiagnostic>>`, but D-13's \
          `preflight_proxy_target` is one; found {boxed:?}"
+    );
+}
+
+#[test]
+fn the_boxed_scan_still_sees_a_source_field_box() {
+    // The `SourceField` arm has no production site left: narrowing
+    // `atomic_write` to `io::Result` retired `CompositionError::AtomicWriteFailed`'s
+    // `#[source] Box<ClaudineError>`, which was D-7's only live instance and the
+    // anchor this test used to assert against. Zero sites is the goal, but a
+    // guard arm with nothing to match is a guard arm that can rot silently — so
+    // the arm is anchored on a fixture instead of on a defect.
+    let scanned = source_scan::scan_text(
+        "lib/src/fixture.rs",
+        r#"
+        #[derive(Debug, thiserror::Error)]
+        pub enum Fixture {
+            #[error("boxed")]
+            Boxed {
+                #[source]
+                source: Box<ClaudineError>,
+            },
+        }
+        "#,
+    );
+    let registered = source_scan::discovery_registry();
+    assert!(
+        scanned.boxed_errors.iter().any(|b| {
+            b.site == source_scan::BoxSite::SourceField
+                && b.type_name == "ClaudineError"
+                && registered.contains(&b.type_name)
+        }),
+        "the `source_field` arm no longer detects a `#[source] Box<RegisteredDiagnostic>`; \
+         found {:?}",
+        scanned.boxed_errors
     );
 }
 
@@ -539,13 +567,13 @@ fn from_code_projects_a_catalog_shaped_detail_for_every_registered_code() {
     // code but none of the per-instance values. It must still project the
     // object, with every declared key present and `null`.
     for spec in CODES {
-        let facets = DiagnosticFacets::from_code(spec.code)
+        let snapshot = DiagnosticSnapshot::from_code(spec.code, String::new())
             .unwrap_or_else(|| panic!("`{}` is in CODES but from_code missed it", spec.code));
 
-        let Value::Object(detail) = &facets.detail else {
+        let Value::Object(detail) = &snapshot.detail else {
             panic!(
                 "`{}` projects a top-level non-object detail: {:?}",
-                spec.code, facets.detail
+                spec.code, snapshot.detail
             );
         };
 
