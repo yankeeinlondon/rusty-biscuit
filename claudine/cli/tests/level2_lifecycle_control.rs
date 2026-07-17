@@ -1645,3 +1645,197 @@ Body
         "expected start → failure → finalize ordering; got {lines:?}; pane:\n{pane}"
     );
 }
+
+/// Run a compose in a real tmux pane and settle on either `expected_lines`
+/// side-effect markers or a stable count (the run finished early). Unlike
+/// [`run_in_tmux_for`], which breaks on the first sighting of one marker, this
+/// cannot stop mid-run on a document whose terminal events fire once **per
+/// iteration** — and it still returns when a buggy run produces fewer markers
+/// than expected, which is what makes an equivalence mismatch observable rather
+/// than a timeout.
+fn run_until_settled(staged: &Staged, expected_lines: usize) -> String {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+
+    let session = format!("biscuit_l2_lcequiv_{}_{seq}", std::process::id());
+    let shell = biscuit_test_harness::detect_shell();
+    let spawned = std::process::Command::new("tmux")
+        .args([
+            "new-session",
+            "-d",
+            "-s",
+            &session,
+            "-x",
+            "200",
+            "-y",
+            "60",
+            &format!("{shell} -l"),
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(spawned, "failed to spawn tmux session");
+
+    let mut harness = TmuxHarness::attach(&session);
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+
+    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let sentinel = format!("L2_EQUIV_DONE_{seq}");
+    let env_prefix = format!(
+        "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
+        home = staged.workspace.path().display(),
+        path = augmented_path(&staged.bin_dir).to_string_lossy(),
+    );
+    let cmd = format!(
+        "cd {ws} && {env_prefix}{claudine} compose --goose {md} ; echo {sentinel}",
+        ws = staged.workspace.path().display(),
+        md = staged.md_file.display(),
+    );
+    harness
+        .send_command_with_env(&cmd, &[])
+        .expect("send compose command");
+
+    let deadline = Instant::now() + Duration::from_secs(40);
+    let mut last_count = 0usize;
+    let mut stable_since: Option<Instant> = None;
+    while Instant::now() < deadline {
+        let count = event_lines(staged).len();
+        if count >= expected_lines {
+            std::thread::sleep(Duration::from_millis(150));
+            break;
+        }
+        if count == last_count {
+            match stable_since {
+                Some(since) if since.elapsed() >= Duration::from_millis(1200) => break,
+                Some(_) => {}
+                None => stable_since = Some(Instant::now()),
+            }
+        } else {
+            stable_since = None;
+            last_count = count;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    let pane = harness.capture().map(|f| f.plain).unwrap_or_default();
+    kill_session_by_name(&session);
+    pane
+}
+
+/// A looping target document. Three iterations (`phase` 1, 2, 3), one
+/// `initialize`, and a per-iteration `finalize` stamping the live `phase` so the
+/// mutation sequence is observable from the side-effect log.
+const EQUIV_LOOP_TARGET: &str = r#"---
+title: proxy target loop
+phase: 1
+loop:
+  until: "phase > 2"
+  action: "increment(phase)"
+  max: 10
+initialize:
+  stack:
+    - action: {append_line: ["events.log", "target-init"]}
+finalize:
+  stack:
+    - action: {append_line: ["events.log", "target-finalize:{{phase}}"]}
+---
+target body phase {{phase}}
+"#;
+
+/// A router with no `loop:` of its own that hands off to the looping target at
+/// `initialize`.
+const EQUIV_ROUTER: &str = r#"---
+title: proxy router
+initialize:
+  stack:
+    - action: {proxy: "@target.md"}
+---
+router body
+"#;
+
+/// **The motivating bug** (`features/2026-07-13-proxy-with/spec.md`): a proxied
+/// target must execute exactly as it does when invoked directly.
+///
+/// A router with no `loop:` proxies at `initialize` to a looping target. Loop
+/// vs single is decided at `cli/src/commands/compose/prep.rs` from the
+/// **router's** frontmatter, before the router's `initialize` proxy fires — so
+/// the routed run treats the target as a single-run document and executes one
+/// provider attempt, while the direct run executes all three iterations.
+///
+/// ## Why this is `#[ignore]`d
+///
+/// It fails on the Phase 1 baseline **by design** — it is the reproduction, not
+/// a regression guard. Loop ownership only follows document identity once the
+/// coordinator (Phase 6) and loop-ownership move (Phase 10) land. **Phase 10
+/// re-enables it**; it is the headline acceptance signal for the feature.
+///
+/// Deterministic by construction: a fake provider, a self-contained temporary
+/// fixture, and no live Claude/Codex/Gemini service. The shipped
+/// `prompts/implement.md` command remains a manual smoke case, never a CI
+/// dependency.
+#[test]
+#[ignore = "reproduction of the motivating bug; Phase 10 (loop ownership follows \
+            document identity) makes this pass and re-enables it"]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_initialize_proxy_to_looping_target_matches_direct_run() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    // 1 target-init + 3 provider-ran + 3 target-finalize = 7 markers per run.
+    const EXPECTED_MARKERS: usize = 7;
+
+    // Direct: the looping target IS the invoked document.
+    let direct = stage_proxy_pair(EQUIV_LOOP_TARGET, EQUIV_LOOP_TARGET, true);
+    let direct_pane = run_until_settled(&direct, EXPECTED_MARKERS);
+    let direct_lines = event_lines(&direct);
+
+    // Routed: the router is invoked and proxies to the same target at initialize.
+    let routed = stage_proxy_pair(EQUIV_ROUTER, EQUIV_LOOP_TARGET, true);
+    let routed_pane = run_until_settled(&routed, EXPECTED_MARKERS);
+    let routed_lines = event_lines(&routed);
+
+    let phases = |lines: &[String]| -> Vec<String> {
+        lines
+            .iter()
+            .filter(|l| l.starts_with("target-finalize:"))
+            .cloned()
+            .collect()
+    };
+    let count = |lines: &[String], needle: &str| lines.iter().filter(|l| *l == needle).count();
+
+    // The direct run is the contract the routed run must match. Assert it first
+    // so a broken fixture is not misread as a routing bug.
+    assert_eq!(
+        phases(&direct_lines),
+        vec!["target-finalize:1", "target-finalize:2", "target-finalize:3"],
+        "fixture check: the target loops three times when invoked directly; \
+         got {direct_lines:?}; pane:\n{direct_pane}"
+    );
+
+    assert_eq!(
+        count(&routed_lines, "provider-ran"),
+        count(&direct_lines, "provider-ran"),
+        "iteration count must not depend on the route: the proxied target ran \
+         {} provider attempts but the direct target ran {}; routed {routed_lines:?}; \
+         pane:\n{routed_pane}",
+        count(&routed_lines, "provider-ran"),
+        count(&direct_lines, "provider-ran"),
+    );
+    assert_eq!(
+        phases(&routed_lines),
+        phases(&direct_lines),
+        "the target's phase mutations must not depend on the route; \
+         routed {routed_lines:?}; pane:\n{routed_pane}"
+    );
+    assert_eq!(
+        count(&routed_lines, "target-init"),
+        1,
+        "the target's initialize fires exactly once on the routed run; \
+         got {routed_lines:?}; pane:\n{routed_pane}"
+    );
+    assert_eq!(
+        count(&routed_lines, "target-init"),
+        count(&direct_lines, "target-init"),
+        "the target initialize count must not depend on the route; \
+         routed {routed_lines:?}; direct {direct_lines:?}"
+    );
+}
