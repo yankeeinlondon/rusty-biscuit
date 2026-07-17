@@ -93,7 +93,8 @@ pub use preflight::{PreFlightResult, resolve_shell_approvals};
 pub use hints::{parse_interactive_hint, parse_selection_hints_from_frontmatter};
 pub use prepare::{PrepareOptions, bind_agent_workspace, prepare_direct, prepare_inline};
 pub use resolve::{
-    enrich_composition_source_load_error, resolve_composition_source, validate_file_permissions,
+    build_prompt_reference, enrich_composition_source_load_error, resolve_composition_source,
+    validate_file_permissions,
 };
 pub use schema::{
     InteractiveSchemaOptions, PreValidatedSchema, PropertyState, PropertyStatus,

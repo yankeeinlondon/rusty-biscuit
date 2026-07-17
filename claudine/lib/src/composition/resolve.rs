@@ -43,12 +43,7 @@ pub fn resolve_composition_source(
     // resolution phase so trace inspection / `--perf` reporting can see
     // when the `biscuit-file` resolver dominates compose prep cost.
     let _span = tracing::info_span!("compose_prep.file_reference", file = %file_ref).entered();
-    let reference = with_prompt_magic_paths(FileReference::new(file_ref).map_err(|e| {
-        CompositionError::InvalidReference {
-            reference: file_ref.to_string(),
-            source: e,
-        }
-    })?);
+    let reference = build_prompt_reference(file_ref)?;
 
     let resolved_path = reference
         .resolve()
@@ -89,6 +84,30 @@ pub fn resolve_composition_source(
         original_text,
         markdown,
     })
+}
+
+/// Build a [`FileReference`] for a top-level Claudine prompt argument with the
+/// convention prompt directories registered as magic (`@`) search roots.
+///
+/// The prompt magic roots (package area, `<area>/prompts`, `<repo>/prompts`,
+/// `<repo>/.claudine/prompts`, `~/.claudine/prompts`) are the explicit
+/// `FileReference` configuration Claudine layers on top of the shared grammar
+/// (D1). Every top-level `compose`/`sequence`/`inline-compose` source resolver
+/// shares this builder so a bare or `@`-prefixed reference resolves through the
+/// identical roots regardless of the file's extension — `@foo.yaml` and
+/// `@foo.md` can no longer diverge.
+///
+/// ## Errors
+///
+/// Returns [`CompositionError::InvalidReference`] when the reference string is
+/// syntactically invalid.
+pub fn build_prompt_reference(file_ref: &str) -> Result<FileReference, CompositionError> {
+    Ok(with_prompt_magic_paths(FileReference::new(file_ref).map_err(
+        |e| CompositionError::InvalidReference {
+            reference: file_ref.to_string(),
+            source: e,
+        },
+    )?))
 }
 
 /// Register the convention prompt directories as magic (`@`) search roots.
@@ -169,9 +188,11 @@ pub fn enrich_composition_source_load_error(
 }
 
 fn read_source_text_for_enrichment(file_ref: &str) -> Option<String> {
-    let reference = FileReference::new(file_ref)
-        .ok()?
-        .with_package_area_magic_path();
+    // Re-resolve through the SAME prompt magic roots the launch-time resolver
+    // used ([`build_prompt_reference`]); resolving through only the package-area
+    // root would fail to re-find a file that launched via a `prompts/` root and
+    // silently degrade the enriched render.
+    let reference = build_prompt_reference(file_ref).ok()?;
     let resolved_path = reference.resolve().ok()??;
 
     let ext = resolved_path
