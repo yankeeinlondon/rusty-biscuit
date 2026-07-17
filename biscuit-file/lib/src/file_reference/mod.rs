@@ -217,6 +217,7 @@ pub enum DetailedOutcome {
 pub struct DetailedResolution {
     raw: String,
     class: FileReferenceClass,
+    effective_kind: FileReferenceKind,
     base_dir: PathBuf,
     source_path: Option<PathBuf>,
     repository_root: Option<PathBuf>,
@@ -234,6 +235,18 @@ impl DetailedResolution {
     /// The parsed classification of the reference.
     pub fn class(&self) -> FileReferenceClass {
         self.class
+    }
+
+    /// The filesystem-anchoring kind that actually drove resolution.
+    ///
+    /// Equal to `class().kind` for most references. It differs only when
+    /// environment interpolation reclassified a local anchoring reference: an
+    /// implicit `{{DIR}}/x.md` whose `DIR` expanded to an absolute path is
+    /// authored [`FileReferenceKind::ImplicitRelative`] yet resolves as
+    /// [`FileReferenceKind::Absolute`]. Diagnostics expose both so the effective
+    /// behavior is honest without hiding the authored intent.
+    pub fn effective_kind(&self) -> FileReferenceKind {
+        self.effective_kind
     }
 
     /// The base directory references resolved against.
@@ -615,6 +628,9 @@ impl FileReference {
             return DetailedResolution {
                 raw: self.raw.clone(),
                 class,
+                // Validation fails before any interpolation, so the authored
+                // kind is the effective kind.
+                effective_kind: class.kind,
                 base_dir,
                 source_path,
                 repository_root: ctx.repository_root().map(Path::to_path_buf),
@@ -632,10 +648,12 @@ impl FileReference {
             &internal,
         );
 
+        let effective_kind = core.effective_kind.unwrap_or(class.kind);
         let (outcome, error) = core.outcome.into_parts();
         DetailedResolution {
             raw: self.raw.clone(),
             class,
+            effective_kind,
             base_dir,
             source_path,
             repository_root: core.repository_root,

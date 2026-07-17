@@ -7,11 +7,12 @@ use crate::file_reference::context::{
     ResolutionContext, find_git_root, find_package_area, home_dir,
 };
 use crate::file_reference::error::FileReferenceError;
+use crate::file_reference::parse;
 use crate::file_reference::{
-    CompletionEntryForm, DetailedOutcome, MagicPathList, ParsedReference, PartialCompletion,
-    PathTemplate, ProbeDisposition, ProbedCandidate, ReferenceKind, ResolutionCandidate,
-    ResolutionFailure, RootProvenance, TemplateSegment, make_candidate, make_partial_completion,
-    make_probed,
+    CompletionEntryForm, DetailedOutcome, FileReferenceKind, MagicPathList, ParsedReference,
+    PartialCompletion, PathTemplate, ProbeDisposition, ProbedCandidate, ReferenceKind,
+    ResolutionCandidate, ResolutionFailure, RootProvenance, TemplateSegment, make_candidate,
+    make_partial_completion, make_probed,
 };
 
 #[cfg(feature = "url")]
@@ -26,6 +27,14 @@ use crate::file_reference::Resolved;
 pub(crate) struct CoreResolution {
     pub candidates: Vec<ProbedCandidate>,
     pub repository_root: Option<PathBuf>,
+    /// The filesystem-anchoring kind that actually drove resolution.
+    ///
+    /// Differs from the authored kind only when environment interpolation
+    /// reclassified a local anchoring reference (OQ1 option 2) -- e.g. an
+    /// implicit `{{DIR}}/x.md` whose `DIR` expanded to an absolute path. `None`
+    /// for failures that never reached candidate building; the detailed
+    /// resolution then falls back to the authored kind.
+    pub effective_kind: Option<FileReferenceKind>,
     pub outcome: CoreOutcome,
 }
 
@@ -91,7 +100,15 @@ pub(crate) fn resolve_core(
         Err(e) => return failed_core(classify_error(&e), e),
     };
 
-    let repository_root = if kind_uses_repository_root(&parsed.kind) {
+    // OQ1 option 2: reclassify the local anchoring family from the interpolated
+    // payload, rejecting any injected grammar sigil.
+    let anchoring = match compute_effective_anchoring(parsed, &interpolated) {
+        Ok(anchoring) => anchoring,
+        Err(e) => return failed_core(classify_error(&e), e),
+    };
+    let effective_kind = effective_public_kind(parsed, anchoring);
+
+    let repository_root = if resolution_uses_repository_root(parsed, anchoring) {
         match resolve_repository_root(ctx) {
             Ok(root) => root,
             Err(e) => return failed_core(classify_error(&e), e),
@@ -101,9 +118,130 @@ pub(crate) fn resolve_core(
     };
 
     if parsed.recursive {
-        resolve_recursive_core(parsed, &interpolated, magic_paths, vault_roots, ctx, repository_root)
+        resolve_recursive_core(
+            parsed,
+            &interpolated,
+            magic_paths,
+            vault_roots,
+            ctx,
+            repository_root,
+            effective_kind,
+        )
     } else {
-        resolve_direct_core(parsed, &interpolated, magic_paths, vault_roots, ctx, repository_root)
+        resolve_direct_core(
+            parsed,
+            &interpolated,
+            anchoring,
+            magic_paths,
+            vault_roots,
+            ctx,
+            repository_root,
+            effective_kind,
+        )
+    }
+}
+
+/// The filesystem-anchoring kind a local reference resolves as after one
+/// interpolation pass (OQ1 option 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EffectiveAnchoring {
+    Absolute,
+    ExplicitRelative,
+    ImplicitRelative,
+}
+
+/// Whether an authored kind is in the local filesystem-anchoring family whose
+/// effective anchoring may change after interpolation.
+///
+/// Only these kinds are reclassified; magic, package, vault, home, and URL keep
+/// their author-controlled sigil and are never re-derived from the payload.
+fn is_local_anchoring(kind: &ReferenceKind) -> bool {
+    matches!(
+        kind,
+        ReferenceKind::Relative(_)
+            | ReferenceKind::ImplicitRelative(_)
+            | ReferenceKind::Absolute(_)
+    )
+}
+
+/// Compute the effective anchoring for a non-recursive local reference.
+///
+/// Returns `None` for recursive references and for the non-anchoring kinds
+/// (magic/package/vault/home/URL), which keep their authored classification.
+///
+/// ## Errors
+///
+/// Returns [`FileReferenceError::InvalidSyntax`] when interpolation injects a
+/// grammar sigil (`@`, `!`, `%`, `vault:`, or a URL scheme); those must stay
+/// author-controlled and are never honored from an environment value.
+fn compute_effective_anchoring(
+    parsed: &ParsedReference,
+    interpolated: &str,
+) -> Result<Option<EffectiveAnchoring>, FileReferenceError> {
+    if parsed.recursive || !is_local_anchoring(&parsed.kind) {
+        return Ok(None);
+    }
+    if let Some(sigil) = injected_sigil(interpolated) {
+        return Err(FileReferenceError::InvalidSyntax(format!(
+            "interpolation produced `{interpolated}`, injecting the `{sigil}` reference \
+             sigil; grammar sigils must be author-controlled"
+        )));
+    }
+    Ok(Some(if parse::is_absolute_reference(interpolated) {
+        EffectiveAnchoring::Absolute
+    } else if parse::is_explicit_relative(interpolated) {
+        EffectiveAnchoring::ExplicitRelative
+    } else {
+        EffectiveAnchoring::ImplicitRelative
+    }))
+}
+
+/// Detect an interpolation-injected grammar sigil at the anchor position.
+fn injected_sigil(s: &str) -> Option<&'static str> {
+    if s.starts_with('@') {
+        Some("@")
+    } else if s.starts_with('!') {
+        Some("!")
+    } else if s.starts_with('%') {
+        Some("%")
+    } else if s.starts_with("vault:") {
+        Some("vault:")
+    } else if parse::starts_with_ignore_ascii_case(s, "http://")
+        || parse::starts_with_ignore_ascii_case(s, "https://")
+    {
+        Some("url scheme")
+    } else {
+        None
+    }
+}
+
+/// Whether the resolution actually anchors on the repository root.
+///
+/// An implicit reference that stayed implicit anchors on it; one reclassified
+/// to absolute or explicit-relative does not, so no git discovery is triggered.
+/// Non-anchoring kinds defer to [`kind_uses_repository_root`].
+fn resolution_uses_repository_root(
+    parsed: &ParsedReference,
+    anchoring: Option<EffectiveAnchoring>,
+) -> bool {
+    match anchoring {
+        Some(EffectiveAnchoring::ImplicitRelative) => true,
+        Some(_) => false,
+        None => kind_uses_repository_root(&parsed.kind),
+    }
+}
+
+/// Project the effective anchoring onto a public [`FileReferenceKind`] for
+/// diagnostics; falls back to the authored kind for non-reclassified references.
+fn effective_public_kind(
+    parsed: &ParsedReference,
+    anchoring: Option<EffectiveAnchoring>,
+) -> FileReferenceKind {
+    match anchoring {
+        Some(EffectiveAnchoring::Absolute) => FileReferenceKind::Absolute,
+        Some(EffectiveAnchoring::ExplicitRelative) => FileReferenceKind::ExplicitRelative,
+        Some(EffectiveAnchoring::ImplicitRelative) => FileReferenceKind::ImplicitRelative,
+        None => parsed.kind.public_kind(),
     }
 }
 
@@ -112,6 +250,7 @@ fn failed_core(failure: ResolutionFailure, error: FileReferenceError) -> CoreRes
     CoreResolution {
         candidates: Vec::new(),
         repository_root: None,
+        effective_kind: None,
         outcome: CoreOutcome::Failed(failure, error),
     }
 }
@@ -230,17 +369,21 @@ pub(crate) fn resolve_target(
 }
 
 /// Resolve without recursion -- probe the ordered candidate plan.
+#[allow(clippy::too_many_arguments)]
 fn resolve_direct_core(
     parsed: &ParsedReference,
     interpolated: &str,
+    anchoring: Option<EffectiveAnchoring>,
     magic_paths: &MagicPathList,
     vault_roots: &[PathBuf],
     ctx: &ResolutionContext,
     repository_root: Option<PathBuf>,
+    effective_kind: FileReferenceKind,
 ) -> CoreResolution {
     let candidates = match build_candidates(
         parsed,
         interpolated,
+        anchoring,
         magic_paths,
         vault_roots,
         ctx,
@@ -252,6 +395,7 @@ fn resolve_direct_core(
             return CoreResolution {
                 candidates: Vec::new(),
                 repository_root,
+                effective_kind: Some(effective_kind),
                 outcome: CoreOutcome::Failed(failure, e),
             };
         }
@@ -267,6 +411,7 @@ fn resolve_direct_core(
                 return CoreResolution {
                     candidates: probed,
                     repository_root,
+                    effective_kind: Some(effective_kind),
                     outcome: CoreOutcome::Matched(resolved),
                 };
             }
@@ -289,6 +434,7 @@ fn resolve_direct_core(
                 return CoreResolution {
                     candidates: probed,
                     repository_root,
+                    effective_kind: Some(effective_kind),
                     outcome: CoreOutcome::Failed(ResolutionFailure::Io, typed),
                 };
             }
@@ -299,12 +445,14 @@ fn resolve_direct_core(
     CoreResolution {
         candidates: probed,
         repository_root,
+        effective_kind: Some(effective_kind),
         outcome: CoreOutcome::NoMatch,
     }
 }
 
 /// Resolve with recursive directory traversal, retaining the global lexical
 /// winner while sourcing its search roots from the shared candidate builder.
+#[allow(clippy::too_many_arguments)]
 fn resolve_recursive_core(
     parsed: &ParsedReference,
     interpolated: &str,
@@ -312,6 +460,7 @@ fn resolve_recursive_core(
     vault_roots: &[PathBuf],
     ctx: &ResolutionContext,
     repository_root: Option<PathBuf>,
+    effective_kind: FileReferenceKind,
 ) -> CoreResolution {
     let roots = match build_search_roots(
         parsed,
@@ -326,6 +475,7 @@ fn resolve_recursive_core(
             return CoreResolution {
                 candidates: Vec::new(),
                 repository_root,
+                effective_kind: Some(effective_kind),
                 outcome: CoreOutcome::Failed(failure, e),
             };
         }
@@ -413,6 +563,7 @@ fn resolve_recursive_core(
     CoreResolution {
         candidates: probed,
         repository_root,
+        effective_kind: Some(effective_kind),
         outcome,
     }
 }
@@ -459,18 +610,7 @@ fn collect_roots(
     match kind {
         ReferenceKind::Relative(_) => Ok(vec![source(ctx.cwd.clone())]),
         ReferenceKind::ImplicitRelative(_) => {
-            // Base/CWD first, then repository root -- Phase 3 preserves the
-            // current precedence; the flip to repository-first is Phase 4.
-            let mut roots = vec![source(ctx.cwd.clone())];
-            if let Some(git_root) = repository_root
-                && git_root != ctx.cwd
-            {
-                roots.push(RootEntry {
-                    path: git_root.to_path_buf(),
-                    provenance: RootProvenance::Repository,
-                });
-            }
-            Ok(roots)
+            Ok(implicit_relative_roots(&ctx.cwd, repository_root))
         }
         ReferenceKind::Absolute(_) => Ok(vec![RootEntry {
             path: PathBuf::from("/"),
@@ -543,24 +683,52 @@ fn collect_roots(
     }
 }
 
+/// The ordered implicit-relative roots: repository root first, then base/CWD.
+///
+/// This is the Phase 4 precedence: a repository-shaped bare path is the primary
+/// Claudine authoring form, so the repository candidate is tried before the
+/// source-local one. When base equals the repository root the two collapse to a
+/// single repository-provenance candidate; when no repository root is available
+/// the base is the only candidate. It is the single authority for implicit
+/// ordering -- both direct and recursive resolution route through it.
+fn implicit_relative_roots(cwd: &Path, repository_root: Option<&Path>) -> Vec<RootEntry> {
+    match repository_root {
+        Some(git_root) => {
+            let mut roots = vec![RootEntry {
+                path: git_root.to_path_buf(),
+                provenance: RootProvenance::Repository,
+            }];
+            if git_root != cwd {
+                roots.push(RootEntry {
+                    path: cwd.to_path_buf(),
+                    provenance: RootProvenance::Source,
+                });
+            }
+            roots
+        }
+        None => vec![RootEntry {
+            path: cwd.to_path_buf(),
+            provenance: RootProvenance::Source,
+        }],
+    }
+}
+
 /// Build the ordered, deduplicated candidate paths for non-recursive
 /// resolution, each carrying the provenance of its root.
+#[allow(clippy::too_many_arguments)]
 fn build_candidates(
     parsed: &ParsedReference,
     interpolated: &str,
+    anchoring: Option<EffectiveAnchoring>,
     magic_paths: &MagicPathList,
     vault_roots: &[PathBuf],
     ctx: &ResolutionContext,
     repository_root: Option<&Path>,
 ) -> Result<Vec<ResolutionCandidate>, FileReferenceError> {
-    if let ReferenceKind::Absolute(_) = &parsed.kind {
-        let path = PathBuf::from(interpolated);
-        if !path.is_absolute() {
-            return Err(FileReferenceError::InvalidSyntax(format!(
-                "absolute reference resolved to non-absolute path: {interpolated}"
-            )));
-        }
-        return Ok(vec![make_candidate(path, RootProvenance::Absolute)]);
+    // The local anchoring family uses the effective anchoring computed from the
+    // interpolated payload (OQ1 option 2) rather than the authored kind.
+    if let Some(anchoring) = anchoring {
+        return Ok(build_anchoring_candidates(anchoring, interpolated, ctx, repository_root));
     }
 
     #[cfg(feature = "url")]
@@ -574,6 +742,34 @@ fn build_candidates(
         .map(|root| make_candidate(root.path.join(interpolated), root.provenance))
         .collect();
     Ok(dedupe_candidates(candidates))
+}
+
+/// Build candidates for a local reference from its effective anchoring.
+///
+/// `Absolute` yields the payload verbatim; `ExplicitRelative` yields exactly one
+/// base-relative candidate with no fallback; `ImplicitRelative` yields the
+/// repository-then-base plan.
+fn build_anchoring_candidates(
+    anchoring: EffectiveAnchoring,
+    interpolated: &str,
+    ctx: &ResolutionContext,
+    repository_root: Option<&Path>,
+) -> Vec<ResolutionCandidate> {
+    match anchoring {
+        EffectiveAnchoring::Absolute => {
+            vec![make_candidate(PathBuf::from(interpolated), RootProvenance::Absolute)]
+        }
+        EffectiveAnchoring::ExplicitRelative => {
+            vec![make_candidate(ctx.cwd.join(interpolated), RootProvenance::Source)]
+        }
+        EffectiveAnchoring::ImplicitRelative => {
+            let candidates = implicit_relative_roots(&ctx.cwd, repository_root)
+                .into_iter()
+                .map(|root| make_candidate(root.path.join(interpolated), root.provenance))
+                .collect();
+            dedupe_candidates(candidates)
+        }
+    }
 }
 
 /// Build the ordered, deduplicated search roots for recursive resolution.
@@ -623,7 +819,8 @@ pub(crate) fn candidate_plan(
     }
 
     let interpolated = interpolate(parsed.kind.template(), ctx)?;
-    let repository_root = if kind_uses_repository_root(&parsed.kind) {
+    let anchoring = compute_effective_anchoring(parsed, &interpolated)?;
+    let repository_root = if resolution_uses_repository_root(parsed, anchoring) {
         resolve_repository_root(ctx)?
     } else {
         ctx.repository_root.clone()
@@ -635,6 +832,7 @@ pub(crate) fn candidate_plan(
         build_candidates(
             parsed,
             &interpolated,
+            anchoring,
             magic_paths,
             vault_roots,
             ctx,
@@ -846,19 +1044,22 @@ fn magic_completion_roots(
 
 /// Compute the absolute roots implied by an implicit-relative token at the
 /// given scope.
+///
+/// Mirrors execution precedence (Phase 4): repository root first, then the base
+/// directory. Completion must teach the same order execution uses, so a value it
+/// emits resolves to the same candidate it displayed.
 fn implicit_relative_completion_roots(
     scope: &str,
     base: &Path,
 ) -> Result<Vec<PathBuf>, FileReferenceError> {
-    let mut roots: Vec<PathBuf> = vec![append_scope(base, scope)];
+    let mut roots: Vec<PathBuf> = Vec::new();
 
-    if let Some(git_root) = find_git_root(base)?
-        && git_root.as_path() != base
-    {
-        let rooted = append_scope(&git_root, scope);
-        if !roots.iter().any(|r| r == &rooted) {
-            roots.push(rooted);
-        }
+    if let Some(git_root) = find_git_root(base)? {
+        roots.push(append_scope(&git_root, scope));
+    }
+    let base_root = append_scope(base, scope);
+    if !roots.iter().any(|r| r == &base_root) {
+        roots.push(base_root);
     }
 
     Ok(roots)
@@ -979,11 +1180,11 @@ mod tests {
     }
 
     #[test]
-    fn implicit_relative_uses_cwd_then_git_root() {
+    fn implicit_relative_without_repo_is_base_only() {
         use crate::file_reference::{MagicPathList, ParsedReference, ReferenceKind};
 
-        // With no repository root supplied, the only root is CWD, matching the
-        // "git lookup returned None" branch.
+        // With no repository root supplied, the only candidate root is the base
+        // directory (the "no git root discoverable" branch).
         let parsed = ParsedReference {
             recursive: false,
             kind: ReferenceKind::ImplicitRelative(PathTemplate {
@@ -1037,9 +1238,10 @@ mod tests {
     }
 
     #[test]
-    fn caller_supplied_repository_root_overrides_discovery() {
+    fn caller_supplied_repository_root_is_tried_before_base() {
         // With a supplied root, collect_roots uses it directly and never
-        // performs git discovery from cwd.
+        // performs git discovery from cwd. Phase 4 precedence: repository root
+        // first, then base.
         let parsed = ReferenceKind::ImplicitRelative(PathTemplate {
             segments: vec![TemplateSegment::Literal("x.md".to_string())],
         });
@@ -1059,11 +1261,11 @@ mod tests {
         .unwrap();
         assert_eq!(
             root_paths(&roots),
-            vec![PathBuf::from("/tmp/base"), PathBuf::from("/tmp/repo")],
-            "base stays first; supplied repo root is the second candidate",
+            vec![PathBuf::from("/tmp/repo"), PathBuf::from("/tmp/base")],
+            "repository root is tried first; base is the source-local fallback",
         );
-        assert_eq!(roots[0].provenance, RootProvenance::Source);
-        assert_eq!(roots[1].provenance, RootProvenance::Repository);
+        assert_eq!(roots[0].provenance, RootProvenance::Repository);
+        assert_eq!(roots[1].provenance, RootProvenance::Source);
     }
 
     #[test]

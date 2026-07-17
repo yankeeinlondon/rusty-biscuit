@@ -123,7 +123,7 @@ fn detect_home<'a>(
 }
 
 /// ASCII case-insensitive prefix check.
-fn starts_with_ignore_ascii_case(s: &str, prefix: &str) -> bool {
+pub(crate) fn starts_with_ignore_ascii_case(s: &str, prefix: &str) -> bool {
     s.as_bytes()
         .get(..prefix.len())
         .is_some_and(|head| head.eq_ignore_ascii_case(prefix.as_bytes()))
@@ -134,7 +134,7 @@ fn starts_with_ignore_ascii_case(s: &str, prefix: &str) -> bool {
 /// Recognizes POSIX roots (`/`), Windows drive-absolute paths (`C:\` or
 /// `C:/`), and UNC paths (`\\server\share`). A drive-relative path such as
 /// `C:foo.md` is deliberately **not** absolute.
-fn is_absolute_reference(s: &str) -> bool {
+pub(crate) fn is_absolute_reference(s: &str) -> bool {
     if s.starts_with('/') || s.starts_with("\\\\") {
         return true;
     }
@@ -147,7 +147,7 @@ fn is_absolute_reference(s: &str) -> bool {
 
 /// Explicit-relative classification, accepting Windows backslash spellings
 /// alongside the portable forward-slash forms.
-fn is_explicit_relative(s: &str) -> bool {
+pub(crate) fn is_explicit_relative(s: &str) -> bool {
     s.starts_with("./")
         || s.starts_with("../")
         || s.starts_with(".\\")
