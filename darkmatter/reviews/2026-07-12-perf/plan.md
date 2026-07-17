@@ -181,7 +181,8 @@ documentation:
 > [its plan](../../features/2026-07-15-performance-followup/plan.md) and
 > [audit table](../../features/2026-07-15-performance-followup/spec.md).
 > Finding 18's correctness half is owned by
-> [`2026-07-15-reference-graph/`](../../features/2026-07-15-reference-graph/plan.md).
+> [`2026-07-15-reference-graph/`](../../features/_completed/2026-07-15-reference-graph/plan.md)
+> (archived to `_completed/` on 2026-07-16; path corrected 2026-07-17).
 
 > **Verification-scope correction (2026-07-15):** Remaining gates use the
 > dependency-derived package-area scope below. Completed checklist entries that

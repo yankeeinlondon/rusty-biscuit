@@ -26,7 +26,8 @@ review_iterations: 3
 >   [`2026-07-15-performance-followup/spec.md`](../../features/2026-07-15-performance-followup/spec.md)
 > - **Finding 18** correctness (graph opacity + document/options/mode identity)
 >   is owned exclusively by
->   [`2026-07-15-reference-graph/`](../../features/2026-07-15-reference-graph/plan.md);
+>   [`2026-07-15-reference-graph/`](../../features/_completed/2026-07-15-reference-graph/plan.md)
+>   (archived to `_completed/` on 2026-07-16; path corrected 2026-07-17);
 >   no such work landed under this review.
 
 > **Verification-scope correction (2026-07-15):** This review introduced
