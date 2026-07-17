@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use tokio::fs;
 
-use crate::error::{ClaudineError, Result};
+use crate::error::{ClaudineError, PolicyParseCause, Result};
 use crate::permissions::backend::{BackendCapabilities, BackendFidelity, ProviderPolicyBackend};
 use crate::permissions::canonical::{
     CanonicalApprovalMode, CanonicalPolicy, CanonicalRuleProvenance, PathProtectionRule,
@@ -105,6 +105,7 @@ impl ProviderPolicyBackend for KimiPolicyBackend {
                     toml::from_str(&content).map_err(|error| ClaudineError::PolicyNativeParse {
                         source_id: source.id.clone(),
                         message: error.to_string(),
+                        source: Some(PolicyParseCause::TomlDe(Box::new(error))),
                     })?;
                 KimiConfig {
                     permission_mode: value
@@ -143,6 +144,7 @@ impl ProviderPolicyBackend for KimiPolicyBackend {
                     return Err(ClaudineError::PolicyCliParse {
                         provider: Provider::KimiCode,
                         message: "parsed CLI overrides belong to another provider".to_owned(),
+                        source: None,
                     });
                 }
                 let typed = parsed
@@ -151,6 +153,7 @@ impl ProviderPolicyBackend for KimiPolicyBackend {
                     .ok_or_else(|| ClaudineError::PolicyCliParse {
                         provider: Provider::KimiCode,
                         message: "parsed CLI overrides had an unexpected payload type".to_owned(),
+                        source: None,
                     })?;
                 Ok(ProviderCliOverrides::new(Provider::KimiCode, typed))
             }
@@ -176,6 +179,7 @@ impl ProviderPolicyBackend for KimiPolicyBackend {
                     ClaudineError::PolicyNativeParse {
                         source_id: layer.source.id.clone(),
                         message: "Kimi layer payload type mismatch".to_owned(),
+                        source: None,
                     }
                 })?;
                 Ok((layer.source.clone(), config))
@@ -218,6 +222,7 @@ impl ProviderPolicyBackend for KimiPolicyBackend {
                 .ok_or_else(|| ClaudineError::PolicyNativeParse {
                     source_id: "kimi-effective".to_owned(),
                     message: "Kimi effective policy payload type mismatch".to_owned(),
+                    source: None,
                 })?;
         let effective_mode = state
             .layers

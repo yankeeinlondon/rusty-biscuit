@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use tokio::fs;
 use toml_edit::{DocumentMut, Item};
 
-use crate::error::{ClaudineError, Result};
+use crate::error::{ClaudineError, PolicyParseCause, Result};
 use crate::permissions::backend::{BackendCapabilities, BackendFidelity, ProviderPolicyBackend};
 use crate::permissions::canonical::{
     CanonicalApprovalMode, CanonicalPolicy, CanonicalRuleProvenance, CanonicalSandboxMode,
@@ -203,6 +203,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
                     ClaudineError::PolicyNativeParse {
                         source_id: source.id.clone(),
                         message: error.to_string(),
+                        source: Some(PolicyParseCause::Json(error)),
                     }
                 })?;
                 GeminiLayerData {
@@ -214,6 +215,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
                     ClaudineError::PolicyNativeParse {
                         source_id: source.id.clone(),
                         message: error.to_string(),
+                        source: Some(PolicyParseCause::Toml(Box::new(error))),
                     }
                 })?;
                 GeminiLayerData {
@@ -241,6 +243,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
                     return Err(ClaudineError::PolicyCliParse {
                         provider: Provider::Gemini,
                         message: "parsed CLI overrides belong to another provider".to_owned(),
+                        source: None,
                     });
                 }
                 let typed = parsed
@@ -249,6 +252,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
                     .ok_or_else(|| ClaudineError::PolicyCliParse {
                         provider: Provider::Gemini,
                         message: "parsed CLI overrides had an unexpected payload type".to_owned(),
+                        source: None,
                     })?;
                 Ok(ProviderCliOverrides::new(Provider::Gemini, typed))
             }
@@ -293,6 +297,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
                     ClaudineError::PolicyNativeParse {
                         source_id: layer.source.id.clone(),
                         message: "Gemini layer payload type mismatch".to_owned(),
+                        source: None,
                     }
                 })?;
                 Ok((layer.source.clone(), data))
@@ -336,6 +341,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
                 .ok_or_else(|| ClaudineError::PolicyNativeParse {
                     source_id: "gemini-effective".to_owned(),
                     message: "Gemini effective policy payload type mismatch".to_owned(),
+                    source: None,
                 })?;
 
         let mut policy = CanonicalPolicy::empty(

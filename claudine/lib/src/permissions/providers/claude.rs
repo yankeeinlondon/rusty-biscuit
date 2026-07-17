@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 use tokio::fs;
 
-use crate::error::{ClaudineError, Result};
+use crate::error::{ClaudineError, PolicyParseCause, Result};
 use crate::permissions::backend::{BackendCapabilities, BackendFidelity, ProviderPolicyBackend};
 use crate::permissions::canonical::{
     CanonicalApprovalMode, CanonicalPolicy, CanonicalRuleProvenance, CanonicalSandboxMode,
@@ -143,6 +143,7 @@ impl ProviderPolicyBackend for ClaudePolicyBackend {
                 ClaudineError::PolicyNativeParse {
                     source_id: source.id.clone(),
                     message: error.to_string(),
+                    source: Some(PolicyParseCause::Json(error)),
                 }
             })?;
             layers.push(NativePolicyLayer::new(
@@ -168,6 +169,7 @@ impl ProviderPolicyBackend for ClaudePolicyBackend {
                     return Err(ClaudineError::PolicyCliParse {
                         provider: Provider::Claude,
                         message: "parsed CLI overrides belong to another provider".to_owned(),
+                        source: None,
                     });
                 }
                 let typed = parsed
@@ -176,6 +178,7 @@ impl ProviderPolicyBackend for ClaudePolicyBackend {
                     .ok_or_else(|| ClaudineError::PolicyCliParse {
                         provider: Provider::Claude,
                         message: "parsed CLI overrides had an unexpected payload type".to_owned(),
+                        source: None,
                     })?;
                 Ok(ProviderCliOverrides::new(Provider::Claude, typed))
             }
@@ -213,6 +216,7 @@ impl ProviderPolicyBackend for ClaudePolicyBackend {
                                             ClaudineError::PolicyCliParse {
                                                 provider: Provider::Claude,
                                                 message: error.to_string(),
+                                                source: Some(PolicyParseCause::Json(error)),
                                             }
                                         })?;
                                     overrides.settings_override =
@@ -243,6 +247,7 @@ impl ProviderPolicyBackend for ClaudePolicyBackend {
                     ClaudineError::PolicyNativeParse {
                         source_id: layer.source.id.clone(),
                         message: "Claude layer payload type mismatch".to_owned(),
+                        source: None,
                     }
                 })?;
                 Ok((layer.source.clone(), config))
@@ -293,6 +298,7 @@ impl ProviderPolicyBackend for ClaudePolicyBackend {
                 .ok_or_else(|| ClaudineError::PolicyNativeParse {
                     source_id: "claude-effective".to_owned(),
                     message: "Claude effective policy payload type mismatch".to_owned(),
+                    source: None,
                 })?;
 
         let mut policy = CanonicalPolicy::empty(

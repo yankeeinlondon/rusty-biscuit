@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 use tokio::fs;
 
-use crate::error::{ClaudineError, Result};
+use crate::error::{ClaudineError, PolicyParseCause, Result};
 use crate::permissions::backend::{BackendCapabilities, BackendFidelity, ProviderPolicyBackend};
 use crate::permissions::canonical::{
     CanonicalApprovalMode, CanonicalPolicy, CanonicalRuleProvenance, CanonicalSandboxMode,
@@ -147,6 +147,7 @@ impl ProviderPolicyBackend for QwenPolicyBackend {
                 ClaudineError::PolicyNativeParse {
                     source_id: source.id.clone(),
                     message: error.to_string(),
+                    source: Some(PolicyParseCause::Json(error)),
                 }
             })?;
             layers.push(NativePolicyLayer::new(
@@ -172,6 +173,7 @@ impl ProviderPolicyBackend for QwenPolicyBackend {
                     return Err(ClaudineError::PolicyCliParse {
                         provider: Provider::QwenCode,
                         message: "parsed CLI overrides belong to another provider".to_owned(),
+                        source: None,
                     });
                 }
                 let typed = parsed
@@ -180,6 +182,7 @@ impl ProviderPolicyBackend for QwenPolicyBackend {
                     .ok_or_else(|| ClaudineError::PolicyCliParse {
                         provider: Provider::QwenCode,
                         message: "parsed CLI overrides had an unexpected payload type".to_owned(),
+                        source: None,
                     })?;
                 Ok(ProviderCliOverrides::new(Provider::QwenCode, typed))
             }
@@ -240,6 +243,7 @@ impl ProviderPolicyBackend for QwenPolicyBackend {
                     ClaudineError::PolicyNativeParse {
                         source_id: layer.source.id.clone(),
                         message: "Qwen layer payload type mismatch".to_owned(),
+                        source: None,
                     }
                 })?;
                 Ok((layer.source.clone(), config))
@@ -285,6 +289,7 @@ impl ProviderPolicyBackend for QwenPolicyBackend {
                 .ok_or_else(|| ClaudineError::PolicyNativeParse {
                     source_id: "qwen-effective".to_owned(),
                     message: "Qwen effective policy payload type mismatch".to_owned(),
+                    source: None,
                 })?;
 
         let mut policy = CanonicalPolicy::empty(
