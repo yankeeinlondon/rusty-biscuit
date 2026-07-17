@@ -18,11 +18,7 @@ name = "md"
 path = "src/main.rs"
 
 [dependencies]
-# `internal-hash-orchestration` exposes the `darkmatter::internal` seam, which
-# `md hash --diff`/`--save` use to compute each hash artifact once per
-# invocation. It is this crate's private arrangement with the library, not
-# public API; see `darkmatter/lib/src/internal.rs`.
-darkmatter = { path = "../lib", features = ["internal-hash-orchestration"] }
+darkmatter = { path = "../lib" }
 renderable = { path = "../../renderable" }
 biscuit-file = { path = "../../biscuit-file/lib", features = ["json5", "yaml", "toml", "file-reference"] }
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }

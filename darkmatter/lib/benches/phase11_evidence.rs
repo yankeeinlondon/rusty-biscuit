@@ -6,12 +6,13 @@
 //! found it was originally measured by a *temporary* in-crate harness that was
 //! deleted after capture, leaving only derived medians and prose. This target is
 //! the retained replacement for the parts that need no crate-private access; the
-//! crate-private checkpoints (23, 25, 35.5, 35.6, 35.7) are measured by the
-//! retained `#[cfg(test)]` harness in `src/perf_harness.rs` instead.
+//! crate-private checkpoints (23, 25, 35.6, 35.7) are measured by the retained
+//! `#[cfg(test)]` harness in `src/perf_harness.rs` instead.
 //!
-//! Finding 35.5 moved here → `src/markdown/hash/explain.rs` when review-3
-//! demoted `diff_hash` to `pub(crate)` (compatibility invariant 2): a `benches/*`
-//! target cannot see it.
+//! Finding 35.5 has no harness in either place: review-4 found its shared hash
+//! seam was still public API under a non-default feature, so the seam — and with
+//! it the measured candidate — was removed and `md hash` returned to the public
+//! two-call path.
 //!
 //! Inputs are the committed, hashed manifest fixtures (Architecture Decision A),
 //! so the measured bytes are frozen and reproducible.

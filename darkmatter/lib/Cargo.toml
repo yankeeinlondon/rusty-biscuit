@@ -24,13 +24,6 @@ default = []
 # and attempts no network access. Off by default; production builds carry no
 # counter state and expose none of the instrumentation API.
 effects-instrumentation = []
-# Exposes the `internal` module: a `#[doc(hidden)]` seam that lets this
-# workspace's own `md` binary reach `pub(crate)` hash orchestration it cannot
-# otherwise see across a crate boundary. Off by default and never part of the
-# compatibility contract; with default features the crate's public API is
-# unchanged by the 2026-07-15 performance follow-up (its invariant 2). Only
-# `darkmatter-cli` may enable it.
-internal-hash-orchestration = []
 
 [dependencies]
 # Tracing

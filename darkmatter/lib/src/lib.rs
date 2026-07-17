@@ -83,13 +83,6 @@ pub mod terminal;
 
 pub mod testing;
 
-/// Crate-internal seam for this workspace's `md` binary. **Not public API** and
-/// not covered by the compatibility contract; off unless the non-default
-/// `internal-hash-orchestration` feature is enabled. See the module docs.
-#[cfg(feature = "internal-hash-orchestration")]
-#[doc(hidden)]
-pub mod internal;
-
 /// Retained, test-only measurement harness for the 2026-07-15 performance
 /// follow-up's crate-private checkpoints. Adds no public API; see the module
 /// docs for why a `benches/*` target cannot reach those functions.
