@@ -123,14 +123,14 @@ pub enum LifecycleControlAction {
     },
 
     /// `proxy('@foo.md')` — hand off execution to another prompt document.
-    /// Valid in `initialize`, `blocked`, `failure`.
     Proxy {
         /// File reference expression resolving to the target prompt path.
         target: Expr,
     },
 
-    /// `retry` / `retry(N)` — try the current prompt again. Valid in
-    /// `blocked`, `failure`.
+    /// `retry` / `retry(N)` — try the current prompt again. Whether re-entry
+    /// re-runs pre-flight or re-invokes the provider is derived at runtime from
+    /// whether the provider had launched.
     Retry {
         /// Number of additional attempts beyond the original. `None` is the
         /// default (one retry).
@@ -142,7 +142,8 @@ pub enum LifecycleControlAction {
     },
 
     /// `resume("message")` — resume the agent session with a follow-up
-    /// message. Valid only in `failure`.
+    /// message. Needs a live provider session at runtime; pre-launch it
+    /// surfaces `ResumeWithoutSession`.
     Resume {
         /// The follow-up prompt. Required.
         message: Expr,
@@ -152,7 +153,7 @@ pub enum LifecycleControlAction {
     },
 
     /// `defer('5m')` — push this prompt onto the deferred-execution
-    /// queue. Valid in `blocked`, `failure`.
+    /// queue. Parsed but not yet wired to a runtime backend.
     Defer {
         /// Delay duration expression. Required.
         delay: Expr,

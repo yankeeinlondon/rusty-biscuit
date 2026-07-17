@@ -174,11 +174,15 @@ pub(super) fn dispatch_terminal_control(
             )
         }
         LifecycleTransitionDecision::ProxyHandoff { target } => {
-            let resolve_ctx = claudine::harness::HarnessResolutionContext {
-                source_path: &prompt_state.source_path,
+            // Resolve through the shared owner rather than `resolve_harness_path`
+            // directly: it adds the existence check the raw resolver lacks, so a
+            // `proxy(missing.md)` fails here — the same way, at the same point —
+            // as the identical proxy on the `initialize` route.
+            let resolved = match claudine::composition::resolve_proxy_target(
+                &target,
+                &prompt_state.source_path,
                 repo_root,
-            };
-            let resolved = match claudine::harness::resolve_harness_path(&target, &resolve_ctx) {
+            ) {
                 Ok(path) => path,
                 Err(e) => return TerminalControlAction::Abort(eyre!("lifecycle proxy: {e}")),
             };
