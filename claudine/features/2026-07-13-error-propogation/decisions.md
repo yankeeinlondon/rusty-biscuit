@@ -556,3 +556,79 @@ is infinitely sized); the fix is `InvalidFileReference`'s shape, which is a
 variant redesign with its own blast radius, and D10 forbids taking it here. No
 route is known to depend on the boxed cause: `AtomicWriteFailed` is `Semantic` and
 owns `io.write_failed`, so selection stops at it before the box matters.
+
+---
+
+## D-16 — The `error-propagation-followup` burn-down is closed at zero
+
+**Decision (final batch).** The grandfather burn-down D-11 opened is closed. Every
+`error-propagation-followup` entry in `transport-allow.toml` is either fixed (its
+finding retained a typed source, so the entry was deleted) or reclassified with a
+narrow, per-site reason. The tag no longer appears in any entry, its `## Tags`
+paragraph is deleted from the allowlist header (it was the reasoning review-1
+rejected, and leaving it would re-license the next freeze), and it is removed from
+`KNOWN_TAGS` in `error_guards.rs` so no future entry can claim it. A typed error in
+hand is now, without exception, a defect to fix.
+
+**Authority.** Review-1 Finding 1 (the freeze is Critical) and
+[`burndown-triage.md`](./burndown-triage.md), which classified each site and set
+the per-batch dispositions. Batches 1–7 landed the bulk; this batch closed the
+last six.
+
+**The six sites' dispositions.**
+
+- **`action_value_to_expr` / `parse_long_form_action_object` (Cat 1 — fixed).** A
+  new `ActionExprError` cause enum (`Parse(#[from] Box<ParseError>)` + an
+  `Invalid(String)` prose arm) carries the Darkmatter `ParseError`.
+  `LifecycleActionInvalidLongForm` gained an `#[source] Option<ActionExprError>`
+  slot — `Some` at the three `action_value_to_expr` call sites, `None` at the ten
+  shape-error constructors that never had a lower cause. `Display`, `code`,
+  `detail`, and the rendered block are byte-identical; the sourced variant twins
+  its source-less shape (`lifecycle_action_invalid_long_form_source_twins…`).
+  `ParseError` is boxed *inside* the enum, not at the field: an unboxed field keeps
+  `ActionExprError` downcastable through `Error::source()` (D-7), while the boxed
+  payload keeps `CompositionError` under `clippy::result_large_err` — the unboxed
+  field alone tripped it across 131 sites.
+
+- **`CompositionPrepContext::new` (Cat 1 — fixed).** The captured
+  `sniff::SniffError` is retained through `ClaudineError::LaunchContextDetection`
+  and projected once into a `DiagnosticSnapshot`, which the `Clone` prep/request
+  record (`launch_detection_error` / `prep_launch_detection_error`) now stores in
+  place of a flattened `String`. This realizes the §D9 "recovery/persistence record
+  consumes the shared snapshot" consumer: the record carries the typed facets and
+  still clones and serializes, and the message consumer (`enforce_repo_launch_
+  detection`) reads `snapshot.message`.
+
+- **`build_and_run_loop` / `run_sequence_steps` (Cat 1 — retained, not fixed).**
+  Both flatten a `color_eyre::eyre::Report` returned by the wrapper-grade
+  exec-wiring boundary (`execute_composition_attempt` /
+  `execute_composition_request_inner`, both `Result<_, Report>`). `Report` does not
+  implement `std::error::Error`, so it cannot be a `#[source]`, and no single
+  concrete typed source is in hand at either site — the provenance was already
+  erased *upstream* where exec wiring returns a `Report`. This is not an in-scope
+  typed-provenance defect; both are re-tagged `retained` with a reason naming the
+  upstream boundary. **Follow-up:** retyping the exec-wiring boundary to a concrete
+  error would let both sites carry a typed source; that is a separate workstream.
+
+- **`try_inline_closure` (genuine §D10 deferral — re-tagged, not fixed).** A typed
+  `CompositionError` is in hand, but typing it here would change an authored
+  matching surface: the flattened string feeds
+  `LifecycleErrorInfo::from_action_failure("inline_closure", …)`, whose
+  `err.msg`/`err.kind`/`err.variant` author `when:` rules match on. Threading the
+  typed cause flips which aliases `to_value()` projects, so a rule matching
+  `err.variant == "inline_closure"` would silently stop matching — the
+  routing/matching-surface change D-2 and D-12 defer to a separate spec. It is
+  tagged with a new `d10-routing-change` tag: a ratified cross-spec deferral, **not**
+  a burn-down. The set does not grow — a new collapse with a typed source still
+  fails the guard — so this tag is distinct from the closed `error-propagation-
+  followup` bucket. `inline.rs` is not edited.
+
+**Consequence accepted.** `transport-allow.toml` now holds 33 `retained` entries
+and 1 `d10-routing-change`. The `d10-routing-change` deferral is only closable by
+the separate matching-surface spec D-2/D-12 name; until then it is honest about
+being a deliberate deferral rather than unfinished burn-down.
+
+**Reversal condition.** If the exec-wiring boundary is later retyped, the two
+`retained` `Report` sites become fixable and should be revisited. If the inline
+closure's matching surface is migrated under its own spec, `try_inline_closure`
+closes and the `d10-routing-change` tag can be retired.
