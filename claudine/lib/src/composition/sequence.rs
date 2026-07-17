@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-use biscuit_file::FileReference;
+use biscuit_file::{FileReference, FileResolutionContext};
 use regex::Regex;
 
 use super::error::{CompositionError, SequenceLoadCause};
@@ -71,78 +71,53 @@ pub fn resolve_sequence_plan(
     }
 }
 
-/// Resolve an external sequence reference string to an absolute path.
+/// Resolve an external sequence reference string to an absolute existing path.
 ///
-/// Mirrors Darkmatter's transclusion resolution behaviour:
-/// - `@`, `!`, `vault:`, `%`, and `{{ENV}}` references go through
-///   [`FileReference`] so that magic, package-relative, and vault
-///   references all work the same way they do in composed documents.
-/// - `~`-prefixed paths are expanded against `$HOME`.
-/// - Absolute paths are used as-is.
-/// - Plain relative paths (including `./` and `../`) are resolved
-///   relative to the composition source file's directory.
+/// Delegates all grammar and candidate ordering to [`FileReference`] and the
+/// shared [`FileResolutionContext`]; this module no longer classifies prefixes
+/// or joins/expands paths itself (D5/D11):
+/// - implicit (`foo.yaml`, `sub/foo.yaml`) — repository root first, then the
+///   source document's directory (D4);
+/// - explicit (`./foo.yaml`, `../foo.yaml`) — pinned to the source directory;
+/// - `@foo` — magic-root search; `!foo` — package-area; `vault:foo` — vault;
+/// - `~foo` / `~/foo` — the user's home directory (the shared `Home` kind);
+/// - absolute paths resolve to themselves.
+///
+/// The reference is authored *inside* the composition source, so per D2 the
+/// source document's directory is the base and the launch directory is never a
+/// fallback here. Resolution probes the filesystem, so only an existing regular
+/// file is a match.
 fn resolve_sequence_reference(raw: &str, source_path: &Path) -> Result<PathBuf, CompositionError> {
-    // Expand ~ to HOME directly, since FileReference treats `@` as the
-    // magic-search prefix and there is no dedicated tilde form.
-    if let Some(rest) = raw.strip_prefix('~') {
-        let home = dirs::home_dir().ok_or_else(|| CompositionError::SequenceExternalLoad {
+    // Preserve the `@/x` → `@x` normalization as explicit `FileReference`
+    // input rather than local string surgery elsewhere: a leading `@/` is the
+    // magic-root search for `x`, identical to `@x`.
+    let normalized;
+    let ref_input = if let Some(rest) = raw.strip_prefix("@/") {
+        normalized = format!("@{rest}");
+        &normalized
+    } else {
+        raw
+    };
+
+    let file_ref =
+        FileReference::new(ref_input).map_err(|e| CompositionError::SequenceExternalLoad {
             context: format!("`{raw}`"),
-            source: SequenceLoadCause::HomeDir,
+            source: e.into(),
         })?;
-        let suffix = rest.trim_start_matches('/');
-        return Ok(home.join(suffix));
-    }
-
-    if is_file_reference_target(raw) {
-        let normalized;
-        let ref_input = if let Some(rest) = raw.strip_prefix("@/") {
-            normalized = format!("@{rest}");
-            &normalized
-        } else {
-            raw
-        };
-
-        let file_ref =
-            FileReference::new(ref_input).map_err(|e| CompositionError::SequenceExternalLoad {
-                context: format!("`{raw}`"),
-                source: e.into(),
-            })?;
-        // Magic (`@`), package (`!`), and other special references must be
-        // resolved relative to the source document's directory, not the
-        // process CWD. Without this, `claudine sequence /abs/path/to/seq.md`
-        // run from an unrelated directory would search the wrong git repo
-        // or workspace for `@fixtures/steps.yaml`.
-        let base_dir = source_path.parent().unwrap_or_else(|| Path::new("."));
-        let resolved = file_ref
-            .resolve_from(base_dir)
-            .map_err(|e| CompositionError::SequenceExternalLoad {
-                context: format!("`{raw}`"),
-                source: e.into(),
-            })?
-            .ok_or_else(|| CompositionError::SequenceExternalLoad {
-                context: format!("`{raw}`"),
-                source: SequenceLoadCause::NotFound,
-            })?;
-        return Ok(resolved);
-    }
-
-    let raw_path = PathBuf::from(raw);
-    if raw_path.is_absolute() {
-        return Ok(raw_path);
-    }
 
     let base_dir = source_path.parent().unwrap_or_else(|| Path::new("."));
-    Ok(base_dir.join(raw_path))
-}
+    let ctx = FileResolutionContext::new(base_dir).with_source_path(source_path);
 
-/// Returns `true` if the raw reference should be routed through
-/// [`FileReference`] rather than treated as a plain relative path.
-fn is_file_reference_target(raw: &str) -> bool {
-    raw.starts_with('@')
-        || raw.starts_with('!')
-        || raw.starts_with("vault:")
-        || raw.starts_with('%')
-        || raw.contains("{{")
+    file_ref
+        .resolve_in_context(&ctx)
+        .map_err(|e| CompositionError::SequenceExternalLoad {
+            context: format!("`{raw}`"),
+            source: e.into(),
+        })?
+        .ok_or_else(|| CompositionError::SequenceExternalLoad {
+            context: format!("`{raw}`"),
+            source: SequenceLoadCause::NotFound,
+        })
 }
 
 /// Build a step overlay for the given step index within a plan.

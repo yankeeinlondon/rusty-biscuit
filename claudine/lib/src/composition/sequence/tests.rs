@@ -514,12 +514,18 @@ fn env_reference_expands_environment_variables() {
     assert_eq!(resolved, target);
 }
 
+/// A `~`-prefixed sequence reference now resolves through [`FileReference`]'s
+/// shared `Home` kind (D11) rather than a private tilde expansion, so it is
+/// home-pinned AND existence-checked: an existing `~/steps.yaml` resolves to
+/// the home-relative path.
 #[test]
 #[serial]
 fn tilde_reference_expands_against_home_directory() {
     let dir = TempDir::new().unwrap();
     let home_dir = dir.path().join("home");
     fs::create_dir_all(&home_dir).unwrap();
+    // The `Home` kind probes the filesystem: the target must exist to match.
+    fs::write(home_dir.join("steps.yaml"), "sequence:\n  - alpha\n").unwrap();
 
     let source_path = dir.path().join("docs/source.md");
     fs::create_dir_all(source_path.parent().unwrap()).unwrap();
@@ -534,6 +540,84 @@ fn tilde_reference_expands_against_home_directory() {
     }
 
     assert_eq!(resolved, home_dir.join("steps.yaml"));
+}
+
+/// An implicit (bare) external sequence reference is repository-first (D4):
+/// with the same basename at the repository root and the source directory, the
+/// repository-root copy wins. The migration replaced the old source-relative
+/// join that never tried the repository root.
+#[test]
+fn implicit_reference_is_repository_first() {
+    let dir = TempDir::new().unwrap();
+    init_git_repo(dir.path());
+
+    // Same basename at the repo root and the source directory.
+    fs::write(dir.path().join("steps.yaml"), "sequence:\n  - repo\n").unwrap();
+    let source_path = dir.path().join("docs/guide.md");
+    fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+    fs::write(
+        source_path.parent().unwrap().join("steps.yaml"),
+        "sequence:\n  - source\n",
+    )
+    .unwrap();
+    fs::write(&source_path, "---\n---\nbody\n").unwrap();
+
+    let resolved = resolve_sequence_reference("steps.yaml", &source_path).unwrap();
+    assert_eq!(
+        resolved.canonicalize().unwrap(),
+        dir.path().join("steps.yaml").canonicalize().unwrap(),
+        "implicit reference must resolve repository-first, not source-relative",
+    );
+}
+
+/// An explicit `./` external sequence reference is pinned to the source
+/// directory with no repository-root fallback — the explicit/implicit
+/// distinction the private grammar collapsed.
+#[test]
+fn explicit_dot_slash_is_source_relative_only() {
+    let dir = TempDir::new().unwrap();
+    init_git_repo(dir.path());
+
+    // Only the repository root holds the file; the source directory does not.
+    fs::write(dir.path().join("steps.yaml"), "sequence:\n  - repo\n").unwrap();
+    let source_path = dir.path().join("docs/guide.md");
+    fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+    fs::write(&source_path, "---\n---\nbody\n").unwrap();
+
+    let err = resolve_sequence_reference("./steps.yaml", &source_path).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            CompositionError::SequenceExternalLoad {
+                source: SequenceLoadCause::NotFound,
+                ..
+            }
+        ),
+        "explicit `./` must be source-relative only and must not fall back to the repo root: {err:?}",
+    );
+}
+
+/// `@/x` normalizes to `@x` (magic-root search) — the normalization is
+/// preserved as explicit `FileReference` input, resolving identically to `@x`.
+#[test]
+fn at_slash_normalizes_to_magic_search() {
+    let dir = TempDir::new().unwrap();
+    init_git_repo(dir.path());
+
+    let prompts_dir = dir.path().join("prompts");
+    fs::create_dir_all(&prompts_dir).unwrap();
+    fs::write(prompts_dir.join("steps.yaml"), "sequence:\n  - alpha\n").unwrap();
+    let source_path = dir.path().join("docs/guide.md");
+    fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+    fs::write(&source_path, "---\n---\nbody\n").unwrap();
+
+    let via_at = resolve_sequence_reference("@prompts/steps.yaml", &source_path).unwrap();
+    let via_at_slash = resolve_sequence_reference("@/prompts/steps.yaml", &source_path).unwrap();
+    assert_eq!(
+        via_at.canonicalize().unwrap(),
+        via_at_slash.canonicalize().unwrap(),
+        "`@/prompts/...` must resolve identically to `@prompts/...`",
+    );
 }
 
 #[test]
