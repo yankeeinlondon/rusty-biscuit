@@ -26,7 +26,7 @@ fn area() -> &'static Path {
 #[test]
 fn committed_generated_artifacts_match_phase_1_byte_baseline() {
     let baseline_path = area().join(
-        "reviews/2026-07-14-module-assessment/generated-artifact-baseline.json",
+        "reviews/_completed/2026-07-14-module-assessment/generated-artifact-baseline.json",
     );
     let baseline: serde_json::Value = serde_json::from_slice(
         &std::fs::read(&baseline_path).expect("phase 1 artifact baseline must be readable"),

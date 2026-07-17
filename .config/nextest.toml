@@ -149,9 +149,20 @@ leak-timeout = { period = "1s", result = "fail" }
 # LEAK-FAIL — same situation as the worktree / tts-audio groups above. Give a
 # 1s grace window; keep `result = "fail"` so a genuinely leaked child still
 # fails.
+#
+# slow-timeout: these tests own an internal ~40s wait-for-marker deadline (the
+# tmux spawn boots a login shell, then a real claudine run drives a fake
+# provider through the full lifecycle). The default 5s×6 = 30s termination
+# ceiling is *below* that internal deadline, so a healthy-but-heavily-contended
+# run gets killed by nextest at 30s before its own deadline can settle — which,
+# under `retries = 3`, surfaces as "timed out on all four attempts" even though
+# nothing is actually hung. Raise the termination ceiling to 30s×3 = 90s so a
+# contended run is governed by its own 40s deadline + assertion, while a
+# genuine deadlock still trips the longer window.
 [[profile.default.overrides]]
 filter = 'package(claudine-cli) & test(/level2_/)'
 leak-timeout = { period = "1s", result = "fail" }
+slow-timeout = { period = "30s", terminate-after = 3 }
 
 [profile.ci]
 # Same behavior for CI environment
