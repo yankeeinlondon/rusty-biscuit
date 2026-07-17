@@ -165,6 +165,20 @@ docs_updated_during_phase_8:
     - claudine/features/2026-07-13-proxy-with/plan.md
 docs_created_during_phase_8: []
 skills_files_updated_during_phase_8: []
+# Phase 9 is PARTIAL: the shell-approval group (R9) is complete and tested; the
+# launch-rebuild group (R6) is unstarted. `phase` therefore stays at 8 — see the
+# Phase 9 validation checkpoint for why R6 admits no safe partial landing.
+source_files_during_phase_9:
+    - claudine/cli/src/commands/wrap/harness_orch/shell_options.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/shell_approval.rs
+docs_updated_during_phase_9:
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9:
+    - .claude/skills/claudine/architecture.md
+packages:
+    - claudine-cli
 ---
 
 # Execution Plan — Canonical Document Handoffs and Transient Proxy Frontmatter (`with:`)
@@ -909,27 +923,104 @@ MCP, workspace, and shell surfaces.
 
 **Shell approval (R9)**
 
-- [ ] Give every fresh proxy target the same discovery and approval opportunity as
+- [x] Give every fresh proxy target the same discovery and approval opportunity as
       a direct invocation, covering body, frontmatter, and lifecycle shell
       surfaces from the one prepared document that will execute.
-- [ ] Allow the invocation-wide approval cache to be shared, but only an **exact**
+- [x] Allow the invocation-wide approval cache to be shared, but only an **exact**
       already-approved command may bypass a new prompt. Freezing the cache for the
       source must not block a target from requesting approval for newly
       discovered commands. Audit `CompositionPrepContext.shared_approval_cache`
       (`lib/src/composition/types.rs:697`) for a freeze that violates this.
-- [ ] Rerun discovery and approval on retry/resume fresh-read preparation:
+- [x] Rerun discovery and approval on retry/resume fresh-read preparation:
       unchanged exact commands hit the cache; new or changed commands get normal
       review. Loop-iteration materialization reuses the stamped structural plan
       and cannot introduce new command bytes.
-- [ ] Guarantee approved bytes equal executed bytes. A `with:` value that
+- [x] Guarantee approved bytes equal executed bytes. A `with:` value that
       influences a command must be present both at approval and at execution.
-- [ ] L1/L2: a target-only command prompts even when the source's commands were
+- [x] L1/L2: a target-only command prompts even when the source's commands were
       already approved; an identical command does not re-prompt.
 
-**Validation checkpoint 9**
-- `just test`, `just test-l2`, `just lint` green.
-- A test proves a proxy to a provider-pinned prompt selects that provider, and
-  that an explicit CLI `--codex` still wins over it.
+**Validation checkpoint 9** — **NOT PASSED. Shell approval (R9) landed; launch
+rebuild (R6) is unstarted and is a larger refactor than the task list implies.**
+
+- `just test` green for `claudine` (3510), `claudine-contract` (47),
+  `claudine-catalog-types` (21), and `claudine-cli` (2009, 1 flaky — the known
+  spurious nextest LEAK-FAIL); `just lint` green.
+- `claudine-gen::drift::committed_generated_artifacts_match_phase_1_byte_baseline`
+  still fails on its missing archived fixture — absent at `HEAD`, untouched by
+  this phase (same as checkpoints 6, 7, and 8). This phase changed no file under
+  `claudine/gen`.
+- The checkpoint's named test (provider-pinned proxy target; CLI `--codex` still
+  wins) is **not written** — it cannot pass until R6 lands. See below.
+
+**R9 — done.** The freeze violation the task predicted was real.
+`CachedHarnessLoopContext::freeze_shell_approvals` dropped the interactive
+approval handler for the whole invocation. Adoption resets `attempt = 1`, so
+the freeze *re-ran* for each target — against an already-`None` handler. A
+command only the target declared was therefore denied without ever being
+offered for review (`PreFlightFailed: "... requires approval but no approval
+handler is available"`), while the plan requires the target get "the same
+discovery and approval opportunity as a direct invocation". The fix scopes the
+freeze to the document that earned it: the context retains the run's original
+handler and `refresh` restores it **only on a document change**. Retry/resume
+re-read the same document mid-run and keep the freeze, which is the point —
+a hand-off happens between child processes, a retry happens behind a live one.
+All six new L1s in `loop_control::tests::shell_approval` were verified to fail
+with the one-line thaw removed.
+
+**R6 — not started, and it cannot be landed partially.** The blocker is
+structural, not effort-estimation:
+
+- Every launch decision R6 lists is computed **once, before the loop**, across
+  four `pipeline.rs` phases (`resolve_selection_and_launch` `:188`,
+  `prepare_environment_and_mcp` `:319`, `construct_argv_and_system_prompt`
+  `:513`, `construct_lifecycle_runtime` `:913`). `HarnessLoopCtx`
+  (`loop_control.rs:49-81`) holds their outputs as `&'a` borrows and `Copy`
+  scalars that outlive the loop, so rebuilding any of them requires owning them.
+- After `coordinator.adopt(...)` the loop re-derives only prompt, frontmatter,
+  lifecycle, harness plan, timeouts, and closure plan. Provider, model argv,
+  MCP, system prompt, child env, structured mode, profile/binary, child CWD,
+  and dispatch context all remain the **source** document's. `build_harness_launch`
+  (`launch.rs:10`) is not a launch builder — it takes `provider`/`profile`/
+  `base_args`/`base_env` as already-decided inputs and never reads
+  `agent:`/`model:`/`mcp:` off the materialized frontmatter.
+- **Provider and argv are inseparable.** argv is built entirely through
+  `profile.apply_entrypoint` (`pipeline.rs:621`),
+  `profile.apply_non_interactive_flags` (`:624`),
+  `resolve_model_and_validate(provider, profile, …)` (`:635`), and
+  `profile.apply_output_format` (`:656`). Rebuilding provider selection without
+  rebuilding argv would launch the target provider's binary with the source
+  provider's flags — strictly worse than today's stale-but-coherent launch.
+  So there is no safe subset: the checkpoint's `--codex` test cannot be
+  satisfied by a selection-only change.
+- The two candidate designs, for whoever picks this up:
+  1. **Owned launch + rebuilder seam.** Extract the three phases' inputs off
+     `&mut CompositionAttempt` into a `LaunchInputs` bundle so they become
+     functions of (immutable invocation state, prepared document); give the loop
+     an owned `TargetLaunch` plus a `&dyn TargetLaunchRebuilder` it calls at each
+     adoption. Precedence falls out for free — `resolve_execution_target`
+     (`target.rs:83`) already returns `ExplicitFlag` for `request.explicit_provider`
+     ahead of any frontmatter hint, which is exactly the checkpoint's
+     `--codex`-still-wins rule.
+     Complication: `prepare_environment_and_mcp` does real I/O (MCP catalog
+     load, `ensure_shadow_home`, injector, and an interactive `Select` prompt),
+     so a rebuild must be idempotent per provider and must not re-emit the
+     execution header or double-count perf substages.
+  2. **Relaunch seam.** Have the loop return a typed `Relaunch` once Phase 7's
+     staged boot has *stabilized* the target but before its first provider
+     attempt, and let `provider_run_handoff` re-enter the four phases for it.
+     This lands on the same seam Phase 10 wants ("move loop recognition to after
+     initialize routing stabilizes and before the first provider attempt").
+     Complication: the `LifecycleRunGuard` and `lifecycle_ctx` borrow from
+     `attempt.request`, which the relaunch must replace — so the ledger, overlay,
+     approval cache, budgets, and the already-emitted `initialize` all have to be
+     carried across an ownership boundary.
+- **Downstream impact.** Phase 10 declares "target-specific launch state must
+  already be canonical before loop ownership moves"; Phase 11's session
+  compatibility key is defined over the launch properties R6 rebuilds; Phase 13's
+  equivalence matrix compares provider/model/MCP/CWD/system-prompt/argv/child-env
+  between the direct and routed routes. None of those can be signed off on a
+  stale launch.
 
 ---
 

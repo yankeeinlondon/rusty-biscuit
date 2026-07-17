@@ -452,6 +452,16 @@ immutable run context alongside the attempt counter, prompt/session overrides,
 retry/resume budgets, proxy chain, cached shell approvals, lifecycle guard,
 run-level timing anchor, and accumulated performance data.
 
+The exact-command approval **cache** is invocation-wide, but the interactive
+approval **window** is scoped to the active document. `CachedHarnessLoopContext`
+(`harness_orch/shell_options.rs`) freezes the window once the current document's
+commands are approved — new uncached commands are then denied without prompting,
+which is what keeps approvals resolved before the provider workflow begins.
+`refresh` reopens it on a document change only, so a proxy target gets the same
+approval opportunity as a direct invocation while retry/resume of the same
+document stay frozen behind a live agent. An exact command approved anywhere in
+the invocation is never re-prompted.
+
 `run_harness_loop_inner` is an ordered coordinator over three typed phases:
 prompt materialization/preflight (including lifecycle `start`), provider
 attempt execution, and result classification/recovery. Re-entry and terminal
