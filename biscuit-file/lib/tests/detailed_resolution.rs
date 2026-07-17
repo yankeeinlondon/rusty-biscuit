@@ -40,38 +40,39 @@ fn detailed_success_retains_ordered_candidates_and_provenance() {
     let repo = tmp.path().canonicalize().unwrap();
     git_init(&repo);
 
-    // File exists only at the repository root; the base sub-directory lacks it,
-    // so the search advances past the source candidate to the repo candidate.
-    fs::write(repo.join("notes.md"), b"root").unwrap();
+    // File exists only in the base sub-directory; the repository root lacks it,
+    // so the search advances past the (repository-first) candidate to the
+    // source candidate.
     let base = repo.join("pkg");
     fs::create_dir_all(&base).unwrap();
     let base = base.canonicalize().unwrap();
+    fs::write(base.join("notes.md"), b"local").unwrap();
 
     let ctx = ctx_with_repo(&base, &repo);
     let detailed = FileReference::new("notes.md").unwrap().resolve_detailed(&ctx);
 
-    // The winner is the repository candidate.
+    // The winner is the source-local candidate (the repository candidate missed).
     assert_eq!(
         detailed.matched_path(),
-        Some(repo.join("notes.md").as_path()),
-        "implicit reference should fall back to the repository root candidate",
+        Some(base.join("notes.md").as_path()),
+        "implicit reference falls back to the source candidate when the repo lacks it",
     );
     assert!(matches!(detailed.outcome(), DetailedOutcome::Matched(_)));
     assert_eq!(detailed.repository_root(), Some(repo.as_path()));
     assert!(detailed.error().is_none());
 
-    // Two candidates were attempted, in base-first order, with provenance.
+    // Two candidates were attempted, in repository-first order, with provenance.
     let candidates = detailed.candidates();
-    assert_eq!(candidates.len(), 2, "base then repo candidate");
-    assert_eq!(candidates[0].candidate().provenance(), RootProvenance::Source);
-    assert_eq!(candidates[0].disposition(), ProbeDisposition::Missing);
-    assert_eq!(candidates[0].candidate().path(), base.join("notes.md"));
+    assert_eq!(candidates.len(), 2, "repo then source candidate");
     assert_eq!(
-        candidates[1].candidate().provenance(),
+        candidates[0].candidate().provenance(),
         RootProvenance::Repository
     );
+    assert_eq!(candidates[0].disposition(), ProbeDisposition::Missing);
+    assert_eq!(candidates[0].candidate().path(), repo.join("notes.md"));
+    assert_eq!(candidates[1].candidate().provenance(), RootProvenance::Source);
     assert_eq!(candidates[1].disposition(), ProbeDisposition::Matched);
-    assert_eq!(candidates[1].candidate().path(), repo.join("notes.md"));
+    assert_eq!(candidates[1].candidate().path(), base.join("notes.md"));
 }
 
 #[test]
@@ -102,15 +103,15 @@ fn detailed_no_match_retains_candidates_and_repository_root() {
     assert!(detailed.error().is_none(), "NoMatch has no underlying error");
     assert_eq!(detailed.repository_root(), Some(repo.as_path()));
 
-    // Both candidates were probed and both missed, provenance preserved.
+    // Both candidates were probed and both missed, in repository-first order.
     let candidates = detailed.candidates();
     assert_eq!(candidates.len(), 2);
-    assert_eq!(candidates[0].candidate().provenance(), RootProvenance::Source);
-    assert_eq!(candidates[0].disposition(), ProbeDisposition::Missing);
     assert_eq!(
-        candidates[1].candidate().provenance(),
+        candidates[0].candidate().provenance(),
         RootProvenance::Repository
     );
+    assert_eq!(candidates[0].disposition(), ProbeDisposition::Missing);
+    assert_eq!(candidates[1].candidate().provenance(), RootProvenance::Source);
     assert_eq!(candidates[1].disposition(), ProbeDisposition::Missing);
 }
 
@@ -133,8 +134,8 @@ fn candidate_plan_matches_the_probed_order() {
     // The plan a consumer inspects is exactly what execution probes, in order.
     let plan_paths: Vec<_> = plan.iter().map(|c| c.path().to_path_buf()).collect();
     assert_eq!(plan_paths, candidate_paths(&detailed));
-    assert_eq!(plan[0].provenance(), RootProvenance::Source);
-    assert_eq!(plan[1].provenance(), RootProvenance::Repository);
+    assert_eq!(plan[0].provenance(), RootProvenance::Repository);
+    assert_eq!(plan[1].provenance(), RootProvenance::Source);
 }
 
 #[test]
@@ -192,25 +193,32 @@ fn non_file_candidate_advances_the_search() {
     let repo = tmp.path().canonicalize().unwrap();
     git_init(&repo);
 
-    // A *directory* named like the target sits at the base; the regular file
-    // sits at the repository root. The directory must not win.
+    // A *directory* named like the target sits at the repository root (the
+    // first candidate under repository-first precedence); the regular file sits
+    // in the base. The directory must not win -- it advances the search.
     let base = repo.join("pkg");
-    fs::create_dir_all(base.join("thing.md")).unwrap();
-    fs::write(repo.join("thing.md"), b"real").unwrap();
+    fs::create_dir_all(&base).unwrap();
+    fs::create_dir_all(repo.join("thing.md")).unwrap();
     let base = base.canonicalize().unwrap();
+    fs::write(base.join("thing.md"), b"real").unwrap();
 
     let ctx = ctx_with_repo(&base, &repo);
     let detailed = FileReference::new("thing.md")
         .unwrap()
         .resolve_detailed(&ctx);
 
-    assert_eq!(detailed.matched_path(), Some(repo.join("thing.md").as_path()));
+    assert_eq!(detailed.matched_path(), Some(base.join("thing.md").as_path()));
     let candidates = detailed.candidates();
+    assert_eq!(
+        candidates[0].candidate().provenance(),
+        RootProvenance::Repository
+    );
     assert_eq!(
         candidates[0].disposition(),
         ProbeDisposition::NonFile,
-        "the directory candidate is a non-file that advances the search",
+        "the repository directory candidate is a non-file that advances the search",
     );
+    assert_eq!(candidates[1].candidate().provenance(), RootProvenance::Source);
     assert_eq!(candidates[1].disposition(), ProbeDisposition::Matched);
 }
 

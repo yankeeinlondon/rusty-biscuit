@@ -46,7 +46,7 @@ fn resolves_file_in_git_root_when_absent_from_cwd() {
 }
 
 #[test]
-fn prefers_cwd_over_git_root_on_name_collision() {
+fn prefers_git_root_over_cwd_on_name_collision() {
     let tmp = TempDir::new().unwrap();
     let repo_root = tmp.path();
     git_init(repo_root);
@@ -58,16 +58,19 @@ fn prefers_cwd_over_git_root_on_name_collision() {
     fs::write(subdir.join("notes.md"), b"subdir").unwrap();
 
     let subdir = subdir.canonicalize().unwrap();
+    let repo_root_canon = repo_root.canonicalize().unwrap();
 
     let resolved = FileReference::new("notes.md")
         .unwrap()
         .resolve_from(&subdir)
         .unwrap();
 
+    // Phase 4 precedence flip: the repository-root candidate wins over the
+    // source-local one for implicit relative references.
     assert_eq!(
         resolved.as_deref(),
-        Some(subdir.join("notes.md").as_path()),
-        "CWD should take priority over git root for implicit relative refs"
+        Some(repo_root_canon.join("notes.md").as_path()),
+        "git root should take priority over CWD for implicit relative refs"
     );
 }
 
@@ -486,8 +489,8 @@ mod partial_completion {
         assert_eq!(completion.active_segment(), "ab");
         assert_eq!(
             completion.roots(),
-            &[subdir.join("prompts"), repo_root_canon.join("prompts")],
-            "CWD-relative root precedes git-root-relative root",
+            &[repo_root_canon.join("prompts"), subdir.join("prompts")],
+            "git-root-relative root precedes CWD-relative root (Phase 4 flip)",
         );
     }
 
