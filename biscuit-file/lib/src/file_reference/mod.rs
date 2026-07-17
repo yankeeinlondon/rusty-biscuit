@@ -76,6 +76,228 @@ pub struct FileReferenceClass {
     pub recursive: bool,
 }
 
+/// The provenance of the root a resolution candidate was built from.
+///
+/// Provenance is carried as data alongside every candidate so diagnostics and
+/// completion never infer a candidate's origin from string prefixes. `Absolute`
+/// marks a candidate that is the authored absolute path itself, with no joined
+/// root.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RootProvenance {
+    /// The repository (worktree) root.
+    Repository,
+    /// The source document/base directory.
+    Source,
+    /// The Cargo package area.
+    Package,
+    /// The user's home directory.
+    Home,
+    /// A configured magic (`@`) search root.
+    Magic,
+    /// A configured vault root.
+    Vault,
+    /// The authored absolute path (no joined root).
+    Absolute,
+}
+
+/// One ordered resolution candidate: a concrete path plus the provenance of the
+/// root it was derived from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolutionCandidate {
+    path: PathBuf,
+    provenance: RootProvenance,
+}
+
+impl ResolutionCandidate {
+    /// The candidate path (not yet normalized to absolute).
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// The provenance of the root this candidate was built from.
+    pub fn provenance(&self) -> RootProvenance {
+        self.provenance
+    }
+}
+
+pub(crate) fn make_candidate(path: PathBuf, provenance: RootProvenance) -> ResolutionCandidate {
+    ResolutionCandidate { path, provenance }
+}
+
+/// The outcome of probing a single candidate path.
+///
+/// A `Missing` or `NonFile` candidate advances the ordered search; an `Io`
+/// disposition stops it (the underlying error is retained on the
+/// [`DetailedResolution`]). `SearchRoot` marks a recursive search root rather
+/// than a directly probed file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProbeDisposition {
+    /// The path does not exist.
+    Missing,
+    /// The path exists but is not a regular file (e.g. a directory).
+    NonFile,
+    /// The path is a regular file (or a symlink to one) -- the winner.
+    Matched,
+    /// Probing failed with an I/O error other than not-found; the search stops.
+    Io(std::io::ErrorKind),
+    /// A recursive search root walked for matches, not a direct file probe.
+    SearchRoot,
+}
+
+/// One attempted candidate paired with its probe disposition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProbedCandidate {
+    candidate: ResolutionCandidate,
+    disposition: ProbeDisposition,
+}
+
+impl ProbedCandidate {
+    /// The candidate that was probed.
+    pub fn candidate(&self) -> &ResolutionCandidate {
+        &self.candidate
+    }
+
+    /// The disposition of the probe.
+    pub fn disposition(&self) -> ProbeDisposition {
+        self.disposition
+    }
+}
+
+pub(crate) fn make_probed(
+    candidate: ResolutionCandidate,
+    disposition: ProbeDisposition,
+) -> ProbedCandidate {
+    ProbedCandidate {
+        candidate,
+        disposition,
+    }
+}
+
+/// The typed classification of a resolution that did not match.
+///
+/// This is the failure taxonomy the error-propagation pipeline projects into
+/// `err.detail.failure`; it must not be re-derived from [`FileReferenceKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolutionFailure {
+    /// The reference syntax or an anchoring invariant was invalid (e.g. an
+    /// interpolated absolute reference that did not expand to an absolute path).
+    InvalidReference,
+    /// A required context anchor was absent (home, vault, repository, package,
+    /// or an interpolation variable).
+    MissingContext,
+    /// No candidate resolved to a regular file.
+    NoMatch,
+    /// A candidate probe hit a permission or other I/O failure.
+    Io,
+    /// A remote URL reference has no local filesystem candidate.
+    UnsupportedRemote,
+}
+
+/// The terminal outcome of a detailed resolution.
+#[derive(Debug)]
+pub enum DetailedOutcome {
+    /// A candidate matched; carries the resolved absolute path.
+    Matched(PathBuf),
+    /// Resolution did not produce a match, with a typed classification.
+    Failed(ResolutionFailure),
+}
+
+/// The detailed outcome of resolving a reference against a
+/// [`FileResolutionContext`].
+///
+/// Retains everything the typed error-propagation pipeline needs to render an
+/// ordered, candidate-aware diagnostic without parsing prose: the raw authored
+/// reference, its parsed class, the base/source anchors, the repository root the
+/// search anchored on (when a root was used), every attempted candidate with its
+/// probe disposition, and the underlying [`FileReferenceError`] when one exists.
+///
+/// A no-match is a typed [`DetailedOutcome::Failed`] carrying
+/// [`ResolutionFailure::NoMatch`], never a silent `Ok(None)`.
+#[derive(Debug)]
+pub struct DetailedResolution {
+    raw: String,
+    class: FileReferenceClass,
+    base_dir: PathBuf,
+    source_path: Option<PathBuf>,
+    repository_root: Option<PathBuf>,
+    candidates: Vec<ProbedCandidate>,
+    outcome: DetailedOutcome,
+    error: Option<FileReferenceError>,
+}
+
+impl DetailedResolution {
+    /// The raw authored reference string.
+    pub fn raw(&self) -> &str {
+        &self.raw
+    }
+
+    /// The parsed classification of the reference.
+    pub fn class(&self) -> FileReferenceClass {
+        self.class
+    }
+
+    /// The base directory references resolved against.
+    pub fn base_dir(&self) -> &Path {
+        &self.base_dir
+    }
+
+    /// The source document/file, when one was supplied on the context.
+    pub fn source_path(&self) -> Option<&Path> {
+        self.source_path.as_deref()
+    }
+
+    /// The repository root the search anchored on, when a root was used or
+    /// supplied.
+    pub fn repository_root(&self) -> Option<&Path> {
+        self.repository_root.as_deref()
+    }
+
+    /// The ordered candidates attempted, each with its probe disposition.
+    ///
+    /// For a recursive reference these are the search roots
+    /// ([`ProbeDisposition::SearchRoot`]) rather than direct file probes.
+    pub fn candidates(&self) -> &[ProbedCandidate] {
+        &self.candidates
+    }
+
+    /// The terminal outcome.
+    pub fn outcome(&self) -> &DetailedOutcome {
+        &self.outcome
+    }
+
+    /// The underlying [`FileReferenceError`], present for every failure except
+    /// [`ResolutionFailure::NoMatch`].
+    pub fn error(&self) -> Option<&FileReferenceError> {
+        self.error.as_ref()
+    }
+
+    /// The resolved absolute path when the reference matched.
+    pub fn matched_path(&self) -> Option<&Path> {
+        match &self.outcome {
+            DetailedOutcome::Matched(p) => Some(p),
+            DetailedOutcome::Failed(_) => None,
+        }
+    }
+
+    /// Project the detailed outcome onto the legacy convenience shape.
+    ///
+    /// A match yields `Ok(Some(path))`, a no-match yields `Ok(None)`, and every
+    /// other failure yields its underlying `Err`. The ordered candidate plan is
+    /// discarded; callers needing it must hold the [`DetailedResolution`].
+    pub fn into_convenience(self) -> Result<Option<PathBuf>, FileReferenceError> {
+        match self.outcome {
+            DetailedOutcome::Matched(p) => Ok(Some(p)),
+            DetailedOutcome::Failed(ResolutionFailure::NoMatch) => Ok(None),
+            // A non-`NoMatch` failure always carries its underlying error; the
+            // `raw`-based fallback only guards against an internally
+            // inconsistent construction.
+            DetailedOutcome::Failed(_) => {
+                Err(self.error.unwrap_or(FileReferenceError::InvalidSyntax(self.raw)))
+            }
+        }
+    }
+}
+
 /// Entry form for a partial completion token.
 ///
 /// Corresponds to the subset of [`FileReferenceKind`] variants that
@@ -367,9 +589,81 @@ impl FileReference {
         &self,
         ctx: &FileResolutionContext,
     ) -> Result<Option<PathBuf>, FileReferenceError> {
+        self.resolve_detailed(ctx).into_convenience()
+    }
+
+    /// Resolve against an explicit context, returning the full detailed outcome.
+    ///
+    /// This is the context-aware detailed operation: it retains the parsed
+    /// class, the ordered candidate plan with per-candidate probe dispositions,
+    /// the repository root the search anchored on, and the underlying typed
+    /// error. Diagnostics and completion consume this rather than the
+    /// `Ok(None)`-collapsing convenience methods, which discard the candidate
+    /// plan D8 requires.
+    ///
+    /// Unlike [`resolve_in_context`], this never returns `Err`: every failure --
+    /// including an invalid context, a missing anchor, or an I/O probe failure --
+    /// is a typed [`DetailedOutcome::Failed`] with the underlying error attached.
+    ///
+    /// [`resolve_in_context`]: Self::resolve_in_context
+    pub fn resolve_detailed(&self, ctx: &FileResolutionContext) -> DetailedResolution {
+        let class = self.class();
+        let base_dir = ctx.base_dir().to_path_buf();
+        let source_path = ctx.source_path().map(Path::to_path_buf);
+
+        if let Err(error) = ctx.validate() {
+            return DetailedResolution {
+                raw: self.raw.clone(),
+                class,
+                base_dir,
+                source_path,
+                repository_root: ctx.repository_root().map(Path::to_path_buf),
+                candidates: Vec::new(),
+                outcome: DetailedOutcome::Failed(ResolutionFailure::MissingContext),
+                error: Some(error),
+            };
+        }
+
+        let internal = context::ResolutionContext::from_context(ctx);
+        let core = resolve::resolve_core(
+            &self.parsed,
+            ctx.magic_paths(),
+            ctx.vault_roots(),
+            &internal,
+        );
+
+        let (outcome, error) = core.outcome.into_parts();
+        DetailedResolution {
+            raw: self.raw.clone(),
+            class,
+            base_dir,
+            source_path,
+            repository_root: core.repository_root,
+            candidates: core.candidates,
+            outcome,
+            error,
+        }
+    }
+
+    /// Build the ordered candidate plan for this reference without probing the
+    /// filesystem.
+    ///
+    /// Exposes the exact candidates (or, for a recursive reference, the search
+    /// roots) that resolution would attempt, each carrying its
+    /// [`RootProvenance`]. This is the separable builder diagnostics,
+    /// completion, and tests inspect without reimplementing the algorithm.
+    ///
+    /// ## Errors
+    ///
+    /// Returns the typed error when the context is invalid or a required anchor
+    /// (interpolation variable, vault, home, repository) cannot be established.
+    pub fn candidate_plan(
+        &self,
+        ctx: &FileResolutionContext,
+    ) -> Result<Vec<ResolutionCandidate>, FileReferenceError> {
         ctx.validate()?;
         let internal = context::ResolutionContext::from_context(ctx);
-        resolve::resolve(
+        resolve::candidate_plan(
             &self.parsed,
             ctx.magic_paths(),
             ctx.vault_roots(),

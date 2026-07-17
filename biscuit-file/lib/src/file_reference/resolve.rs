@@ -8,32 +8,172 @@ use crate::file_reference::context::{
 };
 use crate::file_reference::error::FileReferenceError;
 use crate::file_reference::{
-    CompletionEntryForm, MagicPathList, ParsedReference, PartialCompletion, PathTemplate,
-    ReferenceKind, TemplateSegment, make_partial_completion,
+    CompletionEntryForm, DetailedOutcome, MagicPathList, ParsedReference, PartialCompletion,
+    PathTemplate, ProbeDisposition, ProbedCandidate, ReferenceKind, ResolutionCandidate,
+    ResolutionFailure, RootProvenance, TemplateSegment, make_candidate, make_partial_completion,
+    make_probed,
 };
 
 #[cfg(feature = "url")]
 use crate::file_reference::Resolved;
 
-/// Resolve a parsed reference against runtime context.
+/// The engine-level result of a single detailed resolution.
+///
+/// [`resolve_core`] never returns an `Err`: every failure is a typed
+/// [`CoreOutcome::Failed`] carrying its underlying [`FileReferenceError`]. The
+/// legacy convenience projection ([`resolve`]) collapses this onto
+/// `Result<Option<PathBuf>, _>`.
+pub(crate) struct CoreResolution {
+    pub candidates: Vec<ProbedCandidate>,
+    pub repository_root: Option<PathBuf>,
+    pub outcome: CoreOutcome,
+}
+
+pub(crate) enum CoreOutcome {
+    Matched(PathBuf),
+    NoMatch,
+    Failed(ResolutionFailure, FileReferenceError),
+}
+
+impl CoreOutcome {
+    /// Split the engine outcome into the public [`DetailedOutcome`] plus the
+    /// underlying error (present for every failure except `NoMatch`).
+    pub(crate) fn into_parts(self) -> (DetailedOutcome, Option<FileReferenceError>) {
+        match self {
+            CoreOutcome::Matched(p) => (DetailedOutcome::Matched(p), None),
+            CoreOutcome::NoMatch => (DetailedOutcome::Failed(ResolutionFailure::NoMatch), None),
+            CoreOutcome::Failed(kind, e) => (DetailedOutcome::Failed(kind), Some(e)),
+        }
+    }
+}
+
+/// Resolve a parsed reference against runtime context, projecting the detailed
+/// outcome onto the legacy `Result<Option<PathBuf>, _>` convenience shape
+/// without reordering candidates.
 pub(crate) fn resolve(
     parsed: &ParsedReference,
     magic_paths: &MagicPathList,
     vault_roots: &[PathBuf],
     ctx: &ResolutionContext,
 ) -> Result<Option<PathBuf>, FileReferenceError> {
+    match resolve_core(parsed, magic_paths, vault_roots, ctx).outcome {
+        CoreOutcome::Matched(p) => Ok(Some(p)),
+        CoreOutcome::NoMatch => Ok(None),
+        CoreOutcome::Failed(_, e) => Err(e),
+    }
+}
+
+/// Resolve a parsed reference into the full engine-level detailed outcome.
+///
+/// Discovers the repository root at most once (D10) and only for kinds that
+/// anchor on it, so an explicit/absolute/home/vault reference performs no git
+/// lookup. The kind-specific candidate plan is then probed with a fallible
+/// metadata operation.
+pub(crate) fn resolve_core(
+    parsed: &ParsedReference,
+    magic_paths: &MagicPathList,
+    vault_roots: &[PathBuf],
+    ctx: &ResolutionContext,
+) -> CoreResolution {
     #[cfg(feature = "url")]
     if matches!(parsed.kind, ReferenceKind::Url(_)) {
-        let raw = interpolated_url_string(&parsed.kind, ctx)?;
-        return Err(FileReferenceError::RemoteNotLocal(raw));
+        return match interpolated_url_string(&parsed.kind, ctx) {
+            Ok(raw) => failed_core(
+                ResolutionFailure::UnsupportedRemote,
+                FileReferenceError::RemoteNotLocal(raw),
+            ),
+            Err(e) => failed_core(classify_error(&e), e),
+        };
     }
 
-    let interpolated = interpolate(parsed.kind.template(), ctx)?;
+    let interpolated = match interpolate(parsed.kind.template(), ctx) {
+        Ok(value) => value,
+        Err(e) => return failed_core(classify_error(&e), e),
+    };
+
+    let repository_root = if kind_uses_repository_root(&parsed.kind) {
+        match resolve_repository_root(ctx) {
+            Ok(root) => root,
+            Err(e) => return failed_core(classify_error(&e), e),
+        }
+    } else {
+        ctx.repository_root.clone()
+    };
 
     if parsed.recursive {
-        resolve_recursive(parsed, &interpolated, magic_paths, vault_roots, ctx)
+        resolve_recursive_core(parsed, &interpolated, magic_paths, vault_roots, ctx, repository_root)
     } else {
-        resolve_direct(parsed, &interpolated, magic_paths, vault_roots, ctx)
+        resolve_direct_core(parsed, &interpolated, magic_paths, vault_roots, ctx, repository_root)
+    }
+}
+
+/// Build a failed [`CoreResolution`] with no attempted candidates.
+fn failed_core(failure: ResolutionFailure, error: FileReferenceError) -> CoreResolution {
+    CoreResolution {
+        candidates: Vec::new(),
+        repository_root: None,
+        outcome: CoreOutcome::Failed(failure, error),
+    }
+}
+
+/// Whether a reference kind anchors any of its roots on the repository root.
+///
+/// Only these kinds trigger git discovery; the rest never touch it, so an
+/// explicit-relative, absolute, home, or vault reference cannot fail on a git
+/// error it never needed.
+fn kind_uses_repository_root(kind: &ReferenceKind) -> bool {
+    matches!(
+        kind,
+        ReferenceKind::ImplicitRelative(_) | ReferenceKind::Magic(_) | ReferenceKind::Package(_)
+    )
+}
+
+/// Map a typed [`FileReferenceError`] onto its resolution-failure class.
+///
+/// The class must not be re-derived from the reference kind downstream (D8);
+/// permission/I/O failures in particular must stay distinct from `no_match`.
+fn classify_error(error: &FileReferenceError) -> ResolutionFailure {
+    use FileReferenceError as E;
+    match error {
+        E::RemoteNotLocal(_) => ResolutionFailure::UnsupportedRemote,
+        #[cfg(feature = "url")]
+        E::InvalidUrl(_) => ResolutionFailure::UnsupportedRemote,
+        E::InvalidSyntax(_) | E::RelativePath { .. } => ResolutionFailure::InvalidReference,
+        E::MissingEnvironmentVariable { .. }
+        | E::VaultNotConfigured
+        | E::MissingHomeContext
+        | E::UnsupportedUserHome(_)
+        | E::RepositoryRootNotContainingSource { .. }
+        | E::BareRepository
+        | E::Git(_)
+        | E::Workspace(_) => ResolutionFailure::MissingContext,
+        E::Io { .. } | E::CurrentDirectory(_) => ResolutionFailure::Io,
+    }
+}
+
+/// The outcome of probing a single candidate path with a fallible metadata
+/// operation.
+enum ProbeStep {
+    /// The path does not exist (`NotFound`) -- advance the search.
+    Missing,
+    /// The path exists but is not a regular file -- advance the search.
+    NonFile,
+    /// The path is a regular file (following a symlink) -- the winner.
+    Matched,
+    /// A permission/invalid-path/other I/O failure -- stop the search.
+    Io(std::io::Error),
+}
+
+/// Probe a candidate with `fs::metadata`, distinguishing absence from I/O
+/// failure. `Path::is_file()` is insufficient because it collapses permission
+/// and other I/O errors into `false`. Metadata follows symlinks, so a symlink
+/// to a regular file still matches.
+fn probe_candidate(path: &Path) -> ProbeStep {
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.is_file() => ProbeStep::Matched,
+        Ok(_) => ProbeStep::NonFile,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => ProbeStep::Missing,
+        Err(e) => ProbeStep::Io(e),
     }
 }
 
@@ -89,38 +229,108 @@ pub(crate) fn resolve_target(
     Ok(local.map(Resolved::Local))
 }
 
-/// Resolve without recursion -- check exact file paths.
-fn resolve_direct(
+/// Resolve without recursion -- probe the ordered candidate plan.
+fn resolve_direct_core(
     parsed: &ParsedReference,
     interpolated: &str,
     magic_paths: &MagicPathList,
     vault_roots: &[PathBuf],
     ctx: &ResolutionContext,
-) -> Result<Option<PathBuf>, FileReferenceError> {
-    let candidates = build_candidates(parsed, interpolated, magic_paths, vault_roots, ctx)?;
+    repository_root: Option<PathBuf>,
+) -> CoreResolution {
+    let candidates = match build_candidates(
+        parsed,
+        interpolated,
+        magic_paths,
+        vault_roots,
+        ctx,
+        repository_root.as_deref(),
+    ) {
+        Ok(candidates) => candidates,
+        Err(e) => {
+            let failure = classify_error(&e);
+            return CoreResolution {
+                candidates: Vec::new(),
+                repository_root,
+                outcome: CoreOutcome::Failed(failure, e),
+            };
+        }
+    };
 
-    for candidate in &candidates {
-        let exists = candidate.is_file();
-        trace!(?candidate, exists, "checking candidate");
-        if exists {
-            debug!(?candidate, "resolved file reference");
-            return Ok(Some(normalize_absolute(candidate, &ctx.cwd)));
+    let mut probed: Vec<ProbedCandidate> = Vec::with_capacity(candidates.len());
+    for candidate in candidates {
+        match probe_candidate(candidate.path()) {
+            ProbeStep::Matched => {
+                let resolved = normalize_absolute(candidate.path(), &ctx.cwd);
+                debug!(?resolved, "resolved file reference");
+                probed.push(make_probed(candidate, ProbeDisposition::Matched));
+                return CoreResolution {
+                    candidates: probed,
+                    repository_root,
+                    outcome: CoreOutcome::Matched(resolved),
+                };
+            }
+            ProbeStep::Missing => {
+                trace!(candidate = ?candidate.path(), "candidate missing");
+                probed.push(make_probed(candidate, ProbeDisposition::Missing));
+            }
+            ProbeStep::NonFile => {
+                trace!(candidate = ?candidate.path(), "candidate is not a regular file");
+                probed.push(make_probed(candidate, ProbeDisposition::NonFile));
+            }
+            ProbeStep::Io(err) => {
+                // A permission/invalid-path/other I/O failure stops the search
+                // with the candidate path and typed source attached; it must not
+                // be misreported as absence.
+                let kind = err.kind();
+                let path = candidate.path().to_path_buf();
+                probed.push(make_probed(candidate, ProbeDisposition::Io(kind)));
+                let typed = FileReferenceError::Io { path, source: err };
+                return CoreResolution {
+                    candidates: probed,
+                    repository_root,
+                    outcome: CoreOutcome::Failed(ResolutionFailure::Io, typed),
+                };
+            }
         }
     }
 
     debug!("no candidate matched");
-    Ok(None)
+    CoreResolution {
+        candidates: probed,
+        repository_root,
+        outcome: CoreOutcome::NoMatch,
+    }
 }
 
-/// Resolve with recursive directory traversal.
-fn resolve_recursive(
+/// Resolve with recursive directory traversal, retaining the global lexical
+/// winner while sourcing its search roots from the shared candidate builder.
+fn resolve_recursive_core(
     parsed: &ParsedReference,
     interpolated: &str,
     magic_paths: &MagicPathList,
     vault_roots: &[PathBuf],
     ctx: &ResolutionContext,
-) -> Result<Option<PathBuf>, FileReferenceError> {
-    let roots = build_search_roots(parsed, magic_paths, vault_roots, ctx)?;
+    repository_root: Option<PathBuf>,
+) -> CoreResolution {
+    let roots = match build_search_roots(
+        parsed,
+        magic_paths,
+        vault_roots,
+        ctx,
+        repository_root.as_deref(),
+    ) {
+        Ok(roots) => roots,
+        Err(e) => {
+            let failure = classify_error(&e);
+            return CoreResolution {
+                candidates: Vec::new(),
+                repository_root,
+                outcome: CoreOutcome::Failed(failure, e),
+            };
+        }
+    };
+
     let path = Path::new(interpolated);
 
     // Extract the filename to search for and optional subdirectory filter
@@ -143,7 +353,8 @@ fn resolve_recursive(
 
     let mut matches: Vec<PathBuf> = Vec::new();
 
-    for root in &roots {
+    for root_candidate in &roots {
+        let root = root_candidate.path();
         if !root.is_dir() {
             continue;
         }
@@ -183,10 +394,27 @@ fn resolve_recursive(
         }
     }
 
-    // Sort lexicographically and return the first match
+    // Sort lexicographically and select the first match (global lexical winner).
     matches.sort();
     debug!(match_count = matches.len(), "recursive search complete");
-    Ok(matches.into_iter().next())
+
+    // The search roots are the diagnostics-visible "candidates" for a recursive
+    // reference; they carry provenance but are not direct file probes.
+    let probed: Vec<ProbedCandidate> = roots
+        .into_iter()
+        .map(|candidate| make_probed(candidate, ProbeDisposition::SearchRoot))
+        .collect();
+
+    let outcome = match matches.into_iter().next() {
+        Some(path) => CoreOutcome::Matched(path),
+        None => CoreOutcome::NoMatch,
+    };
+
+    CoreResolution {
+        candidates: probed,
+        repository_root,
+        outcome,
+    }
 }
 
 /// Resolve the repository root for a resolution context.
@@ -203,53 +431,107 @@ fn resolve_repository_root(
     }
 }
 
-/// Collect search root directories for a given reference kind.
+/// A search root paired with the provenance of where it came from.
+///
+/// Provenance is data, never inferred from a string prefix downstream. The
+/// repository root is passed in pre-resolved so discovery happens at most once
+/// per resolution (D10).
+#[derive(Debug)]
+struct RootEntry {
+    path: PathBuf,
+    provenance: RootProvenance,
+}
+
+/// Collect the ordered search roots for a reference kind, each tagged with its
+/// provenance. `repository_root` is the pre-resolved root (supplied or
+/// discovered once); kinds that do not anchor on it ignore it.
 fn collect_roots(
     kind: &ReferenceKind,
     magic_paths: &MagicPathList,
     vault_roots: &[PathBuf],
     ctx: &ResolutionContext,
-) -> Result<Vec<PathBuf>, FileReferenceError> {
+    repository_root: Option<&Path>,
+) -> Result<Vec<RootEntry>, FileReferenceError> {
+    let source = |path: PathBuf| RootEntry {
+        path,
+        provenance: RootProvenance::Source,
+    };
     match kind {
-        ReferenceKind::Relative(_) => Ok(vec![ctx.cwd.clone()]),
+        ReferenceKind::Relative(_) => Ok(vec![source(ctx.cwd.clone())]),
         ReferenceKind::ImplicitRelative(_) => {
-            let mut roots = vec![ctx.cwd.clone()];
-            if let Some(git_root) = resolve_repository_root(ctx)?
+            // Base/CWD first, then repository root -- Phase 3 preserves the
+            // current precedence; the flip to repository-first is Phase 4.
+            let mut roots = vec![source(ctx.cwd.clone())];
+            if let Some(git_root) = repository_root
                 && git_root != ctx.cwd
             {
-                roots.push(git_root);
+                roots.push(RootEntry {
+                    path: git_root.to_path_buf(),
+                    provenance: RootProvenance::Repository,
+                });
             }
             Ok(roots)
         }
-        ReferenceKind::Absolute(_) => Ok(vec![PathBuf::from("/")]),
+        ReferenceKind::Absolute(_) => Ok(vec![RootEntry {
+            path: PathBuf::from("/"),
+            provenance: RootProvenance::Absolute,
+        }]),
         ReferenceKind::Magic(_) => {
             let mut roots = Vec::new();
-            roots.extend(magic_paths.prepend.iter().cloned());
-            if let Some(git_root) = resolve_repository_root(ctx)? {
-                roots.push(git_root);
+            roots.extend(magic_paths.prepend.iter().cloned().map(|path| RootEntry {
+                path,
+                provenance: RootProvenance::Magic,
+            }));
+            if let Some(git_root) = repository_root {
+                roots.push(RootEntry {
+                    path: git_root.to_path_buf(),
+                    provenance: RootProvenance::Repository,
+                });
             }
             if let Some(ref home) = ctx.home_dir {
-                roots.push(home.clone());
+                roots.push(RootEntry {
+                    path: home.clone(),
+                    provenance: RootProvenance::Home,
+                });
             }
-            roots.extend(magic_paths.append.iter().cloned());
+            roots.extend(magic_paths.append.iter().cloned().map(|path| RootEntry {
+                path,
+                provenance: RootProvenance::Magic,
+            }));
             Ok(roots)
         }
         ReferenceKind::Package(_) => {
-            let git_root = match resolve_repository_root(ctx)? {
+            let git_root = match repository_root {
                 Some(root) => root,
                 None => return Ok(vec![]),
             };
-            let area = find_package_area(&git_root, &ctx.cwd)?;
-            Ok(vec![area.unwrap_or(git_root)])
+            let area = find_package_area(git_root, &ctx.cwd)?;
+            Ok(vec![RootEntry {
+                path: area.unwrap_or_else(|| git_root.to_path_buf()),
+                provenance: RootProvenance::Package,
+            }])
         }
         ReferenceKind::Home(_) => match &ctx.home_dir {
-            Some(home) => Ok(vec![home.clone()]),
+            Some(home) => Ok(vec![RootEntry {
+                path: home.clone(),
+                provenance: RootProvenance::Home,
+            }]),
             None => Err(FileReferenceError::MissingHomeContext),
         },
         ReferenceKind::Vault(_) => {
-            let mut roots: Vec<PathBuf> = vault_roots.to_vec();
+            let mut roots: Vec<RootEntry> = vault_roots
+                .iter()
+                .cloned()
+                .map(|path| RootEntry {
+                    path,
+                    provenance: RootProvenance::Vault,
+                })
+                .collect();
             if let Some(vault_env) = ctx.env.get("VAULT") {
-                roots.extend(std::env::split_paths(vault_env));
+                roots.extend(std::env::split_paths(vault_env).map(|path| RootEntry {
+                    path,
+                    provenance: RootProvenance::Vault,
+                }));
             }
             if roots.is_empty() {
                 return Err(FileReferenceError::VaultNotConfigured);
@@ -261,14 +543,16 @@ fn collect_roots(
     }
 }
 
-/// Build candidate file paths for non-recursive resolution.
+/// Build the ordered, deduplicated candidate paths for non-recursive
+/// resolution, each carrying the provenance of its root.
 fn build_candidates(
     parsed: &ParsedReference,
     interpolated: &str,
     magic_paths: &MagicPathList,
     vault_roots: &[PathBuf],
     ctx: &ResolutionContext,
-) -> Result<Vec<PathBuf>, FileReferenceError> {
+    repository_root: Option<&Path>,
+) -> Result<Vec<ResolutionCandidate>, FileReferenceError> {
     if let ReferenceKind::Absolute(_) = &parsed.kind {
         let path = PathBuf::from(interpolated);
         if !path.is_absolute() {
@@ -276,7 +560,7 @@ fn build_candidates(
                 "absolute reference resolved to non-absolute path: {interpolated}"
             )));
         }
-        return Ok(vec![path]);
+        return Ok(vec![make_candidate(path, RootProvenance::Absolute)]);
     }
 
     #[cfg(feature = "url")]
@@ -284,18 +568,79 @@ fn build_candidates(
         return Ok(vec![]);
     }
 
-    let roots = collect_roots(&parsed.kind, magic_paths, vault_roots, ctx)?;
-    Ok(roots.into_iter().map(|r| r.join(interpolated)).collect())
+    let roots = collect_roots(&parsed.kind, magic_paths, vault_roots, ctx, repository_root)?;
+    let candidates = roots
+        .into_iter()
+        .map(|root| make_candidate(root.path.join(interpolated), root.provenance))
+        .collect();
+    Ok(dedupe_candidates(candidates))
 }
 
-/// Build search roots for recursive resolution.
+/// Build the ordered, deduplicated search roots for recursive resolution.
 fn build_search_roots(
     parsed: &ParsedReference,
     magic_paths: &MagicPathList,
     vault_roots: &[PathBuf],
     ctx: &ResolutionContext,
-) -> Result<Vec<PathBuf>, FileReferenceError> {
-    collect_roots(&parsed.kind, magic_paths, vault_roots, ctx)
+    repository_root: Option<&Path>,
+) -> Result<Vec<ResolutionCandidate>, FileReferenceError> {
+    let roots = collect_roots(&parsed.kind, magic_paths, vault_roots, ctx, repository_root)?;
+    let candidates = roots
+        .into_iter()
+        .map(|root| make_candidate(root.path, root.provenance))
+        .collect();
+    Ok(dedupe_candidates(candidates))
+}
+
+/// Remove lexically duplicate candidates while preserving first-seen order.
+///
+/// The dedupe key is the `.`/`..`-normalized path, so `<root>/x` reached via two
+/// equal roots collapses to one entry; the earlier provenance wins.
+fn dedupe_candidates(candidates: Vec<ResolutionCandidate>) -> Vec<ResolutionCandidate> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(candidates.len());
+    for candidate in candidates {
+        if seen.insert(normalize_components(candidate.path())) {
+            out.push(candidate);
+        }
+    }
+    out
+}
+
+/// Build the ordered candidate plan without probing the filesystem.
+///
+/// Shares the exact builder that [`resolve_core`] probes, so a plan a consumer
+/// inspects cannot drift from what execution attempts.
+pub(crate) fn candidate_plan(
+    parsed: &ParsedReference,
+    magic_paths: &MagicPathList,
+    vault_roots: &[PathBuf],
+    ctx: &ResolutionContext,
+) -> Result<Vec<ResolutionCandidate>, FileReferenceError> {
+    #[cfg(feature = "url")]
+    if matches!(parsed.kind, ReferenceKind::Url(_)) {
+        return Ok(Vec::new());
+    }
+
+    let interpolated = interpolate(parsed.kind.template(), ctx)?;
+    let repository_root = if kind_uses_repository_root(&parsed.kind) {
+        resolve_repository_root(ctx)?
+    } else {
+        ctx.repository_root.clone()
+    };
+
+    if parsed.recursive {
+        build_search_roots(parsed, magic_paths, vault_roots, ctx, repository_root.as_deref())
+    } else {
+        build_candidates(
+            parsed,
+            &interpolated,
+            magic_paths,
+            vault_roots,
+            ctx,
+            repository_root.as_deref(),
+        )
+    }
 }
 
 /// Interpolate template segments using the resolution context's env vars.
@@ -628,14 +973,17 @@ mod tests {
         assert_eq!(result, PathBuf::from("/etc/config.toml"));
     }
 
+    /// Extract just the paths from a collected root list for comparison.
+    fn root_paths(roots: &[RootEntry]) -> Vec<PathBuf> {
+        roots.iter().map(|r| r.path.clone()).collect()
+    }
+
     #[test]
     fn implicit_relative_uses_cwd_then_git_root() {
         use crate::file_reference::{MagicPathList, ParsedReference, ReferenceKind};
 
-        // We can't call collect_roots for ImplicitRelative without a real git
-        // context, so exercise the *direct* path by constructing a
-        // ParsedReference with no git root. In that case the only root
-        // should be CWD, matching the "git lookup returned None" branch.
+        // With no repository root supplied, the only root is CWD, matching the
+        // "git lookup returned None" branch.
         let parsed = ParsedReference {
             recursive: false,
             kind: ReferenceKind::ImplicitRelative(PathTemplate {
@@ -648,9 +996,10 @@ mod tests {
             env: std::collections::HashMap::new(),
             repository_root: None,
         };
-        let roots = collect_roots(&parsed.kind, &MagicPathList::default(), &[], &ctx).unwrap();
-        // /tmp has no git repo, so only CWD is returned.
-        assert_eq!(roots, vec![PathBuf::from("/tmp")]);
+        let roots =
+            collect_roots(&parsed.kind, &MagicPathList::default(), &[], &ctx, None).unwrap();
+        assert_eq!(root_paths(&roots), vec![PathBuf::from("/tmp")]);
+        assert_eq!(roots[0].provenance, RootProvenance::Source);
     }
 
     #[test]
@@ -664,8 +1013,9 @@ mod tests {
             env: std::collections::HashMap::new(),
             repository_root: None,
         };
-        let roots = collect_roots(&parsed, &MagicPathList::default(), &[], &ctx).unwrap();
-        assert_eq!(roots, vec![PathBuf::from("/home/test")]);
+        let roots = collect_roots(&parsed, &MagicPathList::default(), &[], &ctx, None).unwrap();
+        assert_eq!(root_paths(&roots), vec![PathBuf::from("/home/test")]);
+        assert_eq!(roots[0].provenance, RootProvenance::Home);
     }
 
     #[test]
@@ -679,7 +1029,7 @@ mod tests {
             env: std::collections::HashMap::new(),
             repository_root: None,
         };
-        let err = collect_roots(&parsed, &MagicPathList::default(), &[], &ctx).unwrap_err();
+        let err = collect_roots(&parsed, &MagicPathList::default(), &[], &ctx, None).unwrap_err();
         assert!(
             matches!(err, FileReferenceError::MissingHomeContext),
             "expected MissingHomeContext, got {err}"
@@ -688,8 +1038,8 @@ mod tests {
 
     #[test]
     fn caller_supplied_repository_root_overrides_discovery() {
-        // With a supplied root, collect_roots must not perform live git
-        // discovery from cwd -- it uses the supplied root directly.
+        // With a supplied root, collect_roots uses it directly and never
+        // performs git discovery from cwd.
         let parsed = ReferenceKind::ImplicitRelative(PathTemplate {
             segments: vec![TemplateSegment::Literal("x.md".to_string())],
         });
@@ -699,12 +1049,21 @@ mod tests {
             env: std::collections::HashMap::new(),
             repository_root: Some(PathBuf::from("/tmp/repo")),
         };
-        let roots = collect_roots(&parsed, &MagicPathList::default(), &[], &ctx).unwrap();
+        let roots = collect_roots(
+            &parsed,
+            &MagicPathList::default(),
+            &[],
+            &ctx,
+            ctx.repository_root.as_deref(),
+        )
+        .unwrap();
         assert_eq!(
-            roots,
+            root_paths(&roots),
             vec![PathBuf::from("/tmp/base"), PathBuf::from("/tmp/repo")],
             "base stays first; supplied repo root is the second candidate",
         );
+        assert_eq!(roots[0].provenance, RootProvenance::Source);
+        assert_eq!(roots[1].provenance, RootProvenance::Repository);
     }
 
     #[test]
