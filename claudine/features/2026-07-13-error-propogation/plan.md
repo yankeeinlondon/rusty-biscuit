@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 3
+phase: 4
 total_phases: 8
 agent: claude/default
 yolo: "true"
@@ -48,6 +48,52 @@ docs_updated_during_phase_3:
     - claudine/features/2026-07-13-error-propogation/decisions.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+packages_during_phase_4:
+    - claudine
+    - claudine-cli
+source_files_during_phase_4:
+    - claudine/lib/src/harness/error.rs
+    - claudine/lib/src/harness/mod.rs
+    - claudine/lib/src/harness/resolve.rs
+    - claudine/lib/src/error.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/lifecycle/control.rs
+    - claudine/lib/src/diagnostics/discovery/tests.rs
+    - claudine/lib/src/diagnostics/snapshot/tests.rs
+    - claudine/lib/src/system_prompt/context.rs
+    - claudine/lib/src/system_prompt/change_state.rs
+    - claudine/lib/src/linking/hashing.rs
+    - claudine/lib/src/stream/reporting.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/commands/mcp/show.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/schema_interactive/mod.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/overlay.rs
+    - claudine/cli/src/commands/wrap/wrapper_mcp.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/src/commands/wrap/env/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/resolve.rs
+    - claudine/cli/src/commands/wrap/composition/mod.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/target.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/docs/providers/dispatch-inventory.json
+docs_updated_during_phase_4:
+    - claudine/features/2026-07-13-error-propogation/plan.md
+    - claudine/features/2026-07-13-error-propogation/decisions.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 ---
 
 # Execution Plan — End-to-End Typed Error Propagation
@@ -232,35 +278,35 @@ catalog shows **only additions** (no removed or renamed field).
 The first phase that changes production behavior. Run the Phase 1
 characterization suite after **every** task in this phase.
 
-- [ ] **[D3] Restructure `HarnessError::PathResolutionFailed`** in
+- [x] **[D3] Restructure `HarnessError::PathResolutionFailed`** in
       `lib/src/harness/error.rs` — replace `detail: String` with structured
       fields plus the typed lower-level `#[source]` where one exists. Re-check
       its classification: today it maps to `io.read_failed`, which may report an
       **authoring** failure as an environment failure.
-- [ ] **[D3] Add the composition semantic wrapper** carrying `SourceContext`,
+- [x] **[D3] Add the composition semantic wrapper** carrying `SourceContext`,
       lifecycle event, action/property path, raw authored value, typed source,
       and a contract-accurate hint. It owns
       **`composition.invalid_file_reference`** — it must **not** introduce a
       proxy-specific code. Event and property path distinguish the surface in
       structured detail only.
-- [ ] **[D1] Migrate the lifecycle proxy path** (the motivating incident) to
+- [x] **[D1] Migrate the lifecycle proxy path** (the motivating incident) to
       return the typed wrapper instead of `eyre!`. Verify the original report
       text is gone.
-- [ ] **[D1] Migrate `harness_orch/loop_control.rs`** (5 sites) — typed errors
+- [x] **[D1] Migrate `harness_orch/loop_control.rs`** (5 sites) — typed errors
       currently converted via `to_string()`.
-- [ ] **[D1] Migrate the `harness_orch/prompt.rs` pre-flight wrapper** (2 sites).
-- [ ] **[D1] Migrate remaining Category-1 inventory rows.** Sequence by cluster
+- [x] **[D1] Migrate the `harness_orch/prompt.rs` pre-flight wrapper** (2 sites).
+- [x] **[D1] Migrate remaining Category-1 inventory rows.** Sequence by cluster
       to keep diffs reviewable — `cli/src/commands/wrap/mod.rs`,
       `wrapper_mcp.rs`, `wrapper_stages.rs`, `wrap/env/mod.rs`,
       `wrap/composition/pipeline.rs`, `signals.rs`,
       `lib/src/composition/lifecycle/executor.rs`. **Each cluster is
       independently parallelizable** once the wrapper types exist.
-- [ ] **[D1]** Every migration uses a permitted mechanism: concrete typed error,
+- [x] **[D1]** Every migration uses a permitted mechanism: concrete typed error,
       `#[from]`, `#[source]` variant, or `wrap_err` **only** where the concrete
       source stays in the chain and no structured context is needed.
-- [ ] **[D10]** Any routing or retry-policy change discovered mid-audit is
+- [x] **[D10]** Any routing or retry-policy change discovered mid-audit is
       **split into a separate spec** — do not fix it here.
-- [ ] *(parallelizable)* **[L1]** Test: every contextual wrapper exposes its
+- [x] *(parallelizable)* **[L1]** Test: every contextual wrapper exposes its
       original concrete error through `Error::source()`.
 
 **⛔ Checkpoint 4** — Characterization suite **byte-identical** to Phase 1

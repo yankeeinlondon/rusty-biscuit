@@ -211,3 +211,77 @@ Widening to recursion later is additive if it is ever ratified.
 **Consequence accepted.** Seven facet fields are declared twice. That is the
 price of the structural guarantee, and the two types are asserted equal
 field-for-field by the round-trip suite.
+
+---
+
+## D-7 — `#[source] Box<ConcreteError>` makes the concrete error undowncastable
+
+**Finding (discovered in Phase 4, proven by probe).** A `#[source]` field typed
+`Box<E>` publishes **`Box<E>`** to the cause chain, not `E`. thiserror's
+`AsDynError` blanket impl applies to `Box<E>` itself (`Box<E: Error>` is itself
+`Error`), so `Error::source()` yields `&dyn Error` whose `TypeId` is
+`Box<E>` — and `downcast_ref::<E>()` returns `None`. Worse, `Box<E>`'s own
+`Error::source()` delegates to `E::source()`, so the walk **skips past `E`
+entirely**: `E` is never a chain member at any depth.
+
+```text
+CompositionError::AtomicWriteFailed  (#[source] source: Box<ClaudineError>)
+  Error::source() -> Some(&dyn Error)
+      downcast_ref::<ClaudineError>()       => None      // ← invisible
+      downcast_ref::<Box<ClaudineError>>()  => Some(..)   // ← what is actually there
+```
+
+**Why it matters.** D2's `as_diagnostic` is a **downcast allowlist over concrete
+types**. Any diagnostic reached only through a `#[source] Box<Concrete>` field is
+undiscoverable by construction — the registry can list it and the source-parity
+test can pass, and it still never resolves at runtime.
+
+**Ruling for this feature.** `CompositionError::InvalidFileReference` carries its
+`HarnessError` **unboxed** and boxes its *context* instead
+(`context: Box<FileReferenceContext>`). Boxing the context costs nothing;
+boxing the source costs discoverability. The unboxed source alone pushed the
+variant to ~200 bytes and tripped `clippy::result_large_err` across 135 sites,
+which is what forced the context-boxing shape — record it so a future author
+does not "simplify" it back.
+
+**Pre-existing instances (NOT fixed here — out of Phase 4's scope).**
+
+| Variant | Field |
+|---|---|
+| `CompositionError::AtomicWriteFailed` | `#[source] source: Box<ClaudineError>` |
+| `CompositionError::ShellExpansionFailed` | `#[source] error: Box<ShellExpansionError>` |
+| `MarkdownLoadCause::Parse` | `#[from] Box<MarkdownError>` |
+
+`AtomicWriteFailed` is the load-bearing one: it wraps a **`ClaudineError`**, a
+registered Claudine diagnostic, so `io.write_failed`'s inner cause is invisible
+to `as_diagnostic` today. **Phase 6's source-parity test cannot catch this** — it
+proves the registry lists every `impl Diagnostic`, not that every registered type
+is *reachable*. Phase 6 should add a companion check: for each `#[source]` /
+`#[from]` field whose type is `Box<T>` where `T` is a registered diagnostic,
+fail. Phase 5 should decide whether `AtomicWriteFailed` is worth the same
+context-boxing treatment.
+
+---
+
+## D-8 — `escape_prose_path` over-escapes body text
+
+**Finding.** `escape_prose_path` (`composition/error/render/mod.rs`) escapes
+`\ < > { "`. The `"` is there because the helper's primary use is interpolating
+a path into an `<a href="…">` attribute. But Prose's own body-text escape set
+(`Prose::escape_text`) is `< > { * _ [ ] ( ) \` — **no `"`** — so a `"` fed
+through `escape_prose_path` into *body* prose renders as a literal `\"`.
+
+This was latent because paths rarely contain quotes. Phase 4 surfaced it:
+`HarnessError`'s `Display` quotes the reference (`path resolution failed for
+"nope.md"`), and rendering that string through `escape_prose_path` leaked
+`\"nope.md\"` into the user-facing block.
+
+**Ruling.** Body text uses `Prose::escape_text`; `escape_prose_path` is for href
+attributes and path labels. `InvalidFileReference`'s renderer does this and
+`invalid_file_reference_body_does_not_leak_escape_backslashes` locks it.
+
+**Not swept here (Rule 3).** Other renderers pass messages through
+`escape_prose_path` (e.g. `lifecycle::status_block`'s `LifecycleInvalid` arm).
+They are only safe because their messages happen not to contain `"`. Phase 8's
+comment/behavior-drift pass is the natural home for auditing the helper's call
+sites, or splitting it into `escape_href` / `escape_body`.
