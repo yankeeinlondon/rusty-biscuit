@@ -3295,19 +3295,77 @@ static BURNTTOAST_AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::ne
 /// Probe whether the BurntToast PowerShell module is installed.
 fn is_burnttoast_available() -> bool {
     *BURNTTOAST_AVAILABLE.get_or_init(|| {
-        crate::performance::increment_counter(crate::performance::counters::PROC_SPAWNS, 1);
-        let output = std::process::Command::new("pwsh")
-            .args([
+        burnttoast_available_with(
+            "pwsh",
+            &[
                 "-NoProfile",
                 "-Command",
                 "if (Get-Module -ListAvailable BurntToast) { 'yes' } else { 'no' }",
-            ])
-            .output();
-        match output {
-            Ok(out) => String::from_utf8_lossy(&out.stdout).trim() == "yes",
-            Err(_) => false,
-        }
+            ],
+            crate::process::timeouts::WINDOWS_BURNTTOAST,
+        )
     })
+}
+
+fn burnttoast_available_with<S, A>(program: S, args: &[A], timeout: std::time::Duration) -> bool
+where
+    S: AsRef<std::ffi::OsStr>,
+    A: AsRef<std::ffi::OsStr>,
+{
+    crate::process::run_for_stdout(program, args, timeout)
+        .is_some_and(|stdout| burnttoast_output_is_available(&stdout))
+}
+
+fn burnttoast_output_is_available(stdout: &str) -> bool {
+    stdout.trim() == "yes"
+}
+
+#[cfg(test)]
+mod burnttoast_tests {
+    use super::*;
+
+    const SLEEPING_CHILD: &str =
+        "programs::enums::metadata::burnttoast_tests::child_sleeps";
+
+    fn test_child_args(name: &str) -> Vec<std::ffi::OsString> {
+        [name, "--exact", "--ignored", "--nocapture"]
+            .into_iter()
+            .map(Into::into)
+            .collect()
+    }
+
+    #[test]
+    #[ignore = "subprocess fixture invoked by the BurntToast probe tests"]
+    fn child_sleeps() {
+        std::thread::sleep(std::time::Duration::from_secs(30));
+    }
+
+    #[test]
+    fn burnttoast_probe_uses_the_shared_bounded_runner() {
+        let executable = std::env::current_exe().expect("current test executable should resolve");
+        let start = std::time::Instant::now();
+        assert!(!burnttoast_available_with(
+            executable,
+            &test_child_args(SLEEPING_CHILD),
+            std::time::Duration::from_millis(100),
+        ));
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    #[test]
+    fn burnttoast_probe_accepts_only_the_available_marker() {
+        assert!(burnttoast_output_is_available("yes\r\n"));
+        assert!(!burnttoast_output_is_available("no\r\n"));
+        assert!(!burnttoast_output_is_available("yes\nwarning"));
+    }
+
+    #[test]
+    fn burnttoast_timeout_is_named_policy() {
+        assert_eq!(
+            crate::process::timeouts::WINDOWS_BURNTTOAST,
+            std::time::Duration::from_secs(3),
+        );
+    }
 }
 
 // Test runner installation methods

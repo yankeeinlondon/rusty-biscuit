@@ -1,8 +1,8 @@
 //! Bounded subprocess execution.
 //!
 //! Every child process sniff spawns goes through [`run_with_timeout`]. It is the
-//! single place that owns the deadline, the pipe draining, and the reaping, so a
-//! wedged or verbose child can never wedge a detection.
+//! single place that owns the deadline, the pipe draining, and process-tree
+//! termination/reaping, so a wedged or verbose child can never wedge a detection.
 //!
 //! See `sniff/features/2026-07-16-performance/phases/06-remote-network-and-subprocess/spec.md`
 //! for the contract this module implements.
@@ -43,6 +43,10 @@ pub(crate) mod timeouts {
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub(crate) const WINDOWS_TIMEZONE: Duration = Duration::from_secs(3);
 
+    /// Windows BurntToast PowerShell module probe.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub(crate) const WINDOWS_BURNTTOAST: Duration = Duration::from_secs(3);
+
     /// macOS `diskutil info`.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) const DISKUTIL: Duration = Duration::from_secs(5);
@@ -59,6 +63,146 @@ pub(crate) mod timeouts {
 
 /// How often the deadline is checked while the child runs.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+#[cfg(unix)]
+mod process_tree {
+    use std::process::{Child, Command};
+
+    use std::os::unix::process::CommandExt;
+
+    pub(super) struct ProcessTree {
+        process_group: libc::pid_t,
+    }
+
+    pub(super) fn configure(command: &mut Command) {
+        command.process_group(0);
+    }
+
+    impl ProcessTree {
+        pub(super) fn attach(child: &Child) -> std::io::Result<Self> {
+            let process_group = libc::pid_t::try_from(child.id()).map_err(|_| {
+                std::io::Error::other("child process ID does not fit the platform pid_t")
+            })?;
+            Ok(Self { process_group })
+        }
+
+        pub(super) fn terminate(&self) -> std::io::Result<()> {
+            // SAFETY: `configure` creates a fresh process group whose ID is the
+            // direct child's PID. A negative PID addresses that group only.
+            let result = unsafe { libc::kill(-self.process_group, libc::SIGKILL) };
+            if result == 0 {
+                return Ok(());
+            }
+
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::ESRCH) {
+                Ok(())
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+mod process_tree {
+    use std::os::windows::io::AsRawHandle;
+    use std::os::windows::process::CommandExt;
+    use std::process::{Child, Command};
+
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+    };
+    use windows::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, TerminateJobObject,
+    };
+    use windows::Win32::System::Threading::{
+        CREATE_SUSPENDED, OpenThread, ResumeThread, THREAD_SUSPEND_RESUME,
+    };
+    use windows::core::Owned;
+
+    pub(super) struct ProcessTree {
+        job: Owned<HANDLE>,
+    }
+
+    pub(super) fn configure(command: &mut Command) {
+        command.creation_flags(CREATE_SUSPENDED.0);
+    }
+
+    impl ProcessTree {
+        pub(super) fn attach(child: &Child) -> std::io::Result<Self> {
+            // The process is still suspended, so it cannot create a descendant
+            // before assignment to the job. Every owned raw handle is wrapped
+            // immediately and remains valid for each Win32 call below.
+            unsafe {
+                let job = Owned::new(
+                    CreateJobObjectW(None, windows::core::PCWSTR::null())
+                        .map_err(std::io::Error::other)?,
+                );
+                let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+                limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                SetInformationJobObject(
+                    *job,
+                    JobObjectExtendedLimitInformation,
+                    std::ptr::from_ref(&limits).cast(),
+                    std::mem::size_of_val(&limits) as u32,
+                )
+                .map_err(std::io::Error::other)?;
+
+                let process = HANDLE(child.as_raw_handle());
+                AssignProcessToJobObject(*job, process).map_err(std::io::Error::other)?;
+                resume_primary_thread(child.id())?;
+
+                Ok(Self { job })
+            }
+        }
+
+        pub(super) fn terminate(&self) -> std::io::Result<()> {
+            // SAFETY: `job` is an owned, live Job Object handle. Termination is
+            // idempotent for the helper's cleanup paths.
+            unsafe { TerminateJobObject(*self.job, 1).map_err(std::io::Error::other) }
+        }
+    }
+
+    unsafe fn resume_primary_thread(process_id: u32) -> std::io::Result<()> {
+        // SAFETY: the snapshot and thread handles are owned for this scope. The
+        // child was created suspended and has exactly one initial thread before
+        // this function resumes it.
+        unsafe {
+            let snapshot = Owned::new(
+                CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0)
+                    .map_err(std::io::Error::other)?,
+            );
+            let mut entry = THREADENTRY32 {
+                dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+                ..Default::default()
+            };
+            Thread32First(*snapshot, &mut entry).map_err(std::io::Error::other)?;
+
+            loop {
+                if entry.th32OwnerProcessID == process_id {
+                    let thread = Owned::new(
+                        OpenThread(THREAD_SUSPEND_RESUME, false, entry.th32ThreadID)
+                            .map_err(std::io::Error::other)?,
+                    );
+                    if ResumeThread(*thread) == u32::MAX {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    return Ok(());
+                }
+                if Thread32Next(*snapshot, &mut entry).is_err() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "suspended child process has no thread",
+                    ));
+                }
+            }
+        }
+    }
+}
 
 /// Captured result of a completed child process.
 #[derive(Debug)]
@@ -139,14 +283,26 @@ where
     S: AsRef<OsStr>,
     A: AsRef<OsStr>,
 {
-    let mut child = Command::new(program.as_ref())
+    let mut command = Command::new(program.as_ref());
+    command
         .args(args.iter().map(AsRef::as_ref))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    process_tree::configure(&mut command);
+
+    let mut child = command
         .spawn()
         .map_err(ProcessError::Spawn)?;
     performance::increment_counter(counters::PROC_SPAWNS, 1);
+    let process_tree = match process_tree::ProcessTree::attach(&child) {
+        Ok(process_tree) => process_tree,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(ProcessError::Spawn(error));
+        }
+    };
 
     // Drain both pipes concurrently with the wait. `take()` moves the handles out
     // so dropping `child` later cannot close them from under the readers.
@@ -175,9 +331,9 @@ where
                     warn!(
                         program = %program.as_ref().to_string_lossy(),
                         timeout_ms = timeout.as_millis(),
-                        "subprocess exceeded its deadline; killing"
+                        "subprocess exceeded its deadline; killing process tree"
                     );
-                    let _ = child.kill();
+                    let _ = process_tree.terminate();
                     // Reap, so the killed child cannot linger as a zombie.
                     let _ = child.wait();
                     break Err(ProcessError::Timeout);
@@ -185,16 +341,21 @@ where
                 std::thread::sleep(POLL_INTERVAL);
             }
             Err(e) => {
-                let _ = child.kill();
+                let _ = process_tree.terminate();
                 let _ = child.wait();
                 break Err(ProcessError::Spawn(e));
             }
         }
     };
 
-    // The child has exited or been killed and reaped, so its pipe write ends are
-    // closed and both readers see EOF. Join on every path so no drain thread can
-    // outlive this call. A panicked reader degrades to empty output.
+    // The direct child may exit while a descendant still owns an inherited pipe
+    // handle. End the tree before joining readers so those handles cannot extend
+    // the helper's advertised deadline.
+    let _ = process_tree.terminate();
+
+    // The process tree has ended, so every inherited pipe write handle is closed
+    // and both readers see EOF. Join on every path so no drain thread can outlive
+    // this call. A panicked reader degrades to empty output.
     let stdout = stdout_handle
         .map(|h| h.join().unwrap_or_default())
         .unwrap_or_default();
@@ -232,6 +393,8 @@ mod tests {
     use super::*;
 
     const LARGE_OUTPUT_CHILD: &str = "process::tests::child_writes_large_output";
+    const PIPE_HOLDING_CHILD: &str = "process::tests::child_spawns_pipe_holding_descendant";
+    const PIPE_HOLDING_DESCENDANT: &str = "process::tests::pipe_holding_descendant";
     const SLEEPING_CHILD: &str = "process::tests::child_sleeps";
 
     fn test_child_args(name: &str) -> Vec<std::ffi::OsString> {
@@ -255,6 +418,23 @@ mod tests {
     #[test]
     #[ignore = "subprocess fixture invoked by the process behavior tests"]
     fn child_sleeps() {
+        std::thread::sleep(Duration::from_secs(30));
+    }
+
+    #[test]
+    #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    fn child_spawns_pipe_holding_descendant() {
+        let executable = std::env::current_exe().expect("current test executable should resolve");
+        let args = test_child_args(PIPE_HOLDING_DESCENDANT);
+        std::process::Command::new(executable)
+            .args(args)
+            .spawn()
+            .expect("pipe-holding descendant should spawn");
+    }
+
+    #[test]
+    #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    fn pipe_holding_descendant() {
         std::thread::sleep(Duration::from_secs(30));
     }
 
@@ -305,6 +485,23 @@ mod tests {
         assert!(
             start.elapsed() < Duration::from_secs(5),
             "killed at deadline, not after the child's own 30s"
+        );
+    }
+
+    /// A descendant can retain inherited stdout/stderr after its direct parent
+    /// exits. Tree cleanup must close those handles before the reader joins.
+    #[test]
+    fn a_pipe_holding_descendant_cannot_extend_the_deadline() {
+        let executable = std::env::current_exe().expect("current test executable should resolve");
+        let args = test_child_args(PIPE_HOLDING_CHILD);
+        let start = Instant::now();
+        let out = run_with_timeout(executable, &args, Duration::from_millis(200))
+            .expect("the direct child exits successfully");
+
+        assert!(out.status.success());
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "descendant-held pipes must not delay reader joins"
         );
     }
 
