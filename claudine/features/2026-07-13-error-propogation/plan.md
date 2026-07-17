@@ -4,6 +4,17 @@ phase: 1
 total_phases: 8
 agent: claude/default
 yolo: "true"
+packages:
+    - claudine-cli
+source_files_during_phase_1:
+    - claudine/cli/tests/characterization_error_routes.rs
+    - .config/nextest.toml
+docs_updated_during_phase_1:
+    - claudine/features/2026-07-13-error-propogation/plan.md
+docs_created_during_phase_1:
+    - claudine/features/2026-07-13-error-propogation/decisions.md
+    - claudine/features/2026-07-13-error-propogation/inventory.md
+skills_files_updated_during_phase_1: []
 ---
 
 # Execution Plan — End-to-End Typed Error Propagation
@@ -73,33 +84,33 @@ Maps to spec §"Acceptance Criteria" 1–9. The plan is done when:
 No production behavior changes. This phase produces the artifacts every later
 phase consumes, and the safety net D10 mandates.
 
-- [ ] **Record the Option A ruling** in `features/2026-07-13-error-propogation/decisions.md`:
+- [x] **Record the Option A ruling** in `features/2026-07-13-error-propogation/decisions.md`:
       Claudine owns semantic adapters; every lower-layer (Darkmatter,
       biscuit-file) error crossing into Claudine is retained as `#[source]` by a
       Claudine diagnostic wrapper. Note Option B's exit condition explicitly.
-- [ ] **Produce the D8 lossy-boundary inventory** at
+- [x] **Produce the D8 lossy-boundary inventory** at
       `features/2026-07-13-error-propogation/inventory.md`. Scan production Rust
       in `claudine/lib/src`, `claudine/cli/src`, `claudine/contract/src`, plus
       crossings from `claudine-gen` and the rendezvous crates into the core CLI.
       Exclude generated sources, fixtures, and snapshot literals **structurally**
       (path-based), not by substring exception.
-- [ ] Classify **every** occurrence as one of: (1) typed provenance defect —
+- [x] Classify **every** occurrence as one of: (1) typed provenance defect —
       replace; (2) genuinely unstructured external text — retain with a written
       reason; (3) presentation-only after the final render boundary — retain.
       Category 1 rows become Phase 4/5 tasks.
-- [ ] Confirm the inventory covers the five named anchors — `error_walker.rs`,
+- [x] Confirm the inventory covers the five named anchors — `error_walker.rs`,
       `lifecycle/context.rs` (`from_action_failure`),
       `harness_orch/loop_control.rs`, `harness/error.rs`
       (`PathResolutionFailed { detail: String }`), and `harness_orch/prompt.rs`
       pre-flight. These are starting points, not the allowlist.
-- [ ] **Enumerate every production `impl Diagnostic for …`** and record it as the
+- [x] **Enumerate every production `impl Diagnostic for …`** and record it as the
       expected-registry baseline for Phase 2 (today: `ClaudineError`,
       `CompositionError`, `HarnessError` — re-derive rather than trusting this).
-- [ ] **[D10] Write characterization tests** capturing *pre-migration* behavior
+- [x] **[D10] Write characterization tests** capturing *pre-migration* behavior
       for each route Phase 4/5 will touch: process exit code, selected lifecycle
       event order, and emission count (exactly-once). These must pass **before
       and after** every later phase, unchanged.
-- [ ] **[D10] Inventory repo-owned lifecycle examples/tests that consume `err.msg`**
+- [x] **[D10] Inventory repo-owned lifecycle examples/tests that consume `err.msg`**
       and record current values, so the documented `err.msg` change to the
       effective diagnostic's concise projection can be verified as still useful
       for TTS/messaging. Cross-check against the known deprecated
