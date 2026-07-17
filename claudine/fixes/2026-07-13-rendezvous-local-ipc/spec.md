@@ -1,6 +1,6 @@
 ---
 status: ready for review
-reviewed: false
+reviewed: true
 created: 2026-07-13
 area: claudine
 packages:
@@ -9,7 +9,7 @@ packages:
     - rendezvous-client
     - rendezvous-daemon
     - claudine-cli
-review_iterations: 0
+review_iterations: 1
 rulings:
     - local transport remains Unix-domain sockets on Unix and named pipes on Windows
     - daemon ownership is per stable OS user account
@@ -503,4 +503,3 @@ The fix is complete when:
   Sniff JSON.
 - Treating root/administrator compromise as preventable by Rendezvous.
 - Automatically trusting or importing the old temp-directory state.
-

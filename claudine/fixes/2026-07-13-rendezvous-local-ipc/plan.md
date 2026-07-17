@@ -1,5 +1,6 @@
 ---
 total_phases: 8
+implemented: true
 created: 2026-07-16
 phase: 8
 agent: codex/default
@@ -19,6 +20,8 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1:
     - claudine/fixes/2026-07-13-rendezvous-local-ipc/change-notes.md
 skills_files_updated_during_phase_1: []
+packages_during_phase_1:
+    - sniff
 source_files_during_phase_2:
     - claudine/rendezvous/core/src/local_endpoint.rs
     - claudine/rendezvous/core/src/local_endpoint/tests.rs
