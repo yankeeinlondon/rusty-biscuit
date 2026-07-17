@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 6
+phase: 7
 total_phases: 14
 agent: claude/default
 yolo: "true"
@@ -133,6 +133,26 @@ docs_updated_during_phase_6:
     - claudine/features/2026-07-13-proxy-with/plan.md
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6: []
+source_files_during_phase_7:
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/overlay.rs
+    - claudine/cli/tests/level2_lifecycle_control.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+docs_updated_during_phase_7:
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
 ---
 
 # Execution Plan — Canonical Document Handoffs and Transient Proxy Frontmatter (`with:`)
@@ -703,47 +723,64 @@ using authored frontmatter plus caller overrides. Phase 8 wires the evaluated
 proxy overlay into that point for both reads. The `proxy.with` path is not
 end-to-end complete, and R4 is not signed off, until Phase 8 passes.
 
-- [ ] Implement the staged canonical boot in order: resolve/read candidate →
+- [x] Implement the staged canonical boot in order: resolve/read candidate →
       apply input layers → derive target-specific repo, selection hints,
       provider/model env, and the early-binding context `initialize` needs →
       parse the bootstrap lifecycle surface → narrow safety gate → run
       `initialize` through the normal evaluator → consume `skip`/`error`/`Proxy`
       atomically → reread the stabilized target → full preparation.
-- [ ] Build the narrow safety gate: parse and approve **every potentially
+- [x] Build the narrow safety gate: parse and approve **every potentially
       selected** `initialize` shell command against the same early-binding
       snapshot, and route all other initialize actions through the existing
       effect/permission engine. It does **not** run target schema validation or
       audit later-event commands. "Initialize before full pre-flight" never means
       "execute unapproved shell."
-- [ ] Make the full post-stabilization audit cover every remaining lifecycle and
+- [x] Make the full post-stabilization audit cover every remaining lifecycle and
       template shell surface and **reuse** exact-command approvals already granted
       by the narrow gate (the cache is keyed on the normalized command string —
       `harness/shell.rs:39`, `:213-240`).
-- [ ] Reread the stabilized target after `initialize` so successful
+- [x] Reread the stabilized target after `initialize` so successful
       initialize-time file/frontmatter mutations are visible, reapply caller
       layers through the shared input-layer assembly point, and do **not** fire
       `initialize` twice. Phase 8 adds the immutable overlay to this same point;
       do not create a temporary overlay-specific read path here.
-- [ ] Support an initialize proxy chaining another atomic proxy; stabilize the
+- [x] Support an initialize proxy chaining another atomic proxy; stabilize the
       chain before committing to provider launch or loop execution.
-- [ ] Error routing at the boundaries: malformed frontmatter or a failure too
+- [x] Error routing at the boundaries: malformed frontmatter or a failure too
       early to construct the target's lifecycle config cannot fire target catch
       events — return the normal typed parse/bootstrap diagnostic. After the
       target lifecycle exists, later bootstrap/preparation failures follow normal
       `failure`/`finalize` routing without emitting either signal more than once.
       Cross-check against `execute_initialize_catch` (`pipeline.rs:1027`) and
       `route_initialize` (`:1086-1140`).
-- [ ] Assert this staging did not create a second composition implementation —
+- [x] Assert this staging did not create a second composition implementation —
       shared work is a shared service with explicit stage boundaries. The Phase 1
       allowlist guard is the mechanical check.
-- [ ] L1: one initialize emission per document; reread-after-mutation observed;
+- [x] L1: one initialize emission per document; reread-after-mutation observed;
       chained initialize proxy stabilizes atomically.
 
-**Validation checkpoint 7**
-- `just test`, `just test-l2` green.
-- Allowlist guard unchanged (no new composer appeared).
-- A test proves an `initialize` shell action is approved by the narrow gate
-  before dispatch, and that the later full audit does not re-prompt for it.
+**Validation checkpoint 7** — PASSED
+- `just test` green for `claudine` (3510) and `claudine-cli` (1982); `just
+  test-l2` green (134). `just lint` green.
+- `claudine-gen::drift::committed_generated_artifacts_match_phase_1_byte_baseline`
+  still fails on its missing archived fixture — absent at `HEAD`, untouched by
+  this phase (same as checkpoint 6).
+- Both Phase 1 drift guards unchanged and green:
+  `composition_seams::compose_with_allowlist_holds_the_line` and
+  `composition_seams::no_new_optional_proxy_target_channel`. No new composer
+  appeared — the staging reuses the canonical service's stage boundaries.
+- The narrow gate before dispatch and the no-re-prompt reuse are proven by
+  `composition::preflight::tests::{initialize_scoped_audit_approves_only_the_initialize_command,
+  full_audit_reuses_the_narrow_gates_approval_without_reprompting}` (L1) and
+  `level2_lifecycle_proxy_target_initialize_shell_is_gated_before_dispatch` (L2,
+  a builtin-blacklisted `rm` that the pre-Phase-7 proxy route executed unaudited).
+- One L2 was rewritten with the change intentional:
+  `level2_lifecycle_proxy_target_lifecycle_parse_failure_routes_blocked_finalize_with_err`
+  → `..._fires_no_catch_events`. It asserted that a target's bootstrap parse
+  failure fires the **source's** `blocked`/`finalize` — a synthetic source
+  closure after the source already handed off, which R7 bans and this phase's
+  error-routing task corrects. The coordinator now discards the source's
+  lifecycle config at the commit.
 
 ---
 
