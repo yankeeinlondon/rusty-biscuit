@@ -206,12 +206,49 @@ impl LifecycleControlAction {
     }
 }
 
+/// One value inside an authored `proxy.with` mapping, typed at parse time.
+///
+/// Leaves are [`Expr`] trees produced by the same rule that types every other
+/// lifecycle action parameter, recursed through arrays and objects. Holding
+/// expressions rather than raw JSON is what lets the handoff preserve a
+/// whole-value span's type: `{{ true }}` stays a bool instead of collapsing to
+/// the string `"true"`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProxyWithValue {
+    /// An authored scalar or interpolation-bearing string.
+    Scalar(Expr),
+    /// An authored YAML `null`. [`Expr`] has no null literal, and `with:`
+    /// values keep their authored types, so null gets its own variant rather
+    /// than forcing authors through `{{ null }}`.
+    Null,
+    /// An authored YAML sequence; elements follow the same rule.
+    Array(Vec<ProxyWithValue>),
+    /// An authored YAML mapping; values follow the same rule. Its keys are
+    /// data, not property names — only the overlay's own top-level keys name
+    /// target frontmatter properties, so only those are span-checked.
+    Object(IndexMap<String, ProxyWithValue>),
+}
+
+/// Why an authored `with:` mapping could not be typed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProxyWithError {
+    /// A top-level key carries an interpolation span. Carries the key verbatim.
+    DynamicKey(String),
+    /// A value could not be typed by the shared action-value rule.
+    Value {
+        /// Path below `with`, e.g. `metadata.area` or `files[0]`.
+        path: String,
+        /// The reason from the shared rule.
+        message: String,
+    },
+}
+
 /// The authored `proxy.with` mapping — a transient top-level frontmatter
 /// overlay for the immediate proxy target.
 ///
-/// Values are held in their authored JSON shape. They are resolved once, at
-/// the source handoff, against the source document's lifecycle context; this
-/// type is the parse-time carrier, not the evaluated overlay.
+/// Values are held as typed [`ProxyWithValue`] trees. They are resolved once,
+/// at the source handoff, against the source document's lifecycle context;
+/// this type is the parse-time carrier, not the evaluated overlay.
 ///
 /// Keys are static YAML strings by construction: [`ProxyWith::new`] is the
 /// only constructor and rejects a key carrying an interpolation span, so a
@@ -220,7 +257,7 @@ impl LifecycleControlAction {
 /// ## Examples
 ///
 /// ```
-/// use claudine::composition::lifecycle::actions::ProxyWith;
+/// use claudine::composition::lifecycle::actions::{ProxyWith, ProxyWithError};
 /// use indexmap::IndexMap;
 ///
 /// let mut authored = IndexMap::new();
@@ -230,27 +267,40 @@ impl LifecycleControlAction {
 ///
 /// let mut dynamic = IndexMap::new();
 /// dynamic.insert("{{ key }}".to_string(), serde_json::json!(1));
-/// assert_eq!(ProxyWith::new(dynamic).unwrap_err(), "{{ key }}");
+/// assert_eq!(
+///     ProxyWith::new(dynamic).unwrap_err(),
+///     ProxyWithError::DynamicKey("{{ key }}".to_string())
+/// );
 /// ```
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct ProxyWith(IndexMap<String, serde_json::Value>);
+pub struct ProxyWith(IndexMap<String, ProxyWithValue>);
 
 impl ProxyWith {
-    /// Build an overlay from an authored mapping.
+    /// Type an overlay from an authored mapping.
     ///
     /// ## Errors
     ///
-    /// Returns the offending key when it carries a `{{ … }}` or `$( … )`
-    /// span. `with:` keys name target frontmatter properties and are never
-    /// interpolated, so a span in a key is an authoring error rather than a
-    /// value to resolve later.
-    pub fn new(authored: IndexMap<String, serde_json::Value>) -> Result<Self, String> {
+    /// [`ProxyWithError::DynamicKey`] when a top-level key carries a `{{ … }}`
+    /// or `$( … )` span — `with:` keys name target frontmatter properties and
+    /// are never interpolated, so a span in a key is an authoring error rather
+    /// than a value to resolve later. [`ProxyWithError::Value`] when a value
+    /// fails the shared action-value rule (e.g. a whole-value span that is not
+    /// a parseable expression).
+    ///
+    /// Keys are checked before values, so an overlay with both faults reports
+    /// the key.
+    pub fn new(authored: IndexMap<String, serde_json::Value>) -> Result<Self, ProxyWithError> {
         for key in authored.keys() {
             if !ExpressionFinder::find_all_plain(key).is_empty() || key.contains("$(") {
-                return Err(key.clone());
+                return Err(ProxyWithError::DynamicKey(key.clone()));
             }
         }
-        Ok(Self(authored))
+        let mut typed = IndexMap::with_capacity(authored.len());
+        for (key, value) in authored {
+            let value = type_with_value(&value, &key)?;
+            typed.insert(key, value);
+        }
+        Ok(Self(typed))
     }
 
     #[allow(missing_docs)]
@@ -263,9 +313,9 @@ impl ProxyWith {
         self.0.len()
     }
 
-    /// The authored value for `key`, or `None` when the overlay does not set
-    /// that property.
-    pub fn get(&self, key: &str) -> Option<&serde_json::Value> {
+    /// The typed value for `key`, or `None` when the overlay does not set that
+    /// property.
+    pub fn get(&self, key: &str) -> Option<&ProxyWithValue> {
         self.0.get(key)
     }
 
@@ -276,8 +326,35 @@ impl ProxyWith {
     /// normalized a nested mapping's keys to sorted order before they reach
     /// here. Overlay semantics are per-key, so no consumer may depend on
     /// order for meaning.
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &serde_json::Value)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &ProxyWithValue)> {
         self.0.iter()
+    }
+}
+
+/// Recurse the shared action-value rule through arrays and objects, tagging
+/// each failure with its path below `with`.
+fn type_with_value(value: &serde_json::Value, path: &str) -> Result<ProxyWithValue, ProxyWithError> {
+    match value {
+        serde_json::Value::Null => Ok(ProxyWithValue::Null),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .enumerate()
+            .map(|(i, item)| type_with_value(item, &format!("{path}[{i}]")))
+            .collect::<Result<Vec<_>, _>>()
+            .map(ProxyWithValue::Array),
+        serde_json::Value::Object(map) => map
+            .iter()
+            .map(|(k, v)| {
+                type_with_value(v, &format!("{path}.{k}")).map(|typed| (k.clone(), typed))
+            })
+            .collect::<Result<IndexMap<_, _>, _>>()
+            .map(ProxyWithValue::Object),
+        scalar => super::action_shape::action_value_to_expr(scalar)
+            .map(ProxyWithValue::Scalar)
+            .map_err(|message| ProxyWithError::Value {
+                path: path.to_string(),
+                message,
+            }),
     }
 }
 

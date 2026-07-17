@@ -27,7 +27,8 @@ use super::error::CompositionError;
 use self::actions::{
     all_lifecycle_verbs, CommunicationAction, CommunicationChannel, ExpressionFunctionAction,
     expression_function_signature, is_known_lifecycle_verb, LifecycleAction, LifecycleActionKind,
-    LifecycleControlAction, LifecycleStackItem, ProxyWith, RetryBackoff, rewrite_to_positional, ShellAction,
+    LifecycleControlAction, LifecycleStackItem, ProxyWith, ProxyWithError,
+    RetryBackoff, rewrite_to_positional, ShellAction,
     SideEffectAction, side_effect_signature,
 };
 use crate::events::{GlobalSettings, TtsSettings};

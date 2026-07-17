@@ -157,7 +157,7 @@ pub fn decide_control(
                 message: message.clone(),
             }
         }
-        StackControl::Proxy { target } => ControlDispatch::Proxy {
+        StackControl::Proxy { target, .. } => ControlDispatch::Proxy {
             target: target.clone(),
         },
         StackControl::Defer { delay, reason } => ControlDispatch::Defer {

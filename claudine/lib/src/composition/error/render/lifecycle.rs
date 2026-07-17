@@ -404,6 +404,32 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 .body(body)
                 .hint("Use a literal key and move the expression into its value.")
         }
+        CompositionError::LifecycleProxyWithEvaluationFailed {
+            source_path,
+            property,
+            path,
+            target,
+            message,
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = format!(
+                "Lifecycle action <cyan>`proxy`</cyan> to <cyan>`{}`</cyan> in {file_link} could \
+                 not resolve <cyan>`{property}.{path}`</cyan>.\n\n{message}\n\n\
+                 The whole <cyan>`with`</cyan> mapping resolves at the source before the handoff, \
+                 so nothing was passed to the target and the source is still active.",
+                escape_prose_path(target)
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "`with` value could not be resolved",
+                ))
+                .body(body)
+                .hint(
+                    "`with:` values resolve against the source document — its live frontmatter, \
+                     `ctx.*`/`env.*`, and the globals valid for this event.",
+                )
+        }
         CompositionError::LifecycleProxyOnlyParameter {
             source_path,
             property,

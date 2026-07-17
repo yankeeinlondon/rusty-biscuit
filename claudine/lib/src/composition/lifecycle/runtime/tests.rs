@@ -555,6 +555,8 @@ fn transition_control_matrix_covers_preflight_and_harness_controls() {
             "proxy handoff",
             StackControl::Proxy {
                 target: "next.md".to_string(),
+                overlay: indexmap::IndexMap::new(),
+                location: crate::composition::ActionLocation::new(LifecycleSignal::Failure, 0, 0),
             },
             true,
             false,
@@ -570,6 +572,8 @@ fn transition_control_matrix_covers_preflight_and_harness_controls() {
             "proxy budget exhausted",
             StackControl::Proxy {
                 target: "next.md".to_string(),
+                overlay: indexmap::IndexMap::new(),
+                location: crate::composition::ActionLocation::new(LifecycleSignal::Failure, 0, 0),
             },
             true,
             false,

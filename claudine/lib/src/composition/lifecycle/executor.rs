@@ -52,6 +52,7 @@ use darkmatter::markdown::compose::expression::{
 };
 use darkmatter::markdown::compose::subtree::{InjectedGlobal, LayeredLookup, SubtreeCompose};
 use darkmatter::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder};
+use indexmap::IndexMap;
 use serde_json::{Map, Value};
 use tracing::warn;
 
@@ -61,9 +62,10 @@ use super::{
     first_undefined_stack_variable, tts_config_from_settings,
 };
 use super::actions::{
-    CommunicationChannel, LifecycleAction, LifecycleActionKind, LifecycleControlAction,
-    RetryBackoff, is_known_side_effect,
+    CommunicationChannel, LifecycleAction, LifecycleActionKind, LifecycleControlAction, ProxyWith,
+    ProxyWithValue, RetryBackoff, is_known_side_effect,
 };
+use crate::composition::coordinator::ActionLocation;
 use super::context::{
     LifecycleCurrent, LifecycleErrorInfo, LifecycleTiming, lifecycle_injected_globals,
 };
@@ -76,7 +78,9 @@ use crate::messaging::RuntimeMessagingSettings;
 /// The parse-time [`LifecycleControlAction`] carries unevaluated [`Expr`]
 /// arguments; this is its post-evaluation form, suitable for the composition
 /// runtime to act on directly.
-#[derive(Debug, Clone, PartialEq, Eq)]
+// `Eq` is intentionally omitted: `Proxy` carries an evaluated overlay of
+// `serde_json::Value` (not `Eq`).
+#[derive(Debug, Clone, PartialEq)]
 pub enum StackControl {
     /// End this event's stack cleanly; outcome unchanged.
     Stop,
@@ -91,9 +95,21 @@ pub enum StackControl {
     },
 
     /// Hand off to another prompt document.
+    ///
+    /// This is everything *evaluation* can know about a handoff. The
+    /// coordinator turns it into an
+    /// [`EvaluatedProxyRequest`][crate::composition::EvaluatedProxyRequest] by
+    /// adding the one thing the lifecycle surface does not own: the
+    /// invocation-wide proxy chain from its run ledger.
     Proxy {
         /// Evaluated target prompt reference (e.g. `@prompts/foo.md`).
         target: String,
+        /// The evaluated `with:` overlay, empty when `with:` was omitted or
+        /// authored as `{}`. Values are resolved data, never templates: no
+        /// `{{ … }}` span survives here into target-time evaluation.
+        overlay: IndexMap<String, Value>,
+        /// Which authored action requested the handoff.
+        location: ActionLocation,
     },
 
     /// Try the current prompt again.
@@ -693,7 +709,7 @@ impl StackExecutionContext<'_> {
         items: &[super::actions::LifecycleStackItem],
         working: &mut Map<String, Value>,
     ) -> LifecycleEventOutcome {
-        for item in items {
+        for (stack_index, item) in items.iter().enumerate() {
             match self.when_matches(item.when.as_ref(), working) {
                 Ok(true) => {}
                 Ok(false) => continue,
@@ -706,8 +722,9 @@ impl StackExecutionContext<'_> {
                     };
                 }
             }
-            for action in &item.actions {
-                match self.run_action(action, working) {
+            for (action_index, action) in item.actions.iter().enumerate() {
+                let location = ActionLocation::new(self.signal, stack_index, action_index);
+                match self.run_action(action, location, working) {
                     ActionStep::Continue => {}
                     ActionStep::Control(control) => {
                         return LifecycleEventOutcome {
@@ -770,8 +787,13 @@ impl StackExecutionContext<'_> {
     /// expression-layer **evaluation** raise always halts the stack and
     /// surfaces, because a thrown guard/interpolation is a defect the author
     /// cannot meaningfully "tolerate" the way a flaky channel send can be.
-    fn run_action(&self, action: &LifecycleAction, working: &mut Map<String, Value>) -> ActionStep {
-        match self.execute_action_inner(action, working) {
+    fn run_action(
+        &self,
+        action: &LifecycleAction,
+        location: ActionLocation,
+        working: &mut Map<String, Value>,
+    ) -> ActionStep {
+        match self.execute_action_inner(action, location, working) {
             Ok(None) => ActionStep::Continue,
             Ok(Some(control)) => ActionStep::Control(control),
             Err(ActionFailure::Evaluation(info)) => {
@@ -815,18 +837,14 @@ impl StackExecutionContext<'_> {
     fn execute_action_inner(
         &self,
         action: &LifecycleAction,
+        location: ActionLocation,
         working: &mut Map<String, Value>,
     ) -> Result<Option<StackControl>, ActionFailure> {
         match &action.kind {
             LifecycleActionKind::LifecycleControl(control) => self
-                .resolve_control(control, working)
+                .resolve_control(control, location, working)
                 .map(Some)
-                .map_err(|msg| {
-                    ActionFailure::Evaluation(LifecycleErrorInfo::from_action_failure(
-                        control.verb(),
-                        msg,
-                    ))
-                }),
+                .map_err(ActionFailure::Evaluation),
             LifecycleActionKind::Communication(comm) => {
                 let message = self.render_message(&comm.message, working).map_err(|msg| {
                     ActionFailure::Evaluation(LifecycleErrorInfo::from_action_failure(
@@ -1132,44 +1150,162 @@ impl StackExecutionContext<'_> {
 
     /// Resolve a parse-time [`LifecycleControlAction`] into a runtime
     /// [`StackControl`] by evaluating its expression arguments against `fm`.
+    ///
+    /// `fm` is the live intra-stack frontmatter, so a preceding
+    /// `set_frontmatter` in the same stack is visible to every argument —
+    /// including a `proxy.with` value.
     fn resolve_control(
         &self,
         control: &LifecycleControlAction,
+        location: ActionLocation,
         fm: &Map<String, Value>,
-    ) -> Result<StackControl, String> {
+    ) -> Result<StackControl, LifecycleErrorInfo> {
         use LifecycleControlAction as C;
+        let verb = control.verb();
+        let untyped = |msg: String| LifecycleErrorInfo::from_action_failure(verb, msg);
         Ok(match control {
             C::Stop => StackControl::Stop,
             C::Skip => StackControl::Skip,
             C::Error { reason } => StackControl::Error {
-                reason: self.eval_opt_string(reason.as_ref(), fm)?,
+                reason: self.eval_opt_string(reason.as_ref(), fm).map_err(untyped)?,
             },
-            C::Proxy { target, .. } => StackControl::Proxy {
-                target: self.render_message(target, fm)?,
-            },
+            C::Proxy { target, with } => {
+                // Atomicity: the target and the *complete* overlay resolve
+                // before this returns, and this returns before anything acts on
+                // the handoff. A failure in either leaves the source active with
+                // no partial overlay installed and the target untouched.
+                let target = self.render_message(target, fm).map_err(untyped)?;
+                let overlay = self.resolve_proxy_with(with, &target, location, fm)?;
+                StackControl::Proxy {
+                    target,
+                    overlay,
+                    location,
+                }
+            }
             C::Retry {
                 max_attempts,
                 backoff,
                 delay,
             } => StackControl::Retry {
-                max_attempts: self.eval_opt_u32(max_attempts.as_ref(), fm)?.unwrap_or(1),
+                max_attempts: self
+                    .eval_opt_u32(max_attempts.as_ref(), fm)
+                    .map_err(untyped)?
+                    .unwrap_or(1),
                 backoff: backoff.unwrap_or(RetryBackoff::Fixed),
                 delay: self
-                    .eval_opt_string(delay.as_ref(), fm)?
+                    .eval_opt_string(delay.as_ref(), fm)
+                    .map_err(untyped)?
                     .unwrap_or_else(|| "0s".to_string()),
             },
             C::Resume {
                 message,
                 max_attempts,
             } => StackControl::Resume {
-                message: self.render_message(message, fm)?,
-                max_attempts: self.eval_opt_u32(max_attempts.as_ref(), fm)?.unwrap_or(1),
+                message: self.render_message(message, fm).map_err(untyped)?,
+                max_attempts: self
+                    .eval_opt_u32(max_attempts.as_ref(), fm)
+                    .map_err(untyped)?
+                    .unwrap_or(1),
             },
             C::Defer { delay, reason } => StackControl::Defer {
-                delay: self.render_message(delay, fm)?,
-                reason: self.eval_opt_string(reason.as_ref(), fm)?,
+                delay: self.render_message(delay, fm).map_err(untyped)?,
+                reason: self.eval_opt_string(reason.as_ref(), fm).map_err(untyped)?,
             },
         })
+    }
+
+    /// Evaluate a whole `proxy.with` mapping into the typed overlay the target
+    /// will receive.
+    ///
+    /// Every value goes through the same DM2 subtree composition the rest of
+    /// the lifecycle surface uses, so `with:` adds no second interpolation
+    /// grammar. The first failing value aborts the whole mapping.
+    fn resolve_proxy_with(
+        &self,
+        with: &ProxyWith,
+        target: &str,
+        location: ActionLocation,
+        fm: &Map<String, Value>,
+    ) -> Result<IndexMap<String, Value>, LifecycleErrorInfo> {
+        let mut overlay = IndexMap::with_capacity(with.len());
+        for (key, value) in with.iter() {
+            let resolved = self
+                .resolve_with_value(value, fm)
+                .map_err(|(suffix, message)| {
+                    let err = CompositionError::LifecycleProxyWithEvaluationFailed {
+                        source_path: self.source_path.to_path_buf(),
+                        property: format!("{}.stack[{}]", location.signal().property_name(), location.stack_index()),
+                        path: format!("action[{}].with.{key}{suffix}", location.action_index()),
+                        target: target.to_string(),
+                        message,
+                    };
+                    LifecycleErrorInfo::from_composition_error(&err)
+                })?;
+            overlay.insert(key.clone(), resolved);
+        }
+        Ok(overlay)
+    }
+
+    /// Resolve one `with:` value tree.
+    ///
+    /// On failure returns the path suffix *below* the overlay key (e.g.
+    /// `.metadata.area`, `[2]`) alongside the reason, so the caller can root a
+    /// diagnostic at the exact nested property without the value ever being
+    /// echoed.
+    fn resolve_with_value(
+        &self,
+        value: &ProxyWithValue,
+        fm: &Map<String, Value>,
+    ) -> Result<Value, (String, String)> {
+        match value {
+            ProxyWithValue::Null => Ok(Value::Null),
+            ProxyWithValue::Scalar(expr) => self
+                .resolve_typed_value(expr, fm)
+                .map_err(|msg| (String::new(), msg)),
+            ProxyWithValue::Array(items) => items
+                .iter()
+                .enumerate()
+                .map(|(i, item)| {
+                    self.resolve_with_value(item, fm)
+                        .map_err(|(suffix, msg)| (format!("[{i}]{suffix}"), msg))
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map(Value::Array),
+            ProxyWithValue::Object(map) => map
+                .iter()
+                .map(|(k, v)| {
+                    self.resolve_with_value(v, fm)
+                        .map(|resolved| (k.clone(), resolved))
+                        .map_err(|(suffix, msg)| (format!(".{k}{suffix}"), msg))
+                })
+                .collect::<Result<Map<_, _>, _>>()
+                .map(Value::Object),
+        }
+    }
+
+    /// Evaluate one expression at event-time, **preserving its type**.
+    ///
+    /// The type-collapsing counterpart of [`Self::render_message`], which folds
+    /// everything to a display string via `scalar_string` — the path that
+    /// reduces `proxy.target` to text. A whole-value span keeps its resolved
+    /// `bool`/number/array/object/null; a mixed string interpolates through DM2
+    /// and stays a string.
+    ///
+    /// Fails closed the same way `render_message` does, and additionally
+    /// rejects a raw span surviving *anywhere* inside a resolved container — a
+    /// `{{ … }}` must never be deferred into target-time evaluation.
+    fn resolve_typed_value(&self, expr: &Expr, fm: &Map<String, Value>) -> Result<Value, String> {
+        if let Some(variable) = first_undefined_stack_variable(expr, Some(fm)) {
+            return Err(format!("references undefined variable `{variable}`"));
+        }
+        let value = self.eval_expr(expr, fm)?;
+        let value = match &value {
+            // A literal-default string may still carry `{{ … }}` spans (mixed
+            // interpolation); DM2 resolves them and rejects a surviving span.
+            Value::String(s) if s.contains("{{") => self.resolve_string_value(s, fm)?,
+            _ => value,
+        };
+        reject_surviving_spans_deep(value)
     }
 
     /// Evaluate an optional expression to a display string.
@@ -1272,6 +1408,28 @@ fn reject_surviving_spans(value: Value) -> Result<Value, String> {
         }
     }
     Ok(value)
+}
+
+/// [`reject_surviving_spans`] extended through arrays and objects.
+///
+/// A whole-value span such as `{{ payload }}` resolves to a container the
+/// scalar guard never looks inside, so a nested raw span would otherwise ride
+/// into the overlay and become a second, target-time evaluation of source
+/// syntax.
+fn reject_surviving_spans_deep(value: Value) -> Result<Value, String> {
+    match value {
+        Value::Array(items) => items
+            .into_iter()
+            .map(reject_surviving_spans_deep)
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array),
+        Value::Object(map) => map
+            .into_iter()
+            .map(|(k, v)| reject_surviving_spans_deep(v).map(|v| (k, v)))
+            .collect::<Result<Map<_, _>, _>>()
+            .map(Value::Object),
+        scalar => reject_surviving_spans(scalar),
+    }
 }
 
 /// Lexically normalize a path (resolve `.`/`..` components) without touching the

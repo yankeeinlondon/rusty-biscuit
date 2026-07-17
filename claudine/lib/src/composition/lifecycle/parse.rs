@@ -945,18 +945,32 @@ fn parse_proxy_with(
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
 
-    ProxyWith::new(authored).map_err(|key| CompositionError::LifecycleProxyWithDynamicKey {
-        source_path: source_file.to_path_buf(),
-        // A dynamic key has no honest dotted representation — `with.{{ x }}`
-        // would name a property that does not exist — so the path stays rooted
-        // at `with` and the key travels in its own field.
-        path: if is_safe_path_segment(&key) {
-            format!("{path}.{key}")
-        } else {
-            path
+    ProxyWith::new(authored).map_err(|err| match err {
+        ProxyWithError::DynamicKey(key) => CompositionError::LifecycleProxyWithDynamicKey {
+            source_path: source_file.to_path_buf(),
+            // A dynamic key has no honest dotted representation — `with.{{ x }}`
+            // would name a property that does not exist — so the path stays rooted
+            // at `with` and the key travels in its own field.
+            path: if is_safe_path_segment(&key) {
+                format!("{path}.{key}")
+            } else {
+                path
+            },
+            property: property_name.to_string(),
+            key,
         },
-        property: property_name.to_string(),
-        key,
+        // A value that fails the shared action-value rule is the same authoring
+        // fault as a bad value on any other key/value parameter, so it reuses
+        // that diagnostic rather than adding a `with`-specific variant.
+        ProxyWithError::Value {
+            path: value_path,
+            message,
+        } => CompositionError::LifecycleActionInvalidLongForm {
+            source_path: source_file.to_path_buf(),
+            property: property_name.to_string(),
+            action: "proxy".to_string(),
+            message: format!("`{path}.{value_path}` is not a valid value: {message}"),
+        },
     })
 }
 

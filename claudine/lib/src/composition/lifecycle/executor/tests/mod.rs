@@ -204,4 +204,5 @@ mod conditions_control;
 mod event_time_interpolation;
 mod filesystem_lookup;
 mod mutation_visibility;
+mod proxy_with_evaluation;
 

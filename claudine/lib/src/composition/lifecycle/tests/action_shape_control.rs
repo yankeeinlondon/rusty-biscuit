@@ -1,6 +1,7 @@
 //! action shape control lifecycle tests.
 
 use super::*;
+use super::actions::ProxyWithValue;
 use darkmatter::markdown::compose::expression::{EvaluationLookup, evaluate};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -1564,9 +1565,11 @@ fn positional_proxy_yields_empty_overlay() {
 }
 
 #[test]
-fn proxy_with_preserves_authored_scalar_and_nested_values() {
-    // Phase 3 stores authored values verbatim; typed resolution happens at the
-    // handoff. Every authored JSON shape must survive parse unchanged.
+fn proxy_with_types_authored_scalar_and_nested_values() {
+    // Every authored JSON shape types through the shared action-value rule,
+    // recursed into arrays and objects. Mixed strings stay literals for
+    // event-time DM2; a whole-value span keeps its parsed expression, which is
+    // what preserves its resolved type at the handoff.
     let fm = json!({
         "failure": {
             "stack": [{"action": {
@@ -1586,17 +1589,73 @@ fn proxy_with_preserves_authored_scalar_and_nested_values() {
     });
     let (_, with) = proxy_action(&fm, LifecycleSignal::Failure);
     assert_eq!(with.len(), 7);
-    assert_eq!(with.get("label"), Some(&json!("phase-{{ iteration }}")));
-    assert_eq!(with.get("attempt"), Some(&json!("{{ iteration }}")));
-    assert_eq!(with.get("ready"), Some(&json!(true)));
-    assert_eq!(with.get("count"), Some(&json!(3)));
-    assert_eq!(with.get("cleared"), Some(&json!(null)));
-    assert_eq!(with.get("files"), Some(&json!(["a.md", "{{ changed }}"])));
     assert_eq!(
-        with.get("metadata"),
-        Some(&json!({"source": "router", "area": "{{ ctx.area }}"}))
+        with.get("label"),
+        Some(&ProxyWithValue::Scalar(Expr::StringLiteral(
+            "phase-{{ iteration }}".into()
+        )))
+    );
+    assert_eq!(
+        with.get("attempt"),
+        Some(&ProxyWithValue::Scalar(Expr::Variable("iteration".into())))
+    );
+    assert_eq!(
+        with.get("ready"),
+        Some(&ProxyWithValue::Scalar(Expr::BoolLiteral(true)))
+    );
+    assert_eq!(
+        with.get("count"),
+        Some(&ProxyWithValue::Scalar(Expr::NumberLiteral(3.0)))
+    );
+    assert_eq!(with.get("cleared"), Some(&ProxyWithValue::Null));
+    assert_eq!(
+        with.get("files"),
+        Some(&ProxyWithValue::Array(vec![
+            ProxyWithValue::Scalar(Expr::StringLiteral("a.md".into())),
+            ProxyWithValue::Scalar(Expr::Variable("changed".into())),
+        ]))
+    );
+    let Some(ProxyWithValue::Object(metadata)) = with.get("metadata") else {
+        panic!("nested mapping types as an object: {:?}", with.get("metadata"));
+    };
+    assert_eq!(
+        metadata.get("source"),
+        Some(&ProxyWithValue::Scalar(Expr::StringLiteral("router".into())))
+    );
+    assert_eq!(
+        metadata.get("area"),
+        Some(&ProxyWithValue::Scalar(Expr::Variable("ctx.area".into())))
     );
     assert_eq!(with.get("absent"), None);
+}
+
+#[test]
+fn proxy_with_rejects_unparseable_whole_value_span() {
+    // A whole-value span is parsed at authoring time, so a malformed expression
+    // is a parse error naming the exact nested path — not an event-time
+    // surprise.
+    let fm = json!({
+        "initialize": {
+            "stack": [{"action": {
+                "action": "proxy",
+                "target": "@next.md",
+                "with": {"metadata": {"area": "{{ && }}"}}
+            }}]
+        }
+    });
+    let err = parse_lifecycle_config(&fm, dummy_path()).expect_err("malformed span rejected");
+    match &err {
+        CompositionError::LifecycleActionInvalidLongForm {
+            action, message, ..
+        } => {
+            assert_eq!(action, "proxy");
+            assert!(
+                message.contains("action[0].with.metadata.area"),
+                "names the exact nested path: {message}"
+            );
+        }
+        other => panic!("expected LifecycleActionInvalidLongForm, got: {other:?}"),
+    }
 }
 
 #[test]
@@ -1712,7 +1771,10 @@ fn static_keys_with_punctuation_are_accepted() {
     });
     let (_, with) = proxy_action(&fm, LifecycleSignal::Initialize);
     assert_eq!(with.len(), 3);
-    assert_eq!(with.get("dotted.key"), Some(&json!(1)));
+    assert_eq!(
+        with.get("dotted.key"),
+        Some(&ProxyWithValue::Scalar(Expr::NumberLiteral(1.0)))
+    );
 }
 
 #[test]
@@ -1863,15 +1925,37 @@ fn proxy_with_authored_yaml_preserves_native_and_quoted_scalar_types() {
         panic!("expected a proxy control action");
     };
 
-    assert_eq!(with.get("native_bool"), Some(&json!(true)));
-    assert_eq!(with.get("quoted_bool"), Some(&json!("true")));
-    assert_eq!(with.get("native_number"), Some(&json!(3)));
-    assert_eq!(with.get("quoted_number"), Some(&json!("3")));
-    assert_eq!(with.get("native_null"), Some(&json!(null)));
-    assert_eq!(with.get("span_bool"), Some(&json!("{{ true }}")));
-    assert_eq!(with.get("mixed"), Some(&json!("phase-{{ iteration }}")));
-    assert_eq!(with.get("nested"), Some(&json!({"area": "{{ ctx.area }}"})));
-    assert_eq!(with.get("list"), Some(&json!(["a", "{{ b }}"])));
+    let scalar = |key: &str| match with.get(key) {
+        Some(ProxyWithValue::Scalar(expr)) => expr.clone(),
+        other => panic!("`{key}` should type as a scalar, got: {other:?}"),
+    };
+
+    assert_eq!(scalar("native_bool"), Expr::BoolLiteral(true));
+    assert_eq!(scalar("quoted_bool"), Expr::StringLiteral("true".into()));
+    assert_eq!(scalar("native_number"), Expr::NumberLiteral(3.0));
+    assert_eq!(scalar("quoted_number"), Expr::StringLiteral("3".into()));
+    assert_eq!(with.get("native_null"), Some(&ProxyWithValue::Null));
+    // The whole-value span parses to the expression, not to its raw text —
+    // that is what lets it resolve to a bool rather than the string "true".
+    assert_eq!(scalar("span_bool"), Expr::BoolLiteral(true));
+    assert_eq!(
+        scalar("mixed"),
+        Expr::StringLiteral("phase-{{ iteration }}".into())
+    );
+    let Some(ProxyWithValue::Object(nested)) = with.get("nested") else {
+        panic!("`nested` should type as an object: {:?}", with.get("nested"));
+    };
+    assert_eq!(
+        nested.get("area"),
+        Some(&ProxyWithValue::Scalar(Expr::Variable("ctx.area".into())))
+    );
+    assert_eq!(
+        with.get("list"),
+        Some(&ProxyWithValue::Array(vec![
+            ProxyWithValue::Scalar(Expr::StringLiteral("a".into())),
+            ProxyWithValue::Scalar(Expr::Variable("b".into())),
+        ]))
+    );
 }
 
 #[test]
@@ -1925,7 +2009,10 @@ fn proxy_with_authored_yaml_non_string_key_is_normalized_to_a_static_string() {
     else {
         panic!("expected a proxy control action");
     };
-    assert_eq!(with.get("1"), Some(&json!("one")));
+    assert_eq!(
+        with.get("1"),
+        Some(&ProxyWithValue::Scalar(Expr::StringLiteral("one".into())))
+    );
 }
 
 #[test]

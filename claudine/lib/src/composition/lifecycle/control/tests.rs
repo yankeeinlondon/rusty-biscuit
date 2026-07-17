@@ -1,4 +1,7 @@
 use super::*;
+use crate::composition::ActionLocation;
+use crate::composition::lifecycle::LifecycleSignal;
+use indexmap::IndexMap;
 
 fn retry(max: u32, backoff: RetryBackoff, delay: &str) -> StackControl {
     StackControl::Retry {
@@ -163,6 +166,8 @@ fn resume_honors_max_attempts() {
 fn proxy_dispatches_target() {
     let control = StackControl::Proxy {
         target: "@prompts/other.md".to_string(),
+        overlay: IndexMap::new(),
+        location: ActionLocation::new(LifecycleSignal::Failure, 0, 0),
     };
     assert_eq!(
         decide_control(&control, 1, 0, false, true),
@@ -196,6 +201,8 @@ fn recovery_controls_dispatch_event_agnostically() {
 
     let proxy = StackControl::Proxy {
         target: "@x.md".to_string(),
+        overlay: IndexMap::new(),
+        location: ActionLocation::new(LifecycleSignal::Failure, 0, 0),
     };
     assert!(matches!(
         decide_control(&proxy, 1, 0, false, true),

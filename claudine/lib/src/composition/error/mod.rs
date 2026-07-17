@@ -554,6 +554,31 @@ pub enum CompositionError {
         key: String,
     },
 
+    /// A `proxy.with` value could not be resolved at event time.
+    ///
+    /// The message carries the underlying expression-layer reason. Neither it
+    /// nor any other field echoes a resolved overlay value: an overlay may
+    /// carry secrets, so a diagnostic names properties, not contents.
+    #[error(
+        "`{property}.{path}` could not be resolved for the proxy to `{target}`: {message} \
+         ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleProxyWithEvaluationFailed {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// The `"{event}.stack[{i}]"` property that fired.
+        property: String,
+        /// The failing path within the stack item, rooted at the action and
+        /// carried down to the exact nested value (e.g.
+        /// `"action[0].with.metadata.area"`).
+        path: String,
+        /// The evaluated proxy target the overlay was being built for.
+        target: String,
+        /// The expression-layer reason.
+        message: String,
+    },
+
     /// A parameter that only `proxy` accepts was authored on another action.
     #[error(
         "lifecycle action `{verb}` in `{property}` does not accept a `{param}` parameter; \
@@ -1785,7 +1810,8 @@ impl CompositionError {
             // locate.
             CompositionError::LifecycleProxyWithNotMapping { property, path, .. }
             | CompositionError::LifecycleProxyWithWholeMapping { property, path, .. }
-            | CompositionError::LifecycleProxyWithDynamicKey { property, path, .. } => {
+            | CompositionError::LifecycleProxyWithDynamicKey { property, path, .. }
+            | CompositionError::LifecycleProxyWithEvaluationFailed { property, path, .. } => {
                 Some(FrontmatterHighlight::Property(format!("{property}.{path}")))
             }
             CompositionError::LifecycleSayConflict(property)

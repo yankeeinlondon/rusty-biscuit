@@ -51,6 +51,7 @@ impl BlockError for CompositionError {
             | CompositionError::LifecycleProxyWithNotMapping { .. }
             | CompositionError::LifecycleProxyWithWholeMapping { .. }
             | CompositionError::LifecycleProxyWithDynamicKey { .. }
+            | CompositionError::LifecycleProxyWithEvaluationFailed { .. }
             | CompositionError::LifecycleProxyOnlyParameter { .. } => lifecycle::status_block(self),
 
             // Schema / frontmatter validation family.
@@ -246,6 +247,7 @@ impl Diagnostic for CompositionError {
             | CompositionError::LifecycleProxyWithNotMapping { .. }
             | CompositionError::LifecycleProxyWithWholeMapping { .. }
             | CompositionError::LifecycleProxyWithDynamicKey { .. }
+            | CompositionError::LifecycleProxyWithEvaluationFailed { .. }
             | CompositionError::LifecycleProxyOnlyParameter { .. }
             | CompositionError::LifecycleEvaluationError { .. } => "composition.lifecycle_invalid",
             // Everything else is a composition failure without a finer code yet.
@@ -446,6 +448,17 @@ impl Diagnostic for CompositionError {
             } => {
                 base["property"] = json!(format!("{property}.{path}"));
                 base["message"] = json!(format!("`with` key `{key}` is not a static string"));
+            }
+            CompositionError::LifecycleProxyWithEvaluationFailed {
+                property,
+                path,
+                target,
+                message,
+                ..
+            } => {
+                base["property"] = json!(format!("{property}.{path}"));
+                base["message"] =
+                    json!(format!("could not be resolved for the proxy to `{target}`: {message}"));
             }
             CompositionError::LifecycleProxyOnlyParameter {
                 property,

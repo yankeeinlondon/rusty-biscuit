@@ -14,7 +14,7 @@ use crate::composition::lifecycle::LifecycleSignal;
 /// shell-preflight resolver already uses for its diagnostics
 /// (`composition::preflight`), so a proxy diagnostic and a shell diagnostic
 /// name the same property the same way.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ActionLocation {
     signal: LifecycleSignal,
     stack_index: usize,
