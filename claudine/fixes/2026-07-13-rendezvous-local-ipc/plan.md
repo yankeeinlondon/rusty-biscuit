@@ -1,7 +1,7 @@
 ---
 total_phases: 8
 created: 2026-07-16
-phase: 5
+phase: 7
 agent: codex/default
 yolo: true
 packages:
@@ -80,6 +80,58 @@ source_files_during_phase_5:
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+    - claudine/rendezvous/core/src/lib.rs
+    - claudine/rendezvous/core/src/socket.rs
+    - claudine/rendezvous/core/src/local_endpoint.rs
+    - claudine/rendezvous/core/src/local_endpoint/test_support.rs
+    - claudine/rendezvous/core/Cargo.toml
+    - claudine/rendezvous/client/src/lib.rs
+    - claudine/rendezvous/client/src/main.rs
+    - claudine/rendezvous/client/Cargo.toml
+    - claudine/rendezvous/client/tests/uds_round_trip.rs
+    - claudine/rendezvous/client/tests/session_log_round_trip.rs
+    - claudine/rendezvous/daemon/src/main.rs
+    - claudine/rendezvous/daemon/src/server.rs
+    - claudine/rendezvous/daemon/src/server/tests.rs
+    - claudine/rendezvous/daemon/src/local_transport/mod.rs
+    - claudine/rendezvous/daemon/Cargo.toml
+    - claudine/rendezvous/daemon/tests/peer_discovery.rs
+    - claudine/rendezvous/daemon/tests/pairing_and_sync.rs
+    - claudine/rendezvous/daemon/tests/phase6_integration.rs
+    - claudine/cli/Cargo.toml
+    - claudine/cli/src/commands/dashboard/mod.rs
+    - claudine/cli/src/commands/dashboard/tests.rs
+    - claudine/cli/src/commands/handle.rs
+    - claudine/cli/src/commands/wrap/session_report.rs
+    - claudine/cli/src/commands/wrap/session_report/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/requeue.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/tests/level2_lifecycle_control.rs
+    - claudine/docs/providers/dispatch-inventory.json
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+packages_during_phase_6:
+    - rendezvous-core
+    - rendezvous-client
+    - rendezvous-daemon
+    - claudine-cli
+source_files_during_phase_7:
+    - claudine/rendezvous/core/src/local_endpoint/tests.rs
+    - claudine/rendezvous/client/src/connector/tests.rs
+    - claudine/rendezvous/client/tests/local_round_trip.rs
+    - claudine/rendezvous/daemon/src/server/tests.rs
+    - claudine/rendezvous/daemon/src/local_transport/windows/tests.rs
+    - .github/workflows/rendezvous-tests.yml
+docs_updated_during_phase_7:
+    - claudine/fixes/2026-07-13-rendezvous-local-ipc/plan.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
+packages_during_phase_7:
+    - rendezvous-core
+    - rendezvous-client
+    - rendezvous-daemon
 ---
 
 # Cross-Platform, Per-User Rendezvous Local IPC — Execution Plan
@@ -381,92 +433,223 @@ implementation cannot duplicate the storage/network stack.
 **Goal:** Complete the atomic public API migration and remove all production
 dependence on the legacy socket vocabulary.
 
-- [ ] Update the daemon binary to accept `--endpoint` /
+- [x] Update the daemon binary to accept `--endpoint` /
   `RENDEZVOUS_ENDPOINT`, resolve `default_local_endpoint()`, select the private
   default data root, call `spawn_local_server`, and log the typed endpoint
   without assuming filesystem display semantics.
-- [ ] Update `rendezvous-test-client` to accept `--endpoint` /
+- [x] Update `rendezvous-test-client` to accept `--endpoint` /
   `RENDEZVOUS_ENDPOINT` as an OS-native value and connect through the portable
   client API.
-- [ ] Migrate dashboard access, lifecycle requeue, hook forwarding/session
+- [x] Migrate dashboard access, lifecycle requeue, hook forwarding/session
   presence in `commands/handle.rs`, wrapped-session status reporting, the test
   client, daemon probes, and all associated tests to `LocalEndpoint` with no
   platform-specific call-site branches.
-- [ ] Move the `rendezvous-daemon` Claudine CLI dev-dependency out of its
+- [x] Move the `rendezvous-daemon` Claudine CLI dev-dependency out of its
   Unix-only target section once daemon-spawning tests compile and run through
   `spawn_local_server` on Windows.
-- [ ] Replace `ServerHandle::socket_path()` with `local_endpoint()` and migrate
+- [x] Replace `ServerHandle::socket_path()` with `local_endpoint()` and migrate
   every daemon/client integration fixture. Use private temporary Unix parents
   or explicit test-only endpoint constructors; never weaken production
   ownership checks for tests.
-- [ ] Remove `RENDEZVOUS_SOCKET`, `--socket`, `default_socket_path`, the public
+- [x] Remove `RENDEZVOUS_SOCKET`, `--socket`, `default_socket_path`, the public
   `socket` module, ambiguous socket/path naming, and obsolete Unix-only test
   gates. Keep legacy names only in historical/superseded documentation that
   explicitly labels them as old behavior.
-- [ ] Update behavior-changing rustdoc/module comments in the same edits,
+- [x] Update behavior-changing rustdoc/module comments in the same edits,
   removing the stale claim that the daemon is Unix-only and avoiding comments
   that merely narrate the implementation.
-- [ ] **Parallelizable:** After the endpoint/server APIs stabilize, migrate the
+- [x] **Parallelizable:** After the endpoint/server APIs stabilize, migrate the
   dashboard/handle group, requeue/session-report group, daemon/test-client
   binaries, and integration fixtures independently.
 
 **Validation checkpoint**
 
-- [ ] Run source searches proving all production local IPC call sites use
+- [x] Run source searches proving all production local IPC call sites use
   `LocalEndpoint`, `rendezvous_client::connect`, and `spawn_local_server`.
-- [ ] Run source searches for the legacy names and review every remaining match
+- [x] Run source searches for the legacy names and review every remaining match
   as either a historical record or a defect.
-- [ ] Run `cd claudine/rendezvous && just test` and the focused Claudine CLI
+    - Zero matches in any `.rs`/`.toml`. Two Markdown matches, both reviewed and
+      neither a defect: `claudine/reviews/2026-06-26-cross-platform/review-1.md`
+      is a dated historical review that *recommended* this rename, and
+      `claudine/docs/rendezvous/current-state.md` still documents the old
+      resolution order — Phase 8 owns that file by name, so it is left for
+      Phase 8 rather than half-corrected here.
+- [x] Run `cd claudine/rendezvous && just test` and the focused Claudine CLI
   dashboard, handle, requeue, and session-report tests on the development host.
+    - `claudine/rendezvous`: 266 passed. Claudine CLI focused suites: 41 passed
+      (dashboard, session-report, requeue, dispatch-inventory) + 10 handle.
+      Full `cd claudine && just test`: 5453 passed. Two pre-existing failures
+      unrelated to this phase, both verified against untouched files:
+      `rendezvous-daemon local_transport::unix::tests::a_directory_at_the_endpoint_is_rejected`
+      (flaky; passes in isolation; file untouched by Phase 6) and
+      `claudine-gen::drift committed_generated_artifacts_match_phase_1_byte_baseline`
+      (missing fixture baseline on HEAD; `claudine/gen` untouched by Phase 6).
 
 ## Phase 7 — Prove Runtime Security and Cross-Platform Behavior
 
 **Goal:** Turn the acceptance matrix into native-host regression and CI gates.
 
-- [ ] Consolidate local-control-plane integration coverage around a portable
+- [x] Consolidate local-control-plane integration coverage around a portable
   daemon/client gRPC round trip that runs on macOS, Linux, and Windows; rename
   Unix-specific test files where their scope becomes cross-platform.
-- [ ] Add Unix integration cases for `0700` runtime/data directories, `0600`
+    - `client/tests/uds_round_trip.rs` → `local_round_trip.rs`; its one
+      remaining `cfg(unix)` case is the socket-unlink assertion, which has no
+      Windows meaning and says so. `server/tests.rs`'s two release tests were
+      Unix-only by accident (they called a `cfg(unix)` helper) and are now
+      portable via an `endpoint_is_bound` probe.
+- [x] Add Unix integration cases for `0700` runtime/data directories, `0600`
   sockets, unsafe parent and endpoint types, stale-versus-active sockets,
   foreign ownership where the runner permits it, and endpoint replacement
   during teardown.
-- [ ] Add Windows integration cases for a real daemon/client gRPC round trip,
+    - Phase 5 landed these in `local_transport/unix/tests.rs` (16 cases, all
+      driving the real `spawn_local_server`). Phase 7 adds the data-root half:
+      `the_data_root_is_created_owner_only`. Foreign *ownership* remains the
+      one gap — planting a foreign-owned entry needs a second UID, which
+      neither the macOS dev host nor a GitHub runner can provision
+      unprivileged.
+- [x] Add Windows integration cases for a real daemon/client gRPC round trip,
   two concurrent clients, bounded `ERROR_PIPE_BUSY` recovery, second-daemon
   exclusion, remote-client rejection, same-user acceptance, DACL contents, and
   other-user denial where CI can provision a second principal.
-- [ ] Add durable-root tests on every native OS proving the default is
+    - Written, not run here (see the checkpoint below). Round trip + same-user
+      acceptance + two concurrent clients: `local_round_trip.rs`, portable, so
+      Windows runs the same assertions macOS does. Bounded `ERROR_PIPE_BUSY`:
+      new `connector/tests.rs::live_pipe`, which saturates a *real* pipe — the
+      pre-existing seam tests fabricate the error and so could not have caught
+      a wrong `ERROR_PIPE_BUSY` constant. Second-daemon exclusion and DACL
+      contents: Phase 5. Remote-client rejection: new
+      `a_remote_form_client_is_refused_while_the_local_one_is_served`.
+      Other-user denial: needs a second principal; not provisionable on a
+      GitHub runner without administrative setup.
+- [x] Add durable-root tests on every native OS proving the default is
   per-user/private, identity and databases share that root, overrides retain
   the authorization policy, and legacy temp state is never imported.
-- [ ] Add call-site round trips for dashboard, lifecycle requeue, hook
+    - Per-user/private default: `default_data_dir_is_the_platform_local_data_directory`
+      + `default_data_dir_is_not_the_legacy_temp_root` + the two new
+      `the_data_root_is_created_*` cases. Shared root:
+      `every_durable_path_sits_under_the_validated_root`. Overrides:
+      `an_overridden_data_root_keeps_the_ownership_policy` (Unix mode) and the
+      new `a_data_root_owned_by_another_account_is_rejected` (Windows
+      ownership — there are no mode bits to check there). Legacy temp:
+      `the_legacy_temp_root_is_neither_selected_nor_read`.
+- [x] Add call-site round trips for dashboard, lifecycle requeue, hook
   forwarding, session reporting, test client, and daemon health/status; ensure
   the portable initialization counter is one for both Unix and Windows.
-- [ ] Add Linux coverage that sets common WSL markers and username variables
+    - The 50 existing call-site tests are now run by the new workflow on all
+      three OSes rather than only on Linux, which is what was missing. The
+      counter assertion (`one_daemon_runs_the_shared_boot_exactly_once`) is
+      transport-neutral and therefore already covers both.
+- [x] Add Linux coverage that sets common WSL markers and username variables
   while asserting `UnixUid`/UDS selection, plus an actual smoke run on a
   Windows-hosted or designated WSL runner; do not close the phase until WSL has
   executed the Unix branch without adding native-Windows SID correlation.
-- [ ] Add or extend a path-filtered Rendezvous workflow to run
+    - Marker coverage added: `wsl_markers_do_not_move_resolution_off_the_uid_and_uds_path`
+      and `wsl_markers_do_not_move_identity_off_the_unix_branch` set
+      `WSL_DISTRO_NAME`/`WSL_INTEROP`/`WSLENV` plus the `USERNAME` that WSL
+      interop really does propagate from the Windows side, and assert
+      `UnixUid` + a UID-qualified socket with no name leaking into it.
+    - **The actual WSL smoke run is not done.** GitHub-hosted runners do not
+      offer WSL, so this needs a self-hosted or manually-attested run. The
+      plan's own instruction is not to close the phase until WSL has executed
+      the Unix branch, so this task is complete only as to the coverage, not
+      the run.
+- [x] Add or extend a path-filtered Rendezvous workflow to run
   `cargo check --all-targets` for `sniff`, all three Rendezvous crates, and
   `claudine-cli`, then run the relevant nextest suites on native
   `macos-latest`, `ubuntu-latest`, and `windows-latest` runners.
-- [ ] Make the Windows Rendezvous runtime leg gating (not soft-fail) and retain
+    - New `.github/workflows/rendezvous-tests.yml`. It deliberately does not
+      use the shared `_area-ci.yml`: that block compile-checks macOS only and
+      soft-fails Windows, and this phase requires the opposite of both.
+- [x] Make the Windows Rendezvous runtime leg gating (not soft-fail) and retain
   test artifacts/logs that identify endpoint, permission, retry, and teardown
   failures without exposing the full user SID.
-- [ ] Keep Sniff's existing three-OS matrix as the stable-user detector gate;
+    - No `continue-on-error` on any leg. Logs are teed per OS and passed
+      through a redaction step that collapses a user SID's trailing RIDs
+      (`S-1-5-21-…` → `S-1-5-21-<redacted>`) while leaving well-known SIDs and
+      the endpoint/permission/retry/teardown text readable.
+- [x] Keep Sniff's existing three-OS matrix as the stable-user detector gate;
   add the new focused tests to that suite rather than creating a second Sniff
   workflow.
+    - No change needed: `test.yml`'s `sniff-cross-platform` job already runs
+      `cd sniff && just test` on all three OSes, and Phase 1's
+      `sniff::os::user` tests are library unit tests, so that matrix is already
+      the gate. The new workflow adds only Sniff's *compile* check, so a
+      `sniff::os::user` change that breaks a Rendezvous consumer fails against
+      Rendezvous rather than only against Sniff.
 - [ ] **Parallelizable:** Run native macOS, Linux, and Windows validation legs
   concurrently once the migrated test suite is committed to the branch.
+    - Blocked on the branch being pushed, which is a separate operation.
 
 **Validation checkpoint**
 
 - [ ] Confirm green native runtime results for macOS UDS, Linux UDS, and Windows
   named pipes; do not close the phase on cross-compilation-only evidence.
+    - **macOS UDS: green on this host.** `cd claudine/rendezvous && just test`
+      → 271 passed (82 core / 168 daemon / 21 client), `just lint` clean, and
+      the 50 claudine-cli call-site tests pass.
+    - **Linux UDS and Windows named pipes: not confirmed.** Both require the
+      new workflow to actually run, which needs the branch pushed — a separate
+      operation. Windows cannot be run or even cross-compiled here: the
+      daemon's `duckdb-sys` overflows mingw's COFF section limit (`too many
+      sections`), and every crate that reaches the daemon — including the
+      client's own test targets, via its `rendezvous-daemon` dev-dependency —
+      inherits that. MSVC is the real target regardless.
+    - Evidence obtained here instead, which is signatures and not runtime:
+      `cargo check --target x86_64-pc-windows-gnu -p rendezvous-core
+      --all-targets` and `-p rendezvous-client --lib` both compile clean, and a
+      throwaway probe crate compiled this phase's new tokio named-pipe test
+      surfaces (`ServerOptions::first_pipe_instance/max_instances/create`,
+      `ClientOptions::open`, the remote-form open) for `windows-gnu`.
+    - Phase 7 therefore **cannot be closed** on this host. What it can and does
+      deliver is that the Windows leg will compile and gate when it runs: the
+      daemon's own test suite could not have compiled on Windows before this
+      phase (see the defect note below).
 - [ ] Confirm the CI matrix compiles all affected targets and exercises both
   transport branches, including Windows concurrency and busy-retry tests.
+    - Blocked on the same push. The workflow's shape is verified (parses; three
+      OSes; no `continue-on-error`; `--all-targets` over `sniff`,
+      `rendezvous-{core,client,daemon}`, `claudine-cli`), and the redaction
+      filter is verified against sample SID-bearing log text.
 - [ ] Confirm a second user derives a distinct endpoint without consulting
   username environment variables; where multi-principal execution is
   unavailable, require DACL/owner inspection plus a documented external
   multi-user verification record.
+    - Multi-principal execution is unavailable on both the unprivileged macOS
+      dev host and GitHub-hosted runners. The fallback the plan allows —
+      DACL/owner inspection — is covered
+      (`the_pipe_dacl_names_this_user_and_nobody_else`,
+      `the_current_user_descriptor_names_this_account_and_nobody_else`,
+      `a_directory_owned_by_another_account_is_rejected`), and the
+      username-independence half is covered by
+      `default_ignores_username_environment_variables` and the two new WSL
+      cases. **The external multi-user verification record is still owed.**
+
+**Defect found while proving the contract (not introduced by this phase)**
+
+- The daemon's own test suite could not compile on Windows: `server/tests.rs`
+  called a `cfg(unix)` helper and imported `PermissionsExt` from three ungated
+  tests, so `cargo check -p rendezvous-daemon --all-targets` would have failed
+  on the very runner this phase adds. Fixed here — the release tests are now
+  portable and the mode-bit tests are gated with Windows counterparts added.
+  This is precisely what a compile-check-only Windows story hides, and why the
+  new workflow runs `--all-targets`.
+- [ ] **Open, deferred:** every endpoint refusal in `unix::serve`
+  (`ensure_private_dir`, `clear_endpoint`, `bind`) runs *after*
+  `prepare_daemon` has opened redb/DuckDB and spawned the batcher thread and
+  capability refresher — and `PreparedDaemon` has no `Drop`, so dropping it on
+  a transport failure leaks those workers with the storage handles still open.
+  Two consequences: (a) under parallel load this trips nextest's 100ms
+  `leak-timeout` (`result = "fail"` repo-wide), which is the pre-existing flake
+  Phase 6 recorded against `a_directory_at_the_endpoint_is_rejected` and which
+  reappeared here as `a_shared_parent_directory_is_rejected` — a flaky test in
+  a *gating* leg is a real problem; (b) in production a failed bind leaves redb
+  open briefly, which is the `DatabaseAlreadyOpen` trap this codebase already
+  knows about and which `an_incompatible_endpoint_is_rejected_without_booting`
+  exists to prevent for the sibling case. The fix is an ordering change — bind
+  the endpoint before `prepare_daemon`, releasing it via the existing cleanup
+  token if preparation then fails — which reopens Phase 4/5 boot code and
+  touches the Windows transport that cannot be run here. Deferred rather than
+  attempted blind; nextest's `retries = 3` masks it today.
 
 ## Phase 8 — Documentation, Skills, Drift, and Final Validation
 
