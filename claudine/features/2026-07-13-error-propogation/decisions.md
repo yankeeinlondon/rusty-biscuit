@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 1
+phase: 2
 status: ratified
 ---
 
@@ -92,3 +92,69 @@ license to change routing inside this feature.
 feature unifies file-reference resolution and is the natural home for this
 convergence. Sequencing it after this feature keeps the dependency edge acyclic,
 exactly as this spec's reader's note requires.
+
+---
+
+## D-3 — A wrapper is `Transparent` only if it delegates code, detail, *and* rendering
+
+**Decision.** `DiagnosticRole::Transparent` is assigned from the projections a
+variant actually forwards, never from what it wraps. Exactly two variants
+qualify today — `CompositionError::WithFrontmatter` and
+`CompositionError::LifecycleEvaluationAlreadyEmitted` — which is the same pair
+the `BlockError` dispatcher has already called "transparent wrappers" since the
+real-errors work. Everything else defaults to `Semantic`.
+
+The load-bearing consequence is for the variants that carry a **typed Darkmatter
+cause** (`CompositionError::ComposeFailed`, `FrontmatterParse`,
+`InlineHashMalformed`, `PreFlightDiscoveryFailed`, `ShellExpansionFailed`,
+`ClaudineError::SystemPromptComposition`). Their doc comments say they exist "so
+the CLI's top-level walker renders Darkmatter's rich block", which reads like
+transparency — but they are **`Semantic`**. Under Option A a Darkmatter cause
+supplies no facets, so a wrapper that delegated to it would leave the failure
+unclassified. Owning the code and *rendering through* the cause is not a
+contradiction: `ShellExpansionFailed` already builds its `status_block` from
+`error.status_block(term)` while owning `composition.shell_expansion`. Role is
+about who owns the identity; where the pixels come from is `status_block`'s
+business.
+
+**Authority.** [`spec.md`](./spec.md) §D4 — "**transparent** — it delegates both
+rendering and facets to its source" — read against §"Open Questions" Option A,
+which is what makes a Darkmatter cause facet-less.
+
+**⚠️ Hazard this hands to Phase 5.** Today the walker cannot see
+`ClaudineError`/`HarnessError` at all, and `CompositionError::ComposeFailed` &
+friends lose to the deepest Darkmatter block. Once Phase 5 points the walker at
+`select_effective_diagnostic`, those `Semantic` wrappers **win** — and their
+`status_block` currently falls through to the flat catch-all arm
+(`render/provider.rs`), which would replace Darkmatter's rich block (path, line,
+excerpt) with one line of `Display` text. **Phase 5 must make each of those
+variants' `status_block` delegate to its inner cause's block, the way
+`ShellExpansionFailed` does.** The L2 capture suites
+(`level2_invalid_file_reference_capture`, `level2_malformed_frontmatter_capture`)
+are the detectors.
+
+**Reversal condition.** If a Claudine diagnostic ever wraps *another Claudine
+diagnostic* purely to add context, that wrapper is `Transparent` and this ruling
+does not constrain it.
+
+---
+
+## D-4 — Two supporting seams the spec did not name
+
+Both were forced by the code, and both are additive.
+
+**`Diagnostic::diagnostic_source`.** The two transparent wrappers hold `inner:
+Box<CompositionError>` with **no `#[source]`** — promoting it would make
+`color_eyre`'s cause-chain fallback print the same `Display` text twice. So
+`Error::source()` returns `None` and the selection walk would stop *at* the
+wrapper, never reaching the error it delegates to. The trait therefore exposes
+`diagnostic_source()`, defaulting to `Error::source`, which those two override.
+This is also the primitive D9's "one-level next registered cause" needs.
+
+**`select_with(error, discover)`.** The registry is a closed downcast list over
+concrete types, and every Claudine diagnostic that can *terminate* a chain today
+is `Semantic`. The deepest-transparent rule and "a guard keeps the best
+candidate" are therefore unreachable through the public `as_diagnostic` — not
+untrue, just not constructible from shipped types. The walk takes its discovery
+function as a parameter so tests can supply a probe registry and exercise the
+rules the spec ratified. Production always passes `as_diagnostic`.

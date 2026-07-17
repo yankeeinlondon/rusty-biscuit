@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 1
+phase: 2
 total_phases: 8
 agent: claude/default
 yolo: "true"
@@ -15,6 +15,21 @@ docs_created_during_phase_1:
     - claudine/features/2026-07-13-error-propogation/decisions.md
     - claudine/features/2026-07-13-error-propogation/inventory.md
 skills_files_updated_during_phase_1: []
+packages_during_phase_2:
+    - claudine
+    - claudine-cli
+source_files_during_phase_2:
+    - claudine/lib/src/diagnostics/discovery.rs
+    - claudine/lib/src/diagnostics/discovery/tests.rs
+    - claudine/lib/src/diagnostics/mod.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/cli/tests/diagnostic_discovery.rs
+docs_updated_during_phase_2:
+    - claudine/features/2026-07-13-error-propogation/plan.md
+    - claudine/features/2026-07-13-error-propogation/decisions.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 ---
 
 # Execution Plan — End-to-End Typed Error Propagation
@@ -128,28 +143,28 @@ is flaky** — a flaky baseline cannot prove D10 neutrality.
 Library-side contracts. Additive; nothing is rewired to them yet, so this phase
 is behavior-neutral by construction.
 
-- [ ] **[D4] Add the diagnostic role** to the `Diagnostic` trait in
+- [x] **[D4] Add the diagnostic role** to the `Diagnostic` trait in
       `lib/src/diagnostics/mod.rs` as **data or an object-safe method** —
       e.g. `fn role(&self) -> DiagnosticRole` returning `Semantic | Transparent`.
       It must **never** be inferred from enum names or `Display` text. Default
       the method so existing impls compile, then set roles explicitly per variant.
-- [ ] **[D2] Implement the discovery seam** in `lib/src/diagnostics/` :
+- [x] **[D2] Implement the discovery seam** in `lib/src/diagnostics/` :
       `pub fn as_diagnostic(error: &(dyn Error + 'static)) -> Option<&dyn Diagnostic>`.
       It may be `#[doc(hidden)]` but **must be `pub`** — `claudine-cli` is a
       separate crate. Register every concrete Claudine `Diagnostic` type.
-- [ ] **[D2] Implement effective-diagnostic selection** as one shared function
+- [x] **[D2] Implement effective-diagnostic selection** as one shared function
       (outer→inner walk): first `Semantic` wins and stops; if only `Transparent`
       diagnostics are found, the deepest wins. It composes with Darkmatter's
       `as_block_error` for lower-layer causes.
-- [ ] **[D4] Add the traversal guards**: terminate on repeated error-object
+- [x] **[D4] Add the traversal guards**: terminate on repeated error-object
       identity and enforce a generous max depth. Reaching either guard is logged
       and **must not** discard the best candidate already selected.
-- [ ] *(parallelizable)* **[L1]** Test: every `Diagnostic` impl is discoverable
+- [x] *(parallelizable)* **[L1]** Test: every `Diagnostic` impl is discoverable
       after erasure to `dyn Error`.
-- [ ] *(parallelizable)* **[L1]** Test: nested Claudine → Darkmatter →
+- [x] *(parallelizable)* **[L1]** Test: nested Claudine → Darkmatter →
       biscuit-file chains select the expected diagnostic under both `Semantic`
       and `Transparent` wrapper cases.
-- [ ] *(parallelizable)* **[L1]** Test: a cyclic and an over-depth `source()`
+- [x] *(parallelizable)* **[L1]** Test: a cyclic and an over-depth `source()`
       chain terminate and preserve the best pre-guard selection.
 
 **⛔ Checkpoint 2** — `just test` green; selection function has explicit test
