@@ -599,12 +599,27 @@ fn level2_lifecycle_failure_stack_observes_err_payload() {
 
 /// `blocked.stack` observes the runtime `err` payload (review-4 critical
 /// finding). A blacklisted shell command in `start.stack` fails shell audit
-/// during composition preflight and routes through
-/// `LifecycleErrorInfo::from_action_failure("shell_approval", fail_msg)`, so
+/// during composition preflight and routes through the blocked path, so
 /// `err.kind`/`err.variant` must reach the stack expression engine.
 ///
 /// The provider is never invoked on the blocked path, so `provider-ran`
 /// stays absent.
+///
+/// ## The migrated values
+///
+/// This site used to call
+/// `LifecycleErrorInfo::from_action_failure("shell_approval", fail_msg)`, which
+/// synthesized the facet-less labels `err.kind = "LifecycleAction"` and
+/// `err.variant = "shell_approval"`. Error-propagation Phase 5 (§D7) pointed it
+/// at the typed `CompositionError::PreFlightFailed` instead, and `err.kind` /
+/// `err.variant` are now **deprecated aliases** of `err.category` / `err.code`
+/// — so they project `composition` and `composition.failed`.
+///
+/// The flip is intended (see the feature's `characterization_error_routes.rs`,
+/// which deliberately pins event *order and presence* rather than these values
+/// for exactly this reason). What this test still proves is unchanged and is
+/// the reason it exists: the payload **reaches** the blocked stack's expression
+/// engine at all.
 #[test]
 #[serial(level2_lifecycle)]
 fn level2_lifecycle_blocked_stack_observes_err_payload() {
@@ -628,14 +643,16 @@ fn level2_lifecycle_blocked_stack_observes_err_payload() {
 
     let lines = event_lines(&staged);
     assert!(
-        lines.iter().any(|l| l == "err-kind=LifecycleAction"),
-        "err.kind must reach the blocked stack as 'LifecycleAction'; \
-         events.log was {lines:?}; pane:\n{pane}"
+        lines.iter().any(|l| l == "err-kind=composition"),
+        "err.kind must reach the blocked stack as the typed error's category \
+         ('composition') — it is a deprecated alias of err.category since the \
+         error-propagation migration; events.log was {lines:?}; pane:\n{pane}"
     );
     assert!(
-        lines.iter().any(|l| l == "err-variant=shell_approval"),
-        "err.variant must reach the blocked stack as 'shell_approval'; \
-         events.log was {lines:?}; pane:\n{pane}"
+        lines.iter().any(|l| l == "err-variant=composition.failed"),
+        "err.variant must reach the blocked stack as the typed error's code \
+         ('composition.failed') — it is a deprecated alias of err.code since the \
+         error-propagation migration; events.log was {lines:?}; pane:\n{pane}"
     );
     assert!(
         !lines.iter().any(|l| l == "provider-ran"),
@@ -649,7 +666,8 @@ fn level2_lifecycle_blocked_stack_observes_err_payload() {
 /// audit during composition preflight and routes to `blocked` then `finalize`
 /// with the same `err_info` attached, so the `when: "err"` guard on the
 /// `finalize.stack` must be truthy and observe `err.variant` carrying the
-/// `shell_approval` label.
+/// typed error's code (see the alias note on
+/// `level2_lifecycle_blocked_stack_observes_err_payload`).
 ///
 /// This complements `level2_lifecycle_finalize_stack_observes_err_after_failure`
 /// (which covers the provider-failure route): together they prove the failed-
@@ -684,7 +702,9 @@ fn level2_lifecycle_finalize_stack_observes_err_after_blocked() {
 
     let lines = event_lines(&staged);
     assert!(
-        lines.iter().any(|l| l == "finalize-err-variant=shell_approval"),
+        lines
+            .iter()
+            .any(|l| l == "finalize-err-variant=composition.failed"),
         "err.variant must reach the failed-finalize stack on the blocked route — \
          `when: 'err'` must be truthy after a shell-audit block; \
          events.log was {lines:?}; pane:\n{pane}"
