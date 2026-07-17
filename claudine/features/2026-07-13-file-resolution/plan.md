@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 5
+phase: 6
 total_phases: 8
 agent: claude/default
 yolo: true
@@ -84,9 +84,22 @@ docs_updated_during_phase_5:
     - claudine/features/2026-07-13-file-resolution/plan.md
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+    - claudine/lib/src/harness/resolve.rs
+    - claudine/lib/src/harness/error.rs
+    - claudine/lib/src/composition/lifecycle/control.rs
+    - claudine/lib/src/composition/lifecycle/control/tests.rs
+    - claudine/lib/tests/boundary_lint.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/composition/mod.rs
+docs_updated_during_phase_6:
+    - claudine/features/2026-07-13-file-resolution/plan.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
 packages:
     - biscuit-file
     - darkmatter
+    - claudine
 ---
 
 # Unified File-Reference Resolution — Execution Plan
@@ -307,20 +320,34 @@ No Darkmatter resolution path reads ambient CWD after context capture.
 Satisfies D5's lifecycle surfaces, D6, and D8's Claudine half.
 **Parallelizable with Phase 5.**
 
-- [ ] Delete the private grammar in `resolve_harness_path` (`claudine/lib/src/harness/resolve.rs:25-68`). Its three branches — absolute `:41-43`, `@`→repo-root `:46-53`, and **everything-else → `source_dir.join` `:56-67`** — are the entire defect: `./foo.md` and `foo.md` take the identical path, so implicit never tries repo root. Make it a thin typed adapter over `FileReference` or remove it
-- [ ] Apply the G2 ruling: `@` becomes magic-root search, not repo-root join. Record as an intentional behavior change
-- [ ] Build the request-scoped `FileResolutionContext` from `HarnessResolutionContext` (`resolve.rs:10-15`), sourcing `repository_root` via `sniff` (`claudine/lib/Cargo.toml:15` already has it) and reusing it across the run per D10 — not per reference
-- [ ] Funnel **all four** proxy routes through one resolver with the context of the document authoring the current target (D6): `harness_orch/loop_control/proxy.rs:82-94`, `composition/pipeline.rs:1157-1175`, `harness_orch/loop_control/control_dispatch.rs:176-215`, `composition/looping/engine.rs:414-450`
-- [ ] **Fix the live latent bug:** `control_dispatch.rs:181` calls `resolve_harness_path` directly, bypassing `resolve_proxy_target`'s existence check (`composition/lifecycle/control.rs:246-251`), so a `failure`-stack proxy to a missing file swaps `source_path` to a nonexistent path at `:209-214` instead of failing
-- [ ] **Nested proxy provenance (D6):** when a proxied target authors another proxy, the *target* document becomes the new source. Retaining the original source path is a context-provenance bug. No route may `PathBuf::join` the target directly
-- [ ] Preserve `RematerializeInputs.file_ref_fallback_dir` threading (`composition/types.rs:500`, populated `prepare.rs:181-183,357-359`, forwarded `harness_orch/prompt.rs:80-82`) — this is the **only** path carrying the launch-area anchor into a proxied target's compose. Reconcile it with D2: launch dir is a base for **top-level references only** and must not become a third fallback for nested documents
-- [ ] Land the typed diagnostic per the G1 ruling: replace `detail: String` flattening at `harness/resolve.rs:34,61-64`, `lifecycle/control.rs:249`, and `harness/audit.rs:34` (full typed-error collapse). Fix `harness/error.rs:122-123` where `PathResolutionFailed` emits only `path` and **drops `detail`** from the diagnostic payload
-- [ ] Stop suppressing typed errors into `eyre!` strings at `loop_control/proxy.rs:89-91`, `control_dispatch.rs:183`, `pipeline.rs:1162`. Follow the pattern already done right at `looping/engine.rs:428-437` (`LifecycleErrorInfo::from_harness_error`), which is the only route threading `err.code`/`err.detail.*` today
-- [ ] Widen the boundary lint at `claudine/lib/tests/boundary_lint.rs:60-63` — it is a literal-substring check against one file and will **not** catch the three `eyre!` flattening sites above
-- [ ] L1 tests: proxy delegates to `FileReference` and returns the shared typed diagnostic; **every route produces the same result for the same source/context/reference tuple**; a nested proxy uses the proxied document as its own source
+- [x] Delete the private grammar in `resolve_harness_path` (`claudine/lib/src/harness/resolve.rs:25-68`). Its three branches — absolute `:41-43`, `@`→repo-root `:46-53`, and **everything-else → `source_dir.join` `:56-67`** — are the entire defect: `./foo.md` and `foo.md` take the identical path, so implicit never tries repo root. Make it a thin typed adapter over `FileReference` or remove it — **DONE.** `resolve_harness_path` is now a thin adapter over `FileReference::resolve_detailed` + `FileResolutionContext` (`build_resolution_context`); the three-branch grammar is gone. Existence is now part of resolution (only an existing regular file matches).
+- [x] Apply the G2 ruling: `@` becomes magic-root search, not repo-root join. Record as an intentional behavior change — **DONE** (intentional behavior change). `@foo` now routes through `FileReference` magic search (repo root + configured roots + home); the `@`→repo-root-join and its `RepoRootRequired` error are no longer produced by the resolver. `RepoRootRequired` is *kept* as a variant (5 test fixtures depend on it across lib+cli) but is production-dead.
+- [x] Build the request-scoped `FileResolutionContext` from `HarnessResolutionContext` (`resolve.rs:10-15`), sourcing `repository_root` via `sniff` (`claudine/lib/Cargo.toml:15` already has it) and reusing it across the run per D10 — not per reference — **DONE.** `build_resolution_context` builds the `FileResolutionContext` from the `HarnessResolutionContext`; `repository_root` is the caller's already-`sniff`-discovered root (threaded from `selection.rs:23`), passed verbatim and never re-discovered inside resolution (D10), attached only when it lexically contains `base_dir`.
+- [x] Funnel **all four** proxy routes through one resolver with the context of the document authoring the current target (D6): `harness_orch/loop_control/proxy.rs:82-94`, `composition/pipeline.rs:1157-1175`, `harness_orch/loop_control/control_dispatch.rs:176-215`, `composition/looping/engine.rs:414-450` — **DONE.** All four routes now call `resolve_proxy_target(target, source_path, repo_root)` (control_dispatch was the one holdout, converged this phase); each passes the currently-running document as `source_path`.
+- [x] **Fix the live latent bug:** `control_dispatch.rs:181` calls `resolve_harness_path` directly, bypassing `resolve_proxy_target`'s existence check (`composition/lifecycle/control.rs:246-251`), so a `failure`-stack proxy to a missing file swaps `source_path` to a nonexistent path at `:209-214` instead of failing — **DONE.** `control_dispatch.rs` now calls `resolve_proxy_target` (existence-checking); a missing target fails immediately with a typed `InvalidFileReference`. Guarded by `control_dispatch_does_not_bypass_the_existence_check` in `boundary_lint.rs`.
+- [x] **Nested proxy provenance (D6):** when a proxied target authors another proxy, the *target* document becomes the new source. Retaining the original source path is a context-provenance bug. No route may `PathBuf::join` the target directly — **DONE.** The source-path swap (`control_dispatch.rs:228`, `engine.rs`/`pipeline.rs` re-materialize with the resolved target) makes the target the new source; no route joins directly. Proven by `resolve_proxy_target_nested_provenance_follows_the_target_document`.
+- [x] Preserve `RematerializeInputs.file_ref_fallback_dir` threading (`composition/types.rs:500`, populated `prepare.rs:181-183,357-359`, forwarded `harness_orch/prompt.rs:80-82`) — this is the **only** path carrying the launch-area anchor into a proxied target's compose. Reconcile it with D2: launch dir is a base for **top-level references only** and must not become a third fallback for nested documents — **DONE (preserved untouched).** Proxy *resolution* now anchors on the target document's parent + repository root and never consults `file_ref_fallback_dir`, so it is not a nested-document fallback (D2). The threading into the target's compose is unchanged (CLI compiles/tests green).
+- [x] Land the typed diagnostic per the G1 ruling: replace `detail: String` flattening at `harness/resolve.rs:34,61-64`, `lifecycle/control.rs:249`, and `harness/audit.rs:34` (full typed-error collapse). Fix `harness/error.rs:122-123` where `PathResolutionFailed` emits only `path` and **drops `detail`** from the diagnostic payload — **DONE.** The error-propagation feature already landed the fully-typed `PathResolutionFailed` (typed `PathResolutionFailure`, rich `detail()`) and the `#[source]`-carrying `ShellAuditParseError`. This phase adds `HarnessError::FileReferenceUnresolvable` carrying the typed `Box<FileReferenceError>` (never a flattened string), with a `failure`-slug mapping over the closed catalog vocabulary.
+- [x] Stop suppressing typed errors into `eyre!` strings at `loop_control/proxy.rs:89-91`, `control_dispatch.rs:183`, `pipeline.rs:1162`. Follow the pattern already done right at `looping/engine.rs:428-437` (`LifecycleErrorInfo::from_harness_error`), which is the only route threading `err.code`/`err.detail.*` today — **DONE.** All three CLI routes already wrap the typed `HarnessError` in `CompositionError::InvalidFileReference` (error-propagation); this phase keeps them typed and guards them with `every_proxy_route_uses_the_shared_resolver_and_typed_error`.
+- [x] Widen the boundary lint at `claudine/lib/tests/boundary_lint.rs:60-63` — it is a literal-substring check against one file and will **not** catch the three `eyre!` flattening sites above — **DONE.** Added `every_proxy_route_uses_the_shared_resolver_and_typed_error` (reads the three CLI routes, asserts `resolve_proxy_target` + `InvalidFileReference`) and `control_dispatch_does_not_bypass_the_existence_check`.
+- [x] L1 tests: proxy delegates to `FileReference` and returns the shared typed diagnostic; **every route produces the same result for the same source/context/reference tuple**; a nested proxy uses the proxied document as its own source — **DONE.** `harness::resolve` unit tests (absolute existing/missing, `@` magic, `@`-without-root, `./` source-relative, implicit repository-first, empty), `control::tests` (`resolve_proxy_target_*`: repository-first, explicit source-relative, nested provenance, typed interpolation failure), and `harness::error` tests for the new variant. All four routes share one `resolve_proxy_target`, so testing it covers the tuple-equality claim.
 
-**Checkpoint 6:** `just test` + `just lint` green in `claudine`. All four proxy
-routes provably agree (acceptance 5).
+**Checkpoint 6:** `just lint` green in `claudine`; every Phase-6 target
+(`harness::resolve`, `harness::error`, `lifecycle::control`, `boundary_lint`)
+green. All four proxy routes provably agree (acceptance 5).
+
+> **Pre-existing failures (NOT Phase 6, do not misattribute).** `just test` in
+> `claudine` has **10 failing tests**, all named `*launch_area_fallback*` /
+> launch-area resolution, across `lifecycle::executor::filesystem_lookup` (4),
+> `looping::expression` (1), `preflight` (1), and `schema` (4). They fail
+> **identically at HEAD with Phase 6 stashed** — they are Phase 5's
+> launch-area-fallback removal (Darkmatter) cascading into claudine tests that
+> still ratify the old contract. They resolve through the Darkmatter
+> expression/schema/preflight engine, **not** `resolve_harness_path`/proxy, and
+> Phase 6 touches none of those files. Their fix belongs to **Phase 7**
+> ("Top-level CLI references … use the launch context") / a Phase 5 follow-up:
+> the top-level-vs-nested launch-base contract must be decided before these
+> tests are rewritten. Phase 6 introduces **zero** new failures.
 
 ---
 
