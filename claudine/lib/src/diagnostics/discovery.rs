@@ -171,6 +171,72 @@ pub fn select_effective_diagnostic<'a>(
 /// deepest-transparent and guard-with-candidate rules are unreachable from the
 /// public entry point until a transparent leaf type ships. Tests supply a probe
 /// registry to exercise them.
+/// The next registered diagnostic *below* `diagnostic` in its cause chain.
+///
+/// The one-level cause projection D9's snapshot and the `err.cause.*` globals
+/// expose: unregistered prose causes are walked through, and the first Claudine
+/// diagnostic found below the primary one wins. `err.cause.cause` is not
+/// exposed in v1, so this is deliberately not recursive.
+///
+/// Shares [`select_effective_diagnostic`]'s identity and depth guards, so a
+/// malformed `source()` cannot hang the projection.
+///
+/// ## Examples
+///
+/// ```
+/// use claudine::composition::CompositionError;
+/// use claudine::diagnostics::{as_diagnostic, next_registered_cause};
+/// use std::error::Error;
+///
+/// let wrapped = CompositionError::LifecycleEvaluationAlreadyEmitted {
+///     inner: Box::new(CompositionError::FileNotFound("missing.md".to_string())),
+/// };
+/// let erased: &(dyn Error + 'static) = &wrapped;
+/// let primary = as_diagnostic(erased).unwrap();
+/// assert_eq!(
+///     next_registered_cause(primary).map(|c| c.code()),
+///     Some("composition.invalid_file_reference"),
+/// );
+/// ```
+pub fn next_registered_cause<'a>(
+    diagnostic: &'a (dyn Diagnostic + 'static),
+) -> Option<&'a (dyn Diagnostic + 'static)> {
+    next_registered_cause_with(diagnostic, as_diagnostic)
+}
+
+/// [`next_registered_cause`], parameterized by its discovery function for the
+/// same reason [`select_with`] is.
+fn next_registered_cause_with<'a>(
+    diagnostic: &'a (dyn Diagnostic + 'static),
+    discover: fn(&'a (dyn StdError + 'static)) -> Option<&'a (dyn Diagnostic + 'static)>,
+) -> Option<&'a (dyn Diagnostic + 'static)> {
+    let mut visited: Vec<*const (dyn StdError + 'static)> = Vec::new();
+    let mut current = diagnostic.diagnostic_source();
+
+    while let Some(err) = current {
+        let identity: *const (dyn StdError + 'static) = err;
+        if visited.contains(&identity) {
+            debug!("cause projection stopped: repeated error identity in source chain");
+            return None;
+        }
+        if visited.len() >= MAX_SELECTION_DEPTH {
+            debug!(
+                depth = MAX_SELECTION_DEPTH,
+                "cause projection stopped: source chain exceeded maximum depth"
+            );
+            return None;
+        }
+        visited.push(identity);
+
+        current = match discover(err) {
+            Some(found) => return Some(found),
+            None => err.source(),
+        };
+    }
+
+    None
+}
+
 fn select_with<'a>(
     error: &'a (dyn StdError + 'static),
     discover: fn(&'a (dyn StdError + 'static)) -> Option<&'a (dyn Diagnostic + 'static)>,

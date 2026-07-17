@@ -213,6 +213,72 @@ fn an_over_depth_chain_terminates_and_keeps_the_best_candidate() {
     assert_eq!(probe_name(selected), "candidate");
 }
 
+// -- one-level cause projection --------------------------------------------
+
+#[test]
+fn the_next_registered_cause_is_the_diagnostic_below_the_primary() {
+    let wrapped = CompositionError::LifecycleEvaluationAlreadyEmitted {
+        inner: Box::new(CompositionError::FileNotFound("missing.md".to_string())),
+    };
+    let primary = as_diagnostic(erase(&wrapped)).expect("the wrapper is registered");
+
+    assert_eq!(
+        next_registered_cause(primary).map(|c| c.code()),
+        Some("composition.invalid_file_reference")
+    );
+}
+
+#[test]
+fn a_chain_ending_in_an_unregistered_error_has_no_registered_cause() {
+    // biscuit-file's error is a real typed source, but it is not a Claudine
+    // diagnostic — so there is nothing for `err.cause.*` to project.
+    let err = CompositionError::InvalidReference {
+        reference: "@@bad".to_string(),
+        source: file_reference_error(),
+    };
+    let primary = as_diagnostic(erase(&err)).unwrap();
+
+    assert!(StdError::source(&err).is_some(), "test premise: a source exists");
+    assert!(next_registered_cause(primary).is_none());
+}
+
+#[test]
+fn the_cause_walk_passes_through_unregistered_links() {
+    // "Next *registered* cause" — prose links in between are stepped over
+    // rather than terminating the projection.
+    let buried = Probe::new("buried", DiagnosticRole::Semantic, None);
+    let link = Link::new("untyped context", Some(Box::new(buried)));
+    let outer = Probe::new("outer", DiagnosticRole::Semantic, Some(Box::new(link)));
+
+    let found = next_registered_cause_with(&outer, probe_registry).expect("a cause is found");
+
+    assert_eq!(found.to_string(), "buried");
+}
+
+#[test]
+fn the_cause_walk_terminates_on_a_cyclic_chain() {
+    let outer = Probe::new(
+        "outer",
+        DiagnosticRole::Semantic,
+        Some(Box::new(SelfCycle)),
+    );
+    assert!(next_registered_cause_with(&outer, probe_registry).is_none());
+}
+
+#[test]
+fn the_cause_walk_terminates_on_an_over_depth_chain() {
+    // The cause sits past the depth cap: the projection stops empty rather
+    // than walking a pathological chain to find it.
+    let mut chain: Box<dyn StdError + Send + Sync + 'static> =
+        Box::new(Probe::new("beyond", DiagnosticRole::Semantic, None));
+    for i in 0..(MAX_SELECTION_DEPTH * 2) {
+        chain = Box::new(Link::new(&format!("link {i}"), Some(chain)));
+    }
+    let outer = Probe::new("outer", DiagnosticRole::Semantic, Some(chain));
+
+    assert!(next_registered_cause_with(&outer, probe_registry).is_none());
+}
+
 // -- probes ----------------------------------------------------------------
 
 /// A plain untyped error with an optional cause — chain filler.
