@@ -204,7 +204,45 @@ docs_updated_during_phase_11:
     - claudine/features/2026-07-13-proxy-with/plan.md
 docs_created_during_phase_11: []
 skills_files_updated_during_phase_11: []
+# Phase 12 is PARTIAL: both checkpoint gates (cross-route typed identity, overlay
+# redaction) pass, the eyre audit and handoff-failure routing are complete, and
+# the `eyre` audit plus the `ProxyCommitError::source()` fix closed two real
+# defects. One task-3 diagnostic — resume incompatibility after canonical refresh
+# — remains blocked on Phase 9's R6, transitively via Phases 10-11: the session
+# compatibility key's facets are pre-loop launch values, so no facet can move.
+# `phase` therefore stays at 8.
+source_files_during_phase_12:
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+    - claudine/cli/tests/composition_seams.rs
+    - claudine/cli/tests/level2_lifecycle_control.rs
+    - claudine/lib/src/composition/coordinator/commit.rs
+    - claudine/lib/src/composition/coordinator/document.rs
+    - claudine/lib/src/composition/coordinator/handoff.rs
+    - claudine/lib/src/composition/coordinator/tests.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/prepare/service.rs
+    - claudine/lib/src/composition/prepare/service/tests.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/translate.rs
+docs_updated_during_phase_12:
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_12: []
+skills_files_updated_during_phase_12: []
 packages:
+    - claudine
     - claudine-cli
 ---
 
@@ -1301,40 +1339,224 @@ Depends on Phases 3, 4, and 6–11, plus the error-propagation integration gate.
 This phase unifies errors only after every transition producer and target boot
 stage exists.
 
-- [ ] Audit every transition path for `eyre!` stringification of a typed error and
+- [x] Audit every transition path for `eyre!` stringification of a typed error and
       remove it. Resolution, initialization, preparation, schema, shell,
       selection, retry, resume, and proxy failures keep their concrete error and
       source/provenance context to the render boundary.
-- [ ] Guarantee the same target failure has the same typed identity and rendering
+      **The audit separated two populations, and only one was a defect.** The
+      dominant idiom — `emit_*_with_err(...).map(Report::from).unwrap_or_else(|| eyre!("{error}"))`
+      (`loop_control.rs` ×3, `runner.rs` ×2) — is correct as written: the `Some`
+      arm carries the typed error through and `eyre!` fires only when the catch
+      protocol produced *no* typed error, so there is nothing to lose. Left
+      alone. Four sites genuinely discarded a type at construction and were
+      converted:
+      - `proxy.rs` initialize abort → the existing typed
+        `CompositionError::LifecycleInitializeFailed`, which is what the
+        non-loop route already returns, so the two routes now agree.
+      - `proxy.rs` `{control:?}` for retry/resume/defer at initialize → the new
+        `LifecycleTransitionUnownedAtStage` (below).
+      - `loop_control.rs` ×2 "prepared without a lifecycle surface" → the new
+        `LifecycleProxyTargetBootstrapFailed` (below).
+      - `control_dispatch.rs` resume gate: `eyre!("{e}")` re-wrapped an
+        already-`eyre` report into a fresh one carrying only the `Display`
+        string, discarding its cause chain. Now propagates `e`.
+      The one *structural* loss was bigger than any of them and is easy to miss
+      by grepping for `eyre!`: `ProxyCommitError`'s `impl Error` took the
+      default `source()` → `None`, so the typed `HarnessError` /
+      `CompositionError` its variants carry were **unreachable to the renderer**,
+      which selects its styled block by walking `source()` and downcasting. The
+      data was right; the trait plumbing was not, and only the plumbing is what
+      production reads. Tests:
+      `loop_control::tests::coordinator_adoption::{a_rejected_hop_exposes_its_typed_cause_to_the_error_chain,
+      an_unresolvable_target_exposes_its_typed_cause_to_the_error_chain,
+      a_refused_handoff_projects_typed_err_facets_per_variant}` — the first two
+      verified to fail with the `source()` impl reverted.
+      Note `lib/tests/boundary_lint.rs`'s error-transport guard and the repo's
+      `✅ error-transport guard: no un-allowlisted typed-error→String collapses`
+      lint both stayed green throughout: they guard `.to_string()` collapses,
+      and none of these were that shape — which is why they had survived.
+- [x] Guarantee the same target failure has the same typed identity and rendering
       whether the target was direct, proxied from `initialize`, or proxied from
       terminal recovery.
-- [ ] Add the remaining typed diagnostics from the spec's Errors section not
+      **The Phase 8 scope note's gap was the whole of it, and it closed
+      mechanically.** `prepare_document` composed through
+      `prepare_direct_with_prompt` while `compose` and `sequence` composed
+      through `prepare_direct_with_schema` — so the harness route (every
+      proxied, retried, resumed, and loop-refreshed document) surfaced an
+      uncategorized `ComposeFailed(SchemaValidationFailed)` where the identical
+      document invoked directly surfaced typed `SchemaValidation` /
+      `MissingProperties`, and invalid-optional drop-and-retry never ran. The
+      one obstacle was that the schema layer hardcoded `PromptSource::ComposedBody`;
+      `PrepareMode::Direct` now carries the `PromptSource`, so the passthrough
+      case keeps skipping the body-emptiness check. Both proxy routes share one
+      commit point since Phase 6, so they were never the asymmetry — direct vs.
+      harness was.
+      Tests: `composition::prepare::service::tests::{a_schema_failure_has_one_typed_identity_across_every_entry,
+      a_missing_required_property_is_typed_on_the_harness_route,
+      an_invalid_optional_is_dropped_and_recorded_on_the_harness_route,
+      a_supplied_prompt_survives_the_schema_layer_with_an_empty_body}`. The
+      first three were verified to fail with the routing reverted, reporting
+      exactly the `ComposeFailed(SchemaValidationFailed)` the scope note named.
+- [x] Add the remaining typed diagnostics from the spec's Errors section not
       already covered by Phase 3/4: target bootstrap/preparation failure with
       source and proxy provenance; resume incompatibility after canonical refresh;
       and any supported transition returned without an owning coordinator able to
       consume it.
-- [ ] Implement handoff-failure routing: event-aware, no duplicate lifecycle
+      **Two of the three landed; resume incompatibility is blocked on R6.**
+      - `LifecycleProxyTargetBootstrapFailed { target_path, source_path,
+        property, reason }` — the target failed but the `proxy` that named it is
+        the only line the user authored, so the coordinator now retains the
+        committed handoff's provenance (`active_provenance()`) to attribute it.
+        Without that the user sees a document they never named failing for a
+        reason they cannot trace.
+      - `LifecycleTransitionUnownedAtStage { source_path, property, verb, stage,
+        reason }` — for `retry`/`resume`/`defer` reaching `initialize`. It names
+        the *stage* rather than calling the action invalid, because `is_valid_for`
+        makes every control except `skip` universally placeable: the authoring is
+        legal and there is simply no provider attempt yet to act on. Calling it
+        invalid would send the user hunting an authoring mistake they did not make.
+      - **Resume incompatibility after canonical refresh is not written**, and
+        the reason is Phase 11's, unchanged: the session compatibility key does
+        not exist, because its facets are pre-loop launch values rather than
+        document-derived ones. A diagnostic naming facets that cannot move would
+        be untestable and dishonest. Blocked on R6, transitively via Phases 10–11.
+      Both new variants are wired into `frontmatter_block_spec()` and
+      `render/lifecycle.rs::status_block`. While there, `LifecycleProxyCycle` —
+      which predates this phase — turned out to have **no arm in either**, so a
+      proxy cycle rendered through the generic `provider::status_block` catch-all
+      as a bare line. It now has both.
+- [x] Implement handoff-failure routing: event-aware, no duplicate lifecycle
       emission. Before `finalize` it follows the existing failure/finalize
       transition; after `finalize` has fired it surfaces directly; a failure
       inside `finalize` never re-enters `finalize`. A failed handoff never
       half-activates the target.
-- [ ] Status/tracing redaction: status may report that a handoff **includes** an
+      **This task found the phase's real bug.** All six `adopt` sites bare-`?`'d
+      a refused hand-off. On the two terminal routes the terminal event had
+      already fired, so the guard's `Drop` net stayed silent (it fires only on
+      `start_emitted && !terminal_emitted`) and the run exited **without its
+      owed `finalize`** — a `finalize.stack` releasing a lock or posting a
+      status simply never ran, on the path where it mattered most. The
+      "half-activates" half already held (`adopt` rejects before touching
+      identity), so the defect was the mirror image: too *little* emission, not
+      too much. New `error_routing::route_handoff_failure` routes all five
+      in-loop sites; event-awareness is not branched on — it falls out of the
+      guard's emission ledger and the existing `LifecycleCatchProtocol`, which
+      already encode all three arms.
+      Tests: `loop_control::tests::lifecycle_ordering::{a_handoff_failure_after_the_terminal_event_still_runs_the_owed_finalize,
+      a_handoff_failure_before_the_terminal_event_routes_blocked_then_finalize,
+      a_handoff_failure_after_finalize_surfaces_without_re_emitting}`. The first
+      two were verified to fail with the routing reverted to bare propagation;
+      the third passes either way (it asserts nothing fires, which bare
+      propagation trivially satisfies) and is kept as the pin on the third arm.
+- [x] Status/tracing redaction: status may report that a handoff **includes** an
       overlay and tracing may record property names and counts, but neither may
       print overlay values — they can contain secrets. Follow existing redaction
       policy.
-- [ ] Render all new terminal status/diagnostics through `TerminalRenderable`
+      The policy already existed (`DocumentOverlay::property_names`, and
+      `LifecycleProxyWithEvaluationFailed`'s no-echo rule); the gap was that
+      nothing enforced it. `EvaluatedProxyRequest`, `ProxyHandoff`, and
+      `DocumentOverlay` all **derived** `Debug`, printing every overlay value
+      verbatim. No live `tracing::debug!(?handoff)` or `{:?}` existed on these
+      paths, so the leak was latent — but `Debug` is one keystroke from live,
+      and this is the phase that adds status output. All three now implement
+      `Debug` by hand, rendering `key: <redacted>`; `PreparedDocument` derives
+      `Debug` and is covered transitively through `DocumentOverlay`'s impl.
+      Tests: `coordinator::tests::{an_evaluated_request_debug_names_properties_but_never_values,
+      a_committed_handoff_debug_names_properties_but_never_values,
+      a_prepared_document_debug_never_prints_overlay_values,
+      redaction_does_not_hide_overlay_values_from_the_code_that_needs_them}`.
+      All four verified to fail with the derived `Debug`s restored. The
+      secret is planted nested inside an object and an array too, so a
+      top-level-only redaction does not pass.
+- [x] Render all new terminal status/diagnostics through `TerminalRenderable`
       components (`StatusBlock`, `Prose`, lists, tables). No ad hoc
       `println!`/`eprintln!` on any transition path — add a guard or a test.
-- [ ] Note for the seam: this phase adds **no** new error registry or rendering
+      Both new renderers are `StatusBlock`. The guard is
+      `composition_seams::no_ad_hoc_printing_on_a_transition_path`, reusing that
+      file's existing comment/string/`cfg(test)`-blanking scanner over an
+      explicit 12-file transition surface (a repo-wide ban would false-positive
+      on the many legitimate boundary writes). Baseline is one pre-existing site:
+      the Ctrl+C status line, whose content is already component-built.
+- [x] Note for the seam: this phase adds **no** new error registry or rendering
       mechanics. Those belong to `../2026-07-13-error-propogation/spec.md`. If
       that spec has landed by now, use it; if not, keep transport typed and leave
       a `//!` pointer.
+      **It has not landed on this branch** — see the checkpoint. Transport is
+      kept typed and `//!` pointers are in place; no registry or rendering
+      mechanics were added (the two new `status_block` arms use the existing
+      `StatusBlock`/`ErrorHeader` vocabulary).
 
-**Validation checkpoint 12**
-- `just test`, `just test-l2` green.
-- A test asserts identical typed identity + rendered diagnostic for one failure
-  across all three routes (direct / initialize-proxy / recovery-proxy).
-- A test asserts no overlay value appears in status or trace output.
+**Validation checkpoint 12** — **PASSED, with one task blocked and named.**
+
+- `just test` green for `claudine-catalog-types` (21), `claudine` (3518),
+  `claudine-contract` (47), and `claudine-cli` (2021); `just test-l2` green
+  (135, no flakes); `just lint` green.
+- `claudine-gen::drift::committed_generated_artifacts_match_phase_1_byte_baseline`
+  still fails on its missing archived baseline fixture. Absent at `HEAD`,
+  untouched by this phase — `git status claudine/gen` is empty. Same as
+  checkpoints 6–11.
+- Both Phase 1 drift guards green, plus the new print-ban guard
+  (`composition_seams`, 13/13). The `compose_with` allowlist did **not** move:
+  the schema layer calls `prepare_direct_with_prompt`, not `compose_with`, so
+  routing the harness through it added no composer.
+- `dispatch-inventory.json` regenerated: a one-line shift from a test-helper
+  insertion. No new `match Provider` dispatch; site count unchanged.
+
+**The checkpoint's two named gates.**
+
+*Cross-route typed identity* is proven by
+`composition::prepare::service::tests::a_schema_failure_has_one_typed_identity_across_every_entry`,
+which asserts one typed variant **and** one rendered string across all five
+`DocumentEntryReason`s against the direct `prepare_direct_with_schema` baseline.
+It is placed at the preparation layer rather than as three end-to-end runs
+because that is where the asymmetry actually lived — and the asymmetry was **not
+direct-vs-proxy**. Phase 6 gave both proxy routes one commit point, so
+initialize-proxy and recovery-proxy have been identical since then. The real
+split was *direct* vs *harness*: `compose` and `sequence` composed through
+`prepare_direct_with_schema`, `prepare_document` through
+`prepare_direct_with_prompt`. Every proxied, retried, resumed, and
+loop-refreshed document was on the wrong side of it.
+
+*No overlay value in status or trace* is proven by the four
+`coordinator::tests` redaction tests. Note what they are really guarding: there
+is **no** live `tracing::debug!(?handoff)` or `{:?}` on these paths today, so
+nothing leaks at `HEAD`. The exposure was latent in the derived `Debug`s — one
+keystroke from live, in the phase that adds status output. The tests fail with
+the derives restored, so they are a guard on the next change rather than a fix
+for this one.
+
+**On the error-propagation gate.** The dependency is **not satisfied**:
+`features/2026-07-13-error-propogation/` here holds only `spec.md`, still
+`status: draft`. Its implementation lives on unmerged branch
+`error-prop-and-file-resolution`. This phase therefore took the plan's own
+documented alternative (task 7): transport is kept typed, `//!` pointers are in
+place at the seam, and **no** error registry or rendering mechanics were added —
+both new `status_block` arms reuse the existing `StatusBlock`/`ErrorHeader`
+vocabulary. Worth recording for whoever merges that branch: its AC5 was carried
+forward as *unsatisfiable* because "both proxy routes fail at different stages
+against different resolvers." **That premise no longer holds** — Phase 6 made
+the coordinator the sole caller of `resolve_proxy_target`, so the two proxy
+routes now share one resolver and one commit point. AC5 should be re-evaluated
+rather than inherited.
+
+**One L2 was rewritten, and one test's wait was fixed.**
+- `overlay_layering::an_invalid_overlay_fails_the_targets_schema_before_any_launch`
+  asserted `ComposeFailed(SchemaValidationFailed)` — the uncategorized failure
+  Phase 8's scope note explicitly recorded as drift and handed to Phase 12. It
+  now asserts the categorized `SchemaValidation` naming `/topic`. The pre-launch
+  timing its name pins is unchanged.
+- `level2_lifecycle_initialize_proxy_cycle_guarded` waited for `target-init` in
+  the log — a marker written *before* the back-proxy is refused — then captured
+  after a fixed 150ms grace. That raced the error block onto the pane, and the
+  race widened once `LifecycleProxyCycle` got a real (taller) `StatusBlock`. It
+  now uses the existing `run_compose_await_exit`, which waits for the sentinel
+  echoed only after claudine exits. Full L2 went from 1 flaky to 0.
+
+**Not done: resume incompatibility (part of task 3), blocked on R6.** Same wall
+as checkpoints 9–11 — the session compatibility key's facets are pre-loop launch
+values, so no facet can move and the diagnostic cannot be honestly written or
+tested. Recommended order is unchanged: land R6 / the relaunch seam, then Phase
+10, then Phase 11's tasks 1–4 and 6, then this one diagnostic.
 
 ---
 
