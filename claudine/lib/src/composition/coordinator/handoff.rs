@@ -316,3 +316,50 @@ impl ProxyHandoff {
         self.overlay
     }
 }
+
+/// A proxy handoff surfaced to the command-owned active-document loop.
+///
+/// Every proxy producer — `initialize` stacks, per-iteration terminal stacks,
+/// and the document-loop gate — returns this one shape to its caller; none of
+/// them swaps its own active document. The two variants distinguish *who*
+/// commits the request against the invocation-wide [`RunLedger`], because a
+/// commit failure routes differently per route (spec "Atomic handoff"):
+///
+/// [`RunLedger`]: super::invocation::RunLedger
+#[derive(Debug, Clone, PartialEq)]
+pub enum SurfacedHandoff {
+    /// An evaluated request awaiting commit by the command-level ledger.
+    ///
+    /// Produced by the `initialize` and document-loop-gate routes, whose
+    /// commit failures follow the setup-error route — the same typed
+    /// diagnostic a direct invocation's `initialize` failure produces, with
+    /// no catch events owed yet.
+    Request(EvaluatedProxyRequest),
+    /// A handoff the provider harness already committed against the shared
+    /// invocation ledger. Terminal routes (`success`/`failure`/`finalize`/
+    /// `start` stacks) commit while the source document's stacks are still
+    /// live so a refused hop routes through the source's `failure`/`finalize`
+    /// with the concrete `err`; a committed handoff then ends the source
+    /// cleanly. The consumer re-prepares the resolved target directly —
+    /// nothing resolves the target again.
+    Committed(Box<ProxyHandoff>),
+}
+
+impl SurfacedHandoff {
+    /// The evaluated overlay this handoff carries, whichever variant it is.
+    pub fn overlay(&self) -> &IndexMap<String, serde_json::Value> {
+        match self {
+            Self::Request(request) => request.overlay(),
+            Self::Committed(handoff) => handoff.overlay(),
+        }
+    }
+
+    /// How the document that requested this handoff reached it, whichever
+    /// variant it is.
+    pub fn provenance(&self) -> &ProxyProvenance {
+        match self {
+            Self::Request(request) => request.provenance(),
+            Self::Committed(handoff) => handoff.provenance(),
+        }
+    }
+}

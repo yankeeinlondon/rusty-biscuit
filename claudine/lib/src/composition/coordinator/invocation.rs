@@ -337,6 +337,17 @@ impl RunLedger {
     }
 }
 
+/// The one invocation-wide [`RunLedger`], shared between the command-owned
+/// active-document loop and the provider harness running inside it.
+///
+/// The command loop owns the ledger; the harness receives a clone of the
+/// `Arc` so a terminal-event proxy can be committed — against this same
+/// chain, never a harness-local copy — while the source document's stacks
+/// are still live to catch a refused hop (spec "Atomic handoff"). Locking is
+/// brief and never re-entrant: a commit or chain read completes before the
+/// harness returns control to the loop.
+pub type SharedRunLedger = std::sync::Arc<std::sync::Mutex<RunLedger>>;
+
 /// The coordinator-supplied capability to mutate a [`RunLedger`].
 ///
 /// Note what is absent: there is no way to shorten the chain, rewind hop

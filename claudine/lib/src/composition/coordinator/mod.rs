@@ -40,10 +40,10 @@ pub use active::{
 pub use document::{DocumentOverlay, PreparedDocument};
 pub use handoff::{
     ActionLocation, EvaluatedProxyRequest, HopApproval, ProxyHandoff, ProxyProvenance,
-    ResolvedProxyTarget,
+    ResolvedProxyTarget, SurfacedHandoff,
 };
 pub use invocation::{
     CommandOutputPolicy, HopRejection, InvocationInputs, InvocationInputsDraft, LaunchDiscovery,
-    LedgerMut, RunLedger, TransitionRecord,
+    LedgerMut, RunLedger, SharedRunLedger, TransitionRecord,
 };
 pub use transition::{DocumentTransition, TransitionAbort};

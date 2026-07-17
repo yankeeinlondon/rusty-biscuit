@@ -803,6 +803,21 @@ pub struct CompositionExecutionRequest {
     /// (opaque, unclassified) rather than an implicit non-Claudine switch.
     /// Drives the INFO status wording only; never affects forwarding.
     pub provider_args_explicit: bool,
+
+    /// The committed proxy handoff's evaluated `with:` overlay for this
+    /// document, when it was reached through a proxy. Re-applied over the
+    /// target's authored frontmatter on every re-materialization
+    /// (retry/resume), so the immutable pre-schema handoff input survives
+    /// refresh exactly as canonical preparation left it. Empty for a
+    /// directly-invoked document.
+    pub proxy_overlay: indexmap::IndexMap<String, serde_json::Value>,
+
+    /// The invocation-wide run ledger, shared with the provider harness so a
+    /// terminal-event proxy can be committed against the one chain while the
+    /// source document's stacks are still live to catch a refused hop.
+    /// `None` for callers with no active-document coordinator (the direct
+    /// wrapper passthrough, whose empty lifecycle can never select a proxy).
+    pub handoff_ledger: Option<crate::composition::SharedRunLedger>,
 }
 
 /// Describes where the sequence definition was found.
