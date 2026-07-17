@@ -3,7 +3,7 @@ status: draft
 reviewed: true
 reviewed_by: claude/default
 reviewed_on: 2026-07-15
-review_iterations: 3
+review_iterations: 5
 created: 2026-07-15
 source_review: ../../reviews/2026-07-12-perf/spec.md
 source_assessment: ../../reviews/2026-07-12-perf/review-3.md
@@ -119,7 +119,7 @@ and cross-platform classification — is in
 | 32 | Open | Each shell directive still clones read-only policy rule collections into a snapshot. | Snapshot once per stage or use safe shared read ownership; preserve the policy state seen by the stage and avoid holding locks while executing commands. | **Implemented** via the Required-Work-6 *"share immutable collections"* option: the rule sets are `Arc`-shared with copy-on-write writes, and `prepare_directive` takes its own view per directive (three refcount bumps, no rule copy). **No behavior change, no owner decision outstanding.** ⚠ An earlier revision hoisted the snapshot to the 3 stage orchestrators, which changed prompt frequency; that was **reverted at review-1** — a mid-stage persist again suppresses a later same-stage prompt (`persistence_mid_stage_is_policy_input_for_the_same_stage` pins 1 approval). Error-path reservation cleanup is verified by a **deterministic** oracle (review-3): `pending_allow_once_for_test()` asserts the runtime's reservation set directly, replacing the wall-clock inference. |
 | 33 | Partial | Remote discovery skips the expensive scan when no HTTP marker exists. | Replace per-expression prefix rescans for line numbers with one forward offset table/pass and measure remote-heavy input. | **Implemented — measured win −82.5 %** (2.394 ms → 419.95 µs) vs a ≥30 % floor; ≈−78 % after discounting build drift. Guard retained. |
 | 34 | Complete | Cleanup change detection no longer clones both full bodies solely to compare them. | No implementation work. | **Unchanged.** |
-| 35 | Partial | The `md delta` full-document clones were removed. | Complete or disposition the seven remaining copy/hash/read sub-items listed below. | **All 7 dispositioned:** 35.1/35.2/35.4/35.5/35.6/35.7 implemented (35.2 **−98.6 %**, 35.6 **−90.9 %**, 35.5 **−37.6 % CLI**); **35.3 no-win → reverted** (four of five call sites regress unconditionally). ⚠ These three figures **supersede** an earlier revision's `−98.8 % / −91.1 % / −18.0 %`: the first two were recomputed from retained raw vectors (review-2), and −18.0 % measured a **superseded** implementation (`540262812`) that no longer exists — the shipped code is −37.6 % vs pre-F35.5. 35.5's public-API violation is **closed**: `diff_hash` / `plan_hash_save_explained` are now `pub(crate)`, reached by `darkmatter-cli` through a `#[doc(hidden)]` `internal` module behind the **non-default** `internal-hash-orchestration` feature. |
+| 35 | Partial | The `md delta` full-document clones were removed. | Complete or disposition the seven remaining copy/hash/read sub-items listed below. | **All 7 dispositioned:** 35.1/35.2/35.4/35.6/35.7 implemented (35.2 **−98.6 %**, 35.6 **−90.9 %**); **35.3 and 35.5's shared-seam step both no-win → reverted.** 35.5 keeps its S0→S1 win (**≈ −16.7 % CLI**) but its S2 cross-call seam (measured −37.6 %) was **removed at review-4**: the `#[doc(hidden)]` `internal` module behind the non-default `internal-hash-orchestration` feature was still additive public API any downstream crate could enable, so it breached compatibility invariant 2. No owner exception was sought or granted; `internal.rs`, the feature, and `plan_hash_save_explained` are deleted and `md hash --diff`/`--save` are back on the public two-call path (double-compute reinstated). A public `compare + explain` pairing API remains a future proposal needing an explicit owner compatibility decision. ⚠ Earlier magnitude figures (`−98.8 % / −91.1 % / −18.0 % / −37.6 %`) are historical: 35.2/35.6 were recomputed from retained raw vectors (review-2), and the 35.5 CLI figures measured now-reverted states. |
 
 Audit totals are 17 complete findings, 13 partial findings, and 5 open or
 correction findings. Finding 18 is counted as complete for its performance
@@ -189,7 +189,10 @@ being adjudicated**. The blocker is **a quiet host, not an owner ruling**; no
 ruling can make a load-110 host resolve a 5 % effect. Predeclared admissibility
 criteria for the required re-run are recorded in
 [`results.md`](./results.md) → *Reference-graph setup remediation*. An owner
-decision is required **only if** a clean re-run lands >5 %.
+decision is required **only if** a clean re-run lands >5 %. The execution
+checklist and all future host-availability attempts, admissibility decisions,
+and results for this deferred measurement belong in
+[`performance-compliance.md`](./performance-compliance.md).
 
 ## Required Work
 
@@ -414,6 +417,13 @@ The following remain independently open:
    most once and reuse it across that mode's comparison/planning and explanation
    output. `--save` may legitimately need separate stored-policy comparison and
    selected-policy baseline artifacts; do not collapse those distinct semantics.
+   **Disposition (review-4): only partially achievable within invariant 2.** The
+   intra-call reuse inside `explain_hash_diff` and `plan_hash_save` shipped and
+   stands. The *cross-call* reuse between the CLI's comparison and explanation
+   could reach `darkmatter-cli` only as new public API, so it was reverted; the
+   CLI computes the artifact twice again. Full satisfaction requires a public
+   pairing API and therefore an explicit owner compatibility decision, deferred.
+   See the Finding 35 audit row.
 6. Make `normalize_body_rhythm` avoid allocating an ANSI-stripped string for
    every output-line check.
 7. Borrow link/image URL and title data through policy application, including
@@ -458,6 +468,13 @@ except for the code change under test. Retain raw samples. A local
 microbenchmark establishes mechanism; an end-to-end command establishes user
 impact. Findings with no repeatable improvement outside noise close through a
 recorded no-win disposition and removal of unnecessary code.
+
+When a required performance capture is deferred because the host cannot meet
+its predeclared admissibility conditions, track the outstanding tasks and all
+subsequent attempts or results in
+[`performance-compliance.md`](./performance-compliance.md). The review that
+identified the gap remains the historical assessment; later implementation
+reviews should carry only the non-performance findings still requiring review.
 
 For Markdown content identities, use Darkmatter's Markdown-aware hashing. Use
 `biscuit-hash` xxHash for non-Markdown content or exact whole-file fixture

@@ -983,12 +983,28 @@ removal — the actual finding — is **retained**.
     API: the seam is `#[cfg(test)]` and crate-private.
   - **The one test that legitimately concerns notification keeps a timeout, but
     not a timing oracle.** `WAITER_BUDGET` is gone; the waiter now runs on its own
-    thread and is consumed with `recv_timeout(NOTIFICATION_BUDGET)` (10 s), with
-    **both its fixtures hoisted out of the window** so it reaches
-    `reserve_allow_once` and parks immediately — otherwise the approver could
-    release before the waiter ever parked and the test would pass while proving
-    nothing. The thread is what turns a missed notification into a *reported*
-    failure rather than a nextest terminate-after timeout.
+    thread and is consumed with `recv_timeout(NOTIFICATION_BUDGET)` (10 s). The
+    thread is what turns a missed notification into a *reported* failure rather
+    than a nextest terminate-after timeout.
+  - **Notification test strengthened at review-4 (2026-07-17): the waiter is now
+    proven parked before release, not inferred from a sleep.** The review-3 shape
+    of `handler_error_notifies_a_waiter_blocked_on_the_same_command` had the
+    approver's handler `sleep(200ms)` and hoist the waiter's fixtures, then trust
+    that the waiter reached `reserve_allow_once` within that window — which
+    review-4 correctly flagged as a false-positive path (a late waiter reserves
+    the command itself and passes while exercising no notification). The test now
+    synchronizes on a test-only hook instead of a sleep:
+    `ShellExpansionRuntime::parked_waiters_for_test(normalized)`
+    (`shell_expansion/types.rs`) reports how many threads are enqueued on
+    `reservation_done` for a command. The count is incremented under the shared
+    mutex immediately before `wait_timeout_while`'s atomic park and decremented
+    after it returns, so a positive reading is *proof* of parking. The approver's
+    handler now spins on `parked_waiters_for_test("echo shared") >= 1` (bounded by
+    a 5 s `WAITER_PARK_DEADLINE` that panics if the waiter never parks) and only
+    then returns its error, so release provably wakes an already-parked peer. The
+    hook is entirely `#[cfg(test)]`-gated — field, increment/decrement, and
+    accessor — so production builds are byte-identical and no `pub(crate)`
+    orchestration logic changed.
   - **Verified load-bearing by deliberate break:** the oracle still catches a real
     leak.
   - **Tests (named, checkable):**
@@ -1381,10 +1397,11 @@ Run records:
   [`benchmarks/raw/f35-residuals/run-20260716T182500-f35-3/`](benchmarks/raw/f35-residuals/run-20260716T182500-f35-3/summary.md)
   (raw Criterion **sample vectors**; retained harness). **Corrects three of the
   original's figures**; disposition unchanged.
-- **35.5 — current:**
+- **35.5 — historical (measures the reverted S2 seam):**
   [`benchmarks/raw/f35-residuals/run-20260716T182500-f35-5/`](benchmarks/raw/f35-residuals/run-20260716T182500-f35-5/summary.md)
-  (raw Criterion **sample vectors** + bracketed CLI vectors; retained harness).
-  **Measured against the CURRENT implementation**, which the original never was.
+  (raw Criterion **sample vectors** + bracketed CLI vectors). Measured the S2
+  shared seam that review-4 reverted; HEAD is S1's call graph, so the surviving
+  figure is the S0→S1 ≈ −16.7 %. The in-crate harness was removed with the seam.
 - **35.6 — current:**
   [`benchmarks/raw/f35-residuals/run-20260716T182214-f35-6/`](benchmarks/raw/f35-residuals/run-20260716T182214-f35-6/summary.md)
   (raw **sample vectors**, interleaved in-process; retained harness).
@@ -1430,7 +1447,7 @@ deleted after capture.
 |---|---|---|---|---|
 | **35.2** `relevel_with_overflow` | **Implemented (win)** | prefix **20.998 ms → 285.86 µs (−98.6 %)**; overflow −98.3 %; extract-only −98.5 %; heading-free control −5.2 % (no regression) | `run-20260716T153400/f35_2_relevel_*-{baseline,candidate}-sample.json` (raw vectors) | OS-identical (byte/line scan; no `cfg`/filesystem) |
 | **35.3** `Arc<str>` fetch bodies | **No-win → reverted** | net **pessimization for 4 of 5 call sites** (+794.73 ns `::file`/preflight/expression); `::code` **break-even** (−0.35 ns), *not* +0.50 µs worse; win unreachable — the whole fetch would have to cost <16 µs to hit the ≥5 % floor | `run-…-f35-3/` (raw vectors) | OS-identical (path inspected, not preclassified); moot — nothing shipped |
-| **35.5** `md hash --diff`/`--save` | **Implemented (win)**, residual **now closed** | CLI **17.61 ms → 10.99 ms (−37.6 %** vs pre-F35.5, drift 3.4 %**)** — *not* the recorded −18.0 %, which measured a superseded state; library `--diff` sequence −50.1 / −50.2 / −42.0 % (CIs disjoint) | `run-…-f35-5/` (raw vectors) | OS-identical (call-graph only; CLI still owns `fs::write`) |
+| **35.5** `md hash --diff`/`--save` | **Partial win; shared-seam step reverted at review-4** | Retained S0→S1 CLI **≈ −16.7 %** stands (the double-compute residual is OPEN again); the S2 seam that measured **−37.6 %** was removed because it could only reach the CLI as public API (invariant 2). Mirrors 35.3. | `run-…-f35-5/` (raw vectors, describe the reverted S2) | OS-identical (call-graph only) |
 | **35.6** `normalize_body_rhythm` | **Implemented (win)** | decorated **169.87 → 15.54 µs (−90.9 %)**; code panel −93.1 %; escape-free control −23.2 % (no regression) | `run-…-f35-6/` (raw vectors) | OS-identical (in-memory regex predicate) |
 | **35.7** link/image policy appliers | **Implemented (win)** at the target operation | empty policy/no title **80.58 → 62.87 µs (−22.0 %)**; empty/with title −12.3 %; hyperlink/no title **−2.1 % (CIs overlap — not a result)**; hyperlink/with title −3.5 %; none regressed | `run-…-f35-7/` (raw vectors) | OS-identical (borrow-vs-clone) |
 
@@ -1452,7 +1469,7 @@ Both are now closed. Status:
 | **F23** render theme snapshot | **Yes** — `run-20260717T012550-f23/` | **Corrected** (−1.14 % / −1.23 %, control at parity — a small *real* win, not the recorded null) |
 | **F25** cleanup-pass profile | **Yes** — `run-20260717T012732-f25/` | **Corrected** (measured ceiling ≤7.98 %, not the reasoned "<7 %") |
 | **35.3** `Arc<str>` fetch bodies | **Yes** — `run-20260716T182500-f35-3/` | **Corrected** (store == clone; `::code` break-even, not +0.50 µs worse) |
-| **35.5** `md hash --diff`/`--save` | **Yes** — `run-20260716T182500-f35-5/` | **Superseded** — the −18.0 % measured an *older* implementation; current code re-measured |
+| **35.5** `md hash --diff`/`--save` | **Yes** — `run-20260716T182500-f35-5/` | **Historical** — measured the S2 seam that review-4 then reverted; HEAD is S1's call graph (≈ −16.7 %) |
 | **35.6** `normalize_body_rhythm` | **Yes** — `run-20260716T182214-f35-6/` | Reproduces (−90.9 % vs −91.1 %) |
 | **35.7** link/image policy appliers | **Yes** — `run-20260716T182232-f35-7/` | Reproduces on 3 of 4 shapes; hyperlink/no-title **downgraded** (−2.1 %, CIs overlap) |
 
@@ -1485,7 +1502,7 @@ deleting was never necessary. The retained harnesses are:
 | Harness | Reaches | Checkpoints |
 |---|---|---|
 | `darkmatter/lib/src/perf_harness.rs` (+ per-module callers) | crate-private targets, `#[cfg(test)]` | F23, F25, 35.6, 35.7 |
-| `darkmatter/lib/benches/phase11_evidence.rs` | public API targets | 35.3, 35.5 |
+| `darkmatter/lib/benches/phase11_evidence.rs` | public API targets | 35.3 (35.5's harness was removed with its reverted seam) |
 | `darkmatter/lib/benches/phase6_interpolation.rs` (`f13_scan_and_replace`) | public API targets | F13, F14 |
 
 Harness tests are `#[ignore]`d and gated on `DM_PERF_RAW_DIR`, so the ordinary
@@ -1504,13 +1521,16 @@ with reproducible evidence — which is the point of the contract:
 - **35.3**'s store cost equals a clone (not 1.75×), so `::code` is **break-even**
   rather than +0.50 µs worse; the no-win verdict survives on a different, more
   robust argument.
-- **35.5**'s −18.0 % CLI figure measured an implementation that **no longer
-  exists** — see that sub-item.
+- **35.5**'s −18.0 % CLI figure measured S1; the −37.6 % re-run measured S2,
+  which review-4 has since reverted. HEAD is back on S1's call graph, so
+  **≈ −16.7 % is the figure that survives** — see that sub-item.
 - **35.7**'s hyperlink/no-title shape is **−2.1 % with overlapping CIs**, not the
   recorded −7.9 %: not a result.
 
-In every case the **disposition** is unchanged; only the evidence and the honest
-magnitude moved.
+In every case *at the time of the re-run* the **disposition** was unchanged;
+only the evidence and the honest magnitude moved. (35.5's disposition changed
+later, at review-4, when its shared seam was reverted for a compatibility reason
+independent of these measurements.)
 
 **Contract change adopted:** a benchmark harness that carries a pinned baseline
 is **retained**, never deleted (see `f13_scan_and_replace` in
@@ -1604,18 +1624,27 @@ removal of the unnecessary code").
   `::code` call site is restored. The cost model is now a **retained** harness
   (`benches/phase11_evidence.rs` → `bench_f35_3_copy_model`); the revert stands.
 
-### 35.5 — `md hash --diff` / `--save` artifact duplication (Implemented in two steps; residual now closed)
+### 35.5 — `md hash --diff` / `--save` artifact duplication (Partially implemented; the shared-seam step REVERTED at review-4)
 
-**This sub-item shipped in two commits, and the recorded −18.0 % measured only
-the first.** Review-2 found "the newly changed F35.5 implementation has no
-reproducible measurement against its current code"; that is confirmed and now
-fixed. Three states exist:
+**Final disposition: the S1 gain stands; the S2 shared seam was removed.** The
+S2 step was implemented and measured (−37.6 % CLI), then reverted because every
+route to exposing it to `darkmatter-cli` was a public-API-shape change that
+compatibility invariant 2 bars. This mirrors how **35.3** was dispositioned:
+implemented, measured, reverted. Four states exist:
 
 | State | Commit | `--diff` artifact computations | Measured by |
 |---|---|---|---|
 | **S0** | `8f604c5a3` (pre-F35.5) | 2, or **3** for `detailed` | — |
 | **S1** | `540262812` | **2** (`compare_hash` + `explain_hash_diff`) | the original `run-20260716T160000` record → **−18.0 % CLI** |
-| **S2** | `b8ecb88cb` (**current**) | **1** (`diff_hash`) | `run-20260716T182500-f35-5` (this re-run) |
+| **S2** | `b8ecb88cb` | **1** (`diff_hash` via the `internal` seam) | `run-20260716T182500-f35-5` → **−37.6 % CLI** |
+| **S3** | this change (**current**) | **2** (`compare_hash` + `explain_hash_diff`) | — (reverts S2 to the S1 call graph) |
+
+**S3 keeps the S0→S1 win and forfeits the S1→S2 win.** S1's real fix — one
+artifact shared between the comparison and `detailed_body` *inside*
+`explain_hash_diff`, and `--save`'s identity-tested baseline reuse inside
+`plan_hash_save` — is untouched, because it never needed a seam. Only the
+cross-call sharing between `compare_hash` and `explain_hash_diff`, which the CLI
+could reach only through non-public API, is gone.
 
 The original record's own *"Honest residual (NOT fixed, and why)"* section states
 that at S1 `--diff` **still computed the artifact twice**, and that this is
@@ -1642,40 +1671,57 @@ describing the residual as open was **stale**.
 - **Stored hash semantics unchanged:** proven by the write → read → re-save round
   trip `saved_baseline_reads_back_as_unchanged` across 5 kinds × 2 ignore
   policies.
-- **The S1 residual is now CLOSED (`b8ecb88cb`), by a third route the original
-  did not consider.** The original recorded the last duplicate as unfixable
-  without either **(a)** a new public accessor on `HashExplanation` — barred by
-  the no-new-public-API contract — or **(b)** an interior-mutability memo on
-  `Markdown`, rejected as a Sync/staleness hazard. `b8ecb88cb` instead returns
-  **both products from one call** (`diff_hash -> (HashComparison,
-  HashExplanation)`), so the CLI gets its exit-2 decision *and* its explanation
-  from a single artifact with no accessor and no memo. `--save` gets the same
-  treatment via `plan_hash_save_explained`.
-- **✅ The public-API violation is CLOSED (2026-07-17, review-3) — by the
-  crate-private seam, not by an exception.** Review-2 flagged `diff_hash` and
-  `plan_hash_save_explained` as **new public inherent methods** violating
-  compatibility invariant 2 ("no new public Rust API shape"), and review-3 held
-  the line. **No owner ruling was sought or granted** — the behavior-preserving
-  branch was taken instead, exactly as Finding 32's revert did:
-  - Both methods are now **`pub(crate)`**
-    (`hash/explain.rs:479`, `hash/save.rs:99`).
-  - `darkmatter-cli` reaches them through a new `#[doc(hidden)] pub mod internal`
-    (`darkmatter/lib/src/internal.rs`) gated behind the **non-default** cargo
-    feature `internal-hash-orchestration` (`darkmatter/lib/Cargo.toml:33`), which
-    only `darkmatter-cli` enables (`darkmatter/cli/Cargo.toml:25`). It is that
-    crate's private arrangement with the library, not public API.
-  - **With default features the module does not exist** — verified empirically: a
-    probe importing `darkmatter::internal` under default features fails to
-    compile. The library's default public surface is therefore **unchanged**.
-  - The 35.5 optimization is intact and `--save`'s two distinct artifact
-    semantics (stored-policy comparison vs selected-policy baseline) are
-    preserved; the measurement below stands unmodified, since the seam moved the
-    *visibility*, not the call graph.
-- **Measurement against the CURRENT implementation (S1 → S2).** Baseline and
-  candidate are both current public API — the baseline *is* the two-call path the
-  CLI used at S1 — so this needs no pinned copy and no cross-build comparison.
-  Recomputed from `run-20260716T182500-f35-5/` (Criterion, n=100, means; every
-  pair equivalence-gated on identical comparison **and** identical rendered
+- **The S1 residual was closed at `b8ecb88cb`, and that closure has now been
+  REVERTED.** The original recorded the last duplicate as unfixable without
+  either **(a)** a new public accessor on `HashExplanation` — barred by the
+  no-new-public-API contract — or **(b)** an interior-mutability memo on
+  `Markdown`, rejected as a Sync/staleness hazard. `b8ecb88cb` tried a third
+  route: return **both products from one call** (`diff_hash -> (HashComparison,
+  HashExplanation)`), plus `plan_hash_save_explained` for `--save`. That route
+  worked mechanically but could not be reached from `darkmatter-cli` — a separate
+  crate — without publishing it. **The residual is therefore OPEN again**, by
+  choice.
+- **❌ The seam route FAILED review-4; the seam is REMOVED (2026-07-17).**
+  Review-2 flagged `diff_hash`/`plan_hash_save_explained` as new **public
+  inherent methods**; review-3 demoted them to `pub(crate)` and re-exposed them
+  to the CLI through a `#[doc(hidden)] pub mod internal` gated behind the
+  non-default feature `internal-hash-orchestration`. **Review-4 found that this
+  did not fix the violation**: `#[doc(hidden)]` hides documentation but not
+  visibility, and a Cargo feature is *additive and enableable by any downstream
+  crate*. `pub mod internal` was therefore reachable public API — the invariant-2
+  breach had been relocated behind a feature flag, not eliminated. The
+  "default-features build has no `internal` module" probe was true but did not
+  answer the objection, because the contract is about what a consumer *can*
+  reach, not what the default build happens to expose.
+  - Review-4 named three routes: restructure the crate boundary, remove the
+    shared seam, or obtain an owner-approved compatibility exception.
+  - **No owner exception was sought and none was granted.** Rust has no
+    friend-crate visibility, so no restructure short of merging
+    `darkmatter-cli` into `darkmatter` is compiler-enforced. **The seam was
+    removed**, exactly as Finding 32's and 35.3's reverts did.
+  - **What was removed:** `darkmatter/lib/src/internal.rs`, the
+    `internal-hash-orchestration` feature (both `Cargo.toml`s), and
+    `Markdown::plan_hash_save_explained`. `Markdown::diff_hash` survives as a
+    **private** helper because `explain_hash_diff` is implemented in terms of it.
+  - **What the CLI does now:** `run_hash_diff` calls `compare_hash` +
+    `explain_hash_diff`; `run_hash_save` calls `plan_hash_save` +
+    `explain_hash_diff`. Both are the public two-call path, so `--diff`/`--save`
+    hash the document **twice** per invocation again.
+- **A public pairing API remains a legitimate future proposal — not a closed
+  question.** A `compare + explain` (and `plan + explain`) pairing on the public
+  surface would recover the win honestly and is arguably the right long-term
+  shape, since needing both products is a real caller requirement. It is **out of
+  scope here**: it is precisely the public-API-shape change invariant 2 bars, so
+  it requires an **explicit owner compatibility decision**, which was **NOT
+  sought and NOT granted** in this work.
+- **Measurement of S1 → S2 (retained; describes the REVERTED step).** These
+  numbers are what the seam bought and what S3 gives back. They are retained as
+  the evidence for the forfeit, not as a claim about current code — **HEAD is
+  S3**, whose call graph is S1's. The baseline arm *is* the two-call path HEAD
+  has returned to, so the "Baseline" column now describes current behavior and
+  the "Candidate" column describes deleted code. Recomputed from
+  `run-20260716T182500-f35-5/` (Criterion, n=100, means; every pair
+  equivalence-gated on identical comparison **and** identical rendered
   explanation before timing):
 
   | Fixture / kind | Baseline (`compare_hash` + `explain_hash_diff`) | Candidate (`diff_hash`) | Δ |
@@ -1701,26 +1747,33 @@ describing the residual as open was **stale**.
   arms. S0, S1 and S2 emit **byte-identical** `--diff` stdout and exit status on
   all three inputs, verified before timing.
 
-  | Case | S0 (pre) | S1 (recorded) | **S2 = HEAD** | drift | S0→S2 | S1→S2 |
+  | Case | S0 (pre) | S1 (recorded) | **S2 (reverted)** | drift | S0→S2 | S1→S2 |
   |---|---|---|---|---|---|---|
   | `large_fm_detailed` **[target]** | 17.61 ms | 14.67 ms | **10.99 ms** | 3.4 % | **−37.6 %** | **−25.1 %** |
   | `large_fm_simple` [control] | 5.64 ms | 5.75 ms | 5.20 ms | 4.7 % | −7.8 % | −9.6 % |
   | `small_detailed` [control] | 4.88 ms | 5.33 ms | 4.91 ms | 3.8 % | +0.6 % (< drift — parity) | −7.9 % |
 
-- **⚠ The headline CLI number changes: −18.0 % → −37.6 %.**
+  **HEAD is S3, not S2.** S3 restores S1's call graph, so the S1 column is the
+  honest estimate of current CLI cost. The **−37.6 % is forfeited**; the retained
+  S0→S1 **−16.7 %** is what this sub-item still delivers. S3 was not re-timed:
+  its call graph is S1's by construction, and re-running the bracket would
+  measure the S1 arm that is already recorded here.
+
+- **⚠ The headline CLI number, historically: −18.0 % → −37.6 % → back to ~−17 %.**
   1. **The recorded −18.0 % reproduces** — as an **S0→S1** measurement: 17.61 →
      14.67 ms = **−16.7 %**, inside the original's stated `17.2 ± 0.5` →
-     `14.1 ± 0.7` σ. The original was honest work describing a **superseded**
-     implementation.
-  2. **It materially understates the shipped code.** The current implementation is
-     **−37.6 %** against pre-F35.5 (17.61 → 10.99 ms), because `b8ecb88cb` closed
-     the residual the original recorded as unfixable. Quoting −18.0 % for the
-     shipped code would be wrong in the *conservative* direction, but it is still
-     a claim about code that does not exist.
-  3. **No control regressed.** `small_detailed` is at parity (+0.6 %, inside its
-     3.8 % drift); `large_fm_simple` *improves* (−7.8 %), and a control that gets
-     faster cannot breach a 0 %-regression budget. The ≥5 % target floor is met at
-     −37.6 % against 3.4 % drift.
+     `14.1 ± 0.7` σ.
+  2. **It understated S2, but S2 no longer exists.** At the time of the re-run,
+     −18.0 % understated the then-shipped code, which measured **−37.6 %** against
+     pre-F35.5 (17.61 → 10.99 ms). Review-4 then forced S2's removal, so
+     **−37.6 % is now the claim about code that does not exist** — the exact error
+     that paragraph was written to correct, with the states swapped.
+  3. **The final figure for this sub-item is ≈ −16.7 % (S0→S1)**, which is what
+     the original −18.0 % recorded. The ≥5 % target floor is still met at −16.7 %
+     against 3.4 % drift.
+  4. **No control regressed** in the S2 bracket: `small_detailed` was at parity
+     (+0.6 %, inside its 3.8 % drift) and `large_fm_simple` *improved* (−7.8 %).
+     S3 reverts to the S1 call graph, so no control can regress past S1 either.
 - **Rejected runs retained beside the accepted one** (per the contract's raw-vector
   rule, including for runs that fail their own gate):
   `invalid-run-load46-69/` — rejected by its own drift bracket at host load 46→69,
@@ -2278,18 +2331,24 @@ was sought — Ken was unavailable for the entirety of every closeout.
    the gate **still does not close**, now for a *measurement* reason rather than a
    code reason. See *Reference-graph setup remediation* below; the blocker is a
    quiet host, not an owner ruling.
-5. ~~**Finding 35.5 residual, and its public-API shape.**~~ — **BOTH CLOSED; no
-   longer a residual.** The double-compute was closed by `b8ecb88cb`
-   (`diff_hash` returns both products from one artifact). The **API shape** — the
-   item this list previously recorded as *"needs an owner ruling: crate-private
-   seam, or a recorded exception"* — was **closed at review-3 via the
-   crate-private seam route, with no owner ruling sought or granted**:
-   `diff_hash` / `plan_hash_save_explained` are now `pub(crate)`, and
-   `darkmatter-cli` reaches them through a `#[doc(hidden)] pub mod internal`
-   behind the **non-default** `internal-hash-orchestration` feature. Under
-   default features the module does not exist (verified by a probe that fails to
-   compile), so the library's default public surface is unchanged and
-   compatibility invariant 2 holds. See the 35.5 section above.
+5. **Finding 35.5 residual, and its public-API shape.** — **The double-compute
+   residual is OPEN by choice; the API-shape violation is CLOSED by reverting.**
+   `b8ecb88cb` closed the double-compute with a shared seam (`diff_hash` /
+   `plan_hash_save_explained`), and review-3 relocated that seam behind the
+   `#[doc(hidden)] pub mod internal` module and the non-default
+   `internal-hash-orchestration` feature. **Review-4 rejected that**: a
+   feature-gated `pub mod` is additive public API any downstream crate can enable,
+   so invariant 2 was still breached. With no owner exception sought or granted
+   and no compiler-enforced friend-crate visibility available, the seam was
+   **removed** (2026-07-17): `internal.rs`, the feature, and
+   `plan_hash_save_explained` are gone; `md hash --diff`/`--save` are back on the
+   public two-call path and hash the document twice per invocation. The **−37.6 %
+   S2 CLI win is forfeited**; this sub-item now delivers the S0→S1 **≈ −16.7 %**.
+   A public `compare + explain` / `plan + explain` pairing API would recover the
+   win but is exactly the public-API-shape change invariant 2 bars, so it remains
+   a **future proposal needing an explicit owner compatibility decision** — not
+   taken here. Mirrors 35.3 (implemented, measured, reverted). See the 35.5
+   section above.
 6. **`strip_incidental_newlines` cost** — surfaced by F25's profile, covered by
    **no** finding: **22.7 %** of cleanup on `toc_large`, **69.2 %** on
    `replace_heavy` (recomputed from retained vectors). It is ~2.8× F25's entire
@@ -2538,6 +2597,42 @@ result:
    owner involvement). **> 5 %** outside drift → **FAIL** → escalate to owner.
 6. **Pins observed, not reconstructed.** Build all three arms from committed SHAs
    (`51c1f16e1` / `e15b1cc22` / `92a3d502e`) rather than a working tree.
+
+#### Review-4 re-run attempt (2026-07-17) — declined; still blocked on a quiet host
+
+Review 4 re-raised this as a High finding: the integrated compose threshold is
+still NOT ESTABLISHED, so acceptance criteria 5 and 6 are unmet. A fresh
+admissible capture was attempted at the review-4 remediation and **declined for
+the same reason as the review-3 closeout — the host was not quiet:**
+
+```
+$ uptime
+ 8:25  up 3 days, 17 mins, 6 users, load averages: 21.28 52.47 49.88
+```
+
+1-min load **21.28**, 5-min **52** — more than **10× the predeclared admissibility
+bar of < 2.0**, and squarely inside the 29–64 band this repository's standing rule
+records as manufacturing phantom ~19 % effects. A capture here would be
+inadmissible under item 1 above and strictly worse than the retained evidence, so
+none was taken. The session host was itself executing the review-4 remediation
+work (concurrent subagents) alongside other users; there was no quiet window to
+capture in, and building the three release pins would only have raised the load
+further.
+
+What **did** advance: the `after` pin `92a3d502eb65c30205a9a255dd13dd8dc6d0aabf`
+is now a **committed commit object** (verified with `git cat-file -t`), as are
+`base` `51c1f16e1` and `before` `e15b1cc22`. Review 3's separate objection — that
+the accepted run reconstructed `after` from a working tree sampled 33 minutes
+before the commit existed — is therefore removed at the SHA level: **admissibility
+item 6 (build all three arms from committed SHAs) is now satisfiable.** The
+committed `refgraph-setup-fix.sh` harness builds each pin in a detached worktree
+with an isolated `CARGO_TARGET_DIR`. Only the quiet-host capture itself remains
+outstanding.
+
+**Disposition unchanged: blocked on host availability, not on the owner.** This
+finding cannot be honestly closed in a loaded, non-interactive session. It closes
+with no owner involvement when items 1–6 are met and `compose_trivial`
+`after vs base` lands ≤ 5 %; only a clean run landing > 5 % escalates to Ken.
 
 ## Newline-named fixture duplicates (committed by Phase 10, removed at review-1)
 
