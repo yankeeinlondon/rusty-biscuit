@@ -13,6 +13,7 @@
 
 pub mod agent_message;
 pub mod closure;
+pub mod coordinator;
 mod error;
 pub mod file_detail;
 pub mod frontmatter_excerpt;
@@ -39,6 +40,13 @@ pub mod sequence;
 mod types;
 
 pub use agent_message::{agent_state_breakdown, invalid_agent_message};
+pub use coordinator::{
+    ActionLocation, ActiveDocumentState, AttemptOutcome, CommandOutputPolicy, ControlBudget,
+    ControlBudgetKind, DocumentIteration, DocumentOverlay, DocumentTransition,
+    EvaluatedProxyRequest, HopApproval, HopRejection, InvocationInputs, InvocationInputsDraft,
+    LaunchDiscovery, LedgerMut, PreparedDocument, ProviderAttempt, ProxyHandoff, ProxyProvenance,
+    ResolvedProxyTarget, RunLedger, TransitionAbort, TransitionRecord,
+};
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 pub use error::{
     CompositionError, DroppedOptional, DroppedOptionalSource, DroppedOptionalStage,
