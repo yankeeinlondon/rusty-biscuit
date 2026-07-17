@@ -18,7 +18,7 @@ use std::path::Path;
 
 use claudine::composition::{
     DocumentEntryReason, EvaluatedProxyRequest, LifecycleConfig, LifecycleRunGuard,
-    ProxyCommitError, RunLedger, SharedApprovalCache, commit_proxy,
+    ProxyCommitError, ProxyProvenance, RunLedger, SharedApprovalCache, commit_proxy,
 };
 
 use super::super::HarnessPromptState;
@@ -33,6 +33,7 @@ use super::super::HarnessPromptState;
 pub(super) struct ActiveDocumentCoordinator {
     ledger: RunLedger,
     bootstrap_pending: bool,
+    active_provenance: Option<ProxyProvenance>,
 }
 
 impl ActiveDocumentCoordinator {
@@ -45,7 +46,19 @@ impl ActiveDocumentCoordinator {
         Self {
             ledger: RunLedger::new(origin, approval_cache),
             bootstrap_pending: false,
+            active_provenance: None,
         }
+    }
+
+    /// How the active document was reached, or `None` when the caller named it
+    /// directly.
+    ///
+    /// Retained across the target's staged boot so a bootstrap failure can name
+    /// the `proxy` that requested the target rather than only the target that
+    /// failed. The user authored the source; they may never have heard of the
+    /// target.
+    pub(super) fn active_provenance(&self) -> Option<&ProxyProvenance> {
+        self.active_provenance.as_ref()
     }
 
     /// The run ledger, for the chain and hop accounting a transition decision
@@ -108,6 +121,7 @@ impl ActiveDocumentCoordinator {
         // `with:` commits an empty map and installs it, which is what makes a
         // three-hop chain's middle document unable to leak into the third.
         prompt_state.overlay = handoff.overlay().clone();
+        self.active_provenance = Some(handoff.provenance().clone());
         prompt_state.source_path = handoff.resolved_target().to_path_buf();
         prompt_state.original_ref = handoff.authored_target().to_string();
         prompt_state.entry = DocumentEntryReason::ProxyTarget;

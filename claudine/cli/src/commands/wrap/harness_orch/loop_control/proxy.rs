@@ -67,15 +67,21 @@ pub(super) fn run_target_initialize(
         ));
     }
     if let Some(setup_error) = catch_result.setup_error.as_ref() {
-        let message = if matches!(
-            catch_result.control,
-            Some(StackControl::Error { .. })
-        ) {
+        // `LifecycleInitializeFailed` already exists for exactly this and is
+        // what the non-loop route returns, so the two agree on the typed
+        // identity of "the target's `initialize` raised".
+        let reason = if matches!(catch_result.control, Some(StackControl::Error { .. })) {
             setup_error.msg.clone()
         } else {
             "lifecycle initialize failed".to_string()
         };
-        return TargetInitializeAction::Abort(eyre!(message));
+        return TargetInitializeAction::Abort(
+            CompositionError::LifecycleInitializeFailed {
+                source_path: source_path.to_path_buf(),
+                reason,
+            }
+            .into(),
+        );
     }
     if let Some(control) = catch_result.control.as_ref() {
         match control {
@@ -93,11 +99,34 @@ pub(super) fn run_target_initialize(
                 ProxyProvenance::new(source_path.to_path_buf(), *location, chain.to_vec()),
             )),
             StackControl::Stop => TargetInitializeAction::Proceed,
+            // Authored placement is legal — `is_valid_for` makes every control
+            // except `skip` universally placeable — but there is no provider
+            // attempt at `initialize` for these to act on. So the diagnostic
+            // names the stage rather than calling the action invalid, which
+            // would send the user looking for an authoring mistake they did
+            // not make.
             StackControl::Retry { .. }
             | StackControl::Resume { .. }
-            | StackControl::Defer { .. } => TargetInitializeAction::Abort(eyre!(
-                "lifecycle control action {control:?} is not valid at initialize"
-            )),
+            | StackControl::Defer { .. } => TargetInitializeAction::Abort(
+                CompositionError::LifecycleTransitionUnownedAtStage {
+                    source_path: source_path.to_path_buf(),
+                    // Only `proxy` carries an `ActionLocation`, so these name
+                    // the event rather than the exact action index. The event
+                    // is the actionable part regardless: `initialize` is where
+                    // the stack is.
+                    property: "initialize.stack".to_string(),
+                    verb: match control {
+                        StackControl::Retry { .. } => "retry",
+                        StackControl::Resume { .. } => "resume",
+                        _ => "defer",
+                    },
+                    stage: "initialize",
+                    reason: "no provider attempt has run yet, so there is nothing to \
+                             retry, resume, or defer"
+                        .to_string(),
+                }
+                .into(),
+            ),
         }
     } else {
         TargetInitializeAction::Proceed

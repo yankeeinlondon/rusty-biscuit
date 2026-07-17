@@ -171,7 +171,10 @@ pub(super) fn dispatch_terminal_control(
                 profile.supports_resume(),
                 session_id,
             ) {
-                return TerminalControlAction::Abort(eyre!("{e}"));
+                // Propagate the report itself. `eyre!("{e}")` re-wrapped it in a
+                // fresh report carrying only the `Display` string, discarding
+                // the cause chain the renderer walks.
+                return TerminalControlAction::Abort(e);
             }
             prompt_state.entry = claudine::composition::DocumentEntryReason::Resume;
             prompt_state.next_resume_session_id = session_id.map(|id| id.to_string());

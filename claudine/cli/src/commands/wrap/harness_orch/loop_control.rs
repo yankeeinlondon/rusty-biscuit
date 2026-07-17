@@ -470,13 +470,24 @@ fn start_lifecycle_phase(
                     return Ok(Some(LoopStep::NextAttempt));
                 }
                 TerminalControlAction::Proxy(request) => {
-                    coordinator.adopt(
+                    if let Err(error) = coordinator.adopt(
                         request,
                         repo_root,
                         prompt_state,
                         lifecycle_guard,
                         control_budgets,
-                    )?;
+                    ) {
+                        return Err(route_handoff_failure(
+                            lifecycle_guard,
+                            materialized,
+                            &prompt_state.source_path,
+                            repo_root,
+                            term,
+                            effect_engine,
+                            error,
+                            loop_start,
+                        ));
+                    }
                     // Re-enter at attempt 1: the target gets a clean
                     // pre-flight / freeze cycle rather than inheriting the
                     // proxying document's attempt count.
@@ -566,9 +577,10 @@ fn bootstrap_adopted_document_phase(
     let bootstrap_lifecycle = match materialized.lifecycle.clone() {
         Some(config) => config,
         None => {
-            return Err(eyre!(
-                "adopted document '{}' was prepared without a lifecycle surface",
-                prompt.prompt_state.source_path.display()
+            return Err(target_bootstrap_failed(
+                prompt,
+                control.coordinator,
+                "canonical preparation returned no lifecycle surface for the bootstrap read",
             ));
         }
     };
@@ -606,13 +618,24 @@ fn bootstrap_adopted_document_phase(
             // A chained proxy re-enters this same staging for its own target,
             // so the chain stabilizes one atomic hop at a time before anything
             // commits to a provider launch or loop execution.
-            control.coordinator.adopt(
+            if let Err(error) = control.coordinator.adopt(
                 request,
                 prompt.repo_root,
                 prompt.prompt_state,
                 lifecycle.guard,
                 control.budgets,
-            )?;
+            ) {
+                return Err(route_handoff_failure(
+                    lifecycle.guard,
+                    materialized,
+                    &prompt.prompt_state.source_path,
+                    prompt.repo_root,
+                    lifecycle.term,
+                    lifecycle.effect_engine,
+                    error,
+                    lifecycle.loop_start,
+                ));
+            }
             *control.attempt = 1;
             return Ok(Some(LoopStep::NextAttempt));
         }
@@ -631,9 +654,10 @@ fn bootstrap_adopted_document_phase(
     let stabilized_lifecycle = match materialized.lifecycle.clone() {
         Some(config) => config,
         None => {
-            return Err(eyre!(
-                "adopted document '{}' was prepared without a lifecycle surface",
-                prompt.prompt_state.source_path.display()
+            return Err(target_bootstrap_failed(
+                prompt,
+                control.coordinator,
+                "canonical preparation returned no lifecycle surface for the stabilized reread",
             ));
         }
     };
@@ -1240,13 +1264,24 @@ fn classify_attempt_phase(
                 return Ok(LoopStep::NextAttempt);
             }
             TerminalRecovery::Proxy(request) => {
-                coordinator.adopt(
+                if let Err(error) = coordinator.adopt(
                     request,
                     repo_root,
                     prompt_state,
                     lifecycle_guard,
                     control_budgets,
-                )?;
+                ) {
+                    return Err(route_handoff_failure(
+                        lifecycle_guard,
+                        &materialized,
+                        &prompt_state.source_path,
+                        repo_root,
+                        term,
+                        effect_engine,
+                        error,
+                        loop_start,
+                    ));
+                }
                 state.attempt = 1;
                 return Ok(LoopStep::NextAttempt);
             }
@@ -1310,13 +1345,24 @@ fn classify_attempt_phase(
                 return Ok(LoopStep::NextAttempt);
             }
             TerminalRecovery::Proxy(request) => {
-                coordinator.adopt(
+                if let Err(error) = coordinator.adopt(
                     request,
                     repo_root,
                     prompt_state,
                     lifecycle_guard,
                     control_budgets,
-                )?;
+                ) {
+                    return Err(route_handoff_failure(
+                        lifecycle_guard,
+                        &materialized,
+                        &prompt_state.source_path,
+                        repo_root,
+                        term,
+                        effect_engine,
+                        error,
+                        loop_start,
+                    ));
+                }
                 state.attempt = 1;
                 return Ok(LoopStep::NextAttempt);
             }
@@ -1355,13 +1401,24 @@ fn classify_attempt_phase(
             return Ok(LoopStep::NextAttempt);
         }
         TerminalRecovery::Proxy(request) => {
-            coordinator.adopt(
+            if let Err(error) = coordinator.adopt(
                 request,
                 repo_root,
                 prompt_state,
                 lifecycle_guard,
                 control_budgets,
-            )?;
+            ) {
+                return Err(route_handoff_failure(
+                    lifecycle_guard,
+                    &materialized,
+                    &prompt_state.source_path,
+                    repo_root,
+                    term,
+                    effect_engine,
+                    error,
+                    loop_start,
+                ));
+            }
             state.attempt = 1;
             return Ok(LoopStep::NextAttempt);
         }
