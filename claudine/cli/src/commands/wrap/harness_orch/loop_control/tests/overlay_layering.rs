@@ -69,7 +69,7 @@ impl OverlayFixture {
                 Some(self.dir()),
                 state,
                 &mut guard,
-                &mut ControlBudgets::default(),
+                &mut claudine::composition::ActiveDocumentState::initial(),
             )
             .expect("the hop is resolvable and uncontested");
     }
@@ -79,7 +79,7 @@ impl OverlayFixture {
         &self,
         state: &HarnessPromptState,
     ) -> Result<MaterializedHarnessPrompt, color_eyre::eyre::Report> {
-        super::super::super::materialize_harness_prompt(state, Some(self.dir()), self.dir())
+        super::super::super::materialize_harness_prompt(state, Some(self.dir()), self.dir(), None)
     }
 }
 
@@ -587,7 +587,7 @@ fn an_overlay_does_not_create_a_distinct_identity_for_cycle_detection() {
             Some(fx.dir()),
             &mut state,
             &mut guard,
-            &mut ControlBudgets::default(),
+            &mut claudine::composition::ActiveDocumentState::initial(),
         )
         .expect("the first hop is uncontested");
     let _ = coord.take_bootstrap_pending();
@@ -600,7 +600,7 @@ fn an_overlay_does_not_create_a_distinct_identity_for_cycle_detection() {
             Some(fx.dir()),
             &mut state,
             &mut guard,
-            &mut ControlBudgets::default(),
+            &mut claudine::composition::ActiveDocumentState::initial(),
         )
         .expect_err("a hop back to a document already in the chain is a cycle");
 

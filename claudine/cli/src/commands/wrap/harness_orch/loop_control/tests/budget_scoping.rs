@@ -76,7 +76,7 @@ fn a_proxy_target_earns_its_own_retry_budget_rather_than_inheriting_the_sources(
     let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
     arm_failure(&mut guard);
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets::default();
+    let mut active = claudine::composition::ActiveDocumentState::initial();
     let mut coord = coordinator(&fx.source_path);
 
     // The source's `retry: {max_attempts: 1}` fires at attempt 1, earning
@@ -84,7 +84,7 @@ fn a_proxy_target_earns_its_own_retry_budget_rather_than_inheriting_the_sources(
     let action = dispatch_terminal_control(
         &retry(1),
         1,
-        &mut budgets,
+        active.iteration_mut(),
         Some("sess-1"),
         resume_capable_profile(),
         Provider::Goose,
@@ -96,10 +96,10 @@ fn a_proxy_target_earns_its_own_retry_budget_rather_than_inheriting_the_sources(
         false,
     );
     assert!(
-        matches!(action, TerminalControlAction::Continue { next_attempt: 2 }),
+        matches!(action, TerminalControlAction::Continue),
         "the source's own retry is honored"
     );
-    assert_eq!(budgets.retry, Some(2), "the source earned ceiling 2");
+    assert_eq!(active.iteration().retry_budget().ceiling(), Some(2), "the source earned ceiling 2");
 
     // The source hands off at attempt 2.
     coord
@@ -108,11 +108,11 @@ fn a_proxy_target_earns_its_own_retry_budget_rather_than_inheriting_the_sources(
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
-            &mut budgets,
+            &mut active,
         )
         .expect("the hop is resolvable and uncontested");
     assert_eq!(
-        budgets.retry, None,
+        active.iteration().retry_budget().ceiling(), None,
         "the source's ceiling did not follow the run to the target"
     );
 
@@ -123,7 +123,7 @@ fn a_proxy_target_earns_its_own_retry_budget_rather_than_inheriting_the_sources(
     let action = dispatch_terminal_control(
         &retry(3),
         2,
-        &mut budgets,
+        active.iteration_mut(),
         Some("sess-2"),
         resume_capable_profile(),
         Provider::Goose,
@@ -135,11 +135,11 @@ fn a_proxy_target_earns_its_own_retry_budget_rather_than_inheriting_the_sources(
         false,
     );
     match action {
-        TerminalControlAction::Continue { next_attempt } => assert_eq!(next_attempt, 3),
+        TerminalControlAction::Continue => {},
         other => panic!("the target's own retry budget must be honored, got {other:?}"),
     }
     assert_eq!(
-        budgets.retry,
+        active.iteration().retry_budget().ceiling(),
         Some(5),
         "the ceiling is the target's max_attempts measured from attempt 2"
     );
@@ -161,13 +161,13 @@ fn a_proxy_target_earns_its_own_resume_budget_rather_than_inheriting_the_sources
     let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
     arm_failure(&mut guard);
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets::default();
+    let mut active = claudine::composition::ActiveDocumentState::initial();
     let mut coord = coordinator(&fx.source_path);
 
     let action = dispatch_terminal_control(
         &resume(1),
         1,
-        &mut budgets,
+        active.iteration_mut(),
         Some("sess-1"),
         resume_capable_profile(),
         Provider::Goose,
@@ -179,10 +179,10 @@ fn a_proxy_target_earns_its_own_resume_budget_rather_than_inheriting_the_sources
         false,
     );
     assert!(
-        matches!(action, TerminalControlAction::Continue { next_attempt: 2 }),
+        matches!(action, TerminalControlAction::Continue),
         "the source's own resume is honored"
     );
-    assert_eq!(budgets.resume, Some(2), "the source earned ceiling 2");
+    assert_eq!(active.iteration().resume_budget().ceiling(), Some(2), "the source earned ceiling 2");
 
     coord
         .adopt(
@@ -190,11 +190,11 @@ fn a_proxy_target_earns_its_own_resume_budget_rather_than_inheriting_the_sources
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
-            &mut budgets,
+            &mut active,
         )
         .expect("the hop is resolvable and uncontested");
     assert_eq!(
-        budgets.resume, None,
+        active.iteration().resume_budget().ceiling(), None,
         "the source's ceiling did not follow the run to the target"
     );
 
@@ -202,7 +202,7 @@ fn a_proxy_target_earns_its_own_resume_budget_rather_than_inheriting_the_sources
     let action = dispatch_terminal_control(
         &resume(3),
         2,
-        &mut budgets,
+        active.iteration_mut(),
         Some("sess-2"),
         resume_capable_profile(),
         Provider::Goose,
@@ -214,10 +214,10 @@ fn a_proxy_target_earns_its_own_resume_budget_rather_than_inheriting_the_sources
         false,
     );
     match action {
-        TerminalControlAction::Continue { next_attempt } => assert_eq!(next_attempt, 3),
+        TerminalControlAction::Continue => {},
         other => panic!("the target's own resume budget must be honored, got {other:?}"),
     }
-    assert_eq!(budgets.resume, Some(5));
+    assert_eq!(active.iteration().resume_budget().ceiling(), Some(5));
 }
 
 #[test]
@@ -238,10 +238,9 @@ fn adoption_resets_budgets_while_the_invocation_wide_chain_keeps_growing() {
     let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
     arm_failure(&mut guard);
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets {
-        retry: Some(2),
-        resume: Some(4),
-    };
+    let mut active = claudine::composition::ActiveDocumentState::initial();
+    active.iteration_mut().retry_budget_mut().ceiling_for(1, 1); // ceiling 2
+    active.iteration_mut().resume_budget_mut().ceiling_for(1, 3); // ceiling 4
     let mut coord = coordinator(&fx.source_path);
     assert_eq!(
         coord.ledger().chain(),
@@ -255,12 +254,12 @@ fn adoption_resets_budgets_while_the_invocation_wide_chain_keeps_growing() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
-            &mut budgets,
+            &mut active,
         )
         .expect("the hop is resolvable and uncontested");
 
-    assert_eq!(budgets.retry, None, "retry ceiling is document-scoped");
-    assert_eq!(budgets.resume, None, "resume ceiling is document-scoped");
+    assert_eq!(active.iteration().retry_budget().ceiling(), None, "retry ceiling is document-scoped");
+    assert_eq!(active.iteration().resume_budget().ceiling(), None, "resume ceiling is document-scoped");
     assert_eq!(
         coord.ledger().chain(),
         &[fx.source_path.clone(), target.clone()],
@@ -287,10 +286,9 @@ fn a_refused_hop_leaves_the_budgets_the_source_earned_intact() {
     let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
     arm_failure(&mut guard);
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets {
-        retry: Some(2),
-        resume: Some(4),
-    };
+    let mut active = claudine::composition::ActiveDocumentState::initial();
+    active.iteration_mut().retry_budget_mut().ceiling_for(1, 1); // ceiling 2
+    active.iteration_mut().resume_budget_mut().ceiling_for(1, 3); // ceiling 4
     let mut coord = coordinator(&fx.source_path);
 
     let missing = fx._dir.path().join("does-not-exist.md");
@@ -300,12 +298,12 @@ fn a_refused_hop_leaves_the_budgets_the_source_earned_intact() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
-            &mut budgets,
+            &mut active,
         )
         .expect_err("an unresolvable target is refused");
 
-    assert_eq!(budgets.retry, Some(2), "the source's ceiling is untouched");
-    assert_eq!(budgets.resume, Some(4), "the source's ceiling is untouched");
+    assert_eq!(active.iteration().retry_budget().ceiling(), Some(2), "the source's ceiling is untouched");
+    assert_eq!(active.iteration().resume_budget().ceiling(), Some(4), "the source's ceiling is untouched");
     assert_eq!(
         state.source_path, fx.source_path,
         "the source is still the active document"
@@ -331,12 +329,12 @@ fn a_retry_cannot_reset_its_own_ceiling_by_firing_again() {
     let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
     arm_failure(&mut guard);
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets::default();
+    let mut active = claudine::composition::ActiveDocumentState::initial();
 
     let action = dispatch_terminal_control(
         &retry(1),
         1,
-        &mut budgets,
+        active.iteration_mut(),
         Some("sess-1"),
         resume_capable_profile(),
         Provider::Goose,
@@ -349,7 +347,7 @@ fn a_retry_cannot_reset_its_own_ceiling_by_firing_again() {
     );
     assert!(matches!(
         action,
-        TerminalControlAction::Continue { next_attempt: 2 }
+        TerminalControlAction::Continue
     ));
 
     // The same control fires again at attempt 2. Re-derivation would give
@@ -358,7 +356,7 @@ fn a_retry_cannot_reset_its_own_ceiling_by_firing_again() {
     let action = dispatch_terminal_control(
         &retry(1),
         2,
-        &mut budgets,
+        active.iteration_mut(),
         Some("sess-1"),
         resume_capable_profile(),
         Provider::Goose,
@@ -373,5 +371,5 @@ fn a_retry_cannot_reset_its_own_ceiling_by_firing_again() {
         matches!(action, TerminalControlAction::Fallthrough),
         "the retained ceiling is exhausted; the retry does not re-arm itself"
     );
-    assert_eq!(budgets.retry, Some(2), "the ceiling never moved");
+    assert_eq!(active.iteration().retry_budget().ceiling(), Some(2), "the ceiling never moved");
 }

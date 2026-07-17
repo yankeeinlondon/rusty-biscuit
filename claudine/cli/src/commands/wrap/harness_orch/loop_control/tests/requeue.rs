@@ -16,8 +16,6 @@ fn requeue_prompt_state(source: &Path) -> HarnessPromptState {
         base_prompt: None,
         overlay: IndexMap::new(),
         prompt_tail: Vec::new(),
-        next_prompt_override: None,
-        next_resume_session_id: None,
         input_layers: Default::default(),
         entry: claudine::composition::DocumentEntryReason::Direct,
     }
@@ -32,6 +30,7 @@ fn requeue_materialized(prompt: &str) -> MaterializedHarnessPrompt {
         frontmatter,
         prompt: prompt.to_string(),
         env_overrides: Vec::new(),
+        selection_hints: claudine::composition::EffectiveSelectionHints::default(),
         inline_closure_plan: None,
         lifecycle: None,
         live_frontmatter,

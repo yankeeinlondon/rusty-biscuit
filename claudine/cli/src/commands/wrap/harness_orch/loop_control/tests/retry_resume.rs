@@ -20,7 +20,7 @@ fn dispatch_retry_from_failure_continues_and_resets_guard() {
     // Mark a Failure terminal as already emitted to model the live call site.
     assert!(guard.record_event_emission(LifecycleSignal::Failure));
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets::default();
+    let mut active = claudine::composition::ActiveDocumentState::initial();
 
     let outcome = outcome_with(StackControl::Retry {
         max_attempts: 2,
@@ -30,7 +30,7 @@ fn dispatch_retry_from_failure_continues_and_resets_guard() {
     let action = dispatch_terminal_control(
         &outcome,
         1,
-        &mut budgets,
+        active.iteration_mut(),
         Some("sess-1"),
         resume_capable_profile(),
         Provider::Goose,
@@ -42,7 +42,7 @@ fn dispatch_retry_from_failure_continues_and_resets_guard() {
         false,
     );
     match action {
-        TerminalControlAction::Continue { next_attempt } => assert_eq!(next_attempt, 2),
+        TerminalControlAction::Continue => assert_eq!(active.iteration().attempt().number(), 2),
         other => panic!("expected Continue, got {other:?}"),
     }
     // Guard was reset so the retried attempt can emit a fresh terminal.
@@ -71,7 +71,7 @@ fn dispatch_retry_from_finalize_continues_and_resets_guard() {
     assert!(guard.record_event_emission(LifecycleSignal::Failure));
     assert!(guard.record_event_emission(LifecycleSignal::Finalize));
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets::default();
+    let mut active = claudine::composition::ActiveDocumentState::initial();
 
     let outcome = outcome_with(StackControl::Retry {
         max_attempts: 1,
@@ -81,7 +81,7 @@ fn dispatch_retry_from_finalize_continues_and_resets_guard() {
     let action = dispatch_terminal_control(
         &outcome,
         1,
-        &mut budgets,
+        active.iteration_mut(),
         Some("sess-1"),
         resume_capable_profile(),
         Provider::Goose,
@@ -93,7 +93,7 @@ fn dispatch_retry_from_finalize_continues_and_resets_guard() {
         false,
     );
     match action {
-        TerminalControlAction::Continue { next_attempt } => assert_eq!(next_attempt, 2),
+        TerminalControlAction::Continue => assert_eq!(active.iteration().attempt().number(), 2),
         other => panic!("expected Continue, got {other:?}"),
     }
     // Guard was reset so the retried attempt can emit a fresh terminal.
@@ -117,7 +117,7 @@ fn dispatch_resume_from_finalize_seeds_prompt_state() {
     let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
     guard.mark_provider_launched();
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets::default();
+    let mut active = claudine::composition::ActiveDocumentState::initial();
 
     let outcome = outcome_with(StackControl::Resume {
         message: "finish the task".to_string(),
@@ -126,7 +126,7 @@ fn dispatch_resume_from_finalize_seeds_prompt_state() {
     let action = dispatch_terminal_control(
         &outcome,
         1,
-        &mut budgets,
+        active.iteration_mut(),
         Some("sess-1"),
         resume_capable_profile(),
         Provider::Goose,
@@ -137,9 +137,15 @@ fn dispatch_resume_from_finalize_seeds_prompt_state() {
         &fx.term,
         false,
     );
-    assert!(matches!(action, TerminalControlAction::Continue { .. }));
-    assert_eq!(state.next_prompt_override.as_deref(), Some("finish the task"));
-    assert_eq!(state.next_resume_session_id.as_deref(), Some("sess-1"));
+    assert!(matches!(action, TerminalControlAction::Continue));
+    // The resume directive is recorded on the freshly-advanced provider-attempt
+    // slice, not on a parallel prompt-state field.
+    assert_eq!(active.iteration().attempt().number(), 2);
+    assert_eq!(
+        active.iteration().attempt().resume_followup(),
+        Some("finish the task")
+    );
+    assert_eq!(active.iteration().attempt().session_id(), Some("sess-1"));
 }
 
 #[test]
@@ -158,10 +164,8 @@ fn dispatch_retry_exhausts_after_budget() {
     let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
     let mut state = prompt_state(&fx.source_path);
     // Pre-seed the retry budget to ceiling 2 (max_attempts 1 firing at 1).
-    let mut budgets = ControlBudgets {
-        retry: Some(2),
-        resume: None,
-    };
+    let mut active = claudine::composition::ActiveDocumentState::initial();
+    active.iteration_mut().retry_budget_mut().ceiling_for(1, 1);
     let outcome = outcome_with(StackControl::Retry {
         max_attempts: 1,
         backoff: RetryBackoff::Fixed,
@@ -171,7 +175,7 @@ fn dispatch_retry_exhausts_after_budget() {
     let action = dispatch_terminal_control(
         &outcome,
         2,
-        &mut budgets,
+        active.iteration_mut(),
         None,
         resume_capable_profile(),
         Provider::Goose,
@@ -201,7 +205,7 @@ fn dispatch_resume_with_session_seeds_prompt_state() {
     let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
     guard.mark_provider_launched();
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets::default();
+    let mut active = claudine::composition::ActiveDocumentState::initial();
     let outcome = outcome_with(StackControl::Resume {
         message: "please finish the task".to_string(),
         max_attempts: 1,
@@ -209,7 +213,7 @@ fn dispatch_resume_with_session_seeds_prompt_state() {
     let action = dispatch_terminal_control(
         &outcome,
         1,
-        &mut budgets,
+        active.iteration_mut(),
         Some("sess-42"),
         resume_capable_profile(),
         Provider::Goose,
@@ -222,11 +226,11 @@ fn dispatch_resume_with_session_seeds_prompt_state() {
     );
     assert!(matches!(
         action,
-        TerminalControlAction::Continue { next_attempt: 2 }
+        TerminalControlAction::Continue
     ));
-    assert_eq!(state.next_resume_session_id.as_deref(), Some("sess-42"));
+    assert_eq!(active.iteration().attempt().session_id(), Some("sess-42"));
     assert_eq!(
-        state.next_prompt_override.as_deref(),
+        active.iteration().attempt().resume_followup(),
         Some("please finish the task")
     );
 }
@@ -246,7 +250,7 @@ fn dispatch_resume_without_session_aborts_typed() {
     };
     let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets::default();
+    let mut active = claudine::composition::ActiveDocumentState::initial();
     let outcome = outcome_with(StackControl::Resume {
         message: "x".to_string(),
         max_attempts: 1,
@@ -254,7 +258,7 @@ fn dispatch_resume_without_session_aborts_typed() {
     let action = dispatch_terminal_control(
         &outcome,
         1,
-        &mut budgets,
+        active.iteration_mut(),
         None,
         resume_capable_profile(),
         Provider::Goose,

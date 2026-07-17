@@ -7,7 +7,9 @@
 
 use super::*;
 
-use claudine::composition::{DocumentEntryReason, EvaluatedProxyRequest, ProxyProvenance};
+use claudine::composition::{
+    ActiveDocumentState, DocumentEntryReason, EvaluatedProxyRequest, ProxyProvenance,
+};
 
 /// A request for `target`, authored by `source`'s `failure` stack, carrying
 /// the chain the ledger would have stamped on it.
@@ -56,10 +58,16 @@ fn adopt_commits_identity_and_discards_source_execution_state() {
     guard.mark_provider_launched();
     assert!(guard.record_event_emission(LifecycleSignal::Failure));
     let mut state = prompt_state(&fx.source_path);
-    // Active-document execution state belonging to the document being replaced.
+    // Active-document execution state belonging to the document being replaced:
+    // the prompt tail lives on the prompt state; the live session, the resume
+    // follow-up, an advanced attempt number, and an earned retry ceiling all
+    // live on the single `ActiveDocumentState` owner.
     state.prompt_tail.push("tail from the source".to_string());
-    state.next_prompt_override = Some("follow-up".to_string());
-    state.next_resume_session_id = Some("sess-1".to_string());
+    let mut active = ActiveDocumentState::initial();
+    active
+        .iteration_mut()
+        .resume_attempt("sess-1".to_string(), Some("follow-up".to_string()));
+    active.iteration_mut().retry_budget_mut().ceiling_for(1, 1);
 
     let mut coord = coordinator(&fx.source_path);
     coord
@@ -68,7 +76,7 @@ fn adopt_commits_identity_and_discards_source_execution_state() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
-            &mut ControlBudgets::default(),
+            &mut active,
         )
         .expect("the hop is resolvable and uncontested");
 
@@ -80,11 +88,17 @@ fn adopt_commits_identity_and_discards_source_execution_state() {
         "the target is prepared as a proxy target, not as a direct document"
     );
     assert!(state.prompt_tail.is_empty(), "the source's tail is discarded");
-    assert_eq!(state.next_prompt_override, None);
+    // The whole execution layer is rebuilt fresh for the target: iteration 1,
+    // attempt 1, no live session, no resume follow-up, no earned ceilings.
+    assert_eq!(active.iteration().number(), 1);
+    assert_eq!(active.iteration().attempt().number(), 1);
     assert_eq!(
-        state.next_resume_session_id, None,
+        active.iteration().attempt().session_id(),
+        None,
         "a proxy clears the source's live session"
     );
+    assert_eq!(active.iteration().attempt().resume_followup(), None);
+    assert_eq!(active.iteration().retry_budget().ceiling(), None);
     assert!(
         !guard.initialize_emitted() && guard.terminal_signal().is_none(),
         "the guard is reset so the target emits its own initialize"
@@ -137,7 +151,7 @@ fn adopt_rejects_a_missing_target_without_activating_it() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
-            &mut ControlBudgets::default(),
+            &mut ActiveDocumentState::initial(),
         )
         .expect_err("a proxy to a missing document must be refused");
 
@@ -198,7 +212,7 @@ fn adopt_rejects_a_hop_back_to_a_document_already_in_the_chain() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
-            &mut ControlBudgets::default(),
+            &mut ActiveDocumentState::initial(),
         )
         .expect("the first hop is uncontested");
     let _ = coord.take_bootstrap_pending();
@@ -215,7 +229,7 @@ fn adopt_rejects_a_hop_back_to_a_document_already_in_the_chain() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
-            &mut ControlBudgets::default(),
+            &mut ActiveDocumentState::initial(),
         )
         .expect_err("an A->B->A cycle must be refused");
 
@@ -277,7 +291,7 @@ fn a_committed_handoff_synthesizes_no_source_finalize() {
                 Some(fx._dir.path()),
                 &mut state,
                 &mut guard,
-                &mut ControlBudgets::default(),
+                &mut ActiveDocumentState::initial(),
             )
             .expect("the hop is resolvable and uncontested");
         // Guard drops here, at the end of the scope.
@@ -339,6 +353,7 @@ fn inline_closure_ownership_follows_the_adopted_target() {
         &state,
         Some(fx._dir.path()),
         fx._dir.path(),
+        None,
     )
     .expect("the router materializes");
     let router_plan = before
@@ -355,7 +370,7 @@ fn inline_closure_ownership_follows_the_adopted_target() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
-            &mut ControlBudgets::default(),
+            &mut ActiveDocumentState::initial(),
         )
         .expect("the hop is resolvable and uncontested");
 
@@ -363,6 +378,7 @@ fn inline_closure_ownership_follows_the_adopted_target() {
         &state,
         Some(fx._dir.path()),
         fx._dir.path(),
+        None,
     )
     .expect("the adopted target materializes");
     let target_plan = after
@@ -421,7 +437,7 @@ fn adopt_discards_the_sources_lifecycle_config_so_the_boot_has_no_stale_catch() 
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
-            &mut ControlBudgets::default(),
+            &mut ActiveDocumentState::initial(),
         )
         .expect("the hop is resolvable and uncontested");
 
@@ -465,7 +481,7 @@ fn a_refused_hop_leaves_the_active_documents_lifecycle_config_installed() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
-            &mut ControlBudgets::default(),
+            &mut ActiveDocumentState::initial(),
         )
         .expect_err("an unresolvable target must be refused");
 
@@ -519,7 +535,7 @@ fn a_rejected_hop_exposes_its_typed_cause_to_the_error_chain() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
-            &mut ControlBudgets::default(),
+            &mut ActiveDocumentState::initial(),
         )
         .expect("the first hop is uncontested");
     let _ = coord.take_bootstrap_pending();
@@ -534,7 +550,7 @@ fn a_rejected_hop_exposes_its_typed_cause_to_the_error_chain() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
-            &mut ControlBudgets::default(),
+            &mut ActiveDocumentState::initial(),
         )
         .expect_err("an A->B->A cycle must be refused");
 
@@ -573,7 +589,7 @@ fn an_unresolvable_target_exposes_its_typed_cause_to_the_error_chain() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
-            &mut ControlBudgets::default(),
+            &mut ActiveDocumentState::initial(),
         )
         .expect_err("an unresolvable target must be refused");
 
@@ -609,7 +625,7 @@ fn a_refused_handoff_projects_typed_err_facets_per_variant() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
-            &mut ControlBudgets::default(),
+            &mut ActiveDocumentState::initial(),
         )
         .expect_err("an unresolvable target must be refused");
     let resolution_info = LifecycleErrorInfo::from_proxy_commit_error(&resolution);
@@ -625,7 +641,7 @@ fn a_refused_handoff_projects_typed_err_facets_per_variant() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
-            &mut ControlBudgets::default(),
+            &mut ActiveDocumentState::initial(),
         )
         .expect("the first hop is uncontested");
     let _ = coord.take_bootstrap_pending();
@@ -639,7 +655,7 @@ fn a_refused_handoff_projects_typed_err_facets_per_variant() {
             Some(fx._dir.path()),
             &mut state,
             &mut guard,
-            &mut ControlBudgets::default(),
+            &mut ActiveDocumentState::initial(),
         )
         .expect_err("an A->B->A cycle must be refused");
     let rejection_info = LifecycleErrorInfo::from_proxy_commit_error(&rejection);

@@ -30,7 +30,7 @@ fn dispatch_proxy_requests_a_handoff_without_touching_active_document() {
     guard.mark_provider_launched();
     assert!(guard.record_event_emission(LifecycleSignal::Failure));
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets::default();
+    let mut active = claudine::composition::ActiveDocumentState::initial();
     let mut overlay = indexmap::IndexMap::new();
     overlay.insert("phase".to_string(), serde_json::json!(2));
     let outcome = outcome_with(StackControl::Proxy {
@@ -41,7 +41,7 @@ fn dispatch_proxy_requests_a_handoff_without_touching_active_document() {
     let action = dispatch_terminal_control(
         &outcome,
         3,
-        &mut budgets,
+        active.iteration_mut(),
         None,
         resume_capable_profile(),
         Provider::Goose,
@@ -116,7 +116,7 @@ fn dispatch_proxy_to_missing_target_still_only_requests() {
     guard.mark_provider_launched();
     assert!(guard.record_event_emission(LifecycleSignal::Failure));
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets::default();
+    let mut active = claudine::composition::ActiveDocumentState::initial();
     let outcome = outcome_with(StackControl::Proxy {
         target: missing.display().to_string(),
         overlay: indexmap::IndexMap::new(),
@@ -125,7 +125,7 @@ fn dispatch_proxy_to_missing_target_still_only_requests() {
     let action = dispatch_terminal_control(
         &outcome,
         3,
-        &mut budgets,
+        active.iteration_mut(),
         None,
         resume_capable_profile(),
         Provider::Goose,

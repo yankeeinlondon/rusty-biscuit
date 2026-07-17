@@ -517,7 +517,7 @@ fn finalize_evaluation_error_aborts_without_reentry() {
     assert!(guard.record_event_emission(LifecycleSignal::Failure));
     let eng = engine(fx._dir.path());
     let mut state = prompt_state(&fx.source_path);
-    let mut budgets = ControlBudgets::default();
+    let mut active = claudine::composition::ActiveDocumentState::initial();
 
     let action = run_finalize_with_recovery(
         &mut guard,
@@ -528,7 +528,7 @@ fn finalize_evaluation_error_aborts_without_reentry() {
         None,
         std::time::Instant::now(),
         1,
-        &mut budgets,
+        active.iteration_mut(),
         Some("sess-1"),
         resume_capable_profile(),
         Provider::Claude,

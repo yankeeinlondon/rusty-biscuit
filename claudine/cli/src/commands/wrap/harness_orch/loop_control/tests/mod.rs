@@ -130,6 +130,7 @@ fn materialized(frontmatter: serde_json::Value) -> MaterializedHarnessPrompt {
         frontmatter,
         prompt: String::new(),
         env_overrides: Vec::new(),
+        selection_hints: claudine::composition::EffectiveSelectionHints::default(),
         inline_closure_plan: None,
         lifecycle: None,
         live_frontmatter,
@@ -227,8 +228,6 @@ fn prompt_state(source: &Path) -> HarnessPromptState {
         base_prompt: None,
         overlay: indexmap::IndexMap::new(),
         prompt_tail: Vec::new(),
-        next_prompt_override: None,
-        next_resume_session_id: None,
         input_layers: Default::default(),
         entry: claudine::composition::DocumentEntryReason::Direct,
     }
@@ -269,6 +268,7 @@ fn dispatch_guard<'a>(
 }
 
 
+mod active_state_wiring;
 mod budget_scoping;
 mod coordinator_adoption;
 mod lifecycle_ordering;
