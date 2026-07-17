@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 3
+phase: 5
 total_phases: 14
 agent: claude/default
 yolo: "true"
@@ -51,6 +51,57 @@ docs_updated_during_phase_3:
     - claudine/features/2026-07-13-proxy-with/plan.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs
+    - claudine/cli/tests/composition_seams.rs
+    - claudine/lib/src/composition/coordinator/handoff.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/control.rs
+    - claudine/lib/src/composition/lifecycle/control/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/proxy_with_evaluation.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/runtime/tests.rs
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/looping/engine.rs
+docs_updated_during_phase_4:
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/tests/composition_seams.rs
+    - claudine/lib/src/composition/coordinator/tests.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/entry.rs
+    - claudine/lib/src/composition/prepare/entry/tests.rs
+    - claudine/lib/src/composition/prepare/service.rs
+    - claudine/lib/src/composition/prepare/service/tests.rs
+    - claudine/lib/src/composition/select/tests.rs
+    - claudine/lib/src/composition/types.rs
+docs_updated_during_phase_5:
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/features/2026-07-13-proxy-with/plan.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 ---
 
 # Execution Plan — Canonical Document Handoffs and Transient Proxy Frontmatter (`with:`)
@@ -417,40 +468,40 @@ Goal: at event time, produce a fully-evaluated `EvaluatedProxyRequest` or fail
 atomically. No filesystem access in this phase (R2: evaluation is
 provider-neutral and does not consult the filesystem).
 
-- [ ] Represent `with:` values as typed `Expr` trees at parse time by **recursing**
+- [x] Represent `with:` values as typed `Expr` trees at parse time by **recursing**
       the existing `action_value_to_expr` rule (`action_shape.rs:329-367`) through
       nested arrays and objects. Do not add a second interpolation grammar and do
       not route values through `render_message` (`executor.rs:887-899`) — that is
       the path that collapses `proxy.target` to a string.
-- [ ] Evaluate at event time through `SubtreeCompose` with the same state,
+- [x] Evaluate at event time through `SubtreeCompose` with the same state,
       globals, and resolution context as the rest of the lifecycle surface
       (`executor.rs:501-555`), `.strict()`, followed by `reject_surviving_spans`
       (`executor.rs:1258-1275`).
-- [ ] Implement the value rules: mixed string → string; exactly-one-span →
+- [x] Implement the value rules: mixed string → string; exactly-one-span →
       preserved type (`bool`, number, string, array, object, null); authored YAML
       scalars/arrays/objects/nulls keep their types; nested strings follow the
       same rule.
-- [ ] Guarantee no raw span survives into the overlay — a `{{ ... }}` must never
+- [x] Guarantee no raw span survives into the overlay — a `{{ ... }}` must never
       be deferred into target-time evaluation (acceptance criterion 20).
-- [ ] Resolve against the source document's **live** frontmatter
+- [x] Resolve against the source document's **live** frontmatter
       (`MaterializedHarnessPrompt::live_frontmatter`, `harness_orch/types.rs:41`)
       so a preceding `set_frontmatter` in the same stack is visible to `with:`.
-- [ ] Scope globals per event: `err`, `timing`, `current` where applicable;
+- [x] Scope globals per event: `err`, `timing`, `current` where applicable;
       out-of-scope late-binding roots fail closed (reuse `LATE_BINDING_ROOTS`,
       `lifecycle/mod.rs:131`).
-- [ ] Enforce atomicity: evaluate target **and** the complete mapping before any
+- [x] Enforce atomicity: evaluate target **and** the complete mapping before any
       state change. On failure, install no partial overlay, leave the source
       active for diagnostic attribution, and do not touch the target.
-- [ ] Keep `no_error` accepted (it is a universal field, `actions.rs:58-70`) but
+- [x] Keep `no_error` accepted (it is a universal field, `actions.rs:58-70`) but
       non-suppressing for proxy: proxy has no side-effect dispatch phase, so
       overlay/target evaluation failures stay fatal. Today `no_error` only
       suppresses dispatch (`executor.rs:767-793`), so this should require no
       behavior change — add a test that locks it.
-- [ ] Emit a typed interpolation-failure diagnostic naming the exact nested
+- [x] Emit a typed interpolation-failure diagnostic naming the exact nested
       `with` path (including object keys and array indices where representable),
       the lifecycle event, the proxy action, and the target — **without** dumping
       unrelated overlay values.
-- [ ] L1: literal, mixed, whole-value, and nested interpolation semantics;
+- [x] L1: literal, mixed, whole-value, and nested interpolation semantics;
       unknown root, malformed expression, unknown function, out-of-scope global;
       atomic-failure assertions; `no_error` does not suppress.
 
@@ -471,19 +522,19 @@ Depends on Phase 2.
 Goal: one service, explicit stages, explicit entry reason. This is the largest
 phase; land it in the listed order.
 
-- [ ] Define the entry-reason enum and encode the spec's stage matrix as data,
+- [x] Define the entry-reason enum and encode the spec's stage matrix as data,
       not as scattered `if`s. Rows: Direct document, Proxy target, Retry, Resume,
       Next loop iteration. Columns: source/input basis, `initialize`, schema +
       full shell audit, loop ownership. No entry reason may fall through to a
       different policy.
-- [ ] Build the service around today's sanctioned composer (`prepare_direct`
+- [x] Build the service around today's sanctioned composer (`prepare_direct`
       `prepare.rs:198`, `prepare_inline` `:373`), giving it explicit stage
       boundaries rather than a new parallel implementation.
-- [ ] Make the prepared document store the **exact** `ComposeContext` used to
+- [x] Make the prepared document store the **exact** `ComposeContext` used to
       compose it (R5), plus the explicit environment override layer. Body
       interpolation, effective frontmatter, lifecycle DM2 lookup, schema/file
       evaluation, and shell preflight must all read that stored snapshot.
-- [ ] Remove `ComposeContext::capture()` as a runtime fallback on any prepared
+- [x] Remove `ComposeContext::capture()` as a runtime fallback on any prepared
       path. Today the capture sites are `prepare.rs:148`, `prepare.rs:328`,
       `compose/prep.rs:260`, `compose/prep.rs:716`, `pipeline.rs:1001`,
       `harness_orch/prompt.rs:96`. The snapshot must derive from immutable launch
@@ -491,29 +542,29 @@ phase; land it in the listed order.
       provider/model identity — never from `std::env::current_dir()` after the
       wrapper changes child CWD. (See the recorded hazard: the wrapper
       intentionally mutates parent CWD to repo root.)
-- [ ] Keep the late-binding `current.ctx.*` surface live and explicitly forbid it
+- [x] Keep the late-binding `current.ctx.*` surface live and explicitly forbid it
       as a fallback for a missing prepared `ctx.*`.
-- [ ] Retire the second composer: delete the `compose_with` calls at
+- [x] Retire the second composer: delete the `compose_with` calls at
       `harness_orch/prompt.rs:218` and `:260` and route `materialize_harness_prompt`
       through the canonical service. Follow the `Inline` arm at `:281` as the
       precedent — it already delegates to `prepare_inline`.
-- [ ] Retire the third option-builder: `preflight_proxy_target`
+- [x] Retire the third option-builder: `preflight_proxy_target`
       (`harness_orch/prompt.rs:124-159`) becomes a canonical-service call.
-- [ ] Resolve `RematerializeInputs` (`lib/src/composition/types.rs:496`): either
+- [x] Resolve `RematerializeInputs` (`lib/src/composition/types.rs:496`): either
       demote it to an internal input of the canonical service **with an honest
       limited name**, or delete it in favor of the Phase 2 invocation/document
       layers. Adding fields to it is explicitly not the answer. Note its in-flight
       mutation at `prompt.rs:180-186` (`preflight_proxy_target` folding newly
       approved commands into `pre_approved_commands`) — that behavior must be
       preserved by whatever replaces it.
-- [ ] L1: prove canonical preparation returns **semantically equivalent** prepared
+- [x] L1: prove canonical preparation returns **semantically equivalent** prepared
       documents for direct and proxy entry given the same resolved source and
       assembled input layers. When proxy carries an overlay, compare against a
       direct preparation supplied equivalent effective inputs rather than
       treating the overlay as accidental route drift.
-- [ ] L1: lock the stage matrix per entry reason — exactly one `initialize`
+- [x] L1: lock the stage matrix per entry reason — exactly one `initialize`
       emission, full retry/resume validation, loop structural-plan reuse.
-- [ ] L1: prove context construction is independent of later process-CWD changes
+- [x] L1: prove context construction is independent of later process-CWD changes
       (construct, then change CWD, then assert `ctx.area` is unchanged). Because
       CWD is process-global, use the existing RAII restore pattern and
       `#[serial_test::serial(...)]`; the test must restore CWD even on panic.
