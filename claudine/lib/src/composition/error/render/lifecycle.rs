@@ -337,6 +337,95 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                     "Pass object data through a whole-value `{{ ... }}` interpolation.",
                 )
         }
+        CompositionError::LifecycleProxyWithNotMapping {
+            source_path,
+            property,
+            path,
+            actual,
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = format!(
+                "Lifecycle action <cyan>`proxy`</cyan> field <cyan>`{property}.{path}`</cyan> in \
+                 {file_link} is a {actual}; <cyan>`with`</cyan> must be a mapping of target \
+                 frontmatter properties."
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "`with` must be a mapping"))
+                .body(body)
+                .hint(
+                    "Author `with:` as a mapping of static keys, or omit it. `with: {}` is \
+                     equivalent to omitting it.",
+                )
+        }
+        CompositionError::LifecycleProxyWithWholeMapping {
+            source_path,
+            property,
+            path,
+            raw,
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = format!(
+                "Lifecycle action <cyan>`proxy`</cyan> field <cyan>`{property}.{path}`</cyan> in \
+                 {file_link} was supplied as the whole-mapping interpolation <cyan>`{}`</cyan>.\
+                 \n\nSupplying the entire mapping from one expression is not supported in this \
+                 version and is a named follow-up. Author the keys explicitly; each value may \
+                 still be a whole-value interpolation carrying an object or array.",
+                escape_prose_path(raw)
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "whole-mapping `with` is not supported",
+                ))
+                .body(body)
+                .hint(
+                    "Write `with:` with explicit keys, e.g. `with: { spec: \"{{ spec }}\" }`.",
+                )
+        }
+        CompositionError::LifecycleProxyWithDynamicKey {
+            source_path,
+            property,
+            path,
+            key,
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = format!(
+                "Lifecycle action <cyan>`proxy`</cyan> field <cyan>`{property}.{path}`</cyan> in \
+                 {file_link} has the dynamic key <cyan>`{}`</cyan>.\n\n\
+                 <cyan>`with`</cyan> keys name top-level frontmatter properties of the target \
+                 and are never interpolated. Only values resolve.",
+                escape_prose_path(key)
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "`with` keys must be static",
+                ))
+                .body(body)
+                .hint("Use a literal key and move the expression into its value.")
+        }
+        CompositionError::LifecycleProxyOnlyParameter {
+            source_path,
+            property,
+            verb,
+            param,
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = format!(
+                "Lifecycle action <cyan>`{verb}`</cyan> in <cyan>`{property}`</cyan> in \
+                 {file_link} received a <cyan>`{param}`</cyan> parameter, which only \
+                 <cyan>`proxy`</cyan> accepts."
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "parameter is proxy-only",
+                ))
+                .body(body)
+                .hint(
+                    "Remove the parameter, or use `{ action: proxy, target: ..., with: { ... } }`.",
+                )
+        }
         CompositionError::LifecycleWrongArity {
             source_path,
             property,

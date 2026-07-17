@@ -1495,3 +1495,213 @@ fn phase_11_family_dispatch_routes_to_family_renderers() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// `proxy.with` diagnostics
+// ---------------------------------------------------------------------------
+
+/// Render an error's status block to plain, single-spaced text.
+///
+/// Assertions here are about wording, not layout. The raw block word-wraps to
+/// the terminal width, threads its left rule through every wrap point, and
+/// carries SGR styling between words — so a multi-word assertion against it
+/// would fail on presentation rather than content.
+fn render(err: &CompositionError) -> String {
+    use biscuit_terminal::prelude::TerminalRenderable;
+    use biscuit_terminal::terminal::Terminal;
+    let term = Terminal::default();
+    let raw = err.status_block(&term).render(&term);
+
+    let mut plain = String::with_capacity(raw.len());
+    let mut chars = raw.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            // CSI: `ESC [` params, ending at the first final byte. `[` is
+            // itself inside the final-byte range, so it must be consumed
+            // before the scan starts.
+            '\u{1b}' => match chars.next() {
+                Some('[') => {
+                    for next in chars.by_ref() {
+                        if ('\u{40}'..='\u{7e}').contains(&next) {
+                            break;
+                        }
+                    }
+                }
+                // OSC: `ESC ]` … terminated by BEL or ST (`ESC \`).
+                Some(']') => {
+                    while let Some(next) = chars.next() {
+                        if next == '\u{7}' {
+                            break;
+                        }
+                        if next == '\u{1b}' {
+                            chars.next();
+                            break;
+                        }
+                    }
+                }
+                _ => {}
+            },
+            '\u{2503}' => plain.push(' '),
+            _ => plain.push(ch),
+        }
+    }
+    plain.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[test]
+fn proxy_with_not_mapping_renders_and_locates_the_with_line() {
+    let err = CompositionError::LifecycleProxyWithNotMapping {
+        source_path: PathBuf::from("router.md"),
+        property: "initialize.stack[0]".to_string(),
+        path: "action[0].with".to_string(),
+        actual: "array".to_string(),
+    };
+    assert!(
+        matches!(
+            err.frontmatter_block_spec(),
+            Some(FrontmatterHighlight::Property(ref p))
+                if p == "initialize.stack[0].action[0].with"
+        ),
+        "the excerpt must focus the `with` property"
+    );
+
+    let rendered = render(&err);
+    assert!(rendered.contains("array"), "names the authored type: {rendered}");
+    assert!(
+        rendered.contains("initialize.stack[0].action[0].with"),
+        "names the full property path: {rendered}"
+    );
+    assert!(
+        rendered.contains("with: {}"),
+        "the hint must offer the empty-mapping equivalence: {rendered}"
+    );
+}
+
+#[test]
+fn proxy_with_whole_mapping_renders_named_follow_up_and_explicit_key_hint() {
+    let err = CompositionError::LifecycleProxyWithWholeMapping {
+        source_path: PathBuf::from("router.md"),
+        property: "failure.stack[1]".to_string(),
+        path: "action[0].with".to_string(),
+        raw: "{{ payload }}".to_string(),
+    };
+    assert!(
+        matches!(
+            err.frontmatter_block_spec(),
+            Some(FrontmatterHighlight::Property(ref p))
+                if p == "failure.stack[1].action[0].with"
+        ),
+        "the excerpt must focus the diagnostic's property path"
+    );
+
+    let rendered = render(&err);
+    assert!(rendered.contains("payload"), "echoes the authored span: {rendered}");
+    assert!(
+        rendered.contains("not supported in this version"),
+        "must say this is a named follow-up, not a permanent rule: {rendered}"
+    );
+    assert!(
+        rendered.contains("explicit keys"),
+        "the hint must point at explicit-key authoring: {rendered}"
+    );
+}
+
+#[test]
+fn proxy_with_dynamic_key_renders_without_inventing_a_dotted_path() {
+    let err = CompositionError::LifecycleProxyWithDynamicKey {
+        source_path: PathBuf::from("router.md"),
+        property: "initialize.stack[0]".to_string(),
+        path: "action[0].with".to_string(),
+        key: "{{ dynamic }}".to_string(),
+    };
+    // The path stops at `with`: appending `.{{ dynamic }}` would name a
+    // property that does not exist.
+    assert!(
+        matches!(
+            err.frontmatter_block_spec(),
+            Some(FrontmatterHighlight::Property(ref p))
+                if p == "initialize.stack[0].action[0].with"
+        ),
+        "the excerpt must focus the diagnostic's property path"
+    );
+
+    let rendered = render(&err);
+    assert!(rendered.contains("dynamic"), "names the offending key: {rendered}");
+    assert!(
+        rendered.contains("never interpolated"),
+        "must explain that only values resolve: {rendered}"
+    );
+    assert!(
+        rendered.contains("literal key"),
+        "the hint must offer the fix: {rendered}"
+    );
+}
+
+#[test]
+fn proxy_only_parameter_renders_verb_and_key_value_rewrite() {
+    let err = CompositionError::LifecycleProxyOnlyParameter {
+        source_path: PathBuf::from("router.md"),
+        property: "failure.stack[0]".to_string(),
+        verb: "retry".to_string(),
+        param: "with".to_string(),
+    };
+    assert!(
+        matches!(
+            err.frontmatter_block_spec(),
+            Some(FrontmatterHighlight::Property(ref p)) if p == "failure.stack[0]"
+        ),
+        "the excerpt must focus the diagnostic's property path"
+    );
+
+    let rendered = render(&err);
+    assert!(rendered.contains("retry"), "names the receiving verb: {rendered}");
+    assert!(rendered.contains("proxy"), "names the owning verb: {rendered}");
+    assert!(
+        rendered.contains("action: proxy"),
+        "the hint must show the key/value rewrite: {rendered}"
+    );
+}
+
+#[test]
+fn proxy_with_diagnostics_share_the_lifecycle_authoring_code_and_project_facets() {
+    // The lifecycle family shares one code; the `property`/`message` facets
+    // are what distinguish these for finer handlers, so both must project.
+    let cases = [
+        CompositionError::LifecycleProxyWithNotMapping {
+            source_path: PathBuf::from("router.md"),
+            property: "initialize.stack[0]".to_string(),
+            path: "action[0].with".to_string(),
+            actual: "array".to_string(),
+        },
+        CompositionError::LifecycleProxyWithWholeMapping {
+            source_path: PathBuf::from("router.md"),
+            property: "initialize.stack[0]".to_string(),
+            path: "action[0].with".to_string(),
+            raw: "{{ payload }}".to_string(),
+        },
+        CompositionError::LifecycleProxyWithDynamicKey {
+            source_path: PathBuf::from("router.md"),
+            property: "initialize.stack[0]".to_string(),
+            path: "action[0].with".to_string(),
+            key: "{{ k }}".to_string(),
+        },
+        CompositionError::LifecycleProxyOnlyParameter {
+            source_path: PathBuf::from("router.md"),
+            property: "initialize.stack[0]".to_string(),
+            verb: "retry".to_string(),
+            param: "with".to_string(),
+        },
+    ];
+    for err in &cases {
+        assert_eq!(err.code(), "composition.lifecycle_invalid", "for: {err:?}");
+        let detail = err.detail();
+        assert!(
+            detail.get("property").and_then(|v| v.as_str()).is_some(),
+            "`property` facet must project for: {err:?}"
+        );
+        assert!(
+            detail.get("message").and_then(|v| v.as_str()).is_some(),
+            "`message` facet must project for: {err:?}"
+        );
+    }
+}

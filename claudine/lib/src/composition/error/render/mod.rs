@@ -47,7 +47,11 @@ impl BlockError for CompositionError {
             | CompositionError::LifecycleMultipleLifecycleActions { .. }
             | CompositionError::LifecycleActionOrder { .. }
             | CompositionError::LifecycleInvalidArgs { .. }
-            | CompositionError::LifecycleErrNotAvailable { .. } => lifecycle::status_block(self),
+            | CompositionError::LifecycleErrNotAvailable { .. }
+            | CompositionError::LifecycleProxyWithNotMapping { .. }
+            | CompositionError::LifecycleProxyWithWholeMapping { .. }
+            | CompositionError::LifecycleProxyWithDynamicKey { .. }
+            | CompositionError::LifecycleProxyOnlyParameter { .. } => lifecycle::status_block(self),
 
             // Schema / frontmatter validation family.
             CompositionError::SchemaLoad { .. }
@@ -239,6 +243,10 @@ impl Diagnostic for CompositionError {
             | CompositionError::LifecycleMultipleLifecycleActions { .. }
             | CompositionError::LifecycleInvalidArgs { .. }
             | CompositionError::LifecycleErrNotAvailable { .. }
+            | CompositionError::LifecycleProxyWithNotMapping { .. }
+            | CompositionError::LifecycleProxyWithWholeMapping { .. }
+            | CompositionError::LifecycleProxyWithDynamicKey { .. }
+            | CompositionError::LifecycleProxyOnlyParameter { .. }
             | CompositionError::LifecycleEvaluationError { .. } => "composition.lifecycle_invalid",
             // Everything else is a composition failure without a finer code yet.
             _ => "composition.failed",
@@ -415,6 +423,39 @@ impl Diagnostic for CompositionError {
             } => {
                 base["property"] = json!(property);
                 base["message"] = json!(format!("`err` is not available in the `{event}` event"));
+            }
+            // The `with`-rooted family projects the deepest representable
+            // path as `property`. The message names the failure without
+            // echoing an overlay value.
+            CompositionError::LifecycleProxyWithNotMapping {
+                property,
+                path,
+                actual,
+                ..
+            } => {
+                base["property"] = json!(format!("{property}.{path}"));
+                base["message"] = json!(format!("`with` must be a mapping, got {actual}"));
+            }
+            CompositionError::LifecycleProxyWithWholeMapping { property, path, .. } => {
+                base["property"] = json!(format!("{property}.{path}"));
+                base["message"] =
+                    json!("`with` cannot be supplied as a whole-mapping interpolation");
+            }
+            CompositionError::LifecycleProxyWithDynamicKey {
+                property, path, key, ..
+            } => {
+                base["property"] = json!(format!("{property}.{path}"));
+                base["message"] = json!(format!("`with` key `{key}` is not a static string"));
+            }
+            CompositionError::LifecycleProxyOnlyParameter {
+                property,
+                verb,
+                param,
+                ..
+            } => {
+                base["property"] = json!(property);
+                base["message"] =
+                    json!(format!("`{param}` is only valid on `proxy`, not `{verb}`"));
             }
             CompositionError::LifecycleEvaluationError {
                 event, message, ..

@@ -493,6 +493,84 @@ pub enum CompositionError {
         param: String,
     },
 
+    /// `proxy.with` was authored with something other than a YAML mapping.
+    #[error(
+        "`{property}.{path}` must be a mapping, got {actual} ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleProxyWithNotMapping {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`); the stack annotator upgrades
+        /// this to `"{event}.stack[{i}]"`.
+        property: String,
+        /// The `with`-rooted path within the stack item (e.g.
+        /// `"action[0].with"`). Joined to `property` for the rendered
+        /// property path.
+        path: String,
+        /// The JSON type name of the authored value.
+        actual: String,
+    },
+
+    /// `proxy.with` was supplied as a single whole-mapping interpolation
+    /// (`with: "{{ payload }}"`) rather than explicit keys.
+    ///
+    /// Named out-of-scope for v1: authors write the mapping explicitly and may
+    /// inject typed object or array values at individual keys.
+    #[error(
+        "`{property}.{path}` cannot be supplied as a whole-mapping interpolation `{raw}` ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleProxyWithWholeMapping {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name; upgraded to `"{event}.stack[{i}]"` by the stack
+        /// annotator.
+        property: String,
+        /// The `with`-rooted path within the stack item.
+        path: String,
+        /// The authored string, verbatim.
+        raw: String,
+    },
+
+    /// A `proxy.with` key carries an interpolation span. Keys name target
+    /// frontmatter properties and are never interpolated.
+    #[error(
+        "`{property}.{path}` has a dynamic key `{key}`; `with:` keys must be static strings ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleProxyWithDynamicKey {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name; upgraded to `"{event}.stack[{i}]"` by the stack
+        /// annotator.
+        property: String,
+        /// The `with`-rooted path within the stack item. It gains a trailing
+        /// `.{key}` segment only when the key is a safe path segment — a
+        /// dotted path built from an unrepresentable key would point at a
+        /// property that does not exist.
+        path: String,
+        /// The offending key, verbatim.
+        key: String,
+    },
+
+    /// A parameter that only `proxy` accepts was authored on another action.
+    #[error(
+        "lifecycle action `{verb}` in `{property}` does not accept a `{param}` parameter; \
+         `{param}` is only valid on `proxy` ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleProxyOnlyParameter {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// The action verb that received the parameter.
+        verb: String,
+        /// The proxy-only parameter name.
+        param: String,
+    },
+
     /// A positional lifecycle action received the wrong number of arguments.
     #[error(
         "lifecycle action `{verb}` in `{property}` has the wrong arity ({source_path}): {message}",
@@ -1698,8 +1776,17 @@ impl CompositionError {
             | CompositionError::LifecycleMultipleLifecycleActions { property, .. }
             | CompositionError::LifecycleActionOrder { property, .. }
             | CompositionError::LifecycleInvalidArgs { property, .. }
-            | CompositionError::LifecycleErrNotAvailable { property, .. } => {
+            | CompositionError::LifecycleErrNotAvailable { property, .. }
+            | CompositionError::LifecycleProxyOnlyParameter { property, .. } => {
                 Some(FrontmatterHighlight::Property(property.clone()))
+            }
+            // The `with`-rooted family names the deepest representable path;
+            // the excerpt renderer walks back to the most specific line it can
+            // locate.
+            CompositionError::LifecycleProxyWithNotMapping { property, path, .. }
+            | CompositionError::LifecycleProxyWithWholeMapping { property, path, .. }
+            | CompositionError::LifecycleProxyWithDynamicKey { property, path, .. } => {
+                Some(FrontmatterHighlight::Property(format!("{property}.{path}")))
             }
             CompositionError::LifecycleSayConflict(property)
             | CompositionError::LifecycleUnknownEffect(property, _) => {
