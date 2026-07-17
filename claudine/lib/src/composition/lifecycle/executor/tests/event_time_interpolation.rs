@@ -33,8 +33,7 @@ fn io_err(msg: &str) -> LifecycleErrorInfo {
         kind: "ClaudineError",
         variant: "Io".to_string(),
         msg: msg.to_string(),
-        facets: None,
-        cause: None,
+        snapshot: None,
     }
 }
 
@@ -402,3 +401,68 @@ fn post_dm2_surviving_span_fails_before_dispatch() {
     assert!(recorder.events().is_empty(), "no side effect dispatched");
 }
 
+
+// ── the expression layer's typed transport (spec §D1/§D4/§D10) ──────────────
+
+/// An interpolation that raises inside Darkmatter reaches the snapshot as the
+/// typed `LifecycleExprError`, and the projection leaves the `err.*` matching
+/// surface exactly where it was.
+///
+/// This is the property that makes retyping the executor's expression layer
+/// behavior-neutral: the Darkmatter cause carries no *Claudine* facets, so
+/// `select_effective_diagnostic` finds nothing to classify with and
+/// `err.kind` / `err.variant` keep their action-failure spellings instead of
+/// silently flipping to `category` / `code` aliases and breaking authored rules.
+#[test]
+fn evaluation_raise_projects_typed_cause_without_moving_err_aliases() {
+    let config = parse_lifecycle_config(
+        &json!({"success": {"stack": [{"action": {"message": "{{ no_such_function() }}"}}]}}),
+        Path::new("t.md"),
+    )
+    .unwrap();
+    let fm = map(json!({}));
+    let (_dir, engine) = temp_engine();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let context = ctx(
+        LifecycleSignal::Success,
+        &fm,
+        None,
+        &engine,
+        &shell,
+        &recorder,
+        &harness,
+        Path::new("t.md"),
+    );
+    let outcome = context.execute_event(&config);
+    let info = outcome
+        .evaluation_error
+        .expect("an unknown function is an expression-layer raise");
+
+    assert_eq!(info.kind, "LifecycleAction");
+    assert_eq!(info.variant, "message");
+    assert!(
+        info.snapshot.is_none(),
+        "a Darkmatter cause supplies no Claudine facets, so none project (and \
+         with no snapshot there is no `err.cause` either)"
+    );
+    assert!(recorder.events().is_empty(), "nothing dispatched");
+
+    // `err.msg` stays notification-safe: single line, escape-free, non-empty,
+    // and inside the ~240-char cap the TTS/webhook routes rely on.
+    assert!(!info.msg.is_empty());
+    assert!(!info.msg.contains('\n'));
+    assert!(!info.msg.contains('\u{1b}'));
+    assert!(info.msg.chars().count() <= 240, "msg: {}", info.msg);
+}
+
+/// The `Prose` arm carries a failure the expression layer describes itself, and
+/// round-trips its text unchanged through `Display` — the leak guard's message
+/// is a user surface.
+#[test]
+fn lifecycle_expr_error_prose_arm_round_trips_its_text() {
+    let error = LifecycleExprError::Prose("references undefined variable `x`".to_string());
+    assert_eq!(error.to_string(), "references undefined variable `x`");
+    assert!(std::error::Error::source(&error).is_none());
+}

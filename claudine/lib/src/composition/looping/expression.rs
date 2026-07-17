@@ -7,7 +7,7 @@ use darkmatter::markdown::compose::expression::{
 };
 use serde_json::{Map, Value};
 
-use super::super::error::CompositionError;
+use super::super::error::{CompositionError, LoopExpressionCause};
 use super::super::types::LoopCondition;
 
 /// Ambient values injected into loop condition and prompt evaluation.
@@ -146,7 +146,8 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
 ///
 /// ## Errors
 ///
-/// Returns `LoopInvalid` when the condition cannot be parsed or evaluated.
+/// Returns `LoopExpressionInvalid` when the condition cannot be parsed or
+/// evaluated, carrying the typed failure as its `#[source]`.
 pub fn evaluate_condition(
     condition: &LoopCondition,
     lookup: &LoopExpressionLookup<'_>,
@@ -157,12 +158,18 @@ pub fn evaluate_condition(
     };
 
     let parsed = parse_condition(source).map_err(|error| {
-        CompositionError::LoopInvalid(format!("failed to parse loop.{kind} `{source}`: {error}"))
+        CompositionError::LoopExpressionInvalid {
+            kind: kind.to_string(),
+            condition: source.clone(),
+            source: LoopExpressionCause::Parse(error),
+        }
     })?;
     let value = evaluate(&parsed, lookup).map_err(|error| {
-        CompositionError::LoopInvalid(format!(
-            "failed to evaluate loop.{kind} `{source}`: {error}"
-        ))
+        CompositionError::LoopExpressionInvalid {
+            kind: kind.to_string(),
+            condition: source.clone(),
+            source: LoopExpressionCause::Evaluate(Box::new(error)),
+        }
     })?;
     let truthy = is_truthy(&value);
 
@@ -467,16 +474,52 @@ mod tests {
         );
     }
 
+    /// A condition that cannot be parsed reports the `while`/`until` keyword and
+    /// the authored text, and keeps the Darkmatter `ParseError` recoverable
+    /// through the chain (spec §L1) rather than flattening it into prose.
     #[test]
-    fn parse_errors_are_loop_invalid() {
+    fn parse_errors_carry_the_typed_parse_cause() {
         let fm = map(json!({}));
         let ambient = ambient();
         let lookup = LoopExpressionLookup::new(&fm, &ambient);
         let err = evaluate_condition(&LoopCondition::While("counter <".into()), &lookup)
             .expect_err("condition should fail to parse");
 
-        assert!(
-            matches!(err, CompositionError::LoopInvalid(message) if message.contains("loop.while"))
-        );
+        let CompositionError::LoopExpressionInvalid {
+            kind,
+            condition,
+            source,
+        } = &err
+        else {
+            panic!("expected LoopExpressionInvalid, got {err:?}");
+        };
+        assert_eq!(kind, "while");
+        assert_eq!(condition, "counter <");
+        assert!(matches!(source, LoopExpressionCause::Parse(_)));
+        assert!(err.to_string().contains("failed to parse loop.while"));
+
+        // `LoopExpressionCause` is `#[error(transparent)]`, so it *replaces* the
+        // concrete error rather than adding a hop to it: the stage is recovered
+        // by downcasting to the cause enum, not by walking one level deeper.
+        let cause = std::error::Error::source(&err).expect("the typed cause is on the chain");
+        assert!(cause.downcast_ref::<LoopExpressionCause>().is_some());
+    }
+
+    /// The evaluate stage is discriminated from the parse stage by the cause's
+    /// arm, and both project through the same variant.
+    #[test]
+    fn evaluate_errors_carry_the_typed_evaluate_cause() {
+        let fm = map(json!({}));
+        let ambient = ambient();
+        let lookup = LoopExpressionLookup::new(&fm, &ambient);
+        let err = evaluate_condition(&LoopCondition::Until("no_such_function()".into()), &lookup)
+            .expect_err("condition should fail to evaluate");
+
+        let CompositionError::LoopExpressionInvalid { kind, source, .. } = &err else {
+            panic!("expected LoopExpressionInvalid, got {err:?}");
+        };
+        assert_eq!(kind, "until");
+        assert!(matches!(source, LoopExpressionCause::Evaluate(_)));
+        assert!(err.to_string().contains("failed to evaluate loop.until"));
     }
 }

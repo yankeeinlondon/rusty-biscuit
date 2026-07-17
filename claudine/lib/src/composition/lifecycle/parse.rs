@@ -81,6 +81,8 @@ pub fn scan_removed_validation_keys(
 ///   deserialize (typically an unknown field).
 /// - [`CompositionError::LifecycleStackInvalidShape`]: A stack item is
 ///   malformed (not an object, missing `action`, unknown key).
+/// - [`CompositionError::LifecycleWhenExpressionInvalid`]: A stack item's
+///   `when:` clause is not a valid condition expression.
 /// - [`CompositionError::LifecycleActionInvalidShortForm`] /
 ///   [`CompositionError::LifecycleActionInvalidLongForm`]: An action could
 ///   not be parsed.
@@ -322,11 +324,13 @@ fn annotate_stack_error(err: CompositionError, property: &str, idx: usize) -> Co
             property: _,
             action,
             message,
+            source,
         } => CompositionError::LifecycleActionInvalidLongForm {
             source_path,
             property: dotted,
             action,
             message,
+            source,
         },
         CompositionError::LifecycleActionPlacement {
             source_path,
@@ -406,13 +410,17 @@ fn parse_lifecycle_stack_item(
     // `until`, and `while` are always boolean expressions and must never be
     // routed through `action_value_to_expr`.
     let when = match obj.get("when") {
-        Some(serde_json::Value::String(s)) => {
-            Some(parse_condition(s).map_err(|e| CompositionError::LifecycleStackInvalidShape {
+        Some(serde_json::Value::String(s)) => Some(parse_condition(s).map_err(|source| {
+            // The one stack-shape rejection that holds a typed cause. It renders
+            // and classifies exactly as `LifecycleStackInvalidShape` does — the
+            // sibling variant adds only the recoverable `ParseError`.
+            CompositionError::LifecycleWhenExpressionInvalid {
                 source_path: source_file.to_path_buf(),
                 property: property_name.to_string(),
-                message: format!("`when` is not a valid expression: {e}"),
-            })?)
-        }
+                message: format!("`when` is not a valid expression: {source}"),
+                source,
+            }
+        })?),
         Some(other) => {
             return Err(CompositionError::LifecycleStackInvalidShape {
                 source_path: source_file.to_path_buf(),
@@ -743,6 +751,7 @@ fn parse_long_form_action_object(
             property: property_name.to_string(),
             action: "<missing>".to_string(),
             message: "long-form action object must have an `action` key".to_string(),
+            source: None,
         }
     })?;
     let verb = match verb_value {
@@ -756,6 +765,7 @@ fn parse_long_form_action_object(
                     "`action` must be a string, got {}",
                     json_type_name(other)
                 ),
+                source: None,
             });
         }
     };
@@ -783,6 +793,7 @@ fn parse_long_form_action_object(
                     "`no_error` must be a boolean, got {}",
                     json_type_name(other)
                 ),
+                source: None,
             });
         }
         None => false,
@@ -803,12 +814,13 @@ fn parse_long_form_action_object(
                 param: key.clone(),
             });
         }
-        let expr = action_value_to_expr(value).map_err(|message| {
+        let expr = action_value_to_expr(value).map_err(|source| {
             CompositionError::LifecycleActionInvalidLongForm {
                 source_path: source_file.to_path_buf(),
                 property: property_name.to_string(),
                 action: verb.clone(),
-                message: format!("`{key}` is not a valid value: {message}"),
+                message: format!("`{key}` is not a valid value: {source}"),
+                source: Some(source),
             }
         })?;
         params.push((key.clone(), expr));

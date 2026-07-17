@@ -311,8 +311,7 @@ fn err_global_visible_in_failure_stack_when() {
         kind: "ClaudineError",
         variant: "Io".to_string(),
         msg: "disk full".to_string(),
-        facets: None,
-        cause: None,
+        snapshot: None,
     };
     let (_dir, engine) = temp_engine();
     let shell = MockShell::new(0);

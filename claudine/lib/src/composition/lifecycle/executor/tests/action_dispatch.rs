@@ -718,3 +718,107 @@ fn deferred_effect_valid_resolved_name_dispatches() {
         vec![Emitted::Effect("confirmation".to_string())]
     );
 }
+
+// ── typed transport at the executor's snapshot boundary (spec §D1/§D9) ──────
+
+/// A shell command that never starts projects the runner's typed error into the
+/// snapshot instead of the executor rebuilding the prose around it.
+///
+/// The `err.msg` assertion is the §D10 contract, not a restatement of the
+/// format string: this text feeds TTS and webhooks verbatim, and typing the
+/// transport must not reword it.
+#[test]
+fn shell_spawn_failure_projects_the_typed_runner_error() {
+    let config = parse_lifecycle_config(
+        &json!({"start": {"stack": [{"action": {"shell": "definitely-not-a-binary"}}]}}),
+        Path::new("t.md"),
+    )
+    .unwrap();
+    let fm = map(json!({}));
+    let (_dir, engine) = temp_engine();
+    let shell = SpawnFailShell;
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let context = ctx(
+        LifecycleSignal::Start,
+        &fm,
+        None,
+        &engine,
+        &shell,
+        &recorder,
+        &harness,
+        Path::new("t.md"),
+    );
+    let outcome = context.execute_event(&config);
+    let info = outcome.action_error.expect("a spawn failure is a dispatch error");
+
+    // The facet-less action-failure aliases are unmoved: `ShellRunError` is not
+    // a registered diagnostic, so selection finds nothing and `err.kind` /
+    // `err.variant` keep their action-failure spellings. Authored rules matching
+    // on them still match.
+    assert_eq!(info.kind, "LifecycleAction");
+    assert_eq!(info.variant, "shell");
+    assert!(info.snapshot.is_none(), "`shell` names no catalog code");
+    assert_eq!(
+        info.msg,
+        format!(
+            "command `definitely-not-a-binary` failed to run: {}",
+            SpawnFailShell::io_error()
+        )
+    );
+}
+
+/// `ShellRunError` keeps the `io::Error` recoverable through `Error::source()`
+/// (spec §L1) rather than surviving only inside its own `Display`.
+#[test]
+fn shell_run_error_exposes_its_io_source() {
+    let error = ShellRunError::Spawn {
+        command: "git push".to_string(),
+        source: SpawnFailShell::io_error(),
+    };
+    let source = std::error::Error::source(&error).expect("the io cause is on the chain");
+    let io = source
+        .downcast_ref::<std::io::Error>()
+        .expect("the concrete io::Error is recoverable, not boxed away");
+    assert_eq!(io.kind(), std::io::ErrorKind::NotFound);
+}
+
+/// A side-effect dispatch failure reaches the snapshot as the effect engine's
+/// typed error. The engine's error is Darkmatter's, so selection finds no
+/// *Claudine* diagnostic and the `err.*` aliases stay on their action-failure
+/// spellings — the §D10 property that makes typing this site safe.
+#[test]
+fn side_effect_dispatch_failure_keeps_the_action_failure_aliases() {
+    let config = parse_lifecycle_config(
+        &json!({
+            "success": {
+                "stack": [{"action": {"append_line": ["/nonexistent-dir/x/y.md", "line"]}}]
+            }
+        }),
+        Path::new("t.md"),
+    )
+    .unwrap();
+    let fm = map(json!({}));
+    let (_dir, engine) = temp_engine();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let context = ctx(
+        LifecycleSignal::Success,
+        &fm,
+        None,
+        &engine,
+        &shell,
+        &recorder,
+        &harness,
+        Path::new("t.md"),
+    );
+    let outcome = context.execute_event(&config);
+    let info = outcome
+        .action_error
+        .expect("an effect-engine error is a dispatch failure");
+    assert_eq!(info.kind, "LifecycleAction");
+    assert_eq!(info.variant, "append_line");
+    assert!(info.snapshot.is_none());
+    assert!(!info.msg.is_empty());
+}

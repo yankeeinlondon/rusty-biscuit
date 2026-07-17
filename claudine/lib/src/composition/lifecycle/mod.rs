@@ -23,7 +23,7 @@ use darkmatter::markdown::compose::expression::{
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use super::error::CompositionError;
+use super::error::{ActionExprError, CompositionError};
 use self::actions::{
     all_lifecycle_verbs, CommunicationAction, CommunicationChannel, ExpressionFunctionAction,
     expression_function_signature, is_known_lifecycle_verb, LifecycleAction, LifecycleActionKind,

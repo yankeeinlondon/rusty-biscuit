@@ -1,6 +1,31 @@
 use super::*;
 use serde_json::json;
 
+/// Hand-build a [`DiagnosticSnapshot`] for a projection test where no typed
+/// `Diagnostic` reconstructs the `detail` (e.g. a cap payload the label-only
+/// path cannot rebuild). `message` is irrelevant here: `to_value` reads
+/// `LifecycleErrorInfo::msg`, not the embedded snapshot's message.
+fn snapshot_with(
+    code: &str,
+    category: &str,
+    disposition: &str,
+    origin: &str,
+    severity: &str,
+    detail: Value,
+) -> DiagnosticSnapshot {
+    DiagnosticSnapshot {
+        schema_version: crate::diagnostics::DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION,
+        category: category.to_string(),
+        code: code.to_string(),
+        disposition: disposition.to_string(),
+        origin: origin.to_string(),
+        severity: severity.to_string(),
+        detail,
+        message: String::new(),
+        cause: None,
+    }
+}
+
 #[test]
 fn error_info_from_claudine_error_records_kind_variant_msg() {
     let err = ClaudineError::Io(std::io::Error::other("disk full"));
@@ -36,8 +61,7 @@ fn error_info_to_value_has_kind_variant_msg() {
         kind: "ClaudineError",
         variant: "Io".to_string(),
         msg: "disk full".to_string(),
-        facets: None,
-        cause: None,
+        snapshot: None,
     };
     let value = info.to_value();
     assert_eq!(value.get("kind"), Some(&json!("ClaudineError")));
@@ -273,19 +297,18 @@ fn cap_detail_promotes_reset_at_and_retry_after_ms_to_top_level() {
         kind: "LifecycleAction",
         variant: "rate_limit".to_string(),
         msg: "slow down".to_string(),
-        facets: Some(Box::new(DiagnosticFacets {
-            code: "cap.rate_limit",
-            category: "cap",
-            disposition: "throttled",
-            origin: "provider",
-            severity: "warning",
-            detail: json!({
+        snapshot: Some(Box::new(snapshot_with(
+            "cap.rate_limit",
+            "cap",
+            "throttled",
+            "provider",
+            "warning",
+            json!({
                 "provider": "claude",
                 "reset_at": "2026-06-28T17:30:00Z",
                 "retry_after_ms": 5_400_000u64,
             }),
-        })),
-        cause: None,
+        ))),
     };
     let value = info.to_value();
     // Promoted to the top level …
@@ -305,15 +328,14 @@ fn null_detail_field_promotes_to_null() {
         kind: "LifecycleAction",
         variant: "x".to_string(),
         msg: "m".to_string(),
-        facets: Some(Box::new(DiagnosticFacets {
-            code: "document.missing_frontmatter",
-            category: "document",
-            disposition: "correctable",
-            origin: "provider",
-            severity: "error",
-            detail: json!({ "doc": "spec.md", "property": "status" }),
-        })),
-        cause: None,
+        snapshot: Some(Box::new(snapshot_with(
+            "document.missing_frontmatter",
+            "document",
+            "correctable",
+            "provider",
+            "error",
+            json!({ "doc": "spec.md", "property": "status" }),
+        ))),
     };
     let value = info.to_value();
     assert_eq!(value.get("reset_at"), Some(&Value::Null));
@@ -367,8 +389,7 @@ fn injected_globals_attaches_err_timing_current() {
         kind: "ClaudineError",
         variant: "Io".to_string(),
         msg: "disk full".to_string(),
-        facets: None,
-        cause: None,
+        snapshot: None,
     };
     let timing = LifecycleTiming {
         document_ms: Some(100),
@@ -398,8 +419,7 @@ fn err_global_resolves_through_dm2_subtree() {
         kind: "ClaudineError",
         variant: "Io".to_string(),
         msg: "disk full".to_string(),
-        facets: None,
-        cause: None,
+        snapshot: None,
     };
     let globals = lifecycle_injected_globals(Some(&info), None, None);
     let state = state(json!({}));
@@ -436,8 +456,7 @@ fn doc_namespace_reaches_literal_err_property_through_dm2() {
         kind: "ClaudineError",
         variant: "Io".to_string(),
         msg: "disk full".to_string(),
-        facets: None,
-        cause: None,
+        snapshot: None,
     };
     let globals = lifecycle_injected_globals(Some(&info), None, None);
     let state = state(json!({"err": "literal-value"}));
@@ -666,10 +685,10 @@ fn provider_failure_message_precedence_survives_the_constructor() {
 #[test]
 fn every_error_kind_code_projects_a_catalog_shaped_detail_object() {
     for spec in crate::diagnostics::CODES {
-        let Some(facets) = DiagnosticFacets::from_code(spec.code) else {
+        let Some(snapshot) = DiagnosticSnapshot::from_code(spec.code, String::new()) else {
             continue;
         };
-        let detail = &facets.detail;
+        let detail = &snapshot.detail;
         assert!(
             detail.is_object(),
             "`{}` projects a top-level non-object detail: {detail}",
@@ -753,7 +772,7 @@ fn from_error_or_action_prefers_facets_and_falls_back_to_the_verb() {
 
     let untyped =
         LifecycleErrorInfo::from_error_or_action("materialize", &std::io::Error::other("boom"));
-    assert!(untyped.facets.is_none(), "std::io::Error is not a Claudine diagnostic");
+    assert!(untyped.snapshot.is_none(), "std::io::Error is not a Claudine diagnostic");
     let value = untyped.to_value();
     assert_eq!(value["variant"], json!("materialize"));
     assert_eq!(value["kind"], json!("LifecycleAction"));

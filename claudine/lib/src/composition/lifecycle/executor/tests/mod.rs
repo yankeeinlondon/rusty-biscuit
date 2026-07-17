@@ -90,9 +90,30 @@ impl MockShell {
 }
 
 impl ShellRunner for MockShell {
-    fn run(&self, command: &str) -> Result<i32, String> {
+    fn run(&self, command: &str) -> Result<i32, ShellRunError> {
         self.commands.lock().unwrap().push(command.to_string());
         Ok(self.code)
+    }
+}
+
+/// A [`ShellRunner`] whose command never starts, so the spawn-failure arm is
+/// reachable without depending on the host shell.
+struct SpawnFailShell;
+
+impl SpawnFailShell {
+    /// The `io::Error` every run reports, so a test can compare the projected
+    /// prose against the exact source it was built from.
+    fn io_error() -> std::io::Error {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "no such file or directory")
+    }
+}
+
+impl ShellRunner for SpawnFailShell {
+    fn run(&self, command: &str) -> Result<i32, ShellRunError> {
+        Err(ShellRunError::Spawn {
+            command: command.to_string(),
+            source: Self::io_error(),
+        })
     }
 }
 

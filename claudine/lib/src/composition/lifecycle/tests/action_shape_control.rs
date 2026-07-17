@@ -1478,7 +1478,7 @@ fn action_value_to_expr_yaml_scalar_typing() {
 
 #[test]
 fn action_value_to_expr_rejects_direct_object() {
-    let err = action_value_to_expr(&json!({ "a": 1 })).unwrap_err();
+    let err = action_value_to_expr(&json!({ "a": 1 })).unwrap_err().to_string();
     assert!(
         err.contains("object values are not supported"),
         "unexpected error: {err}"
@@ -1491,7 +1491,7 @@ fn action_value_to_expr_rejects_direct_object() {
 
 #[test]
 fn action_value_to_expr_rejects_direct_array() {
-    let err = action_value_to_expr(&json!([1, 2, 3])).unwrap_err();
+    let err = action_value_to_expr(&json!([1, 2, 3])).unwrap_err().to_string();
     assert!(
         err.contains("array values are not supported"),
         "unexpected error: {err}"
