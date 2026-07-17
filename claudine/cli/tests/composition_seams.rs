@@ -121,6 +121,95 @@ const SUBTREE_COMPOSE_BASELINE: &[AllowedSite] = &[
     },
 ];
 
+/// Every production caller of the ambient, argument-less
+/// `ComposeContext::capture()`.
+///
+/// **Empty, and it stays empty.** R5 makes context prepared data rather than
+/// ambient process state: the snapshot must derive from immutable launch inputs
+/// plus the target's own source/repo/provider identity. `capture()` instead
+/// reads `std::env::current_dir()` at the instant it is called — and the
+/// wrapper deliberately moves the parent CWD to the repo root — so a runtime
+/// capture on a prepared path resolves a *different* document's context than
+/// the one being prepared. Phase 5 removed the six sites that existed.
+///
+/// The anchored constructors (`capture_for_document`, `capture_for_content`,
+/// `capture_for_dir`) are not this: each takes its anchor explicitly, which is
+/// precisely what the rule asks for. Only the argument-less form is banned.
+///
+/// ## The one entry is debt, not a sanctioned owner
+///
+/// Unlike [`COMPOSE_WITH_ALLOWLIST`], whose entries are semantic owners that
+/// *should* exist, the entry below is a known R5 gap held at one site so the
+/// guard can stop a second. Phase 5 enumerated six ambient captures and retired
+/// all six; this seventh was never on that list and so was never considered.
+/// Removing it is a behavior change to sequence-step context resolution, which
+/// is not Phase 13's (a guard phase's) to make.
+const AMBIENT_CONTEXT_CAPTURE_BASELINE: &[AllowedSite] = &[AllowedSite {
+    site: "sequence::phase1c::build_template_preflight_options",
+    calls: 1,
+    reason: "KNOWN R5 GAP, not a sanctioned owner. A sequence step's template \
+             shell preflight builds its base context ambiently, so `ctx.*` here \
+             resolves from the process CWD the wrapper has already moved to the \
+             repo root. The function's own docblock names the hazard and patches \
+             one face of it (`with_file_ref_fallback_dir` anchors file-ref \
+             resolution on the launch area) while leaving the context itself \
+             ambient. Phase 5's six-site list never named this site. Fixing it \
+             means deciding the correct anchor for a sequence step and is \
+             tracked as R5 debt — see `notes/acceptance-map.md`.",
+}];
+
+/// Every production endpoint of a `DocumentTransition::Proxy` — both the sites
+/// that construct one and the sites that destructure one.
+///
+/// Acceptance criterion 3 requires the initialize, terminal-recovery,
+/// target-initialize chaining, and library-loop proxy routes to return **one**
+/// typed handoff that is always consumed or rejected explicitly. The type
+/// system already carries the *completeness* half — `EvaluatedProxyRequest`
+/// cannot be constructed without a target, an overlay, and provenance, and
+/// `ProxyHandoff` cannot be constructed without a resolution step — so a scan
+/// cannot add to that and does not try.
+///
+/// What it adds is the **census**, and it deliberately covers both ends because
+/// AC3 is a claim about both: a route is only sound if something produces the
+/// handoff *and* something consumes or rejects it. A new endpoint at either end
+/// is the one change that could reintroduce the motivating bug — a producer
+/// that never reaches the coordinator, or a consumer that quietly drops a
+/// handoff — and it is exactly the change a diff review is worst at noticing.
+const PROXY_TRANSITION_SITE_BASELINE: &[AllowedSite] = &[
+    AllowedSite {
+        site: "composition::pipeline::route_initialize",
+        calls: 1,
+        reason: "PRODUCER — the single-document pipeline's `initialize` route \
+                 raises the handoff for the coordinator to commit",
+    },
+    AllowedSite {
+        site: "looping::engine::execute_loop_with_lifecycle",
+        calls: 1,
+        reason: "PRODUCER — the library loop route returns the handoff on its \
+                 `LoopExecutionResult` rather than the retired \
+                 `init_proxy_target` channel",
+    },
+    AllowedSite {
+        site: "coordinator::transition::map_abort",
+        calls: 1,
+        reason: "PRODUCER — maps the lifecycle control outcome onto the shared \
+                 transition; carries the request through unchanged",
+    },
+    AllowedSite {
+        site: "harness_orch::loop_control::new",
+        calls: 1,
+        reason: "CONSUMER — the harness loop hands the request to \
+                 `ActiveDocumentCoordinator::adopt`, the only committer of \
+                 document identity",
+    },
+    AllowedSite {
+        site: "compose::prep::execute_loop_or_single",
+        calls: 1,
+        reason: "CONSUMER — the command-level owner consumes the loop route's \
+                 handoff so a library-loop proxy cannot be dropped silently",
+    },
+];
+
 /// Every production `print!`/`println!`/`eprint!`/`eprintln!` on a transition
 /// path.
 ///
@@ -216,6 +305,37 @@ fn no_new_optional_proxy_target_channel() {
     assert_baseline(&found, PROXY_TARGET_CHANNEL_BASELINE, "optional proxy-target channel", "R1 bans a second optional proxy-target channel: an `Option`-shaped target \
          can be silently dropped by a caller that forgets to consume it, which is \
          the motivating bug. Return the typed document transition instead.");
+}
+
+#[test]
+fn every_canonical_preparation_caller_supplies_explicit_context() {
+    let found = scan_all(find_ambient_context_captures);
+    assert_baseline(
+        &found,
+        AMBIENT_CONTEXT_CAPTURE_BASELINE,
+        "ambient `ComposeContext::capture()` site",
+        "R5 bans ambient context on a prepared path: `capture()` reads the process CWD, \
+         which the wrapper deliberately moves to the repo root, so it resolves a \
+         different document's context than the one being prepared. Pass the anchor \
+         explicitly (`capture_for_document` / `capture_for_content` / `capture_for_dir`), \
+         or thread the prepared document's stored `ComposeContext` through.",
+    );
+}
+
+#[test]
+fn every_production_proxy_route_carries_the_typed_handoff() {
+    let found = scan_all(find_proxy_transition_sites);
+    assert_baseline(
+        &found,
+        PROXY_TRANSITION_SITE_BASELINE,
+        "`DocumentTransition::Proxy` endpoint",
+        "A new proxy route is the one change that can reintroduce the motivating bug. \
+         Every producer must hand its `EvaluatedProxyRequest` to the coordinator — the \
+         only thing that resolves the target, checks hop/cycle state, and commits the \
+         handoff — and every consumer must consume or explicitly reject it. Add the site \
+         to `PROXY_TRANSITION_SITE_BASELINE` with a reason naming the route it serves and \
+         which end of it this is.",
+    );
 }
 
 #[test]
@@ -439,6 +559,31 @@ fn module_identity(rel: &str) -> String {
 /// identity is its enclosing function alone.
 fn find_compose_with_calls(src: &[u8]) -> Vec<Occurrence> {
     find_all(src, b".compose_with(")
+        .into_iter()
+        .map(|offset| Occurrence { offset, name: None })
+        .collect()
+}
+
+/// Every argument-less `ComposeContext::capture()` call — the ambient capture.
+///
+/// The needle carries the closing paren, so the anchored constructors cannot
+/// match: `capture_for_document(` has a `_` where this requires `(`.
+fn find_ambient_context_captures(src: &[u8]) -> Vec<Occurrence> {
+    find_all(src, b"ComposeContext::capture()")
+        .into_iter()
+        .map(|offset| Occurrence { offset, name: None })
+        .collect()
+}
+
+/// Every `DocumentTransition::Proxy(` endpoint.
+///
+/// The needle matches a construction and a destructuring pattern alike, and
+/// that is deliberate rather than imprecision: AC3 is a claim about both ends
+/// of a route ("returned ... always consumed or rejected explicitly"), so a
+/// census that saw only producers would miss a consumer that drops a handoff.
+/// [`PROXY_TRANSITION_SITE_BASELINE`] records which end each site is.
+fn find_proxy_transition_sites(src: &[u8]) -> Vec<Occurrence> {
+    find_all(src, b"DocumentTransition::Proxy(")
         .into_iter()
         .map(|offset| Occurrence { offset, name: None })
         .collect()
