@@ -11,11 +11,12 @@ use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use chrono::{DateTime, Utc};
 use darkmatter::markdown::MarkdownError;
+use darkmatter::markdown::compose::context::merge::CtxMergeError;
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 
 use darkmatter::markdown::compose::expression::file_suggestions::DEFAULT_MAX_SUGGESTIONS;
 use darkmatter::markdown::compose::expression::{
-    ExpressionError, FileRefFailure, FileReferenceDiagnostic, suggest_sibling_files,
+    ExpressionError, FileRefFailure, FileReferenceDiagnostic, ParseError, suggest_sibling_files,
 };
 use serde_json::{Value, json};
 
@@ -310,6 +311,20 @@ pub enum CompositionError {
     #[error("invalid inline composition response: {0}")]
     InvalidInlineResponse(String),
 
+    /// Stamping `last_updated` into the rebuilt inline document failed.
+    ///
+    /// The typed sibling of [`InvalidInlineResponse`] for the one inline-closure
+    /// step that has a concrete cause in hand: `rewrite_inline_document`'s
+    /// fallback path parses the source as Markdown and re-inserts
+    /// `last_updated`, and `fm_insert` is its only fallible call. `Display` is
+    /// byte-identical to the `InvalidInlineResponse(format!(…))` it replaced —
+    /// the prose is a user-visible surface, and typing the error is not a
+    /// licence to reword it.
+    ///
+    /// [`InvalidInlineResponse`]: CompositionError::InvalidInlineResponse
+    #[error("invalid inline composition response: failed to update last_updated: {0}")]
+    InlineRewriteFailed(#[source] MarkdownError),
+
     /// The document's existing `hash` frontmatter property is malformed.
     ///
     /// Carries the typed `MarkdownError` so the CLI's top-level walker renders
@@ -319,23 +334,38 @@ pub enum CompositionError {
 
     /// Atomic file write failed during inline composition.
     ///
-    /// Carries the file path and the typed [`crate::error::ClaudineError`]
-    /// source (boxed because `ClaudineError` can itself contain a
-    /// `CompositionError`, which would otherwise make the type infinitely
-    /// sized) so the path and underlying cause reach the CLI walker instead of
-    /// being flattened to a string.
+    /// Carries the file path and the unboxed [`std::io::Error`] that
+    /// `atomic_write` raised, so both reach the CLI walker instead of being
+    /// flattened to a string.
+    ///
+    /// The source was a `Box<ClaudineError>` until `atomic_write` was narrowed
+    /// to `io::Result`. The box was mandatory then — `ClaudineError` can itself
+    /// hold a `CompositionError`, so an unboxed field made the type infinitely
+    /// sized — and it made the cause invisible to `as_diagnostic`, which is a
+    /// downcast list over concrete types and cannot see through a `Box`. An
+    /// `io::Error` source has neither problem.
     #[error("atomic write to {path} failed: {source}")]
     AtomicWriteFailed {
         /// The file whose atomic write failed.
         path: PathBuf,
         /// The underlying typed write failure.
         #[source]
-        source: Box<crate::error::ClaudineError>,
+        source: std::io::Error,
     },
 
     /// The composition target file lacks required read/write permissions.
-    #[error("insufficient file permissions (need read+write): {0}")]
-    InsufficientFilePermissions(String),
+    ///
+    /// Carries the unboxed [`std::io::Error`] the read+write open probe raised,
+    /// so the OS-level reason (`permission denied`, `is a directory`, a broken
+    /// symlink) reaches a handler instead of only the flattened `Display` text.
+    #[error("insufficient file permissions (need read+write): {}: {source}", path.display())]
+    InsufficientFilePermissions {
+        /// The file whose read+write probe failed.
+        path: PathBuf,
+        /// The typed OS failure the probe raised.
+        #[source]
+        source: std::io::Error,
+    },
 
     /// Pre-flight shell command discovery failed.
     ///
@@ -346,18 +376,75 @@ pub enum CompositionError {
     #[error("pre-flight discovery failed: {0}")]
     PreFlightDiscoveryFailed(#[source] MarkdownError),
 
-    /// A pre-flight failure with no finer typed shape — the early-binding state
-    /// builder, or a shell-audit error outside the approval family.
+    /// A pre-flight failure carrying only prose.
     ///
     /// This variant is **not** the shell-approval surface: it carries prose, so
     /// it cannot claim `composition.shell_approval` without parsing its own
     /// `Display` to find out which failure it is. The approval failures have
     /// [`ShellApprovalUnavailable`] and [`ShellCommandDenied`] instead.
     ///
+    /// Both of its former production constructors are now typed —
+    /// [`PreFlightShellAuditFailed`] and [`PreFlightStateBuildFailed`] — so
+    /// nothing in `lib/src` builds this variant today. It is retained as the
+    /// enum's documented prose anchor: `error-architecture.md` cites it as the
+    /// worked example of why a prose error must not claim a code, and its
+    /// `composition.failed` mapping is pinned by
+    /// `preflight_failed_does_not_claim_the_approval_code`.
+    ///
     /// [`ShellApprovalUnavailable`]: CompositionError::ShellApprovalUnavailable
     /// [`ShellCommandDenied`]: CompositionError::ShellCommandDenied
+    /// [`PreFlightShellAuditFailed`]: CompositionError::PreFlightShellAuditFailed
+    /// [`PreFlightStateBuildFailed`]: CompositionError::PreFlightStateBuildFailed
     #[error("pre-flight shell approval failed: {0}")]
     PreFlightFailed(String),
+
+    /// A shell-audit failure outside the approval family, raised while checking
+    /// a discovered command against policy.
+    ///
+    /// Split out of [`PreFlightFailed`]'s prose so the [`HarnessError`] the
+    /// audit raised stays a downcastable member of the cause chain. The two
+    /// approval-family `HarnessError` variants are destructured before this arm
+    /// and become [`ShellCommandDenied`] / [`ShellApprovalUnavailable`]; every
+    /// other variant lands here.
+    ///
+    /// The source is deliberately **not** boxed, for the reason
+    /// [`InvalidFileReference`] records: a `#[source]` on a `Box<HarnessError>`
+    /// publishes the *box* to the chain, so
+    /// [`as_diagnostic`](crate::diagnostics::as_diagnostic) — a downcast list
+    /// over concrete types — could never resolve the `HarnessError` behind it.
+    ///
+    /// `Display` is byte-identical to the `PreFlightFailed(e.to_string())` it
+    /// replaced, and the variant keeps the `composition.failed` catch-all:
+    /// giving the now-typed failure a code of its own is an `err.code` change,
+    /// which spec §D10 reserves for a separate specification.
+    ///
+    /// [`PreFlightFailed`]: CompositionError::PreFlightFailed
+    /// [`HarnessError`]: crate::harness::HarnessError
+    /// [`ShellCommandDenied`]: CompositionError::ShellCommandDenied
+    /// [`ShellApprovalUnavailable`]: CompositionError::ShellApprovalUnavailable
+    /// [`InvalidFileReference`]: CompositionError::InvalidFileReference
+    #[error("pre-flight shell approval failed: {source}")]
+    PreFlightShellAuditFailed {
+        /// The typed shell-audit failure.
+        #[source]
+        source: crate::harness::HarnessError,
+    },
+
+    /// Building the early-binding state for lifecycle shell resolution failed.
+    ///
+    /// Split out of [`PreFlightFailed`]'s prose so the [`CtxMergeError`] stays a
+    /// chain member. `Display` is byte-identical to the `format!` it replaced.
+    ///
+    /// [`PreFlightFailed`]: CompositionError::PreFlightFailed
+    #[error(
+        "pre-flight shell approval failed: lifecycle shell pre-flight: \
+         building early-binding state failed: {source}"
+    )]
+    PreFlightStateBuildFailed {
+        /// The typed `ctx` merge failure from Darkmatter's state builder.
+        #[source]
+        source: CtxMergeError,
+    },
 
     /// A shell command the author wrote could not be approved at pre-flight,
     /// for a reason other than the user declining it.
@@ -501,6 +588,35 @@ pub enum CompositionError {
         message: String,
     },
 
+    /// A lifecycle stack item's `when:` condition failed to parse.
+    ///
+    /// The typed sibling of [`LifecycleStackInvalidShape`] for the one shape
+    /// site that holds a concrete [`ParseError`]; every other site rejects a
+    /// value on its own JSON shape and has no typed error to retain. It shares
+    /// that variant's `Display`, code, `detail`, and status block — `message`
+    /// keeps the prose so all four render from one string — and adds only the
+    /// recoverable source.
+    ///
+    /// Staged here for the lifecycle-execution burn-down batch, which owns
+    /// `lifecycle/parse.rs`; see `features/2026-07-13-error-propogation/burndown-triage.md`.
+    ///
+    /// [`LifecycleStackInvalidShape`]: CompositionError::LifecycleStackInvalidShape
+    #[error(
+        "invalid lifecycle stack item in `{property}` ({source_path}): {message}",
+        source_path = source_path.display()
+    )]
+    LifecycleWhenExpressionInvalid {
+        /// The prompt file whose lifecycle frontmatter held the condition.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// Human-readable description of the parse failure.
+        message: String,
+        /// The typed expression parse failure.
+        #[source]
+        source: ParseError,
+    },
+
     /// A short-form lifecycle action `verb(args)` failed to parse.
     ///
     /// Covers: missing verb, unbalanced parens, trailing characters, argument
@@ -537,6 +653,16 @@ pub enum CompositionError {
         action: String,
         /// Human-readable description of the long-form problem.
         message: String,
+        /// Typed cause when the failure came from converting an action value
+        /// into an expression (`action_value_to_expr`). `None` for the
+        /// shape failures — missing parameter, unknown key, wrong value type —
+        /// that never had a lower cause. The enum is carried unboxed so
+        /// `Error::source()` publishes [`ActionExprError`] directly rather than
+        /// an undowncastable `Box` (decisions.md §D-7); the heavy [`ParseError`]
+        /// is boxed *inside* the enum instead, keeping `CompositionError` under
+        /// `clippy::result_large_err`.
+        #[source]
+        source: Option<ActionExprError>,
     },
 
     /// A lifecycle action verb is not recognized at parse time.
@@ -792,6 +918,15 @@ pub enum CompositionError {
         /// Human-readable resolution failure (parse error, unknown root,
         /// late-binding reference, etc.).
         message: String,
+        /// The typed DM2 failure, when one exists.
+        ///
+        /// `None` for the late-binding rejection, which is this layer's own
+        /// pre-resolution guard and never calls Darkmatter — there is no typed
+        /// error to retain. Boxed because `MarkdownError` is heavy and this
+        /// variant already carries four fields; nothing downcasts to it, since
+        /// a Darkmatter error is not a registered Claudine diagnostic.
+        #[source]
+        source: Option<Box<MarkdownError>>,
     },
 
     /// A `failure` stack requested `resume(...)` but the agentic loop did
@@ -1043,6 +1178,34 @@ pub enum CompositionError {
     #[error("invalid loop definition: {0}")]
     LoopInvalid(String),
 
+    /// A `loop.while` / `loop.until` condition failed to parse or evaluate.
+    ///
+    /// The typed sibling of [`LoopInvalid`], which is a bare newtype with no
+    /// slot for a cause. Unlike the lifecycle shape family, this variant derives
+    /// its prose at `Display` time from `kind`, `condition`, and the cause's
+    /// stage rather than storing a `message`: it is the only renderer of that
+    /// prose, so a second copy would be a field that can drift from the one
+    /// string that reads it. Byte-identical to the `LoopInvalid(format!(…))` it
+    /// replaces.
+    ///
+    /// Staged here for the looping burn-down batch, which owns
+    /// `looping/expression.rs`; see `features/2026-07-13-error-propogation/burndown-triage.md`.
+    ///
+    /// [`LoopInvalid`]: CompositionError::LoopInvalid
+    #[error(
+        "invalid loop definition: failed to {stage} loop.{kind} `{condition}`: {source}",
+        stage = source.stage()
+    )]
+    LoopExpressionInvalid {
+        /// The condition keyword — `while` or `until`.
+        kind: String,
+        /// The condition expression exactly as authored.
+        condition: String,
+        /// The typed parse-or-evaluate failure.
+        #[source]
+        source: LoopExpressionCause,
+    },
+
     /// Loop execution exceeded its configured safety cap.
     #[error(
         "loop limit exceeded for {prompt_path} at iteration {iteration}; cap is {cap}",
@@ -1070,6 +1233,37 @@ pub enum CompositionError {
         total_actions: usize,
         /// Human-readable failure reason.
         message: String,
+    },
+
+    /// A loop action's `{{ … }}` template failed to parse or evaluate.
+    ///
+    /// The typed sibling of [`InvalidAction`] for the two template sites that
+    /// hold a concrete cause. `InvalidAction` stays as-is because its shared
+    /// `invalid_action` constructor also serves sites with nothing to retain (a
+    /// reserved property name, a rejected value shape), so a mandatory source
+    /// field there would have no value to take.
+    ///
+    /// Staged here for the looping burn-down batch, which owns
+    /// `looping/actions.rs`; see `features/2026-07-13-error-propogation/burndown-triage.md`.
+    ///
+    /// [`InvalidAction`]: CompositionError::InvalidAction
+    #[error(
+        "invalid loop action at iteration {iteration}, action {action_index} \
+         of {total_actions}: {}",
+        source.action_message(expression)
+    )]
+    LoopActionExpressionInvalid {
+        /// 1-based iteration index.
+        iteration: usize,
+        /// 1-based action index.
+        action_index: usize,
+        /// Total actions in this iteration.
+        total_actions: usize,
+        /// The template's inner expression text, trimmed, without its braces.
+        expression: String,
+        /// The typed parse-or-evaluate failure.
+        #[source]
+        source: LoopExpressionCause,
     },
 
     /// Increment targeted a property with an unsupported type.
@@ -1478,6 +1672,84 @@ pub enum SequenceLoadCause {
     HomeDir,
 }
 
+/// Heterogeneous lower-layer cause of a loop expression failure.
+///
+/// Carried as the typed `#[source]` of [`CompositionError::LoopExpressionInvalid`]
+/// and [`CompositionError::LoopActionExpressionInvalid`]. Both variants can fail
+/// at either of two stages against the same authored expression, and the stage
+/// is what their `Display` prose turns on — so the cause carries it rather than
+/// each variant re-declaring a discriminant beside its source.
+///
+/// Like [`MarkdownLoadCause`], the arms are `transparent`: they replace the
+/// concrete error in the chain rather than adding a hop to it, so a handler
+/// recovers the stage by downcasting to this enum and matching, not by walking
+/// one level deeper.
+#[derive(Error, Debug)]
+pub enum LoopExpressionCause {
+    /// The expression could not be parsed.
+    #[error(transparent)]
+    Parse(#[from] ParseError),
+    /// The expression parsed but could not be evaluated.
+    ///
+    /// Boxed to keep the enum small: `ExpressionError` is the heavy member,
+    /// mirroring how `MarkdownError::Interpolation` boxes the same type.
+    #[error(transparent)]
+    Evaluate(#[from] Box<ExpressionError>),
+}
+
+/// Lower-layer cause of an `action_value_to_expr` failure.
+///
+/// Carried as the optional typed `#[source]` of
+/// [`CompositionError::LifecycleActionInvalidLongForm`] so a handler can
+/// recover the concrete Darkmatter [`ParseError`] through
+/// [`std::error::Error::source`] instead of re-parsing the flattened message.
+/// The [`Invalid`](ActionExprError::Invalid) arm carries the genuinely-prose
+/// rejections (a null, an unsupported number, or object/array scalar data)
+/// that never had a typed lower cause.
+///
+/// `Display` is byte-identical to the strings `action_value_to_expr` built
+/// before the cause was typed — typing an error is not a licence to reword it.
+#[derive(Error, Debug)]
+pub enum ActionExprError {
+    /// A whole-value `{{ … }}` interpolation span did not parse.
+    ///
+    /// Boxed to keep `ActionExprError` (and thus the unboxed
+    /// `LifecycleActionInvalidLongForm` source slot) small — [`ParseError`]
+    /// is the heavy member, mirroring how [`MarkdownLoadCause::Parse`] boxes
+    /// its own. The unboxed enum keeps the field downcastable while the boxed
+    /// payload keeps `CompositionError` under `clippy::result_large_err`.
+    #[error("whole-value expression is not valid: {0}")]
+    Parse(#[from] Box<ParseError>),
+    /// A scalar shape that cannot become an action expression at all.
+    #[error("{0}")]
+    Invalid(String),
+}
+
+impl LoopExpressionCause {
+    /// The failing stage, as the verb both loop variants' `Display` reads.
+    pub fn stage(&self) -> &'static str {
+        match self {
+            LoopExpressionCause::Parse(_) => "parse",
+            LoopExpressionCause::Evaluate(_) => "evaluate",
+        }
+    }
+
+    /// The loop-action prose for `expression`, byte-identical to the two
+    /// `format!` strings [`CompositionError::InvalidAction`] carried before the
+    /// stage was typed — the text is a user-visible surface, and typing the
+    /// error is not a licence to reword it.
+    fn action_message(&self, expression: &str) -> String {
+        match self {
+            LoopExpressionCause::Parse(error) => {
+                format!("invalid template `{{{{{expression}}}}}` in loop action: {error}")
+            }
+            LoopExpressionCause::Evaluate(error) => {
+                format!("failed to evaluate template `{{{{{expression}}}}}`: {error}")
+            }
+        }
+    }
+}
+
 /// A single required schema property that is missing from frontmatter.
 ///
 /// Carries enough metadata to render an actionable error (declaration name,
@@ -1825,6 +2097,7 @@ impl CompositionError {
             | CompositionError::LifecycleUndefinedVariable { property, .. }
             | CompositionError::LifecycleInvalid { property, .. }
             | CompositionError::LifecycleStackInvalidShape { property, .. }
+            | CompositionError::LifecycleWhenExpressionInvalid { property, .. }
             | CompositionError::LifecycleActionInvalidShortForm { property, .. }
             | CompositionError::LifecycleActionInvalidLongForm { property, .. }
             | CompositionError::LifecycleUnknownVerb { property, .. }

@@ -224,7 +224,7 @@ fn validate_permissions_readonly_file() {
     let err = validate_file_permissions(&file).unwrap_err();
     assert!(matches!(
         err,
-        CompositionError::InsufficientFilePermissions(_)
+        CompositionError::InsufficientFilePermissions { .. }
     ));
 
     // Cleanup: restore permissions so TempDir can delete
@@ -246,7 +246,7 @@ fn validate_permissions_nonexistent_file() {
     let err = validate_file_permissions(Path::new("/nonexistent/path.md")).unwrap_err();
     assert!(matches!(
         err,
-        CompositionError::InsufficientFilePermissions(_)
+        CompositionError::InsufficientFilePermissions { .. }
     ));
 }
 

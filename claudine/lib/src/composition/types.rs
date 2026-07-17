@@ -720,13 +720,17 @@ pub struct CompositionExecutionRequest {
     /// root matches the launch CWD, the executor reuses it instead of
     /// calling `detect_environment_fast` again.
     pub prep_env_context: Option<crate::events::EnvironmentContext>,
-    /// Captured error message from the shared prep-time sniff scan, if
+    /// Diagnostic snapshot of the shared prep-time sniff scan failure, if
     /// it failed. The shared scan defaults to an empty
     /// [`crate::system_prompt::LaunchContext`] on failure to keep
     /// best-effort callers happy, so the executor reads this field to
     /// preserve the legacy hard-fail contract for `--repo`. `None` (or
     /// no prep context at all) means no failure happened during prep.
-    pub prep_launch_detection_error: Option<String>,
+    ///
+    /// A [`DiagnosticSnapshot`](crate::diagnostics::DiagnosticSnapshot)
+    /// rather than a `String` so the typed `sniff::SniffError` retained
+    /// upstream survives into this `Clone` record.
+    pub prep_launch_detection_error: Option<crate::diagnostics::DiagnosticSnapshot>,
     /// Whether the caller already emitted the execution header up front.
     ///
     /// `compose` / `inline-compose` resolve the agent eagerly (prompting

@@ -192,6 +192,12 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             source_path,
             property,
             message,
+        }
+        | CompositionError::LifecycleWhenExpressionInvalid {
+            source_path,
+            property,
+            message,
+            ..
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(
@@ -238,6 +244,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             property,
             action,
             message,
+            source: _,
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(

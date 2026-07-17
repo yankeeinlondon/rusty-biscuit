@@ -197,8 +197,9 @@ pub fn validate_file_permissions(path: &Path) -> Result<(), CompositionError> {
         .read(true)
         .write(true)
         .open(path)
-        .map_err(|e| {
-            CompositionError::InsufficientFilePermissions(format!("{}: {e}", path.display()))
+        .map_err(|e| CompositionError::InsufficientFilePermissions {
+            path: path.to_path_buf(),
+            source: e,
         })?;
 
     Ok(())

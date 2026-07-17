@@ -46,7 +46,8 @@ pub struct PreFlightResult {
 /// - `ShellCommandDenied` if the user denies any command
 /// - `PreFlightDiscoveryFailed` if Darkmatter's document graph walk fails
 /// - `ShellApprovalUnavailable` for blacklisted commands or missing approval handler
-/// - `PreFlightFailed` for a shell-audit failure outside the approval family
+/// - `PreFlightShellAuditFailed` for a shell-audit failure outside the approval
+///   family, carrying the raised `HarnessError` as its typed source
 ///
 /// ## Arguments
 ///
@@ -171,7 +172,7 @@ pub fn resolve_shell_approvals(
                 });
             }
             Err(e) => {
-                return Err(CompositionError::PreFlightFailed(e.to_string()));
+                return Err(CompositionError::PreFlightShellAuditFailed { source: e });
             }
         }
     }
@@ -239,11 +240,7 @@ pub fn resolve_lifecycle_shell_commands(
         // pathological `ctx` shape to a warning rather than aborting pre-flight.
         .with_allow_ctx_override(true)
         .build()
-        .map_err(|e| {
-            CompositionError::PreFlightFailed(format!(
-                "lifecycle shell pre-flight: building early-binding state failed: {e}"
-            ))
-        })?;
+        .map_err(|e| CompositionError::PreFlightStateBuildFailed { source: e })?;
 
     // Read-side functions (`parent_dir`, `dirname`, `file_exists`, …) resolve
     // against the prompt's parent directory first (document-first contract),
@@ -325,6 +322,9 @@ fn resolve_shell_command_expr(
                  early-binding values (`doc.*`, `ctx.*`, `env.*`, read-side functions) may be \
                  used here"
             ),
+            // This layer's own guard, raised before Darkmatter is consulted, so
+            // there is no typed failure to retain.
+            source: None,
         });
     }
 
@@ -338,6 +338,7 @@ fn resolve_shell_command_expr(
             property: property.to_string(),
             raw: raw.clone(),
             message: e.to_string(),
+            source: Some(Box::new(e)),
         })?;
 
     let resolved = match resolved {

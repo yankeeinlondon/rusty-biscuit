@@ -41,9 +41,9 @@ mod types;
 pub use agent_message::{agent_state_breakdown, invalid_agent_message};
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 pub use error::{
-    CompositionError, DroppedOptional, DroppedOptionalSource, DroppedOptionalStage,
-    FileReferenceContext, InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE, MarkdownLoadCause,
-    MissingProperty,
+    ActionExprError, CompositionError, DroppedOptional, DroppedOptionalSource, DroppedOptionalStage,
+    FileReferenceContext, InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE, LoopExpressionCause,
+    MarkdownLoadCause, MissingProperty,
     SequenceLoadCause, SequenceMissingPropertiesStep, SequenceSelectionFailure,
     ShellApprovalFailure, TextFormat,
 };
@@ -69,7 +69,8 @@ pub use lifecycle_control::{
     parse_delay, proxy_handoff_allowed, resolve_proxy_target,
 };
 pub use lifecycle_executor::{
-    LifecycleEventOutcome, ShellRunner, StackControl, StackExecutionContext, SystemShellRunner,
+    LifecycleEventOutcome, LifecycleExprError, ShellRunError, ShellRunner, StackControl,
+    StackExecutionContext, SystemShellRunner,
 };
 pub use lifecycle::runtime::{
     IterationSummarySignals, LifecycleTransitionAbort, LifecycleTransitionDecision,

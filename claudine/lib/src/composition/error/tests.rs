@@ -1671,3 +1671,407 @@ fn invalid_file_reference_body_does_not_leak_escape_backslashes() {
     );
     assert!(rendered.contains("nope.md"), "{rendered}");
 }
+
+// -- Burn-down batch 3: typed sources on the composition edges ---------------
+//
+// Each site below traded a flattened string for a retained `#[source]`. Two
+// contracts are locked per site: the concrete cause is recoverable through
+// `Error::source` (spec §L1), and every observable projection stayed exactly
+// where it was (spec §D10 — richer detail, never renamed or re-valued detail).
+
+fn markdown_error() -> MarkdownError {
+    MarkdownError::AstParse("unbalanced `{{`".to_string())
+}
+
+/// The shell-audit catch-all publishes its `HarnessError` unboxed, so
+/// `as_diagnostic` — a downcast list over concrete types — can resolve it.
+/// Boxing it would publish the box instead and skip the diagnostic entirely.
+#[test]
+fn pre_flight_shell_audit_failed_publishes_its_harness_error() {
+    let err = CompositionError::PreFlightShellAuditFailed {
+        source: crate::harness::HarnessError::ShellCommandDenied {
+            command: "rm -rf /".to_string(),
+        },
+    };
+
+    let published = (&err as &(dyn std::error::Error + 'static))
+        .source()
+        .expect("the audit failure must publish a cause");
+    assert!(
+        published
+            .downcast_ref::<crate::harness::HarnessError>()
+            .is_some(),
+        "the chain must publish the concrete HarnessError, not a wrapper"
+    );
+    assert!(
+        crate::diagnostics::as_diagnostic(published).is_some(),
+        "the published cause must resolve through the central registry"
+    );
+}
+
+/// `PreFlightShellAuditFailed` replaced `PreFlightFailed(e.to_string())`, and
+/// `PreFlightStateBuildFailed` replaced a `PreFlightFailed(format!(…))`. Both
+/// duplicate the prose their prose twin rendered in order to hold a `#[source]`,
+/// so lock the twins against drift: every observable projection must agree for
+/// the same underlying failure.
+#[test]
+fn pre_flight_twins_agree() {
+    let audit_cause = crate::harness::HarnessError::ShellCommandDenied {
+        command: "rm -rf /".to_string(),
+    };
+    let plain = CompositionError::PreFlightFailed(audit_cause.to_string());
+    let sourced = CompositionError::PreFlightShellAuditFailed {
+        source: crate::harness::HarnessError::ShellCommandDenied {
+            command: "rm -rf /".to_string(),
+        },
+    };
+    assert_eq!(plain.to_string(), sourced.to_string());
+    assert_eq!(plain.code(), sourced.code());
+    assert_eq!(plain.category(), sourced.category());
+    assert_eq!(plain.disposition(), sourced.disposition());
+    assert_eq!(plain.origin(), sourced.origin());
+    assert_eq!(plain.detail(), sourced.detail());
+
+    let merge_cause = CtxMergeError::InvalidUserCtx {
+        kind: "array".to_string(),
+    };
+    let plain = CompositionError::PreFlightFailed(format!(
+        "lifecycle shell pre-flight: building early-binding state failed: {merge_cause}"
+    ));
+    let sourced = CompositionError::PreFlightStateBuildFailed {
+        source: CtxMergeError::InvalidUserCtx {
+            kind: "array".to_string(),
+        },
+    };
+    assert_eq!(plain.to_string(), sourced.to_string());
+    assert_eq!(plain.code(), sourced.code());
+    assert_eq!(plain.detail(), sourced.detail());
+}
+
+/// The state builder's `CtxMergeError` survives as a chain member.
+#[test]
+fn pre_flight_state_build_failed_publishes_its_merge_error() {
+    let err = CompositionError::PreFlightStateBuildFailed {
+        source: CtxMergeError::InvalidUserCtx {
+            kind: "array".to_string(),
+        },
+    };
+    assert!(
+        (&err as &(dyn std::error::Error + 'static))
+            .source()
+            .and_then(|c| c.downcast_ref::<CtxMergeError>())
+            .is_some()
+    );
+}
+
+/// `LifecycleShellResolution`'s source is `Option` because the same variant is
+/// raised by this layer's own late-binding guard, which never calls Darkmatter
+/// and so has no typed error to retain. Both shapes must render identically —
+/// only the recoverable cause differs.
+#[test]
+fn lifecycle_shell_resolution_source_is_optional_and_leaves_display_unmoved() {
+    let untyped = CompositionError::LifecycleShellResolution {
+        source_path: PathBuf::from("run.md"),
+        property: "start.stack[0].action.command".to_string(),
+        raw: "echo {{ err.msg }}".to_string(),
+        message: "late-binding reference `err`".to_string(),
+        source: None,
+    };
+    let typed = CompositionError::LifecycleShellResolution {
+        source_path: PathBuf::from("run.md"),
+        property: "start.stack[0].action.command".to_string(),
+        raw: "echo {{ err.msg }}".to_string(),
+        message: "late-binding reference `err`".to_string(),
+        source: Some(Box::new(markdown_error())),
+    };
+
+    assert_eq!(untyped.to_string(), typed.to_string());
+    assert_eq!(untyped.code(), typed.code());
+    assert_eq!(untyped.detail(), typed.detail());
+    assert!(
+        (&untyped as &(dyn std::error::Error + 'static))
+            .source()
+            .is_none(),
+        "the late-binding guard has no typed cause to publish"
+    );
+    assert!(
+        (&typed as &(dyn std::error::Error + 'static))
+            .source()
+            .is_some(),
+        "the DM2 failure must publish its cause"
+    );
+}
+
+/// The permissions probe now keeps the `io::Error`, so a handler can read the
+/// OS reason instead of substring-matching the message. `Display` must not move.
+#[test]
+fn insufficient_file_permissions_keeps_its_io_error_and_display() {
+    let err = CompositionError::InsufficientFilePermissions {
+        path: PathBuf::from("/repo/run.md"),
+        source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+    };
+
+    assert_eq!(
+        err.to_string(),
+        "insufficient file permissions (need read+write): /repo/run.md: denied"
+    );
+    let io = (&err as &(dyn std::error::Error + 'static))
+        .source()
+        .and_then(|c| c.downcast_ref::<std::io::Error>())
+        .expect("the probe's io::Error must be recoverable");
+    assert_eq!(io.kind(), std::io::ErrorKind::PermissionDenied);
+}
+
+/// `InlineRewriteFailed` carries the prose its `InvalidInlineResponse(format!(…))`
+/// predecessor rendered, so the twins must agree on every projection.
+#[test]
+fn inline_rewrite_failed_twins_agree_and_publish_the_markdown_error() {
+    let plain = CompositionError::InvalidInlineResponse(format!(
+        "failed to update last_updated: {}",
+        markdown_error()
+    ));
+    let sourced = CompositionError::InlineRewriteFailed(markdown_error());
+
+    assert_eq!(plain.to_string(), sourced.to_string());
+    assert_eq!(plain.code(), sourced.code());
+    assert_eq!(plain.detail(), sourced.detail());
+    assert!(
+        (&sourced as &(dyn std::error::Error + 'static))
+            .source()
+            .and_then(|c| c.downcast_ref::<MarkdownError>())
+            .is_some()
+    );
+}
+
+// -- Staged for batches 4 and 5 ---------------------------------------------
+//
+// These variants have no call site yet; their consuming batches add them. The
+// contract they must hold on arrival is that they are drop-in replacements for
+// the prose variants they supersede, so it is locked here rather than left for
+// the batch that discovers it is not true.
+
+fn parse_error() -> ParseError {
+    darkmatter::markdown::compose::expression::parse("1 +").unwrap_err()
+}
+
+/// `LifecycleWhenExpressionInvalid` shares `LifecycleStackInvalidShape`'s
+/// `message`, so batch 4 can retain a `when:` parse error without moving
+/// `Display`, the code, the detail payload, or the rendered block.
+#[test]
+fn lifecycle_when_expression_invalid_twins_with_the_shape_variant() {
+    let message = format!("`when` is not a valid expression: {}", parse_error());
+    let plain = CompositionError::LifecycleStackInvalidShape {
+        source_path: PathBuf::from("run.md"),
+        property: "start".to_string(),
+        message: message.clone(),
+    };
+    let sourced = CompositionError::LifecycleWhenExpressionInvalid {
+        source_path: PathBuf::from("run.md"),
+        property: "start".to_string(),
+        message,
+        source: parse_error(),
+    };
+
+    assert_eq!(plain.to_string(), sourced.to_string());
+    assert_eq!(plain.code(), sourced.code());
+    assert_eq!(plain.category(), sourced.category());
+    assert_eq!(plain.disposition(), sourced.disposition());
+    assert_eq!(plain.origin(), sourced.origin());
+    assert_eq!(plain.detail(), sourced.detail());
+
+    let term = biscuit_terminal::terminal::Terminal::default();
+    assert_eq!(
+        plain.status_block(&term).render(&term),
+        sourced.status_block(&term).render(&term),
+        "the staged variant must render as its shape twin"
+    );
+    assert!(
+        (&sourced as &(dyn std::error::Error + 'static))
+            .source()
+            .and_then(|c| c.downcast_ref::<ParseError>())
+            .is_some()
+    );
+}
+
+/// `LifecycleActionInvalidLongForm`'s optional `#[source]` retains the typed
+/// `ActionExprError` (and its `ParseError` cause) without moving `Display`, the
+/// code, the detail payload, or the rendered block. A `None`-sourced twin (the
+/// shape failures that never had a lower cause) must be indistinguishable on
+/// every observable surface.
+#[test]
+fn lifecycle_action_invalid_long_form_source_twins_with_the_sourceless_shape() {
+    let cause = ActionExprError::Parse(Box::new(parse_error()));
+    let message = format!("`x` is not a valid value: {cause}");
+    let plain = CompositionError::LifecycleActionInvalidLongForm {
+        source_path: PathBuf::from("run.md"),
+        property: "start".to_string(),
+        action: "set".to_string(),
+        message: message.clone(),
+        source: None,
+    };
+    let sourced = CompositionError::LifecycleActionInvalidLongForm {
+        source_path: PathBuf::from("run.md"),
+        property: "start".to_string(),
+        action: "set".to_string(),
+        message,
+        source: Some(cause),
+    };
+
+    assert_eq!(plain.to_string(), sourced.to_string());
+    assert_eq!(plain.code(), sourced.code());
+    assert_eq!(plain.category(), sourced.category());
+    assert_eq!(plain.disposition(), sourced.disposition());
+    assert_eq!(plain.origin(), sourced.origin());
+    assert_eq!(plain.detail(), sourced.detail());
+
+    let term = biscuit_terminal::terminal::Terminal::default();
+    assert_eq!(
+        plain.status_block(&term).render(&term),
+        sourced.status_block(&term).render(&term),
+        "the sourced variant must render as its source-less twin"
+    );
+
+    // The concrete cause enum is recoverable directly (it is carried unboxed),
+    // and its `Parse` arm carries the typed Darkmatter parse error.
+    let action_cause = (&sourced as &(dyn std::error::Error + 'static))
+        .source()
+        .and_then(|c| c.downcast_ref::<ActionExprError>())
+        .expect("the source downcasts to ActionExprError");
+    assert!(
+        matches!(action_cause, ActionExprError::Parse(_)),
+        "the retained cause is the typed parse failure, got: {action_cause:?}"
+    );
+}
+
+/// `LoopExpressionInvalid` derives its prose from `kind`, `condition`, and the
+/// cause's stage. Both stages must reproduce `LoopInvalid`'s text byte for byte.
+#[test]
+fn loop_expression_invalid_twins_with_loop_invalid_at_both_stages() {
+    let parse_twin = CompositionError::LoopInvalid(format!(
+        "failed to parse loop.while `1 +`: {}",
+        parse_error()
+    ));
+    let parse_sourced = CompositionError::LoopExpressionInvalid {
+        kind: "while".to_string(),
+        condition: "1 +".to_string(),
+        source: LoopExpressionCause::Parse(parse_error()),
+    };
+    assert_eq!(parse_twin.to_string(), parse_sourced.to_string());
+    assert_eq!(parse_twin.code(), parse_sourced.code());
+    assert_eq!(parse_twin.detail(), parse_sourced.detail());
+
+    let eval_cause = ExpressionError::UnknownFunction {
+        name: "nope".to_string(),
+    };
+    let eval_twin = CompositionError::LoopInvalid(format!(
+        "failed to evaluate loop.until `nope()`: {eval_cause}"
+    ));
+    let eval_sourced = CompositionError::LoopExpressionInvalid {
+        kind: "until".to_string(),
+        condition: "nope()".to_string(),
+        source: LoopExpressionCause::Evaluate(Box::new(eval_cause)),
+    };
+    assert_eq!(eval_twin.to_string(), eval_sourced.to_string());
+    assert_eq!(eval_twin.code(), eval_sourced.code());
+}
+
+/// `LoopActionExpressionInvalid` derives `InvalidAction`'s two template
+/// messages from the cause's stage, so batch 5 can drop it in per stage.
+#[test]
+fn loop_action_expression_invalid_twins_with_invalid_action_at_both_stages() {
+    let parse_twin = CompositionError::InvalidAction {
+        iteration: 2,
+        action_index: 1,
+        total_actions: 3,
+        message: format!(
+            "invalid template `{{{{x +}}}}` in loop action: {}",
+            parse_error()
+        ),
+    };
+    let parse_sourced = CompositionError::LoopActionExpressionInvalid {
+        iteration: 2,
+        action_index: 1,
+        total_actions: 3,
+        expression: "x +".to_string(),
+        source: LoopExpressionCause::Parse(parse_error()),
+    };
+    assert_eq!(parse_twin.to_string(), parse_sourced.to_string());
+    assert_eq!(parse_twin.code(), parse_sourced.code());
+    assert_eq!(parse_twin.detail(), parse_sourced.detail());
+
+    let eval_cause = ExpressionError::UnknownFunction {
+        name: "nope".to_string(),
+    };
+    let eval_twin = CompositionError::InvalidAction {
+        iteration: 2,
+        action_index: 1,
+        total_actions: 3,
+        message: format!("failed to evaluate template `{{{{nope()}}}}`: {eval_cause}"),
+    };
+    let eval_sourced = CompositionError::LoopActionExpressionInvalid {
+        iteration: 2,
+        action_index: 1,
+        total_actions: 3,
+        expression: "nope()".to_string(),
+        source: LoopExpressionCause::Evaluate(Box::new(eval_cause)),
+    };
+    assert_eq!(eval_twin.to_string(), eval_sourced.to_string());
+}
+
+/// A registered code never projects a top-level `null` detail (spec §D7), and
+/// every new variant must satisfy it — including the staged ones, whose
+/// consuming batch would otherwise be the one to discover it does not.
+#[test]
+fn every_batch_3_variant_projects_a_catalog_shaped_detail() {
+    let errors: Vec<CompositionError> = vec![
+        CompositionError::PreFlightShellAuditFailed {
+            source: crate::harness::HarnessError::ShellCommandDenied {
+                command: "rm -rf /".to_string(),
+            },
+        },
+        CompositionError::PreFlightStateBuildFailed {
+            source: CtxMergeError::InvalidUserCtx {
+                kind: "array".to_string(),
+            },
+        },
+        CompositionError::InsufficientFilePermissions {
+            path: PathBuf::from("/repo/run.md"),
+            source: std::io::Error::other("denied"),
+        },
+        CompositionError::InlineRewriteFailed(markdown_error()),
+        CompositionError::LifecycleShellResolution {
+            source_path: PathBuf::from("run.md"),
+            property: "start.stack[0].action.command".to_string(),
+            raw: "echo hi".to_string(),
+            message: "boom".to_string(),
+            source: Some(Box::new(markdown_error())),
+        },
+        CompositionError::LifecycleWhenExpressionInvalid {
+            source_path: PathBuf::from("run.md"),
+            property: "start".to_string(),
+            message: "bad".to_string(),
+            source: parse_error(),
+        },
+        CompositionError::LoopExpressionInvalid {
+            kind: "while".to_string(),
+            condition: "1 +".to_string(),
+            source: LoopExpressionCause::Parse(parse_error()),
+        },
+        CompositionError::LoopActionExpressionInvalid {
+            iteration: 1,
+            action_index: 1,
+            total_actions: 1,
+            expression: "x".to_string(),
+            source: LoopExpressionCause::Parse(parse_error()),
+        },
+    ];
+
+    for err in &errors {
+        assert!(
+            !err.detail().is_null(),
+            "`{}` projects a top-level null detail for code `{}`",
+            err,
+            err.code()
+        );
+    }
+}

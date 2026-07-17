@@ -45,6 +45,7 @@ impl BlockError for CompositionError {
             | CompositionError::LifecycleEvaluationError { .. }
             | CompositionError::RemovedValidationKey { .. }
             | CompositionError::LifecycleStackInvalidShape { .. }
+            | CompositionError::LifecycleWhenExpressionInvalid { .. }
             | CompositionError::LifecycleActionInvalidShortForm { .. }
             | CompositionError::LifecycleActionInvalidLongForm { .. }
             | CompositionError::LifecycleUnknownVerb { .. }
@@ -295,6 +296,7 @@ impl Diagnostic for CompositionError {
             | CompositionError::LifecycleInterpolationLeak { .. }
             | CompositionError::LifecycleUndefinedVariable { .. }
             | CompositionError::LifecycleStackInvalidShape { .. }
+            | CompositionError::LifecycleWhenExpressionInvalid { .. }
             | CompositionError::LifecycleActionInvalidShortForm { .. }
             | CompositionError::LifecycleActionInvalidLongForm { .. }
             | CompositionError::LifecycleUnknownVerb { .. }
@@ -487,6 +489,9 @@ impl Diagnostic for CompositionError {
                 base["message"] = json!(message);
             }
             CompositionError::LifecycleStackInvalidShape {
+                property, message, ..
+            }
+            | CompositionError::LifecycleWhenExpressionInvalid {
                 property, message, ..
             }
             | CompositionError::LifecycleStackAmbiguous {
