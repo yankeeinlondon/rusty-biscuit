@@ -247,5 +247,6 @@ mod overlay_layering;
 mod proxy;
 mod requeue;
 mod retry_resume;
+mod shell_approval;
 mod terminal_evaluation;
 mod terminal_routing;
