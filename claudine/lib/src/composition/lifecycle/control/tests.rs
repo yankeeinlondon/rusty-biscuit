@@ -306,3 +306,94 @@ fn resolve_proxy_target_missing_file_errors() {
         "unexpected: {err}"
     );
 }
+
+/// D4: a bare implicit proxy target is repository-first. With the same basename
+/// present at both the repository root and the authoring document's directory,
+/// the proxy resolves to the repository-root copy — the exact behavior the
+/// private harness grammar could never reach (`./foo` and `foo` were identical).
+#[test]
+fn resolve_proxy_target_prefers_repository_root_for_implicit() {
+    let repo = tempfile::tempdir().unwrap();
+    let source = repo.path().join("prompts/run.md");
+    std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+    std::fs::write(&source, "---\n---\n").unwrap();
+    let repo_copy = repo.path().join("plan.md");
+    std::fs::write(&repo_copy, "---\n---\n").unwrap();
+    let source_copy = repo.path().join("prompts/plan.md");
+    std::fs::write(&source_copy, "---\n---\n").unwrap();
+
+    let resolved = resolve_proxy_target("plan.md", &source, Some(repo.path())).unwrap();
+    assert_eq!(
+        resolved, repo_copy,
+        "implicit proxy target must resolve repository-first (D4)"
+    );
+}
+
+/// An explicit `./` proxy target stays pinned to the authoring document even
+/// when a repository-root sibling of the same name exists.
+#[test]
+fn resolve_proxy_target_explicit_stays_source_relative() {
+    let repo = tempfile::tempdir().unwrap();
+    let source = repo.path().join("prompts/run.md");
+    std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+    std::fs::write(&source, "---\n---\n").unwrap();
+    std::fs::write(repo.path().join("plan.md"), "---\n---\n").unwrap();
+    let source_copy = repo.path().join("prompts/plan.md");
+    std::fs::write(&source_copy, "---\n---\n").unwrap();
+
+    let resolved = resolve_proxy_target("./plan.md", &source, Some(repo.path())).unwrap();
+    assert_eq!(resolved, source_copy);
+}
+
+/// D6: a nested proxy anchors on the *proxied* document. Resolving a bare
+/// sibling reference against document B finds B's own sibling, never A's —
+/// proving provenance follows the `source_path` argument the swap installs.
+#[test]
+fn resolve_proxy_target_nested_provenance_follows_the_target_document() {
+    let repo = tempfile::tempdir().unwrap();
+    // Document A lives in `a/`; document B (the proxied target) lives in `b/`.
+    let doc_a = repo.path().join("a/run.md");
+    std::fs::create_dir_all(doc_a.parent().unwrap()).unwrap();
+    std::fs::write(&doc_a, "---\n---\n").unwrap();
+    let doc_b = repo.path().join("b/target.md");
+    std::fs::create_dir_all(doc_b.parent().unwrap()).unwrap();
+    std::fs::write(&doc_b, "---\n---\n").unwrap();
+    // `sibling.md` exists only next to B.
+    let b_sibling = repo.path().join("b/sibling.md");
+    std::fs::write(&b_sibling, "---\n---\n").unwrap();
+
+    // A nested proxy authored *by B* resolves against B's directory.
+    let resolved = resolve_proxy_target("./sibling.md", &doc_b, Some(repo.path())).unwrap();
+    assert_eq!(resolved, b_sibling);
+
+    // The same reference anchored on A cannot see B's sibling — confirming the
+    // source argument, not a leaked original, drives resolution.
+    let err = resolve_proxy_target("./sibling.md", &doc_a, Some(repo.path())).unwrap_err();
+    assert!(matches!(
+        err,
+        crate::harness::HarnessError::PathResolutionFailed { .. }
+    ));
+}
+
+/// A `{{VAR}}`-interpolated target with an unset variable surfaces the typed
+/// `FileReferenceUnresolvable` diagnostic rather than a missing-target no-match.
+#[test]
+fn resolve_proxy_target_unset_interpolation_variable_is_typed() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("run.md");
+    std::fs::write(&source, "---\n---\n").unwrap();
+
+    let err = resolve_proxy_target(
+        "{{DEFINITELY_UNSET_PROXY_VAR}}/x.md",
+        &source,
+        Some(dir.path()),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            crate::harness::HarnessError::FileReferenceUnresolvable { .. }
+        ),
+        "unexpected variant: {err:?}"
+    );
+}

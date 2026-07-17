@@ -223,16 +223,21 @@ pub fn proxy_handoff_allowed(chain: &[std::path::PathBuf], target: &std::path::P
 
 /// Resolve a `Proxy` target reference to an existing prompt file.
 ///
-/// Wraps [`crate::harness::resolve_harness_path`] (which handles `@repo/…`,
-/// relative, and absolute forms) with an existence check so a hand-off to a
-/// missing document fails loudly rather than producing an empty/garbage run.
+/// Delegates to [`crate::harness::resolve_harness_path`], the thin adapter over
+/// the shared [`biscuit_file::FileReference`] grammar: implicit references are
+/// repository-first then source-relative, `@` is a magic-root search, `~` is
+/// home-pinned, and explicit `./`/`../` stay pinned to the source. Resolution
+/// probes the filesystem, so a hand-off to a missing document fails loudly with
+/// a typed [`crate::harness::HarnessError`] rather than producing an
+/// empty/garbage run. The proxied target document is the source for its own
+/// nested references (D6): callers must pass the *target's* path as
+/// `source_path` on the next hop.
 ///
 /// ## Errors
 ///
-/// Returns a [`crate::harness::HarnessError`] when the reference cannot be
-/// resolved (e.g. an `@`-prefixed reference with no `repo_root`, propagated
-/// directly from [`crate::harness::resolve_harness_path`]) or when the resolved
-/// path is not an existing file.
+/// Returns a [`crate::harness::HarnessError`] when the reference is empty, has
+/// no anchoring directory, resolves to no existing file, or the shared resolver
+/// rejects it (invalid syntax, absent context anchor, I/O failure, remote URL).
 pub fn resolve_proxy_target(
     target: &str,
     source_path: &std::path::Path,
@@ -242,16 +247,7 @@ pub fn resolve_proxy_target(
         source_path,
         repo_root,
     };
-    let resolved = crate::harness::resolve_harness_path(target, &ctx)?;
-    if !resolved.is_file() {
-        return Err(crate::harness::HarnessError::PathResolutionFailed {
-            raw: target.to_string(),
-            failure: crate::harness::error::PathResolutionFailure::TargetMissing,
-            source_path: Some(source_path.to_path_buf()),
-            resolved: Some(resolved),
-        });
-    }
-    Ok(resolved)
+    crate::harness::resolve_harness_path(target, &ctx)
 }
 
 /// Parse a lifecycle delay string (e.g. `"5m"`, `"0s"`, `"30 sec"`) into a

@@ -65,3 +65,54 @@ fn resolve_proxy_target_does_not_flatten_harness_error() {
          (integrated-design §10)"
     );
 }
+
+/// `CARGO_MANIFEST_DIR` for the lib crate is `claudine/lib`; the CLI proxy
+/// routes live one directory over, under `claudine/cli`.
+fn read_cli_source(relative: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../cli")
+        .join(relative);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
+}
+
+/// Every proxy route must funnel through the shared, existence-checking
+/// `resolve_proxy_target` (D5/D6) and wrap its typed `HarnessError` in
+/// `CompositionError::InvalidFileReference` — never resolve the reference
+/// directly or flatten the failure into an `eyre!` string. The three routes
+/// are the two harness-loop dispatch paths and the setup-phase pipeline.
+#[test]
+fn every_proxy_route_uses_the_shared_resolver_and_typed_error() {
+    let routes = [
+        "src/commands/wrap/harness_orch/loop_control/proxy.rs",
+        "src/commands/wrap/harness_orch/loop_control/control_dispatch.rs",
+        "src/commands/wrap/composition/pipeline.rs",
+    ];
+    for route in routes {
+        let src = read_cli_source(route);
+        assert!(
+            src.contains("resolve_proxy_target"),
+            "{route} no longer resolves proxy targets through the shared \
+             `resolve_proxy_target` (D5)"
+        );
+        assert!(
+            src.contains("InvalidFileReference"),
+            "{route} no longer wraps the proxy resolution failure in the typed \
+             `CompositionError::InvalidFileReference` (integrated-design §10)"
+        );
+    }
+}
+
+/// The terminal-control dispatch route once called `resolve_harness_path`
+/// directly, bypassing the existence probe and swapping `source_path` to a path
+/// it never checked (the live latent bug this feature fixed). Guard that it
+/// stays converged on `resolve_proxy_target`.
+#[test]
+fn control_dispatch_does_not_bypass_the_existence_check() {
+    let src = read_cli_source("src/commands/wrap/harness_orch/loop_control/control_dispatch.rs");
+    assert!(
+        !src.contains("resolve_harness_path(&target"),
+        "control_dispatch.rs reintroduced the direct `resolve_harness_path` call \
+         that bypasses `resolve_proxy_target`'s existence check"
+    );
+}

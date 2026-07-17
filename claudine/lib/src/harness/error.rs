@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use biscuit_file::FileReferenceError;
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::errors::{BlockError, ErrorHeader, StatusBlockExt};
@@ -155,6 +156,30 @@ pub enum HarnessError {
         resolved: Option<PathBuf>,
     },
 
+    /// The shared `biscuit-file` resolver rejected a reference for a reason
+    /// other than a plain missing target: invalid syntax, an absent context
+    /// anchor (interpolation variable, home, repository), a repository
+    /// containment violation, an I/O probe failure, or a remote URL. Carries
+    /// the typed [`FileReferenceError`] cause.
+    ///
+    /// Boxed for the same `clippy::result_large_err` reason as
+    /// [`ShellAuditParseError`], and with the same D-7 trade: the box publishes
+    /// `Box<FileReferenceError>` to the cause chain, so recovery matches this
+    /// variant on the concrete `HarnessError` rather than downcasting
+    /// `Error::source()` to `FileReferenceError`.
+    ///
+    /// [`ShellAuditParseError`]: HarnessError::ShellAuditParseError
+    #[error("could not resolve file reference \"{reference}\": {source}")]
+    FileReferenceUnresolvable {
+        /// The reference exactly as authored (trimmed).
+        reference: String,
+        /// The document the reference was anchored against, when known.
+        source_path: Option<PathBuf>,
+        /// The typed resolution failure from `biscuit-file`.
+        #[source]
+        source: Box<FileReferenceError>,
+    },
+
     // --- Shell audit ---
     /// Failed to parse shell directives from source page during audit.
     #[error("shell audit parse error: {detail}")]
@@ -206,7 +231,10 @@ impl Diagnostic for HarnessError {
             // author typed. Classifying it `io.read_failed` (`Category::Io` /
             // `Origin::Operator`) sent the reader to check the filesystem when
             // the fix is in their frontmatter.
-            HarnessError::PathResolutionFailed { .. } => "composition.invalid_file_reference",
+            HarnessError::PathResolutionFailed { .. }
+            | HarnessError::FileReferenceUnresolvable { .. } => {
+                "composition.invalid_file_reference"
+            }
             // Still environmental: the run needed a repo root and the process
             // was launched outside one.
             HarnessError::RepoRootRequired { .. } => "io.read_failed",
@@ -267,7 +295,47 @@ impl Diagnostic for HarnessError {
                     json!(source_path.as_ref().map(|p| p.to_string_lossy().into_owned()));
                 base
             }
+            // Same projection as `PathResolutionFailed`, but `failure` is
+            // mapped from the typed `FileReferenceError` rather than a resolver
+            // distinction. Only the keys this adapter actually knows are
+            // populated; the rest stay `null` (spec §D3).
+            HarnessError::FileReferenceUnresolvable {
+                reference,
+                source_path,
+                source,
+            } => {
+                let mut base = null_detail_for("composition.invalid_file_reference");
+                base["reference"] = json!(reference);
+                base["failure"] = json!(file_reference_failure_slug(source));
+                base["source_path"] =
+                    json!(source_path.as_ref().map(|p| p.to_string_lossy().into_owned()));
+                base
+            }
         }
+    }
+}
+
+/// Map a `biscuit-file` resolution failure to the closed `failure` vocabulary
+/// the `composition.invalid_file_reference` catalog entry declares.
+///
+/// The slug is derived from the typed error, never back-derived from the
+/// reference kind. A future `FileReferenceError` variant defaults to
+/// `invalid_syntax`.
+fn file_reference_failure_slug(error: &FileReferenceError) -> &'static str {
+    use FileReferenceError as E;
+    match error {
+        E::MissingEnvironmentVariable { .. }
+        | E::MissingHomeContext
+        | E::VaultNotConfigured
+        | E::RepositoryRootNotContainingSource { .. }
+        | E::BareRepository => "missing_context",
+        E::RemoteNotLocal(_) => "unsupported_remote",
+        E::CurrentDirectory(_)
+        | E::Git(_)
+        | E::Workspace(_)
+        | E::RelativePath { .. }
+        | E::Io { .. } => "permission_io",
+        _ => "invalid_syntax",
     }
 }
 
@@ -539,5 +607,83 @@ mod tests {
             resolved: None,
         };
         assert!(empty.to_string().contains("path is empty"));
+    }
+
+    #[test]
+    fn file_reference_unresolvable_classifies_as_an_authoring_failure() {
+        let err = HarnessError::FileReferenceUnresolvable {
+            reference: "{{MISSING}}/x.md".to_string(),
+            source_path: Some(PathBuf::from("/repo/run.md")),
+            source: Box::new(FileReferenceError::MissingEnvironmentVariable {
+                name: "MISSING".to_string(),
+            }),
+        };
+        assert_eq!(err.code(), "composition.invalid_file_reference");
+        assert_eq!(err.category(), Category::Composition);
+        assert_eq!(err.origin(), Origin::Author);
+
+        let detail = err.detail();
+        assert_eq!(detail["reference"], json!("{{MISSING}}/x.md"));
+        // A missing interpolation variable is an absent context anchor.
+        assert_eq!(detail["failure"], json!("missing_context"));
+        assert_eq!(detail["source_path"], json!("/repo/run.md"));
+    }
+
+    #[test]
+    fn file_reference_unresolvable_publishes_the_typed_cause() {
+        use std::error::Error;
+
+        let err = HarnessError::FileReferenceUnresolvable {
+            reference: "http://example.com/x.md".to_string(),
+            source_path: None,
+            source: Box::new(FileReferenceError::RemoteNotLocal(
+                "http://example.com/x.md".to_string(),
+            )),
+        };
+        assert_eq!(err.detail()["failure"], json!("unsupported_remote"));
+
+        // The typed cause is published (as the box — the D-7 trade, matching
+        // `ShellAuditParseError`).
+        let published = (&err as &(dyn Error + 'static))
+            .source()
+            .expect("a source is published");
+        assert!(
+            published.downcast_ref::<Box<FileReferenceError>>().is_some(),
+            "the boxed typed cause must be reachable on the chain"
+        );
+    }
+
+    #[test]
+    fn every_file_reference_error_maps_to_a_declared_failure_slug() {
+        // The slug vocabulary the catalog documents; the mapping must draw from
+        // it rather than coining a slug.
+        let declared = [
+            "invalid_syntax",
+            "missing_context",
+            "no_match",
+            "permission_io",
+            "unsupported_remote",
+        ];
+        let samples = [
+            FileReferenceError::InvalidSyntax("x".to_string()),
+            FileReferenceError::MissingEnvironmentVariable {
+                name: "X".to_string(),
+            },
+            FileReferenceError::MissingHomeContext,
+            FileReferenceError::VaultNotConfigured,
+            FileReferenceError::BareRepository,
+            FileReferenceError::RemoteNotLocal("http://x".to_string()),
+            FileReferenceError::Io {
+                path: PathBuf::from("/x"),
+                source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+            },
+        ];
+        for error in &samples {
+            let slug = file_reference_failure_slug(error);
+            assert!(
+                declared.contains(&slug),
+                "`{error:?}` maps to undeclared slug `{slug}`"
+            );
+        }
     }
 }
