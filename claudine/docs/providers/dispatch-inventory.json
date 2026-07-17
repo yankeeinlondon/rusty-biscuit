@@ -1435,7 +1435,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs",
-      "line": 211,
+      "line": 239,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
