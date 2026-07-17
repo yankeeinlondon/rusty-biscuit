@@ -20,7 +20,8 @@ use std::sync::{Arc, Mutex};
 
 use claudine::composition::{
     CompositionError, CompositionExecutionRequest, CompositionMode, DefaultLifecycleEmitter,
-    LIFECYCLE_EVENT_KEYS, LifecycleRuntimeContext, LoopExecutionOptions, LoopExecutionResult,
+    DocumentTransition, LIFECYCLE_EVENT_KEYS, LifecycleRuntimeContext, LoopExecutionOptions,
+    LoopExecutionResult,
     PrepareOptions, PreparedComposition, ResolvedCompositionSource, ResolvedExecutionTarget,
     SharedApprovalCache, SystemShellRunner, build_loop_seed_with_lifecycle, resolve_loop_config,
 };
@@ -789,6 +790,27 @@ fn execute_loop_or_single(
                     &wrap_terminal(),
                 );
                 return Err(error.enrich_frontmatter(&source, stderr_is_tty).into());
+            }
+            // The engine's transition is consumed here, never dropped. A loop
+            // document whose `initialize` proxies has no coordinator on this
+            // route yet: loop-versus-single is decided about the *router*,
+            // before its `initialize` fires, which is the drift Phase 10 of
+            // `features/2026-07-13-proxy-with` corrects by moving loop
+            // recognition after initialize routing stabilizes. Until then the
+            // hand-off is refused explicitly with the target it could not
+            // reach — the previous behavior was to discard it and exit 0,
+            // reporting success for a run that never happened.
+            if let DocumentTransition::Proxy(request) = loop_result.transition {
+                return Err(CompositionError::LifecycleInitializeFailed {
+                    source_path: source.resolved_path.clone(),
+                    reason: format!(
+                        "`initialize` proxied to `{}`, but a document with `loop:` \
+                         frontmatter cannot hand off yet",
+                        request.target()
+                    ),
+                }
+                .enrich_frontmatter(&source, stderr_is_tty)
+                .into());
             }
             return Ok(loop_result.final_exit_code);
         }

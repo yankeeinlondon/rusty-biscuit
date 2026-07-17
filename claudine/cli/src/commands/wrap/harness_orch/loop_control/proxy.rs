@@ -7,15 +7,20 @@ use super::*;
 /// lifecycle, respecting target-side `Skip`, `Proxy`, `Error`, and action-error
 /// routing.
 ///
-/// Called when `proxy_tracking.pending` is consumed at the top of the harness
-/// loop. Resets the guard so the target gets a fresh `initialize` emission
-/// before pre-flight checks run.
+/// Called when the coordinator's bootstrap-pending flag is consumed at the top
+/// of the harness loop. Resets the guard so the target gets a fresh
+/// `initialize` emission before pre-flight checks run.
+///
+/// A target that proxies on returns a request, never a resolved path: chaining
+/// a second hop is the same commit the first one went through, so it goes
+/// through the same coordinator.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run_target_initialize(
     lifecycle_guard: &mut claudine::composition::LifecycleRunGuard<'_>,
     materialized: &MaterializedHarnessPrompt,
     source_path: &Path,
     repo_root: Option<&Path>,
+    chain: &[std::path::PathBuf],
     term: &Terminal,
     effect_engine: &EffectEngine,
     loop_start: std::time::Instant,
@@ -78,21 +83,15 @@ pub(super) fn run_target_initialize(
             StackControl::Error { .. } => {
                 unreachable!("the catch protocol consumes initialize error control")
             }
-            StackControl::Proxy { target, .. } => {
-                let resolved = match claudine::composition::resolve_proxy_target(
-                    target,
-                    source_path,
-                    repo_root,
-                ) {
-                    Ok(path) => path,
-                    Err(e) => {
-                        return TargetInitializeAction::Abort(eyre!(
-                            "lifecycle initialize proxy: {e}"
-                        ))
-                    }
-                };
-                TargetInitializeAction::Repoint { resolved }
-            }
+            StackControl::Proxy {
+                target,
+                overlay,
+                location,
+            } => TargetInitializeAction::Reproxy(EvaluatedProxyRequest::new(
+                target.clone(),
+                overlay.clone(),
+                ProxyProvenance::new(source_path.to_path_buf(), *location, chain.to_vec()),
+            )),
             StackControl::Stop => TargetInitializeAction::Proceed,
             StackControl::Retry { .. }
             | StackControl::Resume { .. }
@@ -105,20 +104,6 @@ pub(super) fn run_target_initialize(
     }
 }
 
-/// Proxy hand-off bookkeeping for one `run_harness_loop` call.
-///
-/// `chain` is the ordered list of resolved documents visited by proxy,
-/// including the originating document once the first hand-off is accepted; it
-/// drives the cycle/hop-limit guard.
-/// `pending` is set by the `Proxy` dispatch arm and consumed at the loop top,
-/// signalling that the guard's lifecycle config must be re-parsed from the
-/// newly materialized target before its events fire.
-#[derive(Default)]
-pub(super) struct ProxyTracking {
-    pub(super) chain: Vec<std::path::PathBuf>,
-    pub(super) pending: bool,
-}
-
 /// What the loop should do after running a proxy target document's
 /// `initialize` event.
 #[derive(Debug)]
@@ -129,6 +114,6 @@ pub(super) enum TargetInitializeAction {
     ExitCleanly,
     /// Target's `initialize` could not be honored; abort with this error.
     Abort(color_eyre::eyre::Report),
-    /// Target's `initialize` proxied again; repoint the loop and continue.
-    Repoint { resolved: std::path::PathBuf },
+    /// Target's `initialize` proxied on; hand the request to the coordinator.
+    Reproxy(EvaluatedProxyRequest),
 }

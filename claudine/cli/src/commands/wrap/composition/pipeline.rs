@@ -5,8 +5,10 @@ use std::time::Instant;
 
 use super::*;
 use claudine::composition::{
-    LifecycleCatchProtocol, LifecycleCatchResult, LifecycleCatchState, LifecycleTransitionAbort,
-    LifecycleTransitionDecision, LifecycleTransitionError, LifecycleTransitionInput, decide_lifecycle_transition,
+    DocumentTransition, EvaluatedProxyRequest, LifecycleCatchProtocol, LifecycleCatchResult,
+    LifecycleCatchState, LifecycleTransitionAbort, LifecycleTransitionDecision,
+    LifecycleTransitionError, LifecycleTransitionInput, ProxyProvenance,
+    decide_lifecycle_transition,
 };
 
 enum CompositionPhaseResult<T> {
@@ -1083,15 +1085,20 @@ fn execute_initialize_catch(
     .into())
 }
 
+/// Run the launched document's `initialize` event and translate its control
+/// into the transition the harness loop's coordinator will consume.
+///
+/// This route decides *what* should happen; it never commits it. A `Proxy`
+/// control leaves here as an unresolved request, so the target is resolved and
+/// hop-checked in the one place that owns the invocation-wide chain.
 fn route_initialize(
     guard: &mut LifecycleRunGuard<'_>,
     init_ctx: &StackExecutionContext<'_>,
     source_path: &Path,
-    effective_repo_root: Option<&Path>,
     provider: Provider,
     term: &Terminal,
-) -> CompositionPhaseResult<Option<PathBuf>> {
-    let routed = (|| -> Result<CompositionPhaseResult<Option<PathBuf>>> {
+) -> CompositionPhaseResult<DocumentTransition> {
+    let routed = (|| -> Result<CompositionPhaseResult<DocumentTransition>> {
         let init_outcome = guard.execute_event(LifecycleSignal::Initialize, init_ctx);
         let init_result = execute_initialize_catch(
             guard,
@@ -1124,10 +1131,7 @@ fn route_initialize(
             proxy_target_seen: false,
             finalize_emitted: false,
         });
-        // Set by an `initialize` Proxy control: the resolved target document the
-        // run is handed off to. Threaded into `run_composition_body` so the harness loop
-        // re-composes and runs the target instead of the original document.
-        let mut init_proxy_target: Option<std::path::PathBuf> = None;
+        let mut transition = DocumentTransition::Continue;
         if let Some(ref control) = init_result.control {
             match (&init_decision, control) {
                 (_, StackControl::Skip) => {
@@ -1146,33 +1150,26 @@ fn route_initialize(
                 }
                 (
                     LifecycleTransitionDecision::ProxyHandoff { target },
-                    StackControl::Proxy { .. },
+                    StackControl::Proxy {
+                        overlay, location, ..
+                    },
                 ) => {
-                    // Hand off to the target document. Resolve the reference
-                    // (`@repo/…`, relative, or absolute) against the source so
-                    // `run_composition_body` runs the target via the harness loop's
-                    // re-materialize path. The harness loop resets the lifecycle
-                    // guard and re-emits the target's own `initialize` before its
-                    // pre-flight / start / terminal / finalize lifecycle runs.
-                    let resolved = claudine::composition::resolve_proxy_target(
-                        target,
-                        source_path,
-                        effective_repo_root,
-                    )
-                    .map_err(|e| eyre!("lifecycle initialize proxy: {e}"))?;
-                    if !claudine::composition::proxy_handoff_allowed(
-                        std::slice::from_ref(&source_path.to_path_buf()),
-                        &resolved,
-                    ) {
-                        return Err(CompositionError::LifecycleProxyCycle {
-                            source_path: source_path.to_path_buf(),
-                            target: target.clone(),
-                            chain: vec![source_path.display().to_string()],
-                            limit: claudine::composition::MAX_PROXY_HOPS,
-                        }
-                        .into());
-                    }
-                    init_proxy_target = Some(resolved);
+                    // Hand off to the target document. The harness loop's
+                    // coordinator commits this request — resolving the
+                    // reference (`@repo/…`, relative, or absolute) against the
+                    // source, deciding the hop, then re-materializing and
+                    // running the target: its body, frontmatter, harness
+                    // pre-checks, and its own `initialize` before
+                    // start/terminal/finalize.
+                    transition = DocumentTransition::Proxy(EvaluatedProxyRequest::new(
+                        target.clone(),
+                        overlay.clone(),
+                        ProxyProvenance::new(
+                            source_path.to_path_buf(),
+                            *location,
+                            vec![source_path.to_path_buf()],
+                        ),
+                    ));
                 }
                 (LifecycleTransitionDecision::Continue, StackControl::Stop) => {}
                 (
@@ -1212,7 +1209,7 @@ fn route_initialize(
                 _ => unreachable!("initialize control and transition decision diverged"),
             }
         }
-        Ok(CompositionPhaseResult::Proceed(init_proxy_target))
+        Ok(CompositionPhaseResult::Proceed(transition))
     })();
     match routed {
         Ok(result) => result,
@@ -1321,12 +1318,15 @@ fn provider_run_handoff(
     // emitted `initialize` and owns the lifecycle runtime context. Run only
     // the per-iteration body and return.
     if let Some(guard) = attempt.external_guard.take() {
+        // Loop re-entry: `initialize` already ran for this document on the
+        // first iteration, so there is no initialize-route transition to
+        // consume here.
         return runner::run_composition_body(
             &ctx,
             guard,
             perf_collector,
             skip_preflight,
-            None,
+            DocumentTransition::Continue,
         );
     }
 
@@ -1390,22 +1390,15 @@ fn provider_run_handoff(
         messaging: lifecycle_messaging,
         settings: lifecycle_settings,
     };
-    let init_proxy_target = proceed_phase!(route_initialize(
+    let initial_transition = proceed_phase!(route_initialize(
         &mut guard,
         &init_ctx,
         &request.prepared.resolved_path,
-        effective_repo_root,
         provider,
         term,
     ));
 
-    runner::run_composition_body(
-        &ctx,
-        &mut guard,
-        perf_collector,
-        false,
-        init_proxy_target.as_deref(),
-    )
+    runner::run_composition_body(&ctx, &mut guard, perf_collector, false, initial_transition)
 }
 
 #[cfg(test)]

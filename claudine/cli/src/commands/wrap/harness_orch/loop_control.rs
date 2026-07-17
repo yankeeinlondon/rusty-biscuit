@@ -12,10 +12,10 @@ use claudine::composition::lifecycle_executor::{
     LifecycleEventOutcome, StackControl, StackExecutionContext, SystemShellRunner,
 };
 use claudine::composition::{
-    CompositionError, IterationSummarySignals, LifecycleCatchExecution,
-    LifecycleCatchProtocol, LifecycleCatchState, LifecycleTransitionAbort,
-    LifecycleTransitionDecision, LifecycleTransitionError, LifecycleTransitionInput,
-    decide_lifecycle_transition,
+    CompositionError, DocumentTransition, EvaluatedProxyRequest, IterationSummarySignals,
+    LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchState, ProxyProvenance,
+    LifecycleTransitionAbort, LifecycleTransitionDecision, LifecycleTransitionError,
+    LifecycleTransitionInput, RunLedger, decide_lifecycle_transition,
 };
 use claudine::events::EnvironmentContext;
 use claudine::provider::Provider;
@@ -76,17 +76,19 @@ struct HarnessLoopCtx<'a, 'guard> {
     initial_materialized: Option<MaterializedHarnessPrompt>,
     term: &'a Terminal,
     lifecycle_guard: &'a mut claudine::composition::LifecycleRunGuard<'guard>,
-    initial_proxy_target: Option<&'a Path>,
+    initial_transition: DocumentTransition,
     emit_prompt_timing: bool,
 }
 
 mod control_dispatch;
+mod coordinator;
 mod error_routing;
 mod lifecycle_events;
 mod proxy;
 mod requeue;
 
 use control_dispatch::*;
+use coordinator::ActiveDocumentCoordinator;
 use error_routing::*;
 use lifecycle_events::*;
 use proxy::*;
@@ -123,11 +125,12 @@ pub(crate) fn run_harness_loop(
     initial_materialized: Option<MaterializedHarnessPrompt>,
     term: &Terminal,
     lifecycle_guard: &mut claudine::composition::LifecycleRunGuard<'_>,
-    // Set when an `initialize`-stack `proxy(...)` already redirected to this
-    // target document upstream. Seeds the proxy chain (so a proxy back to the
-    // original is caught as a cycle) and triggers the loop-top lifecycle
-    // re-parse so the guard adopts the target's lifecycle.
-    initial_proxy_target: Option<&Path>,
+    // The transition an upstream `initialize` route already decided:
+    // `Continue` for an ordinary run, or `Proxy` when the launched document's
+    // `initialize` stack handed off. The coordinator commits it exactly as it
+    // commits a proxy raised by a terminal event — one commit point, one set
+    // of resolution and cycle semantics, no second channel.
+    initial_transition: DocumentTransition,
     // When `true`, every structured-stream attempt in the harness loop
     // emits the prompt-scoped timing header and — if the parsed plan
     // carries `timeout_warn` / `step_timeout_warn` — their fire-once
@@ -164,7 +167,7 @@ pub(crate) fn run_harness_loop(
         initial_materialized,
         term,
         lifecycle_guard,
-        initial_proxy_target,
+        initial_transition,
         emit_prompt_timing,
     };
     match run_harness_loop_inner(ctx)? {
@@ -183,11 +186,19 @@ struct HarnessLoopState<'a, 'guard> {
     harness_perf: Option<crate::perf::AgentExecutionPerf>,
     loop_start: std::time::Instant,
     control_budgets: ControlBudgets,
-    proxy_tracking: ProxyTracking,
+    coordinator: ActiveDocumentCoordinator,
 }
 
 impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
-    fn new(mut run: HarnessLoopCtx<'a, 'guard>) -> Self {
+    /// Open the loop's state, committing any transition the upstream
+    /// `initialize` route already decided.
+    ///
+    /// ## Errors
+    ///
+    /// Returns the typed commit failure when an upstream `initialize` proxy
+    /// names a target that cannot be resolved or that the ledger refuses. The
+    /// same commit runs for a proxy raised mid-run, so both fail identically.
+    fn new(mut run: HarnessLoopCtx<'a, 'guard>) -> Result<Self> {
         let mutation_root = run.repo_root.unwrap_or(run.child_cwd).to_path_buf();
         let effect_engine = EffectEngine::builder()
             .mutation_root(&mutation_root)
@@ -198,22 +209,25 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
             run.repo_root,
             run.shell_options.clone(),
         );
-        let mut proxy_tracking = ProxyTracking::default();
-        if let Some(initial_target) = run.initial_proxy_target {
-            if !proxy_tracking
-                .chain
-                .iter()
-                .any(|path| path == run.lifecycle_guard.context().source_path)
-            {
-                proxy_tracking
-                    .chain
-                    .push(run.lifecycle_guard.context().source_path.to_path_buf());
-            }
-            proxy_tracking.chain.push(initial_target.to_path_buf());
-            proxy_tracking.pending = true;
+        // The chain originates at the document whose lifecycle the guard was
+        // built for — the router, when an upstream `initialize` proxy is being
+        // committed below — so a hop back to it is a cycle from the first hop.
+        let mut coordinator = ActiveDocumentCoordinator::new(
+            run.lifecycle_guard.context().source_path.to_path_buf(),
+            run.shell_options.approval_cache.clone(),
+        );
+        if let DocumentTransition::Proxy(request) =
+            std::mem::replace(&mut run.initial_transition, DocumentTransition::Continue)
+        {
+            coordinator.adopt(
+                request,
+                run.repo_root,
+                run.prompt_state,
+                run.lifecycle_guard,
+            )?;
         }
         let initial_materialized = run.initial_materialized.take();
-        Self {
+        Ok(Self {
             run,
             effect_engine,
             harness_context,
@@ -222,8 +236,8 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
             harness_perf: None,
             loop_start: std::time::Instant::now(),
             control_budgets: ControlBudgets::default(),
-            proxy_tracking,
-        }
+            coordinator,
+        })
     }
 }
 
@@ -254,7 +268,7 @@ struct AttemptLifecycleExecution<'a, 'guard> {
 struct AttemptRetryProxyControl<'a> {
     attempt: &'a mut u32,
     budgets: &'a mut ControlBudgets,
-    proxy: &'a mut ProxyTracking,
+    coordinator: &'a mut ActiveDocumentCoordinator,
     provider: Provider,
     profile: &'a dyn crate::commands::wrap::profile::WrapperProfile,
 }
@@ -271,7 +285,7 @@ enum PhaseResult<T> {
 }
 
 fn run_harness_loop_inner(ctx: HarnessLoopCtx<'_, '_>) -> Result<LoopStep> {
-    let mut state = HarnessLoopState::new(ctx);
+    let mut state = HarnessLoopState::new(ctx)?;
     loop {
         let prepared = match prepare_attempt_phase(&mut state)? {
             PhaseResult::Ready(prepared) => prepared,
@@ -310,7 +324,7 @@ fn prepare_attempt_phase(
     let mut control = AttemptRetryProxyControl {
         attempt: &mut state.attempt,
         budgets: &mut state.control_budgets,
-        proxy: &mut state.proxy_tracking,
+        coordinator: &mut state.coordinator,
         provider: state.run.provider,
         profile: state.run.profile,
     };
@@ -367,7 +381,7 @@ fn start_lifecycle_phase(
     let profile = control.profile;
     let provider = control.provider;
     let control_budgets = &mut *control.budgets;
-    let proxy_tracking = &mut *control.proxy;
+    let coordinator = &mut *control.coordinator;
     let prompt_state = &mut *prompt.prompt_state;
     let repo_root = prompt.repo_root;
     let show_checks = prompt.show_checks;
@@ -441,14 +455,21 @@ fn start_lifecycle_phase(
                 provider,
                 prompt_state,
                 materialized,
-                repo_root,
                 lifecycle_guard,
-                proxy_tracking,
+                coordinator.ledger(),
                 term,
                 show_checks,
             ) {
                 TerminalControlAction::Continue { next_attempt } => {
                     *attempt = next_attempt;
+                    return Ok(Some(LoopStep::NextAttempt));
+                }
+                TerminalControlAction::Proxy(request) => {
+                    coordinator.adopt(request, repo_root, prompt_state, lifecycle_guard)?;
+                    // Re-enter at attempt 1: the target gets a clean
+                    // pre-flight / freeze cycle rather than inheriting the
+                    // proxying document's attempt count.
+                    *attempt = 1;
                     return Ok(Some(LoopStep::NextAttempt));
                 }
                 TerminalControlAction::Abort(err) => {
@@ -492,7 +513,7 @@ fn adopt_proxy_lifecycle_phase(
     materialized: &MaterializedHarnessPrompt,
 ) -> Result<Option<LoopStep>> {
     let attempt = &mut *control.attempt;
-    let proxy_tracking = &mut *control.proxy;
+    let coordinator = &mut *control.coordinator;
     let prompt_state = &mut *prompt.prompt_state;
     let effective_non_interactive = prompt.effective_non_interactive;
     let detail_requested = prompt.detail_requested;
@@ -502,10 +523,9 @@ fn adopt_proxy_lifecycle_phase(
     let effect_engine = lifecycle.effect_engine;
     let term = lifecycle.term;
     let loop_start = lifecycle.loop_start;
-    if !proxy_tracking.pending {
+    if !coordinator.take_bootstrap_pending() {
         return Ok(None);
     }
-    proxy_tracking.pending = false;
     match claudine::composition::parse_lifecycle_config(
         &materialized.frontmatter,
         &prompt_state.source_path,
@@ -527,11 +547,13 @@ fn adopt_proxy_lifecycle_phase(
             .unwrap_or_else(|| eyre!("{error}")));
         }
     }
+    let chain = coordinator.ledger().chain().to_vec();
     match run_target_initialize(
         lifecycle_guard,
         materialized,
         &prompt_state.source_path,
         repo_root,
+        &chain,
         term,
         effect_engine,
         loop_start,
@@ -541,30 +563,8 @@ fn adopt_proxy_lifecycle_phase(
             return Ok(Some(LoopStep::Return((0, None, None))));
         }
         TargetInitializeAction::Abort(error) => return Err(error),
-        TargetInitializeAction::Repoint { resolved } => {
-            if !proxy_tracking.chain.contains(&prompt_state.source_path) {
-                proxy_tracking.chain.push(prompt_state.source_path.clone());
-            }
-            if !claudine::composition::proxy_handoff_allowed(&proxy_tracking.chain, &resolved) {
-                return Err(CompositionError::LifecycleProxyCycle {
-                    source_path: prompt_state.source_path.clone(),
-                    target: resolved.display().to_string(),
-                    chain: proxy_tracking
-                        .chain
-                        .iter()
-                        .map(|path| path.display().to_string())
-                        .collect(),
-                    limit: claudine::composition::MAX_PROXY_HOPS,
-                }
-                .into());
-            }
-            prompt_state.source_path = resolved.clone();
-            prompt_state.original_ref = resolved.display().to_string();
-            prompt_state.prompt_tail.clear();
-            prompt_state.next_prompt_override = None;
-            prompt_state.next_resume_session_id = None;
-            proxy_tracking.chain.push(resolved);
-            proxy_tracking.pending = true;
+        TargetInitializeAction::Reproxy(request) => {
+            coordinator.adopt(request, repo_root, prompt_state, lifecycle_guard)?;
             *attempt = 1;
             return Ok(Some(LoopStep::NextAttempt));
         }
@@ -597,7 +597,7 @@ fn preflight_pending_proxy_phase(
     control: &AttemptRetryProxyControl<'_>,
 ) -> Result<()> {
     let attempt = *control.attempt;
-    let proxy_pending = control.proxy.pending;
+    let proxy_pending = control.coordinator.bootstrap_pending();
     let has_seed = prompt.initial_materialized.is_some();
     let silent = prompt.silent;
     let prompt_state = &mut *prompt.prompt_state;
@@ -1018,7 +1018,7 @@ fn classify_attempt_phase(
     let lifecycle_guard = &mut *state.run.lifecycle_guard;
     let effect_engine = &state.effect_engine;
     let control_budgets = &mut state.control_budgets;
-    let proxy_tracking = &mut state.proxy_tracking;
+    let coordinator = &mut state.coordinator;
     let attempt = state.attempt;
     let loop_start = state.loop_start;
     let ExecutedHarnessAttempt { materialized, outcome, iteration_signals } = executed;
@@ -1122,11 +1122,16 @@ fn classify_attempt_phase(
             profile,
             provider,
             prompt_state,
-            proxy_tracking,
+            coordinator.ledger(),
             show_checks,
         )? {
             TerminalRecovery::NextAttempt(next_attempt) => {
                 state.attempt = next_attempt;
+                return Ok(LoopStep::NextAttempt);
+            }
+            TerminalRecovery::Proxy(request) => {
+                coordinator.adopt(request, repo_root, prompt_state, lifecycle_guard)?;
+                state.attempt = 1;
                 return Ok(LoopStep::NextAttempt);
             }
             TerminalRecovery::Completed => {}
@@ -1181,11 +1186,16 @@ fn classify_attempt_phase(
             profile,
             provider,
             prompt_state,
-            proxy_tracking,
+            coordinator.ledger(),
             show_checks,
         )? {
             TerminalRecovery::NextAttempt(next_attempt) => {
                 state.attempt = next_attempt;
+                return Ok(LoopStep::NextAttempt);
+            }
+            TerminalRecovery::Proxy(request) => {
+                coordinator.adopt(request, repo_root, prompt_state, lifecycle_guard)?;
+                state.attempt = 1;
                 return Ok(LoopStep::NextAttempt);
             }
             TerminalRecovery::Completed => {}
@@ -1215,11 +1225,16 @@ fn classify_attempt_phase(
         profile,
         provider,
         prompt_state,
-        proxy_tracking,
+        coordinator.ledger(),
         show_checks,
     )? {
         TerminalRecovery::NextAttempt(next_attempt) => {
             state.attempt = next_attempt;
+            return Ok(LoopStep::NextAttempt);
+        }
+        TerminalRecovery::Proxy(request) => {
+            coordinator.adopt(request, repo_root, prompt_state, lifecycle_guard)?;
+            state.attempt = 1;
             return Ok(LoopStep::NextAttempt);
         }
         TerminalRecovery::Completed => {}

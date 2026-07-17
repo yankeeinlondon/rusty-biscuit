@@ -516,7 +516,9 @@ pub(crate) fn run_execution_stage(
             Some(initial_materialized),
             term,
             &mut lifecycle_guard,
-            None,
+            // A direct wrapper passthrough has no `initialize` route to hand
+            // off from; the run starts on the document it was given.
+            claudine::composition::DocumentTransition::Continue,
             true,
         )?;
         if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {

@@ -15,7 +15,9 @@ use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::lifecycle::{DefaultLifecycleEmitter, LifecycleRunGuard};
-use claudine::composition::{CompositionExecutionRequest, ResolvedExecutionTarget};
+use claudine::composition::{
+    CompositionExecutionRequest, DocumentTransition, ResolvedExecutionTarget,
+};
 use claudine::events::GlobalSettings;
 use claudine::harness::ShellApprovalOptions;
 use claudine::messaging::RuntimeMessagingSettings;
@@ -97,7 +99,7 @@ pub(super) fn run_composition_body(
     guard: &mut LifecycleRunGuard<'_>,
     perf_collector: &mut Option<CommandPerfCollector>,
     skip_preflight: bool,
-    proxy_source: Option<&Path>,
+    initial_transition: DocumentTransition,
 ) -> Result<SingleCompositionOutcome> {
     let request = ctx.request;
     let target = ctx.target;
@@ -131,6 +133,12 @@ pub(super) fn run_composition_body(
     let env_plan = ctx.env_plan;
     let effective_sp = ctx.effective_sp;
     let verbose = ctx.verbose;
+
+    // Whether this request's document is handing the run off before its first
+    // provider attempt. The transition itself is consumed by the harness
+    // loop's coordinator; what the body needs to know is only that
+    // `request.prepared` describes a document that will never reach the agent.
+    let hands_off = initial_transition.hands_off_source();
 
     // Composed frontmatter / source-derived base dir, reused by every
     // composition-preflight failure path so the blocked+finalize stacks
@@ -267,6 +275,15 @@ pub(super) fn run_composition_body(
         // Dry-run never launches the provider or mutates the source.
         // Pre-check validation has been removed; only timeout parsing
         // and shell-command audit run during composition preflight.
+        //
+        // `initial_transition` is deliberately dropped here, and this is the
+        // one place that is correct. Dry-run *does* fire `initialize` (its
+        // `blocked`/`finalize` routing is contract, not accident), so a
+        // router's `initialize` can hand off — but a dry run reports what the
+        // document it was given would do, and traversing the hand-off would
+        // mean composing, approving, and rendering a different document than
+        // the one named on the command line. The seam owns that decision
+        // rather than leaving it to a caller that forgot to look.
         let render = super::dry_run::DryRunRender::from_request(request);
 
         crate::log::data(&render.body);
@@ -383,10 +400,10 @@ pub(super) fn run_composition_body(
         }
 
         // Skip the pre-loop agent-prompt preview when an `initialize` proxy
-        // redirected the run: `request.prepared.prompt` is the proxying
+        // handed the run off: `request.prepared.prompt` is the proxying
         // *source* document's body, which never reaches the agent. The harness
         // loop emits the settled *target* document's prompt after the hand-off.
-        if effective_non_interactive && proxy_source.is_none() {
+        if effective_non_interactive && !hands_off {
             crate::output::log_compose_prompt(
                 &request.prepared.prompt,
                 detail_requested,
@@ -411,30 +428,20 @@ pub(super) fn run_composition_body(
         HarnessPromptMode::Compose
     };
 
-    // When an `initialize` Proxy redirected to a different document, the
-    // harness loop re-materializes (re-composes frontmatter + body) from
-    // `source_path` each attempt, so swapping the path here runs the
-    // target document — its body, frontmatter, harness pre-checks, and
-    // its `start`/`success`/`failure`/`finalize` lifecycle. Seed
-    // `initial_materialized = None` so the loop composes the target rather
-    // than reusing the proxying document's prepared prompt.
-    let (effective_source, effective_ref, seed_materialized) = match proxy_source {
-        Some(target_path) => (
-            target_path.to_path_buf(),
-            target_path.display().to_string(),
-            None,
-        ),
-        None => (
-            request.prepared.resolved_path.clone(),
-            request.file_ref.clone(),
-            Some(materialized_harness_prompt_from_prepared(&request.prepared)),
-        ),
-    };
+    // The prompt state always starts at the document this request prepared —
+    // the *router*, when `initialize` handed off. Repointing it is the
+    // coordinator's job and its alone; the harness loop commits
+    // `initial_transition` before its first attempt. Seed
+    // `initial_materialized = None` on a hand-off so the loop composes the
+    // adopted target rather than reusing the proxying document's prepared
+    // prompt.
+    let seed_materialized = (!hands_off)
+        .then(|| materialized_harness_prompt_from_prepared(&request.prepared));
 
     let mut prompt_state = HarnessPromptState {
         mode: harness_mode,
-        source_path: effective_source,
-        original_ref: effective_ref,
+        source_path: request.prepared.resolved_path.clone(),
+        original_ref: request.file_ref.clone(),
         base_prompt: None,
         overlay: indexmap::IndexMap::new(),
         prompt_tail: Vec::new(),
@@ -481,7 +488,7 @@ pub(super) fn run_composition_body(
         seed_materialized,
         term,
         guard,
-        proxy_source,
+        initial_transition,
         true,
     )?;
     if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {

@@ -32,6 +32,10 @@ pub(super) enum TerminalControlAction {
     Fallthrough,
     /// Re-enter the loop for another attempt at `next_attempt`.
     Continue { next_attempt: u32 },
+    /// The stack requested a hand-off. The dispatch has evaluated it and can
+    /// do no more: only the coordinator may resolve the target, decide the
+    /// hop, and commit the change of active document.
+    Proxy(EvaluatedProxyRequest),
     /// A control could not be honored; abort the run with this error.
     Abort(color_eyre::eyre::Report),
 }
@@ -48,9 +52,13 @@ pub(super) enum TerminalControlAction {
 ///
 /// Reuses the existing redirect/resume substrate: a retry bumps the attempt
 /// and `continue`s; a resume seeds `next_resume_session_id` +
-/// `next_prompt_override`; a proxy swaps `source_path`/`original_ref` and
-/// resets the guard for a fresh `initialize`; a requeue records the
-/// materialized prompt in rendezvous and exits the current run.
+/// `next_prompt_override`; a proxy returns a request for the coordinator to
+/// commit; a requeue records the materialized prompt in rendezvous and exits
+/// the current run.
+///
+/// `ledger` is read, never written: the chain answers "how many hops has this
+/// run spent" and stamps the request's provenance. Extending it is the
+/// coordinator's job, and it happens only if the hop is approved.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn dispatch_terminal_control(
     outcome: &LifecycleEventOutcome,
@@ -64,9 +72,8 @@ pub(super) fn dispatch_terminal_control(
     _provider: Provider,
     prompt_state: &mut HarnessPromptState,
     _materialized: &MaterializedHarnessPrompt,
-    repo_root: Option<&Path>,
     lifecycle_guard: &mut claudine::composition::LifecycleRunGuard<'_>,
-    proxy: &mut ProxyTracking,
+    ledger: &RunLedger,
     term: &Terminal,
     show_checks: bool,
 ) -> TerminalControlAction {
@@ -85,8 +92,11 @@ pub(super) fn dispatch_terminal_control(
         _ => 0,
     };
 
-    let proxy_hops_used = proxy.chain.len()
-        + usize::from(!proxy.chain.iter().any(|path| path == &prompt_state.source_path));
+    // The ledger seeds its chain with the originating document and extends it
+    // on every approved hop, so the active document is always already in it —
+    // no "is the current document counted yet" arithmetic, which is what the
+    // four open-coded chain checks each answered differently.
+    let proxy_hops_used = ledger.chain().len();
     let decision = decide_lifecycle_transition(&LifecycleTransitionInput {
         event: lifecycle_guard
             .terminal_signal()
@@ -176,62 +186,27 @@ pub(super) fn dispatch_terminal_control(
             )
         }
         LifecycleTransitionDecision::ProxyHandoff { target } => {
-            // Resolve through the shared owner rather than `resolve_harness_path`
-            // directly: it adds the existence check the raw resolver lacks, so a
-            // `proxy(missing.md)` fails here — the same way, at the same point —
-            // as the identical proxy on the `initialize` route.
-            let resolved = match claudine::composition::resolve_proxy_target(
-                &target,
-                &prompt_state.source_path,
-                repo_root,
-            ) {
-                Ok(path) => path,
-                Err(e) => return TerminalControlAction::Abort(eyre!("lifecycle proxy: {e}")),
+            // Everything a *provider attempt* can know about a hand-off: the
+            // evaluated target, the evaluated overlay, and where it was
+            // authored. Resolution, the cycle/hop decision, and the change of
+            // active document are the coordinator's — this dispatch used to do
+            // all three in place, which is how the harness came to own an
+            // identity it has no business owning.
+            let StackControl::Proxy {
+                overlay, location, ..
+            } = control
+            else {
+                unreachable!("only a proxy control produces a proxy hand-off decision");
             };
-            // Cycle / hop-limit guard: a `failure` stack that proxies back to a
-            // document whose own `failure` stack proxies again would loop
-            // forever. Reject a self-proxy, an A->B->A cycle, or an
-            // over-long chain with a typed error rather than hanging.
-            if !proxy.chain.iter().any(|p| p == &prompt_state.source_path) {
-                proxy.chain.push(prompt_state.source_path.clone());
-            }
-            if !claudine::composition::proxy_handoff_allowed(&proxy.chain, &resolved) {
-                return TerminalControlAction::Abort(
-                    CompositionError::LifecycleProxyCycle {
-                        source_path: prompt_state.source_path.clone(),
-                        target: target.clone(),
-                        chain: proxy
-                            .chain
-                            .iter()
-                            .map(|p| p.display().to_string())
-                            .collect(),
-                        limit: claudine::composition::MAX_PROXY_HOPS,
-                    }
-                    .into(),
-                );
-            }
-            // Swap the running document for the target and reset per-iteration
-            // guard state so the target runs a fresh `initialize`/pre-flight.
-            prompt_state.source_path = resolved.clone();
-            prompt_state.original_ref = target.clone();
-            prompt_state.entry = claudine::composition::DocumentEntryReason::ProxyTarget;
-            prompt_state.prompt_tail.clear();
-            prompt_state.next_prompt_override = None;
-            prompt_state.next_resume_session_id = None;
-            lifecycle_guard.reset_for_proxy();
-            // Record the hop and flag that the loop top must re-parse the
-            // guard's lifecycle config from the target's frontmatter — without
-            // this the target's events would run against the proxying
-            // document's lifecycle (and the original `failure`/`proxy` stack
-            // would re-fire, looping forever).
-            proxy.chain.push(resolved.clone());
-            proxy.pending = true;
-            // The loop's pending-adoption point announces the hand-off via
-            // `report_proxy_handoff` on re-entry, so no message here.
-            // Re-enter at attempt 1 so the target document gets a clean
-            // pre-flight / freeze cycle rather than inheriting the proxying
-            // document's attempt count.
-            TerminalControlAction::Continue { next_attempt: 1 }
+            TerminalControlAction::Proxy(EvaluatedProxyRequest::new(
+                target,
+                overlay.clone(),
+                ProxyProvenance::new(
+                    prompt_state.source_path.clone(),
+                    *location,
+                    ledger.chain().to_vec(),
+                ),
+            ))
         }
         LifecycleTransitionDecision::Abort(
             LifecycleTransitionAbort::DeferredExecutionUnsupported,
@@ -249,17 +224,17 @@ pub(super) fn dispatch_terminal_control(
             )
         }
         LifecycleTransitionDecision::Abort(LifecycleTransitionAbort::ProxyBudgetExhausted) => {
-            let mut chain = proxy.chain.clone();
-            if !chain.iter().any(|path| path == &prompt_state.source_path) {
-                chain.push(prompt_state.source_path.clone());
-            }
             TerminalControlAction::Abort(CompositionError::LifecycleProxyCycle {
                 source_path: prompt_state.source_path.clone(),
                 target: match control {
                     StackControl::Proxy { target, .. } => target.clone(),
                     _ => String::new(),
                 },
-                chain: chain.iter().map(|path| path.display().to_string()).collect(),
+                chain: ledger
+                    .chain()
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect(),
                 limit: claudine::composition::MAX_PROXY_HOPS,
             }
             .into())
@@ -307,7 +282,7 @@ pub(super) fn run_finalize_with_recovery(
     profile: &dyn crate::commands::wrap::profile::WrapperProfile,
     provider: Provider,
     prompt_state: &mut HarnessPromptState,
-    proxy: &mut ProxyTracking,
+    ledger: &RunLedger,
     show_checks: bool,
 ) -> TerminalControlAction {
     let finalize_outcome = run_lifecycle_event(
@@ -348,9 +323,8 @@ pub(super) fn run_finalize_with_recovery(
         provider,
         prompt_state,
         materialized,
-        repo_root,
         lifecycle_guard,
-        proxy,
+        ledger,
         term,
         show_checks,
     )
@@ -358,9 +332,16 @@ pub(super) fn run_finalize_with_recovery(
 
 /// Outcome of [`drive_terminal_recovery`] for the caller's loop control.
 pub(super) enum TerminalRecovery {
-    /// A recovery control (`retry`/`resume`/`proxy`) re-entered the loop:
-    /// the caller sets `attempt` and `continue`s.
+    /// A recovery control (`retry`/`resume`) re-entered the loop: the caller
+    /// sets `attempt` and `continue`s.
     NextAttempt(u32),
+    /// The stack handed the run off. The caller passes the request to the
+    /// coordinator, which is the only thing that may commit it.
+    ///
+    /// Returned *instead of* running this attempt's ordinary `finalize`:
+    /// once `proxy` is selected the source document's closure belongs to the
+    /// target, so no further source terminal signal is synthesized.
+    Proxy(EvaluatedProxyRequest),
     /// The terminal event and `finalize` completed without recovery: the
     /// caller proceeds to its own terminal return (exit code or typed error).
     Completed,
@@ -395,7 +376,7 @@ pub(super) fn drive_terminal_recovery(
     profile: &dyn crate::commands::wrap::profile::WrapperProfile,
     provider: Provider,
     prompt_state: &mut HarnessPromptState,
-    proxy: &mut ProxyTracking,
+    ledger: &RunLedger,
     show_checks: bool,
 ) -> Result<TerminalRecovery> {
     let event = execute_terminal_event(
@@ -439,14 +420,16 @@ pub(super) fn drive_terminal_recovery(
         provider,
         prompt_state,
         materialized,
-        repo_root,
         lifecycle_guard,
-        proxy,
+        ledger,
         term,
         show_checks,
     ) {
         TerminalControlAction::Continue { next_attempt } => {
             return Ok(TerminalRecovery::NextAttempt(next_attempt));
+        }
+        TerminalControlAction::Proxy(request) => {
+            return Ok(TerminalRecovery::Proxy(request));
         }
         TerminalControlAction::Abort(err) => {
             let finalize_outcome = run_lifecycle_event(
@@ -493,12 +476,13 @@ pub(super) fn drive_terminal_recovery(
         profile,
         provider,
         prompt_state,
-        proxy,
+        ledger,
         show_checks,
     ) {
         TerminalControlAction::Continue { next_attempt } => {
             Ok(TerminalRecovery::NextAttempt(next_attempt))
         }
+        TerminalControlAction::Proxy(request) => Ok(TerminalRecovery::Proxy(request)),
         TerminalControlAction::Abort(err) => Err(err),
         TerminalControlAction::Fallthrough => Ok(TerminalRecovery::Completed),
     }
