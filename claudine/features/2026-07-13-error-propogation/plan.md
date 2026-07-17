@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 4
+phase: 6
 total_phases: 8
 agent: claude/default
 yolo: "true"
@@ -94,6 +94,46 @@ docs_updated_during_phase_4:
     - claudine/features/2026-07-13-error-propogation/decisions.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+packages_during_phase_5:
+    - claudine
+    - claudine-cli
+source_files_during_phase_5:
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/lifecycle/context/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+    - claudine/lib/src/diagnostics/discovery.rs
+    - claudine/lib/src/diagnostics/mod.rs
+    - claudine/lib/src/error.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/output/error_walker.rs
+    - claudine/cli/src/output/error_walker/tests.rs
+    - claudine/cli/tests/characterization_error_routes.rs
+    - claudine/cli/tests/effective_diagnostic_render.rs
+    - claudine/cli/tests/wrap_basics.rs
+    - claudine/cli/tests/wrap_compose_validation.rs
+docs_updated_during_phase_5:
+    - claudine/features/2026-07-13-error-propogation/plan.md
+    - claudine/features/2026-07-13-error-propogation/decisions.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+packages_during_phase_6:
+    - claudine-cli
+source_files_during_phase_6:
+    - claudine/cli/tests/error_guards.rs
+    - claudine/cli/tests/error_guards/source_scan.rs
+    - claudine/cli/tests/error_guards/transport-allow.toml
+    - claudine/cli/Cargo.toml
+    - claudine/justfile
+    - scripts/check-error-transport.sh
+    - scripts/check-error-transport.allow
+docs_updated_during_phase_6:
+    - claudine/features/2026-07-13-error-propogation/plan.md
+    - claudine/features/2026-07-13-error-propogation/decisions.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
 ---
 
 # Execution Plan — End-to-End Typed Error Propagation
@@ -317,33 +357,33 @@ in this phase, not an acceptable change.
 
 ## Phase 5 — Unify Rendering and `err.*` on One Selection
 
-- [ ] **[D2/D5] Rewrite `cli/src/output/error_walker.rs`** to call Claudine's
+- [x] **[D2/D5] Rewrite `cli/src/output/error_walker.rs`** to call Claudine's
       `as_diagnostic` + the shared selection function. **Delete the direct
       `CompositionError` downcast** — the walker must not keep a second partial
       type list. This is the fix for the motivating incident.
-- [ ] **[D4] Point `LifecycleErrorInfo` construction at the same selection
+- [x] **[D4] Point `LifecycleErrorInfo` construction at the same selection
       function**, so classification and rendering cannot diverge.
-- [ ] **[D7] Migrate typed `from_action_failure` callers** (~11 sites, mostly
+- [x] **[D7] Migrate typed `from_action_failure` callers** (~11 sites, mostly
       `lifecycle/executor.rs`) to pass the selected diagnostic or a snapshot
       when they already hold typed provider/cap/timeout/runaway/harness data. A
       genuinely prose-only action failure **may remain facet-less** — but must
       not claim a registered code while projecting empty/top-level-null detail.
-- [ ] **[D4] Project `err.msg`** as the selected diagnostic's concise message
+- [x] **[D4] Project `err.msg`** as the selected diagnostic's concise message
       **after** the existing notification-hygiene pass — not its multiline block,
       not a classifier input. Preserve the ratified `harness::failure_message`
       precedence for provider attempt failures.
-- [ ] **[D4] Add `err.cause.*`** as a strict **one-level** projection of the next
+- [x] **[D4] Add `err.cause.*`** as a strict **one-level** projection of the next
       registered diagnostic. `err.cause.cause` is **not** exposed in v1.
-- [ ] **[D6] Verify frontmatter enrichment stays transparent** — it must find the
+- [x] **[D6] Verify frontmatter enrichment stays transparent** — it must find the
       meaningful inner diagnostic through arbitrary typed wrappers, append the
       excerpt **once**, and leave control-flow matching unchanged.
-- [ ] **[D5] Confirm exactly one ordinary render boundary.** The early lifecycle
+- [x] **[D5] Confirm exactly one ordinary render boundary.** The early lifecycle
       -evaluation emission stays (catch events must run after the crash is
       visible), marked already-emitted and covered by exactly-once tests. **No
       new early render boundary** without a separate ruling.
-- [ ] *(parallelizable)* **[L1]** Test: the same selected diagnostic produces the
+- [x] *(parallelizable)* **[L1]** Test: the same selected diagnostic produces the
       terminal rendering, the `LifecycleErrorInfo`, and the serialized snapshot.
-- [ ] *(parallelizable)* **[L1]** Test: every `err.msg` is escape-free,
+- [x] *(parallelizable)* **[L1]** Test: every `err.msg` is escape-free,
       single-line, non-empty, within the ~240-char cap; provider cascade
       precedence unchanged.
 
@@ -357,7 +397,7 @@ one cause while rendering another.
 
 Parallelizable with Phase 7.
 
-- [ ] **[D8] Widen and harden the lossy-boundary guard.** Extend the existing
+- [x] **[D8] Widen and harden the lossy-boundary guard.** Extend the existing
       `scripts/check-error-transport.sh` (currently `map_err(|e| …)`-keyed and
       scoped to `lib/src/composition`) into a **Rust-aware** scan — parse with
       `syn` rather than grep — covering `lib/src`, `cli/src`, `contract/src`.
@@ -365,22 +405,67 @@ Parallelizable with Phase 7.
       map_err, error-bearing `reason`/`message: String` fields, pre-return
       `format!` context, log-then-return-another-error, and `Diagnostic`/
       `BlockError` impls absent from discovery.
-- [ ] **[D8] Rework the allowlist** so each exception is tied to an **enclosing
+      *Landed as `cli/tests/error_guards.rs` + `error_guards/source_scan.rs`; the
+      grep script and its allowlist are deleted. The scan keys on binding
+      **provenance** (a `map_err`/`or_else`/`unwrap_or_else` closure parameter or
+      an `Err(e)` pattern) and on **retention** — a body that keeps the typed
+      value (`Foo { message: e.to_string(), source: e }`) is not a defect, which
+      is the distinction a grep cannot draw and the reason all 13 Category-0 rows
+      of the Phase 1 inventory are correctly ignored.*
+- [x] **[D8] Rework the allowlist** so each exception is tied to an **enclosing
       symbol** (not just a trimmed line, which currently matches by text across
       files) and carries a written reason why no typed source exists.
-- [ ] **[D2] Add the Rust-aware source-parity test**: scan production sources for
+      *`cli/tests/error_guards/transport-allow.toml`, keyed `(shape, file,
+      symbol)` and carrying a `tag` + `reason`. See §D-6 below on the 77-entry
+      grandfather.*
+- [x] **[D2] Add the Rust-aware source-parity test**: scan production sources for
       every `impl Diagnostic for …` and fail when one is missing from the
       registry. Rust has no reflection that makes a hand-authored downcast list
       exhaustive — this test is what makes D2 enforceable.
-- [ ] **[D7] Add catalog-parity enforcement**: fail on a missing declared detail
+      *`registry_lists_every_diagnostic_impl` compares the `impl Diagnostic for …`
+      set against the `downcast_ref::<T>()` arms parsed out of `as_diagnostic`.
+      Both sides are derived from source, so neither can be trusted into
+      agreement. Fails in **both** directions (unregistered impl, phantom
+      downcast).*
+- [x] **[D7] Add catalog-parity enforcement**: fail on a missing declared detail
       key, an undeclared ad hoc key, or a registered code whose detail is
       top-level `null`.
-- [ ] Keep `just lint-transport` wired into `just lint`; update its recipe
+      *Four tests, static and runtime: `detail_projections_write_only_declared_keys`
+      (syn — every `base["k"] = …` / `json!({"k": …})` key must be declared by one
+      of the impl's own codes, exhaustive over all ~70 variants without
+      constructing them), `a_diagnostic_claiming_a_registered_code_projects_a_detail`
+      (inheriting the `Value::Null` default while claiming a code),
+      `from_code_projects_a_catalog_shaped_detail_for_every_registered_code` (all
+      43 codes through the synthesized-label path — the exact regression D7
+      names), and `every_diagnostic_in_the_corpus_projects_its_catalog_key_set`
+      (key-set equality on constructed values), with
+      `the_corpus_covers_every_code_a_diagnostic_can_return` keeping the corpus
+      complete against the source-derived claimed-code set.*
+- [x] Keep `just lint-transport` wired into `just lint`; update its recipe
       comment, which currently describes the narrow Phase-6 composition scope.
+      *Now `just _test claudine-cli --test error_guards` (1.4s). The recipe's
+      "pure grep heuristic — no cargo" claim is gone: `syn` needs the toolchain,
+      which is the deliberate trade for provenance-awareness.*
 
 **⛔ Checkpoint 6** — Each guard **fails on a deliberately introduced violation**
 (prove it, then revert). A guard that cannot fail is not a guard. `just lint`
 green.
+
+**Checkpoint 6 met.** Every guard was proven against a real injected fault, and
+every injection reverted (`git diff` over `lib/` and `cli/src` empty afterwards):
+
+| Guard | Injected fault | Result |
+|---|---|---|
+| `no_unallowlisted_typed_error_collapses` | a new `map_err(\|e\| format!("could not read: {e}"))` in `harness/resolve.rs` | FAILED, naming the shape, file, line, and new symbol |
+| `registry_lists_every_diagnostic_impl` | deleted the `HarnessError` arm from `as_diagnostic` — **the motivating incident, restaged** | FAILED: "`["HarnessError"]` implement `Diagnostic` but `as_diagnostic` cannot see them" |
+| `detail_projections_write_only_declared_keys` | `base["retry_after"] = …` (catalog declares `retry_after_ms`) | FAILED (static) |
+| `every_diagnostic_in_the_corpus_projects_its_catalog_key_set` | same fault | FAILED (runtime), so both halves are live |
+| `from_code_projects_…_for_every_registered_code` | `from_code` reverted to `detail: Value::Null` | FAILED: "`auth.invalid` projects a top-level non-object detail: Null" |
+| `every_allowlist_entry_still_matches_a_live_site` | an entry naming a nonexistent symbol | FAILED as stale |
+
+`just lint` green. `just test` green: 5,568 passed across the area (one known
+spurious nextest `LKFAIL` on `argv_normalization`, which retried and passed —
+pre-existing, see the leak-timeout note in the testing skill).
 
 ---
 

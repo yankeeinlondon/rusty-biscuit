@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 3
+phase: 6
 status: ratified
 ---
 
@@ -285,3 +285,95 @@ attributes and path labels. `InvalidFileReference`'s renderer does this and
 They are only safe because their messages happen not to contain `"`. Phase 8's
 comment/behavior-drift pass is the natural home for auditing the helper's call
 sites, or splitting it into `escape_href` / `escape_body`.
+
+---
+
+## D-9 — A registered code always projects a catalog-shaped `detail` object
+
+**Decision (Phase 5).** `DiagnosticFacets::from_code` — the label-only path that
+serves provider/cap/timeout/runaway failures — now projects
+`null_detail_for(code)` (every declared key present, each `null`) instead of
+`Value::Null`.
+
+**Authority.** [`plan.md`](./plan.md) Phase 5 §D7: a facet-less action failure
+"must not claim a registered code while projecting empty/top-level-null detail".
+Phase 6's catalog-parity guard enforces the same rule mechanically.
+
+**Rationale.** The old shape made `err.detail` a *scalar* for exactly the codes
+whose detail authors most want (`cap.rate_limit`'s `reset_at`,
+`timeout.step_silence`'s duration). `err.detail.reset_at` against a scalar `null`
+is a different failure mode from a declared-but-unknown key, and only the latter
+is honest: the catalog says the code has that field; the label-only path just
+does not know its value.
+
+**Behavior change accepted.** `when: "err.detail"` flips from falsy (`null`) to
+truthy (a populated object) for label-derived failures. This is a bare-`detail`
+truthiness test, which no shipped example uses — authors branch on
+`err.detail.<field>`, whose value is unchanged (`null` either way). The D10
+characterization suite confirms exit codes, event order, and emission counts are
+unaffected.
+
+---
+
+## D-10 — Route 5 was never the unstructured control (discovered, not decided)
+
+**Finding (Phase 5).** `characterization_error_routes.rs` filed
+`--timeout not-a-duration` as the "deliberately unstructured fallback" control,
+asserting it must keep reaching the generic `Error:` line. It carries a typed
+**`HarnessError::InvalidTimeout`**. Phase 1 could not see this precisely because
+the walker could not see `HarnessError` — the bug under repair made the route
+*look* unstructured.
+
+**Ruling.** The route renders a `StatusBlock` after Phase 5, and that is correct:
+"no block" is a claim about the error's **type**, never about how incidental the
+failure feels. The characterization test keeps its baseline value — all three
+pinned properties are unaffected, because `emission_count` deliberately sums both
+surfaces so a route may migrate between them — and only its mistaken rationale
+was corrected. It is renamed `characterize_pre_document_argument_failure`.
+
+**Consequence.** The genuine unstructured control moved to
+`effective_diagnostic_render.rs`, which uses an argument-shape rejection
+(authored prose with no typed error behind it) and is the file that owns the
+render contract this baseline deliberately does not pin. Phase 7's L2 case
+"a deliberately unstructured fallback error" should use that shape, **not**
+`--timeout`.
+
+---
+
+## D-11 — The D8 guard grandfathers 77 symbols rather than expanding Phase 4
+
+**Finding (Phase 6).** The Phase 1 inventory was produced by grep and classified
+**51** Category-1 sites. The `syn`-based guard that replaced it flags **77
+symbols** (103 raw findings) across `lib/src`, `cli/src`, and `contract/src`, and
+manual spot-checks confirmed the extra ones are real, not scan noise: whole
+clusters in `permissions/providers/*`, `messaging/send.rs`, `mcp/import.rs`, and
+`reporting/ingest.rs` flatten a typed error into a `message`/`reason` field. A
+grep keyed on `eyre!\([^)]*\{…` and `map_err -A1 to_string` could not see them,
+so they never entered the Phase 4/5 work list.
+
+**Ruling.** Record them; do not fix them here. Two authorities agree:
+
+- **Spec §D10** — "any routing or retry-policy change discovered mid-audit is
+  split into a separate spec". A 60-symbol migration through the policy engine,
+  the messaging routes, and the MCP importer is exactly the scope creep D10
+  forbids, and Checkpoint 4/5 require the characterization baseline to stay
+  byte-identical.
+- **Repo precedent** — `cli/tests/dispatch_inventory.rs`'s `GUARD_ALLOWLIST` is
+  a "grandfather-with-burn-down list where each entry carries a workstream `tag`
+  and a `reason`". The transport allowlist copies that shape exactly.
+
+**What this buys.** The set is frozen: a *new* collapse fails the guard
+(proven — Checkpoint 6), and a stale entry fails too, so the list cannot rot.
+What it does not buy is a clean tree; 71 of 77 entries carry
+`tag = "error-propagation-followup"` and are a standing debt.
+
+**Reversal condition.** A follow-up spec that types the `Result<_, String>`
+signatures — the `ShellRunner` trait, the side-effect dispatch seam, the
+messaging routes, and `ClaudineError::Policy*{message}` — closes the tag. Until
+one exists the tag is honest about being unfinished; deleting entries without
+that work would silently re-open the hole.
+
+**Also retired.** `scripts/check-error-transport.sh` and its `.allow` are
+deleted, not extended. The verified rationales its allowlist carried (the
+`Result<_, String>` helper boundaries in `closure.rs` and `lifecycle/executor.rs`)
+are carried forward verbatim into the new entries' reasons.
