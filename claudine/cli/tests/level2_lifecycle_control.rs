@@ -2120,3 +2120,261 @@ fn level2_lifecycle_proxy_target_rereads_after_initialize_mutation() {
         "the reread must not fire `initialize` a second time; got {lines:?}; pane:\n{pane}"
     );
 }
+
+// ── Phase 13: the direct/proxy equivalence matrix ───────────────────────────
+//
+// Every row here answers one question: does this target behave identically when
+// invoked directly and when reached through an `initialize` proxy? The rows are
+// deliberately uniform — one probe document, two arms, one comparison — because
+// the feature's whole claim is that the route is not observable.
+
+/// Both arms of one equivalence row.
+struct EquivalenceArms {
+    direct_lines: Vec<String>,
+    routed_lines: Vec<String>,
+    direct_pane: String,
+    routed_pane: String,
+}
+
+/// Stage one arm of the matrix.
+///
+/// Both arms execute the **same file** — `target.md` — and differ only in how
+/// execution reaches it: the direct arm invokes it, the routed arm invokes
+/// `doc.md` ([`EQUIV_ROUTER`]) and is handed off at `initialize`. Pointing the
+/// direct arm at the target file itself, rather than at a copy under a second
+/// name, is what keeps document-path-derived facets comparable — a copy would
+/// differ for reasons that are not routing.
+fn stage_equivalence_arm(target_doc: &str, routed: bool) -> Staged {
+    let mut staged = stage_proxy_pair(EQUIV_ROUTER, target_doc, true);
+    if !routed {
+        staged.md_file = staged.workspace.path().join("target.md");
+    }
+    staged
+}
+
+/// Rewrite the values that legitimately differ between arms into stable
+/// placeholders.
+///
+/// Each arm owns its own temporary workspace, so every path-derived facet —
+/// `ctx.area` among them — carries a random component. Comparing raw lines
+/// would compare that randomness and never agree. What survives normalization
+/// is exactly the routing-sensitive content the row is asserting on.
+fn normalize_arm(lines: &[String], staged: &Staged) -> Vec<String> {
+    let workspace = staged.workspace.path();
+    let path = workspace.display().to_string();
+    let area = workspace
+        .file_name()
+        .expect("a tempdir always has a final component")
+        .to_string_lossy()
+        .to_string();
+    lines
+        .iter()
+        .map(|line| line.replace(&path, "<WS>").replace(&area, "<AREA>"))
+        .collect()
+}
+
+/// Run `target_doc` directly and through the router, returning both arms'
+/// normalized event logs and panes.
+fn equivalence_arms(target_doc: &str, expected_markers: usize) -> EquivalenceArms {
+    let direct = stage_equivalence_arm(target_doc, false);
+    let direct_pane = run_until_settled(&direct, expected_markers);
+    let direct_lines = normalize_arm(&event_lines(&direct), &direct);
+
+    let routed = stage_equivalence_arm(target_doc, true);
+    let routed_pane = run_until_settled(&routed, expected_markers);
+    let routed_lines = normalize_arm(&event_lines(&routed), &routed);
+
+    EquivalenceArms {
+        direct_lines,
+        routed_lines,
+        direct_pane,
+        routed_pane,
+    }
+}
+
+/// The equivalence probe: a target that stamps the facets the matrix compares
+/// into `events.log` from its own lifecycle surfaces.
+///
+/// Covered here are the facets a target can observe about itself **without**
+/// R6's per-document launch rebuild: authored frontmatter, a computed
+/// property, the `ctx.*` snapshot, lifecycle signal order, and the target
+/// `initialize` count. The launch facets (provider, model, argv, MCP, child
+/// environment, child CWD) are a separate row — see
+/// [`level2_lifecycle_equivalence_target_pinned_model_matches_direct_run`].
+const EQUIV_PROBE_TARGET: &str = r#"---
+title: equivalence probe
+note: authored-note
+derived: "{{ note }}-derived"
+initialize:
+  stack:
+    - action: {append_line: ["events.log", "sig=initialize"]}
+success:
+  stack:
+    - action:
+        - {append_line: ["events.log", "sig=success"]}
+        - {append_line: ["events.log", "fm.note={{ note }}"]}
+        - {append_line: ["events.log", "fm.derived={{ derived }}"]}
+        - {append_line: ["events.log", "ctx.area={{ ctx.area }}"]}
+        - {append_line: ["events.log", "ctx.os={{ ctx.os }}"]}
+finalize:
+  stack:
+    - action: {append_line: ["events.log", "sig=finalize"]}
+---
+probe body note={{ note }}
+"#;
+
+/// **Acceptance criteria 8 and 9, non-launch facets.** The probe's frontmatter,
+/// computed property, `ctx.*` snapshot, lifecycle signal order, and target
+/// `initialize` count are identical whether it is invoked directly or reached
+/// through an `initialize` proxy.
+///
+/// This is the matrix row that holds today. The two facets it cannot cover —
+/// launch state (R6) and loop ownership (Phase 10) — have their own rows, both
+/// `#[ignore]`d against the work that unblocks them.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_equivalence_probe_matches_direct_run() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    // sig=initialize, provider-ran, sig=success, 4 stamped facets, sig=finalize.
+    const EXPECTED_MARKERS: usize = 8;
+
+    let arms = equivalence_arms(EQUIV_PROBE_TARGET, EXPECTED_MARKERS);
+
+    // The direct arm is the contract the routed arm must match. Assert its
+    // shape first so a broken fixture is not misread as a routing bug.
+    //
+    // `ctx.os` renders a platform-dependent value, so pinning its text here
+    // would make the matrix macOS-only. The fixture check asserts only that it
+    // resolved to something; the equality assertion below is what compares it
+    // across the two arms, which is the property this row exists to test.
+    let stable: Vec<String> = arms
+        .direct_lines
+        .iter()
+        .filter(|line| !line.starts_with("ctx.os="))
+        .cloned()
+        .collect();
+    assert_eq!(
+        stable,
+        vec![
+            "sig=initialize",
+            "provider-ran",
+            "sig=success",
+            "fm.note=authored-note",
+            "fm.derived=authored-note-derived",
+            // A bare temporary git repo sits in no package area, so `ctx.area`
+            // resolves empty. It is stamped anyway: an empty value that stays
+            // empty on both arms is still the facet agreeing.
+            "ctx.area=",
+            "sig=finalize",
+        ],
+        "fixture check: the probe stamps its facets in this order when invoked \
+         directly; pane:\n{}",
+        arms.direct_pane
+    );
+    assert!(
+        arms.direct_lines
+            .iter()
+            .any(|line| line.starts_with("ctx.os=") && line.len() > "ctx.os=".len()),
+        "fixture check: `ctx.os` must resolve to a non-empty value; got {:?}; pane:\n{}",
+        arms.direct_lines,
+        arms.direct_pane
+    );
+
+    assert_eq!(
+        arms.routed_lines, arms.direct_lines,
+        "the route must not be observable: a target reached through an \
+         `initialize` proxy must stamp the same frontmatter, computed property, \
+         `ctx.*` snapshot, lifecycle signal order, and initialize count as the \
+         same target invoked directly; pane:\n{}",
+        arms.routed_pane
+    );
+}
+
+/// A probe that pins its own `model:` and stamps the launch facets derived from
+/// it. The provider stays fixed (`--goose` on both arms), so `model:` is the
+/// one launch input free to move — which makes this the cheapest honest probe
+/// of R6 that needs no second provider stub and cannot trip interactive
+/// provider selection.
+///
+/// The id rides Goose's declared `llamacpp` local-runner namespace. Frontmatter
+/// models are catalog-validated (`ModelCatalog::is_valid`) and an invalid one is
+/// dropped silently, which would empty this probe's facet for a reason that has
+/// nothing to do with routing. A namespaced id is accepted by construction, so
+/// it cannot age out the way a real model id would.
+const EQUIV_PINNED_MODEL_TARGET: &str = r#"---
+title: equivalence probe with a pinned model
+model: llamacpp/probe-model-x
+initialize:
+  stack:
+    - action: {append_line: ["events.log", "sig=initialize"]}
+success:
+  stack:
+    - action:
+        - {append_line: ["events.log", "sig=success"]}
+        - {append_line: ["events.log", "env.MODEL={{ env.MODEL }}"]}
+finalize:
+  stack:
+    - action: {append_line: ["events.log", "sig=finalize"]}
+---
+pinned probe body
+"#;
+
+/// **Acceptance criteria 9 and 10, launch facets.** A target that pins its own
+/// `model:` must resolve the same launch state on both routes.
+///
+/// ## Why this is `#[ignore]`d
+///
+/// It is a reproduction of the **R6 gap**, not a regression guard, and it fails
+/// on today's tree by design. Observed:
+///
+/// ```text
+/// routed: ["sig=initialize", "provider-ran", "sig=success", "env.MODEL=",                        "sig=finalize"]
+/// direct: ["sig=initialize", "provider-ran", "sig=success", "env.MODEL=llamacpp/probe-model-x", "sig=finalize"]
+/// ```
+///
+/// The fixture check above passes, so the target's `model:` *does* reach the
+/// launch environment when it is the invoked document. Reached through a proxy
+/// it resolves empty: every launch decision is computed once, before the loop,
+/// from the **router**, and `coordinator.adopt` re-derives only prompt,
+/// frontmatter, lifecycle, harness plan, timeouts, and closure plan. Provider,
+/// model, argv, MCP, system prompt, child environment, and child CWD stay the
+/// source document's — see `plan.md` checkpoint 9, "R6 — not started".
+///
+/// This is the row checkpoint 9 called unwritable ("the checkpoint's named test
+/// ... cannot pass until R6 lands"). It is written now because it costs nothing
+/// to keep the contract executable: the launch rebuild makes it green, and
+/// until then it names the gap precisely rather than leaving a prose note. It
+/// probes `model:` rather than `agent:` because the provider is pinned by
+/// `--goose` on both arms — explicit CLI intent that R6 must keep authoritative
+/// — so `model:` is the one launch input free to move without a second provider
+/// stub or an interactive selection prompt.
+#[test]
+#[ignore = "reproduction of the R6 gap: a proxied target keeps the router's \
+            launch state, so its own `model:` never reaches the launch \
+            environment. Phase 9's launch rebuild (R6) makes this pass and \
+            re-enables it"]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_equivalence_target_pinned_model_matches_direct_run() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    // sig=initialize, provider-ran, sig=success, env.MODEL, sig=finalize.
+    const EXPECTED_MARKERS: usize = 5;
+
+    let arms = equivalence_arms(EQUIV_PINNED_MODEL_TARGET, EXPECTED_MARKERS);
+
+    assert!(
+        arms.direct_lines
+            .contains(&"env.MODEL=llamacpp/probe-model-x".to_string()),
+        "fixture check: invoked directly, the target's own `model:` reaches the \
+         launch environment; got {:?}; pane:\n{}",
+        arms.direct_lines,
+        arms.direct_pane
+    );
+
+    assert_eq!(
+        arms.routed_lines, arms.direct_lines,
+        "a proxied target must resolve its own launch state; pane:\n{}",
+        arms.routed_pane
+    );
+}
