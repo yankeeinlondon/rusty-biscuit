@@ -164,25 +164,26 @@ fn lifecycle_reuses_prepared_snapshot_for_prompt_outside_launch_area() {
     );
 }
 
-/// A caller-supplied file reference resolves against the captured launch
-/// area (`ctx_base_dir`) after the ambient process CWD has moved away from
-/// it — the core post-`chdir` independence contract.
+/// A file reference authored inside a document resolves against the document's
+/// own directory (`base_dir`) after the ambient process CWD has moved away —
+/// the core post-`chdir` independence contract (D2).
 ///
-/// Layout: the `spec` file lives ONLY under the launch area; `base_dir`
-/// (the prompt's parent) does not contain it, and the ambient CWD is an
-/// unrelated directory. Pre-fix, `file_exists(spec)` returned `false`
-/// because resolution fell back to the mutated ambient CWD instead of the
-/// captured launch area.
+/// Layout: `spec.md` lives under `base_dir` (the prompt's parent); a same-named
+/// file under the launch area is NOT a resolution candidate — the launch-area
+/// fallback is diagnostic-only for in-document references (D2). Pre-flip this
+/// test asserted the launch area drove resolution; repository-first replaced
+/// that with document-dir anchoring.
 #[serial_test::serial]
 #[test]
-fn file_exists_resolves_against_launch_area_after_chdir() {
+fn file_exists_resolves_against_base_dir_after_chdir() {
     let launch_dir = tempfile::tempdir().unwrap();
     let prompt_dir = tempfile::tempdir().unwrap();
     let unrelated_dir = tempfile::tempdir().unwrap();
 
-    // The caller-supplied file lives only under the launch area.
-    let spec_path = launch_dir.path().join("spec.md");
-    std::fs::write(&spec_path, "# spec\n").unwrap();
+    // The reference resolves against the document's own directory.
+    std::fs::write(prompt_dir.path().join("spec.md"), "# spec\n").unwrap();
+    // A file present ONLY under the launch area must NOT resolve.
+    std::fs::write(launch_dir.path().join("launch_only.md"), "# launch\n").unwrap();
 
     // Move the ambient CWD to an unrelated dir (mirrors the wrapper's
     // `switch_process_cwd` to the repo root before lifecycle events fire).
@@ -193,7 +194,7 @@ fn file_exists_resolves_against_launch_area_after_chdir() {
     let shell = MockShell::new(0);
     let recorder = Recorder::default();
     let harness = Harness::default();
-    let fm = map(json!({ "spec": "spec.md" }));
+    let fm = map(json!({ "spec": "spec.md", "launch_only": "launch_only.md" }));
     let source_path = prompt_dir.path().join("prompt.md");
 
     let context = StackExecutionContext {
@@ -203,9 +204,9 @@ fn file_exists_resolves_against_launch_area_after_chdir() {
         err: None,
         timing: None,
         current: None,
-        // The prompt's parent — does NOT contain spec.md.
+        // The prompt's parent — the document base holding spec.md.
         base_dir: Some(prompt_dir.path()),
-        // The launch area — the one anchor spec.md is relative to.
+        // The launch area — carried for diagnostics only, never a candidate.
         ctx_base_dir: Some(launch_dir.path()),
         prepared_context: None,
         effect_engine: &engine,
@@ -224,7 +225,18 @@ fn file_exists_resolves_against_launch_area_after_chdir() {
     assert_eq!(
         resolved,
         Value::Bool(true),
-        "file_exists must hit the launch-area fallback, not the ambient CWD"
+        "file_exists must anchor on base_dir (document dir), independent of ambient CWD"
+    );
+
+    // The launch-area fallback is diagnostic-only: a file present only there
+    // is not a resolution candidate.
+    let launch_only = context
+        .resolve_string_value("{{file_exists(launch_only)}}", &fm)
+        .expect("file_exists(launch_only) must resolve to a verdict");
+    assert_eq!(
+        launch_only,
+        Value::Bool(false),
+        "a launch-area-only file must NOT resolve; the launch fallback is diagnostic-only"
     );
 
     // Restore the ambient CWD so other tests are unaffected.
@@ -232,7 +244,8 @@ fn file_exists_resolves_against_launch_area_after_chdir() {
 }
 
 /// Prepare-time and event-time resolution agree for the same caller-supplied
-/// path: both anchor on the launch area. This asserts the event-time
+/// path: both anchor on `base_dir` (the document directory) and both carry the
+/// same diagnostic launch-area fallback. This asserts the event-time
 /// `StackExecutionContext` path (`file_exists` → `true`) matches what the
 /// `ResolutionContext` builder alone produces — the two paths share one
 /// explicit anchor instead of diverging on ambient-CWD timing.
@@ -242,8 +255,8 @@ fn prepare_time_and_event_time_agree_on_file_reference() {
     let launch_dir = tempfile::tempdir().unwrap();
     let prompt_dir = tempfile::tempdir().unwrap();
 
-    let spec_path = launch_dir.path().join("plan.md");
-    std::fs::write(&spec_path, "# plan\n").unwrap();
+    // The reference resolves against the document's own directory (base_dir).
+    std::fs::write(prompt_dir.path().join("plan.md"), "# plan\n").unwrap();
 
     let original_cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(prompt_dir.path()).unwrap();
@@ -297,20 +310,20 @@ fn prepare_time_and_event_time_agree_on_file_reference() {
     std::env::set_current_dir(&original_cwd).unwrap();
 }
 
-/// `frontmatter(spec, review_iterations)` resolves against the launch-area
-/// fallback — the mechanism behind `iteration` derivation in prompts like
-/// `review-feature.md`. Pre-fix this returned empty/null because the spec
-/// file resolved as missing, leaving `iteration` stuck at `1`.
+/// `frontmatter(spec, review_iterations)` resolves against `base_dir` (the
+/// document directory) — the mechanism behind `iteration` derivation in prompts
+/// like `review-feature.md`. Under repository-first resolution the spec is read
+/// from the document's own directory, not the launch-area fallback.
 #[serial_test::serial]
 #[test]
-fn frontmatter_reads_resolve_against_launch_area_fallback() {
+fn frontmatter_reads_resolve_against_base_dir() {
     let launch_dir = tempfile::tempdir().unwrap();
     let prompt_dir = tempfile::tempdir().unwrap();
 
-    // The spec file carries a `review_iterations` frontmatter property.
-    let spec_path = launch_dir.path().join("spec.md");
+    // The spec file carries a `review_iterations` frontmatter property and
+    // lives under the document's own directory (base_dir).
     std::fs::write(
-        &spec_path,
+        prompt_dir.path().join("spec.md"),
         "---\nreview_iterations: 3\n---\n# spec\n",
     )
     .unwrap();
@@ -351,7 +364,7 @@ fn frontmatter_reads_resolve_against_launch_area_fallback() {
     assert_eq!(
         resolved,
         Value::Number(3.into()),
-        "frontmatter() must read the spec via the launch-area fallback"
+        "frontmatter() must read the spec from base_dir (the document directory)"
     );
 
     std::env::set_current_dir(&original_cwd).unwrap();
@@ -362,25 +375,26 @@ fn frontmatter_reads_resolve_against_launch_area_fallback() {
 // These tests close the remaining verification goals from the spec with
 // explicit regression coverage at the claudine lifecycle layer.
 
-/// A caller-supplied file that exists ONLY under the launch area (not
-/// under the prompt dir, not under the post-`chdir` ambient CWD which
-/// represents the repo root) resolves through the fallback — proving the
-/// new fallback is the source of the hit (verification goal #8).
+/// A caller-supplied file that exists ONLY under the launch area does NOT
+/// resolve: the launch-area fallback is diagnostic-only and is never a
+/// resolution candidate for a reference authored inside a document (D2). This
+/// is the inverse of the pre-flip contract, which resolved such a file through
+/// the fallback.
 ///
 /// Three distinct anchors are materialized so the test cannot pass by
 /// accident: `prompt_dir` (base_dir, empty), `repo_root_dir` (the
 /// post-`chdir` ambient CWD, empty), and `launch_dir` (ctx_base_dir /
-/// fallback, holds the only copy).
+/// fallback, holds the only copy — yet must not be consulted).
 #[serial_test::serial]
 #[test]
-fn regression_path_only_under_launch_area_resolves() {
+fn regression_path_only_under_launch_area_does_not_resolve() {
     let launch_dir = tempfile::tempdir().unwrap();
     let prompt_dir = tempfile::tempdir().unwrap();
     let repo_root_dir = tempfile::tempdir().unwrap();
 
     // The caller-supplied file lives ONLY under the launch area.
     std::fs::write(launch_dir.path().join("unique.md"), "# unique\n").unwrap();
-    // Defensive sanity: neither other anchor holds the file.
+    // Defensive sanity: neither the base dir nor the ambient CWD holds it.
     assert!(!prompt_dir.path().join("unique.md").exists());
     assert!(!repo_root_dir.path().join("unique.md").exists());
 
@@ -418,12 +432,12 @@ fn regression_path_only_under_launch_area_resolves() {
 
     let resolved = context
         .resolve_string_value("{{file_exists(spec)}}", &fm)
-        .expect("file_exists(spec) must resolve");
+        .expect("file_exists(spec) must resolve to a verdict");
     assert_eq!(
         resolved,
-        Value::Bool(true),
-        "the launch-area fallback is the only anchor that holds unique.md; resolution must \
-         prove the fallback (not prompt dir, not repo root) was consulted",
+        Value::Bool(false),
+        "a file present only under the launch area must NOT resolve; the launch-area fallback \
+         is diagnostic-only, never a candidate (neither prompt dir nor repo root holds it)",
     );
 
     std::env::set_current_dir(&original_cwd).unwrap();

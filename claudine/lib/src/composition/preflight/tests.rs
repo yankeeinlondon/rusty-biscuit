@@ -708,13 +708,14 @@ fn resolved_start_shell_command(
 
 #[test]
 #[serial_test::serial(preflight_cwd)]
-fn lifecycle_shell_read_side_resolves_via_launch_area_fallback() {
+fn lifecycle_shell_read_side_resolves_against_document_dir() {
     let doc_dir = tempfile::TempDir::new().unwrap();
     let launch_dir = tempfile::TempDir::new().unwrap();
     let unrelated = tempfile::TempDir::new().unwrap();
-    // spec.md exists ONLY under the launch-area fallback — not the prompt
-    // (document) directory, not the ambient CWD.
-    std::fs::write(launch_dir.path().join("spec.md"), "# Spec\n").unwrap();
+    // spec.md lives under the prompt (document) directory — the base_dir a
+    // reference authored inside the document resolves against (D2). The
+    // launch-area fallback is diagnostic-only and never a candidate.
+    std::fs::write(doc_dir.path().join("spec.md"), "# Spec\n").unwrap();
 
     let source_path = doc_dir.path().join("prompt.md");
     let (mut config, frontmatter) = lifecycle_with_file_exists_shell();
@@ -730,12 +731,12 @@ fn lifecycle_shell_read_side_resolves_via_launch_area_fallback() {
         &source_path,
         Some(launch_dir.path()),
     )
-    .expect("resolution with the launch-area fallback must succeed");
+    .expect("resolution against the document dir must succeed");
 
     assert_eq!(
         resolved_start_shell_command(&config),
         "echo true",
-        "file_exists(spec) must see spec.md via the launch-area fallback",
+        "file_exists(spec) must see spec.md via base_dir (the document directory), CWD-independently",
     );
 }
 

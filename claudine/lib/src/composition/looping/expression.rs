@@ -423,49 +423,53 @@ mod tests {
         );
     }
 
-    /// A caller-supplied file reference that misses under the document dir
-    /// (`base_dir`) but exists under the launch-area fallback resolves via the
-    /// fallback, independent of the ambient process CWD.
+    /// The launch-area fallback (`file_ref_fallback_dir`) is diagnostic-only: a
+    /// reference authored inside a document resolves against `base_dir`, not the
+    /// launch area (D2). A file present ONLY under the launch area does not
+    /// resolve even when the fallback is set, while a file under `base_dir`
+    /// does — and the fallback is still carried on the resolution context for
+    /// diagnostics.
     #[test]
-    fn file_exists_resolves_via_launch_area_fallback() {
+    fn file_ref_fallback_dir_is_diagnostic_only_not_a_resolution_candidate() {
         let prompt_dir = tempfile::TempDir::new().unwrap();
         let launch_dir = tempfile::TempDir::new().unwrap();
 
-        // The artifact lives ONLY under the launch area.
+        // One artifact under the launch area, one under the document dir.
         std::fs::write(launch_dir.path().join("spec.md"), "# spec\n").unwrap();
+        std::fs::write(prompt_dir.path().join("local.md"), "# local\n").unwrap();
 
         let fm = map(json!({}));
         let ambient = ambient();
 
-        // No fallback: the artifact is missing under the prompt dir, so the
+        let lookup = LoopExpressionLookup::new(&fm, &ambient)
+            .with_base_dir(Some(prompt_dir.path()))
+            .with_file_ref_fallback_dir(Some(launch_dir.path()));
+
+        // A file present only under the launch area does NOT resolve, so the
         // `until` condition keeps going (file_exists is falsy).
-        let no_fallback = LoopExpressionLookup::new(&fm, &ambient)
-            .with_base_dir(Some(prompt_dir.path()));
         assert!(
             evaluate_condition(
                 &LoopCondition::Until("file_exists('spec.md')".into()),
-                &no_fallback
+                &lookup
             )
             .unwrap(),
-            "without the fallback, spec.md is missing under the prompt dir"
+            "a launch-area-only file must not resolve; the fallback is diagnostic-only"
         );
 
-        // With the launch-area fallback: the artifact resolves and the `until`
+        // A file under base_dir DOES resolve (document-first), so the `until`
         // condition stops (file_exists is truthy).
-        let with_fallback = LoopExpressionLookup::new(&fm, &ambient)
-            .with_base_dir(Some(prompt_dir.path()))
-            .with_file_ref_fallback_dir(Some(launch_dir.path()));
         assert!(
             !evaluate_condition(
-                &LoopCondition::Until("file_exists('spec.md')".into()),
-                &with_fallback
+                &LoopCondition::Until("file_exists('local.md')".into()),
+                &lookup
             )
             .unwrap(),
-            "with the fallback, spec.md resolves against the launch area"
+            "a file under base_dir resolves; `until` stops"
         );
 
-        // The fallback is propagated into the resolution context.
-        let ctx = with_fallback
+        // The fallback is still propagated into the resolution context for
+        // diagnostics, even though it is not a resolution candidate.
+        let ctx = lookup
             .resolution_context()
             .expect("resolution context is present");
         assert_eq!(
