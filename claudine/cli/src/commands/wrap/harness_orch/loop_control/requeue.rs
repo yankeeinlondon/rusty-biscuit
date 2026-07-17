@@ -31,6 +31,14 @@ pub(super) const REQUEUE_FALLBACK_FILE_NAME: &str = "deferred-queue.jsonl";
 #[derive(Debug, thiserror::Error)]
 #[allow(dead_code)] // retained for the future rendezvous deferred-execution backend
 pub(super) enum RequeueEnqueueError {
+    /// The daemon has no resolvable address on this host. Treated exactly like
+    /// an unreachable daemon: there is no endpoint to reach, so the entry goes
+    /// to the durable fallback rather than being dropped.
+    #[error("failed to resolve the local rendezvous endpoint: {source}")]
+    Endpoint {
+        #[source]
+        source: rendezvous_core::LocalEndpointError,
+    },
     #[error("failed to connect to rendezvous daemon at {endpoint}: {source}")]
     Connect {
         endpoint: rendezvous_core::LocalEndpoint,
@@ -145,8 +153,6 @@ pub(super) async fn enqueue_requeue_entry_async(
     delay: &str,
     reason: Option<&str>,
 ) -> std::result::Result<(), RequeueEnqueueError> {
-    let endpoint =
-        rendezvous_core::socket::legacy_local_endpoint(rendezvous_core::socket::default_socket_path());
     let metadata = serde_json::json!({
         "kind": "claudine.lifecycle.requeue",
         "provider": provider.as_slug(),
@@ -171,10 +177,14 @@ pub(super) async fn enqueue_requeue_entry_async(
         ),
         metadata_json: serde_json::to_string(&metadata)?,
     };
-    // Daemon-first: on any connect or append failure, durably persist the
-    // entry to the local fallback file so the prompt is never lost. Only a
-    // fallback write failure surfaces.
-    match try_enqueue_via_daemon(&endpoint, &request).await {
+    // Daemon-first: on any endpoint, connect, or append failure, durably
+    // persist the entry to the local fallback file so the prompt is never
+    // lost. Only a fallback write failure surfaces.
+    let attempt = match rendezvous_core::default_local_endpoint() {
+        Ok(endpoint) => try_enqueue_via_daemon(&endpoint, &request).await,
+        Err(source) => Err(RequeueEnqueueError::Endpoint { source }),
+    };
+    match attempt {
         Ok(()) => Ok(()),
         Err(daemon_err) => {
             let Some(fallback_path) = requeue_fallback_path() else {

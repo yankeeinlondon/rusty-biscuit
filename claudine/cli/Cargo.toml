@@ -86,6 +86,9 @@ rstest = "0.25"
 tracing-test = "0.2"
 test-toolkit = { path = "../../tools/test-toolkit" }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
-
-[target.'cfg(unix)'.dev-dependencies]
+# The daemon-spawning fixtures below boot through `spawn_local_server`, which
+# binds a Unix socket or a named pipe depending on the target — so the daemon is
+# no longer a Unix-only dev-dependency. `test-support` supplies the endpoint
+# constructor those fixtures build against.
 rendezvous-daemon = { path = "../rendezvous/daemon" }
+rendezvous-core = { path = "../rendezvous/core", features = ["test-support"] }

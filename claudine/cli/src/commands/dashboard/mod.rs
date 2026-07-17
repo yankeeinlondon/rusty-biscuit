@@ -42,9 +42,11 @@ pub struct DashboardArgs {
 /// Render the mesh NOW view once and return.
 pub async fn run(args: DashboardArgs) -> Result<()> {
     let term = log::terminal();
-    let endpoint = rendezvous_core::socket::legacy_local_endpoint(
-            rendezvous_core::socket::default_socket_path(),
-        );
+    // An unresolvable endpoint is a configuration fault, not an absent daemon:
+    // there is no address to find one at, so it surfaces rather than degrading
+    // to the friendly note below.
+    let endpoint = rendezvous_core::default_local_endpoint()
+        .wrap_err("cannot resolve the local rendezvous endpoint")?;
 
     let mut client = match rendezvous_client::connect(&endpoint).await {
         Ok(client) => client,

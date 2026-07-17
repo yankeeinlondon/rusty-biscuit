@@ -41,14 +41,14 @@ fn requeue_materialized(prompt: &str) -> MaterializedHarnessPrompt {
 /// return `Ok(())` and append exactly one durable fallback entry whose
 /// shape matches what the daemon would have received. This is the exact
 /// code path a Windows user takes (no daemon runs there), proven on the
-/// macOS host by pointing `RENDEZVOUS_SOCKET` at a non-existent socket.
+/// macOS host by pointing `RENDEZVOUS_ENDPOINT` at a non-existent socket.
 #[tokio::test]
 #[serial_test::serial(requeue_fallback)]
 async fn enqueue_requeue_entry_falls_back_to_durable_file_when_daemon_unreachable() {
     let fallback_dir = TempDir::new().expect("tempdir");
     let fallback_path: PathBuf = fallback_dir.path().join(REQUEUE_FALLBACK_FILE_NAME);
-    let _socket_env =
-        test_toolkit::EnvGuard::set_safe("RENDEZVOUS_SOCKET", "/tmp/does-not-exist-rs.sock");
+    let _endpoint_env =
+        test_toolkit::EnvGuard::set_safe("RENDEZVOUS_ENDPOINT", "/tmp/does-not-exist-rs.sock");
     let _fallback_env =
         test_toolkit::EnvGuard::set_safe(REQUEUE_FALLBACK_DIR_ENV, fallback_dir.path());
 
@@ -114,8 +114,8 @@ async fn enqueue_requeue_entry_falls_back_to_durable_file_when_daemon_unreachabl
 async fn enqueue_requeue_entry_fallback_appends_across_calls() {
     let fallback_dir = TempDir::new().expect("tempdir");
     let fallback_path: PathBuf = fallback_dir.path().join(REQUEUE_FALLBACK_FILE_NAME);
-    let _socket_env =
-        test_toolkit::EnvGuard::set_safe("RENDEZVOUS_SOCKET", "/tmp/does-not-exist-rs.sock");
+    let _endpoint_env =
+        test_toolkit::EnvGuard::set_safe("RENDEZVOUS_ENDPOINT", "/tmp/does-not-exist-rs.sock");
     let _fallback_env =
         test_toolkit::EnvGuard::set_safe(REQUEUE_FALLBACK_DIR_ENV, fallback_dir.path());
 
@@ -154,5 +154,86 @@ async fn enqueue_requeue_entry_fallback_appends_across_calls() {
         serde_json::from_str(lines[1]).expect("second entry parses");
     assert_eq!(first["metadata_json"]["delay"], "1m");
     assert_eq!(second["metadata_json"]["delay"], "2m");
+}
+
+/// An endpoint that cannot even be *resolved* — here a `RENDEZVOUS_ENDPOINT`
+/// naming the wrong transport for this target — must reach the same durable
+/// fallback as an unreachable daemon. Resolution became fallible when the
+/// typed endpoint replaced the infallible path-shaped default, and a deferred
+/// prompt lost to a config typo would be exactly the regression that change
+/// could introduce.
+#[cfg(unix)]
+#[tokio::test]
+#[serial_test::serial(requeue_fallback)]
+async fn enqueue_requeue_entry_falls_back_when_endpoint_is_unresolvable() {
+    let fallback_dir = TempDir::new().expect("tempdir");
+    let fallback_path: PathBuf = fallback_dir.path().join(REQUEUE_FALLBACK_FILE_NAME);
+    let _endpoint_env =
+        test_toolkit::EnvGuard::set_safe("RENDEZVOUS_ENDPOINT", r"\\.\pipe\wrong-transport");
+    let _fallback_env =
+        test_toolkit::EnvGuard::set_safe(REQUEUE_FALLBACK_DIR_ENV, fallback_dir.path());
+
+    let workspace = TempDir::new().expect("workspace tempdir");
+    let source_path = workspace.path().join("deferred.md");
+    std::fs::write(&source_path, "defer body").expect("write source");
+    let prompt_state = requeue_prompt_state(&source_path);
+    let materialized = requeue_materialized("unresolvable endpoint body\n");
+
+    let result = enqueue_requeue_entry_async(
+        Provider::Goose,
+        &prompt_state,
+        &materialized,
+        Some(workspace.path()),
+        "9m",
+        None,
+    )
+    .await;
+    assert!(
+        result.is_ok(),
+        "an unresolvable endpoint must not lose the prompt; got {:?}",
+        result.err()
+    );
+
+    let contents = std::fs::read_to_string(&fallback_path).expect("fallback file written");
+    let lines: Vec<&str> = contents.lines().collect();
+    assert_eq!(lines.len(), 1, "exactly one fallback entry; got {lines:?}");
+    let entry: serde_json::Value = serde_json::from_str(lines[0]).expect("fallback line parses");
+    assert_eq!(entry["metadata_json"]["delay"], "9m");
+    assert_eq!(
+        entry["metadata_json"]["prompt"],
+        "unresolvable endpoint body\n"
+    );
+}
+
+/// An empty `RENDEZVOUS_ENDPOINT` is a configuration mistake, not a request
+/// for the default — and it too must land in the fallback rather than abort.
+#[tokio::test]
+#[serial_test::serial(requeue_fallback)]
+async fn enqueue_requeue_entry_falls_back_when_endpoint_override_is_empty() {
+    let fallback_dir = TempDir::new().expect("tempdir");
+    let fallback_path: PathBuf = fallback_dir.path().join(REQUEUE_FALLBACK_FILE_NAME);
+    let _endpoint_env = test_toolkit::EnvGuard::set_safe("RENDEZVOUS_ENDPOINT", "");
+    let _fallback_env =
+        test_toolkit::EnvGuard::set_safe(REQUEUE_FALLBACK_DIR_ENV, fallback_dir.path());
+
+    let workspace = TempDir::new().expect("workspace tempdir");
+    let source_path = workspace.path().join("deferred.md");
+    std::fs::write(&source_path, "defer body").expect("write source");
+    let prompt_state = requeue_prompt_state(&source_path);
+    let materialized = requeue_materialized("empty override body\n");
+
+    enqueue_requeue_entry_async(
+        Provider::Goose,
+        &prompt_state,
+        &materialized,
+        Some(workspace.path()),
+        "3m",
+        None,
+    )
+    .await
+    .expect("empty override must not lose the prompt");
+
+    let contents = std::fs::read_to_string(&fallback_path).expect("fallback file written");
+    assert_eq!(contents.lines().count(), 1);
 }
 

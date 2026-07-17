@@ -277,9 +277,7 @@ async fn report_session_status(contribution: rendezvous_core::proto::StatusContr
     };
 
     let send = async {
-        let endpoint = rendezvous_core::socket::legacy_local_endpoint(
-            rendezvous_core::socket::default_socket_path(),
-        );
+        let endpoint = rendezvous_core::default_local_endpoint()?;
         let mut client = rendezvous_client::connect(&endpoint).await?;
         client
             .report_session_event(rendezvous_core::ReportSessionEventRequest {

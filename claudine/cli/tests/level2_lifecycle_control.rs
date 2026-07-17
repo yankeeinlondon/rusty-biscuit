@@ -96,37 +96,19 @@ use biscuit_test_harness::tmux::{TmuxHarness, kill_session_by_name};
 use serial_test::serial;
 use std::fs;
 use std::path::Path;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
+use rendezvous_core::local_endpoint::LocalEndpoint;
+use rendezvous_core::local_endpoint::test_support::{endpoint_env_value, private_endpoint};
 use tempfile::tempdir;
 use test_toolkit::{Level, require_level};
-
-/// A private directory to hold the daemon's endpoint.
-///
-/// `tempfile` creates 0755 directories, which the daemon refuses: the endpoint
-/// directory is the Unix security boundary. The real default resolves into a
-/// private directory, so a fixture has to build one too.
-fn private_endpoint_dir(parent: &std::path::Path) -> std::path::PathBuf {
-    use std::os::unix::fs::DirBuilderExt;
-
-    let dir = parent.join("rendezvous-runtime");
-    if !dir.exists() {
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&dir)
-            .expect("create runtime dir");
-    }
-    dir
-}
-
 
 struct Staged {
     workspace: tempfile::TempDir,
     bin_dir: std::path::PathBuf,
     md_file: std::path::PathBuf,
     events_log: std::path::PathBuf,
-    rendezvous_socket: Option<PathBuf>,
+    rendezvous_endpoint: Option<LocalEndpoint>,
 }
 
 /// A fake `goose` that always exits non-zero (drives the `failure` event) and
@@ -215,7 +197,7 @@ fn stage_with_provider(doc: &str, succeeding: bool) -> Staged {
         bin_dir,
         md_file,
         events_log,
-        rendezvous_socket: None,
+        rendezvous_endpoint: None,
     }
 }
 
@@ -259,7 +241,7 @@ fn stage_proxy_pair(source_doc: &str, target_doc: &str, succeeding: bool) -> Sta
         bin_dir,
         md_file: main_file,
         events_log,
-        rendezvous_socket: None,
+        rendezvous_endpoint: None,
     }
 }
 
@@ -269,14 +251,14 @@ fn stage_proxy_pair(source_doc: &str, target_doc: &str, succeeding: bool) -> Sta
 struct RendezvousQueue {
     runtime: tokio::runtime::Runtime,
     handle: Option<rendezvous_daemon::server::ServerHandle>,
-    socket: PathBuf,
+    endpoint: LocalEndpoint,
     node_id: String,
 }
 
 #[allow(dead_code)]
 impl RendezvousQueue {
     fn spawn(workspace: &Path) -> Self {
-        let socket = private_endpoint_dir(workspace).join("rendezvous.sock");
+        let endpoint = private_endpoint(workspace, "rendezvous");
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -286,30 +268,21 @@ impl RendezvousQueue {
                 .without_networking();
         let handle = {
             let _enter = runtime.enter();
-            rendezvous_daemon::server::spawn_uds_server(socket.clone(), config)
+            rendezvous_daemon::local_transport::spawn_local_server(endpoint.clone(), config)
                 .expect("spawn rendezvous daemon")
         };
         let node_id = handle.node_id();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while !socket.exists() {
-            assert!(
-                Instant::now() < deadline,
-                "rendezvous socket {} never appeared",
-                socket.display()
-            );
-            std::thread::sleep(Duration::from_millis(10));
-        }
         Self {
             runtime,
             handle: Some(handle),
-            socket,
+            endpoint,
             node_id,
         }
     }
 
     fn entries(&self) -> Vec<rendezvous_core::SessionEntry> {
         self.runtime.block_on(async {
-            let mut client = rendezvous_client::connect_uds(self.socket.clone())
+            let mut client = rendezvous_client::connect(&self.endpoint)
                 .await
                 .expect("connect rendezvous");
             let chunks = client
@@ -397,9 +370,15 @@ fn run_provider_in_tmux_for(staged: &Staged, provider_flag: &str, done_marker: &
         "NO_COLOR='1' HOME='{home}' PATH='{path}'{rendezvous} ",
         home = staged.workspace.path().display(),
         path = augmented_path(&staged.bin_dir).to_string_lossy(),
-        rendezvous = staged.rendezvous_socket.as_ref().map_or_else(String::new, |socket| {
-            format!(" RENDEZVOUS_SOCKET='{}'", socket.display())
-        }),
+        rendezvous = staged
+            .rendezvous_endpoint
+            .as_ref()
+            .map_or_else(String::new, |endpoint| {
+                format!(
+                    " RENDEZVOUS_ENDPOINT='{}'",
+                    endpoint_env_value(endpoint).to_string_lossy()
+                )
+            }),
     );
     let cmd = format!(
         "cd {ws} && {env_prefix}{claudine} compose {provider_flag} {md} ; echo {sentinel}",
@@ -795,7 +774,7 @@ Original body
         bin_dir,
         md_file,
         events_log,
-        rendezvous_socket: None,
+        rendezvous_endpoint: None,
     };
     let pane = run_provider_in_tmux_for(&staged, "--claude", "finalize");
 
@@ -947,7 +926,7 @@ fn level2_lifecycle_failure_proxy_runs_target_document_no_loop() {
         bin_dir,
         md_file: main_file,
         events_log,
-        rendezvous_socket: None,
+        rendezvous_endpoint: None,
     };
     let pane = run_in_tmux_for(&staged, "target-finalize");
 

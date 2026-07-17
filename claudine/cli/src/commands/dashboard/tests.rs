@@ -6,25 +6,6 @@ use biscuit_terminal::terminal::Terminal;
 use super::model::{Intervention, MeshSnapshot, Staleness, STALENESS_THRESHOLD_MS};
 use super::report::DashboardReport;
 
-/// A private directory to hold the daemon's endpoint.
-///
-/// `tempfile` creates 0755 directories, which the daemon refuses: the endpoint
-/// directory is the Unix security boundary. The real default resolves into a
-/// private directory, so a fixture has to build one too.
-fn private_endpoint_dir(parent: &std::path::Path) -> std::path::PathBuf {
-    use std::os::unix::fs::DirBuilderExt;
-
-    let dir = parent.join("rendezvous-runtime");
-    if !dir.exists() {
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&dir)
-            .expect("create runtime dir");
-    }
-    dir
-}
-
-
 const LOCAL: &str = "aaaa1111";
 const REMOTE: &str = "bbbb2222";
 
@@ -257,28 +238,21 @@ fn report_html_fragment_carries_the_figures() {
 /// Unix-only: spawns the real `rendezvous-daemon`, a `cfg(unix)`-gated
 /// dev-dependency (its server binds a `UnixListener`). The Windows
 /// named-pipe daemon server is a tracked follow-up.
-#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fetch_snapshot_reflects_a_live_session() {
-    use std::time::{Duration, Instant};
+    use rendezvous_core::local_endpoint::test_support::private_endpoint;
 
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let socket = private_endpoint_dir(tmp.path()).join("daemon.sock");
+    let endpoint = private_endpoint(tmp.path(), "daemon");
     let mut config = rendezvous_daemon::server::DaemonConfig::with_data_dir(
         tmp.path().join("data"),
     )
     .with_in_memory_projection();
     config.networking = None;
-    let daemon =
-        rendezvous_daemon::server::spawn_uds_server(socket.clone(), config).expect("spawn daemon");
+    let daemon = rendezvous_daemon::local_transport::spawn_local_server(endpoint.clone(), config)
+        .expect("spawn daemon");
 
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !socket.exists() {
-        assert!(Instant::now() < deadline, "daemon socket never appeared");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-
-    let mut client = rendezvous_client::connect(&rendezvous_core::socket::legacy_local_endpoint(socket.clone())).await.expect("client");
+    let mut client = rendezvous_client::connect(&endpoint).await.expect("client");
     client
         .report_session_event(rendezvous_core::ReportSessionEventRequest {
             session_id: "sess-live".into(),

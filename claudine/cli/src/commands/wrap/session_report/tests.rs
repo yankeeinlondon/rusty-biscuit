@@ -1,39 +1,42 @@
 use super::*;
 use std::time::Instant;
 
-/// A private directory to hold the daemon's endpoint.
-///
-/// `tempfile` creates 0755 directories, which the daemon refuses: the endpoint
-/// directory is the Unix security boundary. The real default resolves into a
-/// private directory, so a fixture has to build one too.
-fn private_endpoint_dir(parent: &std::path::Path) -> std::path::PathBuf {
-    use std::os::unix::fs::DirBuilderExt;
-
-    let dir = parent.join("rendezvous-runtime");
-    if !dir.exists() {
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&dir)
-            .expect("create runtime dir");
-    }
-    dir
-}
-
+use rendezvous_core::local_endpoint::test_support::{endpoint_env_value, private_endpoint};
+use rendezvous_core::local_endpoint::{ENDPOINT_ENV_VAR, LocalEndpoint};
 
 fn env_context() -> EnvironmentContext {
     EnvironmentContext::default()
 }
 
-/// nextest runs each test in its own process, so mutating the
-/// process environment here cannot race other tests.
-fn point_socket_at(path: &std::path::Path) {
-    unsafe { std::env::set_var("RENDEZVOUS_SOCKET", path) };
+/// Point the reporter's own endpoint resolution at `endpoint`. The production
+/// code under test resolves its endpoint itself, so this is the only seam a
+/// fixture has to reach it.
+///
+/// nextest runs each test in its own process, so mutating the process
+/// environment here cannot race other tests.
+fn point_endpoint_at(endpoint: &LocalEndpoint) {
+    // SAFETY: see above — this process is this test's alone.
+    unsafe { std::env::set_var(ENDPOINT_ENV_VAR, endpoint_env_value(endpoint)) };
+}
+
+/// Boot a daemon on a fresh private endpoint and point the reporter at it.
+fn boot_daemon(tmp: &tempfile::TempDir) -> (rendezvous_daemon::server::ServerHandle, LocalEndpoint) {
+    let endpoint = private_endpoint(tmp.path(), "daemon");
+    point_endpoint_at(&endpoint);
+
+    let mut config =
+        rendezvous_daemon::server::DaemonConfig::with_data_dir(tmp.path().join("data"))
+            .with_in_memory_projection();
+    config.networking = None;
+    let handle = rendezvous_daemon::local_transport::spawn_local_server(endpoint.clone(), config)
+        .expect("spawn daemon");
+    (handle, endpoint)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn no_daemon_is_fast_and_silent() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    point_socket_at(&tmp.path().join("absent.sock"));
+    point_endpoint_at(&private_endpoint(tmp.path(), "absent"));
 
     let started = Instant::now();
     let presence = SessionPresence::started(
@@ -65,30 +68,10 @@ async fn kill_switch_disables_reporting() {
     assert!(presence.session_id.is_none());
 }
 
-// Spawns the real `rendezvous-daemon`, which is a `cfg(unix)`-only
-// dev-dependency (its server binds a `UnixListener`; the Windows
-// named-pipe server is a tracked follow-up). Gate so the crate still
-// compiles on Windows.
-#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn round_trip_against_live_daemon() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let socket = private_endpoint_dir(tmp.path()).join("daemon.sock");
-    point_socket_at(&socket);
-
-    let mut config = rendezvous_daemon::server::DaemonConfig::with_data_dir(
-        tmp.path().join("data"),
-    )
-    .with_in_memory_projection();
-    config.networking = None;
-    let daemon = rendezvous_daemon::server::spawn_uds_server(socket.clone(), config)
-        .expect("spawn daemon");
-    // Wait for the socket to appear.
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !socket.exists() {
-        assert!(Instant::now() < deadline, "daemon socket never appeared");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    let (daemon, endpoint) = boot_daemon(&tmp);
 
     let child_env: std::collections::HashMap<std::ffi::OsString, std::ffi::OsString> =
         [(
@@ -106,7 +89,7 @@ async fn round_trip_against_live_daemon() {
     );
     assert_eq!(presence.session_id.as_deref(), Some("sess-presence"));
 
-    let mut client = rendezvous_client::connect(&rendezvous_core::socket::legacy_local_endpoint(socket.clone())).await.expect("client");
+    let mut client = rendezvous_client::connect(&endpoint).await.expect("client");
     let hosts = client
         .list_active_sessions(rendezvous_core::ListActiveSessionsRequest {})
         .await
@@ -138,26 +121,10 @@ async fn round_trip_against_live_daemon() {
     daemon.shutdown().await.expect("daemon shutdown");
 }
 
-// Unix-only: spawns the `cfg(unix)`-gated `rendezvous-daemon`.
-#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn status_reporter_flips_and_clears_waiting() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let socket = private_endpoint_dir(tmp.path()).join("daemon.sock");
-    point_socket_at(&socket);
-
-    let mut config = rendezvous_daemon::server::DaemonConfig::with_data_dir(
-        tmp.path().join("data"),
-    )
-    .with_in_memory_projection();
-    config.networking = None;
-    let daemon = rendezvous_daemon::server::spawn_uds_server(socket.clone(), config)
-        .expect("spawn daemon");
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !socket.exists() {
-        assert!(Instant::now() < deadline, "daemon socket never appeared");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    let (daemon, endpoint) = boot_daemon(&tmp);
 
     let child_env: std::collections::HashMap<std::ffi::OsString, std::ffi::OsString> = [(
         std::ffi::OsString::from("CLAUDINE_SESSION_ID"),
@@ -174,7 +141,7 @@ async fn status_reporter_flips_and_clears_waiting() {
     );
     let reporter = presence.status_reporter();
 
-    let mut client = rendezvous_client::connect(&rendezvous_core::socket::legacy_local_endpoint(socket.clone())).await.expect("client");
+    let mut client = rendezvous_client::connect(&endpoint).await.expect("client");
 
     // Trigger 1: a permission ask flips the session to waiting.
     reporter.report("waiting_on_user");
@@ -212,7 +179,7 @@ async fn report_status_kill_switch_and_missing_session_are_fast_noops() {
 
     // Empty session id: nothing to address, no connect attempted.
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    point_socket_at(&tmp.path().join("absent.sock"));
+    point_endpoint_at(&private_endpoint(tmp.path(), "absent"));
     let started = Instant::now();
     report_status("", "idle").await;
     assert!(
@@ -222,30 +189,14 @@ async fn report_status_kill_switch_and_missing_session_are_fast_noops() {
     );
 }
 
-// Unix-only: spawns the `cfg(unix)`-gated `rendezvous-daemon`. The
-// idle hook (Trigger 2) reports through the explicit-session
+// The idle hook (Trigger 2) reports through the explicit-session
 // `report_status` helper; this proves the round-trip flips a STARTED
 // session to `idle` and the next prompt clears it back to `active`.
-#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn report_status_flips_idle_and_clears_to_active() {
     unsafe { std::env::remove_var(ENABLE_ENV) };
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let socket = private_endpoint_dir(tmp.path()).join("daemon.sock");
-    point_socket_at(&socket);
-
-    let mut config = rendezvous_daemon::server::DaemonConfig::with_data_dir(
-        tmp.path().join("data"),
-    )
-    .with_in_memory_projection();
-    config.networking = None;
-    let daemon = rendezvous_daemon::server::spawn_uds_server(socket.clone(), config)
-        .expect("spawn daemon");
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !socket.exists() {
-        assert!(Instant::now() < deadline, "daemon socket never appeared");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    let (daemon, endpoint) = boot_daemon(&tmp);
 
     let child_env: std::collections::HashMap<std::ffi::OsString, std::ffi::OsString> = [(
         std::ffi::OsString::from("CLAUDINE_SESSION_ID"),
@@ -261,7 +212,7 @@ async fn report_status_flips_idle_and_clears_to_active() {
         &child_env,
     );
 
-    let mut client = rendezvous_client::connect(&rendezvous_core::socket::legacy_local_endpoint(socket.clone())).await.expect("client");
+    let mut client = rendezvous_client::connect(&endpoint).await.expect("client");
 
     // Turn complete on an interactive session → idle.
     report_status("sess-idle", "idle").await;
@@ -275,29 +226,13 @@ async fn report_status_flips_idle_and_clears_to_active() {
     daemon.shutdown().await.expect("daemon shutdown");
 }
 
-// Unix-only: spawns the `cfg(unix)`-gated `rendezvous-daemon`.
 // `permission_signal` is computed at STARTED from the launched
 // provider's PermissionRequest support, so the dashboard can tell
 // "no intervention needed" apart from "signal unavailable."
-#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn started_records_permission_signal_per_provider() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let socket = private_endpoint_dir(tmp.path()).join("daemon.sock");
-    point_socket_at(&socket);
-
-    let mut config = rendezvous_daemon::server::DaemonConfig::with_data_dir(
-        tmp.path().join("data"),
-    )
-    .with_in_memory_projection();
-    config.networking = None;
-    let daemon = rendezvous_daemon::server::spawn_uds_server(socket.clone(), config)
-        .expect("spawn daemon");
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !socket.exists() {
-        assert!(Instant::now() < deadline, "daemon socket never appeared");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    let (daemon, endpoint) = boot_daemon(&tmp);
 
     let child_env = |session: &str| {
         [(
@@ -315,7 +250,7 @@ async fn started_records_permission_signal_per_provider() {
     let unsupported =
         SessionPresence::started(Provider::Codex, None, true, &env_context(), &child_env("uns"));
 
-    let mut client = rendezvous_client::connect(&rendezvous_core::socket::legacy_local_endpoint(socket.clone())).await.expect("client");
+    let mut client = rendezvous_client::connect(&endpoint).await.expect("client");
     let hosts = client
         .list_active_sessions(rendezvous_core::ListActiveSessionsRequest {})
         .await
@@ -334,8 +269,7 @@ async fn started_records_permission_signal_per_provider() {
 
 /// Poll the active-sessions register until `session_id` carries
 /// `expected` status, since `StatusReporter::report` is
-/// fire-and-forget. Only used by the Unix-only live-daemon test.
-#[cfg(unix)]
+/// fire-and-forget.
 async fn await_status(
     client: &mut rendezvous_core::RendezvousClient<tonic::transport::Channel>,
     session_id: &str,
