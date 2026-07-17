@@ -1,8 +1,8 @@
 ---
 name: sniff
 description: Expert knowledge for sniff-lib and sniff-cli, a cross-platform system detection library and CLI for Rust. Use when detecting OS/hardware/network/filesystem info, program detection, service detection, adding new detection capabilities, or optimizing detection performance.
-hash: 3cd50ffff2b8b5db-27ba1c39db009879
-last_updated: 2026-06-29
+hash: 3cd50ffff2b8b5db-6927a8524e6f7b34
+last_updated: 2026-07-16
 ---
 
 # sniff
@@ -76,6 +76,45 @@ let git = GitRepo::discover(path)?;
 let hw = detect_hardware_summary()?;
 ```
 
+#### `os::user` — stable user identity (on-demand only)
+
+```rust
+use sniff::os::{StableUserId, current_user_id};
+
+match current_user_id()? {
+    StableUserId::UnixUid(uid) => { /* macOS, Linux, and WSL */ }
+    StableUserId::WindowsSid(sid) => { /* canonical S-1-... form */ }
+}
+```
+
+Returns the security principal the current process runs as: `libc::geteuid()` on
+Unix, the process token's `TokenUser` on Windows. `endpoint_component()` gives a
+lossless, variant-tagged projection (`uid-501`, `sid-S-1-5-21-…`) — not a hash,
+so a human can recognize their own account, and unambiguous, so a UID can never
+be read as a SID.
+
+**Privacy boundary — this is deliberately not host inventory.** It is absent from
+`OsInfo`, `SniffResult`, default `sniff --json`, and every host-capability cache,
+and it is uncached, synchronous, and never part of full detection. A stable
+account identifier is sensitive; adding it to any of those surfaces would make it
+ambient as a side effect. A later feature must opt in explicitly.
+
+Constraints that are load-bearing, not stylistic:
+
+- No subprocess (`id`, `whoami`, PowerShell, WMI), no registry, no network.
+- No `$USER`/`$LOGNAME`/`$UID`/`%USERNAME%`: environment variables are
+  caller-controlled and usernames are mutable, so neither is a principal.
+- Failure is a typed `SniffError` (`UserIdentity` / `InvalidUserIdentity`) and is
+  **never** softened to a username, the text `default`, or a random value — a
+  caller that cannot learn who it is must not create per-user private state.
+- WSL runs this Unix branch and returns `UnixUid`. It never inspects the native
+  Windows token and never correlates the WSL user with a Windows account.
+
+Sniff's responsibility stops at discovery. Consumers authorize: returning a SID
+does not make Sniff responsible for building a DACL. The consumer today is the
+Rendezvous per-user local endpoint —
+[`local-ipc.md`](../../../claudine/docs/rendezvous/local-ipc.md).
+
 ### Legacy: SniffConfig (still supported)
 
 ```rust
@@ -115,6 +154,7 @@ let result = detect_with_config(config)?;
 | `DetectionPlan` | Plan-based config with per-domain request types |
 | `ProgramsInfo` | 9 category fields with shared `ExecutableIndex` + parallel Rayon detection. `test_runners` carries `InstalledTestRunners` (`Vec<TestRunnerEntry>` with `Availability` discriminators `installed` / `local` / `via_parent` / `not_found`). |
 | `ServicesInfo` | Init system + service list (via `ServiceManager::detect()`) |
+| `StableUserId` | `UnixUid(u32)` \| `WindowsSid(String)` — the security principal the process runs as, from `os::current_user_id()`. On-demand only: **not** in `SniffResult`/`OsInfo`/default JSON/caches. See [Tier 3 → `os::user`](#osuser--stable-user-identity-on-demand-only). |
 | `Package` | Package path, languages, managers, dependencies |
 | `GitRepo` | `gix::Repository` handle from trusted discovery. All git access (status, diff, history, refs, remotes, config, worktrees) is pure-Rust gix; git2/libgit2 is gone from production and retained only as a dev-dependency for test/bench fixtures. |
 | `BranchInfo` | Local branch projection with branch name, current flag, tip SHA, upstream, ahead/behind counts, and whether any locally known remote-tracking ref points at the branch tip. `upstream`/`ahead`/`behind` serialize as `null` when no upstream is configured (distinguishing "no tracking data" from an even `0`). Default branch detection uses known refs only; refresh requires explicit opt-in. |
@@ -232,6 +272,7 @@ The aggregate's top-level `version` is the **`AggregateScope::Repo` collapse**: 
 - [Services](./services.md) - Init systems, service listing
 - [Extending](./extending.md) - Add new detection capabilities
 - [Architecture](../../../sniff/docs/sniff-library-architecture.md) - Cost model, shared-work design
+- [Dependencies](../../../sniff/docs/dependencies.md) - Notable edges and why: the `os::user` Windows feature set, the gix pin, git2-as-dev-only
 - If you are working with the `gitoxide` crate -- which is used in Sniff for all **git** operations -- then make sure you use the 'rust-devops' skill!
 
 ## Resources
