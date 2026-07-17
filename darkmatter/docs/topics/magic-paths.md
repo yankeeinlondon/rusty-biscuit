@@ -6,7 +6,7 @@ Magic paths let you customize where darkmatter searches when resolving `@`-prefi
 
 When darkmatter encounters an `@`-prefixed reference like `@config/settings.toml`, `biscuit_file::FileReference` searches these directories in order:
 
-1. **Git repository root** (discovered from CWD)
+1. **Git repository root** (discovered from the source document's location, not the ambient CWD)
 2. **HOME directory** (`$HOME`)
 
 The first directory containing a match wins.

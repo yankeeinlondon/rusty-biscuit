@@ -272,10 +272,11 @@ Implementation strategy:
 
 ### Supported path forms
 
-1. `./relative/path.md`: relative to current document directory
-2. `/absolute/path.md`: absolute path
-3. `~/path.md`: home expansion via `HOME`
-4. `@/path.md` or `@path.md`: repo-root relative
+1. `./relative/path.md` or `../relative/path.md`: explicit relative — resolved from the current document directory only
+2. `relative/path.md` (no leading `./`): implicit relative — resolved repository-root first, then the current document directory
+3. `/absolute/path.md`: absolute path
+4. `~/path.md`: home expansion via `HOME`
+5. `@/path.md` or `@path.md`: repo-root relative
 
 ### Resolution algorithm
 
