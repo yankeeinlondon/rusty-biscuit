@@ -159,7 +159,10 @@ fn detect_repo_context(
         .unwrap_or_default();
     let (info, _, ownership_index) =
         repo::detection::detect_repo_inner_with_shared_request_and_ownership(
-            root, request, evidence,
+            root,
+            request,
+            evidence,
+            request.details.is_some(),
         )?;
     Ok(DetectedRepoContext {
         info,
@@ -664,6 +667,46 @@ mod tests {
             let actual = WalkScope::of(&WalkConsumers::of(&request));
             assert_eq!(actual, expected, "{name}");
         }
+    }
+
+    #[test]
+    fn filesystem_detection_projects_a_standalone_package_without_reparsing_manifest() {
+        use crate::performance::{counters, testing};
+
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("Cargo.toml"),
+            "[package]\nname = \"standalone\"\nversion = \"1.2.3\"\n",
+        )
+        .unwrap();
+        let request = FilesystemRequest::new()
+            .without_git()
+            .repo(RepoRequest::focused(
+                crate::request::RepoDetailRequest::all(),
+            ))
+            .without_docs()
+            .without_formatting()
+            .without_file_inventory();
+
+        let (result, counts) =
+            testing::measure(|| detect_filesystem_with_request(temp.path(), &request));
+        let repo = result
+            .expect("filesystem detection succeeds")
+            .repo
+            .expect("filesystem detection carries the standalone package");
+        let packages = repo.packages.expect("standalone package catalog");
+
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].name, "standalone");
+        assert_eq!(packages[0].version.as_deref(), Some("1.2.3"));
+        assert_eq!(
+            counts.get(counters::REPO_MANIFEST_PARSES),
+            1,
+            "workspace detection and standalone projection must share one manifest parse; \
+             counters were {:?}",
+            counts.all()
+        );
+        assert_eq!(counts.get(counters::REPO_PACKAGE_ENRICHMENTS), 1);
     }
 
     /// R3.1: a formatting-only request must enumerate no descendants.

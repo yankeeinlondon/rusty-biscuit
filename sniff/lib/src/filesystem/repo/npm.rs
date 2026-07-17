@@ -7,9 +7,9 @@ use biscuit_file::serde_yaml_ng;
 use crate::package::{DependencyEntry, DependencyKind};
 use crate::performance;
 use crate::performance::counters;
-use crate::{Result, SniffError};
+use crate::Result;
 
-use super::detection::{DetectorOutcome, RepoEvidence, probe_exists};
+use super::detection::{DetectorOutcome, ManifestStore, RepoEvidence, probe_exists};
 use super::glob::expand_membership_globs;
 use super::seed::{PackageSeed, merge_seeds};
 use super::standard::{GlobDialect, MonorepoStandard, PackageProvenance};
@@ -118,13 +118,15 @@ pub(crate) fn npm_package_version(parsed: &serde_json::Value) -> Option<String> 
 pub(super) fn detect_pnpm_workspace(
     root: &Path,
     evidence: RepoEvidence<'_>,
+    manifests: &ManifestStore,
 ) -> Result<Option<DetectorOutcome>> {
     let pnpm_workspace = root.join("pnpm-workspace.yaml");
     if !probe_exists(&pnpm_workspace) {
         return Ok(None);
     }
 
-    let packages = parse_pnpm_workspace_patterns(&pnpm_workspace)?;
+    let parsed = manifests.required_pnpm_workspace(&pnpm_workspace)?;
+    let packages = pnpm_workspace_patterns_from_value(&parsed);
 
     if packages.is_empty() {
         return Ok(None);
@@ -160,6 +162,7 @@ fn has_bun_lockfile(root: &Path) -> bool {
 pub(super) fn detect_bun_workspace(
     root: &Path,
     evidence: RepoEvidence<'_>,
+    manifests: &ManifestStore,
 ) -> Result<Option<DetectorOutcome>> {
     if !has_bun_lockfile(root) {
         return Ok(None);
@@ -170,7 +173,8 @@ pub(super) fn detect_bun_workspace(
         return Ok(None);
     }
 
-    let workspaces = parse_package_json_workspace_patterns(&package_json)?.unwrap_or_default();
+    let parsed = manifests.required_npm(&package_json)?;
+    let workspaces = package_json_workspace_patterns_from_value(&parsed).unwrap_or_default();
 
     if workspaces.is_empty() {
         return Ok(None);
@@ -198,6 +202,7 @@ pub(super) fn detect_bun_workspace(
 pub(super) fn detect_npm_workspace(
     root: &Path,
     evidence: RepoEvidence<'_>,
+    manifests: &ManifestStore,
 ) -> Result<Option<DetectorOutcome>> {
     let package_json = root.join("package.json");
     if !probe_exists(&package_json) {
@@ -210,7 +215,8 @@ pub(super) fn detect_npm_workspace(
         return Ok(None);
     }
 
-    let workspaces = parse_package_json_workspace_patterns(&package_json)?.unwrap_or_default();
+    let parsed = manifests.required_npm(&package_json)?;
+    let workspaces = package_json_workspace_patterns_from_value(&parsed).unwrap_or_default();
 
     if workspaces.is_empty() {
         return Ok(None);
@@ -238,6 +244,7 @@ pub(super) fn detect_npm_workspace(
 pub(super) fn detect_yarn_workspace(
     root: &Path,
     evidence: RepoEvidence<'_>,
+    manifests: &ManifestStore,
 ) -> Result<Option<DetectorOutcome>> {
     if !probe_exists(&root.join("yarn.lock")) {
         return Ok(None);
@@ -248,7 +255,8 @@ pub(super) fn detect_yarn_workspace(
         return Ok(None);
     }
 
-    let workspaces = parse_package_json_workspace_patterns(&package_json)?.unwrap_or_default();
+    let parsed = manifests.required_npm(&package_json)?;
+    let workspaces = package_json_workspace_patterns_from_value(&parsed).unwrap_or_default();
 
     if workspaces.is_empty() {
         return Ok(None);
@@ -339,18 +347,12 @@ fn parse_rush_project_folders(content: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-pub(super) fn parse_pnpm_workspace_patterns(pnpm_workspace_path: &Path) -> Result<Vec<String>> {
-    performance::increment_counter(counters::FS_FILE_OPENS, 1);
-    let content = std::fs::read_to_string(pnpm_workspace_path)?;
-    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
-    performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
-    let parsed: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(&content).map_err(|e| SniffError::SystemInfo {
-            domain: "repo",
-            message: e.to_string(),
-        })?;
-
-    Ok(parsed
+/// Extract the `packages:` sequence from a parsed `pnpm-workspace.yaml`.
+///
+/// Returns an empty vector when the field is absent, so callers treat a
+/// missing or empty `packages` list as "not a pnpm workspace".
+pub(super) fn pnpm_workspace_patterns_from_value(parsed: &serde_yaml_ng::Value) -> Vec<String> {
+    parsed
         .get("packages")
         .and_then(|p| p.as_sequence())
         .map(|seq| {
@@ -358,35 +360,28 @@ pub(super) fn parse_pnpm_workspace_patterns(pnpm_workspace_path: &Path) -> Resul
                 .filter_map(|v| v.as_str().map(String::from))
                 .collect::<Vec<_>>()
         })
-        .unwrap_or_default())
+        .unwrap_or_default()
 }
 
-pub(super) fn parse_package_json_workspace_patterns(
-    package_json_path: &Path,
-) -> Result<Option<Vec<String>>> {
-    performance::increment_counter(counters::FS_FILE_OPENS, 1);
-    let content = std::fs::read_to_string(package_json_path)?;
-    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
-    performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
-    let parsed: serde_json::Value =
-        serde_json::from_str(&content).map_err(|e| SniffError::SystemInfo {
-            domain: "repo",
-            message: e.to_string(),
-        })?;
-    let Some(workspaces) = parsed.get("workspaces") else {
-        return Ok(None);
-    };
+/// Extract the workspace patterns from a parsed `package.json`.
+///
+/// Returns `None` when the manifest declares no `workspaces` field, so callers
+/// can distinguish "not a workspace root" from an empty pattern list.
+pub(super) fn package_json_workspace_patterns_from_value(
+    parsed: &serde_json::Value,
+) -> Option<Vec<String>> {
+    let workspaces = parsed.get("workspaces")?;
 
     if let Some(arr) = workspaces.as_array() {
-        return Ok(Some(
+        return Some(
             arr.iter()
                 .filter_map(|v| v.as_str().map(String::from))
                 .collect(),
-        ));
+        );
     }
 
     if let Some(obj) = workspaces.as_object() {
-        return Ok(Some(
+        return Some(
             obj.get("packages")
                 .and_then(|v| v.as_array())
                 .map(|arr| {
@@ -395,10 +390,10 @@ pub(super) fn parse_package_json_workspace_patterns(
                         .collect()
                 })
                 .unwrap_or_default(),
-        ));
+        );
     }
 
-    Ok(Some(Vec::new()))
+    Some(Vec::new())
 }
 
 pub(super) fn resolve_js_package_manager(

@@ -9,8 +9,8 @@ use crate::performance;
 use crate::performance::counters;
 
 use super::detection::{
-    DetectorOutcome, RepoEvidence, collect_default_workspace_patterns, dedupe_patterns,
-    discover_seeds_with_optional_index, probe_exists,
+    DetectorOutcome, ManifestStore, RepoEvidence, collect_default_workspace_patterns,
+    dedupe_patterns, discover_seeds_with_optional_index, probe_exists,
 };
 use super::glob::expand_membership_globs;
 use super::seed::merge_seeds;
@@ -19,13 +19,14 @@ use super::standard::{GlobDialect, MonorepoStandard, PackageProvenance};
 pub(super) fn detect_nx(
     root: &Path,
     evidence: RepoEvidence<'_>,
+    manifests: &ManifestStore,
 ) -> Result<Option<DetectorOutcome>> {
     let nx_json = root.join("nx.json");
     if !probe_exists(&nx_json) {
         return Ok(None);
     }
 
-    let mut patterns = collect_default_workspace_patterns(root);
+    let mut patterns = collect_default_workspace_patterns(root, manifests);
     patterns.extend(parse_nx_layout_patterns(&nx_json));
     patterns = dedupe_patterns(patterns);
 
@@ -68,13 +69,14 @@ pub(super) fn detect_nx(
 pub(super) fn detect_turborepo(
     root: &Path,
     evidence: RepoEvidence<'_>,
+    manifests: &ManifestStore,
 ) -> Result<Option<DetectorOutcome>> {
     let turbo_json = root.join("turbo.json");
     if !probe_exists(&turbo_json) {
         return Ok(None);
     }
 
-    let patterns = collect_default_workspace_patterns(root);
+    let patterns = collect_default_workspace_patterns(root, manifests);
     let mut seeds = if patterns.is_empty() {
         discover_seeds_with_optional_index(
             root,
@@ -114,6 +116,7 @@ pub(super) fn detect_turborepo(
 pub(super) fn detect_lerna(
     root: &Path,
     evidence: RepoEvidence<'_>,
+    manifests: &ManifestStore,
 ) -> Result<Option<DetectorOutcome>> {
     let lerna_json = root.join("lerna.json");
     if !probe_exists(&lerna_json) {
@@ -121,7 +124,7 @@ pub(super) fn detect_lerna(
     }
 
     let mut patterns = parse_lerna_workspace_patterns(&lerna_json).unwrap_or_default();
-    patterns.extend(collect_default_workspace_patterns(root));
+    patterns.extend(collect_default_workspace_patterns(root, manifests));
     patterns = dedupe_patterns(patterns);
 
     let mut seeds = if patterns.is_empty() {

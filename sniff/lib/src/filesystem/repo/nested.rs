@@ -402,19 +402,19 @@ fn dispatch_detector_at(
         MonorepoStandard::CargoWorkspace => {
             detect_cargo_workspace(target, evidence, manifests)?
         }
-        MonorepoStandard::NpmWorkspaces => detect_npm_workspace(target, evidence)?,
-        MonorepoStandard::PnpmWorkspaces => detect_pnpm_workspace(target, evidence)?,
-        MonorepoStandard::YarnWorkspaces => detect_yarn_workspace(target, evidence)?,
-        MonorepoStandard::BunWorkspaces => detect_bun_workspace(target, evidence)?,
-        MonorepoStandard::UvWorkspace => detect_uv_workspace(target, evidence)?,
+        MonorepoStandard::NpmWorkspaces => detect_npm_workspace(target, evidence, manifests)?,
+        MonorepoStandard::PnpmWorkspaces => detect_pnpm_workspace(target, evidence, manifests)?,
+        MonorepoStandard::YarnWorkspaces => detect_yarn_workspace(target, evidence, manifests)?,
+        MonorepoStandard::BunWorkspaces => detect_bun_workspace(target, evidence, manifests)?,
+        MonorepoStandard::UvWorkspace => detect_uv_workspace(target, evidence, manifests)?,
         MonorepoStandard::GoWorkspace => detect_go_workspace(target)?,
         MonorepoStandard::GradleMultiProject => detect_gradle_workspace(target)?,
         MonorepoStandard::MavenMultiModule => detect_maven_workspace(target)?,
         MonorepoStandard::DotNetSolution => detect_dotnet_solution(target)?,
         MonorepoStandard::RushStack => detect_rush_workspace(target)?,
-        MonorepoStandard::Nx => detect_nx(target, evidence)?,
-        MonorepoStandard::Turborepo => detect_turborepo(target, evidence)?,
-        MonorepoStandard::Lerna => detect_lerna(target, evidence)?,
+        MonorepoStandard::Nx => detect_nx(target, evidence, manifests)?,
+        MonorepoStandard::Turborepo => detect_turborepo(target, evidence, manifests)?,
+        MonorepoStandard::Lerna => detect_lerna(target, evidence, manifests)?,
         // Bazel/Pants/Buck2 self-walk; Unknown is not a real detector.
         MonorepoStandard::Bazel
         | MonorepoStandard::Pants

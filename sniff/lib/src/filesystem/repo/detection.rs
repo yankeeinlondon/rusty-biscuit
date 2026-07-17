@@ -1,4 +1,4 @@
-use crate::Result;
+use crate::{Result, SniffError};
 use crate::performance;
 use crate::performance::counters;
 use crate::request::RepoRequest;
@@ -34,8 +34,8 @@ use super::seed::{PackageSeed, merge_seeds, normalized_key};
 use super::npm::{
     detect_bun_workspace, detect_npm_workspace, detect_pnpm_workspace, detect_rush_workspace,
     detect_yarn_workspace, npm_package_name, npm_package_version,
-    package_json_dependencies_from_value, parse_package_json_workspace_patterns,
-    parse_pnpm_workspace_patterns, resolve_js_package_manager,
+    package_json_dependencies_from_value, package_json_workspace_patterns_from_value,
+    pnpm_workspace_patterns_from_value, resolve_js_package_manager,
 };
 use super::ownership::PackageOwnershipIndex;
 use super::nx_turbo::{detect_lerna, detect_nx, detect_turborepo, parse_lerna_workspace_patterns};
@@ -155,10 +155,20 @@ pub(crate) fn synthesize_root_package_repo_with_request(
     root: &Path,
     request: &RepoRequest,
 ) -> Option<RepoInfo> {
+    let manifests = ManifestStore::default();
+    synthesize_root_package_repo_with_store(root, request, &manifests)
+}
+
+/// Synthesize a standalone package while reusing the current detection's
+/// manifest store.
+fn synthesize_root_package_repo_with_store(
+    root: &Path,
+    request: &RepoRequest,
+    manifests: &ManifestStore,
+) -> Option<RepoInfo> {
     if detect_package_ecosystem(root) == PackageEcosystem::Unknown {
         return None;
     }
-    let manifests = ManifestStore::default();
     let lock_versions = if request.wants_dependencies() {
         manifests.cargo_lock(&root.join("Cargo.lock"))
     } else {
@@ -171,7 +181,7 @@ pub(crate) fn synthesize_root_package_repo_with_request(
         PackageProvenance::ManifestScan,
         lock_versions.as_deref(),
         request,
-        &manifests,
+        manifests,
     );
     Some(RepoInfo {
         is_monorepo: false,
@@ -181,23 +191,67 @@ pub(crate) fn synthesize_root_package_repo_with_request(
     })
 }
 
-/// Request-scoped store for parsed manifests, lockfiles, and root configuration.
+/// Request-scoped store for manifest outcomes, lockfiles, and root configuration.
 ///
 /// Paths are normalized as native [`PathBuf`] keys. Cached values use [`Rc`]
 /// because detection is single-threaded and callers must retain a parsed value
 /// while asking the store for another input (notably a member and its owning
-/// workspace manifest).
+/// workspace manifest). Parse failures are cached with enough information to
+/// replay the original error class and message to required callers.
 #[derive(Default)]
 pub(crate) struct ManifestStore {
     cargo: RefCell<HashMap<PathBuf, Option<Rc<toml_crate::Value>>>>,
-    npm: RefCell<HashMap<PathBuf, Option<Rc<serde_json::Value>>>>,
-    pyproject: RefCell<HashMap<PathBuf, Option<Rc<toml_crate::Value>>>>,
+    npm: RefCell<HashMap<PathBuf, ManifestOutcome<serde_json::Value>>>,
+    pyproject: RefCell<HashMap<PathBuf, ManifestOutcome<toml_crate::Value>>>,
+    pnpm_workspace: RefCell<HashMap<PathBuf, ManifestOutcome<serde_yaml_ng::Value>>>,
     go_mod: RefCell<HashMap<PathBuf, Option<Rc<String>>>>,
     raw_text: RefCell<HashMap<PathBuf, Option<Rc<String>>>>,
     cargo_locks: RefCell<HashMap<PathBuf, Option<Rc<CargoLockVersions>>>>,
     pnpm_locks: RefCell<HashMap<PathBuf, Option<Rc<serde_yaml_ng::Value>>>>,
     uv_locks: RefCell<HashMap<PathBuf, Option<Rc<toml_crate::Value>>>>,
     root_configs: RefCell<HashMap<PathBuf, bool>>,
+}
+
+type ManifestOutcome<T> = std::result::Result<Rc<T>, ManifestFailure>;
+
+#[derive(Clone, Debug)]
+enum ManifestFailure {
+    Io {
+        kind: std::io::ErrorKind,
+        raw_os_error: Option<i32>,
+        message: String,
+    },
+    Parse(String),
+}
+
+impl ManifestFailure {
+    fn from_io(error: std::io::Error) -> Self {
+        Self::Io {
+            kind: error.kind(),
+            raw_os_error: error.raw_os_error(),
+            message: error.to_string(),
+        }
+    }
+
+    fn to_sniff_error(&self) -> SniffError {
+        match self {
+            Self::Io {
+                kind,
+                raw_os_error,
+                message,
+            } => {
+                let error = raw_os_error.map_or_else(
+                    || std::io::Error::new(*kind, message.clone()),
+                    std::io::Error::from_raw_os_error,
+                );
+                SniffError::Io(error)
+            }
+            Self::Parse(message) => SniffError::SystemInfo {
+                domain: "repo",
+                message: message.clone(),
+            },
+        }
+    }
 }
 
 impl ManifestStore {
@@ -244,25 +298,78 @@ impl ManifestStore {
     pub(crate) fn npm(&self, path: &Path) -> Option<Rc<serde_json::Value>> {
         let key = normalized_key(path);
         if let Some(cached) = self.npm.borrow().get(&key) {
-            return cached.clone();
+            return cached.clone().ok();
         }
-        let parsed = read_counted_manifest(path)
-            .and_then(|content| serde_json::from_str(&content).ok())
-            .map(Rc::new);
+        let parsed = read_counted_parsed_manifest(path, |content| {
+            serde_json::from_str::<serde_json::Value>(content)
+        });
         self.npm.borrow_mut().insert(key, parsed.clone());
-        parsed
+        parsed.ok()
+    }
+
+    /// Parse a required Node manifest while preserving detector error
+    /// propagation. Both parsed values and failures populate the same cache
+    /// used by package identity and dependency resolution.
+    pub(crate) fn required_npm(&self, path: &Path) -> Result<Rc<serde_json::Value>> {
+        let key = normalized_key(path);
+        if let Some(cached) = self.npm.borrow().get(&key) {
+            return cached.clone().map_err(|error| error.to_sniff_error());
+        }
+
+        let parsed = read_counted_parsed_manifest(path, |content| {
+            serde_json::from_str::<serde_json::Value>(content)
+        });
+        self.npm.borrow_mut().insert(key, parsed.clone());
+        parsed.map_err(|error| error.to_sniff_error())
     }
 
     pub(crate) fn pyproject(&self, path: &Path) -> Option<Rc<toml_crate::Value>> {
         let key = normalized_key(path);
         if let Some(cached) = self.pyproject.borrow().get(&key) {
-            return cached.clone();
+            return cached.clone().ok();
         }
-        let parsed = read_counted_manifest(path)
-            .and_then(|content| toml_crate::from_str(&content).ok())
-            .map(Rc::new);
+        let parsed = read_counted_parsed_manifest(path, |content| {
+            toml_crate::from_str::<toml_crate::Value>(content)
+        });
         self.pyproject.borrow_mut().insert(key, parsed.clone());
-        parsed
+        parsed.ok()
+    }
+
+    /// Parse a required `pyproject.toml` while preserving detector error
+    /// propagation. Both parsed values and failures populate the same cache
+    /// used by package identity and dependency resolution.
+    pub(crate) fn required_pyproject(&self, path: &Path) -> Result<Rc<toml_crate::Value>> {
+        let key = normalized_key(path);
+        if let Some(cached) = self.pyproject.borrow().get(&key) {
+            return cached.clone().map_err(|error| error.to_sniff_error());
+        }
+
+        let parsed = read_counted_parsed_manifest(path, |content| {
+            toml_crate::from_str::<toml_crate::Value>(content)
+        });
+        self.pyproject.borrow_mut().insert(key, parsed.clone());
+        parsed.map_err(|error| error.to_sniff_error())
+    }
+
+    /// Parse a required `pnpm-workspace.yaml` while preserving detector error
+    /// propagation. Both parsed values and failures populate the same cache
+    /// used by every consumer of the declaration in the same detection.
+    pub(crate) fn required_pnpm_workspace(
+        &self,
+        path: &Path,
+    ) -> Result<Rc<serde_yaml_ng::Value>> {
+        let key = normalized_key(path);
+        if let Some(cached) = self.pnpm_workspace.borrow().get(&key) {
+            return cached.clone().map_err(|error| error.to_sniff_error());
+        }
+
+        let parsed = read_counted_parsed_manifest(path, |content| {
+            serde_yaml_ng::from_str::<serde_yaml_ng::Value>(content)
+        });
+        self.pnpm_workspace
+            .borrow_mut()
+            .insert(key, parsed.clone());
+        parsed.map_err(|error| error.to_sniff_error())
     }
 
     pub(crate) fn go_mod(&self, path: &Path) -> Option<Rc<String>> {
@@ -335,6 +442,22 @@ impl ManifestStore {
         self.root_configs.borrow_mut().insert(key, exists);
         exists
     }
+}
+
+fn read_counted_parsed_manifest<T, E>(
+    path: &Path,
+    parse: impl FnOnce(&str) -> std::result::Result<T, E>,
+) -> ManifestOutcome<T>
+where
+    E: std::fmt::Display,
+{
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
+    let content = std::fs::read_to_string(path).map_err(ManifestFailure::from_io)?;
+    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+    performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
+    parse(&content)
+        .map(Rc::new)
+        .map_err(|error| ManifestFailure::Parse(error.to_string()))
 }
 
 /// Read a manifest and record the work against the repo and filesystem
@@ -458,7 +581,7 @@ pub(crate) fn detect_repo_inner_with_shared_request(
     evidence: RepoEvidence<'_>,
 ) -> Result<(Option<RepoInfo>, Option<FileInventory>)> {
     let (repo, inventory, _) =
-        detect_repo_inner_with_shared_request_and_ownership(root, request, evidence)?;
+        detect_repo_inner_with_shared_request_and_ownership(root, request, evidence, false)?;
     Ok((repo, inventory))
 }
 
@@ -467,6 +590,7 @@ pub(crate) fn detect_repo_inner_with_shared_request_and_ownership(
     root: &Path,
     request: &RepoRequest,
     evidence: RepoEvidence<'_>,
+    include_root_package: bool,
 ) -> Result<(
     Option<RepoInfo>,
     Option<FileInventory>,
@@ -481,35 +605,43 @@ pub(crate) fn detect_repo_inner_with_shared_request_and_ownership(
         &mut seeds,
         &mut outcomes,
     );
-    collect_outcome(detect_nx(root, evidence)?, &mut seeds, &mut outcomes);
     collect_outcome(
-        detect_turborepo(root, evidence)?,
+        detect_nx(root, evidence, &manifests)?,
         &mut seeds,
         &mut outcomes,
     );
     collect_outcome(
-        detect_pnpm_workspace(root, evidence)?,
+        detect_turborepo(root, evidence, &manifests)?,
         &mut seeds,
         &mut outcomes,
     );
     collect_outcome(
-        detect_yarn_workspace(root, evidence)?,
+        detect_pnpm_workspace(root, evidence, &manifests)?,
         &mut seeds,
         &mut outcomes,
     );
     collect_outcome(
-        detect_npm_workspace(root, evidence)?,
-        &mut seeds,
-        &mut outcomes,
-    );
-    collect_outcome(detect_lerna(root, evidence)?, &mut seeds, &mut outcomes);
-    collect_outcome(
-        detect_bun_workspace(root, evidence)?,
+        detect_yarn_workspace(root, evidence, &manifests)?,
         &mut seeds,
         &mut outcomes,
     );
     collect_outcome(
-        detect_uv_workspace(root, evidence)?,
+        detect_npm_workspace(root, evidence, &manifests)?,
+        &mut seeds,
+        &mut outcomes,
+    );
+    collect_outcome(
+        detect_lerna(root, evidence, &manifests)?,
+        &mut seeds,
+        &mut outcomes,
+    );
+    collect_outcome(
+        detect_bun_workspace(root, evidence, &manifests)?,
+        &mut seeds,
+        &mut outcomes,
+    );
+    collect_outcome(
+        detect_uv_workspace(root, evidence, &manifests)?,
         &mut seeds,
         &mut outcomes,
     );
@@ -570,6 +702,15 @@ pub(crate) fn detect_repo_inner_with_shared_request_and_ownership(
     )?;
 
     if outcomes.is_empty() {
+        if include_root_package {
+            let repo = synthesize_root_package_repo_with_store(root, request, &manifests);
+            let ownership_index = repo.as_ref().and_then(|repo| {
+                repo.packages
+                    .as_deref()
+                    .map(|packages| PackageOwnershipIndex::from_packages(root, packages))
+            });
+            return Ok((repo, None, ownership_index));
+        }
         return Ok((None, None, None));
     }
 
@@ -929,16 +1070,23 @@ fn cargo_lockfile_matches(
     Some(true)
 }
 
-pub(crate) fn collect_default_workspace_patterns(root: &Path) -> Vec<String> {
+pub(crate) fn collect_default_workspace_patterns(
+    root: &Path,
+    manifests: &ManifestStore,
+) -> Vec<String> {
     let mut patterns = Vec::new();
 
-    if let Ok(Some(package_json_patterns)) =
-        parse_package_json_workspace_patterns(&root.join("package.json"))
+    if let Ok(Some(package_json_patterns)) = manifests
+        .required_npm(&root.join("package.json"))
+        .map(|parsed| package_json_workspace_patterns_from_value(&parsed))
     {
         patterns.extend(package_json_patterns);
     }
 
-    if let Ok(pnpm_patterns) = parse_pnpm_workspace_patterns(&root.join("pnpm-workspace.yaml")) {
+    if let Ok(pnpm_patterns) = manifests
+        .required_pnpm_workspace(&root.join("pnpm-workspace.yaml"))
+        .map(|parsed| pnpm_workspace_patterns_from_value(&parsed))
+    {
         patterns.extend(pnpm_patterns);
     }
 
@@ -2109,6 +2257,80 @@ mod tests {
     }
 
     #[test]
+    fn manifest_store_replays_node_pnpm_and_uv_parse_failures() {
+        use crate::performance::testing;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let package_json = dir.path().join("package.json");
+        let pnpm_workspace = dir.path().join("pnpm-workspace.yaml");
+        let pyproject = dir.path().join("pyproject.toml");
+        std::fs::write(&package_json, "{ invalid json").unwrap();
+        std::fs::write(&pnpm_workspace, "packages: [unterminated").unwrap();
+        std::fs::write(&pyproject, "[tool.uv.workspace\nmembers = []\n").unwrap();
+        let manifests = ManifestStore::default();
+
+        let (_, counts) = testing::measure(|| {
+            let npm_error = manifests.required_npm(&package_json).unwrap_err().to_string();
+            assert!(manifests.npm(&package_json).is_none());
+            assert_eq!(
+                manifests.required_npm(&package_json).unwrap_err().to_string(),
+                npm_error
+            );
+
+            let pnpm_error = manifests
+                .required_pnpm_workspace(&pnpm_workspace)
+                .unwrap_err()
+                .to_string();
+            assert_eq!(
+                manifests
+                    .required_pnpm_workspace(&pnpm_workspace)
+                    .unwrap_err()
+                    .to_string(),
+                pnpm_error
+            );
+
+            let uv_error = manifests
+                .required_pyproject(&pyproject)
+                .unwrap_err()
+                .to_string();
+            assert!(manifests.pyproject(&pyproject).is_none());
+            assert_eq!(
+                manifests
+                    .required_pyproject(&pyproject)
+                    .unwrap_err()
+                    .to_string(),
+                uv_error
+            );
+        });
+
+        assert_eq!(counts.get(counters::FS_FILE_OPENS), 3);
+        assert_eq!(counts.get(counters::REPO_MANIFEST_PARSES), 3);
+    }
+
+    #[test]
+    fn manifest_store_replays_io_failures_without_reopening() {
+        use crate::performance::testing;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let missing = dir.path().join("package.json");
+        let manifests = ManifestStore::default();
+
+        let (_, counts) = testing::measure(|| {
+            let first = manifests.required_npm(&missing).unwrap_err();
+            assert!(matches!(&first, SniffError::Io(_)));
+            assert!(manifests.npm(&missing).is_none());
+            let replayed = manifests.required_npm(&missing).unwrap_err();
+            assert!(matches!(&replayed, SniffError::Io(_)));
+            assert_eq!(replayed.to_string(), first.to_string());
+        });
+
+        assert_eq!(counts.get(counters::FS_FILE_OPENS), 1);
+        assert_eq!(counts.get(counters::REPO_MANIFEST_PARSES), 0);
+    }
+
+    #[test]
     fn package_build_context_derives_all_fields_from_manifest_store() {
         use std::io::Write;
         use tempfile::tempdir;
@@ -2554,6 +2776,238 @@ mod observation_index {
             .collect();
         names.sort();
         names
+    }
+
+    fn full_repo_evidence(
+        root: &Path,
+    ) -> crate::filesystem::system_view::FilesystemSystemView {
+        crate::filesystem::system_view::build_filesystem_system_view(
+            root,
+            crate::filesystem::system_view::SharedWalkOptions::full_repo(),
+        )
+    }
+
+    #[test]
+    fn npm_detection_reuses_root_manifest_during_enrichment() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        let member = root.join("packages/app");
+        fs::create_dir_all(&member).expect("create member");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"root","version":"4.2.0","workspaces":["packages/*"]}"#,
+        )
+        .expect("write root package.json");
+        fs::write(
+            member.join("package.json"),
+            r#"{"name":"app","dependencies":{"react":"^19"}}"#,
+        )
+        .expect("write member package.json");
+        let view = full_repo_evidence(root);
+
+        let (result, counts) = testing::measure(|| {
+            detect_repo_inner_with_shared_request(
+                root,
+                &RepoRequest::full(),
+                RepoEvidence::from_view(&view),
+            )
+        });
+        let (repo, _) = result.expect("detection should succeed");
+        let repo = repo.expect("fixture is an npm workspace");
+        let packages = repo.packages.as_deref().expect("package catalog");
+
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].name, "app");
+        assert_eq!(packages[0].version.as_deref(), Some("4.2.0"));
+        assert!(packages[0].dependencies.as_deref().is_some_and(|dependencies| {
+            dependencies.iter().any(|dependency| dependency.name == "react")
+        }));
+        assert_eq!(counts.get(counters::REPO_PACKAGE_ENRICHMENTS), 1);
+        assert_eq!(counts.get(counters::REPO_MANIFEST_PARSES), 2);
+        assert_eq!(counts.get(counters::FS_FILE_OPENS), 2);
+    }
+
+    #[test]
+    fn pnpm_detection_parses_each_manifest_once_during_enrichment() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        fs::write(
+            root.join("pnpm-workspace.yaml"),
+            "packages:\n  - 'packages/*'\n",
+        )
+        .expect("write pnpm workspace");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"root","version":"3.1.0"}"#,
+        )
+        .expect("write root package.json");
+        for name in ["app", "lib"] {
+            let member = root.join("packages").join(name);
+            fs::create_dir_all(&member).expect("create member");
+            fs::write(
+                member.join("package.json"),
+                format!(r#"{{"name":"{name}","dependencies":{{"zod":"^4"}}}}"#),
+            )
+            .expect("write member package.json");
+        }
+        let view = full_repo_evidence(root);
+
+        let (result, counts) = testing::measure(|| {
+            detect_repo_inner_with_shared_request(
+                root,
+                &RepoRequest::full(),
+                RepoEvidence::from_view(&view),
+            )
+        });
+        let (repo, _) = result.expect("detection should succeed");
+        let repo = repo.expect("fixture is a pnpm workspace");
+        let packages = repo.packages.as_deref().expect("package catalog");
+
+        assert_eq!(packages.len(), 2);
+        assert!(packages.iter().all(|package| {
+            package.version.as_deref() == Some("3.1.0")
+                && package.dependencies.as_deref().is_some_and(|dependencies| {
+                    dependencies.iter().any(|dependency| dependency.name == "zod")
+                })
+        }));
+        assert_eq!(counts.get(counters::REPO_PACKAGE_ENRICHMENTS), 2);
+        assert_eq!(counts.get(counters::REPO_MANIFEST_PARSES), 4);
+        assert_eq!(
+            counts.get(counters::FS_FILE_OPENS),
+            5,
+            "four unique manifests plus one absent pnpm lockfile observation"
+        );
+    }
+
+    #[test]
+    fn uv_detection_reuses_root_manifest_during_enrichment() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        let member = root.join("packages/app");
+        fs::create_dir_all(&member).expect("create member");
+        fs::write(
+            root.join("pyproject.toml"),
+            "[project]\nname = \"root\"\nversion = \"1.5.0\"\n\n\
+             [tool.uv.workspace]\nmembers = [\"packages/*\"]\n",
+        )
+        .expect("write root pyproject");
+        fs::write(
+            member.join("pyproject.toml"),
+            "[project]\nname = \"app\"\nversion = \"1.5.0\"\n\
+             dependencies = [\"requests>=2\"]\n",
+        )
+        .expect("write member pyproject");
+        let view = full_repo_evidence(root);
+
+        let (result, counts) = testing::measure(|| {
+            detect_repo_inner_with_shared_request(
+                root,
+                &RepoRequest::full(),
+                RepoEvidence::from_view(&view),
+            )
+        });
+        let (repo, _) = result.expect("detection should succeed");
+        let repo = repo.expect("fixture is a uv workspace");
+        let packages = repo.packages.as_deref().expect("package catalog");
+
+        assert_eq!(packages.len(), 2);
+        assert!(packages.iter().any(|package| {
+            package.name == "app"
+                && package.dependencies.as_deref().is_some_and(|dependencies| {
+                    dependencies
+                        .iter()
+                        .any(|dependency| dependency.name == "requests")
+                })
+        }));
+        assert_eq!(counts.get(counters::REPO_PACKAGE_ENRICHMENTS), 2);
+        assert_eq!(counts.get(counters::REPO_MANIFEST_PARSES), 2);
+        assert_eq!(
+            counts.get(counters::FS_FILE_OPENS),
+            3,
+            "two unique manifests plus one absent uv lockfile observation"
+        );
+    }
+
+    #[test]
+    fn malformed_npm_root_is_opened_and_parsed_once_across_detectors() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        fs::write(root.join("turbo.json"), "{}").expect("write Turborepo marker");
+        fs::write(root.join("package.json"), "{ invalid json")
+            .expect("write malformed package.json");
+        fs::write(root.join("pnpm-workspace.yaml"), "packages: []\n")
+            .expect("write pnpm workspace");
+        let view = full_repo_evidence(root);
+
+        let (result, counts) = testing::measure(|| {
+            detect_repo_inner_with_shared_request(
+                root,
+                &RepoRequest::full(),
+                RepoEvidence::from_view(&view),
+            )
+        });
+
+        assert!(result.is_err());
+        assert_eq!(counts.get(counters::REPO_MANIFEST_PARSES), 2);
+        assert_eq!(
+            counts.get(counters::FS_FILE_OPENS),
+            3,
+            "two unique manifests plus one adjacent detector-input observation"
+        );
+    }
+
+    #[test]
+    fn malformed_pnpm_root_is_opened_and_parsed_once_across_detectors() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        fs::write(root.join("turbo.json"), "{}").expect("write Turborepo marker");
+        fs::write(root.join("package.json"), "{}").expect("write package.json");
+        fs::write(
+            root.join("pnpm-workspace.yaml"),
+            "packages: [unterminated",
+        )
+        .expect("write malformed pnpm workspace");
+        let view = full_repo_evidence(root);
+
+        let (result, counts) = testing::measure(|| {
+            detect_repo_inner_with_shared_request(
+                root,
+                &RepoRequest::full(),
+                RepoEvidence::from_view(&view),
+            )
+        });
+
+        assert!(result.is_err());
+        assert_eq!(counts.get(counters::REPO_MANIFEST_PARSES), 2);
+        assert_eq!(
+            counts.get(counters::FS_FILE_OPENS),
+            3,
+            "two unique manifests plus one adjacent detector-input observation"
+        );
+    }
+
+    #[test]
+    fn malformed_uv_root_is_opened_and_parsed_once() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        fs::write(
+            root.join("pyproject.toml"),
+            "[tool.uv.workspace\nmembers = [\"packages/*\"]\n",
+        )
+        .expect("write malformed pyproject");
+        let view = full_repo_evidence(root);
+
+        let (result, counts) = testing::measure(|| {
+            detect_repo_inner_with_shared_request(
+                root,
+                &RepoRequest::full(),
+                RepoEvidence::from_view(&view),
+            )
+        });
+
+        assert!(result.is_err());
+        assert_eq!(counts.get(counters::REPO_MANIFEST_PARSES), 1);
+        assert_eq!(counts.get(counters::FS_FILE_OPENS), 1);
     }
 
     /// R4's headline: one repository-wide non-Git enumeration for a full
