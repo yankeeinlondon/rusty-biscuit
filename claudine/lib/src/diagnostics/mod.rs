@@ -20,15 +20,19 @@
 //!
 //! The closed facet enums live in [`facets`]; the locked code catalog (the
 //! single source of truth `claudine errors` introspects) lives in [`registry`].
+//! [`discovery`] decides *which* error in a chain answers those questions, and
+//! [`snapshot`] projects the answer once for anything that leaves the process.
 //!
 //! ## Wired implementations
 //!
 //! The concrete `Diagnostic` projections are live:
 //!
-//! - [`CompositionError`] projects every composition code (including the full
-//!   `composition.invalid_file_reference` `detail` payload — `reference`,
-//!   `kind` as a snake_case slug, `base_dir`, the render-time `suggestions`,
-//!   and the optional `fallback_dir`).
+//! - [`CompositionError`] projects every composition code. Its
+//!   `composition.invalid_file_reference` payload supplies what the current
+//!   resolver knows — `reference`, `kind` as a snake_case slug, `base_dir`, the
+//!   render-time `suggestions`, and the optional `fallback_dir` — and reserves
+//!   the rest of the catalog's declared fields as `null` for the
+//!   file-resolution feature to fill.
 //! - [`ClaudineError`] and [`HarnessError`] project the top-level Claudine,
 //!   provider, io, config, and usage surface, so lifecycle `err.*` exposes
 //!   their facets via [`LifecycleErrorInfo::from_claudine_error`] /
@@ -50,14 +54,16 @@ mod discovery;
 mod error_kind;
 mod facets;
 mod registry;
+mod snapshot;
 
 pub use discovery::{
-    DiagnosticRole, EffectiveDiagnostic, MAX_SELECTION_DEPTH, as_diagnostic,
+    DiagnosticRole, EffectiveDiagnostic, MAX_SELECTION_DEPTH, as_diagnostic, next_registered_cause,
     select_effective_diagnostic,
 };
 pub use error_kind::code_for_error_kind;
 pub use facets::{Category, Disposition, Origin, Severity};
 pub use registry::{CODES, CodeSpec, code_spec};
+pub use snapshot::{DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION, DiagnosticCause, DiagnosticSnapshot};
 
 use std::error::Error as StdError;
 

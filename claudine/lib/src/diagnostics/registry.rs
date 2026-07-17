@@ -168,15 +168,35 @@ pub const CODES: &[CodeSpec] = &[
         disposition: Disposition::Correctable,
         origin: Origin::Author,
         severity_override: None,
-        // `fallback_dir` is optional (the launch-area anchor, projected to
-        // `null` when absent) but still a declared field so the registry and
-        // `CompositionError::detail()` agree on the full payload shape.
+        // One identity for the same authoring mistake across proxying,
+        // expressions, schemas, and transclusion — so the payload has to carry
+        // enough context to tell those surfaces apart (`source_path`,
+        // `property`, `event`) without a surface-specific code.
+        //
+        // `base_dir` and `fallback_dir` are **compatibility projections**: the
+        // two anchors the pre-`candidates` payload exposed, retained so an
+        // existing `when:` clause keeps matching. `candidates` supersedes them
+        // with the ordered, provenance-carrying record sequence.
+        //
+        // `failure` is the stable snake_case failure classification —
+        // `invalid_syntax`, `missing_context`, `no_match`, `permission_io`, or
+        // `unsupported_remote`. It is distinct from `kind`, which names the
+        // reference kind. The current resolver cannot supply `failure`,
+        // `source_path`, `property`, `event`, `repository_root`, or
+        // `candidates`; they project as `null` until the file-resolution
+        // feature replaces them with typed values (spec §D3).
         detail: &[
             "reference",
             "kind",
             "base_dir",
             "suggestions",
             "fallback_dir",
+            "source_path",
+            "property",
+            "event",
+            "repository_root",
+            "candidates",
+            "failure",
         ],
     },
     CodeSpec {
@@ -485,6 +505,54 @@ mod tests {
                 spec.detail.contains(&field),
                 "missing FileReferenceDiagnostic detail field `{field}`"
             );
+        }
+    }
+
+    #[test]
+    fn invalid_file_reference_carries_the_semantic_wrapper_context_fields() {
+        // The wrapper owns this code for every surface (proxy, expression,
+        // schema, transclusion), so the payload — not a second code — is what
+        // distinguishes them.
+        let spec = code_spec("composition.invalid_file_reference").unwrap();
+        for field in [
+            "source_path",
+            "property",
+            "event",
+            "repository_root",
+            "candidates",
+            "failure",
+        ] {
+            assert!(
+                spec.detail.contains(&field),
+                "missing semantic-wrapper detail field `{field}`"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_file_reference_extension_removed_no_field() {
+        // The catalog evolves additively: the pre-extension field set must
+        // still be declared, in its original order, ahead of the additions.
+        let spec = code_spec("composition.invalid_file_reference").unwrap();
+        assert_eq!(
+            &spec.detail[..5],
+            &["reference", "kind", "base_dir", "suggestions", "fallback_dir"]
+        );
+    }
+
+    #[test]
+    fn every_code_declares_unique_detail_fields() {
+        // A duplicated field name would make `null_detail_for`'s key count
+        // disagree with the declared list without failing any other test.
+        for spec in CODES {
+            let mut seen = std::collections::HashSet::new();
+            for field in spec.detail {
+                assert!(
+                    seen.insert(field),
+                    "code `{}` declares `{field}` twice",
+                    spec.code
+                );
+            }
         }
     }
 

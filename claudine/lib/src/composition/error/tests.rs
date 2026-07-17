@@ -1318,19 +1318,67 @@ fn file_reference_detail_emits_full_registry_field_set() {
         source: None,
     });
     let detail = err.detail();
-    // Every field the registry declares for the code is present.
-    for field in ["reference", "kind", "base_dir", "suggestions", "fallback_dir"] {
+    // Read the field set from the registry rather than restating it: the
+    // catalog is additive, so a hard-coded list would keep passing while the
+    // projection silently omitted every field added after it was written.
+    let spec = crate::diagnostics::code_spec("composition.invalid_file_reference").unwrap();
+    for &field in spec.detail {
         assert!(
             detail.get(field).is_some(),
             "detail missing registry field `{field}`: {detail}"
         );
     }
+    assert_eq!(
+        detail.as_object().unwrap().len(),
+        spec.detail.len(),
+        "detail carries keys the catalog does not declare: {detail}"
+    );
     assert_eq!(detail["reference"], json!("features/spec.md"));
     assert_eq!(detail["base_dir"], json!("/repo/area"));
     // No fallback_dir set → projects to null (the optional sentinel).
     assert_eq!(detail["fallback_dir"], Value::Null);
     // Malformed reference offers no sibling suggestions.
     assert_eq!(detail["suggestions"], json!([]));
+}
+
+#[test]
+fn file_reference_detail_reserves_the_unavailable_resolver_fields_as_null() {
+    // The `FileReferenceDiagnostic` this projects from carries no authoring
+    // context or candidate record, so these keys are present-and-null: the
+    // file-resolution feature fills them. `failure` in particular must not be
+    // back-derived from `kind` — Darkmatter folds permission and
+    // missing-context errors into `NotFound`, so `no_match` here would assert a
+    // classification nothing made.
+    let err = file_ref_compose_error(FileReferenceDiagnostic {
+        function: "frontmatter",
+        reference: "features/spec.md".to_string(),
+        kind: FileRefFailure::NotFound,
+        base_dir: PathBuf::from("/repo/area"),
+        fallback_dir: None,
+        source: None,
+    });
+    let detail = err.detail();
+
+    for field in [
+        "source_path",
+        "property",
+        "event",
+        "repository_root",
+        "candidates",
+        "failure",
+    ] {
+        // `.get`, not `detail[field]` — indexing yields `Null` for an *absent*
+        // key too, which would pass this assertion on a payload that omits the
+        // field entirely. Present-and-null is the contract.
+        assert_eq!(
+            detail.get(field),
+            Some(&Value::Null),
+            "`{field}` must be present and null until a resolver supplies it: {detail}"
+        );
+    }
+    // ...while the fields the resolver *does* supply are unaffected.
+    assert_eq!(detail["kind"], json!("not_found"));
+    assert_eq!(detail["reference"], json!("features/spec.md"));
 }
 
 #[test]

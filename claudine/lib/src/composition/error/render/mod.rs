@@ -174,13 +174,21 @@ fn compose_failed_code(md: &MarkdownError) -> &'static str {
 /// Build the `composition.invalid_file_reference` `detail` payload from a
 /// [`FileReferenceDiagnostic`].
 ///
-/// Emits exactly the field set the registry declares (`reference`, `kind`,
-/// `base_dir`, `suggestions`, `fallback_dir`). `kind` is the catalog snake_case
-/// slug, never the `Debug` form. `suggestions` reuses the **same** render-time
-/// did-you-mean computation as the interpolation block (a missing reference,
-/// `base_dir`-joined, ranked against its siblings) so `err.detail.suggestions`
-/// is byte-for-byte what the human report shows. `fallback_dir` is omitted (it
-/// projects to `null`) when the resolution context carried none.
+/// Emits the full field set the registry declares, seeding it from
+/// [`null_detail_for`] so every declared key is present. `kind` is the catalog
+/// snake_case slug, never the `Debug` form. `suggestions` reuses the **same**
+/// render-time did-you-mean computation as the interpolation block (a missing
+/// reference, `base_dir`-joined, ranked against its siblings) so
+/// `err.detail.suggestions` is byte-for-byte what the human report shows.
+///
+/// The `FileReferenceDiagnostic` this projects from carries no authoring
+/// context, no root provenance, and no probe record, so `source_path`,
+/// `property`, `event`, `repository_root`, `candidates`, and `failure` keep
+/// their seeded `null`. In particular `failure` is **not** derived from `kind`:
+/// Darkmatter's `FileRefFailure::classify` folds permission and missing-context
+/// errors into `NotFound`, so projecting `no_match` from it would assert a
+/// classification the resolver never made (spec §D3). The file-resolution
+/// feature replaces these nulls with typed values.
 fn file_reference_detail(diagnostic: &FileReferenceDiagnostic) -> Value {
     // Mirror the render gate (errors/blocks.rs): suggestions are computed only
     // for a *missing* reference — a malformed/remote reference has no sibling
@@ -191,16 +199,18 @@ fn file_reference_detail(diagnostic: &FileReferenceDiagnostic) -> Value {
     } else {
         Vec::new()
     };
-    json!({
-        "reference": diagnostic.reference,
-        "kind": diagnostic.kind.as_str(),
-        "base_dir": diagnostic.base_dir.to_string_lossy(),
-        "suggestions": suggestions,
-        "fallback_dir": diagnostic
+    let mut base = null_detail_for("composition.invalid_file_reference");
+    base["reference"] = json!(diagnostic.reference);
+    base["kind"] = json!(diagnostic.kind.as_str());
+    base["base_dir"] = json!(diagnostic.base_dir.to_string_lossy());
+    base["suggestions"] = json!(suggestions);
+    base["fallback_dir"] = json!(
+        diagnostic
             .fallback_dir
             .as_ref()
-            .map(|p| p.to_string_lossy().into_owned()),
-    })
+            .map(|p| p.to_string_lossy().into_owned())
+    );
+    base
 }
 
 impl Diagnostic for CompositionError {
