@@ -1826,29 +1826,50 @@ initialize:
 router body
 "#;
 
+/// A router that *owns* a `loop:` yet hands off at `initialize` before its own
+/// loop begins. Before Phase 10 the loop engine surfaced the handoff and it was
+/// refused with `LifecycleInitializeFailed` ("a document with `loop:` frontmatter
+/// cannot hand off yet"). It must now be honored: the source loop never begins,
+/// and the target owns execution.
+const EQUIV_LOOP_ROUTER: &str = r#"---
+title: proxy loop router
+phase: 1
+loop:
+  until: "phase > 2"
+  action: "increment(phase)"
+  max: 10
+initialize:
+  stack:
+    - action: {proxy: "@target.md"}
+finalize:
+  stack:
+    - action: {append_line: ["events.log", "router-finalize:{{phase}}"]}
+---
+router body phase {{phase}}
+"#;
+
 /// **The motivating bug** (`features/2026-07-13-proxy-with/spec.md`): a proxied
 /// target must execute exactly as it does when invoked directly.
 ///
-/// A router with no `loop:` proxies at `initialize` to a looping target. Loop
-/// vs single is decided at `cli/src/commands/compose/prep.rs` from the
-/// **router's** frontmatter, before the router's `initialize` proxy fires — so
-/// the routed run treats the target as a single-run document and executes one
-/// provider attempt, while the direct run executes all three iterations.
+/// A router with no `loop:` proxies at `initialize` to a looping target. Before
+/// Phase 10, loop-vs-single was decided at `cli/src/commands/compose/prep.rs`
+/// from the **router's** frontmatter, before the router's `initialize` proxy
+/// fired — so the routed run treated the target as a single-run document and
+/// executed one provider attempt while the direct run executed all three
+/// iterations.
 ///
-/// ## Why this is `#[ignore]`d
-///
-/// It fails on the Phase 1 baseline **by design** — it is the reproduction, not
-/// a regression guard. Loop ownership only follows document identity once the
-/// coordinator (Phase 6) and loop-ownership move (Phase 10) land. **Phase 10
-/// re-enables it**; it is the headline acceptance signal for the feature.
+/// Phase 10 moved loop recognition to after `initialize` routing stabilizes: an
+/// `initialize` proxy to a looping target is hoisted to the composition
+/// command's active-document coordinator (`compose/prep.rs`), which commits the
+/// handoff, re-prepares the target as a fresh document, and gives it the same
+/// document loop it would receive when invoked directly. This test is the
+/// headline acceptance signal for that move.
 ///
 /// Deterministic by construction: a fake provider, a self-contained temporary
 /// fixture, and no live Claude/Codex/Gemini service. The shipped
 /// `prompts/implement.md` command remains a manual smoke case, never a CI
 /// dependency.
 #[test]
-#[ignore = "reproduction of the motivating bug; Phase 10 (loop ownership follows \
-            document identity) makes this pass and re-enables it"]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_proxy_to_looping_target_matches_direct_run() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
@@ -1910,6 +1931,74 @@ fn level2_lifecycle_initialize_proxy_to_looping_target_matches_direct_run() {
         count(&direct_lines, "target-init"),
         "the target initialize count must not depend on the route; \
          routed {routed_lines:?}; direct {direct_lines:?}"
+    );
+}
+
+/// A router that owns a `loop:` but proxies at `initialize` must have its
+/// hand-off **honored**, not refused — the source loop never begins and the
+/// target owns execution (R7, acceptance criterion 7).
+///
+/// Before Phase 10 a loop-owning router's `initialize` proxy was refused with
+/// `LifecycleInitializeFailed` ("a document with `loop:` frontmatter cannot hand
+/// off yet"); the run exited non-zero without ever reaching the target. This
+/// asserts the target now executes its own three iterations, exactly as a direct
+/// invocation of the target does, and the router's own loop never runs.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_loop_router_initialize_proxy_is_honored() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    // 1 target-init + 3 provider-ran + 3 target-finalize = 7 markers.
+    const EXPECTED_MARKERS: usize = 7;
+
+    let direct = stage_proxy_pair(EQUIV_LOOP_TARGET, EQUIV_LOOP_TARGET, true);
+    let direct_pane = run_until_settled(&direct, EXPECTED_MARKERS);
+    let direct_lines = event_lines(&direct);
+
+    let routed = stage_proxy_pair(EQUIV_LOOP_ROUTER, EQUIV_LOOP_TARGET, true);
+    let routed_pane = run_until_settled(&routed, EXPECTED_MARKERS);
+    let routed_lines = event_lines(&routed);
+
+    let phases = |lines: &[String]| -> Vec<String> {
+        lines
+            .iter()
+            .filter(|l| l.starts_with("target-finalize:"))
+            .cloned()
+            .collect()
+    };
+    let count = |lines: &[String], needle: &str| lines.iter().filter(|l| *l == needle).count();
+
+    assert_eq!(
+        phases(&direct_lines),
+        vec!["target-finalize:1", "target-finalize:2", "target-finalize:3"],
+        "fixture check: the target loops three times when invoked directly; \
+         got {direct_lines:?}; pane:\n{direct_pane}"
+    );
+    assert_eq!(
+        phases(&routed_lines),
+        phases(&direct_lines),
+        "the loop-owning router's hand-off is honored: the target owns execution \
+         and loops three times; routed {routed_lines:?}; pane:\n{routed_pane}"
+    );
+    assert_eq!(
+        count(&routed_lines, "provider-ran"),
+        count(&direct_lines, "provider-ran"),
+        "iteration count must not depend on the route; routed {routed_lines:?}; \
+         direct {direct_lines:?}"
+    );
+    assert_eq!(
+        count(&routed_lines, "target-init"),
+        1,
+        "the target's initialize fires exactly once on the routed run; \
+         got {routed_lines:?}; pane:\n{routed_pane}"
+    );
+    // The router owns a `loop:`, but its loop never begins: a clean hand-off
+    // ends the source before any iteration, so its `finalize` never fires.
+    assert_eq!(
+        count(&routed_lines, "router-finalize:1"),
+        0,
+        "a clean hand-off ends the source loop before it starts; the router's \
+         finalize must not fire; got {routed_lines:?}; pane:\n{routed_pane}"
     );
 }
 
@@ -2342,18 +2431,15 @@ pinned probe body
 /// source document's — see `plan.md` checkpoint 9, "R6 — not started".
 ///
 /// This is the row checkpoint 9 called unwritable ("the checkpoint's named test
-/// ... cannot pass until R6 lands"). It is written now because it costs nothing
-/// to keep the contract executable: the launch rebuild makes it green, and
-/// until then it names the gap precisely rather than leaving a prose note. It
-/// probes `model:` rather than `agent:` because the provider is pinned by
-/// `--goose` on both arms — explicit CLI intent that R6 must keep authoritative
-/// — so `model:` is the one launch input free to move without a second provider
-/// stub or an interactive selection prompt.
+/// ... cannot pass until R6 lands"). The R6 target launch rebuild
+/// (`harness_orch::loop_control::target_launch`) now recomputes the target's
+/// `model:` into the launch environment on a proxy hand-off, so the routed arm
+/// resolves the same `env.MODEL` as the direct arm. It probes `model:` rather
+/// than `agent:` because the provider is pinned by `--goose` on both arms —
+/// explicit CLI intent that R6 keeps authoritative — so `model:` is the one
+/// launch input free to move without a second provider stub or an interactive
+/// selection prompt.
 #[test]
-#[ignore = "reproduction of the R6 gap: a proxied target keeps the router's \
-            launch state, so its own `model:` never reaches the launch \
-            environment. Phase 9's launch rebuild (R6) makes this pass and \
-            re-enables it"]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_equivalence_target_pinned_model_matches_direct_run() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
@@ -2377,4 +2463,446 @@ fn level2_lifecycle_equivalence_target_pinned_model_matches_direct_run() {
         "a proxied target must resolve its own launch state; pane:\n{}",
         arms.routed_pane
     );
+}
+
+// ── review-3 finding 5: overlay redaction + additional matrix rows ───────────
+//
+// These rows close the gaps the review named in the required Level 2 evidence:
+// a real pane-text assertion for AC 30 (overlay values never reach rendered
+// status/diagnostics), the three-document forwarding/omission chain, a
+// cross-repository proxy context/file-resolution row, a stdout/stderr routing
+// comparison, and proxy containment inside a sequence step. Every row uses the
+// fake `goose` provider and self-contained temporary paths.
+
+/// A distinctive overlay value that must never appear in any rendered status or
+/// diagnostic on the pane, yet must reach the target lifecycle that consumes it.
+const AC30_OVERLAY_SECRET: &str = "SEKRIToverlayVALUExyz";
+
+/// **Acceptance criterion 30, real-terminal evidence.** A proxy hand-off whose
+/// `with:` carries a secret-shaped value renders its user-facing status through
+/// `TerminalRenderable` components (the `report_proxy_handoff` INFO line), and
+/// that rendered output never discloses the overlay's *values* — while the
+/// target's own lifecycle still receives the value (redaction is a display
+/// concern, not a data one).
+///
+/// The overlay value is deliberately absent from the target *body* (which is
+/// previewed as the agent prompt and would legitimately echo it), so its only
+/// route to the pane would be a status/diagnostic that leaked it. The target's
+/// `success` stack stamps the value into `events.log` — off the pane — proving
+/// the value reached the code that needs it (spec "Security and Side Effects":
+/// status may report that a hand-off includes an overlay, but must not print
+/// overlay values).
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_proxy_overlay_value_is_not_disclosed_in_rendered_status() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let source_doc = format!(
+        "---\ntitle: overlay redaction router\ninitialize:\n  stack:\n    \
+         - action: {{action: proxy, target: '@target.md', with: {{secret: \"{secret}\"}}}}\n\
+         ---\nrouter body\n",
+        secret = AC30_OVERLAY_SECRET,
+    );
+    // The target authors its own `secret` default and reads the effective value
+    // through its `success` stack into `events.log`. Its body never references
+    // `secret`, so the value cannot reach the agent-prompt preview.
+    let target_doc = "---\ntitle: overlay redaction target\nsecret: authored-default\nsuccess:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'consumed={{ secret }}']}\nfinalize:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'redaction-finalize']}\n---\ntarget body carries no secret\n";
+    let staged = stage_proxy_pair(&source_doc, target_doc, true);
+
+    let pane = run_in_tmux_for(&staged, "redaction-finalize");
+    let lines = event_lines(&staged);
+
+    // The rendered hand-off status must be present — this is the
+    // `TerminalRenderable` surface the value could have leaked through.
+    assert!(
+        pane.contains("flow control redirected"),
+        "the proxy hand-off status must render through the terminal component; pane:\n{pane}"
+    );
+    // The overlay value must have reached the target's own lifecycle.
+    assert!(
+        lines
+            .iter()
+            .any(|l| l == &format!("consumed={AC30_OVERLAY_SECRET}")),
+        "the overlay value must reach the target lifecycle that consumes it \
+         (redaction hides it from display, not from the code that needs it); got {lines:?}"
+    );
+    // …but must never appear on the rendered pane.
+    assert!(
+        !pane.contains(AC30_OVERLAY_SECRET),
+        "no rendered status or diagnostic may disclose the overlay value; pane:\n{pane}"
+    );
+}
+
+/// **Acceptance criterion 26, three-document forwarding/omission chain.** A
+/// downstream proxy replaces the overlay unless forwarding is explicit: an
+/// overlay key the middle document forwards with an explicit `with:` reaches the
+/// final target; a key it merely received but did not forward does not.
+///
+/// `doc.md` proxies to `@mid.md` carrying two overlay keys. `mid.md` proxies to
+/// `@target.md` forwarding only `token` (via `{{ token }}`, resolved from its own
+/// overlay-installed frontmatter) and omitting `extra`. The final target stamps
+/// both effective values: `token` is the source's value carried across two hops,
+/// while `extra` falls back to the target's own authored default because the
+/// middle hop did not forward it.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_proxy_three_document_chain_forwards_only_explicit_keys() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let source_doc = "---\ntitle: chain source\ninitialize:\n  stack:\n    \
+         - action: {action: proxy, target: '@mid.md', with: {token: from-source, extra: source-extra}}\n\
+         ---\nsource body\n";
+    // The middle hop forwards `token` explicitly and omits `extra`.
+    let mid_doc = "---\ntitle: chain middle\ntoken: mid-default\ninitialize:\n  stack:\n    \
+         - action: {action: proxy, target: '@target.md', with: {token: \"{{ token }}\"}}\n\
+         ---\nmiddle body\n";
+    let target_doc = "---\ntitle: chain target\ntoken: target-default\nextra: authored-extra\nsuccess:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'token={{ token }} extra={{ extra }}']}\nfinalize:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'chain-finalize']}\n---\nchain target body\n";
+    let staged = stage_proxy_pair(source_doc, target_doc, true);
+    fs::write(staged.workspace.path().join("mid.md"), mid_doc).unwrap();
+
+    let pane = run_in_tmux_for(&staged, "chain-finalize");
+    let lines = event_lines(&staged);
+
+    assert!(
+        lines
+            .iter()
+            .any(|l| l == "token=from-source extra=authored-extra"),
+        "the explicitly forwarded `token` must cross both hops while the \
+         unforwarded `extra` must fall back to the target's authored default \
+         (a downstream proxy replaces the overlay unless forwarding is explicit); \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.contains("extra=source-extra")),
+        "the source overlay's `extra` must not silently forward across the \
+         middle hop that omitted it; got {lines:?}; pane:\n{pane}"
+    );
+}
+
+/// The cross-repository file-resolution probe target. Its `$schema` requires a
+/// `file(required;eager)` reference that resolves against the launch area — the
+/// workspace the wrapper `cd`s into — not the target document's own repository.
+///
+/// The success signal is deliberately the provider launch (`provider-ran`, which
+/// the fake `goose` records to an absolute path), not a lifecycle `append_line`:
+/// a relative `append_line` anchors on the *target document's* directory, which
+/// for this row is the nested `otherrepo/`, so it would not reach the launch-root
+/// `events.log` the arm reads. If the `spec` reference failed to resolve, the run
+/// would abort before launching the provider, so `provider-ran` present is
+/// exactly "the schema reference resolved."
+const XREPO_TARGET: &str = r#"---
+title: cross repo target
+$schema:
+    spec: file(required;eager)
+---
+cross repo target body
+"#;
+
+/// A router at the launch root that proxies to a target living in a *different*
+/// git repository nested under the launch workspace. It carries the same schema
+/// so the caller's `spec=` param is accepted and forwarded across the hand-off.
+const XREPO_ROUTER: &str = r#"---
+title: cross repo router
+$schema:
+    spec: file(required;eager)
+initialize:
+  stack:
+    - action: {proxy: "@otherrepo/target.md"}
+---
+router body
+"#;
+
+/// Stage one arm of the cross-repository row. Both arms launch from the same
+/// workspace (the launch repository); the target document lives in a nested,
+/// independent git repository (`otherrepo/`), while the `spec` payload the
+/// target's schema resolves lives only at the launch root. The direct arm
+/// invokes the target by its nested path; the routed arm invokes the launch-root
+/// router that proxies to it.
+fn stage_cross_repo_arm(routed: bool) -> Staged {
+    let workspace = tempdir().unwrap();
+    let bin_dir = workspace.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    assert!(init_git_repo(workspace.path()), "git init failed");
+
+    let events_log = workspace.path().join("events.log");
+    write_succeeding_goose(&bin_dir, &events_log);
+
+    let otherrepo = workspace.path().join("otherrepo");
+    fs::create_dir_all(&otherrepo).unwrap();
+    assert!(init_git_repo(&otherrepo), "git init otherrepo failed");
+    fs::write(otherrepo.join("target.md"), XREPO_TARGET).unwrap();
+
+    let source = workspace.path().join("doc.md");
+    fs::write(&source, XREPO_ROUTER).unwrap();
+
+    // The schema payload exists only at the launch root — never inside
+    // `otherrepo/`. A target that resolved `spec` against its own repository
+    // would fail to find it; resolving against the launch area is what makes
+    // both arms succeed.
+    fs::write(
+        workspace.path().join("payload.md"),
+        "---\nimplemented: true\n---\npayload\n",
+    )
+    .unwrap();
+
+    let md_file = if routed {
+        source
+    } else {
+        otherrepo.join("target.md")
+    };
+
+    Staged {
+        workspace,
+        bin_dir,
+        md_file,
+        events_log,
+        rendezvous_endpoint: None,
+    }
+}
+
+/// **Acceptance criteria 8-10, cross-repository proxy context and file
+/// resolution.** A target reached through a proxy resolves a `file(...)` schema
+/// reference against the same launch-area anchor as the same target invoked
+/// directly, even when the target document lives in a different repository than
+/// the proxying router and the payload lives only at the launch root. The route
+/// is not observable in the resolution anchor.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_equivalence_cross_repo_file_resolution_matches_direct_run() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let assert_resolved = |lines: &[String], pane: &str, arm: &str| {
+        assert!(
+            lines.iter().any(|l| l == "provider-ran"),
+            "[{arm}] the target's `spec` schema reference must resolve against \
+             the launch area (the payload lives only at the launch root, not in \
+             the target's own repository) so the provider launches; \
+             got {lines:?}; pane:\n{pane}"
+        );
+        assert!(
+            !pane.contains("did not satisfy the schema"),
+            "[{arm}] no schema-validation failure must surface; pane:\n{pane}"
+        );
+    };
+
+    let direct = stage_cross_repo_arm(false);
+    let direct_pane = run_proxy_in_tmux_with_set(&direct, "spec=payload.md", "provider-ran");
+    assert_resolved(&event_lines(&direct), &direct_pane, "direct");
+
+    let routed = stage_cross_repo_arm(true);
+    let routed_pane = run_proxy_in_tmux_with_set(&routed, "spec=payload.md", "provider-ran");
+    assert_resolved(&event_lines(&routed), &routed_pane, "routed");
+}
+
+/// Run `claudine compose --goose <doc>` in tmux with the process stdout
+/// redirected to `stdout.txt`, so stdout- and stderr-channel routing can be
+/// distinguished: the returned pane holds only what reached stderr, and the
+/// second string is what reached stdout.
+fn run_capturing_stdout(staged: &Staged, done_marker: &str) -> (String, String) {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+
+    let session = format!("biscuit_l2_lcout_{}_{seq}", std::process::id());
+    let shell = biscuit_test_harness::detect_shell();
+    let spawned = std::process::Command::new("tmux")
+        .args([
+            "new-session",
+            "-d",
+            "-s",
+            &session,
+            "-x",
+            "200",
+            "-y",
+            "60",
+            &format!("{shell} -l"),
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(spawned, "failed to spawn tmux session");
+
+    let mut harness = TmuxHarness::attach(&session);
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+
+    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let sentinel = format!("L2_OUT_DONE_{seq}");
+    let stdout_path = staged.workspace.path().join("stdout.txt");
+    let cmd = format!(
+        "cd {ws} && NO_COLOR='1' HOME='{home}' PATH='{path}' {claudine} compose --goose {md} > {out} ; echo {sentinel}",
+        ws = staged.workspace.path().display(),
+        home = staged.workspace.path().display(),
+        path = augmented_path(&staged.bin_dir).to_string_lossy(),
+        md = staged.md_file.display(),
+        out = stdout_path.display(),
+    );
+    harness
+        .send_command_with_env(&cmd, &[])
+        .expect("send compose command");
+
+    let deadline = Instant::now() + Duration::from_secs(40);
+    while Instant::now() < deadline {
+        if event_lines(staged).iter().any(|l| l == done_marker) {
+            std::thread::sleep(Duration::from_millis(150));
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    let pane = harness.capture().map(|f| f.plain).unwrap_or_default();
+    kill_session_by_name(&session);
+    let stdout = fs::read_to_string(&stdout_path).unwrap_or_default();
+    (pane, stdout)
+}
+
+/// A target whose `success` event routes one marker to stdout and one to stderr.
+const ROUTING_TARGET: &str = r#"---
+title: routing target
+success:
+  stdout: "STDOUTrouteMARKER"
+  info: "STDERRrouteMARKER"
+  stack:
+    - action: {append_line: ["events.log", "routing-done"]}
+---
+routing target body
+"#;
+
+/// Stage one arm of the stdout/stderr routing row: the direct arm invokes the
+/// routing target, the routed arm invokes [`EQUIV_ROUTER`] and is handed off.
+fn stage_routing_arm(routed: bool) -> Staged {
+    let mut staged = stage_proxy_pair(EQUIV_ROUTER, ROUTING_TARGET, true);
+    if !routed {
+        staged.md_file = staged.workspace.path().join("target.md");
+    }
+    staged
+}
+
+/// **Acceptance criterion 10, stdout/stderr routing.** A target's stdout-channel
+/// and stderr-channel lifecycle output route to the same process streams whether
+/// it is invoked directly or reached through a proxy: the stdout-channel marker
+/// lands on stdout (and never on the stderr pane), and the stderr-channel marker
+/// lands on the pane (and never on stdout), identically on both routes.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_equivalence_stdout_stderr_routing_matches_direct_run() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let assert_routing = |pane: &str, stdout: &str, arm: &str| {
+        assert!(
+            stdout.contains("STDOUTrouteMARKER"),
+            "[{arm}] the stdout-channel marker must reach process stdout; stdout:\n{stdout}"
+        );
+        assert!(
+            !pane.contains("STDOUTrouteMARKER"),
+            "[{arm}] the stdout-channel marker must not reach the stderr pane; pane:\n{pane}"
+        );
+        assert!(
+            pane.contains("STDERRrouteMARKER"),
+            "[{arm}] the stderr-channel marker must reach the stderr pane; pane:\n{pane}"
+        );
+        assert!(
+            !stdout.contains("STDERRrouteMARKER"),
+            "[{arm}] the stderr-channel marker must not reach process stdout; stdout:\n{stdout}"
+        );
+    };
+
+    let direct = stage_routing_arm(false);
+    let (direct_pane, direct_stdout) = run_capturing_stdout(&direct, "routing-done");
+    assert_routing(&direct_pane, &direct_stdout, "direct");
+
+    let routed = stage_routing_arm(true);
+    let (routed_pane, routed_stdout) = run_capturing_stdout(&routed, "routing-done");
+    assert_routing(&routed_pane, &routed_stdout, "routed");
+}
+
+/// **Acceptance criterion 6, proxy inside a sequence step.** A sequence step
+/// whose document hands off via `proxy` runs its target within that one step and
+/// cannot advance to the next step or restart the current one: the two-step
+/// sequence runs the target exactly once per step (twice total) and completes
+/// both steps.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_proxy_inside_sequence_step_is_contained() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let sequence_doc = "---\ntitle: sequence with a proxy step\nsequence:\n  - alpha\n  - beta\n\
+         initialize:\n  stack:\n    - action: {proxy: '@target.md'}\n---\nsequence body {{ state }}\n";
+    let target_doc = "---\ntitle: sequence proxy target\nsuccess:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'target-ran']}\n---\nsequence proxy target body\n";
+    let staged = stage_proxy_pair(sequence_doc, target_doc, true);
+
+    // Two steps, each proxying to the target once: 2 `target-ran` markers.
+    let pane = run_sequence_until_target_runs(&staged, 2);
+    let lines = event_lines(&staged);
+
+    assert_eq!(
+        lines.iter().filter(|l| **l == "target-ran").count(),
+        2,
+        "each of the two sequence steps must run the proxied target exactly \
+         once — a proxy inside a step neither advances nor restarts the \
+         sequence; got {lines:?}; pane:\n{pane}"
+    );
+}
+
+/// Run `claudine sequence --goose <doc>` in tmux and block until the target has
+/// run `expected_runs` times (or the deadline elapses). Returns the pane.
+fn run_sequence_until_target_runs(staged: &Staged, expected_runs: usize) -> String {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+
+    let session = format!("biscuit_l2_lcseq_{}_{seq}", std::process::id());
+    let shell = biscuit_test_harness::detect_shell();
+    let spawned = std::process::Command::new("tmux")
+        .args([
+            "new-session",
+            "-d",
+            "-s",
+            &session,
+            "-x",
+            "200",
+            "-y",
+            "60",
+            &format!("{shell} -l"),
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(spawned, "failed to spawn tmux session");
+
+    let mut harness = TmuxHarness::attach(&session);
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+
+    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let sentinel = format!("L2_SEQ_DONE_{seq}");
+    let cmd = format!(
+        "cd {ws} && NO_COLOR='1' HOME='{home}' PATH='{path}' {claudine} sequence --goose {md} ; echo {sentinel}",
+        ws = staged.workspace.path().display(),
+        home = staged.workspace.path().display(),
+        path = augmented_path(&staged.bin_dir).to_string_lossy(),
+        md = staged.md_file.display(),
+    );
+    harness
+        .send_command_with_env(&cmd, &[])
+        .expect("send sequence command");
+
+    let deadline = Instant::now() + Duration::from_secs(40);
+    while Instant::now() < deadline {
+        let runs = event_lines(staged)
+            .iter()
+            .filter(|l| **l == "target-ran")
+            .count();
+        if runs >= expected_runs {
+            std::thread::sleep(Duration::from_millis(150));
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    let pane = harness.capture().map(|f| f.plain).unwrap_or_default();
+    kill_session_by_name(&session);
+    pane
 }

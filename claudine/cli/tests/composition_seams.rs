@@ -136,27 +136,15 @@ const SUBTREE_COMPOSE_BASELINE: &[AllowedSite] = &[
 /// `capture_for_dir`) are not this: each takes its anchor explicitly, which is
 /// precisely what the rule asks for. Only the argument-less form is banned.
 ///
-/// ## The one entry is debt, not a sanctioned owner
-///
-/// Unlike [`COMPOSE_WITH_ALLOWLIST`], whose entries are semantic owners that
-/// *should* exist, the entry below is a known R5 gap held at one site so the
-/// guard can stop a second. Phase 5 enumerated six ambient captures and retired
-/// all six; this seventh was never on that list and so was never considered.
-/// Removing it is a behavior change to sequence-step context resolution, which
-/// is not Phase 13's (a guard phase's) to make.
-const AMBIENT_CONTEXT_CAPTURE_BASELINE: &[AllowedSite] = &[AllowedSite {
-    site: "sequence::phase1c::build_template_preflight_options",
-    calls: 1,
-    reason: "KNOWN R5 GAP, not a sanctioned owner. A sequence step's template \
-             shell preflight builds its base context ambiently, so `ctx.*` here \
-             resolves from the process CWD the wrapper has already moved to the \
-             repo root. The function's own docblock names the hazard and patches \
-             one face of it (`with_file_ref_fallback_dir` anchors file-ref \
-             resolution on the launch area) while leaving the context itself \
-             ambient. Phase 5's six-site list never named this site. Fixing it \
-             means deciding the correct anchor for a sequence step and is \
-             tracked as R5 debt — see `notes/acceptance-map.md`.",
-}];
+/// **Empty, and it stays empty.** Phase 5 retired six ambient captures; the
+/// seventh — `sequence::phase1c::build_template_preflight_options` — was the last
+/// known R5 gap and review-3 finding 4 closed it: the sequence step now captures
+/// its context once via `build_step_prepared_context`
+/// (`capture_for_document(launch_cwd, &markdown)`) and reuses that one snapshot
+/// through the template shell preflight and the step's `PrepareOptions`, so the
+/// audited commands equal the executed commands even after the wrapper moves the
+/// process CWD to the repo root.
+const AMBIENT_CONTEXT_CAPTURE_BASELINE: &[AllowedSite] = &[];
 
 /// Every production endpoint of a `DocumentTransition::Proxy` — both the sites
 /// that construct one and the sites that destructure one.
@@ -181,6 +169,15 @@ const PROXY_TRANSITION_SITE_BASELINE: &[AllowedSite] = &[
         calls: 1,
         reason: "PRODUCER — the single-document pipeline's `initialize` route \
                  raises the handoff for the coordinator to commit",
+    },
+    AllowedSite {
+        site: "composition::pipeline::provider_run_handoff",
+        calls: 1,
+        reason: "PRODUCER — surfaces the single route's `initialize` proxy up to \
+                 the composition command's active-document coordinator \
+                 (`compose::prep`) as `SingleCompositionOutcome::initialize_handoff` \
+                 instead of committing it inside the provider harness, so loop \
+                 recognition reruns for the target (R7)",
     },
     AllowedSite {
         site: "looping::engine::execute_loop_with_lifecycle",
