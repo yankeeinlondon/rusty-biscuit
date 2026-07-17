@@ -8,6 +8,7 @@
 use super::Markdown;
 use super::context;
 use super::context::options::ComposeOptions;
+use biscuit_file::{FileResolutionContext, PathPosition};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -57,6 +58,48 @@ pub fn find_git_root_from(start: &Path) -> Option<PathBuf> {
             return None;
         }
     }
+}
+
+/// Build an explicit, request-scoped [`FileResolutionContext`] for a
+/// document-backed reference.
+///
+/// `base_dir` is the authoring document's directory (the base for the
+/// references it contains); `source_path`, when known, is the document file
+/// itself. The enclosing repository (worktree) root anchors implicit references
+/// repository-first then source-relative without rereading the ambient process
+/// CWD.
+///
+/// A `repository_root` computed once for the resolution pass (see
+/// [`ComposeOptions::expression_resolution_context`]) is reused when it
+/// lexically contains `base_dir` — the common case, including nested documents
+/// inside the same worktree. When the cached root does not contain `base_dir`
+/// (a nested document authored outside the entry worktree) or none was
+/// supplied, the root is discovered from `base_dir` via [`find_git_root_from`].
+/// A discovered or contained root is always an ancestor of `base_dir`, so the
+/// context's lexical-containment validation holds.
+///
+/// [`ComposeOptions::expression_resolution_context`]: super::context::options::ComposeOptions::expression_resolution_context
+pub(crate) fn document_resolution_context(
+    base_dir: &Path,
+    source_path: Option<&Path>,
+    magic_paths: &[(PathBuf, PathPosition)],
+    repository_root: Option<&Path>,
+) -> FileResolutionContext {
+    let mut ctx = FileResolutionContext::new(base_dir);
+    if let Some(source) = source_path {
+        ctx = ctx.with_source_path(source);
+    }
+    let root = repository_root
+        .filter(|root| base_dir.starts_with(root))
+        .map(Path::to_path_buf)
+        .or_else(|| find_git_root_from(base_dir));
+    if let Some(root) = root {
+        ctx = ctx.with_repository_root(root);
+    }
+    for (path, position) in magic_paths {
+        ctx = ctx.add_magic_path(path.clone(), *position);
+    }
+    ctx
 }
 
 /// Helper to find target range within content.

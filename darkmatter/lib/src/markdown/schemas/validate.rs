@@ -117,14 +117,12 @@ impl ValidatorCache {
         }
     }
 
-    /// Sets the directory used to resolve `format: darkmatter-file` property
-    /// values during validation. When set, file references resolve via
-    /// [`FileReference::resolve_from`] against this directory instead of the
-    /// ambient process working directory.
+    /// Records the launch-area anchor for `format: darkmatter-file` diagnostics.
     ///
-    /// Must be set before any validator is built. Changing it after the cache
-    /// holds validators produces stale results because the cache keys on
-    /// schema JSON alone (see the struct-level invariant note).
+    /// Per D2 the launch area is not a resolution input for a document-authored
+    /// `file` value — those resolve repository-first then against the document
+    /// `base_dir`. This anchor is retained for structural parity with the
+    /// validator-cache identity and is not consulted during resolution.
     #[must_use]
     pub fn with_file_ref_fallback_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.file_ref_fallback_dir = Some(dir.into());
@@ -221,17 +219,6 @@ impl ValidatorCache {
     }
 }
 
-/// Builds a `Validator` configured with darkmatter's custom format and
-/// keywords.
-///
-/// `base_dir` (the prompt document directory) and `file_ref_fallback_dir`
-/// (the captured launch area) anchor `format: darkmatter-file` value
-/// resolution document-first then fallback, matching the expression path.
-/// When both are `None`, resolution falls back to the ambient process working
-/// directory (legacy behavior). Threading `base_dir` here lets schema
-/// validation agree with expression-side `file_exists`/`frontmatter`
-/// resolution: a `file` value beside the prompt resolves even after the
-/// wrapper has `chdir`'d away from the launch area.
 /// Reports whether any `patternProperties` key in the compiled JSON Schema
 /// carries a regex lookaround (Feature C literal precedence). Such schemas need
 /// the backtracking `fancy-regex` engine; everything else stays on the linear
@@ -253,6 +240,17 @@ fn schema_uses_lookaround(schema: &Value) -> bool {
     }
 }
 
+/// Builds a `Validator` configured with darkmatter's custom formats and
+/// keywords.
+///
+/// `base_dir` (the prompt document directory) anchors `format: darkmatter-file`
+/// value resolution: implicit bare references resolve repository-root first then
+/// the document directory, explicit `./`/`../` from the document directory only.
+/// When `None`, the bare validator API resolves against the ambient CWD.
+/// `file_ref_fallback_dir` (the launch area) is threaded for structural parity
+/// with the cache anchors but is **not** a resolution input (D2). Threading
+/// `base_dir` lets schema validation agree with expression-side
+/// `file_exists`/`frontmatter` resolution on the same `file` value.
 pub(super) fn build_validator(
     schema: &Value,
     base_dir: Option<&Path>,
@@ -569,17 +567,20 @@ fn offending_property_of(kind: &ValidationErrorKind) -> Option<String> {
     }
 }
 
-/// Document-first / launch-area-fallback anchors used to re-resolve a
-/// `format: darkmatter-file` value when substituting a targeted diagnostic.
+/// Anchors used to re-resolve a `format: darkmatter-file` value when
+/// substituting a targeted diagnostic.
 ///
 /// Mirrors the anchors the compiled validator was built with so the
-/// re-resolution reproduces the same failure mode rather than resolving
-/// against an unrelated (e.g. ambient-CWD) directory.
+/// re-resolution reproduces the same failure mode. `base_dir` is the document
+/// directory the value resolves against (repository-first then source for
+/// implicit references); `fallback` (the launch area) is carried for structural
+/// parity but is not a resolution input (D2).
 #[derive(Clone, Copy, Default)]
 pub(super) struct FileRefAnchors<'a> {
-    /// Prompt document directory, tried first.
+    /// Prompt document directory the reference resolves against.
     pub base_dir: Option<&'a Path>,
-    /// Captured launch-area fallback, tried second.
+    /// Captured launch-area anchor, retained for parity but not a resolution
+    /// input (D2).
     pub fallback: Option<&'a Path>,
 }
 
@@ -654,10 +655,12 @@ fn file_reference_diagnostic(failure: &format::FileReferenceFailure) -> FileRefe
         format::FileReferenceFailure::Resolution { raw, .. } => {
             FileReferenceDiagnostic::ResolutionFailed { raw: raw.clone() }
         }
-        format::FileReferenceFailure::NoMatch { raw, cwd } => FileReferenceDiagnostic::NoMatch {
-            raw: raw.clone(),
-            resolved_from: cwd.clone(),
-        },
+        format::FileReferenceFailure::NoMatch { raw, resolved_from } => {
+            FileReferenceDiagnostic::NoMatch {
+                raw: raw.clone(),
+                resolved_from: resolved_from.clone(),
+            }
+        }
     }
 }
 

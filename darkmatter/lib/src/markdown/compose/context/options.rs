@@ -321,19 +321,21 @@ pub struct ComposeOptions {
     /// request per URL. `None` means each stage builds its own.
     pub(crate) remote_fetch: Option<RemoteFetchRuntime>,
 
-    // ── File-reference fallback (launch-area anchor) ───────────────
-    /// Explicit fallback directory for caller-supplied file references that
-    /// are not authored inside the document (e.g. a CLI-supplied path relative
-    /// to the launch area). Propagated into both
-    /// [`expression_resolution_context`] and [`frontmatter_resolution_context`]
-    /// as `ResolutionContext::file_ref_fallback_dir`, and into the
-    /// [`DarkmatterSchemas`] builder used by the compose-stage schema
-    /// validation. `None` (the default) preserves the legacy document-only +
-    /// ambient-CWD behavior for callers that have not captured a launch area.
+    // ── File-reference launch-area anchor (diagnostic only) ────────
+    /// The captured launch-area directory a top-level caller (Claudine) was
+    /// invoked from.
+    ///
+    /// Per D2 the launch directory is a base for **top-level** references only;
+    /// it is **not** a resolution fallback for references authored inside a
+    /// nested document. Darkmatter's document-backed resolution is
+    /// repository-first then source-relative and never consults this directory,
+    /// so it is retained solely as a diagnostic facet (the `fallback_dir` field
+    /// of a file-reference diagnostic) and as an authored `ComposeOptions`
+    /// identity input. It participates in neither the resolution candidate order
+    /// nor the compiled-validator resolution.
     ///
     /// [`expression_resolution_context`]: Self::expression_resolution_context
     /// [`frontmatter_resolution_context`]: Self::frontmatter_resolution_context
-    /// [`DarkmatterSchemas`]: crate::markdown::schemas::DarkmatterSchemas
     pub(crate) file_ref_fallback_dir: Option<PathBuf>,
 }
 
@@ -862,8 +864,10 @@ impl ComposeOptions {
         &self,
         remote_fetch: &super::super::remote_fetch::RemoteFetchRuntime,
     ) -> super::super::expression::ResolutionContext {
+        let base_dir = self.resolution_base_dir();
         super::super::expression::ResolutionContext {
-            base_dir: self.resolution_base_dir(),
+            repository_root: crate::markdown::compose::util::find_git_root_from(&base_dir),
+            base_dir,
             magic_paths: self.magic_paths.clone(),
             file_ref_fallback_dir: self.file_ref_fallback_dir.clone(),
             remote_fetch: self.remote_reads_enabled().then(|| remote_fetch.clone()),
@@ -885,8 +889,10 @@ impl ComposeOptions {
     /// [`expression_resolution_context`]: Self::expression_resolution_context
     /// [`ResolutionContext`]: super::super::expression::ResolutionContext
     pub(crate) fn frontmatter_resolution_context(&self) -> super::super::expression::ResolutionContext {
+        let base_dir = self.resolution_base_dir();
         super::super::expression::ResolutionContext {
-            base_dir: self.resolution_base_dir(),
+            repository_root: crate::markdown::compose::util::find_git_root_from(&base_dir),
+            base_dir,
             magic_paths: self.magic_paths.clone(),
             file_ref_fallback_dir: self.file_ref_fallback_dir.clone(),
             remote_fetch: None,

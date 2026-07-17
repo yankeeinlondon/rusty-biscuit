@@ -1,8 +1,9 @@
 //! Path and URL resolution for transclusion references.
 
 use super::types::{DirectiveKind, ResolvedTarget, TransclusionError};
+use crate::markdown::compose::util::{document_resolution_context, find_git_root_from};
 use crate::markdown::compose::{ComposeSource, TransclusionOptions};
-use biscuit_file::FileReference;
+use biscuit_file::{FileReference, FileReferenceKind};
 use biscuit_terminal::errors::SourceContext;
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument, trace};
@@ -57,10 +58,13 @@ fn resolve_url_target(
 
 /// Resolves a local filesystem path.
 ///
-/// Delegates to [`FileReference`] for `@` (magic/repo-root), `!` (package),
-/// `vault:`, `%` (recursive), and `{{ENV}}` interpolation references.
-/// Relative paths are resolved from the source file's directory (not CWD)
-/// since transclusion context is file-relative.
+/// Every non-URL target is parsed by [`FileReference`] and resolved through the
+/// shared document-backed context ([`document_resolution_context`]): explicit
+/// `./`/`../` from the source document's directory only, implicit bare paths
+/// repository-root first then the source directory, `~`/`~/…` against the user's
+/// home, and `@` (magic), `!` (package), `vault:`, `%` (recursive), absolute,
+/// and `{{ENV}}` references by their existing `FileReference` semantics. There
+/// is no ambient-CWD read (D2).
 pub(crate) fn resolve_path(
     raw_target: &str,
     kind: DirectiveKind,
@@ -76,124 +80,83 @@ pub(crate) fn resolve_path(
         });
     }
 
-    // Handle ~ (home directory) by converting to absolute path.
-    // FileReference uses @ for magic refs (git root + HOME fallback),
-    // but ~ should resolve directly to HOME without searching git root.
-    if raw_target.starts_with('~') {
-        let home = std::env::var("HOME").map_err(|_| TransclusionError::MissingSourceContext {
+    // `@`-magic requires repo-root resolution to be enabled.
+    if raw_target.starts_with('@') && !options.resolve_repo_root {
+        return Err(TransclusionError::InvalidReference {
+            ctx: Box::new(ctx),
             reference: raw_target.to_string(),
             line,
-        })?;
-        let suffix = raw_target.trim_start_matches('~').trim_start_matches('/');
-        let candidate = Path::new(&home).join(suffix);
-        let canonical = std::fs::canonicalize(&candidate).map_err(|e| {
-            TransclusionError::Io(std::io::Error::new(
-                e.kind(),
-                format!(
-                    "'{}' (resolved to '{}'): {e}",
-                    raw_target,
-                    candidate.display()
-                ),
-            ))
-        })?;
-        debug!(resolved = %canonical.display(), "transclusion: path resolved");
-        return Ok(canonical);
+            directive_kind: kind,
+        });
     }
 
-    // Use FileReference for @, !, vault:, %, {{ENV}}, and absolute paths.
-    if is_file_reference_target(raw_target) {
-        if raw_target.starts_with('@') && !options.resolve_repo_root {
-            return Err(TransclusionError::InvalidReference {
-                ctx: Box::new(ctx),
+    // Normalize @/ to @ — FileReference strips only the leading @, so @/foo
+    // would leave /foo (absolute) which breaks the magic-root join.
+    let normalized;
+    let ref_input = if let Some(rest) = raw_target.strip_prefix("@/") {
+        normalized = format!("@{rest}");
+        normalized.as_str()
+    } else {
+        raw_target
+    };
+
+    let file_ref = FileReference::new(ref_input)?;
+
+    // Absolute, home, and URL references do not need a document base; every
+    // other kind (explicit/implicit relative, magic, package, vault) resolves
+    // against the source document's directory, so a file-backed source is
+    // required for them.
+    let needs_base = !matches!(
+        file_ref.class().kind,
+        FileReferenceKind::Absolute | FileReferenceKind::Home | FileReferenceKind::Url
+    );
+    let base_dir = match source_file_dir(source) {
+        Some(dir) => dir,
+        None if needs_base => {
+            return Err(TransclusionError::MissingSourceContext {
                 reference: raw_target.to_string(),
                 line,
-                directive_kind: kind,
             });
         }
-
-        // Normalize @/ to @ — FileReference strips only the @ prefix,
-        // so @/foo would leave /foo (absolute) which breaks the join.
-        let normalized;
-        let ref_input = if let Some(rest) = raw_target.strip_prefix("@/") {
-            normalized = format!("@{rest}");
-            &normalized
-        } else {
-            raw_target
-        };
-
-        let mut file_ref = FileReference::new(ref_input)?;
-        for (path, position) in &options.magic_paths {
-            file_ref = file_ref.add_magic_path(path, *position);
-        }
-        let resolved = file_ref.resolve()?;
-
-        let path = resolved.ok_or_else(|| {
-            TransclusionError::Io(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("File not found: {raw_target}"),
-            ))
-        })?;
-        debug!(resolved = %path.display(), "transclusion: path resolved");
-        return Ok(path);
-    }
-
-    // Relative paths — resolve from the source file's directory.
-    let raw = PathBuf::from(raw_target);
-
-    if raw.is_absolute() {
-        let canonical = std::fs::canonicalize(&raw).map_err(|e| {
-            TransclusionError::Io(std::io::Error::new(
-                e.kind(),
-                format!("'{}': {e}", raw.display()),
-            ))
-        })?;
-        debug!(resolved = %canonical.display(), "transclusion: path resolved");
-        return Ok(canonical);
-    }
-
-    let source_file =
-        source_file_path(source).ok_or_else(|| TransclusionError::MissingSourceContext {
-            reference: raw_target.to_string(),
-            line,
-        })?;
-    let base_dir = if source_file.is_dir() {
-        source_file
-    } else {
-        source_file.parent().map(Path::to_path_buf).ok_or_else(|| {
-            TransclusionError::MissingSourceContext {
-                reference: raw_target.to_string(),
-                line,
-            }
-        })?
+        // Absolute/home references ignore the base; a neutral one anchors the
+        // context without reading the ambient CWD for candidate construction.
+        None => PathBuf::from("."),
     };
+    let repo_root = find_git_root_from(&base_dir);
+    let resolution_ctx = document_resolution_context(
+        &base_dir,
+        source_file_path(source).as_deref(),
+        &options.magic_paths,
+        repo_root.as_deref(),
+    );
 
-    let candidate = if raw_target.starts_with("./") || raw_target.starts_with("../") {
-        base_dir.join(&raw)
-    } else {
-        base_dir.join(Path::new(raw_target))
-    };
-    let canonical = std::fs::canonicalize(&candidate).map_err(|e| {
+    let path = file_ref.resolve_in_context(&resolution_ctx)?.ok_or_else(|| {
+        TransclusionError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("File not found: {raw_target}"),
+        ))
+    })?;
+    // Canonicalize so downstream transclusion identity (and macOS
+    // `/var`→`/private/var` symlinks) match historical behavior.
+    let canonical = std::fs::canonicalize(&path).map_err(|e| {
         TransclusionError::Io(std::io::Error::new(
             e.kind(),
-            format!(
-                "'{}' (resolved to '{}'): {e}",
-                raw_target,
-                candidate.display()
-            ),
+            format!("'{}' (resolved to '{}'): {e}", raw_target, path.display()),
         ))
     })?;
     debug!(resolved = %canonical.display(), "transclusion: path resolved");
     Ok(canonical)
 }
 
-/// Returns `true` if the target should be routed through [`FileReference`]
-/// rather than handled as a simple relative path.
-fn is_file_reference_target(target: &str) -> bool {
-    target.starts_with('@')
-        || target.starts_with('!')
-        || target.starts_with("vault:")
-        || target.starts_with('%')
-        || target.contains("{{")
+/// The directory a file-backed source's references resolve against: the source
+/// file's parent, or the source path itself when it is already a directory.
+fn source_file_dir(source: &ComposeSource) -> Option<PathBuf> {
+    let source_file = source_file_path(source)?;
+    if source_file.is_dir() {
+        Some(source_file)
+    } else {
+        source_file.parent().map(Path::to_path_buf)
+    }
 }
 
 fn source_file_path(source: &ComposeSource) -> Option<PathBuf> {

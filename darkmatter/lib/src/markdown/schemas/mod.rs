@@ -207,19 +207,14 @@ impl DarkmatterSchemas {
         Self::default()
     }
 
-    /// Sets the explicit fallback directory for `format: darkmatter-file`
-    /// property-value resolution (typically the captured launch area).
+    /// Records the launch-area anchor (typically the captured launch area).
     ///
-    /// When set, file-typed frontmatter values resolve against this directory
-    /// instead of the ambient process working directory, so schema validation
-    /// agrees with expression-side `file_exists`/`frontmatter` resolution
-    /// after the wrapper has `chdir`'d away from the launch area. `None`
-    /// (the default) preserves the legacy ambient-CWD behavior.
-    ///
-    /// Must be called before any `validate` / `effective_for` call. The
-    /// fallback is baked into the compiled validators via the cache; changing
-    /// it after validators are cached leaves stale validators that still
-    /// resolve against the prior directory.
+    /// Per D2 the launch area is **not** a resolution input for a
+    /// document-authored `format: darkmatter-file` value: those resolve
+    /// repository-first then against the document directory, never the launch
+    /// area or the ambient CWD. This anchor is retained for structural parity
+    /// with the validator-cache identity (it still participates in
+    /// `ComposeOptions`/cache identity) but does not change the resolved path.
     #[must_use]
     pub fn with_file_ref_fallback_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.cache = self.cache.with_file_ref_fallback_dir(dir);
@@ -1645,14 +1640,14 @@ mod tests {
         }
     }
 
-    /// A `file`-typed schema property value resolves via the captured
-    /// fallback even when the process CWD is an unrelated directory
-    /// (verification goal #7 precursor). The format validator closure
-    /// captures the fallback dir and resolves via `FileReference::resolve_from`
-    /// instead of the ambient-CWD `resolve()`.
+    /// A `file`-typed schema property value is **not** resolved via the
+    /// captured launch-area fallback (D2): the launch area is not a resolution
+    /// input for a reference authored inside the document. A value present only
+    /// under the fallback (and not under the document base or ambient CWD) fails
+    /// validation.
     #[test]
     #[serial_test::serial(darkmatter_file_cwd)]
-    fn file_format_resolves_via_fallback_when_cwd_unrelated() {
+    fn file_format_does_not_resolve_via_launch_area_fallback() {
         let launch_dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(launch_dir.path().join("spec.md"), "# Spec\n").expect("write spec");
         let unrelated_dir = tempfile::tempdir().expect("tempdir");
@@ -1665,20 +1660,20 @@ mod tests {
         let report = api.validate(&md).expect("validate");
 
         assert!(
-            report.valid,
-            "expected file-format validation to resolve via fallback: {:?}",
+            !report.valid,
+            "the launch-area fallback must not resolve a document-authored file reference: {:?}",
             report.problems,
         );
     }
 
     /// A `file`-typed schema property value that exists under the ambient CWD
-    /// but NOT under the prompt directory or the fallback dir fails validation
-    /// — proving the document-first / fallback anchors (not the ambient CWD)
-    /// drive resolution when configured. The prompt has a real file source in
-    /// a third directory so its `base_dir` is distinct from the CWD.
+    /// but NOT under the prompt directory fails validation — proving the
+    /// document base directory (not the ambient CWD, and not the inert
+    /// launch-area anchor) drives resolution. The prompt has a real file source
+    /// in a third directory so its `base_dir` is distinct from the CWD.
     #[test]
     #[serial_test::serial(darkmatter_file_cwd)]
-    fn file_format_fallback_rejects_when_not_under_fallback() {
+    fn file_format_rejects_when_not_under_document_base() {
         let prompt_dir = tempfile::tempdir().expect("tempdir");
         let fallback_dir = tempfile::tempdir().expect("tempdir");
         let cwd_dir = tempfile::tempdir().expect("tempdir");
@@ -1837,11 +1832,12 @@ mod tests {
     }
 
     /// A `file` value that exists ONLY under the launch-area fallback (not the
-    /// prompt directory) still validates via the fallback rung. Independent of
-    /// the ambient CWD.
+    /// prompt directory) does **not** validate: per D2 the launch area is not a
+    /// resolution input for a document-authored reference. Independent of the
+    /// ambient CWD.
     #[test]
     #[serial_test::serial(darkmatter_file_cwd)]
-    fn file_property_present_only_in_fallback_validates() {
+    fn file_property_present_only_in_fallback_does_not_validate() {
         let prompt_dir = tempfile::tempdir().expect("tempdir");
         let fallback_dir = tempfile::tempdir().expect("tempdir");
         let unrelated = tempfile::tempdir().expect("tempdir");
@@ -1854,8 +1850,8 @@ mod tests {
         let _cwd = CwdGuard::enter(unrelated.path());
         let report = api.validate(&md).expect("validate");
         assert!(
-            report.valid,
-            "a file value under the launch-area fallback must validate: {:?}",
+            !report.valid,
+            "a file value present only under the launch-area fallback must not validate: {:?}",
             report.problems,
         );
     }

@@ -1317,8 +1317,8 @@ mod tests {
 
     /// With the process CWD mutated to an unrelated directory, compose's
     /// eager-`file` rewrite still produces the git-root-relative value. The
-    /// rewrite resolves through `EffectiveSchema`'s anchors (prompt dir +
-    /// launch-area fallback), never the ambient CWD.
+    /// rewrite resolves through the document base directory (repository-first
+    /// then source), never the ambient CWD.
     #[test]
     #[serial_test::serial(darkmatter_file_cwd)]
     fn eager_file_rewrite_is_independent_of_process_cwd() {
@@ -1334,9 +1334,10 @@ mod tests {
             "$schema:\n  spec: 'file(eager; required)'\nspec: ./spec.md\n",
             &doc_path,
         );
-        // The launch-area fallback is the repo root, so the git-root-relative
-        // rewritten value (`area/spec.md`) re-resolves on a second pass —
-        // proving the rewrite does not depend on the ambient CWD.
+        // The rewritten value (`area/spec.md`) is an implicit reference that
+        // re-resolves repository-first on a second pass, proving the rewrite
+        // does not depend on the ambient CWD. The launch-area anchor is set but
+        // inert for resolution (D2).
         let options = ComposeOptions::new()
             .with_source_file(&doc_path)
             .with_file_ref_fallback_dir(repo.path().to_path_buf());

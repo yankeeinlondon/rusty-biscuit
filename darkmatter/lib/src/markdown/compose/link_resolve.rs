@@ -6,6 +6,7 @@
 //! back to portable forms in the Finalization stage.
 
 use crate::markdown::Markdown;
+use crate::markdown::compose::util::{document_resolution_context, find_git_root_from};
 use crate::markdown::compose::{ComposeOptions, ComposeReport, ComposeSource};
 use crate::markdown::reference::{
     ReferenceKind, ReferenceTarget,
@@ -129,32 +130,35 @@ fn resolve_absolute(
     }
 
     trace!("resolve_absolute called with raw: '{}'", raw);
-    if let Ok(mut file_ref) = biscuit_file::FileReference::new(raw) {
-        // Add magic paths from options
-        for (path, position) in &options.magic_paths {
-            file_ref = file_ref.add_magic_path(path, *position);
-        }
-
-        // Resolve to an absolute path.  Use resolve_from when we have a
-        // base directory (document location) so that relative / magic
-        // references are resolved relative to the document, not the process
-        // CWD.  We intentionally do NOT use resolve_relative here – link
-        // resolve's job is to produce absolute paths, not make them
-        // relative again.
+    if let Ok(file_ref) = biscuit_file::FileReference::new(raw) {
+        // Resolve through the shared document-backed context so relative and
+        // `@` references anchor on the document directory (implicit paths
+        // repository-first then source), never the ambient process CWD. When no
+        // document base is known (bare-API path), fall back to ambient
+        // resolution. Magic roots live on the context, not on the reference. We
+        // intentionally do NOT use resolve_relative here — link resolve's job is
+        // to produce absolute paths, not make them relative again.
         let resolved = if let Some(dir) = base_dir {
-            file_ref.resolve_from(dir).ok().flatten()
+            let repo_root = find_git_root_from(dir);
+            let resolution_ctx =
+                document_resolution_context(dir, None, &options.magic_paths, repo_root.as_deref());
+            file_ref.resolve_in_context(&resolution_ctx).ok().flatten()
         } else {
             file_ref.resolve().ok().flatten()
         };
 
         if let Some(resolved) = resolved {
+            // `canonicalize` can fail on a resolved-but-since-removed path; the
+            // resolved absolute path is a correct fallback in that case.
             let result = std::fs::canonicalize(&resolved).ok().or(Some(resolved));
             trace!("resolve_absolute FileReference success: {:?}", result);
             return result;
         }
     }
 
-    // Fallback to simple join if FileReference fails or returns nothing
+    // Missing target: link resolve still absolutizes it (a link to a not-yet-
+    // created file must become absolute). `canonicalize` silently degrades to
+    // the joined path when the target does not exist.
     if let Some(dir) = base_dir {
         let joined = dir.join(raw);
         let result = std::fs::canonicalize(&joined).ok().or(Some(joined));

@@ -12,12 +12,13 @@
 //! raw JSON Schema authors who use Darkmatter's eager format get the same
 //! normalization as SimplifiedSchema authors.
 //!
-//! Resolution consumes the shared [`ResolutionContext`] anchors
-//! (`base_dir` + launch-area `fallback`) — the same anchors the eager `file`
-//! validator resolves through — so the stored value resolves identically at
-//! prepare time and at every later read (Decision #5). The projection itself
-//! goes through [`make_portable_relative`] so the stored string uses `/`
-//! separators on every OS (Decision #2 / cross-platform stability).
+//! Resolution consumes the shared document-backed context anchored at the
+//! document `base_dir` — the same resolver the eager `file` validator resolves
+//! through (implicit paths repository-first then source, no launch-area
+//! fallback; D2) — so the stored value resolves identically at prepare time and
+//! at every later read (Decision #5). The projection itself goes through
+//! [`make_portable_relative`] so the stored string uses `/` separators on every
+//! OS (Decision #2 / cross-platform stability).
 //!
 //! See `darkmatter/features/2026-06-27-file-property-rewrite/spec.md` for
 //! the full contract (Decisions #1–#9).
@@ -37,7 +38,7 @@ use super::format::DARKMATTER_FILE_FORMAT;
 use super::validate::{self, build_validator, error_top_level_key};
 use crate::markdown::compose::expression::path_projection::make_portable_relative;
 use crate::markdown::compose::expression::resolve_ctx::{
-    is_remote_url, normalize_path_arg, resolve_file_ref_with_fallback,
+    is_remote_url, normalize_path_arg, resolve_document_file_ref,
 };
 
 /// Outcome of normalizing a frontmatter instance against a schema.
@@ -56,11 +57,11 @@ pub struct NormalizationOutcome {
 /// Top-level dispatcher: rewrites every present eager-`file` value in
 /// `instance` according to `json_schema`.
 ///
-/// Pure: never mutates inputs. `base_dir` is the prompt document directory
-/// and `fallback` is the captured launch area — the same anchors
-/// [`super::EffectiveSchema::validate_with_positions`] threads into the
-/// eager-`file` format validator, so the rewrite resolves through the
-/// identical document-first / launch-area-fallback order the read side uses.
+/// Pure: never mutates inputs. `base_dir` is the prompt document directory the
+/// eager-`file` format validator resolves against, so the rewrite resolves
+/// through the identical repository-first-then-source order the read side uses.
+/// `fallback` (the launch area) is threaded for structural parity with the
+/// validator but is not a resolution input (D2).
 ///
 /// `composition_pending` carries the set of top-level keys still holding a
 /// `$(...)` shell expression (compose pre-shell stage). The rewrite skips
@@ -305,7 +306,7 @@ fn rewrite_property_union(
 ///   Decision #7),
 /// - rewriting produces a byte-identical string (idempotence fast path,
 ///   Decision #6).
-fn rewrite_file_value(value: &Value, base_dir: &Path, fallback: Option<&Path>) -> Option<Value> {
+fn rewrite_file_value(value: &Value, base_dir: &Path, _fallback: Option<&Path>) -> Option<Value> {
     let Value::String(raw) = value else {
         return None;
     };
@@ -320,10 +321,11 @@ fn rewrite_file_value(value: &Value, base_dir: &Path, fallback: Option<&Path>) -
     if raw.contains("$(") || raw.contains("{{") {
         return None;
     }
-    // Resolve through the shared document-first / launch-area-fallback order
-    // — the same order the eager-file format validator used to accept this
-    // value. The rewrite must consume the same resolver so the stored value
-    // resolves identically at every later read (Decision #5).
+    // Resolve through the shared document-backed context — the same resolver
+    // the eager-file format validator used to accept this value: implicit paths
+    // repository-first then source, no launch-area fallback (D2). The rewrite
+    // must consume the same resolver so the stored value resolves identically at
+    // every later read (Decision #5).
     let normalized = normalize_path_arg(raw);
     let file_ref = match FileReference::new(&normalized) {
         Ok(r) => r,
@@ -331,7 +333,7 @@ fn rewrite_file_value(value: &Value, base_dir: &Path, fallback: Option<&Path>) -
         // the value), but degrade gracefully rather than panic.
         Err(_) => return None,
     };
-    let resolved = match resolve_file_ref_with_fallback(&file_ref, base_dir, fallback) {
+    let resolved = match resolve_document_file_ref(&file_ref, base_dir, None, &[]) {
         Ok(Some(abs)) => abs,
         // `None`: the reference is well-formed but resolves to nothing local
         // (e.g. a remote-resolving value validation accepted). Leave verbatim

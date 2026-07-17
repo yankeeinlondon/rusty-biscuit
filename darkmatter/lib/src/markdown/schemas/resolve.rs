@@ -28,6 +28,7 @@ use std::{
 };
 
 use biscuit_file::FileReference;
+use crate::markdown::compose::{document_resolution_context, find_git_root_from};
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
 use serde_yaml_ng::Value as YamlValue;
@@ -354,8 +355,14 @@ fn resolve_reference(
         reference: reference.to_string(),
         source,
     })?;
+    // `$schema` references resolve through the shared document-backed context:
+    // explicit `./`/`../` from the document directory only, implicit path
+    // references repository-root first then the document directory — the same
+    // order the `file`-typed value references use. No ambient CWD is read.
+    let repo_root = find_git_root_from(base_dir);
+    let resolution_ctx = document_resolution_context(base_dir, None, &[], repo_root.as_deref());
     let path = file_ref
-        .resolve_from(base_dir)
+        .resolve_in_context(&resolution_ctx)
         .map_err(|source| SchemaError::Unresolved {
             reference: reference.to_string(),
             source,

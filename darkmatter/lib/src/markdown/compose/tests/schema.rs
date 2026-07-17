@@ -362,18 +362,18 @@ mod schema_validation_integration {
         );
     }
 
-    /// The launch-area anchor (`file_ref_fallback_dir`) changes read-side file
-    /// resolution, so two runs that differ only in their anchor must not share a
-    /// persistent cache entry.
+    /// Per D2 the launch-area anchor (`file_ref_fallback_dir`) is **not** a
+    /// resolution input for a reference authored inside a document, so a file
+    /// present only under the fallback never resolves — the interpolated
+    /// `file_exists("anchored.md")` is `false` regardless of which fallback is
+    /// configured.
     ///
-    /// The body interpolates `{{ file_exists("anchored.md") }}`. The document
-    /// dir never holds `anchored.md`, so the outcome depends entirely on the
-    /// fallback dir: run 1's fallback has the file (resolves `true`), run 2's
-    /// fallback does not (`false`). If `options_hash` ignored
-    /// `file_ref_fallback_dir`, run 2 would reuse run 1's cached `true` —
-    /// returning a stale, wrong-launch-area result.
+    /// The anchor nevertheless remains part of `ComposeOptions` identity
+    /// (`options_hash`), so two runs that differ only in their anchor still get
+    /// distinct persistent cache keys (a conservative over-invalidation): run 2
+    /// must not reuse run 1's entry.
     #[test]
-    fn cache_does_not_reuse_across_distinct_file_ref_fallback_dirs() {
+    fn distinct_file_ref_fallback_dirs_do_not_share_a_cache_entry_and_never_resolve_via_fallback() {
         use crate::markdown::compose::CacheAccessMode;
 
         let dir = tempfile::tempdir().unwrap();
@@ -383,7 +383,8 @@ mod schema_validation_integration {
         let root = doc_dir.join("root.md");
         std::fs::write(&root, "anchored exists: {{ file_exists(\"anchored.md\") }}\n").unwrap();
 
-        // Run 1's launch area HAS anchored.md; run 2's does NOT.
+        // Both launch areas exist; only the first HAS anchored.md — but neither
+        // is consulted for resolution (D2), so the result is `false` either way.
         let fallback_present = dir.path().join("launch-present");
         let fallback_absent = dir.path().join("launch-absent");
         std::fs::create_dir_all(&fallback_present).unwrap();
@@ -400,14 +401,15 @@ mod schema_validation_integration {
                 .with_fail_fast(true)
         };
 
-        // ── Run 1: cold cache, fallback HAS anchored.md → true ─────
+        // ── Run 1: cold cache; the launch-area copy of anchored.md is NOT
+        // consulted, so file_exists is false. ─────────────────────
         let md1 = Markdown::try_from(root.as_path()).unwrap();
         let (composed1, report1) = md1
             .compose_with(mk_options(&fallback_present))
             .expect("run 1 (present fallback, cold cache) should succeed");
         assert!(
-            composed1.content().contains("anchored exists: true"),
-            "run 1 must resolve file_exists as true from its launch area: {}",
+            composed1.content().contains("anchored exists: false"),
+            "the launch-area fallback must not resolve a document-authored reference: {}",
             composed1.content(),
         );
         let stats1 = report1
@@ -418,16 +420,24 @@ mod schema_validation_integration {
             "run 1 should have a cold persistent cache, got {stats1:?}"
         );
 
-        // ── Run 2: different launch area, fallback LACKS the file ──
+        // ── Run 2: different launch area → distinct options_hash → must not
+        // reuse run 1's entry. Same (false) resolution outcome. ────
         let md2 = Markdown::try_from(root.as_path()).unwrap();
-        let (composed2, _report2) = md2
+        let (composed2, report2) = md2
             .compose_with(mk_options(&fallback_absent))
             .expect("run 2 (absent fallback) should succeed");
         assert!(
             composed2.content().contains("anchored exists: false"),
-            "run 2 must reflect its OWN launch area (file absent) — options_hash \
-             must include file_ref_fallback_dir, not reuse run 1's cached output: {}",
+            "the launch-area fallback is inert for resolution: {}",
             composed2.content(),
+        );
+        let stats2 = report2
+            .cache_stats
+            .expect("expected cache stats with cache enabled");
+        assert_eq!(
+            stats2.persistent_hits, 0,
+            "run 2 must NOT reuse run 1's entry — options_hash still includes \
+             file_ref_fallback_dir. got {stats2:?}",
         );
     }
 }
