@@ -30,7 +30,7 @@ use tracing::info_span;
 use super::{
     CachedHarnessLoopContext, HarnessPromptState, MaterializedHarnessPrompt, build_harness_launch,
     execute_harness_attempt, harness_prompt_mode_label, materialize_harness_prompt,
-    preflight_proxy_target, HarnessPromptMode,
+    preflight_proxy_target, session_compat_key, HarnessPromptMode,
 };
 
 type HarnessLoopResult = (
@@ -55,6 +55,12 @@ struct HarnessLoopCtx<'a, 'guard> {
     cli_timeout: Option<String>,
     cli_step_timeout: Option<String>,
     cli_stall_timeout: Option<String>,
+    // Immutable invocation-level launch intent, retained so the R6 target launch
+    // rebuild can re-resolve a proxied target's model while keeping explicit CLI
+    // intent authoritative. `cli_model` is `--model` (wins over any target
+    // frontmatter `model:`); `yolo` is the invocation's bypass intent.
+    cli_model: Option<String>,
+    yolo: bool,
     base_args: &'a [String],
     base_env: &'a HashMap<OsString, OsString>,
     prompt_state: &'a mut HarnessPromptState,
@@ -86,12 +92,14 @@ mod error_routing;
 mod lifecycle_events;
 mod proxy;
 mod requeue;
+mod target_launch;
 
 use control_dispatch::*;
 use coordinator::ActiveDocumentCoordinator;
 use error_routing::*;
 use lifecycle_events::*;
 use proxy::*;
+use target_launch::rebuild_target_launch;
 #[allow(unused_imports)] // entirely dead_code until the rendezvous backend lands
 use requeue::*;
 
@@ -106,6 +114,8 @@ pub(crate) fn run_harness_loop(
     cli_timeout: Option<String>,
     cli_step_timeout: Option<String>,
     cli_stall_timeout: Option<String>,
+    cli_model: Option<String>,
+    yolo: bool,
     base_args: &[String],
     base_env: &HashMap<OsString, OsString>,
     prompt_state: &mut HarnessPromptState,
@@ -148,6 +158,8 @@ pub(crate) fn run_harness_loop(
         cli_timeout,
         cli_step_timeout,
         cli_stall_timeout,
+        cli_model,
+        yolo,
         base_args,
         base_env,
         prompt_state,
@@ -181,11 +193,15 @@ struct HarnessLoopState<'a, 'guard> {
     run: HarnessLoopCtx<'a, 'guard>,
     effect_engine: EffectEngine,
     harness_context: CachedHarnessLoopContext,
-    attempt: u32,
     initial_materialized: Option<MaterializedHarnessPrompt>,
     harness_perf: Option<crate::perf::AgentExecutionPerf>,
     loop_start: std::time::Instant,
-    control_budgets: ControlBudgets,
+    /// The one owner of the active document's mutable execution state — the
+    /// provider-attempt slice (number, live session, resume follow-up) and the
+    /// enclosing iteration's retry/resume budgets. There is no parallel copy:
+    /// the attempt number, the ceilings, and the resume session all read from
+    /// here. A proxy discards it wholesale (see [`ActiveDocumentCoordinator::adopt`]).
+    active: claudine::composition::ActiveDocumentState,
     coordinator: ActiveDocumentCoordinator,
 }
 
@@ -218,8 +234,8 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
         );
         // Established before the initial commit rather than in the struct
         // literal below: an upstream `initialize` proxy is committed here, and
-        // `adopt` retires the budgets of the document it replaces.
-        let mut control_budgets = ControlBudgets::default();
+        // `adopt` discards the active-document state of the document it replaces.
+        let mut active = claudine::composition::ActiveDocumentState::initial();
         if let DocumentTransition::Proxy(request) =
             std::mem::replace(&mut run.initial_transition, DocumentTransition::Continue)
         {
@@ -228,7 +244,7 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
                 run.repo_root,
                 run.prompt_state,
                 run.lifecycle_guard,
-                &mut control_budgets,
+                &mut active,
             )?;
         }
         let initial_materialized = run.initial_materialized.take();
@@ -236,11 +252,10 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
             run,
             effect_engine,
             harness_context,
-            attempt: 1,
             initial_materialized,
             harness_perf: None,
             loop_start: std::time::Instant::now(),
-            control_budgets,
+            active,
             coordinator,
         })
     }
@@ -271,11 +286,15 @@ struct AttemptLifecycleExecution<'a, 'guard> {
 }
 
 struct AttemptRetryProxyControl<'a> {
-    attempt: &'a mut u32,
-    budgets: &'a mut ControlBudgets,
+    active: &'a mut claudine::composition::ActiveDocumentState,
     coordinator: &'a mut ActiveDocumentCoordinator,
     provider: Provider,
     profile: &'a dyn crate::commands::wrap::profile::WrapperProfile,
+    /// Immutable invocation launch intent, read by the R6 target launch rebuild
+    /// when a proxied target's launch identity is recomputed. Explicit `--model`
+    /// stays authoritative over any target frontmatter `model:`.
+    cli_model: Option<&'a str>,
+    yolo: bool,
 }
 
 struct ExecutedHarnessAttempt {
@@ -327,16 +346,17 @@ fn prepare_attempt_phase(
         loop_start: state.loop_start,
     };
     let mut control = AttemptRetryProxyControl {
-        attempt: &mut state.attempt,
-        budgets: &mut state.control_budgets,
+        active: &mut state.active,
         coordinator: &mut state.coordinator,
         provider: state.run.provider,
         profile: state.run.profile,
+        cli_model: state.run.cli_model.as_deref(),
+        yolo: state.run.yolo,
     };
     let _attempt_cycle_span = info_span!(
         "harness_attempt_cycle",
         provider = %control.provider,
-        attempt = *control.attempt,
+        attempt = control.active.iteration().attempt().number(),
         prompt_mode = harness_prompt_mode_label(prompt.prompt_state.mode),
         source_path = %prompt.prompt_state.source_path.display(),
     )
@@ -382,10 +402,10 @@ fn start_lifecycle_phase(
     control: &mut AttemptRetryProxyControl<'_>,
     materialized: &MaterializedHarnessPrompt,
 ) -> Result<Option<LoopStep>> {
-    let attempt = &mut *control.attempt;
+    let attempt = control.active.iteration().attempt().number();
     let profile = control.profile;
     let provider = control.provider;
-    let control_budgets = &mut *control.budgets;
+    let active = &mut *control.active;
     let coordinator = &mut *control.coordinator;
     let prompt_state = &mut *prompt.prompt_state;
     let repo_root = prompt.repo_root;
@@ -453,8 +473,8 @@ fn start_lifecycle_phase(
             StackControl::Stop => {}
             _ => match dispatch_terminal_control(
                 &start_outcome,
-                *attempt,
-                control_budgets,
+                attempt,
+                active.iteration_mut(),
                 None,
                 profile,
                 provider,
@@ -465,8 +485,9 @@ fn start_lifecycle_phase(
                 term,
                 show_checks,
             ) {
-                TerminalControlAction::Continue { next_attempt } => {
-                    *attempt = next_attempt;
+                TerminalControlAction::Continue => {
+                    // The attempt slice was advanced on `active` by the dispatch;
+                    // the next iteration reads its number from there.
                     return Ok(Some(LoopStep::NextAttempt));
                 }
                 TerminalControlAction::Proxy(request) => {
@@ -475,7 +496,7 @@ fn start_lifecycle_phase(
                         repo_root,
                         prompt_state,
                         lifecycle_guard,
-                        control_budgets,
+                        active,
                     ) {
                         return Err(route_handoff_failure(
                             lifecycle_guard,
@@ -488,10 +509,9 @@ fn start_lifecycle_phase(
                             loop_start,
                         ));
                     }
-                    // Re-enter at attempt 1: the target gets a clean
-                    // pre-flight / freeze cycle rather than inheriting the
-                    // proxying document's attempt count.
-                    *attempt = 1;
+                    // `adopt` reset `active` to iteration 1 / attempt 1: the
+                    // target gets a clean pre-flight / freeze cycle rather than
+                    // inheriting the proxying document's attempt count.
                     return Ok(Some(LoopStep::NextAttempt));
                 }
                 TerminalControlAction::Abort(err) => {
@@ -623,7 +643,7 @@ fn bootstrap_adopted_document_phase(
                 prompt.repo_root,
                 prompt.prompt_state,
                 lifecycle.guard,
-                control.budgets,
+                control.active,
             ) {
                 return Err(route_handoff_failure(
                     lifecycle.guard,
@@ -636,7 +656,7 @@ fn bootstrap_adopted_document_phase(
                     lifecycle.loop_start,
                 ));
             }
-            *control.attempt = 1;
+            // `adopt` reset `active` to attempt 1 for the chained target.
             return Ok(Some(LoopStep::NextAttempt));
         }
     }
@@ -675,6 +695,38 @@ fn bootstrap_adopted_document_phase(
     }
     lifecycle.guard.set_config(stabilized_lifecycle);
 
+    // R6 — rebuild the target's launch identity from its own frontmatter now that
+    // its document identity has stabilized. Recomputes provider/model (honoring
+    // explicit CLI precedence) into the `AGENT`/`MODEL`/`YOLO` env, then installs
+    // it on both consumers: the target's lifecycle early-binding context (so its
+    // stacks resolve `env.MODEL`/`ctx.model` to the target's own identity) and
+    // the child environment (via `materialized.env_overrides`, retained on the
+    // coordinator so every subsequent attempt carries it too). Without this a
+    // proxied target keeps the router's launch state — a target pinned to a
+    // different model would otherwise launch with the router's empty model.
+    let launch_area = lifecycle
+        .guard
+        .context()
+        .launch_area
+        .map(Path::to_path_buf)
+        .or_else(|| prompt.repo_root.map(Path::to_path_buf))
+        .unwrap_or_else(|| prompt.child_cwd.to_path_buf());
+    let rebuild = rebuild_target_launch(
+        control.provider,
+        control.cli_model,
+        control.yolo,
+        prompt.repo_root,
+        &launch_area,
+        materialized,
+    );
+    apply_target_env_overrides(materialized, &rebuild.env_overrides);
+    control
+        .coordinator
+        .set_target_env_overrides(rebuild.env_overrides);
+    lifecycle
+        .guard
+        .set_proxy_prepared_context(rebuild.prepared_context);
+
     if prompt.effective_non_interactive {
         crate::output::log_compose_prompt(
             &materialized.prompt,
@@ -685,6 +737,21 @@ fn bootstrap_adopted_document_phase(
         );
     }
     Ok(None)
+}
+
+/// Overlay the rebuilt target launch-identity env onto a materialized prompt's
+/// `env_overrides`, replacing any prior entry for the same key so a re-applied
+/// rebuild is idempotent.
+fn apply_target_env_overrides(
+    materialized: &mut MaterializedHarnessPrompt,
+    overrides: &[(String, String)],
+) {
+    for (key, value) in overrides {
+        materialized.env_overrides.retain(|(k, _)| k != key);
+        materialized
+            .env_overrides
+            .push((key.clone(), value.clone()));
+    }
 }
 
 
@@ -719,6 +786,7 @@ fn empty_materialized_prompt() -> MaterializedHarnessPrompt {
         frontmatter: serde_json::Value::Null,
         prompt: String::new(),
         env_overrides: Vec::new(),
+        selection_hints: claudine::composition::EffectiveSelectionHints::default(),
         inline_closure_plan: None,
         lifecycle: None,
         live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&serde_json::Value::Null),
@@ -730,7 +798,7 @@ fn preflight_pending_proxy_phase(
     lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
     control: &AttemptRetryProxyControl<'_>,
 ) -> Result<()> {
-    let attempt = *control.attempt;
+    let attempt = control.active.iteration().attempt().number();
     let proxy_pending = control.coordinator.bootstrap_pending();
     let has_seed = prompt.initial_materialized.is_some();
     let silent = prompt.silent;
@@ -781,7 +849,16 @@ fn materialize_attempt_prompt_phase(
     lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
     control: &AttemptRetryProxyControl<'_>,
 ) -> Result<MaterializedHarnessPrompt> {
-    let attempt = *control.attempt;
+    let attempt = control.active.iteration().attempt().number();
+    // The resume follow-up, when this attempt is a resume, is the provider
+    // input the model recorded on the attempt slice — it overrides the composed
+    // prompt for exactly this attempt.
+    let resume_followup = control
+        .active
+        .iteration()
+        .attempt()
+        .resume_followup()
+        .map(str::to_string);
     let initial_materialized = &mut *prompt.initial_materialized;
     let prompt_state = &mut *prompt.prompt_state;
     let child_cwd = prompt.child_cwd;
@@ -793,12 +870,24 @@ fn materialize_attempt_prompt_phase(
     if let Some(seed) = initial_materialized.take() {
         return Ok(seed);
     }
+    // Re-apply the active target's rebuilt launch identity (R6). A directly
+    // invoked document has none (empty), so this is a no-op there; a proxied
+    // target's every attempt — including later loop iterations, which
+    // re-materialize from disk — carries the target's own `AGENT`/`MODEL`/`YOLO`
+    // in its child environment.
+    let target_env_overrides = control.coordinator.target_env_overrides().to_vec();
     info_span!(
         "harness_materialize_prompt",
         attempt,
         source_path = %prompt_state.source_path.display(),
     )
-    .in_scope(|| materialize_harness_prompt(prompt_state, repo_root, child_cwd))
+    .in_scope(|| {
+        materialize_harness_prompt(prompt_state, repo_root, child_cwd, resume_followup.as_deref())
+    })
+    .map(|mut materialized| {
+        apply_target_env_overrides(&mut materialized, &target_env_overrides);
+        materialized
+    })
     .map_err(|error| {
         // Canonical preparation returns concrete `CompositionError`s (a target's
         // malformed lifecycle stack, a schema failure, a shell denial). Keep the
@@ -833,7 +922,7 @@ fn prepare_harness_plan_phase(
     control: &AttemptRetryProxyControl<'_>,
     materialized: &MaterializedHarnessPrompt,
 ) -> Result<claudine::harness::HarnessPlan> {
-    let attempt = *control.attempt;
+    let attempt = control.active.iteration().attempt().number();
     let show_checks = prompt.show_checks;
     let prompt_state = &*prompt.prompt_state;
     let harness_context = &mut *prompt.harness_context;
@@ -981,18 +1070,68 @@ fn execute_attempt_phase(
     let repo_root = state.run.repo_root;
     let term = state.run.term;
     let emit_prompt_timing = state.run.emit_prompt_timing;
+    let attempt = state.active.iteration().attempt().number();
+    // The live session to resume, when this attempt is a resume. Read from the
+    // single active-document owner rather than a parallel prompt-state field.
+    let resume_session = state
+        .active
+        .iteration()
+        .attempt()
+        .session_id()
+        .map(str::to_string);
     let prompt_state = &mut *state.run.prompt_state;
     let lifecycle_guard = &mut *state.run.lifecycle_guard;
     let effect_engine = &state.effect_engine;
-    let attempt = state.attempt;
     let loop_start = state.loop_start;
     let PreparedHarnessAttempt { materialized, plan } = prepared;
+
+    // R8 — compute the session-compatibility key for the launch this attempt is
+    // about to run, from the resolved launch state the harness will execute
+    // (provider, effective child env, resolved argv, working directory, mode).
+    let launch_key = session_compat_key(
+        provider,
+        profile,
+        binary_path,
+        child_cwd,
+        state.run.yolo,
+        effective_non_interactive,
+        use_structured,
+        structured_codex_output.is_some(),
+        base_args,
+        base_env,
+        &materialized,
+    );
+    // A resume carries the key of the session-producing attempt forward with the
+    // live session. If the canonical refresh changed a launch property the
+    // provider fixed when it opened the session, refuse the resume with a typed
+    // diagnostic before launching the provider under the stale session — never
+    // mix a live session with a newly prepared launch plan.
+    if resume_session.is_some()
+        && let Some(prior) = state.active.iteration().attempt().compat_key()
+    {
+        let facets = prior.incompatibilities(&launch_key);
+        if !facets.is_empty() {
+            return Err(CompositionError::LifecycleResumeIncompatible {
+                source_path: prompt_state.source_path.clone(),
+                facets,
+            }
+            .into());
+        }
+    }
+    // Record the key of the launch this attempt runs with, so a subsequent
+    // resume can compare its refreshed plan against it.
+    state
+        .active
+        .iteration_mut()
+        .attempt_mut()
+        .set_compat_key(launch_key);
+
     let launch = build_harness_launch(
         provider,
         profile,
         base_args,
         base_env,
-        prompt_state,
+        resume_session.as_deref(),
         &materialized,
         effective_non_interactive,
         cli_timeout.clone(),
@@ -1148,12 +1287,12 @@ fn classify_attempt_phase(
     let repo_root = state.run.repo_root;
     let show_checks = state.run.show_checks;
     let term = state.run.term;
+    let attempt = state.active.iteration().attempt().number();
     let prompt_state = &mut *state.run.prompt_state;
     let lifecycle_guard = &mut *state.run.lifecycle_guard;
     let effect_engine = &state.effect_engine;
-    let control_budgets = &mut state.control_budgets;
+    let active = &mut state.active;
     let coordinator = &mut state.coordinator;
-    let attempt = state.attempt;
     let loop_start = state.loop_start;
     let ExecutedHarnessAttempt { materialized, outcome, iteration_signals } = executed;
     if outcome.termination == claudine::harness::ProcessTermination::Interrupted {
@@ -1251,7 +1390,7 @@ fn classify_attempt_phase(
             effect_engine,
             loop_start,
             attempt,
-            control_budgets,
+            active.iteration_mut(),
             outcome.session_id.as_deref(),
             profile,
             provider,
@@ -1259,8 +1398,8 @@ fn classify_attempt_phase(
             coordinator.ledger(),
             show_checks,
         )? {
-            TerminalRecovery::NextAttempt(next_attempt) => {
-                state.attempt = next_attempt;
+            TerminalRecovery::NextAttempt => {
+                // The attempt slice was advanced on `active` by the dispatch.
                 return Ok(LoopStep::NextAttempt);
             }
             TerminalRecovery::Proxy(request) => {
@@ -1269,7 +1408,7 @@ fn classify_attempt_phase(
                     repo_root,
                     prompt_state,
                     lifecycle_guard,
-                    control_budgets,
+                    active,
                 ) {
                     return Err(route_handoff_failure(
                         lifecycle_guard,
@@ -1282,7 +1421,7 @@ fn classify_attempt_phase(
                         loop_start,
                     ));
                 }
-                state.attempt = 1;
+                // `adopt` reset `active` to attempt 1 for the target.
                 return Ok(LoopStep::NextAttempt);
             }
             TerminalRecovery::Completed => {}
@@ -1332,7 +1471,7 @@ fn classify_attempt_phase(
             effect_engine,
             loop_start,
             attempt,
-            control_budgets,
+            active.iteration_mut(),
             outcome.session_id.as_deref(),
             profile,
             provider,
@@ -1340,8 +1479,8 @@ fn classify_attempt_phase(
             coordinator.ledger(),
             show_checks,
         )? {
-            TerminalRecovery::NextAttempt(next_attempt) => {
-                state.attempt = next_attempt;
+            TerminalRecovery::NextAttempt => {
+                // The attempt slice was advanced on `active` by the dispatch.
                 return Ok(LoopStep::NextAttempt);
             }
             TerminalRecovery::Proxy(request) => {
@@ -1350,7 +1489,7 @@ fn classify_attempt_phase(
                     repo_root,
                     prompt_state,
                     lifecycle_guard,
-                    control_budgets,
+                    active,
                 ) {
                     return Err(route_handoff_failure(
                         lifecycle_guard,
@@ -1363,7 +1502,7 @@ fn classify_attempt_phase(
                         loop_start,
                     ));
                 }
-                state.attempt = 1;
+                // `adopt` reset `active` to attempt 1 for the target.
                 return Ok(LoopStep::NextAttempt);
             }
             TerminalRecovery::Completed => {}
@@ -1388,7 +1527,7 @@ fn classify_attempt_phase(
         effect_engine,
         loop_start,
         attempt,
-        control_budgets,
+        active.iteration_mut(),
         outcome.session_id.as_deref(),
         profile,
         provider,
@@ -1396,8 +1535,8 @@ fn classify_attempt_phase(
         coordinator.ledger(),
         show_checks,
     )? {
-        TerminalRecovery::NextAttempt(next_attempt) => {
-            state.attempt = next_attempt;
+        TerminalRecovery::NextAttempt => {
+            // The attempt slice was advanced on `active` by the dispatch.
             return Ok(LoopStep::NextAttempt);
         }
         TerminalRecovery::Proxy(request) => {
@@ -1406,7 +1545,7 @@ fn classify_attempt_phase(
                 repo_root,
                 prompt_state,
                 lifecycle_guard,
-                control_budgets,
+                active,
             ) {
                 return Err(route_handoff_failure(
                     lifecycle_guard,
@@ -1419,7 +1558,7 @@ fn classify_attempt_phase(
                     loop_start,
                 ));
             }
-            state.attempt = 1;
+            // `adopt` reset `active` to attempt 1 for the target.
             return Ok(LoopStep::NextAttempt);
         }
         TerminalRecovery::Completed => {}

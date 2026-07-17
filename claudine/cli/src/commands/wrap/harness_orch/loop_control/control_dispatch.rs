@@ -4,38 +4,7 @@
 
 use super::*;
 
-/// Per-control retry/resume budget tracking for one `run_harness_loop` call.
-///
-/// A lifecycle `retry`/`resume` control declares `max_attempts` relative to
-/// the attempt at which it first fires. The budget (the absolute attempt
-/// ceiling) is computed once on first firing and reused so the ceiling does
-/// not drift as the attempt counter advances.
-#[derive(Default)]
-pub(super) struct ControlBudgets {
-    pub(super) retry: Option<u32>,
-    pub(super) resume: Option<u32>,
-}
-
-impl ControlBudgets {
-    /// Return (and lazily establish) the budget for a control firing at
-    /// `attempt`. `max_attempts` is the additional-attempts parameter.
-    fn budget_for(slot: &mut Option<u32>, attempt: u32, max_attempts: u32) -> u32 {
-        *slot.get_or_insert_with(|| control_budget_for(attempt, max_attempts))
-    }
-
-    /// Retire the budgets of the document that just stopped being active.
-    ///
-    /// A ceiling is earned by the `retry`/`resume` control that declared it, so
-    /// it is scoped to that document's iteration. Because `budget_for` only
-    /// establishes a ceiling into an empty slot, a ceiling left behind here
-    /// would silently swallow the *next* document's `max_attempts` — a target
-    /// asking for five retries would get whatever the router had already spent.
-    /// Invocation-wide hop/cycle accounting lives in the ledger and is
-    /// deliberately not reset alongside this.
-    pub(super) fn reset_for_document(&mut self) {
-        *self = Self::default();
-    }
-}
+use claudine::composition::DocumentIteration;
 
 /// What the loop should do after dispatching a terminal-event control.
 #[derive(Debug)]
@@ -43,8 +12,10 @@ pub(super) enum TerminalControlAction {
     /// No actionable control (Stop/Skip/None) — fall through to the
     /// loop's normal terminal handling (finalize + return).
     Fallthrough,
-    /// Re-enter the loop for another attempt at `next_attempt`.
-    Continue { next_attempt: u32 },
+    /// Re-enter the loop for another attempt. The dispatch has already advanced
+    /// the active document's provider-attempt slice, so the caller reads the new
+    /// attempt number from the model rather than from this action.
+    Continue,
     /// The stack requested a hand-off. The dispatch has evaluated it and can
     /// do no more: only the coordinator may resolve the target, decide the
     /// hop, and commit the change of active document.
@@ -63,11 +34,13 @@ pub(super) enum TerminalControlAction {
 /// `Retry` re-entry from the guard's `provider_launched()` state, not the
 /// signal.
 ///
-/// Reuses the existing redirect/resume substrate: a retry bumps the attempt
-/// and `continue`s; a resume seeds `next_resume_session_id` +
-/// `next_prompt_override`; a proxy returns a request for the coordinator to
-/// commit; a requeue records the materialized prompt in rendezvous and exits
-/// the current run.
+/// A retry replaces the active document's provider-attempt slice with a fresh
+/// one (new attempt number, no session) and `continue`s; a resume replaces it
+/// too but retains the live session and records the follow-up message as the
+/// next provider input — both mutate the single [`DocumentIteration`] passed in
+/// rather than a parallel prompt-state field. A proxy returns a request for the
+/// coordinator to commit; a requeue records the materialized prompt in
+/// rendezvous and exits the current run.
 ///
 /// `ledger` is read, never written: the chain answers "how many hops has this
 /// run spent" and stamps the request's provenance. Extending it is the
@@ -76,7 +49,7 @@ pub(super) enum TerminalControlAction {
 pub(super) fn dispatch_terminal_control(
     outcome: &LifecycleEventOutcome,
     attempt: u32,
-    budgets: &mut ControlBudgets,
+    iteration: &mut DocumentIteration,
     session_id: Option<&str>,
     profile: &dyn crate::commands::wrap::profile::WrapperProfile,
     // `_provider` / `_materialized` are retained on the signature for when
@@ -94,13 +67,15 @@ pub(super) fn dispatch_terminal_control(
         return TerminalControlAction::Fallthrough;
     };
 
-    // Compute the control budget (only retry/resume consume one).
+    // Compute the control budget (only retry/resume consume one). The ceiling
+    // lives on the active iteration's retry/resume `ControlBudget`, established
+    // once and reused, so a re-firing control cannot lift its own ceiling.
     let budget = match control {
         StackControl::Retry { max_attempts, .. } => {
-            ControlBudgets::budget_for(&mut budgets.retry, attempt, *max_attempts)
+            iteration.retry_budget_mut().ceiling_for(attempt, *max_attempts)
         }
         StackControl::Resume { max_attempts, .. } => {
-            ControlBudgets::budget_for(&mut budgets.resume, attempt, *max_attempts)
+            iteration.resume_budget_mut().ceiling_for(attempt, *max_attempts)
         }
         _ => 0,
     };
@@ -153,14 +128,17 @@ pub(super) fn dispatch_terminal_control(
                 std::thread::sleep(delay);
             }
             prompt_state.entry = claudine::composition::DocumentEntryReason::Retry;
+            // Replace the provider-attempt slice: a fresh attempt number and no
+            // carried session, so the retried attempt starts a fresh provider
+            // session. The enclosing retry budget is retained — that is why it
+            // lives on the iteration, not the attempt.
+            iteration.retry_attempt();
             // The terminal event already fired for this iteration; reset the
             // guard's per-iteration state so the retried attempt can emit its
             // own start/terminal/finalize without the terminal slot being
             // suppressed as already-taken.
             lifecycle_guard.reset_for_next_iteration();
-            TerminalControlAction::Continue {
-                next_attempt: attempt + 1,
-            }
+            TerminalControlAction::Continue
         }
         LifecycleTransitionDecision::Reenter(ControlDispatch::Resume { message }) => {
             // Honor the provider's resume capability. The CLI-side resume gate
@@ -177,9 +155,15 @@ pub(super) fn dispatch_terminal_control(
                 return TerminalControlAction::Abort(e);
             }
             prompt_state.entry = claudine::composition::DocumentEntryReason::Resume;
-            prompt_state.next_resume_session_id = session_id.map(|id| id.to_string());
-            prompt_state.next_prompt_override = Some(message);
             prompt_state.prompt_tail.clear();
+            // Replace the provider-attempt slice, retaining the live session and
+            // substituting the follow-up message as the next provider input. A
+            // resume is only decided when a session exists (`has_session`), so
+            // the library never routes here without one.
+            let session = session_id
+                .expect("a resume re-entry is only decided when a live session exists")
+                .to_string();
+            iteration.resume_attempt(session, Some(message));
             if show_checks {
                 claudine::harness::report::report_lifecycle_recovery(
                     &format!("lifecycle resume: resuming session (attempt {})", attempt + 1),
@@ -189,9 +173,7 @@ pub(super) fn dispatch_terminal_control(
             // Reset per-iteration guard state (the failure terminal already
             // fired) so the resumed attempt emits its own lifecycle events.
             lifecycle_guard.reset_for_next_iteration();
-            TerminalControlAction::Continue {
-                next_attempt: attempt + 1,
-            }
+            TerminalControlAction::Continue
         }
         LifecycleTransitionDecision::Abort(LifecycleTransitionAbort::ResumeWithoutSession) => {
             TerminalControlAction::Abort(
@@ -293,7 +275,7 @@ pub(super) fn run_finalize_with_recovery(
     err: Option<&LifecycleErrorInfo>,
     loop_start: std::time::Instant,
     attempt: u32,
-    budgets: &mut ControlBudgets,
+    iteration: &mut DocumentIteration,
     session_id: Option<&str>,
     profile: &dyn crate::commands::wrap::profile::WrapperProfile,
     provider: Provider,
@@ -333,7 +315,7 @@ pub(super) fn run_finalize_with_recovery(
     dispatch_terminal_control(
         &finalize_outcome,
         attempt,
-        budgets,
+        iteration,
         session_id,
         profile,
         provider,
@@ -348,9 +330,10 @@ pub(super) fn run_finalize_with_recovery(
 
 /// Outcome of [`drive_terminal_recovery`] for the caller's loop control.
 pub(super) enum TerminalRecovery {
-    /// A recovery control (`retry`/`resume`) re-entered the loop: the caller
-    /// sets `attempt` and `continue`s.
-    NextAttempt(u32),
+    /// A recovery control (`retry`/`resume`) re-entered the loop: the dispatch
+    /// already advanced the active document's provider-attempt slice, so the
+    /// caller only has to `continue`.
+    NextAttempt,
     /// The stack handed the run off. The caller passes the request to the
     /// coordinator, which is the only thing that may commit it.
     ///
@@ -387,7 +370,7 @@ pub(super) fn drive_terminal_recovery(
     effect_engine: &EffectEngine,
     loop_start: std::time::Instant,
     attempt: u32,
-    budgets: &mut ControlBudgets,
+    iteration: &mut DocumentIteration,
     session_id: Option<&str>,
     profile: &dyn crate::commands::wrap::profile::WrapperProfile,
     provider: Provider,
@@ -430,7 +413,7 @@ pub(super) fn drive_terminal_recovery(
     match dispatch_terminal_control(
         &event.outcome,
         attempt,
-        budgets,
+        iteration,
         session_id,
         profile,
         provider,
@@ -441,8 +424,8 @@ pub(super) fn drive_terminal_recovery(
         term,
         show_checks,
     ) {
-        TerminalControlAction::Continue { next_attempt } => {
-            return Ok(TerminalRecovery::NextAttempt(next_attempt));
+        TerminalControlAction::Continue => {
+            return Ok(TerminalRecovery::NextAttempt);
         }
         TerminalControlAction::Proxy(request) => {
             return Ok(TerminalRecovery::Proxy(request));
@@ -487,7 +470,7 @@ pub(super) fn drive_terminal_recovery(
         finalize_err,
         loop_start,
         attempt,
-        budgets,
+        iteration,
         session_id,
         profile,
         provider,
@@ -495,9 +478,7 @@ pub(super) fn drive_terminal_recovery(
         ledger,
         show_checks,
     ) {
-        TerminalControlAction::Continue { next_attempt } => {
-            Ok(TerminalRecovery::NextAttempt(next_attempt))
-        }
+        TerminalControlAction::Continue => Ok(TerminalRecovery::NextAttempt),
         TerminalControlAction::Proxy(request) => Ok(TerminalRecovery::Proxy(request)),
         TerminalControlAction::Abort(err) => Err(err),
         TerminalControlAction::Fallthrough => Ok(TerminalRecovery::Completed),
