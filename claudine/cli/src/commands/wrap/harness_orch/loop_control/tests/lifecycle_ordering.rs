@@ -518,7 +518,6 @@ fn finalize_evaluation_error_aborts_without_reentry() {
     let eng = engine(fx._dir.path());
     let mut state = prompt_state(&fx.source_path);
     let mut budgets = ControlBudgets::default();
-    let mut proxy = ProxyTracking::default();
 
     let action = run_finalize_with_recovery(
         &mut guard,
@@ -534,7 +533,7 @@ fn finalize_evaluation_error_aborts_without_reentry() {
         resume_capable_profile(),
         Provider::Claude,
         &mut state,
-        &mut proxy,
+        &ledger(&fx.source_path),
         false,
     );
 

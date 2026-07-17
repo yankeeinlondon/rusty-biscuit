@@ -81,24 +81,14 @@ const COMPOSE_WITH_ALLOWLIST: &[AllowedSite] = &[
 
 /// Every `Option<PathBuf>`-shaped proxy-target carrier in production today.
 ///
-/// The spec's R1 bans a second optional proxy-target channel: a proxy whose
-/// consumption is optional is a proxy that can be silently dropped, which is
-/// the motivating bug. Phase 6 collapses both into one typed transition and
-/// empties this list; Phase 10 verifies it stays empty.
-const PROXY_TARGET_CHANNEL_BASELINE: &[AllowedSite] = &[
-    AllowedSite {
-        site: "looping::types::LoopExecutionResult::init_proxy_target",
-        calls: 1,
-        reason: "PHASE 6 REMOVES THIS. The library loop engine's out-of-band \
-                 initialize-proxy return channel.",
-    },
-    AllowedSite {
-        site: "composition::pipeline::route_initialize::init_proxy_target",
-        calls: 1,
-        reason: "PHASE 6 REMOVES THIS. The CLI single-document pipeline's \
-                 parallel initialize-proxy channel.",
-    },
-];
+/// **Empty, and it stays empty.** The spec's R1 bans an optional proxy-target
+/// channel: a proxy whose consumption is optional is a proxy that can be
+/// silently dropped, which is the motivating bug. Phase 6 collapsed the two
+/// that existed — the loop engine's `LoopExecutionResult::init_proxy_target`
+/// and the pipeline's `route_initialize::init_proxy_target` — into the one
+/// `DocumentTransition`, whose `Proxy` variant a caller cannot ignore without
+/// a compile error.
+const PROXY_TARGET_CHANNEL_BASELINE: &[AllowedSite] = &[];
 
 /// Every production entry point to Darkmatter's event-time subtree composition
 /// (DM2).

@@ -1,0 +1,373 @@
+//! The coordinator is the only thing that may change the active document.
+//!
+//! Every proxy producer routes through [`ActiveDocumentCoordinator::adopt`], so
+//! these assertions cover the `initialize` route, the terminal-recovery route,
+//! and a chained target proxy alike — there is no per-route resolution or
+//! cycle semantics left to test separately.
+
+use super::*;
+
+use claudine::composition::{DocumentEntryReason, EvaluatedProxyRequest, ProxyProvenance};
+
+/// A request for `target`, authored by `source`'s `failure` stack, carrying
+/// the chain the ledger would have stamped on it.
+fn request_for(source: &Path, target: &Path, chain: Vec<PathBuf>) -> EvaluatedProxyRequest {
+    EvaluatedProxyRequest::new(
+        target.display().to_string(),
+        indexmap::IndexMap::new(),
+        ProxyProvenance::new(
+            source.to_path_buf(),
+            claudine::composition::ActionLocation::new(LifecycleSignal::Failure, 0, 0),
+            chain,
+        ),
+    )
+}
+
+struct AdoptFixture {
+    fx: Fixture,
+    target: PathBuf,
+}
+
+fn adopt_fixture() -> AdoptFixture {
+    let fx = fixture(serde_json::json!({}));
+    // Both documents exist on disk: the coordinator resolves through the shared
+    // resolver, which checks existence, so a cycle test needs a real cycle
+    // rather than a resolution failure standing in for one.
+    std::fs::write(&fx.source_path, "---\n---\nbody\n").unwrap();
+    let target = fx._dir.path().join("target.md");
+    std::fs::write(&target, "---\n---\nbody\n").unwrap();
+    AdoptFixture { fx, target }
+}
+
+#[test]
+fn adopt_commits_identity_and_discards_source_execution_state() {
+    let AdoptFixture { fx, target } = adopt_fixture();
+    let emitter = RecordingEmitter::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &fx.settings,
+        messaging: &fx.messaging,
+        term: &fx.term,
+        source_path: &fx.source_path,
+        repo_root: Some(fx._dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
+    guard.mark_provider_launched();
+    assert!(guard.record_event_emission(LifecycleSignal::Failure));
+    let mut state = prompt_state(&fx.source_path);
+    // Active-document execution state belonging to the document being replaced.
+    state.prompt_tail.push("tail from the source".to_string());
+    state.next_prompt_override = Some("follow-up".to_string());
+    state.next_resume_session_id = Some("sess-1".to_string());
+
+    let mut coord = coordinator(&fx.source_path);
+    coord
+        .adopt(
+            request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
+            Some(fx._dir.path()),
+            &mut state,
+            &mut guard,
+        )
+        .expect("the hop is resolvable and uncontested");
+
+    assert_eq!(state.source_path, target, "identity moved to the target");
+    assert_eq!(state.original_ref, target.display().to_string());
+    assert_eq!(
+        state.entry,
+        DocumentEntryReason::ProxyTarget,
+        "the target is prepared as a proxy target, not as a direct document"
+    );
+    assert!(state.prompt_tail.is_empty(), "the source's tail is discarded");
+    assert_eq!(state.next_prompt_override, None);
+    assert_eq!(
+        state.next_resume_session_id, None,
+        "a proxy clears the source's live session"
+    );
+    assert!(
+        !guard.initialize_emitted() && guard.terminal_signal().is_none(),
+        "the guard is reset so the target emits its own initialize"
+    );
+    assert!(
+        coord.bootstrap_pending(),
+        "the adopted target still owes its lifecycle re-parse and initialize"
+    );
+    assert_eq!(
+        coord.ledger().chain(),
+        [fx.source_path.clone(), target.clone()],
+        "the committed hop extends the invocation-wide chain"
+    );
+    assert_eq!(coord.ledger().hops(), 1, "the seeded origin is not a hop");
+    assert_eq!(
+        coord.ledger().transitions().len(),
+        1,
+        "the hop is recorded for diagnostics and final output"
+    );
+}
+
+/// A refused hand-off must never half-activate the target. This is the
+/// resolver-bypass regression, now structurally impossible: the coordinator is
+/// the only caller of `resolve_proxy_target`, so `initialize` and terminal
+/// recovery cannot disagree about a missing document.
+#[test]
+fn adopt_rejects_a_missing_target_without_activating_it() {
+    let fx = fixture(serde_json::json!({}));
+    let missing = fx._dir.path().join("missing.md");
+    assert!(!missing.exists(), "the fixture target must not exist");
+    let emitter = RecordingEmitter::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &fx.settings,
+        messaging: &fx.messaging,
+        term: &fx.term,
+        source_path: &fx.source_path,
+        repo_root: Some(fx._dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
+    guard.mark_provider_launched();
+    assert!(guard.record_event_emission(LifecycleSignal::Failure));
+    let mut state = prompt_state(&fx.source_path);
+    let mut coord = coordinator(&fx.source_path);
+
+    let error = coord
+        .adopt(
+            request_for(&fx.source_path, &missing, vec![fx.source_path.clone()]),
+            Some(fx._dir.path()),
+            &mut state,
+            &mut guard,
+        )
+        .expect_err("a proxy to a missing document must be refused");
+
+    assert!(
+        matches!(
+            error,
+            claudine::composition::ProxyCommitError::Resolution { .. }
+        ),
+        "the refusal keeps the resolver's typed cause, got {error:?}"
+    );
+    assert!(
+        error.to_string().contains("proxy target does not exist"),
+        "the diagnostic carries the shared resolver's existence check: {error}"
+    );
+    assert_eq!(
+        state.source_path, fx.source_path,
+        "the source document stays active when the hand-off is refused"
+    );
+    assert!(
+        !coord.bootstrap_pending(),
+        "a refused hand-off flags no pending bootstrap"
+    );
+    assert!(
+        !coord.ledger().contains_document(&missing),
+        "a missing target never enters the chain"
+    );
+    assert!(
+        guard.initialize_emitted() || guard.terminal_signal().is_some(),
+        "the guard is not reset for a hand-off that was refused"
+    );
+}
+
+/// The ledger seeds its chain with the originating document, so a document
+/// that proxies to itself is a cycle from the *first* hop. Before the
+/// coordinator, four call sites each decided independently whether the current
+/// document was in the chain yet.
+#[test]
+fn adopt_rejects_a_hop_back_to_a_document_already_in_the_chain() {
+    let AdoptFixture { fx, target } = adopt_fixture();
+    let emitter = RecordingEmitter::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &fx.settings,
+        messaging: &fx.messaging,
+        term: &fx.term,
+        source_path: &fx.source_path,
+        repo_root: Some(fx._dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
+    let mut state = prompt_state(&fx.source_path);
+    let mut coord = coordinator(&fx.source_path);
+
+    // Hop A -> B.
+    coord
+        .adopt(
+            request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
+            Some(fx._dir.path()),
+            &mut state,
+            &mut guard,
+        )
+        .expect("the first hop is uncontested");
+    let _ = coord.take_bootstrap_pending();
+
+    // B -> A closes the cycle. Multi-hop history is exactly what the loop
+    // engine's single-element chain slice could not see.
+    let error = coord
+        .adopt(
+            request_for(
+                &target,
+                &fx.source_path,
+                vec![fx.source_path.clone(), target.clone()],
+            ),
+            Some(fx._dir.path()),
+            &mut state,
+            &mut guard,
+        )
+        .expect_err("an A->B->A cycle must be refused");
+
+    let claudine::composition::ProxyCommitError::Rejected(composition) = error else {
+        panic!("a cycle is a ledger rejection, not a resolution failure");
+    };
+    assert!(
+        matches!(
+            composition,
+            claudine::composition::CompositionError::LifecycleProxyCycle { .. }
+        ),
+        "the refusal is the typed cycle error"
+    );
+    assert_eq!(
+        state.source_path, target,
+        "the refused hop leaves the current target active"
+    );
+    assert_eq!(
+        coord.ledger().chain(),
+        [fx.source_path.clone(), target.clone()],
+        "a refused hop does not extend the chain"
+    );
+}
+
+/// Clean-handoff semantics: once `proxy` is selected, the source document's
+/// closure belongs to the target. No later source terminal or `finalize`
+/// signal may be synthesized — including by the guard's `Drop` net, which
+/// exists to emit `failure`/`blocked` for a run that started and never
+/// reached a terminal.
+///
+/// The Drop net is safe here only because [`ActiveDocumentCoordinator::adopt`]
+/// resets the guard, clearing `start_emitted`. That coupling is the reason
+/// this is a test and not a comment.
+#[test]
+fn a_committed_handoff_synthesizes_no_source_finalize() {
+    let AdoptFixture { fx, target } = adopt_fixture();
+    let emitter = RecordingEmitter::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &fx.settings,
+        messaging: &fx.messaging,
+        term: &fx.term,
+        source_path: &fx.source_path,
+        repo_root: Some(fx._dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let mut state = prompt_state(&fx.source_path);
+    let mut coord = coordinator(&fx.source_path);
+    {
+        let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
+        // The source got as far as launching a provider: without a hand-off,
+        // dropping the guard here would emit a synthetic `failure`.
+        assert!(guard.record_event_emission(LifecycleSignal::Start));
+        guard.mark_provider_launched();
+
+        coord
+            .adopt(
+                request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
+                Some(fx._dir.path()),
+                &mut state,
+                &mut guard,
+            )
+            .expect("the hop is resolvable and uncontested");
+        // Guard drops here, at the end of the scope.
+    }
+
+    let signals: Vec<LifecycleSignal> = emitter
+        .events()
+        .into_iter()
+        .filter_map(|event| match event {
+            Emitted::Stderr(signal, _) => Some(signal),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !signals.contains(&LifecycleSignal::Finalize)
+            && !signals.contains(&LifecycleSignal::Failure)
+            && !signals.contains(&LifecycleSignal::Blocked),
+        "a handed-off source closes nothing; the target owns closure. Got {signals:?}"
+    );
+}
+
+/// Closure and output ownership follow the active document, so an
+/// `inline-compose` run closes over the **final target** and never the router
+/// it passed through.
+///
+/// This holds because `materialize_harness_prompt` composes from
+/// `prompt_state.source_path` and derives the closure plan from that freshly
+/// prepared document — and the coordinator is what repoints `source_path`
+/// before the next attempt materializes. The plan's `original_document_text`
+/// is the document it will write back to, so it is the honest witness for
+/// which document owns closure.
+#[test]
+fn inline_closure_ownership_follows_the_adopted_target() {
+    let fx = fixture(serde_json::json!({}));
+    std::fs::write(
+        &fx.source_path,
+        "---\nprompt: ROUTER-PROMPT\n---\nROUTER-BODY\n",
+    )
+    .unwrap();
+    let target = fx._dir.path().join("target.md");
+    std::fs::write(&target, "---\nprompt: TARGET-PROMPT\n---\nTARGET-BODY\n").unwrap();
+
+    let emitter = RecordingEmitter::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &fx.settings,
+        messaging: &fx.messaging,
+        term: &fx.term,
+        source_path: &fx.source_path,
+        repo_root: Some(fx._dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
+    let mut state = prompt_state(&fx.source_path);
+    state.mode = HarnessPromptMode::Inline;
+
+    // Before the hand-off, the router owns closure.
+    let before = super::super::super::materialize_harness_prompt(
+        &state,
+        Some(fx._dir.path()),
+        fx._dir.path(),
+    )
+    .expect("the router materializes");
+    let router_plan = before
+        .inline_closure_plan
+        .expect("inline mode plans a closure");
+    assert!(
+        router_plan.original_document_text.contains("ROUTER-BODY"),
+        "the router owns closure while it is the active document"
+    );
+
+    coordinator(&fx.source_path)
+        .adopt(
+            request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
+            Some(fx._dir.path()),
+            &mut state,
+            &mut guard,
+        )
+        .expect("the hop is resolvable and uncontested");
+
+    let after = super::super::super::materialize_harness_prompt(
+        &state,
+        Some(fx._dir.path()),
+        fx._dir.path(),
+    )
+    .expect("the adopted target materializes");
+    let target_plan = after
+        .inline_closure_plan
+        .expect("inline mode plans a closure for the target too");
+    assert!(
+        target_plan.original_document_text.contains("TARGET-BODY"),
+        "closure ownership moved to the target with the hand-off"
+    );
+    assert!(
+        !target_plan.original_document_text.contains("ROUTER-BODY"),
+        "the router is not the closure owner once it has handed off"
+    );
+}

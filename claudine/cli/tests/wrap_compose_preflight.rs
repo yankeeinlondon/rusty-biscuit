@@ -296,3 +296,70 @@ fn compose_preflight_discovers_shell_inside_false_block() {
         "provider must not launch when preflight fails; stderr was:\n{plain}"
     );
 }
+
+/// `--dry-run` never traverses a dynamic `proxy` route.
+///
+/// The Phase 6 plan asserted dry-run "fires no lifecycle events and therefore
+/// never traverses a dynamic proxy route". The first half is false and
+/// deliberately so: `level2_lifecycle_dispatch`'s
+/// `..._blocked_preflight_dry_run_shell_audit_fires_blocked_and_finalize_stacks`
+/// pins `initialize` → `blocked` → `finalize` as the dry-run contract. So a
+/// router's `initialize` *can* hand off during a dry run, and the conclusion
+/// has to be earned rather than inherited: the dry-run seam consumes the
+/// transition and renders the document it was given. Without that, the
+/// hand-off would be the silently-dropped proxy the transition type exists to
+/// prevent.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_does_not_traverse_a_proxy_handoff() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let target = workspace.path().join("target.md");
+    fs::write(&target, "---\ntitle: target\n---\nTARGET-BODY\n").unwrap();
+
+    // `--goose` below makes the target resolve eagerly, which is the path that
+    // reaches `initialize` on a dry run.
+    let router = workspace.path().join("router.md");
+    fs::write(
+        &router,
+        "---\ntitle: router\ninitialize:\n  stack:\n    - action: {proxy: \"target.md\"}\n---\nROUTER-BODY\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'provider should not run' >&2\nexit 99\n",
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "compose",
+            "--goose",
+            "--dry-run",
+            router.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let stdout = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stdout));
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+
+    assert!(
+        stdout.contains("ROUTER-BODY"),
+        "dry-run renders the document it was given; stdout was:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("TARGET-BODY"),
+        "dry-run must not compose the hand-off target; stdout was:\n{stdout}"
+    );
+    assert!(
+        !stderr.contains("provider should not run"),
+        "dry-run must not launch the provider; stderr was:\n{stderr}"
+    );
+}

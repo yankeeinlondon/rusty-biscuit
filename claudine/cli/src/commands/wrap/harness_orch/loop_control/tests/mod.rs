@@ -218,6 +218,19 @@ fn outcome_with(control: StackControl) -> LifecycleEventOutcome {
     }
 }
 
+/// A run ledger seeded at `origin`, for dispatches that read the chain.
+///
+/// A default approval cache is correct here: these tests exercise transition
+/// decisions, and no dispatch path reads the cache.
+fn ledger(origin: &Path) -> claudine::composition::RunLedger {
+    claudine::composition::RunLedger::new(origin.to_path_buf(), Default::default())
+}
+
+/// A coordinator whose run originates at `origin`.
+fn coordinator(origin: &Path) -> ActiveDocumentCoordinator {
+    ActiveDocumentCoordinator::new(origin.to_path_buf(), Default::default())
+}
+
 fn dispatch_guard<'a>(
     config: &'a LifecycleConfig,
     ctx: &'a LifecycleRuntimeContext<'a>,
@@ -227,6 +240,7 @@ fn dispatch_guard<'a>(
 }
 
 
+mod coordinator_adoption;
 mod lifecycle_ordering;
 mod proxy;
 mod requeue;

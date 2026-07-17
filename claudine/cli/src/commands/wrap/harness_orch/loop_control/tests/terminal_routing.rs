@@ -31,9 +31,8 @@ fn dispatch_defer_aborts_not_implemented() {
         Provider::Goose,
         &mut state,
         &fx.materialized,
-        Some(fx._dir.path()),
         &mut guard,
-        &mut ProxyTracking::default(),
+        &ledger(&fx.source_path),
         &fx.term,
         false,
     );
@@ -76,9 +75,8 @@ fn dispatch_stop_falls_through() {
         Provider::Goose,
         &mut state,
         &fx.materialized,
-        Some(fx._dir.path()),
         &mut guard,
-        &mut ProxyTracking::default(),
+        &ledger(&fx.source_path),
         &fx.term,
         false,
     );
@@ -112,9 +110,8 @@ fn dispatch_error_aborts_without_changing_stop_semantics() {
         Provider::Goose,
         &mut state,
         &fx.materialized,
-        Some(fx._dir.path()),
         &mut guard,
-        &mut ProxyTracking::default(),
+        &ledger(&fx.source_path),
         &fx.term,
         false,
     );
@@ -151,9 +148,8 @@ fn dispatch_no_control_falls_through() {
         Provider::Goose,
         &mut state,
         &fx.materialized,
-        Some(fx._dir.path()),
         &mut guard,
-        &mut ProxyTracking::default(),
+        &ledger(&fx.source_path),
         &fx.term,
         false,
     );
