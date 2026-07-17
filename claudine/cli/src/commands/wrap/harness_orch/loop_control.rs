@@ -623,8 +623,7 @@ fn preflight_pending_proxy_phase(
         preflight_proxy_target(prompt_state, harness_context.shell_options(), child_cwd)
     });
     if let Err(error) = result {
-        let err_info =
-            LifecycleErrorInfo::from_action_failure("shell_approval", error.to_string());
+        let err_info = LifecycleErrorInfo::from_error_or_action("shell_approval", error.as_ref());
         let empty = empty_materialized_prompt();
         return Err(emit_blocked_finalize_with_err(
             lifecycle_guard,
@@ -666,8 +665,7 @@ fn materialize_attempt_prompt_phase(
     )
     .in_scope(|| materialize_harness_prompt(prompt_state, repo_root, child_cwd))
     .map_err(|error| {
-        let err_info =
-            LifecycleErrorInfo::from_action_failure("materialize", error.to_string());
+        let err_info = LifecycleErrorInfo::from_error_or_action("materialize", error.as_ref());
         let empty = empty_materialized_prompt();
         match emit_blocked_finalize_with_err(
             lifecycle_guard,
@@ -860,7 +858,7 @@ fn execute_attempt_phase(
         cli_stall_timeout.clone(),
     )
     .map_err(|e| {
-        let err_info = LifecycleErrorInfo::from_action_failure("harness_launch", e.to_string());
+        let err_info = LifecycleErrorInfo::from_error_or_action("harness_launch", e.as_ref());
         // A lifecycle evaluation error raised by the failure/finalize
         // stack takes precedence over the original harness-launch error —
         // the lifecycle raise is the more actionable diagnosis and must
@@ -950,8 +948,7 @@ fn execute_attempt_phase(
     // failure + finalize stacks (with `err`) before propagating.
     let (outcome, perf, iteration_signals) = attempt_result
     .map_err(|e| {
-        let err_info =
-            LifecycleErrorInfo::from_action_failure("harness_attempt", e.to_string());
+        let err_info = LifecycleErrorInfo::from_error_or_action("harness_attempt", e.as_ref());
         // A lifecycle evaluation error raised by the failure/finalize
         // stack takes precedence over the original harness-attempt error —
         // the lifecycle raise is the more actionable diagnosis and must

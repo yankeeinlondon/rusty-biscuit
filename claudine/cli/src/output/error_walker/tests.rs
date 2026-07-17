@@ -39,6 +39,97 @@ fn returns_none_for_untyped_error() {
     assert!(try_render_block_report(&report, &width80()).is_none());
 }
 
+/// A `HarnessError` was invisible to the walker before Phase 5: it implemented
+/// `Diagnostic`, but the walker's own downcast list only knew
+/// `CompositionError`, so it could never render a block. This is spec §"Failure
+/// Pattern 2" and the class of the motivating incident.
+#[test]
+fn renders_harness_error_block() {
+    let err = claudine::harness::HarnessError::PathResolutionFailed {
+        raw: "no/such/target.md".to_string(),
+        failure: claudine::harness::PathResolutionFailure::TargetMissing,
+        source_path: Some(PathBuf::from("route.md")),
+        resolved: Some(PathBuf::from("/repo/no/such/target.md")),
+    };
+    let report: Report = eyre!(err);
+
+    let rendered = try_render_block_report(&report, &width80()).expect("block error found");
+    let plain = strip_escape_codes(&rendered);
+    assert!(plain.contains("composition.invalid_file_reference"), "got:\n{plain}");
+    assert!(plain.contains("no/such/target.md"), "got:\n{plain}");
+}
+
+/// Selection is role-based, not deepest-wins: a `Semantic` Claudine wrapper
+/// stops the walk even though a renderable lower-layer cause sits below it.
+///
+/// The wrapper is what knows *which authored value* asked and *where*, so the
+/// pre-Phase-5 deepest-wins rule would have discarded exactly the context the
+/// operator needs.
+#[test]
+fn semantic_wrapper_wins_over_deeper_lower_layer_cause() {
+    let report: Report = eyre!(invalid_file_reference());
+
+    let rendered = try_render_block_report(&report, &width80()).expect("block error found");
+    let plain = strip_escape_codes(&rendered);
+    // The wrapper's authoring context, which the inner `HarnessError` lacks.
+    assert!(plain.contains("route.md"), "source path missing:\n{plain}");
+    assert!(plain.contains("initialize"), "event missing:\n{plain}");
+    // The typed source's own detail still reaches the block through it.
+    assert!(plain.contains("no/such/target.md"), "reference missing:\n{plain}");
+}
+
+/// Rendering, `err.*`, and the serialized snapshot must resolve through the
+/// *same* selection — a route that classifies one cause while rendering another
+/// is the defect D2/D5 exist to prevent.
+#[test]
+fn rendering_lifecycle_err_and_snapshot_agree_on_one_diagnostic() {
+    use claudine::composition::LifecycleErrorInfo;
+    use claudine::diagnostics::{DiagnosticSnapshot, select_effective_diagnostic};
+
+    let err = invalid_file_reference();
+    let selected = select_effective_diagnostic(&err)
+        .and_then(|s| s.diagnostic())
+        .expect("a diagnostic is selected");
+    let snapshot = DiagnosticSnapshot::from_diagnostic(selected);
+    let info = LifecycleErrorInfo::from_composition_error(&err);
+    let facets = info.facets.as_ref().expect("typed error projects facets");
+
+    // One code across all three surfaces.
+    assert_eq!(facets.code, selected.code());
+    assert_eq!(snapshot.code, selected.code());
+    // One message across `err.msg` and the snapshot.
+    assert_eq!(info.msg, snapshot.message);
+    // And the terminal rendering is that same diagnostic's own block — not a
+    // wrapper's flattened `Display`, and not a deeper cause's block.
+    let term = width80();
+    let report: Report = eyre!(invalid_file_reference());
+    assert_eq!(
+        try_render_block_report(&report, &term).expect("block"),
+        selected.report_block_error(&term),
+    );
+}
+
+/// The motivating incident's error shape: a composition semantic wrapper over a
+/// typed `HarnessError` resolution failure.
+fn invalid_file_reference() -> CompositionError {
+    CompositionError::InvalidFileReference {
+        context: Box::new(claudine::composition::FileReferenceContext {
+            source_path: PathBuf::from("route.md"),
+            event: Some("initialize".to_string()),
+            property: "initialize.stack[0].proxy".to_string(),
+            reference: "no/such/target.md".to_string(),
+            hint: "A `proxy` target must name an existing Markdown document."
+                .to_string(),
+        }),
+        source: claudine::harness::HarnessError::PathResolutionFailed {
+            raw: "no/such/target.md".to_string(),
+            failure: claudine::harness::PathResolutionFailure::TargetMissing,
+            source_path: Some(PathBuf::from("route.md")),
+            resolved: Some(PathBuf::from("/repo/no/such/target.md")),
+        },
+    }
+}
+
 #[test]
 fn renders_transclusion_cycle_chain() {
     use darkmatter::markdown::compose::TransclusionError;

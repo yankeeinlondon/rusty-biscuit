@@ -1,13 +1,15 @@
-//! Top-level cause-chain walker that renders darkmatter `BlockError`
-//! reports for any error produced by the CLI's subcommands.
+//! Top-level cause-chain walker that renders a [`BlockError`] report for any
+//! error produced by the CLI's subcommands.
 //!
-//! The walker iterates a [`color_eyre::Report`]'s cause chain from
-//! outermost to innermost, calls
-//! [`darkmatter::markdown::errors::as_block_error`] on each cause, and
-//! renders the deepest typed match via its
-//! [`BlockError::report_block_error`] impl.
+//! The walker resolves the **effective diagnostic** through Claudine's shared
+//! [`select_effective_diagnostic`], which is also what builds
+//! [`LifecycleErrorInfo`] and the machine-facing snapshot — so a route cannot
+//! classify one cause while rendering another. Selection composes Claudine's
+//! diagnostic registry with Darkmatter's `as_block_error`, so this module keeps
+//! no downcast list of its own; a second, partial list here is exactly how
+//! `ClaudineError` and `HarnessError` became unrenderable.
 //!
-//! If no cause implements [`BlockError`], the caller falls back to
+//! If nothing in the chain is renderable, the caller falls back to
 //! `color_eyre`'s default `Debug` output.
 
 use biscuit_terminal::discovery::detection::ColorDepth;
@@ -16,35 +18,30 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 use claudine::composition::lifecycle_context::LifecycleErrorInfo;
 use claudine::composition::{CompositionError, FrontmatterExcerpt};
+use claudine::diagnostics::select_effective_diagnostic;
 use color_eyre::eyre::Report;
-use darkmatter::markdown::errors::as_block_error;
 use std::error::Error as StdError;
 use std::path::Path;
 
-/// Try to render `report` as a darkmatter [`BlockError`] report.
+/// Try to render `report` as a [`BlockError`] report.
 ///
-/// Walks the report's cause chain and returns the rendered string for the
-/// **deepest** cause that implements [`BlockError`]. Deepest is preferred
-/// so wrappers (`ClaudineError`, `CompositionError`, `MarkdownError`, …)
-/// do not shadow the richer leaf error's metadata.
+/// Returns the rendered string for the diagnostic
+/// [`select_effective_diagnostic`] chose to speak for the failure, with a
+/// captured frontmatter excerpt appended when the chain carries one.
 ///
-/// Returns `None` when no cause implements [`BlockError`].
+/// Returns `None` when nothing in the chain is renderable.
 pub(crate) fn try_render_block_report(report: &Report, term: &Terminal) -> Option<String> {
     let root: &(dyn StdError + 'static) = report.as_ref();
 
-    // A frontmatter-enriched error wraps its real cause; render from the inner
-    // error so the deepest typed block still wins, then append the captured
-    // frontmatter excerpt after it.
-    let wrapper = find_frontmatter_wrapper(root);
-    let start: &(dyn StdError + 'static) = match wrapper {
-        Some((inner, _)) => inner,
-        None => root,
-    };
+    // Selection walks *through* a frontmatter wrapper on its own — the wrapper
+    // is `Transparent`, so it never becomes the selected diagnostic. This
+    // lookup is only for the excerpt it captured.
+    let excerpt = find_frontmatter_excerpt(root);
 
-    let deepest = deepest_block_error(start)?;
-    let mut out = deepest.report_block_error(term);
+    let selected = select_effective_diagnostic(root)?;
+    let mut out = selected.block_error().report_block_error(term);
 
-    if let Some((_, excerpt)) = wrapper {
+    if let Some(excerpt) = excerpt {
         let appendix = excerpt.render_appendix(term);
         if !appendix.is_empty() {
             out = out.trim_end_matches('\n').to_string();
@@ -128,45 +125,22 @@ pub(crate) fn evaluation_error_already_emitted(report: &Report) -> bool {
     false
 }
 
-/// Find the first [`CompositionError::WithFrontmatter`] in the cause chain,
-/// returning its inner error and captured excerpt.
-fn find_frontmatter_wrapper<'a>(
+/// Find the excerpt captured by the first [`CompositionError::WithFrontmatter`]
+/// in the cause chain.
+///
+/// Walks `Error::source` rather than `diagnostic_source` because the wrapper
+/// may sit below an error that is not a `Diagnostic` at all.
+fn find_frontmatter_excerpt<'a>(
     root: &'a (dyn StdError + 'static),
-) -> Option<(&'a CompositionError, &'a FrontmatterExcerpt)> {
+) -> Option<&'a FrontmatterExcerpt> {
     let mut current = Some(root);
     while let Some(err) = current {
-        if let Some(CompositionError::WithFrontmatter { inner, excerpt }) =
+        if let Some(CompositionError::WithFrontmatter { excerpt, .. }) =
             err.downcast_ref::<CompositionError>()
         {
-            return Some((inner.as_ref(), excerpt));
+            return Some(excerpt);
         }
         current = err.source();
-    }
-    None
-}
-
-fn deepest_block_error<'a>(
-    err: &'a (dyn StdError + 'static),
-) -> Option<&'a (dyn BlockError + 'static)> {
-    let mut deepest = discover_block_error(err);
-    let mut current = err.source();
-    while let Some(next) = current {
-        if let Some(found) = discover_block_error(next) {
-            deepest = Some(found);
-        }
-        current = next.source();
-    }
-    deepest
-}
-
-fn discover_block_error<'a>(
-    err: &'a (dyn StdError + 'static),
-) -> Option<&'a (dyn BlockError + 'static)> {
-    if let Some(found) = as_block_error(err) {
-        return Some(found);
-    }
-    if let Some(v) = err.downcast_ref::<CompositionError>() {
-        return Some(v);
     }
     None
 }

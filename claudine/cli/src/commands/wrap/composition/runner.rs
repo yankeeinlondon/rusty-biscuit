@@ -167,10 +167,7 @@ pub(super) fn run_composition_body(
             Some(lifecycle_context),
             frontmatter,
             document_start,
-            claudine::composition::LifecycleErrorInfo::from_action_failure(
-                "harness_plan",
-                e.to_string(),
-            ),
+            claudine::composition::LifecycleErrorInfo::from_error_or_action("harness_plan", &e),
         );
         match preflight_outcome {
             PreflightBlockedOutcome::EvaluationError(ce) => ce.into(),
@@ -215,9 +212,9 @@ pub(super) fn run_composition_body(
                 Some(lifecycle_context),
                 frontmatter,
                 document_start,
-                claudine::composition::LifecycleErrorInfo::from_action_failure(
+                claudine::composition::LifecycleErrorInfo::from_error_or_action(
                     "shell_approval",
-                    e.to_string(),
+                    &e,
                 ),
             );
             match preflight_outcome {
