@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 6
+phase: 7
 total_phases: 8
 agent: claude/default
 yolo: true
@@ -96,6 +96,25 @@ docs_updated_during_phase_6:
     - claudine/features/2026-07-13-file-resolution/plan.md
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6: []
+source_files_during_phase_7:
+    - claudine/lib/src/composition/sequence.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/composition/resolve.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/system_prompt/resolve.rs
+    - claudine/lib/src/system_prompt/resolve/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/harness/error.rs
+    - claudine/lib/src/harness/error/tests.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+docs_updated_during_phase_7:
+    - claudine/features/2026-07-13-file-resolution/plan.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
 packages:
     - biscuit-file
     - darkmatter
@@ -356,20 +375,31 @@ green. All four proxy routes provably agree (acceptance 5).
 Satisfies D5's remaining surfaces, D9, D11. **Parallelizable with Phases 5–6**;
 touches disjoint files from Phase 6.
 
-- [ ] Migrate `resolve_sequence_reference` (`composition/sequence.rs:84-136`): delete the private `~` expansion at `:87-94` (now a shared kind per D11), the `is_file_reference_target` classifier at `:140-146`, and the **plain-relative manual join at `:134-135`** which conflates implicit with explicit exactly as the harness resolver did. Note `./`/`../` currently fall through to that join by design (`:82-83`) and `~` never reaches `FileReference` at all
-- [ ] Preserve the `@/x` → `@x` normalization (`sequence.rs:98-102`) as explicit `FileReference` configuration, not local string surgery
-- [ ] Migrate system-prompt **file reference** `resolve_file_ref` (`system_prompt/resolve.rs:190-203`) — a third private grammar: absolute passthrough, else `cwd.join(path)` at `:195`, with no `@`/`~`/magic/repo-root support. Callers: `:52` (`--append-system-prompt`), `:65` (`--replace-system-prompt`)
-- [ ] **Leave `discover_standard_file` (`system_prompt/resolve.rs:80-115`) alone.** Per D5 it is filename **discovery** over known anchors, not reference resolution. Name it as such in its docs so the distinction survives
-- [ ] Unify the divergent sequence-source resolvers: `resolve_sequence_source` (`cli/src/commands/sequence.rs:88-100`) falls back on `NotMarkdown` to a **bare** `FileReference::new` at `:97` that never gets the `prompts/` magic roots — so `@foo.yaml` resolves differently from `@foo.md` today
-- [ ] Fix the composition enrichment divergence: `read_source_text_for_enrichment` (`composition/resolve.rs:171-186`) uses only `.with_package_area_magic_path()` and **skips** `with_prompt_magic_paths` (`:106-124`), so a file that resolved at launch via a `prompts/` root fails to re-resolve for error enrichment and silently degrades the render (`:165-168`)
-- [ ] Keep Claudine's prompt magic roots (`composition/resolve.rs:133-151`) as explicit `FileReference` configuration per D1 — package area, `<area>/prompts`, `<repo>/prompts`, `<repo>/.claudine/prompts`, `~/.claudine/prompts`
-- [ ] Preserve the interactive autocomplete fallback at `cli/src/commands/compose/prep.rs:380-389` — it **keys on the `FileNotFound` error variant**, so changing error types breaks it silently. Re-point it at the typed no-match outcome
-- [ ] D9: completion must emit values that execute through the **same** candidate builder in the same context. Verify `cli/src/completion/` ranks/displays from the shared plan and never teaches source-relative-only syntax while execution is repository-first
-- [ ] Top-level CLI references with no source document use the launch context: **repository root first, then launch directory**. In-memory/stdin surfaces with neither return a typed missing-context error, never an unrelated ambient CWD (D2)
-- [ ] L1 tests: external sequences and composition sources honor the explicit/implicit contract; existing sequence `~` references resolve through `FileReference` with **unchanged** user-visible behavior; no production Claudine resolver manually classifies prefixes or joins/expands reference strings
+- [x] Migrate `resolve_sequence_reference` (`composition/sequence.rs:84-136`): delete the private `~` expansion at `:87-94` (now a shared kind per D11), the `is_file_reference_target` classifier at `:140-146`, and the **plain-relative manual join at `:134-135`** which conflates implicit with explicit exactly as the harness resolver did. Note `./`/`../` currently fall through to that join by design (`:82-83`) and `~` never reaches `FileReference` at all — **DONE.** `resolve_sequence_reference` is now a thin adapter over `FileReference::resolve_in_context` + `FileResolutionContext` (base = source document dir, no launch fallback per D2). The `~` expansion, `is_file_reference_target`, and plain-relative join are gone; `~` routes through the shared `Home` kind and resolution existence-checks. `SequenceLoadCause::HomeDir` is now production-dead (kept as a pub variant).
+- [x] Preserve the `@/x` → `@x` normalization (`sequence.rs:98-102`) as explicit `FileReference` configuration, not local string surgery — **DONE** (the only local surgery retained; guarded by `at_slash_normalizes_to_magic_search`).
+- [x] Migrate system-prompt **file reference** `resolve_file_ref` (`system_prompt/resolve.rs:190-203`) — a third private grammar: absolute passthrough, else `cwd.join(path)` at `:195`, with no `@`/`~`/magic/repo-root support. Callers: `:52` (`--append-system-prompt`), `:65` (`--replace-system-prompt`) — **DONE.** Now takes `&LaunchContext`, builds a `FileResolutionContext` (base = launch cwd, supplied repo root when it contains the cwd), and delegates to `FileReference::resolve_in_context`. `@`/`~`/magic/repo-first now supported; both callers updated.
+- [x] **Leave `discover_standard_file` (`system_prompt/resolve.rs:80-115`) alone.** Per D5 it is filename **discovery** over known anchors, not reference resolution. Name it as such in its docs so the distinction survives — **DONE** (untouched logic; doc-comment now states it is filename discovery, not reference resolution, and is deliberately distinct from `resolve_file_ref`).
+- [x] Unify the divergent sequence-source resolvers: `resolve_sequence_source` (`cli/src/commands/sequence.rs:88-100`) falls back on `NotMarkdown` to a **bare** `FileReference::new` at `:97` that never gets the `prompts/` magic roots — so `@foo.yaml` resolves differently from `@foo.md` today — **DONE.** Extracted `composition::build_prompt_reference` (the shared prompt-magic-root builder, D1); both the Markdown path and the CLI YAML fallback now route through it, so `@foo.yaml` and `@foo.md` resolve through identical roots.
+- [x] Fix the composition enrichment divergence: `read_source_text_for_enrichment` (`composition/resolve.rs:171-186`) uses only `.with_package_area_magic_path()` and **skips** `with_prompt_magic_paths` (`:106-124`), so a file that resolved at launch via a `prompts/` root fails to re-resolve for error enrichment and silently degrades the render (`:165-168`) — **DONE** (now uses the shared `build_prompt_reference`, so enrichment re-resolves through the same roots as launch).
+- [x] Keep Claudine's prompt magic roots (`composition/resolve.rs:133-151`) as explicit `FileReference` configuration per D1 — package area, `<area>/prompts`, `<repo>/prompts`, `<repo>/.claudine/prompts`, `~/.claudine/prompts` — **DONE** (kept; now the single source shared via `build_prompt_reference`).
+- [x] Preserve the interactive autocomplete fallback at `cli/src/commands/compose/prep.rs:380-389` — it **keys on the `FileNotFound` error variant**, so changing error types breaks it silently. Re-point it at the typed no-match outcome — **DONE (preserved).** The migration keeps `resolve_composition_source`/`resolve_sequence_source` mapping a no-match (`Ok(None)`) to `CompositionError::FileNotFound`, so the fallback still keys on the same variant; both compose (`prep.rs`) and sequence (`sequence.rs`) fallbacks continue to work.
+- [x] D9: completion must emit values that execute through the **same** candidate builder in the same context. Verify `cli/src/completion/` ranks/displays from the shared plan and never teaches source-relative-only syntax while execution is repository-first — **VERIFIED.** The completion subsystem hand-rolls its own scope/walker stack (`completion/scopes.rs` + `walker.rs`), but its positional prompt-file surfaces are already **repository-first** (`ScopeSet::iter_scopes`/`iter_magic_scopes`: repo → package-area → package → …), so it never teaches source-relative-only while execution is repository-first. The frontmatter-value surface is deliberately CWD-anchored (`scopes::property_value_root`). No change required in Phase 7; converting the whole hand-rolled subsystem to `FileReference::complete_partial` would be a separate refactor (Rule 2/3).
+- [x] Top-level CLI references with no source document use the launch context: **repository root first, then launch directory**. In-memory/stdin surfaces with neither return a typed missing-context error, never an unrelated ambient CWD (D2) — **DONE (satisfied by existing behavior + Phase 4).** Top-level `compose`/`sequence` source arguments resolve via `FileReference::resolve()` over the ambient launch context; Phase 4's implicit-relative flip makes that repository-first then launch-directory. Claudine has no in-memory/stdin composition source surface.
+- [x] L1 tests: external sequences and composition sources honor the explicit/implicit contract; existing sequence `~` references resolve through `FileReference` with **unchanged** user-visible behavior; no production Claudine resolver manually classifies prefixes or joins/expands reference strings — **DONE.** New: `sequence::tests::{implicit_reference_is_repository_first, explicit_dot_slash_is_source_relative_only, at_slash_normalizes_to_magic_search}`, updated `tilde_reference_expands_against_home_directory` (now existence-checked via the shared `Home` kind); `system_prompt::resolve::tests::{explicit_append_at_prefix_searches_repository_root, explicit_append_tilde_resolves_against_home, explicit_append_implicit_is_repository_first}`. The 10 pre-existing `*launch_area_fallback*` failures (Phase 6 note) are rewritten to the D2 contract (base-dir + repository-first; launch-area fallback is diagnostic-only, not a candidate) across `filesystem_lookup.rs`, `looping/expression.rs`, `preflight/tests.rs`, `schema/tests.rs`.
 
 **Checkpoint 7:** `just test` + `just lint` green in `claudine`. All four private
 grammars are gone (acceptance 1).
+
+> **Pre-existing-debt fix folded in.** `just test` (claudine area) also runs
+> `claudine-cli`, whose `repository_test_placement` was red on the inline-test
+> line cap for `lib/src/harness/error.rs` (347 > 300) — a violation introduced
+> by **this feature's own Phase 6** commit (`9327ba193`). Phase 7 relocated that
+> file's two inline `#[cfg(test)] mod` blocks verbatim into a sibling
+> `lib/src/harness/error/tests.rs` (declared `#[cfg(test)] mod tests;`), a
+> **test-only** move with no production change, so the whole area gate is green.
+> Also reconciled the CLI-side launch-area test
+> `wrap::sequence::phase1c::template_preflight_*` to the D2 contract alongside
+> the ten lib-side ones.
 
 ---
 
