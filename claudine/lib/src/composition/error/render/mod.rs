@@ -149,6 +149,12 @@ pub(super) fn render_file_link(path: &std::path::Path) -> String {
     )
 }
 
+/// Project a 1-based line number, or `null` for the `0` sentinel the
+/// composition layer uses to mean "the source carried no line".
+fn optional_line(line: usize) -> Value {
+    if line > 0 { json!(line) } else { Value::Null }
+}
+
 pub(super) fn escape_prose_path(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for ch in input.chars() {
@@ -164,8 +170,12 @@ pub(super) fn escape_prose_path(input: &str) -> String {
 }
 
 /// Map a `ComposeFailed`'s inner [`MarkdownError`] to a composition code,
-/// delegating an interpolation failure to its deepest typed cause (design §9:
-/// the code follows the same deepest-meaningful-cause walk as rendering).
+/// reading an interpolation failure's typed cause for a finer one.
+///
+/// This is a match over Darkmatter's own error tree, not the selection walk: a
+/// `MarkdownError` is not a `Diagnostic`, so `select_effective_diagnostic`
+/// cannot see inside it. `ComposeFailed` is `Semantic` and owns whichever code
+/// this returns (decisions.md §D-3).
 fn compose_failed_code(md: &MarkdownError) -> &'static str {
     match md {
         MarkdownError::Interpolation { cause, .. } => match cause.as_ref() {
@@ -269,6 +279,13 @@ impl Diagnostic for CompositionError {
             | CompositionError::SequenceMissingProperties { .. } => "composition.missing_properties",
             CompositionError::FrontmatterParse(_) => "composition.frontmatter_parse",
             CompositionError::ShellExpansionFailed { .. } => "composition.shell_expansion",
+            // The approval family: a user declining and the catalog refusing
+            // are the same authoring problem with the same fix, so they share a
+            // code and `err.detail.reason` tells them apart. `PreFlightFailed`
+            // is deliberately *not* here — it is prose, and claiming this code
+            // would mean parsing its `Display` to find its reason.
+            CompositionError::ShellCommandDenied { .. }
+            | CompositionError::ShellApprovalUnavailable { .. } => "composition.shell_approval",
             CompositionError::AtomicWriteFailed { .. } => "io.write_failed",
             // The lifecycle-stack family shares one authoring-error code; the
             // `variant` facet still distinguishes them for finer handlers.
@@ -435,6 +452,30 @@ impl Diagnostic for CompositionError {
             // `io.write_failed` declares `path`.
             CompositionError::AtomicWriteFailed { path, .. } => {
                 base["path"] = json!(path.to_string_lossy());
+            }
+            // `composition.shell_approval` declares `command`, `source_path`,
+            // `line`, `reason`. A `line` of 0 means the source carried none, so
+            // it projects `null` rather than a line number that does not exist.
+            CompositionError::ShellCommandDenied {
+                command,
+                source_file,
+                line,
+            } => {
+                base["command"] = json!(command);
+                base["source_path"] = json!(source_file.to_string_lossy());
+                base["line"] = optional_line(*line);
+                base["reason"] = json!("denied");
+            }
+            CompositionError::ShellApprovalUnavailable {
+                command,
+                source_file,
+                line,
+                failure,
+            } => {
+                base["command"] = json!(command);
+                base["source_path"] = json!(source_file.to_string_lossy());
+                base["line"] = optional_line(*line);
+                base["reason"] = json!(failure.as_str());
             }
             // `composition.lifecycle_invalid` declares `property`, `message`.
             // The lifecycle family threads a `property` (and usually a

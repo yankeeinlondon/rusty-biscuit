@@ -12,7 +12,7 @@ use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder, Resoluti
 use darkmatter::markdown::compose::subtree::SubtreeCompose;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, EffectiveStateBuilder};
 
-use crate::composition::error::CompositionError;
+use crate::composition::error::{CompositionError, ShellApprovalFailure};
 use crate::composition::lifecycle::{
     LATE_BINDING_ROOTS, LifecycleConfig, LifecycleSignal, collect_lifecycle_shell_commands,
 };
@@ -45,7 +45,8 @@ pub struct PreFlightResult {
 ///
 /// - `ShellCommandDenied` if the user denies any command
 /// - `PreFlightDiscoveryFailed` if Darkmatter's document graph walk fails
-/// - `PreFlightFailed` for blacklisted commands or missing approval handler
+/// - `ShellApprovalUnavailable` for blacklisted commands or missing approval handler
+/// - `PreFlightFailed` for a shell-audit failure outside the approval family
 ///
 /// ## Arguments
 ///
@@ -146,35 +147,28 @@ pub fn resolve_shell_approvals(
                 // No handler -- cannot get approval. Under `--dry-run` the
                 // CI/non-TTY gate names the offending command and points at
                 // the two ways to proceed (spec: Non-TTY Behavior).
-                if approval_options.dry_run {
-                    return Err(CompositionError::PreFlightFailed(format!(
-                        "Cannot dry-run: shell command '{command}' requires interactive approval. \
-                         Run with --yolo to auto-approve, or pre-approve the command in your \
-                         configuration."
-                    )));
-                }
-                let location = if *line > 0 {
-                    format!("{}:{}", source_file.display(), line)
+                let failure = if approval_options.dry_run {
+                    ShellApprovalFailure::DryRun
                 } else {
-                    source_file.display().to_string()
+                    ShellApprovalFailure::NoHandler
                 };
-                return Err(CompositionError::PreFlightFailed(format!(
-                    "Shell command '{command}' at {location} requires approval but no approval handler \
-                     is available. Add to whitelist or run interactively."
-                )));
+                return Err(CompositionError::ShellApprovalUnavailable {
+                    command,
+                    source_file: source_file.clone(),
+                    line: *line,
+                    failure,
+                });
             }
             Err(crate::harness::error::HarnessError::ShellCommandBlacklisted {
                 command,
                 reason,
             }) => {
-                let location = if *line > 0 {
-                    format!("{}:{}", source_file.display(), line)
-                } else {
-                    source_file.display().to_string()
-                };
-                return Err(CompositionError::PreFlightFailed(format!(
-                    "Shell command '{command}' at {location} is blacklisted: {reason}"
-                )));
+                return Err(CompositionError::ShellApprovalUnavailable {
+                    command,
+                    source_file: source_file.clone(),
+                    line: *line,
+                    failure: ShellApprovalFailure::Blacklisted(reason),
+                });
             }
             Err(e) => {
                 return Err(CompositionError::PreFlightFailed(e.to_string()));

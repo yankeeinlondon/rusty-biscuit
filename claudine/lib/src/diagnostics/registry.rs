@@ -1,10 +1,10 @@
 //! The single-source registry of locked diagnostic codes.
 //!
 //! This is the ratified code catalog from
-//! `claudine/features/2026-06-28-real-errors/error-catalog.md` §3, encoded as
-//! data: every dotted `code`, its [`Category`]/[`Disposition`]/[`Origin`]
-//! facets, an optional severity override, and the field names its `detail`
-//! payload carries. It is the contract that `claudine errors` introspects and
+//! `claudine/features/_completed/2026-06-28-real-errors/error-catalog.md` §3,
+//! encoded as data: every dotted `code`, its
+//! [`Category`]/[`Disposition`]/[`Origin`] facets, an optional severity
+//! override, and the field names its `detail` payload carries. It is the contract that `claudine errors` introspects and
 //! that a `Diagnostic` implementation must agree with.
 //!
 //! Evolution is **additive-only**: adding a new [`CodeSpec`] or a new
@@ -270,6 +270,20 @@ pub const CODES: &[CodeSpec] = &[
         origin: Origin::Author,
         severity_override: None,
         detail: &["command"],
+    },
+    CodeSpec {
+        code: "composition.shell_approval",
+        category: Category::Composition,
+        disposition: Disposition::Correctable,
+        origin: Origin::Author,
+        severity_override: None,
+        // A shell command the author wrote could not be approved. Every reason
+        // — the user declined, the catalog blacklists it, no handler was
+        // available, `--dry-run` cannot prompt — resolves the same way: change
+        // the document or the approval configuration. That shared remediation
+        // is what keeps one code's `disposition` stable while `reason`
+        // discriminates (error-catalog §7.5).
+        detail: &["command", "source_path", "line", "reason"],
     },
     CodeSpec {
         code: "composition.failed",
@@ -585,8 +599,9 @@ mod tests {
     #[test]
     fn catalog_covers_the_ratified_count() {
         // 12 categories; the faithful transcription of §3 landed at 42, plus the
-        // additive `composition.schema_parse` (finding #6) → 43. This pins the
-        // count so an accidental drop or duplicate is caught.
-        assert_eq!(CODES.len(), 43);
+        // additive `composition.schema_parse` (finding #6) → 43, plus the
+        // additive `composition.shell_approval` (error-propagation §D-14) → 44.
+        // This pins the count so an accidental drop or duplicate is caught.
+        assert_eq!(CODES.len(), 44);
     }
 }

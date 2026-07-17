@@ -1,4 +1,5 @@
 use super::*;
+use crate::diagnostics::Diagnostic;
 use darkmatter::markdown::compose::shell_expansion::types::{
     ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
 };
@@ -205,9 +206,91 @@ fn blacklisted_command_returns_error() {
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
-        matches!(err, CompositionError::PreFlightFailed(ref msg) if msg.contains("blacklisted")),
-        "expected PreFlightFailed with blacklisted, got: {err}"
+        matches!(
+            err,
+            CompositionError::ShellApprovalUnavailable {
+                failure: ShellApprovalFailure::Blacklisted(_),
+                ..
+            }
+        ),
+        "expected ShellApprovalUnavailable/Blacklisted, got: {err}"
     );
+    // The prose the variant replaced is a user-visible surface; typing the
+    // error must not reword it.
+    assert!(
+        err.to_string().contains("is blacklisted:"),
+        "blacklist message must survive the typed variant; got: {err}"
+    );
+}
+
+/// Every approval failure claims `composition.shell_approval` and projects the
+/// authored command, its source, and a matchable `reason` — the distinction a
+/// `when:` clause lost when these three all collapsed into
+/// `PreFlightFailed(String)`'s `composition.failed` catch-all (Phase 7 finding,
+/// ruled in decisions.md §D-14).
+#[test]
+fn approval_failures_project_a_matchable_reason() {
+    let cases = [
+        (
+            ShellApprovalFailure::Blacklisted("destructive".to_string()),
+            "blacklisted",
+        ),
+        (ShellApprovalFailure::NoHandler, "no_handler"),
+        (ShellApprovalFailure::DryRun, "dry_run"),
+    ];
+
+    for (failure, expected_reason) in cases {
+        let err = CompositionError::ShellApprovalUnavailable {
+            command: "rm -rf /".to_string(),
+            source_file: std::path::PathBuf::from("/repo/run.md"),
+            line: 12,
+            failure,
+        };
+        assert_eq!(err.code(), "composition.shell_approval");
+        let detail = err.detail();
+        assert_eq!(detail["reason"], serde_json::json!(expected_reason));
+        assert_eq!(detail["command"], serde_json::json!("rm -rf /"));
+        assert_eq!(detail["source_path"], serde_json::json!("/repo/run.md"));
+        assert_eq!(detail["line"], serde_json::json!(12));
+    }
+}
+
+/// A user declining shares the family's code, so one `when:` clause catches
+/// every approval failure, and `reason` separates a denial from a blacklist hit.
+#[test]
+fn a_user_denial_shares_the_approval_code_with_reason_denied() {
+    let err = CompositionError::ShellCommandDenied {
+        command: "curl example.com".to_string(),
+        source_file: std::path::PathBuf::from("/repo/run.md"),
+        line: 3,
+    };
+    assert_eq!(err.code(), "composition.shell_approval");
+    assert_eq!(err.detail()["reason"], serde_json::json!("denied"));
+}
+
+/// The lifecycle-stack source carries no line number, and `0` is its sentinel.
+/// Projecting `0` would assert a line that does not exist, so it must be `null`
+/// — the same absent-optional rule the rest of `err.detail.*` follows.
+#[test]
+fn a_line_less_source_projects_a_null_line_not_zero() {
+    let err = CompositionError::ShellApprovalUnavailable {
+        command: "rm -rf /".to_string(),
+        source_file: std::path::PathBuf::from("<lifecycle-stack>"),
+        line: 0,
+        failure: ShellApprovalFailure::NoHandler,
+    };
+    assert!(err.detail()["line"].is_null(), "line 0 must project null");
+}
+
+/// `PreFlightFailed` keeps the `composition.failed` catch-all deliberately: it
+/// is prose covering unrelated failures (the early-binding state builder, a
+/// shell-audit error outside the family), so claiming the approval code would
+/// mean parsing its `Display` to find a reason — the exact defect this feature
+/// exists to remove (decisions.md §D-14).
+#[test]
+fn preflight_failed_does_not_claim_the_approval_code() {
+    let err = CompositionError::PreFlightFailed("building early-binding state failed".to_string());
+    assert_eq!(err.code(), "composition.failed");
 }
 
 #[test]

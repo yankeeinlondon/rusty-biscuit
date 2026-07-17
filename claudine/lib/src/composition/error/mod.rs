@@ -1,7 +1,7 @@
 //! Composition-specific error types.
 
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::status::StatusState;
@@ -44,6 +44,60 @@ pub const LOOP_RATE_LIMITED_EXIT_CODE: i32 = 75;
 
 pub(crate) fn indexed_property(property: &str, index: usize) -> String {
     format!("{property}[{index}]")
+}
+
+/// Why a shell command could not be approved at pre-flight.
+///
+/// The `reason` facet of `composition.shell_approval`. Deliberately a closed
+/// enum rather than the prose it replaced: an author who wants to react to a
+/// blacklist hit but not to a missing approval handler needs a value to match,
+/// and re-deriving one by parsing `Display` is what this feature exists to stop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShellApprovalFailure {
+    /// The command matched Claudine's blacklist; carries the catalog's reason.
+    Blacklisted(String),
+    /// Approval was required, but no approval handler was available — a
+    /// non-interactive run with an unwhitelisted command.
+    NoHandler,
+    /// `--dry-run` cannot obtain the interactive approval the command needs.
+    DryRun,
+}
+
+impl ShellApprovalFailure {
+    /// The stable snake_case slug projected to `err.detail.reason`.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ShellApprovalFailure::Blacklisted(_) => "blacklisted",
+            ShellApprovalFailure::NoHandler => "no_handler",
+            ShellApprovalFailure::DryRun => "dry_run",
+        }
+    }
+
+    /// The human-facing message, byte-identical to the prose each of these
+    /// failures carried inside `PreFlightFailed(String)` before the approval
+    /// family was typed — the text is a user-visible surface, and typing the
+    /// error is not a licence to reword it.
+    fn message(&self, command: &str, source_file: &Path, line: usize) -> String {
+        let location = if line > 0 {
+            format!("{}:{}", source_file.display(), line)
+        } else {
+            source_file.display().to_string()
+        };
+        match self {
+            ShellApprovalFailure::Blacklisted(reason) => {
+                format!("Shell command '{command}' at {location} is blacklisted: {reason}")
+            }
+            ShellApprovalFailure::NoHandler => format!(
+                "Shell command '{command}' at {location} requires approval but no approval \
+                 handler is available. Add to whitelist or run interactively."
+            ),
+            ShellApprovalFailure::DryRun => format!(
+                "Cannot dry-run: shell command '{command}' requires interactive approval. \
+                 Run with --yolo to auto-approve, or pre-approve the command in your \
+                 configuration."
+            ),
+        }
+    }
 }
 
 /// Errors that can occur during composition workflows.
@@ -292,9 +346,39 @@ pub enum CompositionError {
     #[error("pre-flight discovery failed: {0}")]
     PreFlightDiscoveryFailed(#[source] MarkdownError),
 
-    /// A general pre-flight failure (blacklisted command, missing handler, etc.).
+    /// A pre-flight failure with no finer typed shape — the early-binding state
+    /// builder, or a shell-audit error outside the approval family.
+    ///
+    /// This variant is **not** the shell-approval surface: it carries prose, so
+    /// it cannot claim `composition.shell_approval` without parsing its own
+    /// `Display` to find out which failure it is. The approval failures have
+    /// [`ShellApprovalUnavailable`] and [`ShellCommandDenied`] instead.
+    ///
+    /// [`ShellApprovalUnavailable`]: CompositionError::ShellApprovalUnavailable
+    /// [`ShellCommandDenied`]: CompositionError::ShellCommandDenied
     #[error("pre-flight shell approval failed: {0}")]
     PreFlightFailed(String),
+
+    /// A shell command the author wrote could not be approved at pre-flight,
+    /// for a reason other than the user declining it.
+    ///
+    /// Split out of [`PreFlightFailed`]'s prose so the approval family can own
+    /// `composition.shell_approval` and project `command` / `source_path` /
+    /// `line` / `reason` as structured detail. `failure` is what tells a
+    /// blacklist hit from a missing handler, so no surface needs its own code.
+    ///
+    /// [`PreFlightFailed`]: CompositionError::PreFlightFailed
+    #[error("pre-flight shell approval failed: {}", failure.message(command, source_file, *line))]
+    ShellApprovalUnavailable {
+        /// The authored command that could not be approved.
+        command: String,
+        /// The document the command was written in.
+        source_file: PathBuf,
+        /// 1-based line of the command; `0` when the source carries no line.
+        line: usize,
+        /// Why approval could not be obtained.
+        failure: ShellApprovalFailure,
+    },
 
     /// The user denied a shell command during pre-flight approval.
     #[error(

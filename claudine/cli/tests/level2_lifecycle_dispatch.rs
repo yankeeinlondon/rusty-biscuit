@@ -611,15 +611,18 @@ fn level2_lifecycle_failure_stack_observes_err_payload() {
 /// `LifecycleErrorInfo::from_action_failure("shell_approval", fail_msg)`, which
 /// synthesized the facet-less labels `err.kind = "LifecycleAction"` and
 /// `err.variant = "shell_approval"`. Error-propagation Phase 5 (§D7) pointed it
-/// at the typed `CompositionError::PreFlightFailed` instead, and `err.kind` /
-/// `err.variant` are now **deprecated aliases** of `err.category` / `err.code`
-/// — so they project `composition` and `composition.failed`.
+/// at the typed pre-flight error instead, and `err.kind` / `err.variant` are now
+/// **deprecated aliases** of `err.category` / `err.code`.
 ///
-/// The flip is intended (see the feature's `characterization_error_routes.rs`,
-/// which deliberately pins event *order and presence* rather than these values
-/// for exactly this reason). What this test still proves is unchanged and is
-/// the reason it exists: the payload **reaches** the blocked stack's expression
-/// engine at all.
+/// Phase 5 landed that as `composition` / `composition.failed`, which was a loss
+/// of specificity — a shell denial became indistinguishable from any other
+/// uncoded composition failure. Phase 8 (§D-14) gave the approval family a typed
+/// variant and the `composition.shell_approval` code, so the distinction the
+/// old `shell_approval` label carried is back as a faceted value, and
+/// `err.detail.reason` (`blacklisted` here) says which approval failure it was.
+///
+/// What this test proves is unchanged and is the reason it exists: the payload
+/// **reaches** the blocked stack's expression engine at all.
 #[test]
 #[serial(level2_lifecycle)]
 fn level2_lifecycle_blocked_stack_observes_err_payload() {
@@ -649,10 +652,10 @@ fn level2_lifecycle_blocked_stack_observes_err_payload() {
          error-propagation migration; events.log was {lines:?}; pane:\n{pane}"
     );
     assert!(
-        lines.iter().any(|l| l == "err-variant=composition.failed"),
+        lines.iter().any(|l| l == "err-variant=composition.shell_approval"),
         "err.variant must reach the blocked stack as the typed error's code \
-         ('composition.failed') — it is a deprecated alias of err.code since the \
-         error-propagation migration; events.log was {lines:?}; pane:\n{pane}"
+         ('composition.shell_approval') — it is a deprecated alias of err.code since \
+         the error-propagation migration; events.log was {lines:?}; pane:\n{pane}"
     );
     assert!(
         !lines.iter().any(|l| l == "provider-ran"),
@@ -666,7 +669,7 @@ fn level2_lifecycle_blocked_stack_observes_err_payload() {
 /// audit during composition preflight and routes to `blocked` then `finalize`
 /// with the same `err_info` attached, so the `when: "err"` guard on the
 /// `finalize.stack` must be truthy and observe `err.variant` carrying the
-/// typed error's code (see the alias note on
+/// typed error's code (see the alias and `composition.shell_approval` notes on
 /// `level2_lifecycle_blocked_stack_observes_err_payload`).
 ///
 /// This complements `level2_lifecycle_finalize_stack_observes_err_after_failure`
@@ -704,7 +707,7 @@ fn level2_lifecycle_finalize_stack_observes_err_after_blocked() {
     assert!(
         lines
             .iter()
-            .any(|l| l == "finalize-err-variant=composition.failed"),
+            .any(|l| l == "finalize-err-variant=composition.shell_approval"),
         "err.variant must reach the failed-finalize stack on the blocked route — \
          `when: 'err'` must be truthy after a shell-audit block; \
          events.log was {lines:?}; pane:\n{pane}"

@@ -44,7 +44,8 @@ pub use error::{
     CompositionError, DroppedOptional, DroppedOptionalSource, DroppedOptionalStage,
     FileReferenceContext, InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE, MarkdownLoadCause,
     MissingProperty,
-    SequenceLoadCause, SequenceMissingPropertiesStep, SequenceSelectionFailure, TextFormat,
+    SequenceLoadCause, SequenceMissingPropertiesStep, SequenceSelectionFailure,
+    ShellApprovalFailure, TextFormat,
 };
 pub use file_detail::{FileDetail, extract_markdown_detail, extract_yaml_sequence_detail};
 pub use frontmatter_excerpt::FrontmatterExcerpt;
