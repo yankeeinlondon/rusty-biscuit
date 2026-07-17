@@ -22,8 +22,8 @@ access occurs until `resolve()` is called.
 
 | Prefix                | Kind                  | Resolves against                                         | Example                      |
 |-----------------------|-----------------------|----------------------------------------------------------|------------------------------|
-| `./` or `../`         | **Relative**          | Current working directory                                | `./src/main.rs`, `../a.md`   |
-| _(none)_              | **Implicit Relative** | CWD, then git repository root                            | `README.md`, `docs/spec.md`  |
+| `./` or `../`         | **Explicit Relative** | Current working directory (or `base`); no fallback       | `./src/main.rs`, `../a.md`   |
+| _(none)_              | **Implicit Relative** | Git repository root, then CWD (or `base`)                | `README.md`, `docs/spec.md`  |
 | `/`                   | **Absolute**          | Used verbatim                                            | `/etc/config.toml`           |
 | `@`                   | **Magic**             | Configurable search roots (git root, HOME, custom paths) | `@docs/spec.md`              |
 | `!`                   | **Package**           | Cargo workspace package area (or git root fallback)      | `!README.md`                 |
@@ -49,17 +49,20 @@ No fallback search is performed.
 
 ### Implicit Relative (bare path, no prefix)
 
-A bare path with no recognized prefix is treated as *implicitly* relative.
-It is first checked against the CWD and, if not found there, against the
-root of the enclosing git repository (when one is present).
+A bare path with no recognized prefix is treated as *implicitly* relative. It is
+first checked against the root of the enclosing git repository (when one is
+present) and, if not found there, against the CWD (or the `base` passed to
+`resolve_from`). Repository-shaped bare paths are the primary authoring form, so
+the repository candidate takes precedence over the source-local one.
 
 ```text
-foo.md              → <CWD>/foo.md, then <git_root>/foo.md
-docs/spec.md        → <CWD>/docs/spec.md, then <git_root>/docs/spec.md
+foo.md              → <git_root>/foo.md, then <CWD>/foo.md
+docs/spec.md        → <git_root>/docs/spec.md, then <CWD>/docs/spec.md
 ```
 
 If the reference is not found in either location, `resolve()` returns
-`Ok(None)`. If no git repository is discoverable, only the CWD is searched.
+`Ok(None)`. If no git repository is discoverable, only the CWD is searched. When
+the CWD *is* the git root, the two candidates collapse to a single one.
 
 ```rust,no_run
 use biscuit_file::FileReference;
@@ -289,6 +292,22 @@ left-to-right. Empty variable names (`{{}}`) and invalid names
 
 Interpolation happens during resolution, not parsing.
 
+### Interpolation and filesystem anchoring
+
+For the local anchoring family (explicit-relative, implicit-relative, and
+absolute references), the *effective* anchoring is re-derived from the payload
+**after** one interpolation pass. An implicit `{{PROJECT_ROOT}}/docs/spec.md`
+whose `PROJECT_ROOT` expands to an absolute path therefore resolves as an
+absolute reference rather than silently joining the expanded value onto a search
+root. The detailed resolver exposes both the authored kind (`class().kind`) and
+the effective anchoring (`effective_kind()`) so the behavior is observable.
+
+Interpolation may **not** inject a grammar sigil: an environment value that
+begins with `@`, `!`, `%`, `vault:`, or a URL scheme is rejected with
+`InvalidSyntax` rather than honored as that kind. Grammar sigils remain
+author-controlled. Magic (`@`), package (`!`), vault, and URL references keep
+their authored classification and interpolate within their own root search.
+
 ## API
 
 ### `FileReference`
@@ -326,8 +345,11 @@ All builder methods consume and return `self`, enabling chained usage.
 
 When a file reference appears inside a document, it should usually resolve
 relative to _that document's location_, not wherever the process happens to be
-running. `resolve_from()` overrides the ambient CWD for relative, `@`, and `!`
-lookups:
+running. `resolve_from(base)` treats `base` as the working directory for
+explicit-relative, implicit-relative, `@`, and `!` lookups. `base` is a
+directory: for a file-backed source, pass the source file's parent. Implicit
+references still search the enclosing git repository root of `base` first, then
+`base`; explicit `./`/`../` references use `base` only.
 
 ```rust,no_run
 use std::path::Path;
@@ -403,8 +425,8 @@ constructed by joining each search root with the interpolated path:
 
 | Kind              | Search Roots                                                       |
 |-------------------|--------------------------------------------------------------------|
-| Relative          | `[CWD]`                                                            |
-| Implicit Relative | `[CWD, git_root]` (git_root omitted when equal to CWD or absent)   |
+| Explicit Relative | `[CWD]` (no fallback)                                              |
+| Implicit Relative | `[git_root, CWD]` (CWD omitted when equal to git_root; git_root omitted when absent) |
 | Absolute          | `[interpolated path directly]`                                     |
 | Magic             | `magic_paths.prepend` → `git_root` → `HOME` → `magic_paths.append` |
 | Package           | `[package_area or git_root]`                                       |
