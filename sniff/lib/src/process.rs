@@ -31,6 +31,18 @@ pub(crate) mod timeouts {
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub(crate) const WINDOWS_LOCALE: Duration = Duration::from_secs(3);
 
+    /// Windows PowerShell audio-device probe.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub(crate) const WINDOWS_AUDIO: Duration = Duration::from_secs(5);
+
+    /// Windows default-route probe.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub(crate) const WINDOWS_DEFAULT_ROUTE: Duration = Duration::from_secs(3);
+
+    /// Windows timezone probe.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub(crate) const WINDOWS_TIMEZONE: Duration = Duration::from_secs(3);
+
     /// macOS `diskutil info`.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) const DISKUTIL: Duration = Duration::from_secs(5);
@@ -154,9 +166,9 @@ where
     });
 
     let start = Instant::now();
-    let status = loop {
+    let result = loop {
         match child.try_wait() {
-            Ok(Some(status)) => break status,
+            Ok(Some(status)) => break Ok(status),
             Ok(None) => {
                 if start.elapsed() >= timeout {
                     performance::increment_counter(counters::PROC_TIMEOUTS, 1);
@@ -168,27 +180,29 @@ where
                     let _ = child.kill();
                     // Reap, so the killed child cannot linger as a zombie.
                     let _ = child.wait();
-                    return Err(ProcessError::Timeout);
+                    break Err(ProcessError::Timeout);
                 }
                 std::thread::sleep(POLL_INTERVAL);
             }
             Err(e) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(ProcessError::Spawn(e));
+                break Err(ProcessError::Spawn(e));
             }
         }
     };
 
-    // The child has exited, so its pipe write ends are closed and both readers see
-    // EOF; joining cannot hang. A panicked reader degrades to empty output rather
-    // than propagating.
+    // The child has exited or been killed and reaped, so its pipe write ends are
+    // closed and both readers see EOF. Join on every path so no drain thread can
+    // outlive this call. A panicked reader degrades to empty output.
     let stdout = stdout_handle
         .map(|h| h.join().unwrap_or_default())
         .unwrap_or_default();
     let stderr = stderr_handle
         .map(|h| h.join().unwrap_or_default())
         .unwrap_or_default();
+
+    let status = result?;
 
     Ok(CapturedOutput {
         status,
@@ -217,48 +231,74 @@ where
 mod tests {
     use super::*;
 
+    const LARGE_OUTPUT_CHILD: &str = "process::tests::child_writes_large_output";
+    const SLEEPING_CHILD: &str = "process::tests::child_sleeps";
+
+    fn test_child_args(name: &str) -> Vec<std::ffi::OsString> {
+        [name, "--exact", "--ignored", "--nocapture"]
+            .into_iter()
+            .map(Into::into)
+            .collect()
+    }
+
+    #[test]
+    #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    fn child_writes_large_output() {
+        use std::io::Write;
+
+        let stdout = vec![b'o'; 1_048_576];
+        let stderr = vec![b'e'; 1_048_576];
+        std::io::stdout().write_all(&stdout).unwrap();
+        std::io::stderr().write_all(&stderr).unwrap();
+    }
+
+    #[test]
+    #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    fn child_sleeps() {
+        std::thread::sleep(Duration::from_secs(30));
+    }
+
     /// A child that outstrips its pipe buffer must still be captured whole.
     ///
     /// This is the regression the module exists for: the pre-Phase-6 `try_wait()`
     /// loops left stdout undrained, so this child would block in `write()` and be
     /// killed at the deadline with its output lost.
-    #[cfg(unix)]
     #[test]
     fn output_larger_than_a_pipe_buffer_does_not_deadlock() {
-        // 1 MiB — far beyond any platform's pipe buffer (64 KiB on Linux).
+        let executable = std::env::current_exe().expect("current test executable should resolve");
+        let args = test_child_args(LARGE_OUTPUT_CHILD);
         let out = run_with_timeout(
-            "sh",
-            &["-c", "yes abcdefghijklmnopqrstuvwxyz | head -c 1048576"],
+            executable,
+            &args,
             Duration::from_secs(30),
         )
         .expect("child should complete, not time out");
 
         assert!(out.status.success());
-        assert_eq!(out.stdout.len(), 1_048_576);
+        assert!(out.stdout.iter().filter(|byte| **byte == b'o').count() >= 1_048_576);
+        assert!(out.stderr.iter().filter(|byte| **byte == b'e').count() >= 1_048_576);
     }
 
     /// Both pipes drain concurrently, so a child filling stderr as well as stdout
     /// cannot wedge on either.
-    #[cfg(unix)]
     #[test]
     fn both_pipes_drain_concurrently() {
-        let out = run_with_timeout(
-            "sh",
-            &["-c", "yes out | head -c 200000 & yes err | head -c 200000 >&2; wait"],
-            Duration::from_secs(30),
-        )
-        .expect("child should complete");
+        let executable = std::env::current_exe().expect("current test executable should resolve");
+        let args = test_child_args(LARGE_OUTPUT_CHILD);
+        let out = run_with_timeout(executable, &args, Duration::from_secs(30))
+            .expect("child should complete");
 
-        assert_eq!(out.stdout.len(), 200_000);
-        assert_eq!(out.stderr.len(), 200_000);
+        assert!(out.stdout.len() >= 1_048_576);
+        assert!(out.stderr.len() >= 1_048_576);
     }
 
     /// Tests inject a short deadline rather than sleeping for a production one.
-    #[cfg(unix)]
     #[test]
     fn a_hung_child_is_killed_at_its_deadline() {
+        let executable = std::env::current_exe().expect("current test executable should resolve");
+        let args = test_child_args(SLEEPING_CHILD);
         let start = Instant::now();
-        let result = run_with_timeout("sleep", &["30"], Duration::from_millis(200));
+        let result = run_with_timeout(executable, &args, Duration::from_millis(200));
 
         assert!(matches!(result, Err(ProcessError::Timeout)));
         // Generous bound: asserts the deadline was honored, not the scheduler's precision.

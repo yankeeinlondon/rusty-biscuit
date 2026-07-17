@@ -66,6 +66,8 @@ pub const REPO_LOCKFILE_PARSES: &str = "filesystem.repo.lockfile_parses";
 
 /// Root-scoped configuration inputs parsed (test-runner and tool config).
 pub const REPO_CONFIG_PARSES: &str = "filesystem.repo.config_parses";
+/// Unique workspace-root test-runner configuration paths observed.
+pub const REPO_ROOT_CONFIG_PROBES: &str = "filesystem.repo.root_config_probes";
 
 /// Package boundaries enriched with languages, dependencies, and frameworks.
 pub const REPO_PACKAGE_ENRICHMENTS: &str = "filesystem.repo.package_enrichments";
@@ -109,7 +111,8 @@ pub const GIT_REF_WALKS: &str = "git.ref_walks";
 /// Commits visited by a revision or ancestry walk.
 pub const GIT_COMMIT_VISITS: &str = "git.commit_visits";
 
-/// Linked worktrees opened as repositories.
+/// Linked worktrees opened as repositories to obtain details unavailable from
+/// their administrative metadata or the current repository handle.
 pub const GIT_WORKTREE_OPENS: &str = "git.worktree_opens";
 
 // ---------------------------------------------------------------------------
