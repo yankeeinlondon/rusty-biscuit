@@ -45,6 +45,15 @@ pub(crate) struct MaterializedHarnessPrompt {
     pub(crate) prompt: String,
     pub(crate) env_overrides: Vec<(String, String)>,
     pub(crate) inline_closure_plan: Option<claudine::composition::InlineClosurePlan>,
+    /// The lifecycle config canonical preparation parsed for this document,
+    /// with its shell commands already C3-resolved.
+    ///
+    /// Carried rather than re-parsed from [`Self::frontmatter`]: a re-parse
+    /// yields the *authored* commands with their `{{ }}` spans intact, so the
+    /// bytes the bootstrap gate approves would not be the bytes the executor
+    /// runs. `None` only for the passthrough seed and the synthesized empty
+    /// prompt, neither of which has a document lifecycle.
+    pub(crate) lifecycle: Option<claudine::composition::LifecycleConfig>,
     /// Shared cross-event live document frontmatter for the current attempt.
     ///
     /// Seeded from `frontmatter` when the prompt is materialized and threaded

@@ -33,6 +33,7 @@ fn requeue_materialized(prompt: &str) -> MaterializedHarnessPrompt {
         prompt: prompt.to_string(),
         env_overrides: Vec::new(),
         inline_closure_plan: None,
+        lifecycle: None,
         live_frontmatter,
     }
 }

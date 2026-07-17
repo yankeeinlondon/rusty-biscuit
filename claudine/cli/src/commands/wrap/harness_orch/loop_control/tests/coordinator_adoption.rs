@@ -371,3 +371,103 @@ fn inline_closure_ownership_follows_the_adopted_target() {
         "the router is not the closure owner once it has handed off"
     );
 }
+
+/// The handoff discards the source's lifecycle *config*, not only the guard's
+/// emission ledger.
+///
+/// Everything between the commit and the target installing its own config is
+/// the target's staged boot. If the source's stacks were still loaded there, a
+/// failure while booting the target — a malformed target surface, a refused
+/// `initialize` command — would fire the *source's* `blocked`/`finalize`: a
+/// synthetic closure for a document that already ended. Those failures must
+/// surface as their own typed diagnostic instead.
+#[test]
+fn adopt_discards_the_sources_lifecycle_config_so_the_boot_has_no_stale_catch() {
+    let fx = fixture(serde_json::json!({
+        "blocked": {"stack": [{"action": {"append_line": ["events.log", "source-blocked"]}}]},
+        "finalize": {"stack": [{"action": {"append_line": ["events.log", "source-finalize"]}}]},
+    }));
+    std::fs::write(&fx.source_path, "---\n---\nbody\n").unwrap();
+    let target = fx._dir.path().join("target.md");
+    std::fs::write(&target, "---\n---\nbody\n").unwrap();
+
+    let emitter = RecordingEmitter::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &fx.settings,
+        messaging: &fx.messaging,
+        term: &fx.term,
+        source_path: &fx.source_path,
+        repo_root: Some(fx._dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
+    assert!(
+        guard.config().stack(LifecycleSignal::Blocked).is_some(),
+        "precondition: the source declares a blocked stack"
+    );
+
+    let mut state = prompt_state(&fx.source_path);
+    let mut coord = coordinator(&fx.source_path);
+    coord
+        .adopt(
+            request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
+            Some(fx._dir.path()),
+            &mut state,
+            &mut guard,
+        )
+        .expect("the hop is resolvable and uncontested");
+
+    assert!(
+        guard.config().stack(LifecycleSignal::Blocked).is_none(),
+        "the source's blocked stack must not survive the hand-off"
+    );
+    assert!(
+        guard.config().stack(LifecycleSignal::Finalize).is_none(),
+        "the source's finalize stack must not survive the hand-off"
+    );
+}
+
+/// A refused hop leaves the guard's config alone along with everything else —
+/// the source is still the active document and still owns its own closure.
+#[test]
+fn a_refused_hop_leaves_the_active_documents_lifecycle_config_installed() {
+    let fx = fixture(serde_json::json!({
+        "finalize": {"stack": [{"action": {"append_line": ["events.log", "source-finalize"]}}]},
+    }));
+    std::fs::write(&fx.source_path, "---\n---\nbody\n").unwrap();
+    let missing = fx._dir.path().join("does-not-exist.md");
+
+    let emitter = RecordingEmitter::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &fx.settings,
+        messaging: &fx.messaging,
+        term: &fx.term,
+        source_path: &fx.source_path,
+        repo_root: Some(fx._dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
+    let mut state = prompt_state(&fx.source_path);
+    let mut coord = coordinator(&fx.source_path);
+
+    coord
+        .adopt(
+            request_for(&fx.source_path, &missing, vec![fx.source_path.clone()]),
+            Some(fx._dir.path()),
+            &mut state,
+            &mut guard,
+        )
+        .expect_err("an unresolvable target must be refused");
+
+    assert!(
+        guard.config().stack(LifecycleSignal::Finalize).is_some(),
+        "a refused hand-off never half-activates a target: the source keeps its \
+         own closure"
+    );
+    assert!(
+        !coord.bootstrap_pending(),
+        "a refused hand-off owes no boot"
+    );
+}

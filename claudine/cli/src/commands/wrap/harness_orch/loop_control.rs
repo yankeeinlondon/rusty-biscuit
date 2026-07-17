@@ -340,14 +340,14 @@ fn prepare_attempt_phase(
         .harness_context
         .refresh(&prompt.prompt_state.source_path, prompt.repo_root);
     preflight_pending_proxy_phase(&mut prompt, &mut lifecycle, &control)?;
-    let materialized =
+    let mut materialized =
         materialize_attempt_prompt_phase(&mut prompt, &mut lifecycle, &control)?;
 
-    if let Some(step) = adopt_proxy_lifecycle_phase(
+    if let Some(step) = bootstrap_adopted_document_phase(
         &mut prompt,
         &mut lifecycle,
         &mut control,
-        &materialized,
+        &mut materialized,
     )? {
         return Ok(PhaseResult::Transition(Box::new(step)));
     }
@@ -506,57 +506,85 @@ fn start_lifecycle_phase(
     Ok(None)
 }
 
-fn adopt_proxy_lifecycle_phase(
+/// Run a newly adopted document's staged canonical boot.
+///
+/// The staging exists because of an ordering conflict: `initialize` may mutate
+/// the document, and the full audit has to read the document it will actually
+/// execute. Auditing everything first and then letting `initialize` rewrite the
+/// file underneath the audit is the drift; running `initialize` first with
+/// nothing approved is a hole. So the boot splits:
+///
+/// 1. the **bootstrap read** — the document as adopted, composed with the
+///    caller's input layers, giving the lifecycle surface `initialize` needs;
+/// 2. the **narrow safety gate** — approve only the shell commands
+///    `initialize` could select, against that same read;
+/// 3. `initialize` itself, through the normal evaluator, consuming
+///    `skip`/`error`/`proxy` atomically;
+/// 4. the **stabilized reread** — a fresh read, so an initialize-time file or
+///    frontmatter mutation is visible, with the caller's layers reapplied
+///    through the same assembly point;
+/// 5. the **full audit** over every lifecycle surface, which reuses the gate's
+///    approvals from the invocation-wide cache rather than prompting twice.
+///
+/// `initialize` fires exactly once across all five stages: only step 3 emits
+/// it, and the reread re-points the guard's config without touching its
+/// emission ledger.
+///
+/// ## Errors
+///
+/// The boundary is stage 2/3: a failure before the target's lifecycle config
+/// is installed has no target catch events to route to, and the source's were
+/// discarded by the clean handoff, so it surfaces as its own typed diagnostic.
+/// From stage 3 on, the target owns the run and a stabilized-reread or audit
+/// failure routes through its ordinary `blocked`/`finalize` — once, because
+/// each stage either routes or propagates, never both.
+fn bootstrap_adopted_document_phase(
     prompt: &mut AttemptPromptPreparation<'_>,
     lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
     control: &mut AttemptRetryProxyControl<'_>,
-    materialized: &MaterializedHarnessPrompt,
+    materialized: &mut MaterializedHarnessPrompt,
 ) -> Result<Option<LoopStep>> {
-    let attempt = &mut *control.attempt;
-    let coordinator = &mut *control.coordinator;
-    let prompt_state = &mut *prompt.prompt_state;
-    let effective_non_interactive = prompt.effective_non_interactive;
-    let detail_requested = prompt.detail_requested;
-    let silent = prompt.silent;
-    let repo_root = prompt.repo_root;
-    let lifecycle_guard = &mut *lifecycle.guard;
-    let effect_engine = lifecycle.effect_engine;
-    let term = lifecycle.term;
-    let loop_start = lifecycle.loop_start;
-    if !coordinator.take_bootstrap_pending() {
+    if !control.coordinator.take_bootstrap_pending() {
         return Ok(None);
     }
-    match claudine::composition::parse_lifecycle_config(
-        &materialized.frontmatter,
-        &prompt_state.source_path,
-    ) {
-        Ok(target_lifecycle) => lifecycle_guard.set_config(target_lifecycle),
-        Err(error) => {
-            let err_info = LifecycleErrorInfo::from_composition_error(&error);
-            return Err(emit_blocked_finalize_with_err(
-                lifecycle_guard,
-                materialized,
-                &prompt_state.source_path,
-                repo_root,
-                term,
-                effect_engine,
-                &err_info,
-                loop_start,
-            )
-            .map(color_eyre::eyre::Report::from)
-            .unwrap_or_else(|| eyre!("{error}")));
+
+    // Stage 1 — the bootstrap read is `materialized`, already composed against
+    // the caller's input layers by the shared assembly point. Its lifecycle
+    // came from canonical preparation, so its shell commands are C3-resolved:
+    // the bytes the gate approves are the bytes the executor runs.
+    let bootstrap_lifecycle = match materialized.lifecycle.clone() {
+        Some(config) => config,
+        None => {
+            return Err(eyre!(
+                "adopted document '{}' was prepared without a lifecycle surface",
+                prompt.prompt_state.source_path.display()
+            ));
         }
-    }
-    let chain = coordinator.ledger().chain().to_vec();
+    };
+
+    // Stage 2 — the narrow safety gate. Every `initialize` shell command the
+    // evaluator could select is approved before the evaluator runs. Later
+    // events are deliberately out of scope: their commands may not survive the
+    // stabilized reread.
+    claudine::composition::resolve_lifecycle_shell_approvals(
+        &bootstrap_lifecycle,
+        &prompt.prompt_state.source_path,
+        &[LifecycleSignal::Initialize],
+        prompt.harness_context.shell_options(),
+    )?;
+    lifecycle.guard.set_config(bootstrap_lifecycle);
+
+    // Stage 3 — `initialize`, through the normal evaluator.
+    let chain = control.coordinator.ledger().chain().to_vec();
     match run_target_initialize(
-        lifecycle_guard,
+        lifecycle.guard,
         materialized,
-        &prompt_state.source_path,
-        repo_root,
+        &prompt.prompt_state.source_path,
+        prompt.repo_root,
         &chain,
-        term,
-        effect_engine,
-        loop_start,
+        lifecycle.term,
+        lifecycle.effect_engine,
+        lifecycle.loop_start,
     ) {
         TargetInitializeAction::Proceed => {}
         TargetInitializeAction::ExitCleanly => {
@@ -564,21 +592,90 @@ fn adopt_proxy_lifecycle_phase(
         }
         TargetInitializeAction::Abort(error) => return Err(error),
         TargetInitializeAction::Reproxy(request) => {
-            coordinator.adopt(request, repo_root, prompt_state, lifecycle_guard)?;
-            *attempt = 1;
+            // A chained proxy re-enters this same staging for its own target,
+            // so the chain stabilizes one atomic hop at a time before anything
+            // commits to a provider launch or loop execution.
+            control.coordinator.adopt(
+                request,
+                prompt.repo_root,
+                prompt.prompt_state,
+                lifecycle.guard,
+            )?;
+            *control.attempt = 1;
             return Ok(Some(LoopStep::NextAttempt));
         }
     }
-    if effective_non_interactive {
+
+    // Stage 4 — the stabilized reread. `initialize` may have rewritten the
+    // document or its frontmatter; the run executes what is on disk now.
+    if let Err(error) = preflight_proxy_target(
+        prompt.prompt_state,
+        prompt.harness_context.shell_options(),
+        prompt.child_cwd,
+    ) {
+        return Err(bootstrap_blocked(prompt, lifecycle, materialized, &error));
+    }
+    *materialized = materialize_attempt_prompt_phase(prompt, lifecycle, control)?;
+    let stabilized_lifecycle = match materialized.lifecycle.clone() {
+        Some(config) => config,
+        None => {
+            return Err(eyre!(
+                "adopted document '{}' was prepared without a lifecycle surface",
+                prompt.prompt_state.source_path.display()
+            ));
+        }
+    };
+
+    // Stage 5 — the full audit. `set_config` re-points the guard at the
+    // stabilized surface without resetting its emission ledger, so
+    // `initialize` is not fired a second time.
+    if let Err(error) = claudine::composition::resolve_lifecycle_shell_approvals(
+        &stabilized_lifecycle,
+        &prompt.prompt_state.source_path,
+        &LifecycleSignal::ALL,
+        prompt.harness_context.shell_options(),
+    ) {
+        return Err(bootstrap_blocked(prompt, lifecycle, materialized, &error));
+    }
+    lifecycle.guard.set_config(stabilized_lifecycle);
+
+    if prompt.effective_non_interactive {
         crate::output::log_compose_prompt(
             &materialized.prompt,
-            detail_requested,
-            silent,
+            prompt.detail_requested,
+            prompt.silent,
             false,
-            term,
+            lifecycle.term,
         );
     }
     Ok(None)
+}
+
+
+/// Route a stabilized-stage boot failure through the target's own
+/// `blocked`/`finalize` stacks.
+///
+/// Only called after stage 3 installed the target's lifecycle config: before
+/// that there is nothing to catch with.
+fn bootstrap_blocked(
+    prompt: &mut AttemptPromptPreparation<'_>,
+    lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
+    materialized: &MaterializedHarnessPrompt,
+    error: &dyn std::fmt::Display,
+) -> color_eyre::eyre::Report {
+    let err_info = LifecycleErrorInfo::from_action_failure("shell_approval", error.to_string());
+    emit_blocked_finalize_with_err(
+        lifecycle.guard,
+        materialized,
+        &prompt.prompt_state.source_path,
+        prompt.repo_root,
+        lifecycle.term,
+        lifecycle.effect_engine,
+        &err_info,
+        lifecycle.loop_start,
+    )
+    .map(color_eyre::eyre::Report::from)
+    .unwrap_or_else(|| eyre!("{error}"))
 }
 
 fn empty_materialized_prompt() -> MaterializedHarnessPrompt {
@@ -587,6 +684,7 @@ fn empty_materialized_prompt() -> MaterializedHarnessPrompt {
         prompt: String::new(),
         env_overrides: Vec::new(),
         inline_closure_plan: None,
+        lifecycle: None,
         live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&serde_json::Value::Null),
     }
 }

@@ -17,8 +17,8 @@
 use std::path::Path;
 
 use claudine::composition::{
-    DocumentEntryReason, EvaluatedProxyRequest, LifecycleRunGuard, ProxyCommitError, RunLedger,
-    SharedApprovalCache, commit_proxy,
+    DocumentEntryReason, EvaluatedProxyRequest, LifecycleConfig, LifecycleRunGuard,
+    ProxyCommitError, RunLedger, SharedApprovalCache, commit_proxy,
 };
 
 use super::super::HarnessPromptState;
@@ -111,6 +111,13 @@ impl ActiveDocumentCoordinator {
         prompt_state.next_prompt_override = None;
         prompt_state.next_resume_session_id = None;
         lifecycle_guard.reset_for_proxy();
+        // Clean-handoff semantics, applied to the guard's *config* and not just
+        // its emission ledger: the source's stacks belong to the document being
+        // replaced. Leaving them installed would let a failure while booting the
+        // target fire the source's `blocked`/`finalize` — a synthetic source
+        // closure after the source has already ended. The target's own config is
+        // installed by its staged boot, once it exists.
+        lifecycle_guard.set_config(LifecycleConfig::default());
         self.bootstrap_pending = true;
         Ok(())
     }

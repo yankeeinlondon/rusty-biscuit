@@ -26,6 +26,7 @@ pub(crate) fn materialized_harness_prompt_from_prepared(
         prompt: prepared.prompt.clone(),
         env_overrides: Vec::new(),
         inline_closure_plan,
+        lifecycle: Some(prepared.lifecycle.clone()),
         live_frontmatter,
     }
 }
@@ -181,6 +182,7 @@ pub(crate) fn materialize_harness_prompt(
     };
     let mut prompt = prepared.prompt;
     let frontmatter = prepared.effective_frontmatter;
+    let lifecycle = prepared.lifecycle;
     let env_overrides: Vec<(String, String)> = Vec::new();
 
     if let Some(ref override_prompt) = state.next_prompt_override {
@@ -198,6 +200,7 @@ pub(crate) fn materialize_harness_prompt(
         prompt,
         env_overrides,
         inline_closure_plan,
+        lifecycle: Some(lifecycle),
         live_frontmatter,
     })
 }

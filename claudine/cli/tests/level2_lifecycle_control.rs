@@ -1477,61 +1477,63 @@ fn level2_lifecycle_proxy_target_harness_plan_failure_routes_blocked_finalize_wi
     );
 }
 
-/// Finding 5 (High): a proxy hand-off whose target then fails **target
-/// lifecycle parse** must likewise route the blocked pre-provider run through
-/// `blocked` → `finalize` with `err` (Site 2 in `run_harness_loop`).
+/// A proxy hand-off whose target then fails **target lifecycle parse** surfaces
+/// the typed diagnostic and fires no catch event on either document.
 ///
-/// The source proxies from `initialize`. On hand-off the target's
-/// `parse_lifecycle_config` fails because the target declares an unknown
-/// lifecycle effect, surfacing a typed `CompositionError` before the provider
-/// launches. The fix routes this through the **source/proxying** guard's
-/// blocked/finalize stacks (the guard still holds the proxying document's
-/// lifecycle at the point target-lifecycle parse fails), carrying `err`.
+/// **Rewritten in Phase 7 of `features/2026-07-13-proxy-with`; the change is
+/// intentional.** This test previously asserted the opposite — that the
+/// *source's* `blocked`/`finalize` stacks fire, because "the guard still holds
+/// the proxying document's lifecycle at the point target-lifecycle parse
+/// fails". That was the drift, not the contract: a committed hand-off ends the
+/// source, so firing its closure afterwards synthesizes a terminal signal for a
+/// document that already handed off (R7 clean-handoff), and the target has no
+/// lifecycle to catch with precisely because parsing it is what failed. The
+/// coordinator now discards the source's config at the commit, so a boot
+/// failure in this window surfaces as its own typed diagnostic — the same one
+/// invoking the malformed target directly would produce.
 #[test]
 #[serial(level2_lifecycle_control)]
-fn level2_lifecycle_proxy_target_lifecycle_parse_failure_routes_blocked_finalize_with_err() {
+fn level2_lifecycle_proxy_target_lifecycle_parse_failure_fires_no_catch_events() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    // The proxying source carries the blocked/finalize stacks: when the target's
-    // lifecycle parse fails, the guard still holds the source's lifecycle, so the
-    // source's stacks fire with the routed `err`.
     let source_doc = "---\ntitle: proxy source\ninitialize:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'source-init']}\n    \
          - action: {proxy: '@target.md'}\nblocked:\n  stack:\n    \
-         - action: {append_line: ['events.log', \"{{ 'blocked-err-kind=' + err.kind }}\"]}\nfinalize:\n  stack:\n    \
-         - when: \"err\"\n      action: {append_line: ['events.log', \"{{ 'finalize-err-msg=' + err.msg }}\"]}\n    \
+         - action: {append_line: ['events.log', 'source-blocked']}\nfinalize:\n  stack:\n    \
          - action: {append_line: ['events.log', 'source-finalize']}\n---\nsource body\n";
     // The target's `success.stack` carries a malformed item (no `action` key),
     // which `parse_lifecycle_config` rejects with a typed CompositionError
-    // (`LifecycleStackInvalidShape`) on hand-off.
+    // (`LifecycleStackInvalidShape`) during the target's bootstrap read.
     let target_doc = "---\ntitle: proxy target\nsuccess:\n  stack:\n    \
          - when: \"true\"\n---\ntarget body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, false);
-    let pane = run_in_tmux_for(&staged, "source-finalize");
+    let pane = run_in_tmux_until_exit(&staged);
 
     let lines = event_lines(&staged);
 
+    assert!(
+        lines.iter().any(|l| l == "source-init"),
+        "the source initialize must fire before the hand-off; got {lines:?}; pane:\n{pane}"
+    );
     assert_eq!(
         lines.iter().filter(|l| **l == "provider-ran").count(),
         0,
         "a target lifecycle parse failure must not launch the provider; \
          got {lines:?}; pane:\n{pane}"
     );
-    // The typed CompositionError (`LifecycleStackInvalidShape` →
-    // `composition.lifecycle_invalid`) is classifiable, so the deprecated
-    // `err.kind` alias now reads as its `err.category` facet (`composition`).
     assert!(
-        lines.iter().any(|l| l == "blocked-err-kind=composition"),
-        "the proxying document's blocked.stack must fire with err.kind='composition' \
-         (alias of err.category); got {lines:?}; pane:\n{pane}"
+        !lines.iter().any(|l| l == "source-blocked"),
+        "the source handed off; its blocked stack must not fire for the \
+         target's parse failure; got {lines:?}; pane:\n{pane}"
     );
     assert!(
-        lines.iter().any(|l| l.starts_with("finalize-err-msg=") && l.len() > "finalize-err-msg=".len()),
-        "finalize.stack `when: err` must be truthy and observe a non-empty err.msg; \
-         got {lines:?}; pane:\n{pane}"
+        !lines.iter().any(|l| l == "source-finalize"),
+        "the source handed off; its finalize must not be synthesized after the \
+         fact; got {lines:?}; pane:\n{pane}"
     );
     assert!(
-        lines.iter().any(|l| l == "source-finalize"),
-        "the proxying document's finalize must fire; got {lines:?}; pane:\n{pane}"
+        pane.contains("stack"),
+        "the typed lifecycle-stack diagnostic must be rendered; pane:\n{pane}"
     );
 }
 
@@ -1837,5 +1839,213 @@ fn level2_lifecycle_initialize_proxy_to_looping_target_matches_direct_run() {
         count(&direct_lines, "target-init"),
         "the target initialize count must not depend on the route; \
          routed {routed_lines:?}; direct {direct_lines:?}"
+    );
+}
+
+// ── Phase 7: staged bootstrap, narrow safety gate, stabilized reread ────────
+
+/// A fake `goose` that records the prompt it was handed, so a test can assert
+/// which read of the document produced the delivered body.
+///
+/// Goose takes the prompt on argv, not stdin, so both channels are recorded
+/// onto one line and the caller matches against it.
+fn write_prompt_recording_goose(bin_dir: &Path, events_log: &Path) {
+    write_executable(
+        &bin_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\nstdin=$(cat)\nprintf 'prompt:%s %s\\n' \"$stdin\" \"$*\" >> {log}\n\
+             printf 'provider-ran\\n' >> {log}\nexit 0\n",
+            log = events_log.display(),
+        ),
+    );
+}
+
+/// Run `claudine compose --goose <doc>` in tmux and block until the shell
+/// sentinel lands, rather than until an `events.log` marker does.
+///
+/// The gate tests below assert on what the run *refused* to do, so there is no
+/// success marker to wait for and waiting on `events.log` would burn the whole
+/// deadline on every run.
+fn run_in_tmux_until_exit(staged: &Staged) -> String {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+
+    let session = format!("biscuit_l2_lcctl_exit_{}_{seq}", std::process::id());
+    let shell = biscuit_test_harness::detect_shell();
+    let spawned = std::process::Command::new("tmux")
+        .args([
+            "new-session",
+            "-d",
+            "-s",
+            &session,
+            "-x",
+            "200",
+            "-y",
+            "60",
+            &format!("{shell} -l"),
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(spawned, "failed to spawn tmux session");
+
+    let mut harness = TmuxHarness::attach(&session);
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+
+    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let sentinel = format!("L2_CTL_EXIT_{seq}");
+    let cmd = format!(
+        "cd {ws} && NO_COLOR='1' HOME='{home}' PATH='{path}' {claudine} compose --goose {md} ; echo {sentinel}",
+        ws = staged.workspace.path().display(),
+        home = staged.workspace.path().display(),
+        path = augmented_path(&staged.bin_dir).to_string_lossy(),
+        md = staged.md_file.display(),
+    );
+    harness
+        .send_command_with_env(&cmd, &[])
+        .expect("send compose command");
+
+    let deadline = Instant::now() + Duration::from_secs(40);
+    let mut pane = String::new();
+    while Instant::now() < deadline {
+        pane = harness.capture().map(|f| f.plain).unwrap_or_default();
+        // Two occurrences: the echoed command line and the shell's output.
+        if pane.matches(sentinel.as_str()).count() >= 2 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(150));
+    }
+    kill_session_by_name(&session);
+    pane
+}
+
+/// The narrow safety gate: a proxy target's `initialize` shell command is
+/// approved **before** the evaluator dispatches it.
+///
+/// The target's `initialize` runs before the target's full pre-flight audit
+/// can — the audit has to read the document `initialize` may rewrite. That
+/// ordering must never mean "execute unapproved shell": the gate approves
+/// every command `initialize` could select first, on its own.
+///
+/// `rm` is builtin-blacklisted, so a gate that ran would refuse it. Before the
+/// staged boot the proxy route audited no lifecycle surface at all, so this
+/// command reached `SystemShellRunner` and deleted the sentinel.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_proxy_target_initialize_shell_is_gated_before_dispatch() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let source_doc = "---\ntitle: gate source\ninitialize:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'source-init']}\n    \
+         - action: {proxy: '@target.md'}\n---\nsource body\n";
+    let target_doc = "---\ntitle: gate target\ninitialize:\n  stack:\n    \
+         - action: {shell: 'rm sentinel.txt'}\nsuccess:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'target-success']}\n---\ntarget body\n";
+    let staged = stage_proxy_pair(source_doc, target_doc, true);
+    let sentinel = staged.workspace.path().join("sentinel.txt");
+    fs::write(&sentinel, "intact").unwrap();
+
+    let pane = run_in_tmux_until_exit(&staged);
+    let lines = event_lines(&staged);
+
+    assert!(
+        lines.iter().any(|l| l == "source-init"),
+        "the source initialize must fire before the hand-off; got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        sentinel.exists(),
+        "the blacklisted `initialize` shell command must be refused by the narrow \
+         gate before dispatch — it deleted the sentinel instead; pane:\n{pane}"
+    );
+    assert!(
+        !lines.iter().any(|l| l == "provider-ran"),
+        "a refused initialize command must stop the run before the provider \
+         launches; got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        !lines.iter().any(|l| l == "target-success"),
+        "no target terminal event may fire when the boot never completed; \
+         got {lines:?}; pane:\n{pane}"
+    );
+}
+
+/// The full post-stabilization audit covers a proxy target's later lifecycle
+/// surfaces too — not only the ones the narrow gate scoped.
+///
+/// The gate deliberately skips `success`, so if the audit that follows the
+/// stabilized reread did not run, this blacklisted `success` command would
+/// reach the shell runner after the provider exited 0.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_proxy_target_later_event_shell_is_audited_after_stabilization() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let source_doc = "---\ntitle: audit source\ninitialize:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'source-init']}\n    \
+         - action: {proxy: '@target.md'}\n---\nsource body\n";
+    let target_doc = "---\ntitle: audit target\ninitialize:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'target-init']}\nsuccess:\n  stack:\n    \
+         - action: {shell: 'rm sentinel.txt'}\n---\ntarget body\n";
+    let staged = stage_proxy_pair(source_doc, target_doc, true);
+    let sentinel = staged.workspace.path().join("sentinel.txt");
+    fs::write(&sentinel, "intact").unwrap();
+
+    let pane = run_in_tmux_until_exit(&staged);
+    let lines = event_lines(&staged);
+
+    assert!(
+        lines.iter().any(|l| l == "target-init"),
+        "the target's own initialize must fire; got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        sentinel.exists(),
+        "the blacklisted `success` shell command must be refused by the full \
+         post-stabilization audit; pane:\n{pane}"
+    );
+    assert!(
+        !lines.iter().any(|l| l == "provider-ran"),
+        "the audit runs before the provider launches; got {lines:?}; pane:\n{pane}"
+    );
+}
+
+/// The stabilized reread: a proxy target that mutates its own frontmatter from
+/// `initialize` delivers the **mutated** body to the provider.
+///
+/// The bootstrap read composed `phase: authored`; `initialize` then rewrote the
+/// document on disk. Without the reread the run would deliver the body composed
+/// before its own `initialize` ran — the document as it was, not as it is.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_proxy_target_rereads_after_initialize_mutation() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let source_doc = "---\ntitle: reread source\ninitialize:\n  stack:\n    \
+         - action: {proxy: '@target.md'}\n---\nsource body\n";
+    let target_doc = "---\ntitle: reread target\nphase: authored\ninitialize:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'target-init']}\n    \
+         - action: {set_frontmatter: ['target.md', 'phase', 'stabilized']}\nfinalize:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'target-finalize']}\n---\nphase-is-{{ phase }}\n";
+    let staged = stage_proxy_pair(source_doc, target_doc, true);
+    write_prompt_recording_goose(&staged.bin_dir, &staged.events_log);
+
+    let pane = run_in_tmux_for(&staged, "target-finalize");
+    let lines = event_lines(&staged);
+
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("prompt:") && l.contains("phase-is-stabilized")),
+        "the delivered prompt must come from the reread of the stabilized \
+         target, not from the pre-initialize bootstrap read; got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.contains("phase-is-authored")),
+        "the pre-initialize bootstrap body must never reach the provider; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert_eq!(
+        lines.iter().filter(|l| **l == "target-init").count(),
+        1,
+        "the reread must not fire `initialize` a second time; got {lines:?}; pane:\n{pane}"
     );
 }
