@@ -16,7 +16,9 @@
 #
 # Usage: refgraph-setup-fix.sh <out-dir> [rounds]
 # Expects binaries at /tmp/dmbench/target-{base,before,after}/release/md; build
-# them in detached worktrees with isolated CARGO_TARGET_DIR (see summary.md).
+# them in detached worktrees with isolated CARGO_TARGET_DIR. The pin SHAs and the
+# exact build commands are in the run of record:
+#   raw/f-refgraph-setup-fix/run-20260717T033745/summary.md
 set -euo pipefail
 
 OUT="${1:?usage: refgraph-setup-fix.sh <out-dir> [rounds]}"

@@ -306,7 +306,7 @@ and B (one exhaustive `ComposeOptions` field classification driving
 purpose-specific identities).
 
 Opaque `ReferenceGraph` correctness (Finding 18) is **out of scope** — it is
-owned by the linked [Opaque Reference Graph](../2026-07-15-reference-graph/plan.md)
+owned by the linked [Opaque Reference Graph](../_completed/2026-07-15-reference-graph/plan.md)
 feature. This plan only *coordinates* with it on the shared field-classification
 authority (Architecture Decision B / Phase 4).
 
@@ -544,7 +544,7 @@ the required real non-macOS L2 behavior evidence.
 ## Phase 4 — Consume the shared `ComposeOptions` classification (Architecture Decision B)
 
 Land Architecture Decision B exactly once. The linked
-[Opaque Reference Graph](../2026-07-15-reference-graph/plan.md) Phase 1 owns the
+[Opaque Reference Graph](../_completed/2026-07-15-reference-graph/plan.md) Phase 1 owns the
 crate-private exhaustive classification, the two purpose-specific identity
 products, and the `options_hash` migration. This feature depends on that shared
 prerequisite and must not implement a competing inventory. **Blocks Phase 5.**

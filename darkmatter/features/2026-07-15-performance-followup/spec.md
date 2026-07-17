@@ -12,7 +12,7 @@ source_results:
   - ../../reviews/2026-07-12-perf/results.md
   - ../../reviews/2026-07-12-perf/results-2.md
 related:
-  - ../2026-07-15-reference-graph
+  - ../_completed/2026-07-15-reference-graph
 recovery_branch: rescue/review3-terminated-agent
 audit_commit: 51c1f16e10ffe825b56987573ba4eabc659c768e
 ---
@@ -27,9 +27,10 @@ the owner-approved scope move required by that review's delivery contract; the
 moved work is not thereby considered complete.
 
 The opaque `ReferenceGraph` correctness work is intentionally owned by the
-separate [Opaque Reference Graph](../2026-07-15-reference-graph/spec.md)
-specification. This document retains Finding 18 only as audit history and does
-not duplicate that feature's implementation.
+separate [Opaque Reference Graph](../_completed/2026-07-15-reference-graph/spec.md)
+specification (archived to `_completed/` after this feature's Phase 11). This
+document retains Finding 18 only as audit history and does not duplicate that
+feature's implementation.
 
 ## Summary
 
@@ -85,7 +86,7 @@ and cross-platform classification — is in
 | Finding | Status | Current implementation | Work retained here | Final (2026-07-16) |
 |---:|---|---|---|---|
 | 1 | Partial | Darkmatter explicitly calls `detect_timezone_with_options(false)`, removing its unused NTP request. | Restore bare `sniff::detect_timezone()` to its compatible full-report behavior by delegating to `true`; retain Darkmatter's explicit `false` call. | **Corrected.** Bare API delegates to `true` again; Darkmatter keeps `false` via a local seam. |
-| 2 | Partial | OSC 10 text-color results are process-cached. | Add L2 proof that repeated terminal construction emits one OSC 10 request and record repeated-construction latency. | **Verified (L2)** on macOS (real WezTerm, **gated**) **and real Linux** (real kitty under a Linux kernel in Docker, **retained manual run**). 3 constructions → exactly 1 OSC 10; macOS median 0.970 ms. Oracle is theme-independent: the pane's foreground is pinned and demanded back verbatim. ⚠ An earlier revision of this row claimed real-Linux L2 on the strength of a **manufactured-PTY (L1)** run; corrected 2026-07-16 (review-2). |
+| 2 | Partial | OSC 10 text-color results are process-cached. | Add L2 proof that repeated terminal construction emits one OSC 10 request and record repeated-construction latency. | **Verified (L2)** on macOS (real WezTerm, **gated**) **and real Linux** (real kitty under a Linux kernel in Docker, **retained manual run**). 3 constructions → exactly 1 OSC 10; macOS median 0.970 ms. Oracle is theme-independent: the pane's foreground is pinned and demanded back verbatim. Work-2.3's *"record repeated-construction latency with warm-up, sample count, dispersion"* is satisfied by the **run record** ([`run-20260716T065617`](./benchmarks/raw/f2f3f21-terminal-evidence/run-20260716T065617/summary.md): warm-up 3, 50 samples, median 0.970 ms, stddev 0.022 ms) — the run record, not a test assertion, is the measurement of record. ⚠ Two earlier-revision corrections: this row once claimed real-Linux L2 on the strength of a **manufactured-PTY (L1)** run (corrected 2026-07-16, review-2); and `terminal_repeated_construction_latency`'s wall-clock threshold — which review-3 found flaky under area-test load — was replaced (review-3) by a **structural invariant**: exactly one OSC 10 across 53 constructions, counted on the PTY master's bytes and cross-checked against the crate-private `osc_query_attempt` tracing event. No new public API. |
 | 3 | Partial | The compose CLI shares a terminal through a per-invocation `OnceCell`. | Add an end-to-end CLI case exercising verbose, performance, and warning-report branches and prove one detection per invocation. | **Verified.** Detections *counted* = 1 across verbose + perf + warning branches. |
 | 4 | Partial | TOC line lookup uses an offset table and binary search; compatibility tests cover line/span behavior. | Replace the non-comparable closeout with identical, hashed fixtures, predeclared thresholds, and retained raw samples. | **Closed.** Reconstructed on identical hashed bytes: `toc_large` 488 → 23 ms. |
 | 5 | Complete | Schema validation uses the already resolved effective schema rather than resolving and coercing twice. | No implementation work. Protect in the final benchmark and regression gates. | **Unchanged**; held by the final gates. |
@@ -115,16 +116,23 @@ and cross-platform classification — is in
 | 29 | Complete | Effective schemas use shared `Arc<Value>` ownership; built-in baseline paths avoid deep clones. `results-2.md` contains a same-source A/B comparison. | Preserve the approved public ownership exception and its owned compatibility facade. | **Preserved.** Ownership exception + owned facade intact; not reopened. |
 | 30 | Complete | `doc.*` lookup walks effective state by reference and clones only the selected result. | No implementation work. | **Unchanged.** |
 | 31 | Complete | Variable interpolation stringifies the first lookup result rather than performing the lookup twice. | No implementation work. | **Unchanged.** |
-| 32 | Open | Each shell directive still clones read-only policy rule collections into a snapshot. | Snapshot once per stage or use safe shared read ownership; preserve the policy state seen by the stage and avoid holding locks while executing commands. | **Implemented**, snapshot hoisted to the 3 stage orchestrators. ⚠ Carries a **deliberate prompt-frequency change** (mid-stage persist no longer suppresses a later same-stage prompt) flagged for owner acceptance. |
+| 32 | Open | Each shell directive still clones read-only policy rule collections into a snapshot. | Snapshot once per stage or use safe shared read ownership; preserve the policy state seen by the stage and avoid holding locks while executing commands. | **Implemented** via the Required-Work-6 *"share immutable collections"* option: the rule sets are `Arc`-shared with copy-on-write writes, and `prepare_directive` takes its own view per directive (three refcount bumps, no rule copy). **No behavior change, no owner decision outstanding.** ⚠ An earlier revision hoisted the snapshot to the 3 stage orchestrators, which changed prompt frequency; that was **reverted at review-1** — a mid-stage persist again suppresses a later same-stage prompt (`persistence_mid_stage_is_policy_input_for_the_same_stage` pins 1 approval). Error-path reservation cleanup is verified by a **deterministic** oracle (review-3): `pending_allow_once_for_test()` asserts the runtime's reservation set directly, replacing the wall-clock inference. |
 | 33 | Partial | Remote discovery skips the expensive scan when no HTTP marker exists. | Replace per-expression prefix rescans for line numbers with one forward offset table/pass and measure remote-heavy input. | **Implemented — measured win −82.5 %** (2.394 ms → 419.95 µs) vs a ≥30 % floor; ≈−78 % after discounting build drift. Guard retained. |
 | 34 | Complete | Cleanup change detection no longer clones both full bodies solely to compare them. | No implementation work. | **Unchanged.** |
-| 35 | Partial | The `md delta` full-document clones were removed. | Complete or disposition the seven remaining copy/hash/read sub-items listed below. | **All 7 dispositioned:** 35.1/35.2/35.4/35.5/35.6/35.7 implemented (35.2 −98.8 %, 35.6 −91.1 %, 35.5 −18.0 % CLI); **35.3 no-win → reverted** (net pessimization). |
+| 35 | Partial | The `md delta` full-document clones were removed. | Complete or disposition the seven remaining copy/hash/read sub-items listed below. | **All 7 dispositioned:** 35.1/35.2/35.4/35.5/35.6/35.7 implemented (35.2 **−98.6 %**, 35.6 **−90.9 %**, 35.5 **−37.6 % CLI**); **35.3 no-win → reverted** (four of five call sites regress unconditionally). ⚠ These three figures **supersede** an earlier revision's `−98.8 % / −91.1 % / −18.0 %`: the first two were recomputed from retained raw vectors (review-2), and −18.0 % measured a **superseded** implementation (`540262812`) that no longer exists — the shipped code is −37.6 % vs pre-F35.5. 35.5's public-API violation is **closed**: `diff_hash` / `plan_hash_save_explained` are now `pub(crate)`, reached by `darkmatter-cli` through a `#[doc(hidden)]` `internal` module behind the **non-default** `internal-hash-orchestration` feature. |
 
 Audit totals are 17 complete findings, 13 partial findings, and 5 open or
 correction findings. Finding 18 is counted as complete for its performance
 portion and separated for its correctness portion.
 
-### Final totals (2026-07-16 closeout)
+### Final totals (2026-07-16 closeout; reconciled 2026-07-17 at review-3)
+
+> **This feature is NOT fully closed.** Every *finding* below has a disposition
+> backed by a retained artifact or a named test, but the feature-level
+> **integrated compose-regression threshold is unresolved** — neither pass nor
+> fail. Acceptance criteria 5 and 6 are therefore not met, and the table below
+> must not be read as a closure. See *Feature-level open item* at the end of this
+> section.
 
 Of the 18 findings carrying retained work (1–4, 7, 11–14, 16, 17, 21–23, 25, 32,
 33, and 35's seven sub-items):
@@ -155,8 +163,33 @@ Of the 18 findings carrying retained work (1–4, 7, 11–14, 16, 17, 21–23, 2
   The earlier claim here that "no Windows host is reachable" was **wrong** — two
   Windows 11 VMs were present on the implementation host throughout. See
   *Cross-platform evidence* in [`results.md`](./results.md).
-- **1 deliberate behavior change awaiting owner acceptance** — 32's mid-stage
-  prompt frequency.
+- **0 behavior changes awaiting owner acceptance.** ⚠ An earlier revision of this
+  bullet read *"1 deliberate behavior change awaiting owner acceptance — 32's
+  mid-stage prompt frequency"*. That is **no longer true and is corrected here**:
+  the prompt-frequency change was **reverted at review-1**, and the live code
+  asserts the original frequency
+  (`persistence_mid_stage_is_policy_input_for_the_same_stage` → 1 approval;
+  `exact_persist_mid_stage_suppresses_only_the_same_command` → 2, the
+  over-authorization control). Finding 32's clone removal was kept by sharing the
+  rule sets behind `Arc` with copy-on-write writes, so **no compatibility ruling
+  is owed**. See *Finding 32* in [`results.md`](./results.md).
+
+**Feature-level open item — the integrated compose-regression threshold.** The
+`f-cumulative-closeout` gate (no case may regress `audit → head` by >5 % outside
+dispersion) recorded a +11–34 % compose regression that bisected to the linked
+reference-graph feature's two commits, **not** to this follow-up's own diff
+(which is flat or improving on every case). A remediation — `92a3d502e`,
+baseline-schema canonical-JSON caching — has since been measured and **robustly
+removes ~25 percentage points** of it (compose cases +12.9…+26.6 % before →
+−15.6…+0.76 % after, controls flat). But the **threshold verdict is NOT
+ESTABLISHED — neither pass nor fail**: both retained runs' point estimates fall
+under 5 %, while the *same* audit-commit binary measured 11.049 ms and 11.957 ms
+~1 minute apart — **+8.2 % drift on identical code, larger than the 5 % gate
+being adjudicated**. The blocker is **a quiet host, not an owner ruling**; no
+ruling can make a load-110 host resolve a 5 % effect. Predeclared admissibility
+criteria for the required re-run are recorded in
+[`results.md`](./results.md) → *Reference-graph setup remediation*. An owner
+decision is required **only if** a clean re-run lands >5 %.
 
 ## Required Work
 
@@ -264,7 +297,7 @@ state, context, and directive-overlay identities, and the result can drive both
 run-local single-flight reuse and persistent cache reads/writes. Audit that
 existing key before changing reuse boundaries. Its selected-field `Debug`-based
 encoding is not the exhaustive canonical authority required by the linked
-[Opaque Reference Graph](../2026-07-15-reference-graph/spec.md) feature.
+[Opaque Reference Graph](../_completed/2026-07-15-reference-graph/spec.md) feature.
 
 Both consumers must derive from the shared field-classification authority in
 [Architecture Decision B](#architecture-decision-b--shared-classification-purpose-specific-identities).

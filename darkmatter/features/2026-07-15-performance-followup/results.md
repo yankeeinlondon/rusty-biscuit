@@ -236,6 +236,28 @@ Run record (interactive PTY + piped CLI as separate cases):
   **first** OSC 10, and it observes **exactly one** `\x1b]10;?\x07` across all
   three — a wire count a real emulator cannot give us. Kept as the fast,
   deterministic, always-available regression.
+- **`terminal_repeated_construction_latency` de-timed (2026-07-17, review-3).**
+  Review-3 found this test **flaky under parallel area-test load** (failed its
+  first attempt, passed its retry) — a host-time threshold is not a stable gate
+  under contention. Its wall-clock threshold is **replaced by a structural
+  invariant**: exactly **one** OSC 10 request across **53** constructions
+  (3 warm-up + 50 samples), counted on the PTY master's bytes **and**
+  cross-checked against the crate-private `biscuit_terminal::osc_query_attempt`
+  tracing event. The remaining 30 s bound is an explicit **liveness** bound, not
+  a performance gate: it is ~600× the ~50 ms of cached work, and deliberately
+  generous enough that a broken cache reaches the *count* assertion (and fails
+  there, with the diagnostic) rather than timing out first. No new public API.
+  Verified load-bearing by deliberately breaking the cache.
+  **The latency measurement is not lost** — Work-2.3's warm-up / sample-count /
+  dispersion requirement is satisfied by the retained **run record**
+  ([`run-20260716T065617`](benchmarks/raw/f2f3f21-terminal-evidence/run-20260716T065617/summary.md):
+  warm-up 3, 50 samples, median **0.970 ms**, stddev 0.022 ms), which is the
+  measurement of record. A benchmark belongs in a run record; a gate belongs in a
+  test. Conflating them is what made this flaky.
+  **Gate at the remediation:** `biscuit-terminal just test` — 2769 passed, **zero
+  flaky**. One unrelated `Table__baseline` snapshot failure remains, verified
+  pre-existing (width-fill drift from `b66742909`) and explicitly not attributed
+  to this feature by review-3.
 - **What is now genuinely L2.**
   `biscuit-terminal/lib/tests/level2_terminal_osc_wezterm.rs` — runs
   `discovery_probe` in a **real WezTerm pane** via the shared
@@ -377,7 +399,8 @@ Run record (interactive PTY + piped CLI as separate cases):
 ## Phase 4 — Consume the shared `ComposeOptions` classification (Architecture Decision B)
 
 AD-B is landed **once** by the linked
-[Opaque Reference Graph](../2026-07-15-reference-graph/plan.md) feature, which
+[Opaque Reference Graph](../_completed/2026-07-15-reference-graph/plan.md) feature
+(archived to `_completed/` after Phase 11), which
 owns the crate-private exhaustive `ComposeOptions` field classification, the two
 purpose-specific identity products, and the `options_hash` migration. This
 follow-up **consumes** that shared prerequisite and finalizes the compose-cache
@@ -936,6 +959,50 @@ removal — the actual finding — is **retained**.
   copy), then asserts that a `persist_whitelist_prefix` leaves the earlier
   snapshot's rules untouched (`entries.is_empty()`) while a later snapshot
   observes the new rule. Deterministic; no timing assertion.
+- **Error-path reservation cleanup — deterministic oracle (added 2026-07-17,
+  review-3).** The allow-once reservations `prepare_directive` takes are owned by
+  an RAII `ReservationGuard`, so every exit — handler error, policy-store write
+  failure, conflict, or success — releases what is still reserved and wakes any
+  same-command waiter. Review-3 accepted that implementation shape but rejected
+  its **oracle** as a release blocker: all five cleanup tests inferred release
+  from **wall-clock**, so they failed whenever a normal second `prepare_directive`
+  took ~5 s, and two of them failed all four attempts at 5.29–5.85 s. That is now
+  fixed, and **no production code changed**:
+  - **Root cause of the flake, found rather than tuned around.**
+    `ComposeOptions::new()` calls `ComposeContext::capture()` (host/repo
+    discovery), which cost **4.30–5.07 s** *inside the timed region* — straddling
+    the old 5 s `WAITER_BUDGET`. The tests were measuring context capture, not a
+    leaked reservation. Raising the budget would have hidden this; it was removed
+    from the window instead.
+  - **The oracle is now the reservation set itself.** A `#[cfg(test)]
+    pub(crate)` seam, `ShellExpansionRuntime::pending_allow_once_for_test()`
+    (`shell_expansion/types.rs:1167`), lets the tests assert the runtime's
+    reservation set **directly** — the exact definition of the defect. It runs
+    **first**, so a leak reports the leaked command *by name* instead of stalling
+    the next composition for the full 30 s `RESERVATION_WAIT_TIMEOUT`. No public
+    API: the seam is `#[cfg(test)]` and crate-private.
+  - **The one test that legitimately concerns notification keeps a timeout, but
+    not a timing oracle.** `WAITER_BUDGET` is gone; the waiter now runs on its own
+    thread and is consumed with `recv_timeout(NOTIFICATION_BUDGET)` (10 s), with
+    **both its fixtures hoisted out of the window** so it reaches
+    `reserve_allow_once` and parks immediately — otherwise the approver could
+    release before the waiter ever parked and the test would pass while proving
+    nothing. The thread is what turns a missed notification into a *reported*
+    failure rather than a nextest terminate-after timeout.
+  - **Verified load-bearing by deliberate break:** the oracle still catches a real
+    leak.
+  - **Tests (named, checkable):**
+    `approval_handler_error_releases_every_reservation`,
+    `whitelist_exact_write_failure_releases_the_rest_of_the_chain`,
+    `blacklist_exact_write_failure_releases_the_rest_of_the_chain`,
+    `whitelist_prefix_write_failure_leaves_no_reservation`, and
+    `handler_error_notifies_a_waiter_blocked_on_the_same_command` (the
+    notification case) — all in `shell_expansion::mod`'s cleanup module. The
+    persistence arms fail **for real** (a read-only policy file, as a read-only
+    checkout or root-owned file produces), not through a test-only seam.
+  - **Gate at the review-3 remediation:** darkmatter `just test` green — 5768
+    (`darkmatter`) + 559 (`darkmatter-cli`) + 566 (`dmls`), **zero retries**,
+    closing review-3's red/flaky area gate.
 - **Spec reconciliation:** Required Work item 6 sanctions "one immutable stage
   snapshot **or** share immutable collections". The second option is taken,
   because the first cannot hold compatibility invariants #1/#5 (prompt
@@ -1584,12 +1651,26 @@ describing the residual as open was **stale**.
   HashExplanation)`), so the CLI gets its exit-2 decision *and* its explanation
   from a single artifact with no accessor and no memo. `--save` gets the same
   treatment via `plan_hash_save_explained`.
-- **⚠ This closure is itself under an open review-2 finding.** `diff_hash` and
-  `plan_hash_save_explained` are **new public inherent methods**, which review-2
-  flags as violating compatibility invariant 2 ("no new public Rust API shape").
-  The mechanism is sound and the measurement below is real, but the *shape* awaits
-  an owner ruling — keep the operation crate-private behind a non-public seam, or
-  record an explicit exception. **Not resolved here; evidence only.**
+- **✅ The public-API violation is CLOSED (2026-07-17, review-3) — by the
+  crate-private seam, not by an exception.** Review-2 flagged `diff_hash` and
+  `plan_hash_save_explained` as **new public inherent methods** violating
+  compatibility invariant 2 ("no new public Rust API shape"), and review-3 held
+  the line. **No owner ruling was sought or granted** — the behavior-preserving
+  branch was taken instead, exactly as Finding 32's revert did:
+  - Both methods are now **`pub(crate)`**
+    (`hash/explain.rs:479`, `hash/save.rs:99`).
+  - `darkmatter-cli` reaches them through a new `#[doc(hidden)] pub mod internal`
+    (`darkmatter/lib/src/internal.rs`) gated behind the **non-default** cargo
+    feature `internal-hash-orchestration` (`darkmatter/lib/Cargo.toml:33`), which
+    only `darkmatter-cli` enables (`darkmatter/cli/Cargo.toml:25`). It is that
+    crate's private arrangement with the library, not public API.
+  - **With default features the module does not exist** — verified empirically: a
+    probe importing `darkmatter::internal` under default features fails to
+    compile. The library's default public surface is therefore **unchanged**.
+  - The 35.5 optimization is intact and `--save`'s two distinct artifact
+    semantics (stored-policy comparison vs selected-policy baseline) are
+    preserved; the measurement below stands unmodified, since the seam moved the
+    *visibility*, not the call graph.
 - **Measurement against the CURRENT implementation (S1 → S2).** Baseline and
   candidate are both current public API — the baseline *is* the two-call path the
   CLI used at S1 — so this needs no pinned copy and no cross-build comparison.
@@ -1761,7 +1842,9 @@ checkbox was rewritten** — they remain the historical `codex/default` record:
 | `results-2.md` | **Still current** — Finding 29 was sustained; its ownership exception is preserved, not reopened. |
 
 Each notice links to this feature's `results.md` + `spec.md` audit table **and**
-to `../2026-07-15-reference-graph/plan.md` for Finding 18.
+to `../_completed/2026-07-15-reference-graph/plan.md` for Finding 18 (the notices
+were written before that feature was archived, so they name its pre-archival
+path; the target moved, the notices' claims did not).
 
 ### Audit table finalized
 
@@ -1971,8 +2054,10 @@ introduced for this run.
 `cargo check --target x86_64-pc-windows-gnu` passes for **`darkmatter`,
 `darkmatter-cli`, `sniff`** and, with `--tests`, for **`biscuit-terminal` +
 `sniff`** — which compiles the target-gated test code itself. Both skip arms
-exist and compile: `level2_terminal_osc_cache_unsupported_on_this_platform`
-(`cfg(not(unix))`) and `compose_redirected_appearance_defaults_probe_is_macos_only`
+exist and compile: `terminal_osc_cache_unsupported_on_this_platform`
+(`cfg(not(unix))` — de-prefixed with the review-1 L1 rename; this section
+originally named it `level2_terminal_osc_cache_unsupported_on_this_platform`,
+which no longer exists) and `compose_redirected_appearance_defaults_probe_is_macos_only`
 (`cfg(not(target_os = "macos"))`). This satisfies the matrix's "Windows
 compilation + clean skip/unsupported behavior" requirement.
 
@@ -2115,7 +2200,17 @@ absorbed, consistent with Phase 9's HIGH disclosure.
 
 ## Open at closeout
 
-Carried to the owner. None is a defect in this feature's shipped code.
+None is a defect in this feature's shipped code. **Reconciled 2026-07-17
+(review-3):** items 1, 3 and 5 are **closed** and struck through — they are kept
+as the record of what was believed and how it resolved, not as live residuals.
+What genuinely remains: item **4** (the compose-regression threshold — blocked on
+a **quiet host**, *not* on an owner ruling), item **2** (pre-existing, sniff's),
+and item **6** (a recorded future candidate, no finding covers it).
+
+**There is exactly one item that would need Ken, and it is not live yet:** if the
+item-4 re-run lands >5 %, the three-way decision recorded under *Regression gate
+FAILED* becomes live. Nothing in this file records an owner approval, and none
+was sought — Ken was unavailable for the entirety of every closeout.
 
 1. ~~**Windows behavioral runs — F17 (shell wait primitive) and F22 (directory
    hash CLI).**~~ — **CLOSED 2026-07-17; no longer a residual.** Both findings
@@ -2178,19 +2273,271 @@ Carried to the owner. None is a defect in this feature's shipped code.
 4. **Compose setup regression owned by the Opaque Reference Graph feature** —
    +13–27 % on every compose case, from `a8e5e98d9` + `16ed1e57a`. Evidence and
    bisect in the cumulative run record. Not fixed here (scope boundary).
-5. **~~Finding 35.5 residual~~ — CLOSED by `b8ecb88cb`, but its *shape* is now
-   the open item.** The double-compute is gone: `diff_hash` returns both products
-   from one artifact, which needed neither of the two routes this list called
-   barred. What is open instead is that `diff_hash` and
-   `plan_hash_save_explained` are **new public API**, which review-2 flags against
-   compatibility invariant 2. Needs an owner ruling: crate-private seam, or a
-   recorded exception. See the 35.5 section above.
+   **Updated 2026-07-17 (review-3):** a remediation (`92a3d502e`, baseline-schema
+   canonical-JSON cache) has since been **measured** and removes most of it — but
+   the gate **still does not close**, now for a *measurement* reason rather than a
+   code reason. See *Reference-graph setup remediation* below; the blocker is a
+   quiet host, not an owner ruling.
+5. ~~**Finding 35.5 residual, and its public-API shape.**~~ — **BOTH CLOSED; no
+   longer a residual.** The double-compute was closed by `b8ecb88cb`
+   (`diff_hash` returns both products from one artifact). The **API shape** — the
+   item this list previously recorded as *"needs an owner ruling: crate-private
+   seam, or a recorded exception"* — was **closed at review-3 via the
+   crate-private seam route, with no owner ruling sought or granted**:
+   `diff_hash` / `plan_hash_save_explained` are now `pub(crate)`, and
+   `darkmatter-cli` reaches them through a `#[doc(hidden)] pub mod internal`
+   behind the **non-default** `internal-hash-orchestration` feature. Under
+   default features the module does not exist (verified by a probe that fails to
+   compile), so the library's default public surface is unchanged and
+   compatibility invariant 2 holds. See the 35.5 section above.
 6. **`strip_incidental_newlines` cost** — surfaced by F25's profile, covered by
    **no** finding: **22.7 %** of cleanup on `toc_large`, **69.2 %** on
    `replace_heavy` (recomputed from retained vectors). It is ~2.8× F25's entire
    measured fusion ceiling. A future candidate, not actioned.
 7. **Stray newline-named directory** — see immediately below. It **was
    committed**, making it a live Windows checkout hazard; removed at review-1.
+
+## Reference-graph setup remediation (checkpoint `f-refgraph-setup-fix`)
+
+Added 2026-07-17 at the review-3 closeout. Review 3 recorded that this
+remediation and its two runs were **absent from this file entirely**, leaving the
+integrated compose regression with no auditable disposition (acceptance criteria 5
+and 6). This section is that disposition.
+
+### The two retained runs
+
+Both were captured on 2026-07-16 within ~1 minute of each other and **disagree by
+5×** on the release-critical `compose_trivial` case:
+
+| run | `compose_trivial` after vs base | its A/A drift floor | disposition |
+|---|---:|---:|---|
+| [`run-20260717T033745`](benchmarks/raw/f-refgraph-setup-fix/run-20260717T033745/summary.md) | **+0.76 %** (+0.091 ms) | 0.36 % | **ACCEPTED** as run of record |
+| [`run-20260717T033000-trivial-conservative`](benchmarks/raw/f-refgraph-setup-fix/run-20260717T033000-trivial-conservative/rejection.md) | **+4.91 %** (+0.543 ms) | 1.13 % | **REJECTED** on provenance; retained |
+
+> **Evidence-layout note (2026-07-17).** Review 3's finding had two halves, both
+> now **closed**: no auditable disposition (this section is it, and it is
+> deliberately self-contained so it stands alone), and `refgraph-setup-fix.sh:19`'s
+> dangling `summary.md` reference. The accepted run now carries its AD-A
+> [`summary.md`](benchmarks/raw/f-refgraph-setup-fix/run-20260717T033745/summary.md)
+> and the rejected run a
+> [`rejection.md`](benchmarks/raw/f-refgraph-setup-fix/run-20260717T033000-trivial-conservative/rejection.md)
+> recording why its number must not be quoted bare. This section remains the
+> authority for the checkpoint's disposition; the run records own pins, commands,
+> environment, samples, dispersion, thresholds, and raw-result locations.
+>
+> The checkpoint's *threshold verdict* is a separate matter and stays open — see
+> *Threshold verdict* below. It is blocked on a quiet host, not on documentation.
+
+Both figures were **independently recomputed** from the 96 retained observations
+per arm during this closeout and reproduce exactly. Recompute either with:
+
+```bash
+cd darkmatter/features/2026-07-15-performance-followup/benchmarks
+bun refgraph-setup-fix-report.ts raw/f-refgraph-setup-fix/<run-id>
+```
+
+### Why `run-20260717T033745` is accepted
+
+Accepted on **provenance, not on its more favourable number**:
+
+1. **It is a live product of the committed harness.** Its per-file mtimes are
+   staggered `20:37:46 → 20:38:39`, matching its 11 continuous `load.log` samples
+   — the signature of a real sequential run.
+2. **It has the control arms.** All six cases, including `render_basic` and `help`.
+   `help` runs no compose code at all, which is what makes a compose-specific claim
+   falsifiable.
+3. **Its load is monitored end-to-end** (5-s samples across the whole capture).
+
+### Why `run-20260717T033000-trivial-conservative` is rejected
+
+Rejected for **structural defects that make its number uninterpretable** — not for
+being unfavourable. Retained, per the standing rule that raw vectors and harnesses
+are never deleted:
+
+1. **No control arms.** It measured `compose_trivial` only. The committed harness
+   emits six cases; this run has eight files, all `compose_trivial`. It is
+   therefore **not reproducible** by `refgraph-setup-fix.sh` as committed, and it
+   is *structurally incapable* of distinguishing a compose regression from a
+   host-wide shift — the exact question at issue.
+2. **Its files did not come from a live run in that directory.** All eight JSONs
+   and its `load.log` share one mtime, `20:39:04` — materialised in a single
+   second, *after* the accepted run finished at `20:38:39`. It is a retained copy
+   of an earlier ad-hoc invocation, not a harness product.
+3. **5 seconds of load monitoring.** Its `load.log` has a **single** sample
+   (`20:36:44`, load 5.61) — and that timestamp precedes its own mtime by 2m20s,
+   consistent with (2). What the host did during the capture is essentially
+   unrecorded.
+4. **Its A/A drift floor is 3× wider** (1.13 % vs 0.36 %) — the run resolved the
+   code less well.
+
+### Pins, commands, and environment (what a `summary.md` owes, per AD-A)
+
+| Arm | Commit | Meaning |
+|---|---|---|
+| `base` | `51c1f16e10ffe825b56987573ba4eabc659c768e` | audit commit — the gate's baseline (`spec.md` frontmatter `audit_commit`) |
+| `before` | `e15b1cc22b113a9b24058207d760cd879fa62eb6` | integrated head carrying the regression (parent of the fix) |
+| `after` | `92a3d502eb65c30205a9a255dd13dd8dc6d0aabf` | `before` + *perf(darkmatter): cache baseline schema canonical JSON for compose options* |
+
+`after` is sampled **twice per round** (`after_A`/`after_B`) — same binary, so their
+delta is the identical-code drift floor.
+
+**Provenance caveat.** `92a3d502e` is timestamped `2026-07-16 21:10:34 -0700`, but
+the accepted run executed at `20:37:45 -0700` — **33 minutes earlier**. The `after`
+binary was built from the **working tree** while the fix was uncommitted, and
+committed after. The table records the commit that tree became; the `after` pin is
+therefore **reconstructed, not observed**. The required re-run must build all three
+pins from committed SHAs.
+
+**Detached-worktree build** (reconstructed from `refgraph-setup-fix.sh:19-20` and
+the `f-cumulative-closeout` declared contract) — isolated `CARGO_TARGET_DIR` per
+pin, so no pin reads another's incremental artifacts:
+
+```bash
+for pin in base:51c1f16e1 before:e15b1cc22 after:92a3d502e; do
+  name="${pin%%:*}"; sha="${pin##*:}"
+  git worktree add --detach "/tmp/dmbench/src-$name" "$sha"
+  CARGO_TARGET_DIR="/tmp/dmbench/target-$name" \
+    cargo build --release -p darkmatter-cli \
+    --manifest-path "/tmp/dmbench/src-$name/Cargo.toml"
+done
+```
+
+The harness expects `/tmp/dmbench/target-{base,before,after}/release/md` and
+hard-fails if any is missing (`refgraph-setup-fix.sh:31-33`). Those worktrees are
+scratch and not retained; rebuild from the SHAs above.
+
+**Capture:** `./refgraph-setup-fix.sh raw/f-refgraph-setup-fix/run-20260717T033745 8`
+
+**Fixtures:** committed bytes under `benchmarks/fixtures/`; identities frozen in
+`manifest.yaml` and re-verified by
+`benchmark_fixtures.rs :: benchmark_manifest_matches_recorded_identities` (that
+test is the authority — identities are not recomputed ad hoc). `compose_trivial`:
+241 bytes, `darkmatter_hash` `10f054ee903d73ec-489140f252295fb7`, `xxhash64`
+`26e8dcccefde48cd`. All three pins read identical fixture bytes; only the binary
+differs.
+
+**Method:** `hyperfine`, `--shell=none`, `--style basic`, `NO_COLOR=1`; warm-up 3,
+12 runs per arm per round, 8 rounds → **96 observations per arm per case**; every
+round samples all four arms per case, so a load excursion shifts arms together
+rather than landing inside one. Statistic = mean of pooled observations, dispersion
+= sample stddev. Non-TTY (piped), so terminal detection short-circuits.
+**Host:** Apple M4 Max (`Mac16,5`), macOS 26.5.2, Darwin 25.5.0 arm64; toolchain
+`stable`; `--release`. **Capture window:** `20:37:45`–`20:38:39` local (~54 s).
+**Load during capture:** 1-min **5.42–7.16** — *not* a quiet host.
+
+### Full recomputed table — accepted run (n=96/arm)
+
+Times in ms. `drift floor` = `(after_B − after_A)/after_A`, the same binary against
+itself.
+
+| case | `base` | `before` | vs base | `after_A` | `after_B` | **drift (A/A)** | **after vs base** |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `compose_trivial` | 11.957 | 15.132 | **+26.6 %** | 12.069 | 12.026 | **−0.36 %** | **+0.76 %** (+0.091 ms) |
+| `compose_schema_transclusion` | 17.568 | 21.580 | **+22.8 %** | 16.959 | 17.049 | +0.53 % | −3.21 % |
+| `compose_interpolation_heavy` | 15.907 | 18.601 | **+16.9 %** | 15.775 | 15.883 | +0.68 % | −0.49 % |
+| `compose_transclusion_heavy` | 55.874 | 63.055 | **+12.9 %** | 47.199 | 47.149 | −0.11 % | −15.57 % † |
+| `render_basic` *(control)* | 5.793 | 5.896 | +1.79 % | 5.756 | 5.939 | **+3.18 %** | +0.95 % |
+| `help` *(control)* | 5.134 | 5.124 | −0.19 % | 5.114 | 5.168 | **+1.04 %** | +0.14 % |
+
+† `compose_transclusion_heavy`'s `base` arm carries a large round-8 excursion
+(78.54 ms vs ~52 ms round-typical). Excluding round 8, `after vs base` is
+**−10.4 %**, not −15.57 %. Reported as computed with the caveat attached rather
+than dropping the round silently; the retained vectors let anyone check it.
+
+### Threshold verdict — **NOT ESTABLISHED.** Not a pass; not a fail
+
+**Predeclared threshold** (`f-cumulative-closeout/run-20260716T050518/declared-contract.md`
+§*Predeclared thresholds* 1, written before any measurement): no case may regress
+`audit → head` by more than **5 %** outside dispersion; a reproducible out-of-noise
+regression >5 % is a **fail**. `base` is the audit commit and `after` is the head,
+so `after vs base` is exactly the gated quantity.
+
+Both point estimates (+0.76 %, +4.91 %) fall **under** 5 %. **A pass is
+nevertheless not claimable**, because the host cannot resolve a 5 % gate:
+
+> The `base` arm is the **same audit-commit binary** in both runs, on the same host,
+> against the same fixture bytes, ~1 minute apart. It measured **11.049 ms** in one
+> and **11.957 ms** in the other — **+8.2 % drift on identical code**, i.e. **larger
+> than the 5 % threshold being adjudicated.**
+
+Supporting points:
+
+- The harness's per-case "RESOLVABLE" criterion calls **both** contradictory
+  readings established, because each exceeds its own A/A bracket. They cannot both
+  be right. The contradiction shows the **within-block A/A bracket understates
+  between-run variance**: `after_A`/`after_B` are sampled seconds apart inside one
+  `hyperfine` block, so their delta is a short-timescale noise **floor**, not a
+  between-run confidence bound.
+- Within the accepted run alone, the identical-code A/A bracket ranges from
+  **−0.11 %** to **+3.18 %** (`render_basic`) across its six cases.
+  `compose_trivial`'s 0.36 % bracket is the tightest of the six — a favourable
+  draw, not a quiet host.
+- The pessimistic run's margin to the gate is **0.09 pp**, an order of magnitude
+  below its own 1.13 % drift floor.
+- **Neither run was captured on a quiet host** (1-min load 5.4–7.8 throughout).
+
+### What *is* established (robustly)
+
+The remediation works. In the accepted run, `before vs base` is **+12.9 % to
++26.6 %** across the four compose cases while both controls stay flat (`help`
+−0.19 %, `render_basic` +1.79 %); after the fix every compose case falls to
+**−15.6 % … +0.76 %**. That contrast is 10–20× any drift floor present and is
+compose-specific by construction. **`92a3d502e` removes ~25 percentage points of
+the Command-Setup regression.** Only the *residual's exact value* is unresolved.
+
+### No fresh run was captured — and why
+
+The review-3 closeout was directed to capture a fresh quiet-host run if the
+retained evidence could not settle the question. It cannot. **The run was not
+captured because the host was not quiet.** Two independent reads at closeout time:
+
+```
+$ uptime
+22:54  up 2 days, 14:46, 6 users, load averages: 67.92 112.86 100.88
+$ uptime
+22:54  up 2 days, 14:46, 6 users, load averages: 59.30 109.54 99.84
+```
+
+Load **~60–68 (1-min) / ~110 (5-min)**. This repository's standing rule records
+that concurrent load of **29–64** has previously manufactured **phantom 19 %
+effects**. A capture at load ~110 would be strictly worse evidence than what is
+already retained, and would not be admissible under any honest reading of the
+Benchmark and Evidence Contract.
+
+### Disposition — blocked on a **quiet host**, not on the owner
+
+This checkpoint **does not close**. It needs **one quiet-host bracketed re-run**.
+This is a **host-availability blocker, not an owner decision**: no ruling can make
+a load-110 host resolve a 5 % effect. Open item 4 above is updated accordingly.
+
+The three-way owner decision recorded under *Regression gate FAILED* remains
+**live but re-scoped**: its option 1 ("fix the setup-path cost") has now been
+*attempted and measured*, and appears to have largely succeeded. Whether it
+succeeded *enough* to clear 5 % is the open question. **An owner decision is
+required only if the re-run lands >5 %.** Nothing here grants a re-threshold, and
+no owner approval is recorded — Ken was unavailable for the entirety of this
+closeout.
+
+#### Predeclared admissibility + thresholds for the required re-run
+
+Declared **now**, before that run is captured, so they cannot be tuned to its
+result:
+
+1. **Host.** 1-min load **< 2.0** for the whole capture, sampled every 5 s into the
+   harness's `load.log`, **no sample ≥ 2.0**. Retain the full log.
+2. **Resolving power.** **Every** case's identical-code A/A drift floor must be
+   **< 1.0 %**, *controls included*. Any run with an A/A bracket ≥ 1.0 % is
+   **inadmissible** — it has demonstrated it cannot resolve the gate. Both retained
+   runs fail this (3.18 %; 1.13 %).
+3. **Between-run confirmation.** Two independent admissible runs; their `base`
+   means must agree within **1.5 %**. This directly tests the failure that
+   invalidated the retained pair (+8.2 %).
+4. **Coverage.** All six cases of the committed harness, controls included. A
+   compose-only run is inadmissible.
+5. **Gate.** `compose_trivial` `after vs base` **≤ 5 %** → **PASS** (closes with no
+   owner involvement). **> 5 %** outside drift → **FAIL** → escalate to owner.
+6. **Pins observed, not reconstructed.** Build all three arms from committed SHAs
+   (`51c1f16e1` / `e15b1cc22` / `92a3d502e`) rather than a working tree.
 
 ## Newline-named fixture duplicates (committed by Phase 10, removed at review-1)
 
