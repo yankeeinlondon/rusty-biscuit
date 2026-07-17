@@ -9,8 +9,10 @@ claudine/lib/src/
 ├── actions/      → Hook action types and response model
 ├── badges/       → Styled terminal badge constants (YOLO, Non-Interactive, Interactive, etc.)
 ├── composition/  → Markdown frontmatter composition (inline and chained prompt pipelines)
+│   ├── coordinator/ → Active-document ownership: the typed DocumentTransition, the two-stage proxy handoff, and the four state layers (coordinator/{transition,handoff,commit,invocation,document,active}.rs)
 │   ├── lifecycle/ → Lifecycle config/types, parsing, validation, actions, context, control, execution, and the pure transition core shared by composition preflight and the harness loop
 │   ├── looping/   → Loop configuration, action DSL, condition evaluation, and execution orchestration (looping/{engine,types,seed,config,dsl,actions,expression}.rs — engine holds only execution/routing/gate logic; types holds the option/context/output/result value types; seed holds loop-seed construction)
+│   ├── prepare/   → The canonical preparation service (prepare/service.rs) and the entry-reason stage matrix as data (prepare/entry.rs); prepare.rs holds the two sanctioned composers prepare_direct/prepare_inline
 │   └── schema/    → Schema-aware preparation, error translation, problem classification, and status reporting
 ├── config/       → Agent detection, hook registration, atomic writes, backups
 ├── dispatch/     → Event processing pipeline
@@ -434,6 +436,63 @@ Other concerns remain split by responsibility:
 
 Composition execution headers are shared output helpers in
 `cli/src/output/mod.rs`; they do not live in the executor pipeline.
+
+### Active-Document Coordinator and Canonical Preparation
+
+A run has one **active document**. `lib/src/composition/coordinator/` owns the
+provider-neutral vocabulary for changing it; the CLI driver owns the process,
+terminal, filesystem, and provider-adapter effects (nothing under
+`coordinator/` performs I/O or resolves a file reference — a resolved `PathBuf`
+arrives as a value).
+
+- `transition.rs` — `DocumentTransition` (`Continue`, `Retry`, `Resume`,
+  `Proxy`, `Complete`, `Abort`). Every proxy producer returns it; every
+  coordinator outcome consumes or explicitly rejects it. There is **no** second
+  optional `Option<PathBuf>` proxy channel — `LoopExecutionResult::init_proxy_target`
+  and `route_initialize::init_proxy_target` are both gone, and
+  `composition_seams::no_new_optional_proxy_target_channel` holds that baseline
+  at zero.
+- `handoff.rs` — the two-stage handoff. Lifecycle evaluation can build only an
+  `EvaluatedProxyRequest { target, overlay, provenance }`; a `ProxyHandoff`
+  additionally requires the opaque `ResolvedProxyTarget` and a `HopApproval`, so
+  the type system makes an unresolved or unvalidated handoff unconstructable.
+- `commit.rs` — `commit_proxy`, the single site that may change document
+  identity. The harness *requests* `Proxy`; it no longer swaps its own source.
+- `invocation.rs` / `active.rs` / `document.rs` — the four ownership layers:
+  immutable `InvocationInputs`, the coordinator-only `RunLedger` (proxy chain,
+  hop accounting, approval cache, timing anchors — extended, never reset),
+  `PreparedDocument`, and `ActiveDocumentState` (discarded by a proxy). Retry
+  and resume replace only the `ProviderAttempt` slice and retain their labeled
+  `ControlBudget`s.
+
+`lib/src/composition/prepare/` is the one canonical preparation service.
+`entry.rs` holds the spec's stage matrix as **data** — one `PreparationStages`
+row per `DocumentEntryReason` (`Direct`, `ProxyTarget`, `Retry`, `Resume`,
+`LoopIteration`), with no fall-through — and `service.rs::prepare_document`
+runs it around the two sanctioned composers (`prepare_direct` / `prepare_inline`
+in `prepare.rs`). A prepared document stores the **exact** `ComposeContext` it
+composed against; ambient `ComposeContext::capture()` is not a runtime fallback
+on any prepared path (the wrapper moves process CWD to the repo root, so a
+recapture reads the wrong anchor).
+
+Two `cli/tests/composition_seams.rs` guards hold these lines mechanically: the
+`compose_with` allowlist (four sanctioned composer sites) and the ambient-capture
+ban. The latter carries one baselined **debt** entry —
+`sequence::phase1c::build_template_preflight_options` — which is not a
+sanctioned owner.
+
+**Retired carriers.** `RematerializeInputs` → `CallerInputLayers` (the four
+invocation-scoped caller layers, an input of the canonical service — a
+source-specific value belongs to the prepared document instead). The
+second/third composers in `harness_orch/prompt.rs` (`materialize_harness_prompt`'s
+hand-rolled `compose_with` calls and `preflight_proxy_target`'s option builder)
+now route through the canonical service.
+
+**Known gap.** Launch inputs (provider, model, MCP, argv, child env/CWD, system
+prompt, interactivity) and document-loop recognition are still computed once
+before the loop from the originally-invoked document, so a proxied target does
+not yet select its authored `model:` or acquire its own `loop:`. Tracked in
+`features/2026-07-13-proxy-with/notes/acceptance-map.md` (AC 7, 9, 10, 15).
 
 `LifecycleCatchProtocol` in `lib/src/composition/lifecycle/runtime.rs` is the
 single provider-neutral owner of setup catch routing, terminal-slot

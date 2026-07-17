@@ -256,6 +256,97 @@ docs_updated_during_phase_13:
 docs_created_during_phase_13:
     - claudine/features/2026-07-13-proxy-with/notes/acceptance-map.md
 skills_files_updated_during_phase_13: []
+source_files_during_phase_14: []
+docs_updated_during_phase_14:
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/lifecycle.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/non-interactive-sessions.md
+docs_created_during_phase_14: []
+skills_files_updated_during_phase_14:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+source_code:
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/budget_scoping.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/shell_approval.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_evaluation.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_routing.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/shell_options.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/overlay.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/tests/composition_seams.rs
+    - claudine/cli/tests/level2_lifecycle_control.rs
+    - claudine/cli/tests/wrap_compose_preflight.rs
+    - claudine/lib/src/composition/coordinator/active.rs
+    - claudine/lib/src/composition/coordinator/commit.rs
+    - claudine/lib/src/composition/coordinator/document.rs
+    - claudine/lib/src/composition/coordinator/handoff.rs
+    - claudine/lib/src/composition/coordinator/invocation.rs
+    - claudine/lib/src/composition/coordinator/mod.rs
+    - claudine/lib/src/composition/coordinator/tests.rs
+    - claudine/lib/src/composition/coordinator/transition.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/actions/tests.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/lifecycle/control.rs
+    - claudine/lib/src/composition/lifecycle/control/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/proxy_with_evaluation.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/runtime/tests.rs
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/types.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/entry.rs
+    - claudine/lib/src/composition/prepare/entry/tests.rs
+    - claudine/lib/src/composition/prepare/service.rs
+    - claudine/lib/src/composition/prepare/service/tests.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/translate.rs
+    - claudine/lib/src/composition/select/tests.rs
+    - claudine/lib/src/composition/types.rs
+documentation:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/lifecycle.md
+    - claudine/docs/topics/non-interactive-sessions.md
+    - claudine/features/2026-07-13-proxy-with/notes/acceptance-map.md
+    - claudine/features/2026-07-13-proxy-with/notes/baseline.md
+    - claudine/features/2026-07-13-proxy-with/notes/state-migration.md
+    - claudine/features/2026-07-13-proxy-with/plan.md
 packages:
     - claudine
     - claudine-cli
@@ -1855,39 +1946,102 @@ remaining diagnostic, then re-run this checkpoint — at which point both
 
 Depends on Phase 13.
 
-- [ ] Update the lifecycle topic doc (`claudine/docs/topics/`, surfaced as the
+- [x] Update the lifecycle topic doc (`claudine/docs/topics/`, surfaced as the
       skill's `lifecycle.md`) with: key/value `proxy.with` syntax and typed
       interpolation; source-time evaluation; the advanced control-plane-overlay
       trust model; precedence and immediate-target overlay lifetime; transient
       `with:` versus persistent `set_frontmatter`/`merge_frontmatter`.
-- [ ] Update the composition topic doc with: the direct-versus-proxy equivalence
+      Landed as `### Proxy Handoffs` with six subsections, plus a `with:` note
+      on the flow-control table's `proxy` row.
+- [x] Update the composition topic doc with: the direct-versus-proxy equivalence
       contract; active-document ownership; the retry/resume re-entry contract and
       the resume compatibility key; the per-entry stage matrix; target-specific
       context/provider/MCP/workspace/loop behavior; inline closure ownership,
       sequence-step containment, and dry-run behavior.
-- [ ] Recommend schema-declared data properties for ordinary parameter passing and
+      Landed as `## Document Handoffs and the Equivalence Contract`. **Two
+      subjects are documented as gaps rather than as behavior, because they are
+      not implemented**: the resume compatibility key (AC15) and the
+      target-specific launch rebuild covering provider/model/MCP/argv/env/CWD/
+      system-prompt/loop (AC7/9/10). Both carry a blockquote naming the blocker
+      and pointing at `notes/acceptance-map.md`. Documenting them as shipped
+      would have been the one failure mode this task cannot afford.
+- [x] Recommend schema-declared data properties for ordinary parameter passing and
       explicitly call out control-plane overlays as an advanced, trusted-prompt
       capability.
-- [ ] Correct stale documentation that describes retry/resume/proxy in terms of a
+      `lifecycle.md` → `#### Trust model: prefer schema-declared data
+      properties`, which also enumerates the four safety properties that hold
+      regardless (target reparse/revalidate, pre-launch schema failure,
+      target-side shell policy, no value disclosure).
+- [x] Correct stale documentation that describes retry/resume/proxy in terms of a
       reduced harness path, or that implies recovery is limited to `failure` when
       the universal lifecycle contract supports other runtime signals.
-- [ ] Ship the reader note verbatim in the compatibility section: a proxied target
+      Six sites across four docs. Two classes of real drift found:
+      - **`Requeue` never existed** under that name any more — the verb was
+        renamed to `defer` on 2026-06-23 (`universal-flow-control`), but four
+        recovery lists still advertised `Requeue` as an available action.
+        Corrected to `defer` with its not-implemented status stated.
+      - **`resume` was documented as `failure`-only** (`lifecycle.md`'s
+        "Resume after a timeout" example), directly contradicting the same
+        file's universal-flow-control paragraph 300 lines above. Code is
+        authoritative (`is_valid_for` restricts `Skip` only); the comment
+        drifted.
+      Also narrowed the off-loop paragraph: it lumped `proxy` in with `retry` as
+      having "no re-entry loop to act on", which stopped being true when the
+      coordinator landed. `initialize` `proxy` is now a first-class transition;
+      what remains unsupported is `retry` from `initialize` and
+      `retry`/`resume`/`proxy` from a pre-flight `blocked` or the `loop` gate.
+- [x] Ship the reader note verbatim in the compatibility section: a proxied target
       may now run additional loop iterations, select its authored provider/model,
       request approval for its own shell actions, or surface the typed error
       direct invocation already produced. These are compatibility **fixes**, not
       preserved quirks.
-- [ ] Update `.claude/skills/claudine/SKILL.md` and `architecture.md` for the new
+      Shipped verbatim in `composition.md` → `### Backward compatibility`,
+      **followed by a correction paragraph**, because two of its four claims are
+      false on today's tree: loop iterations and authored-provider/model
+      selection are both blocked on R6. The note is shipped as the intended
+      contract and the paragraph states which halves are live (shell approval,
+      typed errors) and which are pending. Shipping it verbatim and unqualified
+      would have made the topic doc assert the exact two behaviors that the
+      `#[ignore]`d L2 rows exist to prove absent.
+- [x] Update `.claude/skills/claudine/SKILL.md` and `architecture.md` for the new
       module structure (coordinator, canonical preparation service, transition
       types) and the retired carriers.
-- [ ] Update `claudine/docs/dependencies.md` if any crate changed (e.g. `indexmap`
+      `architecture.md`: `coordinator/` and `prepare/` added to the module tree;
+      new `### Active-Document Coordinator and Canonical Preparation` section
+      covering the transition/handoff/commit/state-layer split, the stage matrix
+      as data, the stored-`ComposeContext` rule, both `composition_seams` guards
+      (including the baselined `phase1c` debt), the retired carriers
+      (`RematerializeInputs` → `CallerInputLayers`; both `init_proxy_target`
+      channels; the second/third composers), and the R6 gap. `SKILL.md`: a new
+      `Document handoffs` row in the wrapper/composition subsystem table.
+- [x] Update `claudine/docs/dependencies.md` if any crate changed (e.g. `indexmap`
       for the overlay).
-- [ ] Regenerate the skill `hash:` frontmatter with `md hash <file>` for every
+      **No-op, verified rather than assumed.** `indexmap` was already a
+      dependency of both `claudine` and `claudine-cli` before this feature
+      (`git log -L` dates it to `bf8d4e109` / `12af3075b`), and
+      `git diff main...HEAD -- claudine/lib/Cargo.toml claudine/cli/Cargo.toml`
+      shows this feature added no crate. The only `cli/Cargo.toml` delta on the
+      branch is an unrelated rendezvous dev-dependency change.
+- [x] Regenerate the skill `hash:` frontmatter with `md hash <file>` for every
       edited skill document.
+      Only two edited documents carry a `hash:` — `SKILL.md` and `composition.md`
+      (the topic doc the skill symlinks). `lifecycle.md`, `architecture.md`,
+      `execution-flow.md`, and `non-interactive-sessions.md` have no frontmatter
+      and therefore no hash to stamp.
 - [ ] Move this feature directory to `features/_completed/` once checkpoint 14
       passes. Before moving it, update the spec status to the repository's
       implemented/completed convention and verify both declared dependency gates
       are satisfied; a completed directory must not hide an unresolved required
       dependency.
+      **Not done, and must not be** — on two independent grounds. (1) The
+      instruction driving this phase explicitly withholds the move from its
+      scope. (2) The move's own precondition is unmet: checkpoint 14 requires
+      checkpoint 13, which did not pass (4 of 30 criteria blocked on R6), and
+      the task's own wording forbids a completed directory that hides an
+      unresolved dependency. Both declared dependency gates (file-resolution,
+      error-propagation) also remain owner-approved bridges rather than
+      satisfied dependencies. This is the task that would launder the R6 gap
+      into "done"; leaving it open is the point.
 
 **Validation checkpoint 14**
 - `just test`, `just test-l2`, `just lint` green.

@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-4d16a4d593030242
-last_updated: 2026-07-15
+hash: ef46db3751d8e999-b49dd427cfb31b3c
+last_updated: 2026-07-17
 ---
 # Claudine Composition
 
@@ -580,9 +580,90 @@ Source loading (shared by all three commands) parses frontmatter strictly. A doc
 
 The composition completion engine consults `$schema` when the cursor sits on a setter slot AND a positional prompt-file argument is already committed. See [shell-completions.md — Schema-Aware Setter Completion](completions/shell-completions.md#schema-aware-setter-completion) for the full contract.
 
+## Document Handoffs and the Equivalence Contract
+
+A run has exactly one **active document** at a time. A lifecycle `proxy` action replaces it: the target enters at its own `initialize`, becomes active, and owns everything from there — the remaining lifecycle, the closure, and the output. See [lifecycle.md — Proxy Handoffs](lifecycle.md#proxy-handoffs) for the authoring surface, including the `with:` overlay.
+
+### The equivalence contract
+
+> **A document reached through a proxy behaves like the same document invoked directly.**
+
+`claudine compose target.md` and a `proxy` to `target.md` route through **one** canonical preparation service, so the route is not supposed to be a behavior. A proxy is a change of document, not a downgrade to a reduced pipeline: the target's `initialize`, schema validation, shell discovery and approval, `ctx.*` context, and typed diagnostics are all decided from the target's own stabilized frontmatter.
+
+That is the contract, and it holds today for everything preparation owns. It does **not** yet hold for the launch inputs the wrapper computes before the loop — provider, model, MCP, argv, environment, and loop recognition — which are called out under [Target-specific behavior](#target-specific-behavior) below. Read the contract as the invariant the code is converging on, and that section as the ledger of what is left.
+
+### Active-document ownership
+
+Only the **coordinator** — which sits above both the document loop and the provider-attempt harness — may commit a change of document identity. Lifecycle evaluation cannot; it produces an *evaluated proxy request* (target string, resolved overlay, provenance) and hands it up. The provider harness cannot; it *returns* a `Proxy` transition rather than swapping its own source path. The coordinator alone resolves the target through the shared file resolver, checks hop and cycle state against the invocation-wide chain, and atomically commits a resolved handoff. No layer below it resolves the target a second time.
+
+State is owned in four layers, which is what makes "what survives a handoff" answerable rather than incidental:
+
+| Layer | Lifetime | Survives a proxy? |
+|---|---|---|
+| Invocation inputs (caller overrides, launch inputs) | the command | yes — immutable |
+| Run ledger (proxy chain, hop accounting, approval cache, timing anchors) | the command | yes — extended, never reset |
+| Prepared document | one active document | no — the target is prepared afresh |
+| Active-document execution state (attempt, budgets, session) | one active document | no — discarded |
+
+A failed handoff never half-activates the target: the source stays active for diagnostic attribution, the failure follows the normal event-aware routing, and no duplicate terminal or `finalize` event is synthesized.
+
+### Entry reasons and the stage matrix
+
+Every entry into canonical preparation declares **why**, and each reason has exactly one row — no reason falls through to another's policy:
+
+| Entry reason | Built from | Emits `initialize` | Schema + full shell audit | Loop ownership |
+|---|---|:-:|:-:|---|
+| Direct document | the caller's resolved source | yes | yes | recognized from this document |
+| Proxy target | a fresh read from disk | yes | yes | recognized from this document |
+| Retry | a fresh read from disk | no | yes | inherits the active document's |
+| Resume | a fresh read from disk | no | yes | inherits the active document's |
+| Next loop iteration | the stamped structural plan | no | no | reuses the owning loop's plan |
+
+Direct and proxy-target differ **only** in the read basis — that identity is the equivalence contract in table form. A proxy target reads fresh because the handoff commits to a document the source may never have touched.
+
+`initialize` fires once per **active document**, not once per attempt: a retry or resume re-enters a document that has already initialized. A loop iteration skips validation because it re-materializes against an already-audited structural plan and therefore cannot introduce command bytes the audit never saw.
+
+### Retry and resume re-entry
+
+Retry and resume replace only the **provider-attempt slice** of the active document. They refresh the document canonically (a fresh read, full validation), keep the document's overlay and proxy provenance, and retain and decrement their own budgets — a retry cannot reset its budget by replacing the attempt. Retry drops any live session and starts a fresh attempt; resume keeps the session and delivers its follow-up message. Proxy and the next loop iteration are the two transitions that grant *fresh* budgets, because both are new active-document scope; retry, resume, proxy, and loop counters each have their own labeled home rather than sharing one counter.
+
+> **Not yet implemented: the resume session-compatibility key.** The spec requires a resume to retain a live session only when a compatibility key of the target's launch properties still matches, and to name the changed facet when it does not. Today's resume retains the live session without that check. The key's facets are pre-loop launch values, so it depends on the target-specific launch rebuild described below. Tracked in [`features/2026-07-13-proxy-with/notes/acceptance-map.md`](../../features/2026-07-13-proxy-with/notes/acceptance-map.md) → AC 15.
+
+### Target-specific behavior
+
+The target's stabilized frontmatter is the basis for the target's decisions. What is rebuilt per target today:
+
+- **Context** — the prepared document stores the exact `ComposeContext` it composed against, derived from immutable launch inputs plus the target's own source, repo, and workspace. Body interpolation, effective frontmatter, lifecycle DM2 lookup, schema and file evaluation, and shell preflight all read that one stored snapshot; nothing recaptures ambient context at runtime, which matters because the wrapper deliberately moves the process CWD to the repo root. `current.ctx.*` remains live as a late-binding surface, and is explicitly *not* a fallback for a missing prepared `ctx.*`.
+- **`initialize` and shell** — the target runs its own `initialize` behind a narrow safety gate that approves every potentially-selected `initialize` shell command first ("initialize before full pre-flight" never means "execute unapproved shell"), then rereads the stabilized target so initialize-time mutations are visible, then runs the full audit over every remaining lifecycle and template shell surface, reusing approvals the narrow gate already granted rather than re-prompting. An `initialize` proxy may chain another proxy; the chain stabilizes before any launch.
+- **Schema and diagnostics** — the target's `$schema` validates the target's effective frontmatter (including any `with:` overlay), and a given failure has one typed identity whichever route reached it.
+
+> **Not yet implemented: the target-specific launch rebuild.** Provider, model, MCP, argv, child environment, child CWD, system prompt, interactivity, and document-loop recognition are still computed **once, before the loop, from the originally-invoked document**. A proxied target therefore does not yet select its authored `model:`, and does not yet acquire its own `loop:`. This is the largest known gap in the equivalence contract; it is reproduced by two `#[ignore]`d L2 rows and tracked in [`notes/acceptance-map.md`](../../features/2026-07-13-proxy-with/notes/acceptance-map.md) → AC 7, 9, 10.
+
+### Command-level ownership
+
+The coordinator is nested **inside** the command's own ownership — a handoff changes the document, never the command:
+
+- **`compose`** routes the final active document's output to stdout.
+- **`inline-compose`** stays inline mode across a handoff, but only the **final** target is eligible for the inline closure. The document that proxied away is not rewritten.
+- **`sequence`** contains a proxy within its current step: no step advance, no restart, and the step keeps its scoped inputs and timing identity. There is no cross-step handoff.
+- **`--dry-run`** never traverses a dynamic proxy route. Dry-run *does* fire lifecycle events — `initialize` → `blocked` → `finalize` is contract — so an `initialize` can request a handoff on a dry run; the dry-run seam consumes that transition explicitly and renders the document it was given rather than following it.
+
+### Backward compatibility
+
+The authoring surface is additive: positional `proxy: target.md` is unchanged, key/value `{ action: proxy, target: target.md }` is unchanged, caller overrides continue to survive every handoff, cycle protection and hop limits are unchanged, and action parameters other than `proxy.with` still reject direct mapping values.
+
+> Reader note: the runtime refactor intentionally corrects behavior that
+> depended on the router path. A proxied target may now execute additional loop
+> iterations, select its authored provider/model, request approval for its own
+> shell actions, or surface the typed error already produced by direct
+> invocation. Those are compatibility fixes required by the equivalence
+> contract, not preserved route quirks.
+
+Two of the four fixes named in that note are live today — a proxied target requests approval for its own shell actions, and surfaces the same typed error direct invocation produces. **The other two are not yet landed**: additional loop iterations and authored-provider/model selection both wait on the target-specific launch rebuild above. They are fixes in intent and blocked in fact; see [`notes/acceptance-map.md`](../../features/2026-07-13-proxy-with/notes/acceptance-map.md) for the named criteria and their reproductions.
+
 ## Migrating from the Retired Harness DSL
 
-Earlier Claudine releases let composed documents declare `pre_checks`, `post_checks`, `handle_*` handlers, a programmatic `handle`, and `deviate` recovery commands in their frontmatter. That validation-and-handler DSL has been **removed**. Its gating, verification, and recovery roles are now expressed through the [lifecycle stack](lifecycle.md): `when:` guards plus the `Error` / `Skip` / `Proxy` / `Retry` / `Resume` / `Requeue` lifecycle actions and `shell` actions.
+Earlier Claudine releases let composed documents declare `pre_checks`, `post_checks`, `handle_*` handlers, a programmatic `handle`, and `deviate` recovery commands in their frontmatter. That validation-and-handler DSL has been **removed**. Its gating, verification, and recovery roles are now expressed through the [lifecycle stack](lifecycle.md): `when:` guards plus the `error` / `skip` / `proxy` / `retry` / `resume` / `defer` lifecycle actions and `shell` actions.
 
 A document that still declares any of these keys fails composition with a typed `RemovedValidationKey` diagnostic that names the offending key and points at its replacement surface:
 
@@ -596,7 +677,7 @@ A document that still declares any of these keys fails composition with a typed 
 
 The scan runs before lifecycle event blocks are parsed, so the diagnostic names the removed DSL key rather than falling through to generic unknown-field handling. Like every frontmatter-rooted composition error, it appends the authored frontmatter as a syntax-highlighted YAML block under a TTY.
 
-**Verification** that the agentic loop actually did the work it claimed (the old `post_checks` role) now belongs in the `success` or `finalize` stack: guard a `when:` clause and raise an `Error` lifecycle action when the contract is unmet. **Recovery** (the old `handle_*` role) belongs in the `failure`/`blocked` stack via `Retry`, `Resume`, `Requeue`, or `Proxy`. See [lifecycle.md](lifecycle.md) for the full action catalog.
+**Verification** that the agentic loop actually did the work it claimed (the old `post_checks` role) now belongs in the `success` or `finalize` stack: guard a `when:` clause and raise an `Error` lifecycle action when the contract is unmet. **Recovery** (the old `handle_*` role) belongs in a `failure`/`blocked` stack — or any other event's, since flow control is universal — via `retry`, `resume`, or `proxy`. See [lifecycle.md](lifecycle.md) for the full action catalog.
 
 ## Timeouts
 
@@ -706,12 +787,12 @@ precedence chain, termination path, and worked examples.
 
 ### Recovery
 
-Recovery from a failed run is expressed through the `failure` and `blocked` lifecycle stacks, not a separate handler DSL. The available lifecycle recovery actions are:
+Recovery is expressed through the lifecycle stacks, not a separate handler DSL. `failure` and `blocked` are its natural homes, but recovery is **not limited to them** — flow control is universal, so a `success` stack can `resume` an agent that finished cleanly without producing what it promised, and a `finalize` stack can `retry` an error the terminal event downgraded. The available recovery actions are:
 
-- **`Retry`** — re-run the prompt (re-runs the pre-flight/start path from `blocked`, or the agentic loop from `failure`)
-- **`Resume`** — resume the agent session with its context intact and a follow-up message (provider must support session resume)
-- **`Proxy`** — hand off execution to a different prompt document at its own `initialize`
-- **`Requeue`** — push the prompt onto the deferred-execution queue
+- **`retry`** — re-run the prompt with a fresh provider attempt. Its re-entry point is derived from whether the provider had launched, not from the event that asked for it.
+- **`resume`** — resume the agent session with its context intact and a follow-up message (provider must support session resume; pre-launch there is no session, and it surfaces `ResumeWithoutSession`).
+- **`proxy`** — hand off to a different prompt document at its own `initialize`, optionally parameterized with a `with:` overlay. See [Document Handoffs](#document-handoffs-and-the-equivalence-contract).
+- **`defer`** — re-run this prompt later as a fresh scheduled run. **Not implemented**: it surfaces a typed `LifecycleDeferNotImplemented` until its rendezvous backend lands.
 
 See [lifecycle.md](lifecycle.md) for the full recovery-action reference and the [migration table](#migrating-from-the-retired-harness-dsl) for the mapping from the removed `handle_*` keys.
 
@@ -871,7 +952,7 @@ When `fail_fast` is `true` (the default), Claudine stops immediately after the f
 
 When `fail_fast` is `false`, Claudine records each step's result and continues through all steps regardless of failures. After the last step, Claudine exits with `0` if all steps succeeded, or `1` if one or more steps failed.
 
-Lifecycle recovery actions (`Retry`, `Resume`, `Requeue`, `Proxy`) apply within a single step only. There is no cross-step recovery mechanism.
+Lifecycle recovery actions (`retry`, `resume`, `proxy`) apply within a single step only. A `proxy` stays inside its current step: no step advance, no restart, and the step keeps its scoped inputs and timing identity. There is no cross-step recovery mechanism.
 
 > **Note:** The `fail_fast` frontmatter key is reserved for sequence control. It is not passed to Darkmatter's internal compose options.
 
@@ -886,7 +967,7 @@ Resolve → Initialize → Pre-Flight → Prepare → Start → Select Provider 
 - **Resolve**: `composition::resolve_composition_source()` loads the Markdown file
 - **Initialize**: `LifecycleRunGuard::emit_initialize_once()` fires the `initialize` lifecycle event; a `skip` control action here exits cleanly before any later stage
 - **Pre-Flight**: `composition::resolve_shell_approvals()` discovers every shell command in the document graph — template `::shell` directives, top-level frontmatter `$(...)` expressions, and lifecycle `shell` stack actions — checks whitelists, and prompts the user to approve any unapproved commands before proceeding (see [Pre-Flight Shell Approval](pre-flight-checks.md))
-- **Prepare**: `composition::prepare_direct()` or `composition::prepare_inline()` composes through Darkmatter with the pre-approved command set and produces a `PreparedComposition` with `effective_frontmatter`
+- **Prepare**: `composition::prepare::service::prepare_document()` — the canonical preparation service every entry reason routes through (direct, proxy target, retry, resume, loop iteration) — composes through Darkmatter via `prepare_direct()` / `prepare_inline()` with the pre-approved command set and produces a `PreparedComposition` with `effective_frontmatter`. There is exactly one composer per mode; see [Document Handoffs](#document-handoffs-and-the-equivalence-contract)
 - **Start**: `LifecycleRunGuard::emit_start_once()` fires the `start` lifecycle event after schema validation and shell audit pass
 - **Select**: `composition::select_provider()` applies the precedence chain
 - **Launch**: `wrap::composition::execute_composition_request()` runs the provider through the full wrapper pipeline (env, MCP, harness, streaming)

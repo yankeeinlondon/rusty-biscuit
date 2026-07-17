@@ -1,8 +1,8 @@
 ---
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Kilo, Pi, Antigravity), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
-last_updated: 2026-07-16
-hash: 65dc854540ca152c-f3f0ea7bc1000720
+last_updated: 2026-07-17
+hash: 65dc854540ca152c-835988ea3385623e
 ---
 
 ## Overview
@@ -122,6 +122,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | Composition diagnostics | Prepare-time did-you-mean warnings (unknown function / `ctx.*`, `--silent`-suppressed); frontmatter-rooted errors append a highlighted, line-numbered YAML block (TTY-gated) | [Composition](composition.md#prepare-time-warnings) |
 | Whole-value frontmatter | A value that is *exactly one* `{{ … }}` / `$(…)` span is executable state — it must resolve and must never leak as raw syntax | [Composition § Whole-value](composition.md#whole-value-frontmatter-expansion-is-executable-state) |
 | Lifecycle stacks | Seven flow-control verbs (`stop`/`skip`/`error`/`proxy`/`retry`/`resume`/`defer`; `defer` unimplemented), two action forms, early/late binding via Darkmatter DM1/DM2 (strict, fail-closed), leak & err-placement guards, `no_error`, the `stdout` channel | [Lifecycle](lifecycle.md) |
+| Document handoffs | `proxy` swaps the active document; one coordinator owns identity, one canonical service prepares every entry reason, so a proxied target behaves like the same document invoked directly. Key/value `proxy.with:` adds a transient, source-evaluated, typed frontmatter overlay for the immediate target | [Lifecycle § Proxy Handoffs](lifecycle.md#proxy-handoffs) · [Composition § Handoffs](composition.md#document-handoffs-and-the-equivalence-contract) |
 | Protect | `protect::observe` classifies bash- and write-shaped tools; best-effort defense-in-depth, not a security boundary | [Protect Service](protect-service.md) |
 
 ## MCP Support
