@@ -272,8 +272,23 @@ fn run_phase_1c_attempt(
                 Err(other) => return Err(other.into()),
             };
 
-        let compose_options = build_template_preflight_options(
+        // Capture the step's early-binding context ONCE, anchored on the
+        // step's explicit launch CWD (never the process CWD), and reuse the
+        // same snapshot for the template shell preflight below AND the final
+        // `PrepareOptions.prepared_context`. This is the sequence-step
+        // equivalent of the compose path's single `prepared_context`
+        // (`compose::prep::execute_loop_or_single`): the commands the preflight
+        // audits are then the commands the step's execution expands, even when
+        // the wrapper has moved the process CWD to the repo root (R5/R9).
+        let step_prepared_context = build_step_prepared_context(
+            launch_area,
+            &step_source.resolved_path,
+            &step_source.markdown,
             &env_overrides,
+        );
+
+        let compose_options = build_template_preflight_options(
+            &step_prepared_context,
             &step_source.resolved_path,
             &step_overrides,
             launch_area,
@@ -305,9 +320,9 @@ fn run_phase_1c_attempt(
             perf_enabled: shared.perf,
             source_repo_root: source_repo_root.map(std::path::Path::to_path_buf),
             shell_working_directory: Some(child_cwd.to_path_buf()),
-            // Sequence prep has no launch-area snapshot threaded here; fall back
-            // to capture-at-prepare (the lib default).
-            prepared_context: None,
+            // Reuse the exact snapshot the shell preflight audited against, so
+            // `ctx.*` resolves identically at audit and execution time (R5/R9).
+            prepared_context: Some(step_prepared_context.clone()),
             file_ref_fallback_dir: launch_area.map(std::path::Path::to_path_buf),
         };
 
@@ -465,7 +480,44 @@ pub(super) fn find_first_unsupported(
     None
 }
 
+/// Capture a sequence step's early-binding [`ComposeContext`] ONCE, anchored on
+/// the step's explicit launch CWD rather than ambient process state (R5).
+///
+/// The anchor precedence mirrors the library's `derive_compose_context`: the
+/// launch area, then the document's own directory, then `"."` — but never
+/// `std::env::current_dir()`. The wrapper deliberately moves the parent CWD to
+/// the repo root before dispatch, so an ambient `ComposeContext::capture()`
+/// would resolve `ctx.*` against a different document's location than the step
+/// being prepared. `capture_for_document` is demand-driven over the step's
+/// frontmatter and body, so a step that never mentions `ctx.*` pays for no host
+/// scan.
+///
+/// The returned snapshot is reused for both the template shell preflight and the
+/// step's final `PrepareOptions.prepared_context`, so the commands the audit
+/// discovers are the commands the execution expands.
+fn build_step_prepared_context(
+    launch_area: Option<&std::path::Path>,
+    source_path: &std::path::Path,
+    markdown: &darkmatter::markdown::Markdown,
+    env_overrides: &BTreeMap<String, String>,
+) -> darkmatter::markdown::compose::ComposeContext {
+    let anchor = launch_area
+        .map(std::path::Path::to_path_buf)
+        .or_else(|| source_path.parent().map(std::path::Path::to_path_buf))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let mut ctx =
+        darkmatter::markdown::compose::ComposeContext::capture_for_document(&anchor, markdown);
+    for (key, value) in env_overrides {
+        ctx.env_mut().insert(key.clone(), value.clone());
+    }
+    ctx
+}
+
 /// Build the Darkmatter `ComposeOptions` for a step's template SHELL preflight.
+///
+/// Takes the step's already-captured, launch-anchored context (see
+/// [`build_step_prepared_context`]) rather than capturing ambiently, so `ctx.*`
+/// resolves against the launch CWD both here and at execution time.
 ///
 /// The launch-area fallback is anchored on `file`-typed schema validation and
 /// read-side interpolation so an area-relative path resolves document-first then
@@ -476,25 +528,22 @@ pub(super) fn find_first_unsupported(
 /// corrected prepare path. The fallback is applied only when `launch_area` is
 /// present, matching `PrepareOptions`'s `launch_area.map(...)`.
 fn build_template_preflight_options(
-    env_overrides: &BTreeMap<String, String>,
+    prepared_context: &darkmatter::markdown::compose::ComposeContext,
     source_path: &std::path::Path,
     set_overrides: &serde_json::Value,
     launch_area: Option<&std::path::Path>,
 ) -> darkmatter::markdown::compose::ComposeOptions {
-    let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
-    for (key, value) in env_overrides {
-        ctx.env_mut().insert(key.clone(), value.clone());
-    }
-    let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
-        .with_source_file(source_path)
-        // Defer the lifecycle event keys (DM1), matching the main prepare pass.
-        // The preflight compose exists only to discover template `::shell`
-        // directives; without the exclusion it resolves the deferred lifecycle
-        // subtree at compose time, so a `success`/`failure` read-side file
-        // reference (a file a later event creates) trips the fatal file-ref
-        // check before that event fires. Lifecycle shell commands are audited
-        // separately via `collect_lifecycle_shell_commands`.
-        .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied());
+    let mut opts =
+        darkmatter::markdown::compose::ComposeOptions::new_with_context(prepared_context.clone())
+            .with_source_file(source_path)
+            // Defer the lifecycle event keys (DM1), matching the main prepare pass.
+            // The preflight compose exists only to discover template `::shell`
+            // directives; without the exclusion it resolves the deferred lifecycle
+            // subtree at compose time, so a `success`/`failure` read-side file
+            // reference (a file a later event creates) trips the fatal file-ref
+            // check before that event fires. Lifecycle shell commands are audited
+            // separately via `collect_lifecycle_shell_commands`.
+            .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied());
     if let Some(launch_area) = launch_area {
         opts = opts.with_file_ref_fallback_dir(launch_area.to_path_buf());
     }
@@ -518,7 +567,7 @@ fn merge_overrides(
 
 #[cfg(test)]
 mod tests {
-    use super::build_template_preflight_options;
+    use super::{build_step_prepared_context, build_template_preflight_options};
     use std::collections::BTreeMap;
 
     use darkmatter::markdown::Markdown;
@@ -545,6 +594,93 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::env::set_current_dir(&self.prior);
         }
+    }
+
+    /// Initialize a real git repository at `dir` so `ctx.repo_root` resolves to
+    /// it. A bare `.git` directory is not a valid gix repository, so the context
+    /// capture's `GitRepo::discover` needs an actual `git init`.
+    fn init_git_repo(dir: &std::path::Path) {
+        let ok = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(dir)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        assert!(ok, "git init failed in {}", dir.display());
+    }
+
+    /// A step's template shell preflight must resolve `ctx.*` against the
+    /// explicit launch CWD, never the ambient process CWD (R5/R9).
+    ///
+    /// `launch_dir` and `unrelated` are distinct git repositories. The step's
+    /// `::shell` argument reads `ctx.repo_root`. With the process CWD moved to
+    /// `unrelated` (as the wrapper moves it to the repo root before dispatch),
+    /// the approved command must still carry `launch_dir`'s root — the anchor the
+    /// step's execution will also use. Before the fix the preflight captured
+    /// ambiently and would approve `unrelated`'s root instead, so the audited
+    /// bytes could differ from the executed bytes.
+    #[test]
+    #[serial_test::serial(preflight_cwd)]
+    fn preflight_context_anchors_on_launch_cwd_not_process_cwd() {
+        let launch_dir = tempfile::TempDir::new().unwrap();
+        let unrelated = tempfile::TempDir::new().unwrap();
+        let doc_dir = tempfile::TempDir::new().unwrap();
+        init_git_repo(launch_dir.path());
+        init_git_repo(unrelated.path());
+
+        let source_path = doc_dir.path().join("prompt.md");
+        std::fs::write(&source_path, "::shell echo {{ ctx.repo_root }}\n").unwrap();
+        std::fs::write(
+            doc_dir.path().join(".darkmatter-shell-whitelist"),
+            "prefix echo\n",
+        )
+        .unwrap();
+
+        let md = Markdown::try_from(source_path.as_path()).unwrap();
+        let approval_options = ShellApprovalOptions {
+            policy_root: Some(doc_dir.path().to_path_buf()),
+            approval_handler: None,
+            ..Default::default()
+        };
+
+        // Move the process CWD to the unrelated repo, standing in for the
+        // wrapper's chdir to the repo root.
+        let _cwd = CwdGuard::enter(unrelated.path());
+
+        let env_overrides: BTreeMap<String, String> = BTreeMap::new();
+        let ctx =
+            build_step_prepared_context(Some(launch_dir.path()), &source_path, &md, &env_overrides);
+        let opts = build_template_preflight_options(
+            &ctx,
+            &source_path,
+            &serde_json::json!({}),
+            Some(launch_dir.path()),
+        );
+        let result =
+            resolve_shell_approvals(Some(&md), Some(&opts), &approval_options, None, None).unwrap();
+
+        // The tempdir's unique basename survives macOS `/var`→`/private/var`
+        // canonicalization of the discovered repo root, so match on it rather
+        // than the full path.
+        let launch_name = launch_dir.path().file_name().unwrap().to_str().unwrap();
+        let unrelated_name = unrelated.path().file_name().unwrap().to_str().unwrap();
+        assert!(
+            result
+                .approved_commands
+                .iter()
+                .any(|c| c.contains(launch_name)),
+            "preflight ctx.repo_root must anchor on the launch CWD ({launch_name}); approved: {:?}",
+            result.approved_commands,
+        );
+        assert!(
+            !result
+                .approved_commands
+                .iter()
+                .any(|c| c.contains(unrelated_name)),
+            "preflight ctx.repo_root must NOT reflect the process CWD ({unrelated_name}); \
+             approved: {:?}",
+            result.approved_commands,
+        );
     }
 
     /// Regression for the Phase 1c template-preflight fallback omission.
@@ -594,8 +730,10 @@ mod tests {
         let _cwd = CwdGuard::enter(unrelated.path());
 
         let env_overrides: BTreeMap<String, String> = BTreeMap::new();
+        let ctx =
+            build_step_prepared_context(Some(launch_dir.path()), &source_path, &md, &env_overrides);
         let opts = build_template_preflight_options(
-            &env_overrides,
+            &ctx,
             &source_path,
             &overrides,
             Some(launch_dir.path()),
@@ -648,7 +786,8 @@ mod tests {
         let _cwd = CwdGuard::enter(unrelated.path());
 
         let env_overrides: BTreeMap<String, String> = BTreeMap::new();
-        let opts = build_template_preflight_options(&env_overrides, &source_path, &overrides, None);
+        let ctx = build_step_prepared_context(None, &source_path, &md, &env_overrides);
+        let opts = build_template_preflight_options(&ctx, &source_path, &overrides, None);
         let result =
             resolve_shell_approvals(Some(&md), Some(&opts), &approval_options, None, None).unwrap();
 

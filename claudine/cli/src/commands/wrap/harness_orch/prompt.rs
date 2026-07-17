@@ -25,6 +25,7 @@ pub(crate) fn materialized_harness_prompt_from_prepared(
         frontmatter: prepared.effective_frontmatter.clone(),
         prompt: prepared.prompt.clone(),
         env_overrides: Vec::new(),
+        selection_hints: prepared.selection_hints.clone(),
         inline_closure_plan,
         lifecycle: Some(prepared.lifecycle.clone()),
         live_frontmatter,
@@ -151,6 +152,11 @@ pub(crate) fn materialize_harness_prompt(
     state: &HarnessPromptState,
     _repo_root: Option<&Path>,
     child_cwd: &Path,
+    // The resume follow-up recorded on the active document's provider-attempt
+    // slice, when this attempt is a resume. It overrides the composed prompt for
+    // exactly this attempt; a retry or a first attempt passes `None` and the
+    // document's own `prompt_tail` is appended instead.
+    resume_followup: Option<&str>,
 ) -> Result<MaterializedHarnessPrompt> {
     let source = load_overlaid_source(state)?;
     let options = harness_prepare_options(state, child_cwd);
@@ -196,10 +202,11 @@ pub(crate) fn materialize_harness_prompt(
     let mut prompt = prepared.prompt;
     let frontmatter = prepared.effective_frontmatter;
     let lifecycle = prepared.lifecycle;
+    let selection_hints = prepared.selection_hints;
     let env_overrides: Vec<(String, String)> = Vec::new();
 
-    if let Some(ref override_prompt) = state.next_prompt_override {
-        prompt = override_prompt.clone();
+    if let Some(override_prompt) = resume_followup {
+        prompt = override_prompt.to_string();
     } else {
         for tail in &state.prompt_tail {
             prompt.push_str("\n\n");
@@ -212,6 +219,7 @@ pub(crate) fn materialize_harness_prompt(
         frontmatter,
         prompt,
         env_overrides,
+        selection_hints,
         inline_closure_plan,
         lifecycle: Some(lifecycle),
         live_frontmatter,
@@ -232,8 +240,6 @@ mod tests {
             base_prompt: None,
             overlay: indexmap::IndexMap::new(),
             prompt_tail: Vec::new(),
-            next_prompt_override: None,
-            next_resume_session_id: None,
             input_layers,
             entry: DocumentEntryReason::ProxyTarget,
         }
@@ -261,7 +267,7 @@ mod tests {
             },
         );
 
-        let materialized = materialize_harness_prompt(&state, None, dir.path()).unwrap();
+        let materialized = materialize_harness_prompt(&state, None, dir.path(), None).unwrap();
         assert_eq!(
             materialized.prompt.trim(),
             "codex/gpt-5",
@@ -320,7 +326,7 @@ mod tests {
 
         // The re-materialize compose now expands the frontmatter command against
         // the augmented pre-approved set instead of failing NotPreApproved.
-        let materialized = materialize_harness_prompt(&state, None, dir.path()).unwrap();
+        let materialized = materialize_harness_prompt(&state, None, dir.path(), None).unwrap();
         assert_eq!(materialized.prompt.trim(), "reviewing spec.md");
     }
 }

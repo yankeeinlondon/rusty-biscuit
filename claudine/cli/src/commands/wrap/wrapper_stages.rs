@@ -449,8 +449,6 @@ pub(crate) fn run_execution_stage(
             base_prompt: Some(base_prompt),
             overlay: indexmap::IndexMap::new(),
             prompt_tail: Vec::new(),
-            next_prompt_override: None,
-            next_resume_session_id: None,
             // Direct-wrapper passthrough runs carry no compose params.
             input_layers: Default::default(),
             entry: claudine::composition::DocumentEntryReason::Direct,
@@ -497,6 +495,8 @@ pub(crate) fn run_execution_stage(
             args.timeout.clone(),
             cli_step_timeout.clone(),
             args.stall_timeout.clone(),
+            args.model.clone(),
+            args.yolo,
             &harness_base_args,
             &env_plan.env,
             &mut prompt_state,

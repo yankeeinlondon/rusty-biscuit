@@ -59,6 +59,7 @@ pub(crate) fn materialize_passthrough_harness_seed(
         frontmatter,
         prompt,
         env_overrides: Vec::new(),
+        selection_hints: claudine::composition::EffectiveSelectionHints::default(),
         inline_closure_plan: None,
         lifecycle: None,
         live_frontmatter,

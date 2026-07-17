@@ -303,6 +303,7 @@ pub(super) fn run_composition_body(
             // Dry-run never produces a per-iteration summary.
             iteration_signals: None,
             terminal_signal: None,
+            initialize_handoff: None,
         };
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
@@ -445,8 +446,6 @@ pub(super) fn run_composition_body(
         base_prompt: None,
         overlay: indexmap::IndexMap::new(),
         prompt_tail: Vec::new(),
-        next_prompt_override: None,
-        next_resume_session_id: None,
         // Carried so a `retry`/`resume`/`proxy` re-materialization re-applies
         // the caller's `--set` params, launch-area file-ref anchor, and
         // pre-approved shell commands (a proxy target with a `$schema` needs
@@ -469,6 +468,8 @@ pub(super) fn run_composition_body(
         request.timeout.clone(),
         request.step_timeout.clone(),
         request.stall_timeout.clone(),
+        request.model.clone(),
+        request.yolo,
         &harness_base_args,
         &env_plan.env,
         &mut prompt_state,
@@ -507,6 +508,9 @@ pub(super) fn run_composition_body(
         // exit_reason pickup for every composition document.
         iteration_signals: harness_signals,
         terminal_signal,
+        // Initialize proxies are surfaced before the harness loop begins (see
+        // `provider_run_handoff`); a run that reached the harness never carries one.
+        initialize_handoff: None,
     };
     // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
     // The perf report is always emitted to stderr when requested.

@@ -40,8 +40,6 @@ pub(crate) struct HarnessPromptState {
     /// — when this document proxies on.
     pub(crate) overlay: indexmap::IndexMap<String, serde_json::Value>,
     pub(crate) prompt_tail: Vec<String>,
-    pub(crate) next_prompt_override: Option<String>,
-    pub(crate) next_resume_session_id: Option<String>,
     /// The caller's input layers, reapplied at every canonical preparation of
     /// this document. Sourced from
     /// [`PreparedComposition::input_layers`][claudine::composition::PreparedComposition].
@@ -58,6 +56,14 @@ pub(crate) struct MaterializedHarnessPrompt {
     pub(crate) frontmatter: serde_json::Value,
     pub(crate) prompt: String,
     pub(crate) env_overrides: Vec<(String, String)>,
+    /// The provider/model selection hints canonical preparation parsed from this
+    /// document's effective frontmatter.
+    ///
+    /// Carried so the R6 target launch rebuild can re-resolve a proxied target's
+    /// provider/model from the target's *own* `agent:`/`model:` hints (honoring
+    /// immutable CLI precedence) rather than inheriting the router's resolved
+    /// identity. Empty for the passthrough seed and the synthesized empty prompt.
+    pub(crate) selection_hints: claudine::composition::EffectiveSelectionHints,
     pub(crate) inline_closure_plan: Option<claudine::composition::InlineClosurePlan>,
     /// The lifecycle config canonical preparation parsed for this document,
     /// with its shell commands already C3-resolved.

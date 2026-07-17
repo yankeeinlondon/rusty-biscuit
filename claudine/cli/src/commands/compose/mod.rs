@@ -4,7 +4,8 @@
 //! - `claudine inline-compose <file>` — inline composition (replaces body)
 //!
 //! Both commands are thin request builders that delegate to
-//! [`execute_composition_request`] for wrapper-grade execution.
+//! [`crate::commands::wrap::composition::execute_composition_request_inner`]
+//! for wrapper-grade execution.
 
 // `CompositionError` carries variants with several `PathBuf` and other
 // owned fields (e.g. `LoopIterationFailed`, `LoopRateLimited`) so the
