@@ -8,7 +8,8 @@ use tracing::debug;
 use crate::filesystem::git::ConventionalCommit;
 use crate::filesystem::git::discovery::DeltaKind;
 use crate::filesystem::path_kind::{is_documentation_path, is_source_code_path};
-use crate::filesystem::repo::{Package, detect_repo};
+use crate::filesystem::repo::{Package, RepoInfo, detect_repo};
+use crate::performance::{self, counters};
 use crate::{Result, SniffError};
 
 // ---------------------------------------------------------------------------
@@ -193,6 +194,32 @@ pub struct CommitDescSet {
 // ---------------------------------------------------------------------------
 // Query functions
 // ---------------------------------------------------------------------------
+
+/// [`get_recent_commits_by_duration`] against an already-observed repository.
+///
+/// Takes both the discovered handle and the `RepoInfo` the caller has already
+/// detected, so neither the repository discovery nor the [`detect_repo`] pass
+/// that `get_recent_commits_by_duration` performs internally is repeated. Pass
+/// `repo_info: None` only when the caller genuinely has no package catalog —
+/// commits then carry no package attribution, exactly as for a non-monorepo.
+pub fn get_recent_commits_by_duration_with_repo(
+    repo: &super::GitRepo,
+    duration: Duration,
+    period_label: &str,
+    repo_info: Option<&RepoInfo>,
+) -> Result<CommitDescSet> {
+    let until = Utc::now();
+    let since = until - duration;
+    let commits =
+        repo.with_cached_gix(|gix| collect_commits_in_range(gix, since, until, repo_info))?;
+
+    Ok(CommitDescSet {
+        commits,
+        period_label: period_label.to_string(),
+        repo_root: repo.repo_root().to_path_buf(),
+        packages: repo_info.and_then(|ri| ri.packages.clone()),
+    })
+}
 
 pub fn get_recent_commits_by_duration(
     base_dir: &Path,
@@ -387,6 +414,7 @@ fn collect_commits_in_range(
 
     for info_result in walk {
         let info = info_result.map_err(|e| SniffError::git("revwalk", e))?;
+        performance::increment_counter(counters::GIT_COMMIT_VISITS, 1);
 
         // Git commit times are whole seconds; treat the commit as occurring at
         // the start of its second and compare against the full-precision
@@ -493,6 +521,7 @@ fn collect_commits_from_hash_to_head(
 
     for info_result in walk {
         let info = info_result.map_err(|e| SniffError::git("revwalk", e))?;
+        performance::increment_counter(counters::GIT_COMMIT_VISITS, 1);
 
         let commit_time = DateTime::from_timestamp(info.commit_time(), 0).unwrap_or_default();
 
@@ -592,6 +621,7 @@ fn collect_commits_by_count(
             break;
         }
         let info = info_result.map_err(|e| SniffError::git("revwalk", e))?;
+        performance::increment_counter(counters::GIT_COMMIT_VISITS, 1);
 
         let commit_time = DateTime::from_timestamp(info.commit_time(), 0).unwrap_or_default();
 

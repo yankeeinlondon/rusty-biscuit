@@ -3432,8 +3432,12 @@ fn test_performance_collector_thread_local_aggregation() {
         increment_counter("test.counter.x", 5);
         increment_counter("test.counter.y", 7);
 
-        // Spawn additional threads that each install the same collector
-        // and record data into their own thread-local buffers.
+        // Spawn additional threads that each install the same collector and
+        // record data into their own thread-local buffers. Recording writes to
+        // a thread-local buffer, so a thread that exits without draining it
+        // would silently discard everything it recorded; these threads rely on
+        // `with_current_collector` flushing before it restores the previous
+        // collector.
         let handles: Vec<_> = (0..3)
             .map(|i| {
                 let c = Arc::clone(&collector);
@@ -3442,38 +3446,6 @@ fn test_performance_collector_thread_local_aggregation() {
                         record_stage("test.stage.a", Duration::from_millis((i + 1) as u64));
                         increment_counter("test.counter.x", 1);
                     });
-                })
-            })
-            .collect();
-
-        for h in handles {
-            h.join().unwrap();
-        }
-
-        // After worker threads finish, their thread-local buffers may still
-        // hold data (thread pools park rather than exit).  We must flush
-        // each worker thread's buffer before snapshotting.  In production
-        // this is done by the parallel walker callbacks; here we simulate
-        // it by flushing the current thread only (the workers already
-        // flushed when with_current_collector restored the previous collector).
-        //
-        // Actually, with_current_collector does NOT flush on exit — it only
-        // restores the previous collector.  So the worker threads' data is
-        // still in their thread-local buffers.  For this test to pass we
-        // need to ensure the workers flush.  We do that by having each
-        // worker call flush_thread_local before exiting.
-        //
-        // Re-spawn with explicit flush:
-        let handles: Vec<_> = (0..3)
-            .map(|i| {
-                let c = Arc::clone(&collector);
-                std::thread::spawn(move || {
-                    with_current_collector(Some(Arc::clone(&c)), || {
-                        record_stage("test.stage.a", Duration::from_millis((i + 1) as u64));
-                        increment_counter("test.counter.x", 1);
-                    });
-                    // Flush after the scope so data is merged into central state.
-                    c.flush_thread_local();
                 })
             })
             .collect();

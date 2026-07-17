@@ -5,7 +5,7 @@
 //! enumeration, tracking status, git config, and linked worktree discovery.
 
 use gix::bstr::ByteSlice;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, warn};
@@ -14,6 +14,7 @@ use super::discovery::resolve_base_branch;
 use super::status::get_repo_status_counts;
 use super::types::*;
 use crate::SniffError;
+use crate::performance::{self, counters};
 
 /// gix equivalent of git2's `graph_ahead_behind`: `(commits reachable from
 /// `local` but not `upstream`, commits reachable from `upstream` but not
@@ -99,6 +100,7 @@ fn configured_upstream(config: &gix::config::File<'_>, branch: &str) -> Option<S
 }
 
 fn remote_tracking_tips(repo: &gix::Repository) -> crate::Result<HashMap<String, gix::ObjectId>> {
+    performance::increment_counter(counters::GIT_REF_WALKS, 1);
     let platform = repo
         .references()
         .map_err(|e| SniffError::git("references", e))?;
@@ -140,6 +142,7 @@ fn count_reachable_excluding(
     let mut count = 0;
     for item in walk {
         item.map_err(|e| SniffError::git("revwalk", e))?;
+        performance::increment_counter(counters::GIT_COMMIT_VISITS, 1);
         count += 1;
     }
     Ok(count)
@@ -249,17 +252,28 @@ fn extra_system_config_at(path: Option<&std::path::Path>) -> Option<gix::config:
 ///
 /// Propagates ref-store, ref-iteration, and peel failures as
 /// [`SniffError::Git`] rather than returning empty or partial data.
+/// `include_divergence` gates the per-branch ahead/behind computation, which
+/// costs two graph reachability walks for every non-current branch. It is
+/// `true` for every preset — those values are part of the published preset
+/// contract — so only a caller with explicit metadata controls turns it off,
+/// and then `ahead`/`behind` report `0`.
 pub(crate) fn get_local_branches_fallible(
     repo: &gix::Repository,
     current_branch: Option<&str>,
+    include_divergence: bool,
 ) -> crate::Result<Vec<LocalBranchInfo>> {
     let mut branches = Vec::new();
 
     // HEAD commit OID for ahead/behind calculations. An unborn HEAD is `None`
     // (no commits to compare against); a malformed/unreadable HEAD surfaces
     // rather than zeroing ahead/behind on a successful-looking branch list.
-    let head_oid = super::discovery::head_id_opt(repo)?;
+    let head_oid = if include_divergence {
+        super::discovery::head_id_opt(repo)?
+    } else {
+        None
+    };
 
+    performance::increment_counter(counters::GIT_REF_WALKS, 1);
     let platform = repo
         .references()
         .map_err(|e| SniffError::git("references", e))?;
@@ -368,6 +382,7 @@ fn push_relevant_ahead(
     remote_name: &str,
 ) -> crate::Result<usize> {
     let prefix = format!("refs/remotes/{remote_name}/");
+    performance::increment_counter(counters::GIT_REF_WALKS, 1);
     let platform = repo
         .references()
         .map_err(|e| SniffError::git("references", e))?;
@@ -392,6 +407,7 @@ fn push_relevant_ahead(
     let mut count = 0;
     for item in walk {
         item.map_err(|e| SniffError::git("revwalk", e))?;
+        performance::increment_counter(counters::GIT_COMMIT_VISITS, 1);
         count += 1;
     }
     Ok(count)
@@ -490,6 +506,7 @@ pub(crate) fn refresh_remote_tracking_refs(repo: &gix::Repository, max_concurren
 
 /// Run `git fetch --quiet --prune <remote>` for a single remote.
 fn fetch_single_remote(repo_root: &std::path::Path, remote_name: &str) {
+    performance::increment_counter(counters::PROC_SPAWNS, 1);
     let _ = Command::new("git")
         .current_dir(repo_root)
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -548,15 +565,50 @@ pub(crate) fn populate_recent_commit_remotes(
         remote_tips.truncate(limit);
     }
 
-    // Walk ancestry from each remote tip, collecting containment.
+    // The only commits this function can ever answer for. Building the target
+    // set up front is what bounds the walks below: previously every visited
+    // commit was recorded, so a 10,000-commit repo with 50 remote tips built a
+    // map of up to 500,000 entries to answer ~10 questions.
+    let targets: HashSet<gix::ObjectId> = commits
+        .iter()
+        .filter_map(|c| gix::ObjectId::from_hex(c.sha.as_bytes()).ok())
+        .collect();
+    if targets.is_empty() {
+        return;
+    }
+
+    // Remote *names* are deduplicated into a table and referenced by index
+    // during traversal, so a hit costs a `u32` push rather than a `String`
+    // clone. Two tips of the same remote (origin/main, origin/dev) share an
+    // index, which is what makes the dedup at assembly equivalent to cloning
+    // the name per tip.
+    let mut remote_names: Vec<String> = Vec::new();
+    let tips: Vec<(u32, gix::ObjectId)> = remote_tips
+        .iter()
+        .map(|(name, oid)| {
+            let idx = match remote_names.iter().position(|n| n == name) {
+                Some(i) => i,
+                None => {
+                    remote_names.push(name.clone());
+                    remote_names.len() - 1
+                }
+            };
+            (idx as u32, *oid)
+        })
+        .collect();
+
+    // Walk ancestry from each remote tip, recording only target commits.
     //
     // We do NOT stop early based on commit time: gix's ByCommitTime walk is a
     // lazy frontier, not a globally monotonic sequence. An old-dated child can
     // have a newer-dated parent, so a time-based `break` would incorrectly
-    // discard unseen requested commits (see skewed-timestamp test).
-    let mut containment: HashMap<gix::ObjectId, Vec<String>> = HashMap::new();
+    // discard unseen requested commits (see skewed-timestamp test). The
+    // target-count stop below is a *reachability* bound and is safe precisely
+    // because it makes no assumption about ordering: once every target has been
+    // seen on this walk, no further ancestor can change this walk's answer.
+    let mut containment: HashMap<gix::ObjectId, Vec<u32>> = HashMap::new();
 
-    for (remote_name, tip_oid) in &remote_tips {
+    for (remote_idx, tip_oid) in &tips {
         let Ok(walk) = repo
             .rev_walk(Some(*tip_oid))
             .sorting(gix::revision::walk::Sorting::ByCommitTime(
@@ -568,15 +620,21 @@ pub(crate) fn populate_recent_commit_remotes(
             continue;
         };
 
+        let mut found_here = 0usize;
         for info_result in walk {
             let Ok(info) = info_result else {
                 continue;
             };
+            performance::increment_counter(counters::GIT_COMMIT_VISITS, 1);
 
-            containment
-                .entry(info.id)
-                .or_default()
-                .push(remote_name.clone());
+            if !targets.contains(&info.id) {
+                continue;
+            }
+            containment.entry(info.id).or_default().push(*remote_idx);
+            found_here += 1;
+            if found_here == targets.len() {
+                break;
+            }
         }
     }
 
@@ -585,8 +643,13 @@ pub(crate) fn populate_recent_commit_remotes(
             continue;
         };
 
-        if let Some(remotes) = containment.get(&commit_oid) {
-            let mut containing = remotes.clone();
+        if let Some(indices) = containment.get(&commit_oid) {
+            // Names resolved here, once per result commit, rather than cloned
+            // once per visited commit during traversal.
+            let mut containing: Vec<String> = indices
+                .iter()
+                .map(|i| remote_names[*i as usize].clone())
+                .collect();
             containing.sort();
             containing.dedup();
             if !containing.is_empty() {
@@ -598,6 +661,7 @@ pub(crate) fn populate_recent_commit_remotes(
 
 /// Collect the tip OIDs for all remote-tracking branches keyed by remote name.
 fn remote_branch_tips(repo: &gix::Repository) -> Vec<(String, gix::ObjectId)> {
+    performance::increment_counter(counters::GIT_REF_WALKS, 1);
     let Ok(refs) = repo.references() else {
         return Vec::new();
     };
@@ -656,6 +720,7 @@ fn get_remote_default_branch(repo: &gix::Repository, remote_name: &str) -> Optio
 /// No network access required.
 fn get_remote_branches(repo: &gix::Repository, remote_name: &str) -> Option<Vec<String>> {
     let prefix = format!("refs/remotes/{}/", remote_name);
+    performance::increment_counter(counters::GIT_REF_WALKS, 1);
     let refs = repo.references().ok()?;
     let iter = refs
         .prefixed(prefix.as_str())
@@ -741,10 +806,13 @@ pub(crate) fn get_worktrees(
     // rather than reopening the base repo N times.
     let base_sync = repo.clone().into_sync();
 
+    let collector = performance::current_collector();
     let results: crate::Result<Vec<(String, WorktreeInfo)>> = worktree_paths
         .par_iter()
         .map(|(name, worktree_path)| {
+            let _worker = performance::pooled_worker(collector.as_ref());
             let base = base_sync.to_thread_local();
+            performance::increment_counter(counters::GIT_WORKTREE_OPENS, 1);
             let mut worktree_repo = super::open::trusted_open(worktree_path)?;
             super::open::configure_cache(&mut worktree_repo);
 
@@ -1681,7 +1749,7 @@ mod tests {
         .unwrap();
 
         let gix_repo = gix::open(dir.path()).unwrap();
-        let result = get_local_branches_fallible(&gix_repo, Some("main"));
+        let result = get_local_branches_fallible(&gix_repo, Some("main"), true);
         assert!(
             result.is_err(),
             "corrupt refs must cause branch enumeration to return an error, not empty vec"
@@ -1705,7 +1773,7 @@ mod tests {
         std::fs::write(&bad_ref, "not-a-valid-ref\n").unwrap();
 
         let gix_repo = open_gix(&dir);
-        let result = get_local_branches_fallible(&gix_repo, Some(&branch));
+        let result = get_local_branches_fallible(&gix_repo, Some(&branch), true);
         assert!(
             result.is_err(),
             "a ref item that fails during iteration must propagate, not be dropped"

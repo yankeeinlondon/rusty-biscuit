@@ -102,14 +102,17 @@ pub fn register(c: &mut Criterion) {
     });
 
     // Huge monorepo benchmarks stress manifest caching and index normalization.
-    repo_group.bench_function("repo_structure_huge_500_packages", |b| {
+    // The fixture holds 375 packages (200 Rust, 100 JS, 50 Python, 25 Go); the
+    // name says so because a benchmark id that misstates its own workload
+    // invalidates every baseline compared against it.
+    repo_group.bench_function("repo_structure_huge_375_packages", |b| {
         b.iter(|| {
             let info = detect_repo_structure(black_box(huge.path())).unwrap();
             black_box(info);
         });
     });
 
-    repo_group.bench_function("repo_full_huge_500_packages", |b| {
+    repo_group.bench_function("repo_full_huge_375_packages", |b| {
         b.iter(|| {
             let info = detect_repo(black_box(huge.path())).unwrap();
             black_box(info);

@@ -4,15 +4,23 @@ use std::path::Path;
 
 use biscuit_file::toml_crate;
 
+use crate::performance;
+use crate::performance::counters;
 use crate::{Result, SniffError};
 
-use super::detection::{DetectorOutcome, create_package, dedupe_packages, resolve_internal_deps};
+use super::detection::{
+    DetectorOutcome, RepoEvidence, probe_exists,
+};
 use super::glob::expand_membership_globs;
+use super::seed::{PackageSeed, merge_seeds};
 use super::standard::{GlobDialect, MonorepoStandard, PackageProvenance};
 
-pub(super) fn detect_uv_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
+pub(super) fn detect_uv_workspace(
+    root: &Path,
+    evidence: RepoEvidence<'_>,
+) -> Result<Option<DetectorOutcome>> {
     let pyproject = root.join("pyproject.toml");
-    if !pyproject.exists() {
+    if !probe_exists(&pyproject) {
         return Ok(None);
     }
 
@@ -21,36 +29,32 @@ pub(super) fn detect_uv_workspace(root: &Path) -> Result<Option<DetectorOutcome>
         return Ok(None);
     }
 
-    let lock_versions = None;
     let dialect = MonorepoStandard::UvWorkspace
         .glob_dialect()
         .unwrap_or(GlobDialect::Minimatch);
-    let mut packages = expand_membership_globs(
+    let mut seeds = expand_membership_globs(
         root,
         &members,
         dialect,
         MonorepoStandard::UvWorkspace,
         None,
-        &lock_versions,
+        evidence,
     );
 
     // uv's `RootMembership::Always`: the root `[project]` is itself a workspace
     // member, so the root directory is counted alongside the globbed children.
-    packages.push(create_package(
+    seeds.push(PackageSeed::new(
         root,
         root,
         MonorepoStandard::UvWorkspace,
         PackageProvenance::Globbed,
-        &lock_versions,
     ));
 
-    packages = dedupe_packages(packages);
-    resolve_internal_deps(&mut packages);
 
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::UvWorkspace,
         root: root.to_path_buf(),
-        packages,
+        seeds: merge_seeds(seeds),
     }))
 }
 
@@ -59,7 +63,10 @@ pub(super) fn detect_uv_workspace(root: &Path) -> Result<Option<DetectorOutcome>
 /// Returns an empty vector when the table or field is absent, so callers treat a
 /// missing or empty `members` list as "not a uv workspace".
 pub(super) fn parse_uv_workspace_members(pyproject_path: &Path) -> Result<Vec<String>> {
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
     let content = std::fs::read_to_string(pyproject_path)?;
+    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+    performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
     let parsed: toml_crate::Value =
         toml_crate::from_str(&content).map_err(|e| SniffError::SystemInfo {
             domain: "repo",

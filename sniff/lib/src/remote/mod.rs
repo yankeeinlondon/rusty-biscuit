@@ -46,6 +46,7 @@ mod gitea;
 mod github;
 mod gitlab;
 mod provider;
+mod snapshot;
 mod types;
 mod url_parser;
 
@@ -56,10 +57,28 @@ pub use gitea::*;
 pub use github::*;
 pub use gitlab::*;
 pub use provider::*;
+pub use snapshot::*;
 pub use types::*;
 pub use url_parser::*;
 
 use crate::error::SniffError;
+use crate::performance::{self, counters};
+
+/// Record one outbound provider API request against the aggregate counter and
+/// the counter for `operation`.
+///
+/// Call sites pass a short stable slug (`metadata`, `tree`, `pulls`, ...) that
+/// names the logical operation rather than the endpoint, so a request counted
+/// here stays comparable across providers whose URLs differ.
+///
+/// ## Notes
+///
+/// Retries are separate units of work: an authenticated attempt followed by an
+/// anonymous fallback is two requests, because two requests reached the wire.
+fn count_api_request(operation: &str) {
+    performance::increment_counter(counters::REMOTE_REQUESTS, 1);
+    performance::increment_counter_dynamic(counters::remote_operation(operation), 1);
+}
 
 type RemoteCandidate = (&'static str, fn() -> Result<GitRemote, SniffError>);
 

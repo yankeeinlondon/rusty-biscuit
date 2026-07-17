@@ -487,6 +487,63 @@ fn repo_json_output_is_valid_json_on_stdout_with_clean_stderr() {
     );
 }
 
+/// `--json` stdout must be exactly one document, not a document followed by
+/// anything else. A trailing render or perf block would still let a lenient
+/// `from_str` succeed on some inputs, so this asserts the stream is fully
+/// consumed by the single value.
+#[test]
+fn repo_json_stdout_is_exactly_one_json_document() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "--json"])
+        .output()
+        .expect("run sniff repo --json");
+
+    assert!(output.status.success(), "sniff repo --json must succeed");
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    let mut stream =
+        serde_json::Deserializer::from_str(stdout).into_iter::<serde_json::Value>();
+
+    let first = stream
+        .next()
+        .expect("stdout must carry a JSON document")
+        .expect("that document must be valid JSON");
+    assert!(first.is_object(), "the aggregate must be a JSON object");
+    assert!(
+        stream.next().is_none(),
+        "stdout must carry exactly one JSON document, found trailing content"
+    );
+}
+
+/// Bare `sniff repo` renders text and `--plain` renders plain text; neither
+/// goes through the `--json` aggregate. Pinned so the aggregate rewrite cannot
+/// leak JSON into, or diagnostics out of, the human-facing paths.
+#[test]
+fn repo_default_and_plain_emit_text_with_clean_stderr() {
+    for args in [vec!["repo"], vec!["repo", "--plain"]] {
+        let label = args.join(" ");
+        let output = cargo_bin_cmd!("sniff")
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("run sniff {label}: {e}"));
+
+        assert!(output.status.success(), "sniff {label} must succeed");
+
+        let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+        assert!(!stdout.trim().is_empty(), "sniff {label} must render output");
+        assert!(
+            serde_json::from_str::<serde_json::Value>(stdout).is_err(),
+            "sniff {label} must render text, not JSON"
+        );
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.trim().is_empty(),
+            "sniff {label} must not emit diagnostics on stderr: {stderr}"
+        );
+    }
+}
+
 #[test]
 fn repo_structure_json_output_is_valid_json_on_stdout_with_clean_stderr() {
     let output = cargo_bin_cmd!("sniff")

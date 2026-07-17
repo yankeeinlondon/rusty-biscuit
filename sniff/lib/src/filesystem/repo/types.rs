@@ -436,14 +436,26 @@ pub fn detect_repo(root: &Path) -> Result<Option<RepoInfo>> {
     super::detection::detect_repo_inner(root, false).map(|(info, _inventory)| info)
 }
 
-/// Lightweight repo detection that skips per-package language scanning.
+/// Shallow repository detection for topology and package identity.
 ///
-/// Returns the same package structure (names, paths, areas) but without
-/// `primary_language`, `frameworks`, or `file_associations` per package.
-/// Typically 10-50x faster than `detect_repo` on large monorepos.
+/// Package managers, dependencies, test runners, features, languages,
+/// frameworks, and file lists are empty. Call [`detect_repo_with_request`]
+/// with [`RepoRequest::focused`] for selected manifest-backed details, or
+/// [`detect_repo`] for complete enrichment.
+///
+/// [`RepoRequest::structure`]: crate::request::RepoRequest::structure
 #[instrument(skip_all, fields(root = %root.display()))]
 pub fn detect_repo_structure(root: &Path) -> Result<Option<RepoInfo>> {
     super::detection::detect_repo_inner(root, true).map(|(info, _inventory)| info)
+}
+
+/// Detect a repository using a caller-selected detail request.
+pub fn detect_repo_with_request(
+    root: &Path,
+    request: &crate::request::RepoRequest,
+) -> Result<Option<RepoInfo>> {
+    super::detection::detect_repo_inner_with_request(root, request)
+        .map(|(info, _inventory)| info)
 }
 
 /// Like [`detect_repo_structure`], but synthesizes a single-package `RepoInfo`
@@ -451,10 +463,10 @@ pub fn detect_repo_structure(root: &Path) -> Result<Option<RepoInfo>> {
 ///
 /// [`detect_repo_structure`] returns `Ok(None)` for an ordinary single-package
 /// project (a `Cargo.toml` with `[package]` but no `[workspace]`, or a lone
-/// `package.json`, `pyproject.toml`, or `go.mod`). Reporting paths such as
-/// `sniff repo package-manager`, `sniff repo dependencies`, and the bare
-/// `sniff repo --json` aggregate still need that root package's facts, so this
-/// fills the gap with a one-package, non-monorepo `RepoInfo`.
+/// `package.json`, `pyproject.toml`, or `go.mod`). This function preserves the
+/// shallow semantics of [`detect_repo_structure`]. Use
+/// [`detect_repo_with_request_or_root_package`] when selected package details
+/// are required.
 ///
 /// ## Returns
 ///
@@ -469,6 +481,20 @@ pub fn detect_repo_structure_or_root_package(root: &Path) -> Result<Option<RepoI
     Ok(super::detection::synthesize_root_package_repo(root))
 }
 
+/// Detect a repository using `request`, synthesizing a standalone root package
+/// when no workspace structure is present.
+pub fn detect_repo_with_request_or_root_package(
+    root: &Path,
+    request: &crate::request::RepoRequest,
+) -> Result<Option<RepoInfo>> {
+    if let Some(info) = detect_repo_with_request(root, request)? {
+        return Ok(Some(info));
+    }
+    Ok(super::detection::synthesize_root_package_repo_with_request(
+        root, request,
+    ))
+}
+
 /// Full repo detection that also returns the shared file inventory.
 ///
 /// The returned inventory is the same one used internally to enrich
@@ -477,18 +503,7 @@ pub fn detect_repo_structure_or_root_package(root: &Path) -> Result<Option<RepoI
 pub fn detect_repo_with_inventory(
     root: &Path,
 ) -> Result<(Option<RepoInfo>, Option<FileInventory>)> {
-    let options = super::super::system_view::SharedWalkOptions {
-        collect_manifests: true,
-        collect_inventory: true,
-        collect_docs: false,
-    };
-    let view = super::super::system_view::build_filesystem_system_view(root, options);
-    super::detection::detect_repo_inner_with_shared(
-        root,
-        false,
-        view.manifest_index.as_ref(),
-        view.inventory.as_ref(),
-    )
+    super::detection::detect_repo_inner(root, false)
 }
 
 #[cfg(test)]

@@ -115,7 +115,8 @@ for iface in &net.interfaces {
     println!("Interface: {}", iface.name);
 }
 
-// OS with tuned detail level (skip NTP which can take up to 10s on Linux)
+// OS with tuned detail level: core identity only, no package-manager scan.
+// (NTP is already off in the default plan; `full()` opts back into it.)
 let os = detect_os_with_request(&OsRequest::summary())?;
 println!("OS: {} {}", os.name, os.version);
 

@@ -42,6 +42,10 @@ pub(crate) fn filter_file_breakdown(
         } else {
             Vec::new()
         },
+        // An association filter narrows what is shown; it cannot make a
+        // truncated observation complete.
+        truncated: breakdown.truncated,
+        limit: breakdown.limit,
     }
 }
 

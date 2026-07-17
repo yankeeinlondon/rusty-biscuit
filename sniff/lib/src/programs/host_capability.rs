@@ -6,7 +6,6 @@
 use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -15,10 +14,11 @@ use serde::{Deserialize, Serialize};
 use crate::executable_index::ExecutableIndex;
 use crate::os::{LinuxFamily, OsType, detect_linux_distro, detect_os_type};
 use crate::performance;
+use crate::process::{self, timeouts};
 use crate::programs::categories::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
 
-const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+const PROBE_TIMEOUT: Duration = timeouts::HOST_CAPABILITY;
 
 /// Shared input to `build_install_plan`.
 ///
@@ -62,7 +62,12 @@ impl HostCapabilities {
     /// Does not touch disk cache; call [`HostCapabilities::load_or_detect`]
     /// for the cached path.
     pub fn detect() -> Self {
-        let index = ExecutableIndex::build_path_only();
+        // Eager, PATH-only: the detection below asks the index for ~40 program
+        // names, and the lazy index walks PATH once per name. The `_only`
+        // variant keeps the lookup surface identical to the lazy index's — the
+        // bundle/Windows fallback layers must not start resolving package
+        // managers that are absent from PATH.
+        let index = ExecutableIndex::build_eager_path_only();
         Self::detect_with_index(&index)
     }
 
@@ -99,36 +104,7 @@ impl HostCapabilities {
 
 /// Runs a command with a short timeout and returns its stdout on success.
 fn run_probe(program: &str, args: &[&str]) -> Option<String> {
-    let mut child = Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => {
-                use std::io::Read;
-                let mut out = String::new();
-                if let Some(mut stdout) = child.stdout.take() {
-                    let _ = stdout.read_to_string(&mut out);
-                }
-                return Some(out);
-            }
-            Ok(Some(_)) => return None,
-            Ok(None) => {}
-            Err(_) => return None,
-        }
-        if start.elapsed() >= PROBE_TIMEOUT {
-            let _ = child.kill();
-            let _ = child.wait();
-            return None;
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    }
+    process::run_for_stdout(program, args, PROBE_TIMEOUT)
 }
 
 fn parse_npm_global_list(stdout: &str) -> bool {
@@ -198,9 +174,11 @@ fn detect_verified_lang_pkg_mgrs(
     // Each probe has its own timeout and spends most of its time waiting on
     // a child process, so parallelism here collapses worst-case latency from
     // `5 × PROBE_TIMEOUT` to roughly `1 × PROBE_TIMEOUT`.
+    let collector = performance::current_collector();
     candidates
         .par_iter()
         .filter_map(|(pm, probe)| {
+            let _worker = performance::pooled_worker(collector.as_ref());
             if lang_pkg_mgrs.is_installed(*pm) && probe() {
                 Some(*pm)
             } else {
@@ -490,16 +468,10 @@ fn decide_can_sudo(probes: &SudoProbes) -> bool {
 
 #[cfg(unix)]
 fn probe_group_membership() -> bool {
-    use std::process::Command;
-
     // `id -Gn` prints space-separated group names for the current user.
-    let Ok(output) = Command::new("id").arg("-Gn").output() else {
+    let Some(groups) = run_probe("id", &["-Gn"]) else {
         return false;
     };
-    if !output.status.success() {
-        return false;
-    }
-    let groups = String::from_utf8_lossy(&output.stdout);
     groups
         .split_whitespace()
         .any(|g| matches!(g, "wheel" | "sudo" | "admin"))
@@ -512,12 +484,9 @@ fn probe_group_membership() -> bool {
 
 #[cfg(unix)]
 fn probe_sudo_n_true() -> bool {
-    use std::process::Command;
-
-    let Ok(output) = Command::new("sudo").args(["-n", "true"]).output() else {
-        return false;
-    };
-    output.status.success()
+    // `-n` makes sudo fail rather than prompt, and the helper's null stdin means a
+    // sudo that ignores `-n` still cannot block on a terminal read.
+    run_probe("sudo", &["-n", "true"]).is_some()
 }
 
 #[cfg(not(unix))]
@@ -682,6 +651,32 @@ mod tests {
         let after = Utc::now();
         assert!(host.detected_at >= before);
         assert!(host.detected_at <= after);
+    }
+
+    /// `detect()` asks the index for every OS and language package-manager
+    /// name; a lazy index would walk PATH once per name.
+    #[test]
+    fn detect_traverses_path_through_the_shared_eager_index() {
+        HostCapabilities::detect();
+        assert!(
+            crate::executable_index::eager_path_cache_is_populated(),
+            "detect() must build an eager PATH index so PATH is traversed once"
+        );
+    }
+
+    /// Routing `detect()` through the eager builder changes work, not results.
+    #[test]
+    fn detect_agrees_with_a_lazy_path_only_index() {
+        let lazy = HostCapabilities::detect_with_index(&ExecutableIndex::build_path_only());
+        let host = HostCapabilities::detect();
+
+        assert_eq!(host.has_bash, lazy.has_bash);
+        assert_eq!(host.os_pkg_mgrs, lazy.os_pkg_mgrs);
+        assert_eq!(host.lang_pkg_mgrs, lazy.lang_pkg_mgrs);
+        assert_eq!(
+            host.default_os_package_manager,
+            lazy.default_os_package_manager
+        );
     }
 
     #[test]

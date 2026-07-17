@@ -84,8 +84,15 @@ jobs:
       # *code* compiling everywhere. `--all-targets` builds the test, bench, and
       # example targets so a Unix-only import or a macOS-only helper fails here
       # even when the offending test never runs on this OS.
+      #
+      # `--features remote` (which enables `network`) is not optional: sniff-lib
+      # is `default = []`, so without it every `#[cfg(feature = "remote")]` and
+      # `#[cfg(feature = "network")]` target is invisible to this guard — which
+      # is exactly how ~190 tests, including the whole `remote_providers` suite,
+      # went unrun for months. A guard that cannot see the code it guards reads
+      # as coverage without being any.
       - name: Check sniff library (all targets)
-        run: cargo check --color=never -p sniff --all-targets
+        run: cargo check --color=never -p sniff --all-targets --features remote
 
       - name: Check sniff CLI (all targets)
         run: cargo check --color=never -p sniff-cli --all-targets

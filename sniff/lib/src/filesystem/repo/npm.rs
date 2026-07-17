@@ -5,10 +5,13 @@ use std::path::Path;
 use biscuit_file::serde_yaml_ng;
 
 use crate::package::{DependencyEntry, DependencyKind};
+use crate::performance;
+use crate::performance::counters;
 use crate::{Result, SniffError};
 
-use super::detection::{DetectorOutcome, create_package, dedupe_packages, resolve_internal_deps};
+use super::detection::{DetectorOutcome, RepoEvidence, probe_exists};
 use super::glob::expand_membership_globs;
+use super::seed::{PackageSeed, merge_seeds};
 use super::standard::{GlobDialect, MonorepoStandard, PackageProvenance};
 
 /// Parses a single dependency section from package.json.
@@ -112,9 +115,12 @@ pub(crate) fn npm_package_version(parsed: &serde_json::Value) -> Option<String> 
         .map(String::from)
 }
 
-pub(super) fn detect_pnpm_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
+pub(super) fn detect_pnpm_workspace(
+    root: &Path,
+    evidence: RepoEvidence<'_>,
+) -> Result<Option<DetectorOutcome>> {
     let pnpm_workspace = root.join("pnpm-workspace.yaml");
-    if !pnpm_workspace.exists() {
+    if !probe_exists(&pnpm_workspace) {
         return Ok(None);
     }
 
@@ -124,25 +130,22 @@ pub(super) fn detect_pnpm_workspace(root: &Path) -> Result<Option<DetectorOutcom
         return Ok(None);
     }
 
-    let lock_versions = None;
     let dialect = MonorepoStandard::PnpmWorkspaces
         .glob_dialect()
         .unwrap_or(GlobDialect::Minimatch);
-    let mut package_locations = expand_membership_globs(
+    let package_locations = expand_membership_globs(
         root,
         &packages,
         dialect,
         MonorepoStandard::PnpmWorkspaces,
         None,
-        &lock_versions,
+        evidence,
     );
-    package_locations = dedupe_packages(package_locations);
-    resolve_internal_deps(&mut package_locations);
 
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::PnpmWorkspaces,
         root: root.to_path_buf(),
-        packages: package_locations,
+        seeds: merge_seeds(package_locations),
     }))
 }
 
@@ -151,16 +154,19 @@ pub(super) fn detect_pnpm_workspace(root: &Path) -> Result<Option<DetectorOutcom
 /// Bun and npm/yarn all declare members via `package.json#workspaces`; the
 /// lockfile is what disambiguates Bun so it wins the membership authority.
 fn has_bun_lockfile(root: &Path) -> bool {
-    root.join("bun.lock").exists() || root.join("bun.lockb").exists()
+    probe_exists(&root.join("bun.lock")) || probe_exists(&root.join("bun.lockb"))
 }
 
-pub(super) fn detect_bun_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
+pub(super) fn detect_bun_workspace(
+    root: &Path,
+    evidence: RepoEvidence<'_>,
+) -> Result<Option<DetectorOutcome>> {
     if !has_bun_lockfile(root) {
         return Ok(None);
     }
 
     let package_json = root.join("package.json");
-    if !package_json.exists() {
+    if !probe_exists(&package_json) {
         return Ok(None);
     }
 
@@ -170,31 +176,31 @@ pub(super) fn detect_bun_workspace(root: &Path) -> Result<Option<DetectorOutcome
         return Ok(None);
     }
 
-    let lock_versions = None;
     let dialect = MonorepoStandard::BunWorkspaces
         .glob_dialect()
         .unwrap_or(GlobDialect::Minimatch);
-    let mut packages = expand_membership_globs(
+    let packages = expand_membership_globs(
         root,
         &workspaces,
         dialect,
         MonorepoStandard::BunWorkspaces,
         None,
-        &lock_versions,
+        evidence,
     );
-    packages = dedupe_packages(packages);
-    resolve_internal_deps(&mut packages);
 
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::BunWorkspaces,
         root: root.to_path_buf(),
-        packages,
+        seeds: merge_seeds(packages),
     }))
 }
 
-pub(super) fn detect_npm_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
+pub(super) fn detect_npm_workspace(
+    root: &Path,
+    evidence: RepoEvidence<'_>,
+) -> Result<Option<DetectorOutcome>> {
     let package_json = root.join("package.json");
-    if !package_json.exists() {
+    if !probe_exists(&package_json) {
         return Ok(None);
     }
 
@@ -210,35 +216,35 @@ pub(super) fn detect_npm_workspace(root: &Path) -> Result<Option<DetectorOutcome
         return Ok(None);
     }
 
-    let lock_versions = None;
     let dialect = MonorepoStandard::NpmWorkspaces
         .glob_dialect()
         .unwrap_or(GlobDialect::Minimatch);
-    let mut packages = expand_membership_globs(
+    let packages = expand_membership_globs(
         root,
         &workspaces,
         dialect,
         MonorepoStandard::NpmWorkspaces,
         None,
-        &lock_versions,
+        evidence,
     );
-    packages = dedupe_packages(packages);
-    resolve_internal_deps(&mut packages);
 
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::NpmWorkspaces,
         root: root.to_path_buf(),
-        packages,
+        seeds: merge_seeds(packages),
     }))
 }
 
-pub(super) fn detect_yarn_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
-    if !root.join("yarn.lock").exists() {
+pub(super) fn detect_yarn_workspace(
+    root: &Path,
+    evidence: RepoEvidence<'_>,
+) -> Result<Option<DetectorOutcome>> {
+    if !probe_exists(&root.join("yarn.lock")) {
         return Ok(None);
     }
 
     let package_json = root.join("package.json");
-    if !package_json.exists() {
+    if !probe_exists(&package_json) {
         return Ok(None);
     }
 
@@ -248,67 +254,62 @@ pub(super) fn detect_yarn_workspace(root: &Path) -> Result<Option<DetectorOutcom
         return Ok(None);
     }
 
-    let lock_versions = None;
     let dialect = MonorepoStandard::YarnWorkspaces
         .glob_dialect()
         .unwrap_or(GlobDialect::Minimatch);
-    let mut packages = expand_membership_globs(
+    let packages = expand_membership_globs(
         root,
         &workspaces,
         dialect,
         MonorepoStandard::YarnWorkspaces,
         None,
-        &lock_versions,
+        evidence,
     );
-    packages = dedupe_packages(packages);
-    resolve_internal_deps(&mut packages);
 
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::YarnWorkspaces,
         root: root.to_path_buf(),
-        packages,
+        seeds: merge_seeds(packages),
     }))
 }
 
 pub(super) fn detect_rush_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
     let rush_json = root.join("rush.json");
-    if !rush_json.exists() {
+    if !probe_exists(&rush_json) {
         return Ok(None);
     }
 
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
     let content = std::fs::read_to_string(&rush_json)?;
+    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+    performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
     let folders = parse_rush_project_folders(&content);
     if folders.is_empty() {
         return Ok(None);
     }
 
-    let lock_versions = None;
-    let mut packages = Vec::new();
+    let mut seeds = Vec::new();
     for folder in folders {
         let member_path = root.join(&folder);
-        if !member_path.exists() {
+        if !probe_exists(&member_path) {
             continue;
         }
-        packages.push(create_package(
+        seeds.push(PackageSeed::new(
             &member_path,
             root,
             MonorepoStandard::RushStack,
             PackageProvenance::Explicit,
-            &lock_versions,
         ));
     }
 
-    if packages.is_empty() {
+    if seeds.is_empty() {
         return Ok(None);
     }
-
-    packages = dedupe_packages(packages);
-    resolve_internal_deps(&mut packages);
 
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::RushStack,
         root: root.to_path_buf(),
-        packages,
+        seeds: merge_seeds(seeds),
     }))
 }
 
@@ -339,7 +340,10 @@ fn parse_rush_project_folders(content: &str) -> Vec<String> {
 }
 
 pub(super) fn parse_pnpm_workspace_patterns(pnpm_workspace_path: &Path) -> Result<Vec<String>> {
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
     let content = std::fs::read_to_string(pnpm_workspace_path)?;
+    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+    performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
     let parsed: serde_yaml_ng::Value =
         serde_yaml_ng::from_str(&content).map_err(|e| SniffError::SystemInfo {
             domain: "repo",
@@ -360,7 +364,10 @@ pub(super) fn parse_pnpm_workspace_patterns(pnpm_workspace_path: &Path) -> Resul
 pub(super) fn parse_package_json_workspace_patterns(
     package_json_path: &Path,
 ) -> Result<Option<Vec<String>>> {
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
     let content = std::fs::read_to_string(package_json_path)?;
+    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+    performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
     let parsed: serde_json::Value =
         serde_json::from_str(&content).map_err(|e| SniffError::SystemInfo {
             domain: "repo",
@@ -406,14 +413,16 @@ pub(super) fn resolve_js_package_manager(
     }
 
     if package_managers.iter().any(|manager| manager == "pnpm")
-        || root.join("pnpm-lock.yaml").exists()
+        || probe_exists(&root.join("pnpm-lock.yaml"))
     {
         return "pnpm";
     }
-    if package_managers.iter().any(|manager| manager == "yarn") || root.join("yarn.lock").exists() {
+    if package_managers.iter().any(|manager| manager == "yarn")
+        || probe_exists(&root.join("yarn.lock"))
+    {
         return "yarn";
     }
-    if root.join("bun.lock").exists() || root.join("bun.lockb").exists() {
+    if probe_exists(&root.join("bun.lock")) || probe_exists(&root.join("bun.lockb")) {
         return "bun";
     }
 

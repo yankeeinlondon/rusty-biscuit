@@ -11,9 +11,12 @@ use std::path::{Path, PathBuf};
 use biscuit_file::toml_crate;
 use tracing::debug;
 
-use super::detection::{create_package, normalize_path};
+use crate::performance;
+use crate::performance::counters;
+
+use super::detection::normalize_path;
+use super::seed::PackageSeed;
 use super::standard::{MonorepoStandard, PackageProvenance};
-use super::types::Package;
 
 /// Resolved versions from Cargo.lock.
 pub(crate) struct CargoLockVersions {
@@ -23,12 +26,15 @@ pub(crate) struct CargoLockVersions {
 impl CargoLockVersions {
     /// Parse a Cargo.lock file and extract package versions.
     pub fn parse(lock_path: &Path) -> Option<Self> {
+        performance::increment_counter(counters::FS_FILE_OPENS, 1);
         let content = std::fs::read_to_string(lock_path)
             .map_err(|e| {
                 debug!(path = %lock_path.display(), error = %e, "could not read file");
                 e
             })
             .ok()?;
+        performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+        performance::increment_counter(counters::REPO_LOCKFILE_PARSES, 1);
         let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
 
         let mut versions: HashMap<String, Vec<String>> = HashMap::new();
@@ -59,7 +65,7 @@ impl CargoLockVersions {
 }
 
 /// Manifest file type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum ManifestKind {
     Cargo,
     Node,
@@ -87,9 +93,17 @@ pub(crate) struct ManifestEntry {
 /// Performs a single directory walk and caches manifest locations,
 /// avoiding redundant filesystem traversals during package discovery.
 /// Each entry is canonicalized once at build time so that downstream
-/// `package_dirs_in_tree` queries do not perform any syscalls.
+/// [`ManifestIndex::package_dirs_in_tree`] queries do not perform any syscalls.
+///
+/// ## Notes
+///
+/// `entries` is sorted by `canonical` at construction, which is what lets a
+/// subtree query resolve as a binary-searched contiguous range instead of a scan
+/// over every manifest in the repository. On a 375-package workspace the scan
+/// form is O(packages²).
 #[derive(Debug, Clone)]
 pub(crate) struct ManifestIndex {
+    /// Sorted by `canonical`. Invariant relied on by `subtree_range`.
     pub(crate) entries: Vec<ManifestEntry>,
 }
 
@@ -100,8 +114,15 @@ impl ManifestIndex {
         use ignore::{WalkBuilder, WalkState};
         use std::sync::{Arc, Mutex};
 
+        /// Per-worker state for one `build_parallel` thread.
+        ///
+        /// The collector is what makes this worker's reads visible: recording
+        /// writes to a thread-local buffer that only a `WorkerCollector`'s drop
+        /// drains, so without one every `is_generated_manifest` read this
+        /// worker performs would be silently discarded from the report.
         struct ManifestWorker {
             shared: Arc<Mutex<Vec<(PathBuf, ManifestKind)>>>,
+            collector: performance::WorkerCollector,
             local: Vec<(PathBuf, ManifestKind)>,
         }
 
@@ -120,6 +141,7 @@ impl ManifestIndex {
 
         let shared: Arc<Mutex<Vec<(PathBuf, ManifestKind)>>> = Arc::new(Mutex::new(Vec::new()));
 
+        performance::increment_counter(counters::FS_READ_DIRS, 1);
         WalkBuilder::new(root)
             .hidden(false)
             .git_ignore(true)
@@ -138,9 +160,14 @@ impl ManifestIndex {
             .run(|| {
                 let mut worker = ManifestWorker {
                     shared: Arc::clone(&shared),
+                    collector: performance::WorkerCollector::inherit(),
                     local: Vec::new(),
                 };
                 Box::new(move |result| {
+                    // The first callback is the earliest point that runs on
+                    // this worker's own thread, which is where the collector
+                    // must live.
+                    worker.collector.activate();
                     let Ok(entry) = result else {
                         return WalkState::Continue;
                     };
@@ -213,7 +240,7 @@ impl ManifestIndex {
     }
 
     fn from_grouped(grouped: HashMap<PathBuf, HashSet<ManifestKind>>) -> Self {
-        let entries = grouped
+        let mut entries: Vec<ManifestEntry> = grouped
             .into_iter()
             .map(|(original, kinds)| {
                 let canonical = normalize_path(&original);
@@ -224,35 +251,56 @@ impl ManifestIndex {
                 }
             })
             .collect();
+        entries.sort_by(|a, b| a.canonical.cmp(&b.canonical));
         Self { entries }
+    }
+
+    /// The contiguous entry range whose canonical paths lie under `search_root`.
+    ///
+    /// ## Notes
+    ///
+    /// Sound because `entries` is sorted by `canonical` and `Path`'s ordering is
+    /// componentwise: every descendant of `search_root` sorts at or after it, and
+    /// the first non-descendant ends the run. The membership test stays
+    /// `Path::starts_with` (componentwise), so a sibling sharing a textual prefix
+    /// — `crates/pkg-a2` against `crates/pkg-a` — is excluded rather than
+    /// silently claimed, which a string-prefix range would get wrong.
+    fn subtree_range(&self, search_root: &Path) -> &[ManifestEntry] {
+        let start = self
+            .entries
+            .partition_point(|entry| entry.canonical.as_path() < search_root);
+        let tail = &self.entries[start..];
+        let len = tail.partition_point(|entry| entry.canonical.starts_with(search_root));
+        &tail[..len]
     }
 
     /// Get directories containing manifests within a specific subtree.
     ///
     /// Uses the pre-canonicalized entries built at index construction time, so
-    /// no filesystem syscalls occur during the query.  The `search_root` and
+    /// no filesystem syscalls occur during the query. The `search_root` and
     /// `root` parameters are lexically normalized (not canonicalized) so the
     /// comparison is syscall-free.
     pub(crate) fn package_dirs_in_tree(&self, search_root: &Path, root: &Path) -> Vec<&Path> {
         let search_root_normalized = normalize_path(search_root);
         let root_normalized = normalize_path(root);
 
-        let mut dirs: Vec<&Path> = self
-            .entries
+        self.subtree_range(&search_root_normalized)
             .iter()
-            .filter_map(|entry| {
-                if entry.canonical.starts_with(&search_root_normalized)
-                    && entry.canonical != root_normalized
-                {
-                    Some(entry.original.as_path())
-                } else {
-                    None
-                }
-            })
-            .collect();
+            .filter(|entry| entry.canonical != root_normalized)
+            .map(|entry| entry.original.as_path())
+            .collect()
+    }
 
-        dirs.sort();
-        dirs
+    /// The manifest kinds observed at `dir`, empty when nothing was observed.
+    ///
+    /// Presence is proof; absence is not. The index omits generated and fixture
+    /// manifests by design, so an empty set never means "no manifest exists".
+    pub(crate) fn kinds_at(&self, dir: &Path) -> HashSet<ManifestKind> {
+        let normalized = normalize_path(dir);
+        self.entries
+            .binary_search_by(|entry| entry.canonical.cmp(&normalized))
+            .map(|index| self.entries[index].kinds.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -265,9 +313,11 @@ pub(crate) fn is_generated_manifest(path: &Path) -> bool {
         return false;
     }
 
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
     let Ok(content) = std::fs::read_to_string(path) else {
         return false;
     };
+    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
     let content_lower = content.to_lowercase();
 
     content_lower.contains("automatically generated")
@@ -293,44 +343,47 @@ pub(crate) fn is_fixture_manifest(path: &Path) -> bool {
     })
 }
 
-pub(super) fn discover_packages_from_manifests(
+/// Discover boundaries using the manifest index if available, otherwise walk.
+pub(super) fn discover_seeds_with_optional_index(
     root: &Path,
     standard: MonorepoStandard,
     provenance: PackageProvenance,
-    lock_versions: &Option<CargoLockVersions>,
-) -> Vec<Package> {
-    discover_packages_from_manifests_in_tree(root, root, standard, provenance, lock_versions)
-}
-
-/// Discover packages using manifest index if available, otherwise walk filesystem.
-pub(super) fn discover_packages_with_optional_index(
-    root: &Path,
-    standard: MonorepoStandard,
-    provenance: PackageProvenance,
-    lock_versions: &Option<CargoLockVersions>,
     index: Option<&ManifestIndex>,
-) -> Vec<Package> {
-    if let Some(idx) = index {
-        // Use package_dirs_in_tree to exclude root itself (matches original
-        // discover_packages_from_manifests_in_tree which skips search_root)
-        idx.package_dirs_in_tree(root, root)
+) -> Vec<PackageSeed> {
+    match index {
+        // `package_dirs_in_tree` excludes the root itself, matching
+        // `discover_seeds_from_manifests_in_tree`'s `parent == search_root` skip.
+        Some(idx) => idx
+            .package_dirs_in_tree(root, root)
             .iter()
-            .map(|path| create_package(path, root, standard, provenance, lock_versions))
-            .collect()
-    } else {
-        discover_packages_from_manifests(root, standard, provenance, lock_versions)
+            .map(|path| seed_from_index(path, root, standard, provenance, idx))
+            .collect(),
+        None => discover_seeds_from_manifests_in_tree(root, root, standard, provenance),
     }
 }
 
-pub(super) fn discover_packages_from_manifests_in_tree(
+/// A seed carrying the manifest kinds the index observed at `path`.
+pub(super) fn seed_from_index(
+    path: &Path,
+    root: &Path,
+    standard: MonorepoStandard,
+    provenance: PackageProvenance,
+    index: &ManifestIndex,
+) -> PackageSeed {
+    let mut seed = PackageSeed::new(path, root, standard, provenance);
+    seed.evidence = index.kinds_at(path).into_iter().collect();
+    seed
+}
+
+pub(super) fn discover_seeds_from_manifests_in_tree(
     search_root: &Path,
     repo_root: &Path,
     standard: MonorepoStandard,
     provenance: PackageProvenance,
-    lock_versions: &Option<CargoLockVersions>,
-) -> Vec<Package> {
+) -> Vec<PackageSeed> {
     let mut discovered_dirs = HashSet::new();
 
+    performance::increment_counter(counters::FS_READ_DIRS, 1);
     let walker = walkdir::WalkDir::new(search_root)
         .follow_links(false)
         .into_iter()
@@ -381,26 +434,24 @@ pub(super) fn discover_packages_from_manifests_in_tree(
     dirs.sort();
 
     dirs.iter()
-        .map(|path| create_package(path, repo_root, standard, provenance, lock_versions))
+        .map(|path| PackageSeed::new(path, repo_root, standard, provenance))
         .collect()
 }
 
-/// Discover packages from manifest index (optimized path).
+/// Discover boundaries from the manifest index (optimized path).
 ///
-/// Uses pre-built manifest index instead of walking the filesystem.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn discover_packages_from_index(
+/// Uses the pre-built manifest index instead of walking the filesystem.
+pub(crate) fn discover_seeds_from_index(
     search_root: &Path,
     repo_root: &Path,
     standard: MonorepoStandard,
-    lock_versions: &Option<CargoLockVersions>,
     provenance: PackageProvenance,
     index: &ManifestIndex,
-) -> Vec<Package> {
-    let dirs = index.package_dirs_in_tree(search_root, repo_root);
-
-    dirs.iter()
-        .map(|path| create_package(path, repo_root, standard, provenance, lock_versions))
+) -> Vec<PackageSeed> {
+    index
+        .package_dirs_in_tree(search_root, repo_root)
+        .iter()
+        .map(|path| seed_from_index(path, repo_root, standard, provenance, index))
         .collect()
 }
 

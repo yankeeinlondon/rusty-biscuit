@@ -1,8 +1,8 @@
 ---
 name: sniff
 description: Expert knowledge for sniff-lib and sniff-cli, a cross-platform system detection library and CLI for Rust. Use when detecting OS/hardware/network/filesystem info, program detection, service detection, adding new detection capabilities, or optimizing detection performance.
-hash: 3cd50ffff2b8b5db-27ba1c39db009879
-last_updated: 2026-06-29
+hash: 3cd50ffff2b8b5db-b635023f1c5ff58b
+last_updated: 2026-07-17
 ---
 
 # sniff
@@ -92,13 +92,19 @@ let result = detect_with_config(config)?;
 
 | Type | Presets | Controls |
 |------|---------|----------|
-| `OsRequest` | `summary()`, `full()` | Package managers, locale, timezone, NTP status (up to 10s on Linux) |
+| `OsRequest` | `summary()`, `full()` | Package managers, locale, timezone, NTP status (bounded at 3s; off in the default plan) |
 | `HardwareRequest` | `summary()`, `full()` | Storage, GPU, audio (~1.5s macOS) |
 | `NetworkRequest` | `interfaces_only()`, `full()` | WAN IP lookup (HTTP); `.force_refresh(true)` bypasses the TTL cache |
-| `GitRequest` | `identity()`, `summary()`, `full()`, `deep()` | Commits, per-file stats, worktrees, unified diffs, remote refresh |
-| `RepoRequest` | `structure()`, `full()` | Per-package language scanning (10-50x slower than `structure()`) |
+| `GitRequest` | `identity()`, `summary()`, `full()`, `deep()` | Commits, per-file stats, worktrees, unified diffs, remote refresh. `.metadata(GitMetadataRequest)` opts into fine-grained control of commits/decorations/branches/divergence/remotes/tracking/config/worktrees |
+| `RepoRequest` | `structure()`, `focused(details)`, `full()` | Focused package managers/dependencies/test runners; full inventory-backed enrichment |
 | `FilesystemRequest` | `new()` (default full) | Composes git + repo + file inventory + formatting + docs |
-| `DetectionPlan` | `new()` (default full) | Composes all four domains (os, hardware, network, filesystem) |
+| `DetectionPlan` | `new()` (default full domains, **safe** defaults — NTP off) | Composes all four domains (os, hardware, network, filesystem) |
+
+`structure()` performs membership and minimum package identity only. Package managers, dependencies,
+test runners, features, languages, frameworks, and file lists remain empty. Use
+`RepoRequest::focused(RepoDetailRequest::…)` for selected manifest-backed facts without enabling the
+inventory-backed work in `full()`. Structure still pays a nested-marker fallback walk that full
+avoids via the observation index, so it is not simply "full minus work".
 
 **Git preset cheat sheet:**
 - `identity()` -- repo root, branch, HEAD id, worktree flag, base repo root, and org/repo only. **No working-tree status walk**, no commits, no branches, no remotes, no config. This is the new floor below `minimal()`.
@@ -106,6 +112,18 @@ let result = detect_with_config(config)?;
 - `full()` -- 10 commits, per-file change stats, worktrees; no unified diffs, no network
 - `deep()` -- adds full unified diffs, remote refresh, branch details, and per-commit containment
 - Every preset except `identity()` runs a working-tree status walk. Use `identity()` when you only need repository identity, or use the Tier-3 `GitRepo::discover().repo_root()` handle for bare repo-root access.
+
+**Focused Git metadata (`GitMetadataRequest`):**
+- `GitRequest.metadata` is `Option<GitMetadataRequest>`. **`None` means "derive legacy behavior from the coarse fields", never "collect nothing"** — the `wants_*` accessors (`wants_commits`, `wants_branches`, `wants_branch_divergence`, `wants_config`, …) are the single place that rule lives; don't re-derive it at a call site.
+- `#[serde(default, skip_serializing_if = "Option::is_none")]` is the whole compatibility story and both halves are load-bearing: every preset leaves it `None`, so preset JSON stays **byte-identical**, and plans serialized before the field existed still deserialize. Asserted by `preset_json_omits_the_metadata_field` and `legacy_request_json_without_metadata_derives_legacy_behavior`.
+- Controls **narrow, never widen**: `summary().metadata(GitMetadataRequest::all())` still collects no commits, because `commit_count: 0` wins.
+- `full()` keeps paying for branch divergence by design — the preset's published `ahead`/`behind` values are contract. Only an explicit `branch_divergence(false)` skips the two reachability walks per non-current branch.
+
+**Bounded path history (`PathHistoryOptions` / `PathHistoryResult`):**
+- `commits_for_path_at` / `get_commits_for_path` take `PathHistoryOptions` and return `PathHistoryResult { commits, commits_scanned, history_exhausted, limit_reached }`.
+- **`history_exhausted` and `limit_reached` are not complements.** A walk that satisfied `count` before either boundary reports both `false`. That third state is the reason the API is not a bare `Vec<CommitInfo>`.
+- Default scan bound is `DEFAULT_PATH_HISTORY_SCAN_LIMIT` (10,000) and a zero bound is rejected in favor of it — zero would return an empty history indistinguishable from "path never touched".
+- The bound caps the **tail**; stopping at `count` matches is what makes the common case cheap. Sparse/absent-match paths are what the bound protects.
 
 ## Key Types
 
@@ -167,14 +185,48 @@ CLI text derives the one-liner from `RepoInfo::primary_layer()`. The shared labe
 
 - **Top-level concurrency**: OS, hardware, network, filesystem run in scoped threads via `detect_with_plan`
 - **Staged filesystem**: git → repo → file inventory → formatting → docs; each stage reuses earlier work
-- **Shared repo inventory**: full repo detection returns its `FileInventory` alongside the `RepoInfo` via `detect_repo_with_inventory`, so the file-inventory stage skips rescanning
-- **Manifest Index**: single walk records every `Cargo.toml`/`package.json`/`pyproject.toml`/`go.mod` for full repo mode; structure mode skips it entirely
-- **Single-pass nested-marker walk**: `walk_for_nested_markers` matches marker filenames (`package.json`, `pnpm-workspace.yaml`, `*.sln`, …) in-memory against the entries the `ignore` walker already yields, instead of re-probing the filesystem per directory. This collapses a per-directory `exists()`/`read_dir` syscall storm (~21k syscalls on this repo) into the single batched walk. Gitignored markers are intentionally no longer detected (markers are conventionally committed); see `spec.md` "Intentional Behavior Change" in the `2026-06-20-faster-package-list` feature.
+- **Walk scope is chosen from consumers, never from Git**: an internal `WalkConsumers`/`WalkScope` pair decides whether the shared descendant walk runs and from where. Formatting-only requests start **no** walker (`.editorconfig` is probed directly). Structure-only repo requests start none either. Inventory alone walks the **resolved package root**, not the repository root — a Git handle being present is not a consumer of repository-wide evidence and no longer widens the scope. Full repo detection and repo-wide docs walk the repository root.
+- **Inventory saturation**: classification stops at `MAX_FILES` (10,000 accepted). An inventory-**only** walk quits globally at the cap; a combined walk keeps going for its still-active manifest/docs observers (quitting would silently truncate the manifest index). `FileInventory`, `FileAssociationBreakdown`, and `LanguageSummary` carry `truncated: bool` + `limit: Option<usize>`, Serde-defaulted and omitted when complete, so existing JSON consumers are unaffected. **A truncated subset is unspecified across runs** — workers race for the bounded slots. Ordering is always sorted; a complete result is fully deterministic.
+- **One observation index per request**: a **full** repo detection observes the tree **once**. `FilesystemSystemView` is the request-scoped index; `SharedWalkOptions` gates what it retains (manifest index, unfiltered manifest dirs, nested-workspace markers, capped inventory, Markdown metadata). It never retains `DirEntry` values or file bodies, and there is no process-global cache. `RepoEvidence::from_view` borrows it into repo detection — the *only* constructor from a walk, so evidence and the root it came from cannot drift apart.
+- **Both full routes share it**: standalone `detect_repo`/`detect_repo_with_inventory` and integrated `WalkScope::Repository` build the same index and return equivalent results. Before, standalone walked the tree **three** times (manifest index + nested markers + inventory) and integrated twice.
+- **`manifest_dirs` vs `manifest_index`**: `ManifestIndex` drops generated/fixture manifests because they are not discovery boundaries. Membership **globs** resolve a boundary by marker presence alone and never applied that exclusion, so they consume the unfiltered `manifest_dirs`. Routing globs through the filtered index would silently drop a member whose manifest says `auto-generated` — and only in full mode, making structure and full disagree.
+- **Structure mode keeps the smallest evidence set**: it consumes no index, inventory, or docs, so building the observation index for it would classify every file for evidence it discards. It walks for nested markers instead (`filesystem.repo.nested_marker_walks: 1`), which is expected, not a defect.
+- **Discovery finishes before enrichment**: detectors return cheap `PackageSeed`s (`repo/seed.rs`) — a normalized `key`, the `owner_root` they were resolved against, standard, provenance, evidence kinds — and `merge_seeds` collapses duplicate boundaries **before** `create_package` runs. Enrichment (manifest parses, ecosystem probes, the per-package test-runner search) therefore happens exactly once per unique boundary. Two detectors resolving the same directory is normal, not a bug; what was a bug is paying full enrichment for each and merging afterwards. `merge_packages`/`merge_package_into`/`dedupe_packages`/`rebase_package_to_root` are **gone** — there is nothing left to reconcile, and re-adding a post-hoc merge would re-open the defect.
+- **`PackageSeed::owner_root` is load-bearing**: enrichment runs in the frame the *detector* resolved the boundary in, because Cargo `version.workspace = true`, npm's root-version fallback, and `Cargo.lock` resolution all resolve against the owning workspace's root — not the repo root. Only `relative`/`package_area` are re-framed to the repo-root catalog view. A nested Cargo workspace enriched against the outer root would silently report the wrong inherited versions.
+- **`seed.evidence` presence is proof; absence is not.** The manifest index omits generated (`auto-generated`) and fixture manifests, so an empty evidence set means "nothing observed", never "no manifest exists". A probe-skipping fast path is sound only for kinds known *present*.
+- **`ManifestIndex` entries are sorted by `canonical`**; `subtree_range` binary-searches a contiguous range instead of scanning every manifest per query (which was O(packages²)). Membership still tests `Path::starts_with` (componentwise), so `crates/pkg-a` never claims `crates/pkg-a2`.
+- **`has_workspace_marker` gate**: full `detect_repo` only observes a root that carries a workspace marker. This is what keeps `detect_repo` over a large non-repo directory (a system temp dir) cheap — do not remove it.
+- **Single-pass nested-marker walk**: marker filenames (`package.json`, `pnpm-workspace.yaml`, `*.sln`, …) are matched in-memory against entries the `ignore` walker already yields rather than re-probed per directory. Gitignored markers are intentionally not detected (markers are conventionally committed); see `spec.md` "Intentional Behavior Change" in the `2026-06-20-faster-package-list` feature.
 - **Git status layers**: counts-only vs full file changes vs full unified diffs, selectable via `GitRequest` flags
 - **Parallel remote fetch**: deep git mode fetches multiple remotes concurrently with bounded parallelism; `GIT_TERMINAL_PROMPT=0` is preserved to avoid interactive hangs
 - **Ancestry-walk containment**: per-commit remote containment is computed with a single ancestry walk per remote, cached in a `HashMap<Oid, Vec<remote>>`
-- **ExecutableIndex**: scans `PATH` + macOS bundles once, shared across all 9 program categories via `Arc`. The test-runner category additionally consults a cwd-sensitive `LocalBinIndex` for project-local bin dirs.
+- **ExecutableIndex**: scans `PATH` + macOS bundles once, shared across all 9 program categories via `Arc`. The test-runner category additionally consults a cwd-sensitive `LocalBinIndex` for project-local bin dirs. Four builders span a PATH-scan × fallback-layers 2×2: `build()` (lazy `which`, + bundles/Windows layers, bundle index cache-backed), `build_path_only()` (lazy, no layers), `build_eager_path()` (one PATH traversal, + layers), and `build_eager_path_only()` (one PATH traversal, no layers — used by `HostCapabilities::detect()`). Prefer an eager builder for bulk lookups; `_only` matters on Windows, where the fallback layers scan the App Paths registry and would change *which* programs resolve.
+- **One remote snapshot per report**: `RemoteRepoSnapshot` (`remote/snapshot.rs`) is the remote analogue of the filesystem observation index — metadata, default branch, and tree resolved **once** per `fetch_report`. Before it, `list_documents` and `detect_cicd` each re-fetched metadata just to learn the default branch and then re-fetched the identical tree (GitHub/Gitea 3 metadata + 2 tree; GitLab **3 identical tree** calls, since absent `GetProject` its metadata call *is* a tree fetch whose result was discarded). Now all four are **1 metadata + 1 tree**. The three hooks (`snapshot`, `list_documents_with`, `detect_cicd_with`) are **defaulted** — a downstream provider adopting none still works. A provider adopting `list_documents_with` must override `list_documents` too, or the default re-enters it and recurses.
+- **`RemoteTree::available` ≠ empty `files`**: `false` means the fetch failed and the tree carries no evidence, so a projection degrades rather than concluding "absent". Metadata is required; a tree failure never sinks a report.
+- **`truncated` is real and was ignored**: GitHub/Gitea deserialize it and nothing read it, so a >100k-entry repo reported "no docs, no CI" confidently; Bitbucket ignored `response.next` the same way. Continuations are counted under `remote.api_requests.tree_continuation`, separate from `tree`, so a correctness-preserving continuation stays distinguishable from a duplicate root request. **`CONTINUATION_PREFIXES` entries must be single path components** — the client percent-encodes the whole `branch:prefix` tree_sha into one path segment, so `.github/workflows` would go out as `%2F` and be rejected/normalized by routers. Continue `.github`; the recursive response supplies `workflows/ci.yml`.
+- **`categorize_document` lives once**, in `remote/snapshot.rs`. All four providers previously carried byte-identical copies plus four copies of the same test suite.
+- **Every subprocess goes through `process::run_with_timeout`** (`process.rs`), which owns the deadline, the pipe draining, and the reaping. **Never poll `try_wait()` over a piped stdout you are not draining** — the child blocks in `write()` past one pipe buffer (64 KiB Linux / ~16 KiB macOS), never exits, and gets killed at its deadline with its output lost. That bug was live in `os/time.rs`, `programs/schema.rs`, and `host_capability.rs`; `Command::output()` drains correctly but blocks forever without a deadline. Deadlines are policy and live in `process::timeouts` (services/Windows-locale 3s, `diskutil` 5s, host-capability 2s, program-schema/NTP 3s). Tests inject short deadlines; never sleep for a production one.
+- **Service enrichment is chunked, not per-service**: systemd was `1 + N_running` spawns (one `systemctl show` each), runit `N` (one `sv status` each). Both now batch at `ENRICHMENT_CHUNK` (128), which bounds command-line length only — not how many services get reported. A failed/timed-out chunk degrades only its own services (`pid: None` / `(false, None)`) and never discards a healthy chunk.
+- **`DetectionPlan::default()` is "all domains at safe defaults", not "every domain at `full()`"**: it uses `OsRequest::full().include_ntp_status(false)`, so Tier-1 `detect()` initiates no implicit network probe. `OsRequest::full()` is unchanged — explicit callers still get NTP.
+- **WAN IP**: one blocking client reused across the ladder (was rebuilt per attempt), **two** default HTTPS endpoints (one made the fallback unreachable), queried **sequentially** — a successful first attempt discloses the host address to exactly one endpoint. Bodies are strictly parsed through `IpAddr` and never reach an error, log, or counter. The ladder runs on a spawned thread inside a tokio context, so its counters need an explicit `WorkerCollector` (see the parallel-worker trap below).
 - **CLI async model**: the CLI is a single-shot command runner; most paths are synchronous (git, filesystem, subprocess) and run directly in the async entrypoint. `spawn_blocking` is avoided unless true concurrent async work exists
+
+## Testing gotcha: feature-gated tests
+
+`sniff-lib` has `default = []`, and `remote = ["network"]`. **A test behind `#[cfg(feature = "remote")]`
+or `#[cfg(feature = "network")]` does not compile, let alone run, unless the feature is on.** The
+`sniff/justfile` `test` recipe passes `--features remote` for exactly this reason — until Phase 6 it did
+not, and **190 tests silently never ran**, including the entire 65-test `remote_providers` suite.
+
+If you add a test under either feature, confirm it actually executes (`just test` should report a
+higher count) rather than trusting a green run. A feature-gated test that never runs is worse than no
+test: it reads as coverage.
+
+**The same trap bit CI's compile guard.** `test.yml`'s `sniff-cross-platform` job ran
+`cargo check -p sniff --all-targets` with no `--features` — so the guard whose whole purpose is
+catching a Unix-only import in test code that never runs on that OS could not see any
+`remote`/`network`-gated target. Phase 8 added `--features remote` there. Any new feature gate needs
+the same treatment in **both** the justfile recipe and the CI check.
 
 ## CLI
 
@@ -225,6 +277,41 @@ sniff hardware --json      # Subcommand with JSON output
 Bare `sniff repo --json` returns the consolidated `SniffRepo` projection with snake_case top-level keys. Identity fields remain top-level (`name`, `version`, `language`, `is_monorepo`, `package_count`, `root`), the repo-wide `package_manager` and `test_runner` facts collapse across all packages to `string | string[] | null`, cwd-relative facts live under `context`, worktrees and branches appear once as top-level arrays, and change data is grouped into four `ScopeBucket` objects: `dirty`, `staged`, `unstaged`, and `untracked`. Each bucket contains `files`, `source_code`, `documentation`, `packages`, and `package_areas` arrays. Aggregate `git_status` is intentionally lean (`current_branch`, `config`, compact `file_changes`, and dirty/staged/unstaged/untracked counts), while focused commands such as `repo git-status --json`, `repo structure --json`, and `repo recent-commits --json` keep their richer contracts. Network-primary subcommands (`remote`, `pr`) and parameterized subcommands (`hash`) are excluded, and no network requests are made by the aggregate.
 
 The aggregate's top-level `version` is the **`AggregateScope::Repo` collapse**: exactly one distinct version across all packages → that string; zero or more-than-one distinct versions → `null` (e.g. a pure-virtual Cargo workspace with uniform member versions now reports the version string instead of `null`). The focused `sniff repo version --json` shape is `{ "versions": [ { version, packages, sources: [ { manifest, path, href, inherited, packages } ] } ] }`.
+
+## Work Counters (performance evidence)
+
+Performance claims in sniff are judged by **work removed**, not wall time — hosted runners and a loaded dev box swing timings by 2×+ on identical code. `sniff::performance` provides the evidence:
+
+```rust
+use sniff::performance::{PerformanceCollector, with_current_collector};
+
+let collector = PerformanceCollector::new_shared();
+with_current_collector(Some(collector.clone()), || detect_repo(path))?;
+let report = collector.snapshot(elapsed); // report.counters: BTreeMap<String, u64>
+```
+
+- Stable counter names live in `sniff/lib/src/performance/counters.rs` — treat them as a contract; renaming one invalidates archived baselines. An absent counter means zero.
+- Counters cover walk entries, inventory acceptance/saturation, file opens/bytes/metadata probes/canonicalizations, manifest/lockfile/config parses, package enrichments, git discoveries/status walks/blob loads/diffs/ref walks/commit visits, subprocess spawns/timeouts, and remote API operations by slug.
+- `filesystem.repo.nested_marker_walks` and `filesystem.repo.membership_glob_walks` name the two repo-detection fallback walks. They exist because `filesystem.io.read_dirs` is shared by five unrelated detectors (`test_runner_usage.rs` alone increments it at five sites) and so cannot answer "was the tree enumerated again?". `filesystem.walk.*` is incremented **only** by `build_filesystem_system_view`, so a removed fallback walk shows up as a single `read_dirs` decrement and badly understates itself.
+- `cargo run -p sniff --release --example work_counts` prints the baseline table for the standard cases; baselines are archived in `sniff/features/2026-07-16-performance/phases/01-work-accounting/spec.md`.
+
+**Adding instrumentation:**
+
+- Recording is gated on `performance::is_collecting()` (one relaxed atomic load). Check it before setting up any instrumentation state — reading a clock, formatting a name. Use `StageTimer::start(name)` rather than a bare `Instant::now()`, so the default path reads no clock.
+- Count at **one chokepoint per unit of work**, never at both a helper and its callers — double counting silently corrupts a baseline and is worse than not counting.
+- **Parallel workers need explicit propagation or their counts vanish.** An `ignore::build_parallel()` worker owns a `performance::WorkerCollector` (`inherit()` on the spawning thread, `activate()` in the first callback, flush on drop) in the same struct as its result buffers. A Rayon closure takes `let _worker = performance::pooled_worker(collector.as_ref());` — pool threads park rather than exit, so nothing would otherwise drain them.
+- This has bitten **four times** now: `system_view`'s walker (Phase 1), `with_current_collector`'s scoped stage threads (Phase 2), `ManifestIndex::build`'s walker (Phase 3, which reported *zero* file opens while reading every `Cargo.toml` in the tree), and the WAN IP ladder (Phase 6, once it moved onto the tokio-context thread). **Any new `build_parallel`/`spawn` site must carry a collector, or it silently reports zero.** A counter that drops when you add work — or a "regression" from a change that only removes work — is this bug, not the code under test.
+- **`git.file_diffs` under-reports before Phase 5.** `text_hunks` ran a full `diff_with_slider_heuristics` per patch side without incrementing anything, so every `include_diffs` case executed twice the diffs its counter admitted. Phase 5 collapsed stats+patch onto one diff per side; the counter therefore **does not move** while real work halves, and `git.blob_loads` (8 → 4 on a two-sided fixture) is the counter that shows it. Never compare Phase 5+ diff counts to Phase 1–4 archived values.
+- **Git status: one load and one diff per dirty file side.** `StatusContext` resolves the HEAD tree and index snapshot once per status call (was once per file *per side*). `each_dirty_side_loads_and_diffs_once` pins the bound — `blob_loads` above 4 on a staged+modified file means the double-observation is back. Whole-file adds/deletes are line-**counted**, not diffed, so a stats-only request runs zero diffs.
+- **Archived baseline caveat**: Phase 1's `filesystem.io.file_opens` / `bytes_read` under-report every case that built a manifest index. Compare against the Phase 3 table in `sniff/features/2026-07-16-performance/phases/03-observation-index/spec.md`, not the Phase 1 values. For **full-mode** cases the current baseline is Phase 4's table (`phases/04-package-enrichment-and-ownership/spec.md`), which halved them again.
+- **`repo_full` ≈ `repo_structure` + inventory.** Since Phase 4 their probe and `read_dirs` counts land within 1 of each other on the 375-package fixture. A full-mode counter materially above structure's means a second enrichment pass has been re-introduced.
+- **Counters, not wall time.** Timing on a loaded host is worthless: a Phase 3 Criterion run at load 57-87/16 cores reported +330% for a case whose counters were byte-identical. Always keep an unchanged case in the run as a drift bracket.
+- **`work_counts` case order is a page-cache confound.** `repo_structure_huge_375_packages` runs *before* `repo_full_huge_375_packages` over the **same** fixture, so the full case reads a cache the structure case just warmed. Three sequential runs put structure *slower* than full (223/144, 138/112, 124/100 ms) — that is the confound, not a finding. Never read a structure-vs-full ratio off one sequential run.
+- **Final baselines are the Phase 8 table** (`phases/08-cross-platform-validation/spec.md`), which compares every case against Phase 1 and flags the three counters that cannot be compared naively. Headline vs Phase 1: `metadata_probes` −48%/−49%, `read_dirs` −50%, `manifest_parses` −42%/−40%, `package_enrichments` −50%, deep-status `blob_loads` 400 → 200. Results-shaped counters (`entries_visited`, `files_accepted`, `documents_parsed`) are **unchanged** — the feature changed work, not results. The two structure-mode cases are byte-identical to Phase 1 and serve as the drift bracket.
+- **CI collects this nightly across three OSes.** `sniff-performance.yml`'s `sniff-work-counts` matrix uploads the table per OS (90-day retention). Compare **only within one OS and runner class** — artifacts are named per OS and the Criterion baseline is `ci-linux` precisely so a cross-OS diff cannot happen by accident. Cross-OS counter deltas are not regressions; path/case/ignore semantics differ legitimately by platform.
+- **A high counter is not by itself duplicate work — attribute before optimizing.** `filesystem.io.metadata_probes` is **13,275** against 4,685 walked entries on the 375-package fixture, which reads like the dominant reuse defect left in the codebase. It isn't: per-path attribution (Phase 7) found **12,675 distinct / 600 redundant — only 4.5%**. Those probes *are* the detection contract ("does `<pkg>/vitest.config.ts` exist?"), asked once each, about paths the walk legitimately does not answer. There is no observe-once win there. Before treating any counter as duplicate work, attribute it by `(call site → path)` with a temporary `#[track_caller]` shim on `probe_exists`/`probe_is_dir`; the aggregate counter cannot tell "expensive" from "repeated".
+- **The R14 micro-optimizations were measured and deferred — don't re-litigate them without new evidence.** Phase 7 profiled both hot paths post-structural work and deferred **all nine** candidates (ASCII classification, framework prefix reads, walker-metadata mtime reuse, static regex/maps, path-list merges, rate-limit lowercasing, interface-cache clones, local-bin memoization). Repo detection is **~71% syscalls** on distinct paths with its largest userspace bucket at ~2.9%; `ProgramsInfo::detect` is **~96% Rayon park/spin** — so adding parallelism there buys contention, not throughput. Two review premises were already **stale**: `standard.rs`'s version regex is now `#[cfg(test)]`-only (production leaves `version: None` for the no-subprocess boundary), and `merge_path_lists` was deleted in Phase 4. See `phases/07-profile-guided-cleanup/spec.md` for the keep/defer table and the 5%-of-counter-or-sampled-time threshold.
+- **Sampling on macOS costs ~7×.** `sample` on a `detect_repo` loop returned 58 iterations where the unsampled binary did 396 in the same window. Read a sampled profile for **composition** (does this symbol appear at all?) and never for absolute attribution. A symbol absent at 1 ms sampling is decisively cold; a symbol present is not thereby material.
 
 ## Detailed Topics
 

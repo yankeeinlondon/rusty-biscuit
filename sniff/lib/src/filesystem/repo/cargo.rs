@@ -5,20 +5,28 @@ use std::path::Path;
 use biscuit_file::toml_crate;
 
 use crate::package::{DependencyEntry, DependencyKind};
+use crate::performance;
+use crate::performance::counters;
 use crate::{Result, SniffError};
 
-use super::detection::{DetectorOutcome, resolve_internal_deps};
+use super::detection::{DetectorOutcome, RepoEvidence, probe_exists};
 use super::glob::expand_membership_globs;
 use super::manifest_index::CargoLockVersions;
 use super::standard::{GlobDialect, MonorepoStandard};
 
-pub(super) fn detect_cargo_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
+pub(super) fn detect_cargo_workspace(
+    root: &Path,
+    evidence: RepoEvidence<'_>,
+) -> Result<Option<DetectorOutcome>> {
     let cargo_toml = root.join("Cargo.toml");
-    if !cargo_toml.exists() {
+    if !probe_exists(&cargo_toml) {
         return Ok(None);
     }
 
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
     let content = std::fs::read_to_string(&cargo_toml)?;
+    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+    performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
     let parsed: toml_crate::Value =
         toml_crate::from_str(&content).map_err(|e| SniffError::SystemInfo {
             domain: "repo",
@@ -44,9 +52,6 @@ pub(super) fn detect_cargo_workspace(root: &Path) -> Result<Option<DetectorOutco
         return Ok(None);
     }
 
-    // Parse Cargo.lock once for version resolution
-    let lock_versions = CargoLockVersions::parse(&root.join("Cargo.lock"));
-
     let excludes = workspace
         .get("exclude")
         .and_then(|m| m.as_array())
@@ -61,37 +66,34 @@ pub(super) fn detect_cargo_workspace(root: &Path) -> Result<Option<DetectorOutco
         .glob_dialect()
         .unwrap_or(GlobDialect::Cargo);
 
-    // Expand globs and collect packages with dependencies
-    let mut packages = expand_membership_globs(
+    let mut seeds = expand_membership_globs(
         root,
         &members,
         dialect,
         MonorepoStandard::CargoWorkspace,
         None,
-        &lock_versions,
+        evidence,
     );
 
-    // Expand excluded patterns and mark them
-    let mut excluded_packages = expand_membership_globs(
+    // Expand excluded patterns and mark them. A directory matched by both an
+    // include and an exclude pattern merges to one excluded seed.
+    let mut excluded_seeds = expand_membership_globs(
         root,
         &excludes,
         dialect,
         MonorepoStandard::CargoWorkspace,
         None,
-        &lock_versions,
+        evidence,
     );
-    for pkg in &mut excluded_packages {
-        pkg.is_excluded = true;
+    for seed in &mut excluded_seeds {
+        seed.is_excluded = true;
     }
-    packages.extend(excluded_packages);
-
-    // Resolve internal dependency graph
-    resolve_internal_deps(&mut packages);
+    seeds.extend(excluded_seeds);
 
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::CargoWorkspace,
         root: root.to_path_buf(),
-        packages,
+        seeds,
     }))
 }
 
@@ -239,7 +241,7 @@ pub(crate) fn cargo_package_version_with_source(
         return None;
     }
     let root_manifest = repo_root.join("Cargo.toml");
-    let root_manifest = if root_manifest.exists() {
+    let root_manifest = if probe_exists(&root_manifest) {
         root_manifest
     } else {
         package_manifest.to_path_buf()
@@ -262,7 +264,10 @@ pub(crate) fn cargo_package_version_with_source(
 /// parse failure. Used by the workspace-inheritance helper to peek at the
 /// root `Cargo.toml` without disturbing the caller's manifest cache.
 fn read_toml_at(path: &Path) -> Option<toml_crate::Value> {
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
     let content = std::fs::read_to_string(path).ok()?;
+    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+    performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
     toml_crate::from_str(&content).ok()
 }
 

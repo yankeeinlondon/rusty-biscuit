@@ -6,49 +6,53 @@ use std::sync::OnceLock;
 use regex::Regex;
 
 use crate::Result;
+use crate::performance;
+use crate::performance::counters;
 
-use super::detection::{DetectorOutcome, create_package, dedupe_packages, resolve_internal_deps};
+use super::detection::{
+    DetectorOutcome, probe_exists,
+};
+use super::seed::{PackageSeed, merge_seeds};
 use super::standard::{MonorepoStandard, PackageProvenance};
 
 pub(super) fn detect_maven_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
     let pom = root.join("pom.xml");
-    if !pom.exists() {
+    if !probe_exists(&pom) {
         return Ok(None);
     }
 
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
     let content = std::fs::read_to_string(&pom)?;
+    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+    performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
     let modules = parse_maven_modules(&content);
     if modules.is_empty() {
         return Ok(None);
     }
 
-    let lock_versions = None;
-    let mut packages = Vec::new();
+    let mut seeds = Vec::new();
     for module in modules {
         let module_path = root.join(&module);
-        if !module_path.exists() {
+        if !probe_exists(&module_path) {
             continue;
         }
-        packages.push(create_package(
+        seeds.push(PackageSeed::new(
             &module_path,
             root,
             MonorepoStandard::MavenMultiModule,
             PackageProvenance::Explicit,
-            &lock_versions,
         ));
     }
 
-    if packages.is_empty() {
+    if seeds.is_empty() {
         return Ok(None);
     }
 
-    packages = dedupe_packages(packages);
-    resolve_internal_deps(&mut packages);
 
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::MavenMultiModule,
         root: root.to_path_buf(),
-        packages,
+        seeds: merge_seeds(seeds),
     }))
 }
 

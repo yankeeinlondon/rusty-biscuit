@@ -612,7 +612,7 @@ fn cli_facing_apis_surface_open_failure_instead_of_absence() {
         "commit_files_at"
     );
     assert!(
-        sniff::filesystem::commits_for_path_at(p, "", 5).is_err(),
+        sniff::filesystem::commits_for_path_at(p, "", sniff::filesystem::PathHistoryOptions::new(5)).is_err(),
         "commits_for_path_at"
     );
     assert!(
@@ -731,7 +731,7 @@ fn commits_for_path_at_surfaces_corrupt_ancestor() {
     corrupt_loose_object(dir.path(), &root);
 
     assert!(
-        sniff::filesystem::commits_for_path_at(dir.path(), "", 10).is_err(),
+        sniff::filesystem::commits_for_path_at(dir.path(), "", sniff::filesystem::PathHistoryOptions::new(10)).is_err(),
         "corrupt ancestor must surface through commits_for_path_at"
     );
 }
@@ -835,7 +835,7 @@ fn commits_for_path_at_surfaces_malformed_head() {
     fs::write(dir.path().join(".git").join("HEAD"), b"not a valid head\n").unwrap();
 
     assert!(
-        sniff::filesystem::commits_for_path_at(dir.path(), "", 10).is_err(),
+        sniff::filesystem::commits_for_path_at(dir.path(), "", sniff::filesystem::PathHistoryOptions::new(10)).is_err(),
         "malformed HEAD must surface through commits_for_path_at"
     );
 }
@@ -1800,18 +1800,9 @@ fn phase3_counts_only_matches_full_request_totals() {
     // detailed-count code path. Its totals must agree with the full walk.
     let counts = detect_git_with_request(
         dir.path(),
-        &GitRequest {
-            commit_count: 0,
-            include_file_changes: false,
-            include_file_diffs: false,
-            include_worktrees: true, // keeps is_minimal() false
-            refresh_remote_tracking: false,
-            include_remote_branch_details: false,
-            include_commit_remote_containment: false,
-            max_remote_branches: None,
-            full_worktree_details: false,
-            identity_only: false,
-        },
+        // `include_worktrees` keeps `is_minimal()` false, which is what selects
+        // the detailed-count path being compared here.
+        &GitRequest::minimal().include_worktrees(true),
     )
     .unwrap()
     .expect("repo found");

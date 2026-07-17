@@ -5,6 +5,7 @@
 //! listing all worktrees in a repository.
 
 use crate::SniffError;
+use crate::performance::{self, counters};
 use gix::bstr::ByteSlice;
 use std::error::Error;
 use std::path::{Path, PathBuf};
@@ -49,23 +50,7 @@ pub fn get_current_worktree_name(cwd: &Path) -> Result<Option<String>, Box<dyn E
     let Some(repo) = super::open::trusted_discover(cwd)? else {
         return Ok(None);
     };
-
-    // Not a linked worktree — either the main repo or a bare repo. A linked
-    // worktree has a per-worktree git dir distinct from the common dir.
-    if !is_linked_worktree(&repo) {
-        return Ok(None);
-    }
-
-    let Some(workdir) = repo.workdir() else {
-        return Ok(None);
-    };
-
-    // Canonicalize first: gix may report a relative workdir (no `file_name`).
-    let canonical = std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
-    Ok(canonical
-        .file_name()
-        .and_then(|n| n.to_str())
-        .map(String::from))
+    Ok(current_worktree_name_from_gix(&repo))
 }
 
 /// True when `repo` is a linked worktree rather than the main worktree.
@@ -130,15 +115,46 @@ pub fn list_worktrees(base_dir: &Path) -> Result<Option<Vec<WorktreeEntry>>, Box
     let Some(discovered) = super::open::trusted_discover(base_dir)? else {
         return Ok(None);
     };
+    list_worktrees_from_gix(&discovered).map(Some)
+}
 
+/// [`list_worktrees`] against an already-discovered repository.
+///
+/// Identical output to `list_worktrees(repo.repo_root())`, without the second
+/// `trusted_discover`. Exists so an aggregate observation can enumerate
+/// worktrees on the one handle it already holds.
+pub fn list_worktrees_with_repo(repo: &super::GitRepo) -> Result<Vec<WorktreeEntry>, Box<dyn Error>> {
+    repo.with_cached_gix(list_worktrees_from_gix)
+}
+
+/// [`get_current_worktree_name`] against an already-discovered repository.
+pub fn current_worktree_name_with_repo(repo: &super::GitRepo) -> Option<String> {
+    repo.with_cached_gix(current_worktree_name_from_gix)
+}
+
+fn current_worktree_name_from_gix(repo: &gix::Repository) -> Option<String> {
+    // Not a linked worktree — either the main repo or a bare repo.
+    if !is_linked_worktree(repo) {
+        return None;
+    }
+    let workdir = repo.workdir()?;
+    // Canonicalize first: gix may report a relative workdir (no `file_name`).
+    let canonical = std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
+    canonical
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(String::from)
+}
+
+fn list_worktrees_from_gix(discovered: &gix::Repository) -> Result<Vec<WorktreeEntry>, Box<dyn Error>> {
     // If discovery landed on a linked worktree, open the base repository so
     // that worktree enumeration includes the main worktree as well.
-    let base_repo = if is_linked_worktree(&discovered) {
+    let base_repo = if is_linked_worktree(discovered) {
         Some(super::open::trusted_open(discovered.common_dir())?)
     } else {
         None
     };
-    let repo = base_repo.as_ref().unwrap_or(&discovered);
+    let repo = base_repo.as_ref().unwrap_or(discovered);
 
     // Determine the current workdir so we can mark exactly one entry as current.
     let current_workdir = std::env::current_dir().ok();
@@ -186,6 +202,7 @@ pub fn list_worktrees(base_dir: &Path) -> Result<Option<Vec<WorktreeEntry>>, Box
 
         // Open the worktree as its own repository to read HEAD.
         let (branch, is_detached) = {
+            performance::increment_counter(counters::GIT_WORKTREE_OPENS, 1);
             let wt_repo = super::open::trusted_open(&canonical)?;
             resolve_branch_and_detached(&wt_repo)
         };
@@ -202,7 +219,7 @@ pub fn list_worktrees(base_dir: &Path) -> Result<Option<Vec<WorktreeEntry>>, Box
     }
 
     entries.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(Some(entries))
+    Ok(entries)
 }
 
 /// Resolves the branch name and detached-HEAD state for a repository.

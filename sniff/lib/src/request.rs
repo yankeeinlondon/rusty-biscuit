@@ -41,8 +41,13 @@ use std::path::PathBuf;
 /// Top-level detection plan controlling which domains are collected
 /// and at what detail level.
 ///
-/// By default, all domains are included at full detail. Use builder
-/// methods or `without_*` to exclude domains, and pass domain-specific
+/// By default, all domains are included at **safe defaults** — which is not the
+/// same as every domain at `full()`. The one difference is the live NTP probe:
+/// [`DetectionPlan::default`] disables it so that observing the OS never initiates
+/// an implicit network request. Ask for it explicitly with
+/// `.os(OsRequest::full())`.
+///
+/// Use builder methods or `without_*` to exclude domains, and pass domain-specific
 /// request types to control detail within each domain.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectionPlan {
@@ -65,7 +70,11 @@ impl Default for DetectionPlan {
     fn default() -> Self {
         Self {
             base_dir: None,
-            os: Some(OsRequest::full()),
+            // Full OS observation minus the live NTP probe: it is the only default
+            // field that reaches the network, and it costs a subprocess plus a
+            // round trip for a fact almost no caller of `detect()` reads. NTP is
+            // one `.os(OsRequest::full())` away.
+            os: Some(OsRequest::full().include_ntp_status(false)),
             hardware: Some(HardwareRequest::full()),
             network: Some(NetworkRequest::full()),
             filesystem: Some(FilesystemRequest::default()),
@@ -139,7 +148,8 @@ pub struct OsRequest {
     pub include_locale: bool,
     /// Include timezone, UTC offset, and DST detection (local, cheap)
     pub include_timezone: bool,
-    /// Include NTP synchronization status (can take up to 10s on Linux)
+    /// Include NTP synchronization status (bounded at 3s; network round trip
+    /// on macOS only). Off in `DetectionPlan::default()`, on in `full()`.
     pub include_ntp_status: bool,
 }
 
@@ -289,6 +299,120 @@ impl NetworkRequest {
     }
 }
 
+/// Fine-grained controls for the repository metadata a git request collects.
+///
+/// Each flag names one independently expensive observation. A caller that wants
+/// recent commits but not, say, the per-branch divergence walk sets only what it
+/// renders.
+///
+/// This is only consulted when a [`GitRequest`] carries it. Absence means
+/// "derive the legacy behavior from the coarse fields", never "collect nothing"
+/// — see [`GitRequest::metadata`].
+///
+/// ## Examples
+///
+/// ```
+/// use sniff::request::{GitMetadataRequest, GitRequest};
+///
+/// // Ten commits, and none of the branch/remote/config/worktree work that
+/// // `full()` would otherwise imply.
+/// let request = GitRequest::full()
+///     .metadata(GitMetadataRequest::none().commits(true));
+/// assert!(request.wants_commits());
+/// assert!(!request.wants_branches());
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitMetadataRequest {
+    /// Collect recent commits (bounded by [`GitRequest::commit_count`]).
+    pub commits: bool,
+    /// Attach ref decorations (branches/tags pointing at a returned commit).
+    pub ref_decorations: bool,
+    /// Collect the local branch list.
+    pub branches: bool,
+    /// Compute per-branch ahead/behind against the current branch.
+    ///
+    /// Separate from [`branches`](Self::branches) because it walks the commit
+    /// graph once per branch, which dominates latency on branch-heavy repos.
+    pub branch_divergence: bool,
+    /// Collect configured remotes.
+    pub remotes: bool,
+    /// Compute per-remote tracking (ahead/behind) status.
+    pub tracking: bool,
+    /// Read git config (user identity, signing, pager).
+    pub config: bool,
+    /// Enumerate linked worktrees.
+    pub worktrees: bool,
+}
+
+impl GitMetadataRequest {
+    /// No metadata at all — the base for opting in to exactly one thing.
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// Every metadata observation.
+    pub fn all() -> Self {
+        Self {
+            commits: true,
+            ref_decorations: true,
+            branches: true,
+            branch_divergence: true,
+            remotes: true,
+            tracking: true,
+            config: true,
+            worktrees: true,
+        }
+    }
+
+    /// Collect recent commits.
+    pub fn commits(mut self, include: bool) -> Self {
+        self.commits = include;
+        self
+    }
+
+    /// Attach ref decorations to returned commits.
+    pub fn ref_decorations(mut self, include: bool) -> Self {
+        self.ref_decorations = include;
+        self
+    }
+
+    /// Collect the local branch list.
+    pub fn branches(mut self, include: bool) -> Self {
+        self.branches = include;
+        self
+    }
+
+    /// Compute per-branch ahead/behind counts.
+    pub fn branch_divergence(mut self, include: bool) -> Self {
+        self.branch_divergence = include;
+        self
+    }
+
+    /// Collect configured remotes.
+    pub fn remotes(mut self, include: bool) -> Self {
+        self.remotes = include;
+        self
+    }
+
+    /// Compute per-remote tracking status.
+    pub fn tracking(mut self, include: bool) -> Self {
+        self.tracking = include;
+        self
+    }
+
+    /// Read git config.
+    pub fn config(mut self, include: bool) -> Self {
+        self.config = include;
+        self
+    }
+
+    /// Enumerate linked worktrees.
+    pub fn worktrees(mut self, include: bool) -> Self {
+        self.worktrees = include;
+        self
+    }
+}
+
 /// Controls git repository detection detail level.
 ///
 /// Presets range from [`identity()`](Self::identity) — the cheapest,
@@ -332,6 +456,16 @@ pub struct GitRequest {
     /// so older serialized plans deserialize to the pre-identity behavior.
     #[serde(default)]
     pub identity_only: bool,
+    /// Fine-grained metadata controls, or `None` to derive them from the coarse
+    /// fields above.
+    ///
+    /// `None` means "legacy behavior", not "want nothing" — the distinction the
+    /// `wants_*` accessors exist to enforce. Every preset leaves this `None`, so
+    /// `skip_serializing_if` keeps their serialized JSON byte-identical to what
+    /// it was before this field existed, and `default` lets plans serialized
+    /// before it existed deserialize unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<GitMetadataRequest>,
 }
 
 impl GitRequest {
@@ -349,6 +483,7 @@ impl GitRequest {
             max_remote_branches: None,
             full_worktree_details: false,
             identity_only: false,
+            metadata: None,
         }
     }
 
@@ -370,6 +505,7 @@ impl GitRequest {
             max_remote_branches: None,
             full_worktree_details: false,
             identity_only: true,
+            metadata: None,
         }
     }
 
@@ -393,6 +529,7 @@ impl GitRequest {
             max_remote_branches: None,
             full_worktree_details: false,
             identity_only: false,
+            metadata: None,
         }
     }
 
@@ -415,6 +552,7 @@ impl GitRequest {
             max_remote_branches: None,
             full_worktree_details: false,
             identity_only: false,
+            metadata: None,
         }
     }
 
@@ -432,6 +570,7 @@ impl GitRequest {
             max_remote_branches: Some(50),
             full_worktree_details: true,
             identity_only: false,
+            metadata: None,
         }
     }
 
@@ -500,21 +639,161 @@ impl GitRequest {
         self.full_worktree_details = full;
         self
     }
+
+    /// Opt into fine-grained metadata controls.
+    ///
+    /// Once set, the controls decide what metadata is collected instead of the
+    /// coarse fields; the coarse fields still govern *how much* (e.g.
+    /// [`commit_count`](Self::commit_count) still bounds the commit walk).
+    pub fn metadata(mut self, metadata: GitMetadataRequest) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
+
+    /// Collect recent commits?
+    pub fn wants_commits(&self) -> bool {
+        match self.metadata {
+            Some(m) => m.commits && self.commit_count > 0,
+            None => self.commit_count > 0,
+        }
+    }
+
+    /// Attach ref decorations to returned commits?
+    ///
+    /// Legacy behavior decorates whenever commits are collected.
+    pub fn wants_ref_decorations(&self) -> bool {
+        match self.metadata {
+            Some(m) => m.ref_decorations && self.wants_commits(),
+            None => self.wants_commits(),
+        }
+    }
+
+    /// Collect the local branch list?
+    pub fn wants_branches(&self) -> bool {
+        match self.metadata {
+            Some(m) => m.branches,
+            None => self.wants_repo_metadata(),
+        }
+    }
+
+    /// Compute per-branch ahead/behind counts?
+    ///
+    /// Legacy behavior ties divergence to the branch list, and the presets'
+    /// published values depend on it, so `full()` keeps paying for it unless a
+    /// caller explicitly opts out.
+    pub fn wants_branch_divergence(&self) -> bool {
+        match self.metadata {
+            Some(m) => m.branch_divergence,
+            None => self.wants_repo_metadata(),
+        }
+    }
+
+    /// Collect configured remotes?
+    pub fn wants_remotes(&self) -> bool {
+        match self.metadata {
+            Some(m) => m.remotes,
+            None => self.wants_repo_metadata(),
+        }
+    }
+
+    /// Compute per-remote tracking status?
+    pub fn wants_tracking(&self) -> bool {
+        match self.metadata {
+            Some(m) => m.tracking,
+            None => self.wants_repo_metadata(),
+        }
+    }
+
+    /// Read git config?
+    pub fn wants_config(&self) -> bool {
+        match self.metadata {
+            Some(m) => m.config,
+            None => self.wants_repo_metadata(),
+        }
+    }
+
+    /// Enumerate linked worktrees?
+    pub fn wants_worktrees(&self) -> bool {
+        match self.metadata {
+            Some(m) => m.worktrees && self.include_worktrees,
+            None => self.include_worktrees,
+        }
+    }
+}
+
+/// Focused package details that can be added to a shallow repository request.
+///
+/// Identity and topology are always collected. These controls opt into facts
+/// that otherwise belong to [`RepoRequest::full`] without enabling its file
+/// inventory, language, framework, feature, or file-list work.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoDetailRequest {
+    /// Detect package managers from ecosystem markers and lockfiles.
+    pub package_managers: bool,
+    /// Parse external and workspace-internal dependencies.
+    pub dependencies: bool,
+    /// Detect declared test runners and their evidence.
+    pub test_runners: bool,
+}
+
+impl RepoDetailRequest {
+    /// Package-manager detection only.
+    pub fn package_managers() -> Self {
+        Self {
+            package_managers: true,
+            ..Self::default()
+        }
+    }
+
+    /// Dependency parsing only.
+    pub fn dependencies() -> Self {
+        Self {
+            dependencies: true,
+            ..Self::default()
+        }
+    }
+
+    /// Test-runner detection only.
+    pub fn test_runners() -> Self {
+        Self {
+            test_runners: true,
+            ..Self::default()
+        }
+    }
+
+    /// Every focused detail used by repository aggregate projections.
+    pub fn all() -> Self {
+        Self {
+            package_managers: true,
+            dependencies: true,
+            test_runners: true,
+        }
+    }
 }
 
 /// Controls repo/monorepo detection detail level.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoRequest {
-    /// When true, only detect workspace structure (tools, package names/paths).
-    /// When false, also scan per-package languages, frameworks, and file associations.
+    /// When true, skip inventory-backed package enrichment.
+    /// When false, collect the complete repository detail set.
     pub structure_only: bool,
+    /// Optional enrichment for callers that need selected package facts but
+    /// not inventory-backed full repository detail.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<RepoDetailRequest>,
 }
 
 impl RepoRequest {
-    /// Structure only: workspace tools and package list. 10-50x faster than full.
+    /// Workspace topology and minimum package identity only.
+    ///
+    /// Package managers, dependencies, test runners, features, languages,
+    /// frameworks, and file lists are empty. Use [`Self::focused`] for one of
+    /// the inexpensive manifest-backed detail sets, or [`Self::full`] for all
+    /// enriched fields.
     pub fn structure() -> Self {
         Self {
             structure_only: true,
+            details: None,
         }
     }
 
@@ -522,7 +801,39 @@ impl RepoRequest {
     pub fn full() -> Self {
         Self {
             structure_only: false,
+            details: None,
         }
+    }
+
+    /// Structure plus selected manifest-backed package details.
+    pub fn focused(details: RepoDetailRequest) -> Self {
+        Self {
+            structure_only: true,
+            details: Some(details),
+        }
+    }
+
+    /// Whether package-manager detection is requested.
+    pub fn wants_package_managers(&self) -> bool {
+        !self.structure_only
+            || self
+                .details
+                .is_some_and(|details| details.package_managers)
+    }
+
+    /// Whether dependency parsing is requested.
+    pub fn wants_dependencies(&self) -> bool {
+        !self.structure_only || self.details.is_some_and(|details| details.dependencies)
+    }
+
+    /// Whether declared test-runner detection is requested.
+    pub fn wants_test_runners(&self) -> bool {
+        !self.structure_only || self.details.is_some_and(|details| details.test_runners)
+    }
+
+    /// Whether any manifest-backed package enrichment is requested.
+    pub fn wants_package_enrichment(&self) -> bool {
+        self.wants_package_managers() || self.wants_dependencies() || self.wants_test_runners()
     }
 }
 
@@ -605,13 +916,138 @@ impl FilesystemRequest {
 mod tests {
     use super::*;
 
+    /// The `metadata` field must be invisible in every preset's JSON.
+    ///
+    /// This is the R9.1/R9.8 compatibility contract: adding fine-grained
+    /// controls must not change the wire shape of any existing preset.
     #[test]
-    fn detection_plan_defaults_to_all_full() {
+    fn preset_json_omits_the_metadata_field() {
+        for (label, request) in [
+            ("identity", GitRequest::identity()),
+            ("minimal", GitRequest::minimal()),
+            ("summary", GitRequest::summary()),
+            ("full", GitRequest::full()),
+            ("deep", GitRequest::deep()),
+        ] {
+            let value: serde_json::Value =
+                serde_json::from_str(&serde_json::to_string(&request).unwrap()).unwrap();
+            assert!(
+                !value.as_object().unwrap().contains_key("metadata"),
+                "{label}() must serialize without a metadata field"
+            );
+        }
+    }
+
+    /// A plan serialized before `metadata` existed must still deserialize, and
+    /// must derive the behavior it had then.
+    #[test]
+    fn legacy_request_json_without_metadata_derives_legacy_behavior() {
+        let legacy = r#"{
+            "commit_count": 10,
+            "include_file_changes": true,
+            "include_file_diffs": false,
+            "include_worktrees": true,
+            "refresh_remote_tracking": false,
+            "include_remote_branch_details": false,
+            "include_commit_remote_containment": false,
+            "max_remote_branches": null,
+            "full_worktree_details": false
+        }"#;
+
+        let request: GitRequest = serde_json::from_str(legacy).unwrap();
+        assert!(request.metadata.is_none(), "absent field must stay absent");
+        // Absence means "derive from the coarse fields", not "want nothing".
+        assert!(request.wants_commits());
+        assert!(request.wants_branches());
+        assert!(request.wants_remotes());
+        assert!(request.wants_config());
+        assert!(request.wants_worktrees());
+    }
+
+    #[test]
+    fn focused_metadata_controls_round_trip() {
+        let request = GitRequest::full().metadata(
+            GitMetadataRequest::none()
+                .commits(true)
+                .ref_decorations(true),
+        );
+        let round_tripped: GitRequest =
+            serde_json::from_str(&serde_json::to_string(&request).unwrap()).unwrap();
+
+        assert_eq!(round_tripped.metadata, request.metadata);
+        assert!(round_tripped.wants_commits());
+        assert!(round_tripped.wants_ref_decorations());
+        assert!(!round_tripped.wants_branches());
+        assert!(!round_tripped.wants_config());
+    }
+
+    /// R9.2: asking for commits must not drag in branch, remote, tracking,
+    /// config, or worktree work.
+    #[test]
+    fn focused_commit_request_wants_nothing_else() {
+        let request = GitRequest::full().metadata(GitMetadataRequest::none().commits(true));
+
+        assert!(request.wants_commits());
+        for (label, wanted) in [
+            ("branches", request.wants_branches()),
+            ("branch_divergence", request.wants_branch_divergence()),
+            ("remotes", request.wants_remotes()),
+            ("tracking", request.wants_tracking()),
+            ("config", request.wants_config()),
+            ("worktrees", request.wants_worktrees()),
+        ] {
+            assert!(!wanted, "focused commit request must not want {label}");
+        }
+    }
+
+    /// The coarse fields still bound the controls: opting into commits cannot
+    /// resurrect a walk a `commit_count` of zero already ruled out.
+    #[test]
+    fn metadata_controls_cannot_widen_past_coarse_fields() {
+        let request = GitRequest::summary().metadata(GitMetadataRequest::all());
+        assert!(!request.wants_commits(), "commit_count 0 still wins");
+        assert!(!request.wants_worktrees(), "include_worktrees false still wins");
+    }
+
+    #[test]
+    fn zero_scan_limit_is_rejected_in_favor_of_the_default() {
+        use crate::filesystem::git::{DEFAULT_PATH_HISTORY_SCAN_LIMIT, PathHistoryOptions};
+
+        // A zero bound would return an empty history indistinguishable from
+        // "never touched" — the exact confusion the bounded API removes.
+        let opts = PathHistoryOptions::new(10).scan_limit(0);
+        assert_eq!(opts.scan_limit_value(), DEFAULT_PATH_HISTORY_SCAN_LIMIT);
+    }
+
+    #[test]
+    fn detection_plan_defaults_to_all_domains() {
         let plan = DetectionPlan::default();
         assert!(plan.os.is_some());
         assert!(plan.hardware.is_some());
         assert!(plan.network.is_some());
         assert!(plan.filesystem.is_some());
+    }
+
+    /// The default plan is "all domains at safe defaults", not "every domain at
+    /// `full()`". The live NTP probe is the sole difference: it is the only OS
+    /// default that reaches the network.
+    #[test]
+    fn default_plan_makes_no_ntp_request() {
+        let os = DetectionPlan::default().os.expect("os domain is on by default");
+
+        assert!(!os.include_ntp_status, "default plan must not probe NTP");
+        // Every other full() field survives — this gates one probe, it does not
+        // downgrade the default plan to summary().
+        assert!(os.include_package_managers);
+        assert!(os.include_locale);
+        assert!(os.include_timezone);
+    }
+
+    /// R12.1: gating the default must not change what an explicit `full()` means.
+    #[test]
+    fn explicit_full_os_request_retains_ntp() {
+        let plan = DetectionPlan::new().os(OsRequest::full());
+        assert!(plan.os.expect("explicitly set").include_ntp_status);
     }
 
     #[test]

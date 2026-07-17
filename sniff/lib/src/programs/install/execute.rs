@@ -7,6 +7,7 @@
 use std::process::{Command, Output};
 
 use crate::error::SniffInstallationError;
+use crate::performance::{self, counters};
 use crate::programs::contract::InstallationMethod;
 
 use super::command::{
@@ -98,6 +99,7 @@ pub fn execute_versioned_install(
 
 /// Runs the astral.sh uv bootstrap script for the current platform.
 fn run_uv_bootstrap() -> std::io::Result<Output> {
+    performance::increment_counter(counters::PROC_SPAWNS, 1);
     if cfg!(target_os = "windows") {
         Command::new("powershell")
             .arg("-ExecutionPolicy")
@@ -151,6 +153,7 @@ pub fn execute_install_captured(
     let program = &cmd_parts[0];
     let args = &cmd_parts[1..];
 
+    performance::increment_counter(counters::PROC_SPAWNS, 1);
     match Command::new(program).args(args).output() {
         Ok(output) => InstallCapturedOutcome::Completed(InstallCapturedResult {
             command,
@@ -210,6 +213,7 @@ pub fn execute_versioned_install_captured(
     let program = &cmd_parts[0];
     let args = &cmd_parts[1..];
 
+    performance::increment_counter(counters::PROC_SPAWNS, 1);
     match Command::new(program).args(args).output() {
         Ok(output) => InstallCapturedOutcome::Completed(InstallCapturedResult {
             command,
@@ -318,6 +322,7 @@ fn execute_uv_with_install_captured(
         None => pkg.to_string(),
     };
 
+    performance::increment_counter(counters::PROC_SPAWNS, 1);
     match Command::new(&uv_path)
         .arg("tool")
         .arg("install")

@@ -10,7 +10,7 @@ matters.
 |-----------------|---------|
 | `_small_repo` | Synthetic git repo with ~5 commits |
 | `_monorepo` | Synthetic monorepo with ~50 packages |
-| `_huge` | Synthetic monorepo with 500 packages |
+| `_huge` | Synthetic monorepo with 375 packages (200 Rust, 100 JS, 50 Python, 25 Go) |
 | `_only` | A single subsystem is exercised in isolation |
 | `_isolated` | Request-level bench with all other flags disabled |
 | `_lazy` / `_eager` | Which `ExecutableIndex` build strategy is used |
@@ -66,9 +66,9 @@ matters.
 | `repo_structure_monorepo_manifest_discovery` | `detect_repo_structure()` on a large monorepo. Manifest discovery (Cargo.toml, package.json, etc.) without per-package language scanning. |
 | `repo_with_shared_inventory_monorepo` | `detect_repo_with_inventory()` — structure + file inventory in one pass. Measures the shared-work path that avoids re-walking the tree. |
 | `repo_full_monorepo_language_scan` | `detect_repo()` — structure + per-package language detection + framework heuristics + dependency parsing. The dominant cost of `RepoRequest::full()`. |
-| `repo_structure_huge_500_packages` | Structure-only on a 500-package monorepo. Stresses manifest caching and index normalization. |
-| `repo_full_huge_500_packages` | Full repo detection on 500 packages. Worst-case language-scan cost. |
-| `package_boundary_refresh_huge` | Isolated `refresh_package_boundaries()` on 500 packages with a pre-built inventory. Measures only the boundary-assignment logic. |
+| `repo_structure_huge_375_packages` | Structure-only on the 375-package monorepo fixture (200 Rust, 100 JS, 50 Python, 25 Go). Stresses manifest caching and index normalization. |
+| `repo_full_huge_375_packages` | Full repo detection on the 375-package fixture. Worst-case language-scan cost. |
+| `package_boundary_refresh_huge` | Isolated `refresh_package_boundaries()` on the 375-package fixture with a pre-built inventory. Measures only the boundary-assignment logic. |
 
 ## filesystem_inventory
 
@@ -178,6 +178,33 @@ Parameterised by package count (10, 100, optionally 500).
 |----------|--------|
 | `SNIFF_BENCH_DEEP_DIRTY=1` | Includes the `1000` dirty-file row in `git_dirty_scaling` |
 | `SNIFF_BENCH_DEEP_REPO=1` | Includes the `500` package row in `repo_package_boundaries` |
+
+## What These Timings Are Worth
+
+**Criterion timings here are directional evidence, not acceptance evidence.** Work
+counters are what performance claims in sniff are judged on — see
+`sniff/lib/src/performance/counters.rs` and
+`cargo run -p sniff --release --example work_counts`.
+
+Read this before quoting a number from a report:
+
+- **Only compare within one OS and runner class.** No universal cross-OS
+  wall-clock threshold exists, and none should be added.
+- **Always include an unchanged case as a drift bracket.** On a loaded host these
+  benches are worthless without one: a run at load 57–87 on 16 cores reported
+  **+330%** for a case whose counters were byte-identical.
+- **Case order matters within a run.** `repo_structure_huge_375_packages` runs
+  before `repo_full_huge_375_packages` over the *same* fixture, so the full case
+  reads a page cache the structure case warmed. Do not read a structure-vs-full
+  ratio off one sequential run.
+- **`_huge` is 375 packages but only ~3,755 files** (10 per package). It is
+  package-dense and file-sparse, which is precisely the shape where
+  `structure()` and `full()` converge. It is not a general model of "a big repo".
+
+The fixture was previously described as "500 packages" in benchmark IDs while the
+builder created 375. The IDs were renamed to match the code in Phase 1 of the
+2026-07-16 performance feature; **never compare against an archived `huge_500`
+result** — the workload never changed, but only post-rename runs are on record.
 
 ## How to Read Reports
 

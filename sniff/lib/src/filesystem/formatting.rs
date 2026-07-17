@@ -30,13 +30,19 @@ use crate::Result;
 
 /// Complete formatting configuration from EditorConfig.
 ///
-/// Contains all sections parsed from `.editorconfig` files found in the
-/// directory hierarchy.
+/// Contains all sections parsed from the single `.editorconfig` file found in
+/// the observed directory. See [`detect_formatting`] for why parent
+/// directories are not consulted.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FormattingConfig {
     /// Path to the `.editorconfig` file.
     pub config_path: PathBuf,
-    /// Whether this is a root configuration (stops searching parent directories).
+    /// The file's `root` property, reported as parsed.
+    ///
+    /// In the EditorConfig standard this is what stops a parent-directory
+    /// search. Sniff never searches parents, so this value is passed through
+    /// for callers that implement the standard's resolution themselves; it
+    /// does not affect what Sniff detects.
     pub is_root: bool,
     /// All sections from the EditorConfig file.
     pub sections: Vec<EditorConfigSection>,
@@ -87,14 +93,18 @@ pub struct EditorConfigSection {
 
 /// Detects EditorConfig formatting configuration for a directory.
 ///
-/// Searches for `.editorconfig` files starting from `root` and traversing
-/// parent directories until a root configuration is found or the filesystem
-/// root is reached.
+/// Checks `root` for an `.editorconfig` file and nothing else. This departs
+/// from the EditorConfig standard, which resolves a file by walking parents
+/// until one declares `root = true`: Sniff reports configuration that lives
+/// *within* the tree under observation, so a config above the repository would
+/// be attributed to a repository that does not contain it. No descendants are
+/// enumerated either — this is a single probe, which is what lets a
+/// formatting-only request start no walker at all.
 ///
 /// ## Returns
 ///
-/// - `Ok(Some(config))` if an `.editorconfig` file is found
-/// - `Ok(None)` if no `.editorconfig` file exists in the hierarchy
+/// - `Ok(Some(config))` if `root` directly contains an `.editorconfig` file
+/// - `Ok(None)` if it does not
 ///
 /// ## Errors
 ///
@@ -113,7 +123,6 @@ pub struct EditorConfigSection {
 /// }
 /// ```
 pub fn detect_formatting(root: &Path) -> Result<Option<FormattingConfig>> {
-    // Search for .editorconfig in root and parent directories
     let config_path = find_editorconfig(root);
 
     let Some(path) = config_path else {

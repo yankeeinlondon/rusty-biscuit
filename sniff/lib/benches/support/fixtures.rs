@@ -6,6 +6,11 @@
 //! [`Fixture`] wrapper on top so bench groups can drop a fixture to
 //! clean up their scratch tree.
 
+// Consumers include this module via `#[path = "..."]` and each uses only the
+// fixtures its own cases need, so an unused wrapper here is expected rather
+// than dead.
+#![allow(dead_code)]
+
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 

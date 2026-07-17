@@ -51,8 +51,12 @@ sanity:
     @just _sanity sniff-cli
 
 # test library and CLI
+#
+# `--features remote` (which enables `network`) is not optional here: both feature
+# sets are off by default, so without it the ~80 wiremock-backed provider and WAN
+# tests silently do not run. They reach a local mock server, never the internet.
 test *args="":
-    @just _test sniff {{ args }}
+    @just _test sniff --features remote {{ args }}
     @just _test sniff-cli {{ args }}
 
 # Real-terminal (Level-2) tests: CI/CD status-cell styling in sniff-cli.

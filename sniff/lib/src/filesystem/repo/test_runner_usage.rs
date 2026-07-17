@@ -15,7 +15,9 @@ use std::path::{Path, PathBuf};
 use biscuit_file::toml_crate;
 use serde::{Deserialize, Serialize};
 
-use crate::filesystem::repo::detection::ManifestCache;
+use crate::filesystem::repo::detection::{ManifestCache, probe_exists, probe_is_dir};
+use crate::performance;
+use crate::performance::counters;
 use crate::programs::contract::CategoryEnum;
 use crate::programs::enums::TestRunner;
 use crate::programs::test_runner_spec::{TEST_RUNNER_SPEC, TestRunnerEcosystem};
@@ -285,7 +287,7 @@ fn locate_config(
         return locate_glob_file(pkg_dir, glob);
     }
     let path = pkg_dir.join(glob);
-    if !path.exists() {
+    if !probe_exists(&path) {
         return None;
     }
     match required_config_section(runner, glob) {
@@ -336,7 +338,7 @@ fn locate_glob_file(pkg_dir: &Path, pattern: &str) -> Option<PathBuf> {
         root.push(segment);
         literal_segments += 1;
     }
-    if !root.exists() {
+    if !probe_exists(&root) {
         return None;
     }
 
@@ -359,6 +361,7 @@ fn glob_walk(
     matcher: &globset::GlobMatcher,
     max_descent: usize,
 ) -> Option<PathBuf> {
+    performance::increment_counter(counters::FS_READ_DIRS, 1);
     let entries = std::fs::read_dir(dir).ok()?;
     for entry in entries.flatten() {
         let Ok(file_type) = entry.file_type() else {
@@ -423,37 +426,37 @@ fn push_unique(
 /// Returns the ecosystems that have a manifest present in `pkg_dir`.
 fn ecosystems_present(pkg_dir: &Path) -> HashSet<TestRunnerEcosystem> {
     let mut set = HashSet::new();
-    if pkg_dir.join("Cargo.toml").exists() {
+    if probe_exists(&pkg_dir.join("Cargo.toml")) {
         set.insert(TestRunnerEcosystem::Rust);
     }
-    if pkg_dir.join("go.mod").exists() {
+    if probe_exists(&pkg_dir.join("go.mod")) {
         set.insert(TestRunnerEcosystem::Go);
     }
-    if pkg_dir.join("package.json").exists() {
+    if probe_exists(&pkg_dir.join("package.json")) {
         set.insert(TestRunnerEcosystem::Node);
     }
-    if pkg_dir.join("pyproject.toml").exists()
-        || pkg_dir.join("requirements.txt").exists()
-        || pkg_dir.join("setup.py").exists()
+    if probe_exists(&pkg_dir.join("pyproject.toml"))
+        || probe_exists(&pkg_dir.join("requirements.txt"))
+        || probe_exists(&pkg_dir.join("setup.py"))
     {
         set.insert(TestRunnerEcosystem::Python);
     }
-    if pkg_dir.join("composer.json").exists() {
+    if probe_exists(&pkg_dir.join("composer.json")) {
         set.insert(TestRunnerEcosystem::Php);
     }
-    if pkg_dir.join("Gemfile").exists() || has_gemspec(pkg_dir) {
+    if probe_exists(&pkg_dir.join("Gemfile")) || has_gemspec(pkg_dir) {
         set.insert(TestRunnerEcosystem::Ruby);
     }
-    if pkg_dir.join("pom.xml").exists()
-        || pkg_dir.join("build.gradle").exists()
-        || pkg_dir.join("build.gradle.kts").exists()
+    if probe_exists(&pkg_dir.join("pom.xml"))
+        || probe_exists(&pkg_dir.join("build.gradle"))
+        || probe_exists(&pkg_dir.join("build.gradle.kts"))
     {
         set.insert(TestRunnerEcosystem::Jvm);
     }
     if has_csproj(pkg_dir) {
         set.insert(TestRunnerEcosystem::DotNet);
     }
-    if pkg_dir.join("mix.exs").exists() {
+    if probe_exists(&pkg_dir.join("mix.exs")) {
         set.insert(TestRunnerEcosystem::Elixir);
     }
     set
@@ -759,6 +762,7 @@ fn collect_elixir_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut Hash
 /// Return the package-dir entries whose file name satisfies `pred`. The scan is
 /// shallow (no recursion), so it is cheap and bounded.
 fn files_matching(pkg_dir: &Path, pred: impl Fn(&str) -> bool) -> Vec<PathBuf> {
+    performance::increment_counter(counters::FS_READ_DIRS, 1);
     let Ok(entries) = std::fs::read_dir(pkg_dir) else {
         return Vec::new();
     };
@@ -841,6 +845,7 @@ fn is_coordinate_token(token: &str) -> bool {
 
 /// Returns `true` when the package dir contains a `.gemspec` file.
 fn has_gemspec(pkg_dir: &Path) -> bool {
+    performance::increment_counter(counters::FS_READ_DIRS, 1);
     if let Ok(entries) = std::fs::read_dir(pkg_dir) {
         for entry in entries.flatten() {
             if entry
@@ -857,6 +862,7 @@ fn has_gemspec(pkg_dir: &Path) -> bool {
 
 /// Returns `true` when the package dir contains a `.csproj` file.
 fn has_csproj(pkg_dir: &Path) -> bool {
+    performance::increment_counter(counters::FS_READ_DIRS, 1);
     if let Ok(entries) = std::fs::read_dir(pkg_dir) {
         for entry in entries.flatten() {
             if entry
@@ -875,10 +881,11 @@ fn has_csproj(pkg_dir: &Path) -> bool {
 /// (`tests/`, `test/`, `spec/`, or `*_test.*` / `*_spec.*` naming).
 fn has_convention_tests(pkg_dir: &Path) -> bool {
     for dir in ["tests", "test", "spec"] {
-        if pkg_dir.join(dir).is_dir() {
+        if probe_is_dir(&pkg_dir.join(dir)) {
             return true;
         }
     }
+    performance::increment_counter(counters::FS_READ_DIRS, 1);
     if let Ok(entries) = std::fs::read_dir(pkg_dir) {
         for entry in entries.flatten() {
             if let Some(name) = entry.file_name().to_str()

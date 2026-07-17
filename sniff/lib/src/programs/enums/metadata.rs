@@ -3295,6 +3295,7 @@ static BURNTTOAST_AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::ne
 /// Probe whether the BurntToast PowerShell module is installed.
 fn is_burnttoast_available() -> bool {
     *BURNTTOAST_AVAILABLE.get_or_init(|| {
+        crate::performance::increment_counter(crate::performance::counters::PROC_SPAWNS, 1);
         let output = std::process::Command::new("pwsh")
             .args([
                 "-NoProfile",

@@ -1240,9 +1240,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             }) => {
                 // `git-status` renders only the git section (Status, Worktrees,
                 // Meta). Repo language scanning, docs, formatting, and the file
-                // inventory are never displayed, yet `RepoRequest::full()` alone
-                // costs 10-50x a structure scan — the dominant fixed cost that
-                // kept the command above the 500ms target. Drop all of it.
+                // inventory are never displayed, so none of it is requested —
+                // this was the dominant fixed cost keeping the command above
+                // the 500ms target.
                 //
                 // Repo *structure* is still required to resolve a
                 // `--package`/`--package-area` scope to a path; in that case
@@ -1344,10 +1344,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .as_deref()
             .unwrap_or_else(|| std::path::Path::new("."));
         {
-            let scoped_commits =
-                sniff::filesystem::commits_for_path_at(dir, path_prefix, history_count)?;
+            let scoped_history = sniff::filesystem::commits_for_path_at(
+                dir,
+                path_prefix,
+                sniff::filesystem::PathHistoryOptions::new(history_count),
+            )?;
             if let Some(ref mut git) = filesystem.git {
-                git.recent = scoped_commits;
+                git.recent = scoped_history.commits;
 
                 // Filter file_changes to the package path
                 git.file_changes
@@ -1652,16 +1655,21 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Bare `sniff repo --json` assembles the scope-complete aggregate of its
-    // participating children. It must run after the full detection pass so
-    // the aggregate can draw from the shared `SniffResult`.
+    // participating children. It must run after the full detection pass so the
+    // library observation can reuse the shared `SniffResult`'s `GitInfo` and
+    // `RepoInfo` rather than re-observing them, and so the builder stays a pure
+    // projection (umbrella spec R2).
     if matches!(repo_action, Some(crate::args::RepoAction::Default)) && cli.json {
         let dir = base_dir
             .as_deref()
             .unwrap_or_else(|| std::path::Path::new("."));
-        let identity = sniff::filesystem::repo::detect_repo_identity(dir)?;
         let aggregate =
-            output::repo_json::build_aggregate_value(&result, base_dir.as_deref(), &identity)?;
-        output::print_json_value(aggregate, result.performance.as_ref());
+            sniff::filesystem::repo::observe_repo_aggregate(dir, result.filesystem.as_ref())?;
+        let options = output::repo_json::AggregateRenderOptions {
+            base_dir: base_dir.as_deref(),
+        };
+        let value = output::repo_json::build_aggregate_value(&result, &aggregate, &options);
+        output::print_json_value(value, result.performance.as_ref());
         perf.emit_for_json(result.performance.as_ref());
         return Ok(());
     }

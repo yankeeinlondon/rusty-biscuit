@@ -32,6 +32,9 @@ use std::path::{Path, PathBuf};
 use ignore::WalkBuilder;
 use tracing::debug;
 
+use crate::performance;
+use crate::performance::counters;
+
 use super::cargo::detect_cargo_workspace;
 use super::dotnet::detect_dotnet_solution;
 use super::go::detect_go_workspace;
@@ -44,7 +47,7 @@ use super::npm::{
 use super::nx_turbo::{detect_lerna, detect_nx, detect_turborepo};
 use super::standard::{MonorepoStandard, NestingPolicy};
 use super::topology::DetectorOutcome;
-use super::types::Package;
+use super::seed::PackageSeed;
 use super::uv::detect_uv_workspace;
 use crate::Result;
 use crate::filesystem::file_types::should_skip_directory_name;
@@ -135,14 +138,22 @@ static NESTED_MARKERS: &[MarkerMapping] = &[
 /// The leaf-marker polyglot detectors (Bazel, Pants, Buck2) are intentionally
 /// absent from [`NESTED_MARKERS`]: they already perform their own tree walk
 /// and segment nested workspace roots internally.
+///
+/// `evidence` carries marker paths the request-scoped observation index already
+/// collected. When it supplies them, no walk happens here: the shared walk used
+/// the same ignore, prune, and marker-name rules, so re-enumerating the tree
+/// would only re-derive evidence that is already in hand.
 pub(crate) fn discover_nested_workspace_outcomes(
     root: &Path,
-    manifest_index: Option<&super::manifest_index::ManifestIndex>,
+    evidence: super::detection::RepoEvidence<'_>,
     forbids_nested_roots: &[(PathBuf, MonorepoStandard)],
-    packages: &mut Vec<Package>,
+    seeds: &mut Vec<PackageSeed>,
     outcomes: &mut Vec<DetectorOutcome>,
 ) -> Result<()> {
-    let candidates = walk_for_nested_markers(root);
+    let candidates = match evidence.nested_markers {
+        Some(markers) => candidates_from_marker_paths(root, markers),
+        None => walk_for_nested_markers(root),
+    };
     if candidates.is_empty() {
         return Ok(());
     }
@@ -173,14 +184,7 @@ pub(crate) fn discover_nested_workspace_outcomes(
                 continue;
             }
 
-            dispatch_detector_at(
-                standard,
-                &candidate.root,
-                root,
-                manifest_index,
-                packages,
-                outcomes,
-            )?;
+            dispatch_detector_at(standard, &candidate.root, root, evidence, seeds, outcomes)?;
         }
     }
 
@@ -228,6 +232,8 @@ struct Candidate {
 ///   `nested/package.json/`) is no longer treated as evidence. The loop now
 ///   inspects non-directory entries only, which is the true marker contract.
 fn walk_for_nested_markers(root: &Path) -> Vec<Candidate> {
+    performance::increment_counter(counters::FS_READ_DIRS, 1);
+    performance::increment_counter(counters::REPO_NESTED_MARKER_WALKS, 1);
     let walker = WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(true)
@@ -244,16 +250,66 @@ fn walk_for_nested_markers(root: &Path) -> Vec<Candidate> {
         })
         .build();
 
-    let mut by_root: HashMap<PathBuf, Vec<MonorepoStandard>> = HashMap::new();
-    for entry in walker.filter_map(|entry| entry.ok()) {
+    let paths: Vec<PathBuf> = walker
+        .filter_map(|entry| entry.ok())
         // Marker evidence is a file contract: skip directories so a directory
-        // whose name happens to match a marker no longer counts as evidence.
-        if entry.file_type().is_some_and(|ft| ft.is_dir()) {
-            continue;
+        // whose name happens to match a marker does not count as evidence.
+        .filter(|entry| !entry.file_type().is_some_and(|ft| ft.is_dir()))
+        .map(|entry| entry.path().to_path_buf())
+        .collect();
+
+    candidates_from_marker_paths(root, &paths)
+}
+
+/// Whether `path` names a nested-workspace marker file.
+///
+/// This is the predicate the shared observation walk applies when it records
+/// marker evidence, so an indexed walk and [`walk_for_nested_markers`] admit
+/// exactly the same files.
+pub(crate) fn is_nested_marker_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| !standards_for_marker_name(name).is_empty())
+}
+
+/// The standards a marker file name could indicate.
+///
+/// Empty when the name is not a marker.
+fn standards_for_marker_name(name: &str) -> Vec<MonorepoStandard> {
+    let mut matched: Vec<MonorepoStandard> = Vec::new();
+    for mapping in NESTED_MARKERS {
+        if marker_name_matches(name, mapping.file) {
+            for &standard in mapping.standards {
+                if !matched.contains(&standard) {
+                    matched.push(standard);
+                }
+            }
         }
-        let path = entry.path();
+    }
+
+    // Suffix match for .NET solution files. Intentionally case-sensitive even
+    // on Windows: this inspects names returned by the walker and preserves the
+    // historical byte-exact contract from the old `read_dir`-based loop.
+    if (name.ends_with(SOLUTION_SUFFIX) || name.ends_with(".slnx"))
+        && !matched.contains(&MonorepoStandard::DotNetSolution)
+    {
+        matched.push(MonorepoStandard::DotNetSolution);
+    }
+
+    matched
+}
+
+/// Group observed marker file paths into non-root candidate directories.
+///
+/// Shared by the fallback walk and by callers supplying marker evidence from
+/// the request-scoped observation index, so the two cannot drift apart on
+/// root exclusion, per-directory dedup, or ordering.
+fn candidates_from_marker_paths(root: &Path, paths: &[PathBuf]) -> Vec<Candidate> {
+    let mut by_root: HashMap<PathBuf, Vec<MonorepoStandard>> = HashMap::new();
+
+    for path in paths {
         // Nested discovery is non-root only: skip entries whose parent is the
-        // repo root itself. The walker also yields `root`, whose parent is
+        // repo root itself. A walker also yields `root`, whose parent is
         // `Some("")`/`None`/`Some(parent_of_root)` — none of those equal
         // `Some(root)`, so the root entry naturally fails this check too.
         let Some(parent) = path.parent() else {
@@ -263,42 +319,24 @@ fn walk_for_nested_markers(root: &Path) -> Vec<Candidate> {
             continue;
         }
 
-        let Some(name) = entry.file_name().to_str() else {
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             // Non-Unicode filenames cannot be marker names: all
             // `NESTED_MARKERS[*].file` literals are ASCII.
             continue;
         };
 
-        let mut matched_for_entry: Vec<MonorepoStandard> = Vec::new();
-        for mapping in NESTED_MARKERS {
-            if marker_name_matches(name, mapping.file) {
-                for &standard in mapping.standards {
-                    if !matched_for_entry.contains(&standard) {
-                        matched_for_entry.push(standard);
-                    }
-                }
-            }
+        let matched_for_entry = standards_for_marker_name(name);
+        if matched_for_entry.is_empty() {
+            continue;
         }
 
-        // Suffix match for .NET solution files. Intentionally case-sensitive
-        // even on Windows: this inspects names returned by the walker and
-        // preserves the historical byte-exact contract from the old
-        // `read_dir`-based loop.
-        if (name.ends_with(SOLUTION_SUFFIX) || name.ends_with(".slnx"))
-            && !matched_for_entry.contains(&MonorepoStandard::DotNetSolution)
-        {
-            matched_for_entry.push(MonorepoStandard::DotNetSolution);
-        }
-
-        if !matched_for_entry.is_empty() {
-            // Dedup per parent root so multiple markers in the same directory
-            // (e.g. several `*.sln` files, or `package.json` next to
-            // `pnpm-workspace.yaml`) dispatch each detector at most once.
-            let standards = by_root.entry(parent.to_path_buf()).or_default();
-            for standard in matched_for_entry {
-                if !standards.contains(&standard) {
-                    standards.push(standard);
-                }
+        // Dedup per parent root so multiple markers in the same directory
+        // (e.g. several `*.sln` files, or `package.json` next to
+        // `pnpm-workspace.yaml`) dispatch each detector at most once.
+        let standards = by_root.entry(parent.to_path_buf()).or_default();
+        for standard in matched_for_entry {
+            if !standards.contains(&standard) {
+                standards.push(standard);
             }
         }
     }
@@ -345,53 +383,55 @@ fn dispatch_detector_at(
     standard: MonorepoStandard,
     target: &Path,
     repo_root: &Path,
-    manifest_index: Option<&super::manifest_index::ManifestIndex>,
-    packages: &mut Vec<Package>,
+    evidence: super::detection::RepoEvidence<'_>,
+    seeds: &mut Vec<PackageSeed>,
     outcomes: &mut Vec<DetectorOutcome>,
 ) -> Result<()> {
     let outcome = match standard {
-        MonorepoStandard::CargoWorkspace => detect_cargo_workspace(target)?,
-        MonorepoStandard::NpmWorkspaces => detect_npm_workspace(target)?,
-        MonorepoStandard::PnpmWorkspaces => detect_pnpm_workspace(target)?,
-        MonorepoStandard::YarnWorkspaces => detect_yarn_workspace(target)?,
-        MonorepoStandard::BunWorkspaces => detect_bun_workspace(target)?,
-        MonorepoStandard::UvWorkspace => detect_uv_workspace(target)?,
+        MonorepoStandard::CargoWorkspace => detect_cargo_workspace(target, evidence)?,
+        MonorepoStandard::NpmWorkspaces => detect_npm_workspace(target, evidence)?,
+        MonorepoStandard::PnpmWorkspaces => detect_pnpm_workspace(target, evidence)?,
+        MonorepoStandard::YarnWorkspaces => detect_yarn_workspace(target, evidence)?,
+        MonorepoStandard::BunWorkspaces => detect_bun_workspace(target, evidence)?,
+        MonorepoStandard::UvWorkspace => detect_uv_workspace(target, evidence)?,
         MonorepoStandard::GoWorkspace => detect_go_workspace(target)?,
         MonorepoStandard::GradleMultiProject => detect_gradle_workspace(target)?,
         MonorepoStandard::MavenMultiModule => detect_maven_workspace(target)?,
         MonorepoStandard::DotNetSolution => detect_dotnet_solution(target)?,
         MonorepoStandard::RushStack => detect_rush_workspace(target)?,
-        MonorepoStandard::Nx => detect_nx(target, manifest_index)?,
-        MonorepoStandard::Turborepo => detect_turborepo(target, manifest_index)?,
-        MonorepoStandard::Lerna => detect_lerna(target, manifest_index)?,
+        MonorepoStandard::Nx => detect_nx(target, evidence)?,
+        MonorepoStandard::Turborepo => detect_turborepo(target, evidence)?,
+        MonorepoStandard::Lerna => detect_lerna(target, evidence)?,
         // Bazel/Pants/Buck2 self-walk; Unknown is not a real detector.
         MonorepoStandard::Bazel
         | MonorepoStandard::Pants
         | MonorepoStandard::Buck2
         | MonorepoStandard::Unknown => None,
     };
-    collect_outcome(outcome, repo_root, packages, outcomes);
+    collect_outcome(outcome, repo_root, seeds, outcomes);
     Ok(())
 }
 
 /// Fold a detector's [`DetectorOutcome`] into the shared collections.
 ///
-/// Outcome packages are rebased to `repo_root` so `MonorepoLayer.packages`
-/// carries repo-relative paths matching the canonical `RepoInfo.packages`
-/// catalog; the same rebased clones populate the flat `packages` list.
+/// Outcome seeds are rebased to `repo_root` so `MonorepoLayer.packages` carries
+/// repo-relative paths matching the canonical `RepoInfo.packages` catalog; the
+/// same rebased clones populate the flat seed list. Each seed's `owner_root`
+/// stays at the nested detector's root, which is the frame its manifests must be
+/// enriched in.
 fn collect_outcome(
     outcome: Option<DetectorOutcome>,
     repo_root: &Path,
-    packages: &mut Vec<Package>,
+    seeds: &mut Vec<PackageSeed>,
     outcomes: &mut Vec<DetectorOutcome>,
 ) {
     let Some(mut outcome) = outcome else {
         return;
     };
-    for pkg in &mut outcome.packages {
-        super::detection::rebase_package_to_root(pkg, repo_root);
+    for seed in &mut outcome.seeds {
+        seed.rebase_to_root(repo_root);
     }
-    packages.extend(outcome.packages.clone());
+    seeds.extend(outcome.seeds.clone());
     outcomes.push(outcome);
 }
 
@@ -421,6 +461,85 @@ mod tests {
             "a marker at the repo root must not register a nested candidate, got {} candidate(s)",
             candidates.len()
         );
+    }
+
+    /// Supplied marker evidence and the fallback walk must produce identical
+    /// candidates.
+    ///
+    /// The shared observation walk applies the same ignore, prune, and
+    /// marker-name rules, so consuming its evidence is meant to be a pure work
+    /// saving. This is the assertion that would fail if the two ever drift.
+    #[test]
+    fn supplied_evidence_and_the_fallback_walk_agree() {
+        let dir = TempDir::new().expect("create temp dir");
+        let root = dir.path();
+
+        // A root marker (must not become a candidate), two nested markers, and
+        // a solution file whose suffix match is separate from the fixed names.
+        std::fs::write(root.join("Cargo.toml"), "[workspace]\n").expect("write root marker");
+        for (sub, file) in [
+            ("web", "pnpm-workspace.yaml"),
+            ("api", "package.json"),
+            ("desktop", "App.sln"),
+        ] {
+            let nested = root.join(sub);
+            std::fs::create_dir_all(&nested).expect("create nested dir");
+            std::fs::write(nested.join(file), "{}\n").expect("write nested marker");
+        }
+
+        let walked = walk_for_nested_markers(root);
+
+        // The evidence a shared walk would hand over: every marker file it saw.
+        let observed: Vec<PathBuf> = walkdir::WalkDir::new(root)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_type().is_file())
+            .map(|entry| entry.path().to_path_buf())
+            .filter(|path| is_nested_marker_path(path))
+            .collect();
+        let supplied = candidates_from_marker_paths(root, &observed);
+
+        assert_eq!(
+            walked.iter().map(|c| &c.root).collect::<Vec<_>>(),
+            supplied.iter().map(|c| &c.root).collect::<Vec<_>>(),
+            "supplied evidence must yield the same candidate roots as the walk"
+        );
+        assert_eq!(
+            walked
+                .iter()
+                .map(|c| c.matched_standards.clone())
+                .collect::<Vec<_>>(),
+            supplied
+                .iter()
+                .map(|c| c.matched_standards.clone())
+                .collect::<Vec<_>>(),
+            "supplied evidence must dispatch the same standards as the walk"
+        );
+        assert_eq!(supplied.len(), 3, "root marker must not be a candidate");
+    }
+
+    /// The root-marker exception survives the supplied-evidence path.
+    #[test]
+    fn root_marker_from_supplied_evidence_registers_no_candidate() {
+        let dir = TempDir::new().expect("create temp dir");
+        let markers = vec![dir.path().join("pnpm-workspace.yaml")];
+
+        assert!(
+            candidates_from_marker_paths(dir.path(), &markers).is_empty(),
+            "a marker at the observation root must not register a nested candidate"
+        );
+    }
+
+    /// `is_nested_marker_path` is the predicate the shared walk records with, so
+    /// it must admit exactly the names the candidate grouping later matches.
+    #[test]
+    fn nested_marker_predicate_matches_fixed_names_and_solution_suffixes() {
+        assert!(is_nested_marker_path(Path::new("a/package.json")));
+        assert!(is_nested_marker_path(Path::new("a/pnpm-workspace.yaml")));
+        assert!(is_nested_marker_path(Path::new("a/App.sln")));
+        assert!(is_nested_marker_path(Path::new("a/App.slnx")));
+        assert!(!is_nested_marker_path(Path::new("a/README.md")));
+        assert!(!is_nested_marker_path(Path::new("a/Cargo.lock")));
     }
 
     /// `marker_name_matches` is byte-exact on Unix and ASCII case-insensitive

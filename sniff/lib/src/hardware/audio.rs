@@ -807,6 +807,7 @@ fn parse_cim_sound_devices(contents: &str) -> Vec<(String, String)> {
 /// external command probes.
 #[cfg(target_os = "windows")]
 fn run_powershell_with_timeout(command: &str, timeout: std::time::Duration) -> Option<String> {
+    use crate::performance::{self, counters};
     use std::process::{Command, Stdio};
     use std::time::Instant;
 
@@ -816,6 +817,7 @@ fn run_powershell_with_timeout(command: &str, timeout: std::time::Duration) -> O
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
+    performance::increment_counter(counters::PROC_SPAWNS, 1);
 
     let start = Instant::now();
     loop {
@@ -829,6 +831,7 @@ fn run_powershell_with_timeout(command: &str, timeout: std::time::Duration) -> O
             }
             Ok(None) => {
                 if start.elapsed() >= timeout {
+                    performance::increment_counter(counters::PROC_TIMEOUTS, 1);
                     let _ = child.kill();
                     let _ = child.wait();
                     return None;

@@ -541,6 +541,17 @@ impl GitRepo {
         }
     }
 
+    /// Runs `f` against this instance's gix handle with the object cache sized.
+    ///
+    /// The seam that lets sibling modules add `*_with_repo` query variants which
+    /// reuse an already-discovered handle instead of paying a second
+    /// `trusted_discover`. `f` must not re-enter a `GitRepo` method: the handle
+    /// is held through a [`RefCell`] borrow for the duration of the call.
+    pub(crate) fn with_cached_gix<T>(&self, f: impl FnOnce(&gix::Repository) -> T) -> T {
+        self.ensure_cache();
+        f(&self.gix.borrow())
+    }
+
     /// Returns cached ref decorations, computing them once on first access.
     ///
     /// Errors are suppressed: an unreadable ref store yields an empty map. For
@@ -777,7 +788,7 @@ impl GitRepo {
     pub fn try_branches(&self) -> Result<Vec<LocalBranchInfo>> {
         self.ensure_cache();
         let current = self.try_current_branch()?;
-        super::remote_refresh::get_local_branches_fallible(&self.gix.borrow(), current.as_deref())
+        super::remote_refresh::get_local_branches_fallible(&self.gix.borrow(), current.as_deref(), true)
     }
 
     /// Branch projection for `sniff repo branches`.
@@ -883,14 +894,24 @@ impl GitRepo {
             super::remote_refresh::refresh_remote_tracking_refs(&self.gix.borrow(), 2);
         }
 
-        let mut recent = if request.commit_count > 0 {
+        let mut recent = if request.wants_commits() {
             self.ensure_cache();
-            let decorations = self.try_ref_decorations()?;
-            super::discovery::get_recent_commits_fallible(
-                &self.gix.borrow(),
-                request.commit_count,
-                Some(&decorations),
-            )?
+            // Decorations are an opt-out: a caller that wants bare commit
+            // metadata should not pay for a ref-store walk and peel.
+            if request.wants_ref_decorations() {
+                let decorations = self.try_ref_decorations()?;
+                super::discovery::get_recent_commits_fallible(
+                    &self.gix.borrow(),
+                    request.commit_count,
+                    Some(&decorations),
+                )?
+            } else {
+                super::discovery::get_recent_commits_fallible(
+                    &self.gix.borrow(),
+                    request.commit_count,
+                    None,
+                )?
+            }
         } else {
             Vec::new()
         };
@@ -930,13 +951,13 @@ impl GitRepo {
         };
 
         // Remotes, config, branches, and tracking are repo metadata that a pure
-        // file-change query never renders. Gating them on `wants_repo_metadata`
-        // (rather than `is_minimal`) lets a `summary().include_file_changes`
-        // request skip the per-branch `graph_ahead_behind` walk that otherwise
-        // dominates latency on repos with many local branches.
-        let wants_metadata = request.wants_repo_metadata();
-
-        let remotes = if wants_metadata {
+        // file-change query never renders. Each is gated on its own `wants_*`
+        // accessor, which derives the legacy `wants_repo_metadata` answer unless
+        // the caller supplied explicit controls — so a `summary()
+        // .include_file_changes` request still skips the per-branch
+        // `graph_ahead_behind` walk that otherwise dominates latency on repos
+        // with many local branches.
+        let remotes = if request.wants_remotes() {
             super::remote_refresh::get_remotes(
                 &self.gix.borrow(),
                 request.include_remote_branch_details,
@@ -945,7 +966,7 @@ impl GitRepo {
             Vec::new()
         };
 
-        let worktrees = if request.include_worktrees {
+        let worktrees = if request.wants_worktrees() {
             self.ensure_cache();
             super::remote_refresh::get_worktrees(
                 &self.gix.borrow(),
@@ -956,23 +977,24 @@ impl GitRepo {
             HashMap::new()
         };
 
-        let config = if wants_metadata {
+        let config = if request.wants_config() {
             self.config()
         } else {
             GitConfig::default()
         };
 
-        let branches = if wants_metadata {
+        let branches = if request.wants_branches() {
             self.ensure_cache();
             super::remote_refresh::get_local_branches_fallible(
                 &self.gix.borrow(),
                 current_branch.as_deref(),
+                request.wants_branch_divergence(),
             )?
         } else {
             Vec::new()
         };
 
-        let tracking = if wants_metadata {
+        let tracking = if request.wants_tracking() {
             self.ensure_cache();
             super::remote_refresh::get_tracking_status_fallible(
                 &self.gix.borrow(),

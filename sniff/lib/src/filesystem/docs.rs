@@ -1,4 +1,6 @@
 use super::repo::detect_repo_structure;
+use crate::performance;
+use crate::performance::counters;
 use crate::{Result, SniffError};
 use biscuit_file::serde_yaml_ng;
 use biscuit_hash::xx_hash;
@@ -158,7 +160,10 @@ pub fn detect_docs(root: &Path) -> Option<Vec<MarkdownMeta>> {
 /// Resolve the monorepo package list using structure-only detection.
 ///
 /// Returns `(package_name, repo_relative_path)` pairs without performing
-/// per-package language scanning, making it 10-50x faster than `detect_repo`.
+/// package-manager, dependency, test-runner, feature, language, framework, or
+/// file-list enrichment.
+///
+/// [`RepoRequest::structure`]: crate::request::RepoRequest::structure
 pub fn detect_repo_packages(repo_root: &Path) -> Vec<(String, PathBuf)> {
     detect_repo_structure(repo_root)
         .ok()
@@ -285,9 +290,11 @@ pub fn detect_blast_radius_docs(root: &Path) -> Option<Vec<MarkdownMeta>> {
         .map(|entry| entry.path().to_path_buf())
         .collect();
 
+    let collector = performance::current_collector();
     let mut docs: Vec<MarkdownMeta> = paths
         .into_par_iter()
         .filter_map(|path| {
+            let _worker = performance::pooled_worker(collector.as_ref());
             parse_markdown_meta_with_mode(&path, &repo_root, &[], DocParseMode::BlastRadiusOnly)
         })
         .filter(|doc| doc.has_blast_radius)
@@ -330,9 +337,13 @@ fn collect_markdown_files(repo_root: &Path, packages: &[(String, PathBuf)]) -> V
         .map(|entry| entry.path().to_path_buf())
         .collect();
 
+    let collector = performance::current_collector();
     let mut docs: Vec<MarkdownMeta> = paths
         .into_par_iter()
-        .filter_map(|path| parse_markdown_meta(&path, repo_root, packages))
+        .filter_map(|path| {
+            let _worker = performance::pooled_worker(collector.as_ref());
+            parse_markdown_meta(&path, repo_root, packages)
+        })
         .collect();
 
     docs.sort_by(|a, b| a.relative.cmp(&b.relative));
@@ -374,9 +385,13 @@ where
         .map(|entry| entry.path().to_path_buf())
         .collect();
 
+    let collector = performance::current_collector();
     let mut docs: Vec<MarkdownMeta> = paths
         .into_par_iter()
-        .filter_map(|path| parse_markdown_meta_with_mode(&path, repo_root, packages, mode))
+        .filter_map(|path| {
+            let _worker = performance::pooled_worker(collector.as_ref());
+            parse_markdown_meta_with_mode(&path, repo_root, packages, mode)
+        })
         .collect();
 
     docs.sort_by(|a, b| a.relative.cmp(&b.relative));
@@ -556,9 +571,13 @@ where
         all_paths.extend(paths);
     }
 
+    let collector = performance::current_collector();
     let mut docs: Vec<MarkdownMeta> = all_paths
         .into_par_iter()
-        .filter_map(|path| parse_markdown_meta_with_mode(&path, repo_root, packages, mode))
+        .filter_map(|path| {
+            let _worker = performance::pooled_worker(collector.as_ref());
+            parse_markdown_meta_with_mode(&path, repo_root, packages, mode)
+        })
         .collect();
 
     docs.sort_by(|a, b| a.relative.cmp(&b.relative));
@@ -576,9 +595,13 @@ pub fn parse_markdown_files(
     packages: &[(String, PathBuf)],
     mode: DocParseMode,
 ) -> Vec<MarkdownMeta> {
+    let collector = performance::current_collector();
     let mut docs: Vec<MarkdownMeta> = paths
         .into_par_iter()
-        .filter_map(|path| parse_markdown_meta_with_mode(path, repo_root, packages, mode))
+        .filter_map(|path| {
+            let _worker = performance::pooled_worker(collector.as_ref());
+            parse_markdown_meta_with_mode(path, repo_root, packages, mode)
+        })
         .collect();
     docs.sort_by(|a, b| a.relative.cmp(&b.relative));
     docs
@@ -630,12 +653,15 @@ fn parse_markdown_meta_full(
     package: Option<String>,
     relative: String,
 ) -> Option<MarkdownMeta> {
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
     let content = fs::read_to_string(path)
         .map_err(|e| {
             debug!(path = %path.display(), error = %e, "could not read doc file");
             e
         })
         .ok()?;
+    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+    performance::increment_counter(counters::FS_DOCS_PARSED, 1);
     let (frontmatter, body) = extract_frontmatter(&content);
 
     let (title, title_source) = extract_title(&frontmatter, body);
@@ -738,6 +764,8 @@ fn parse_markdown_meta_frontmatter_only(
 /// map when the file has no frontmatter, and `None` when the file cannot be
 /// opened or its frontmatter is malformed.
 fn read_frontmatter_only(path: &Path) -> Option<HashMap<String, serde_yaml_ng::Value>> {
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
+    performance::increment_counter(counters::FS_DOCS_PARSED, 1);
     let file = fs::File::open(path)
         .map_err(|e| {
             debug!(path = %path.display(), error = %e, "could not read doc file");
@@ -995,6 +1023,7 @@ fn parse_datetime_value(value: &serde_yaml_ng::Value) -> Option<DateTime<Utc>> {
 
 /// Get file modification time as DateTime<Utc>.
 fn file_mtime(path: &Path) -> DateTime<Utc> {
+    performance::increment_counter(counters::FS_METADATA_PROBES, 1);
     fs::metadata(path)
         .ok()
         .and_then(|m| m.modified().ok())

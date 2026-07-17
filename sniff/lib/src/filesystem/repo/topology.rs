@@ -12,17 +12,27 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::toml_crate;
 
+use crate::performance;
+use crate::performance::counters;
+
+use super::detection::probe_exists;
 use super::standard::{
     DetectedStandard, DetectionConfidence, MonorepoLayer, MonorepoStandard, RootMembership,
 };
-use super::types::Package;
+use super::seed::PackageSeed;
 
 /// One detector's contribution to the topology: the standard it matched, the
-/// root its marker lives at, and the packages its membership model resolved.
+/// root its marker lives at, and the boundaries its membership model resolved.
+///
+/// ## Notes
+///
+/// Carries [`PackageSeed`]s rather than enriched `Package`s so the topology is
+/// built — and duplicate boundaries collapsed — before any manifest is parsed
+/// for them. `relative` is the only field this module ever needed.
 pub(crate) struct DetectorOutcome {
     pub(crate) standard: MonorepoStandard,
     pub(crate) root: PathBuf,
-    pub(crate) packages: Vec<Package>,
+    pub(crate) seeds: Vec<PackageSeed>,
 }
 
 /// Build the membership layers from detector outcomes.
@@ -57,9 +67,9 @@ pub(crate) fn build_monorepo_layers(outcomes: &[DetectorOutcome]) -> Vec<Monorep
             let provenance = outcome.standard.membership_provenance();
             let root_is_package = root_declares_package(outcome.standard, root);
             let packages = outcome
-                .packages
+                .seeds
                 .iter()
-                .map(|pkg| pkg.relative.clone())
+                .map(|seed| seed.relative.clone())
                 .collect();
             layers.push(MonorepoLayer {
                 root: root.to_path_buf(),
@@ -94,9 +104,12 @@ fn root_declares_package(standard: MonorepoStandard, root: &Path) -> bool {
             if standard != MonorepoStandard::CargoWorkspace {
                 return false;
             }
+            performance::increment_counter(counters::FS_FILE_OPENS, 1);
             let Ok(content) = std::fs::read_to_string(root.join("Cargo.toml")) else {
                 return false;
             };
+            performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+            performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
             let Ok(parsed) = toml_crate::from_str::<toml_crate::Value>(&content) else {
                 return false;
             };
@@ -187,7 +200,7 @@ fn matched_markers(standard: MonorepoStandard, root: &Path) -> Vec<PathBuf> {
         .markers
         .iter()
         .map(|marker| root.join(marker.file))
-        .filter(|path| path.exists())
+        .filter(|path| probe_exists(path))
         .collect()
 }
 
@@ -196,31 +209,32 @@ mod tests {
     use super::*;
     use crate::filesystem::repo::standard::{DetectionConfidence, PackageProvenance};
 
-    fn pkg(name: &str) -> Package {
-        Package {
-            name: name.to_string(),
-            relative: format!("packages/{name}"),
-            ..Package::default()
-        }
+    fn pkg(name: &str) -> PackageSeed {
+        PackageSeed::new(
+            &PathBuf::from("/repo/packages").join(name),
+            Path::new("/repo"),
+            MonorepoStandard::Unknown,
+            PackageProvenance::ManifestScan,
+        )
     }
 
-    fn outcome(standard: MonorepoStandard, packages: Vec<Package>) -> DetectorOutcome {
+    fn outcome(standard: MonorepoStandard, seeds: Vec<PackageSeed>) -> DetectorOutcome {
         DetectorOutcome {
             standard,
             root: PathBuf::from("/repo"),
-            packages,
+            seeds,
         }
     }
 
     fn outcome_at(
         standard: MonorepoStandard,
         root: &str,
-        packages: Vec<Package>,
+        seeds: Vec<PackageSeed>,
     ) -> DetectorOutcome {
         DetectorOutcome {
             standard,
             root: PathBuf::from(root),
-            packages,
+            seeds,
         }
     }
 
@@ -354,9 +368,9 @@ mod tests {
 
         let catalog: std::collections::HashMap<String, usize> = outcomes
             .iter()
-            .flat_map(|o| o.packages.iter())
-            .fold(std::collections::HashMap::new(), |mut acc, pkg| {
-                *acc.entry(pkg.relative.clone()).or_insert(0) += 1;
+            .flat_map(|o| o.seeds.iter())
+            .fold(std::collections::HashMap::new(), |mut acc, seed| {
+                *acc.entry(seed.relative.clone()).or_insert(0) += 1;
                 acc
             });
 
