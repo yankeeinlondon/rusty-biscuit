@@ -416,5 +416,8 @@ fn default_windows_endpoint(user: &StableUserId) -> Result<LocalEndpoint, LocalE
     ))))
 }
 
+#[cfg(feature = "test-support")]
+pub mod test_support;
+
 #[cfg(test)]
 mod tests;

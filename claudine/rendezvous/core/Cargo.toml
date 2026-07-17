@@ -9,6 +9,11 @@ description = "Shared protobuf schema, gRPC stubs, and IPC helpers for the rende
 name = "rendezvous_core"
 path = "src/lib.rs"
 
+[features]
+# Endpoint constructors for daemon-spawning fixtures. Kept off the default
+# path so nothing in a shipped binary can reach them.
+test-support = []
+
 [dependencies]
 prost = "0.14"
 tonic = { version = "0.14", default-features = false, features = ["transport", "codegen", "server", "channel", "router"] }

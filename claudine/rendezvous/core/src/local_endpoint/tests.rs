@@ -17,16 +17,19 @@ fn env_guard() -> std::sync::MutexGuard<'static, ()> {
 }
 
 /// Every variable that can steer endpoint resolution, captured and cleared on
-/// construction and restored on drop. `USER`/`LOGNAME`/`USERNAME` are in the
-/// list not because resolution reads them — it must not — but so a test can
-/// poison them and prove that.
-const TRACKED_ENV: [&str; 6] = [
+/// construction and restored on drop. `USER`/`LOGNAME`/`USERNAME` and the
+/// `WSL_*` markers are in the list not because resolution reads them — it must
+/// not — but so a test can poison them and prove that.
+const TRACKED_ENV: [&str; 9] = [
     ENDPOINT_ENV_VAR,
     "XDG_RUNTIME_DIR",
     "TMPDIR",
     "USER",
     "LOGNAME",
     "USERNAME",
+    "WSL_DISTRO_NAME",
+    "WSL_INTEROP",
+    "WSLENV",
 ];
 
 struct EnvSnapshot {
@@ -373,6 +376,75 @@ fn unix_default_uses_a_private_xdg_runtime_dir_when_one_is_usable() {
                 .join("rendezvous")
                 .join("daemon.sock")
         )
+    );
+}
+
+/// WSL is a Linux user, not a view of a Windows one.
+///
+/// It compiles as Linux and has no branch of its own, which is exactly why this
+/// has to be asserted rather than assumed: WSL's interop propagates the Windows
+/// side's `USERNAME` into the Linux environment, so a resolver that ever reached
+/// for a username would silently key the endpoint to the *Windows* account and
+/// two WSL distros would collide on one name. The markers below are what a real
+/// WSL session sets; the endpoint must be a UID-qualified socket regardless.
+#[cfg(unix)]
+#[test]
+fn wsl_markers_do_not_move_resolution_off_the_uid_and_uds_path() {
+    let env = EnvSnapshot::new();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    env.set("TMPDIR", tmp.path());
+    // What a real WSL2 session exports.
+    env.set("WSL_DISTRO_NAME", "Ubuntu-24.04");
+    env.set("WSL_INTEROP", "/run/WSL/8_interop");
+    env.set("WSLENV", "PATH/l:USERPROFILE/pu");
+    // The Windows-side account name, which WSL interop really does propagate.
+    env.set("USERNAME", "windows-side-account");
+    env.set("USER", "linux-side-account");
+
+    let endpoint = default_local_endpoint().expect("default resolves under WSL markers");
+
+    let uid = unsafe { libc::geteuid() };
+    assert_eq!(
+        endpoint,
+        LocalEndpoint::UnixSocket(
+            tmp.path()
+                .join(format!("claudine-rendezvous-uid-{uid}"))
+                .join("daemon.sock")
+        ),
+        "WSL must stay on the Unix branch and stay qualified by the effective UID"
+    );
+
+    // Spelled out separately from the equality above: these are the two ways
+    // this could regress, and the equality alone would not say which.
+    assert!(
+        endpoint.as_windows_pipe_name().is_none(),
+        "WSL must never resolve to a named pipe"
+    );
+    let rendered = endpoint.to_string();
+    for leaked in ["windows-side-account", "linux-side-account", "Ubuntu-24.04"] {
+        assert!(
+            !rendered.contains(leaked),
+            "{leaked} reached the endpoint name: {rendered}"
+        );
+    }
+}
+
+/// The identity half of the same rule, at the source: Sniff must report a UID
+/// under WSL markers and never correlate the Windows account.
+#[cfg(unix)]
+#[test]
+fn wsl_markers_do_not_move_identity_off_the_unix_branch() {
+    let env = EnvSnapshot::new();
+    env.set("WSL_DISTRO_NAME", "Ubuntu-24.04");
+    env.set("WSL_INTEROP", "/run/WSL/8_interop");
+    env.set("USERNAME", "windows-side-account");
+
+    let id = sniff::os::current_user_id().expect("identity resolves under WSL markers");
+
+    assert_eq!(
+        id,
+        sniff::os::StableUserId::UnixUid(unsafe { libc::geteuid() }),
+        "a WSL host is a Unix host; it must report its effective UID"
     );
 }
 
