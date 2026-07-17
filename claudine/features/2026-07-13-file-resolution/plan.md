@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 3
+phase: 4
 total_phases: 8
 agent: claude/default
 yolo: true
@@ -40,6 +40,22 @@ docs_updated_during_phase_3:
     - claudine/features/2026-07-13-file-resolution/plan.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - biscuit-file/lib/src/file_reference/parse.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/tests/implicit_relative.rs
+    - biscuit-file/lib/tests/detailed_resolution.rs
+    - biscuit-file/lib/tests/resolution_context.rs
+    - biscuit-file/lib/tests/precedence_flip.rs
+    - biscuit-file/cli/tests/cli_tests.rs
+    - prompts/faster-builds-and-tests.md
+docs_updated_during_phase_4:
+    - biscuit-file/docs/topics/file-references.md
+    - claudine/features/2026-07-13-file-resolution/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/biscuit-file/references/file-references.md
 packages:
     - biscuit-file
 ---
@@ -213,17 +229,17 @@ assert the full ordered candidate plan. Downstream still untouched.
 **The breaking change.** Gated on Phase 1's collision inventory. Satisfies D4,
 D12, OQ1.
 
-- [ ] Flip `collect_roots` for `ImplicitRelative` (`resolve.rs:190-198`) to **repository root first, then base**; keep the `git_root != base` dedupe. When no git root is discoverable, base is the only candidate
-- [ ] Mirror the flip in `implicit_relative_completion_roots` (`resolve.rs:466-482`) — it independently duplicates the order today and would otherwise teach the opposite of what executes (D9)
-- [ ] Implement OQ1 **option 2** (reclassify after interpolation): expand once from the captured env snapshot, then classify **filesystem anchoring only** (absolute / explicit-relative / implicit-relative) for the payload
-- [ ] Interpolation must **not** inject `@`, `!`, `%`, `vault:`, or a remote URL scheme — those sigils stay author-controlled. Reject rather than honor an injected sigil
-- [ ] Diagnostics record **both** authored kind and effective anchoring. This closes the silent bug where `{{DIR}}/foo.md` classifies implicit (`parse.rs:87`, test `parse.rs:212-214`) yet `PathBuf::join` at `resolve.rs:259` discards the root when `DIR` expands absolute — the inverse guard already exists at `resolve.rs:243-250`
-- [ ] Apply the audited transition policy from Phase 1: any call site genuinely needing CWD-first selects a **shared explicit** policy living in `biscuit-file`, explicit at the call site, documented, and unused by every Claudine/Darkmatter surface in scope. No permanent dual-behavior layer; no Claudine-only candidate loop
-- [ ] Rewrite fixtures/prompts flagged as source-local intent to `./`. Leave unambiguous bare references alone
-- [ ] Invert `prefers_cwd_over_git_root_on_name_collision` (`lib/tests/implicit_relative.rs:49`) and close the coverage gap the existing test names — `collect_roots` for `ImplicitRelative` is currently only unit-tested in the no-git-root branch (`resolve.rs:591-612`)
-- [ ] L1 tests: repo-before-base for implicit; explicit yields exactly **one** base-relative candidate with no fallback; both-exist → repo wins; only-source-exists → falls back; no-git-root → base only; duplicate roots dedupe stably; special kinds unchanged; interpolation authored/effective-kind diagnostics
-- [ ] **[parallel]** Update `biscuit-file/docs/topics/file-references.md` — the sigil table (`:26`), the implicit prose (`:50-54`), the example (`:56-59`), and the `Ok(None)` note (`:61-62`) all currently document CWD-first and become wrong the moment this phase lands. Clarify `resolve_from`'s base-vs-CWD wording (`:329`)
-- [ ] **[parallel]** Update the `biscuit-file` skill reference to the ratified terminology and precedence; refresh its `hash:` via `md hash <file>`
+- [x] Flip `collect_roots` for `ImplicitRelative` (`resolve.rs:190-198`) to **repository root first, then base**; keep the `git_root != base` dedupe. When no git root is discoverable, base is the only candidate — **DONE** (single authority `implicit_relative_roots`; both `collect_roots` and the direct anchoring path route through it)
+- [x] Mirror the flip in `implicit_relative_completion_roots` (`resolve.rs:466-482`) — it independently duplicates the order today and would otherwise teach the opposite of what executes (D9) — **DONE** (git root first, then base; deduped)
+- [x] Implement OQ1 **option 2** (reclassify after interpolation): expand once from the captured env snapshot, then classify **filesystem anchoring only** (absolute / explicit-relative / implicit-relative) for the payload — **DONE** (`compute_effective_anchoring` for the non-recursive local family)
+- [x] Interpolation must **not** inject `@`, `!`, `%`, `vault:`, or a remote URL scheme — those sigils stay author-controlled. Reject rather than honor an injected sigil — **DONE** (`injected_sigil` → typed `InvalidSyntax`)
+- [x] Diagnostics record **both** authored kind and effective anchoring. This closes the silent bug where `{{DIR}}/foo.md` classifies implicit (`parse.rs:87`, test `parse.rs:212-214`) yet `PathBuf::join` at `resolve.rs:259` discards the root when `DIR` expands absolute — the inverse guard already exists at `resolve.rs:243-250` — **DONE** (`DetailedResolution::effective_kind()` distinct from `class().kind`; the absolute-from-interpolation case now builds a single Absolute-provenance candidate rather than joining onto a discarded root)
+- [x] Apply the audited transition policy from Phase 1: any call site genuinely needing CWD-first selects a **shared explicit** policy living in `biscuit-file`, explicit at the call site, documented, and unused by every Claudine/Darkmatter surface in scope. No permanent dual-behavior layer; no Claudine-only candidate loop — **DONE (no shim needed).** The Phase 1 audit (`inventory.md §1`) found **zero** in-scope call sites genuinely needing CWD-first: 5 migrate by inheriting the flipped `resolve()`/`resolve_from` default, 8 adopt repository-first via the detailed context (Phase 5), 7 unaffected. Per Rule 2, no speculative unused transition-policy type was introduced; repository-first is the shared default (D4)
+- [x] Rewrite fixtures/prompts flagged as source-local intent to `./`. Leave unambiguous bare references alone — **DONE** (`prompts/faster-builds-and-tests.md:8` → `::file ./_senior-reviewer.md`, the only shipped source-local bare reference per `inventory.md §2.4`; the test-fixture canaries are Phase 5/7-scoped)
+- [x] Invert `prefers_cwd_over_git_root_on_name_collision` (`lib/tests/implicit_relative.rs:49`) and close the coverage gap the existing test names — `collect_roots` for `ImplicitRelative` is currently only unit-tested in the no-git-root branch (`resolve.rs:591-612`) — **DONE** (renamed to `prefers_git_root_over_cwd_on_name_collision`; supplied-root ordering now covered by `caller_supplied_repository_root_is_tried_before_base` and the `precedence_flip.rs` both-exist/only-source cases)
+- [x] L1 tests: repo-before-base for implicit; explicit yields exactly **one** base-relative candidate with no fallback; both-exist → repo wins; only-source-exists → falls back; no-git-root → base only; duplicate roots dedupe stably; special kinds unchanged; interpolation authored/effective-kind diagnostics — **DONE** (`biscuit-file/lib/tests/precedence_flip.rs`, 10 tests; plus updated `detailed_resolution.rs`, `resolution_context.rs`, `implicit_relative.rs`)
+- [x] **[parallel]** Update `biscuit-file/docs/topics/file-references.md` — the sigil table (`:26`), the implicit prose (`:50-54`), the example (`:56-59`), and the `Ok(None)` note (`:61-62`) all currently document CWD-first and become wrong the moment this phase lands. Clarify `resolve_from`'s base-vs-CWD wording (`:329`) — **DONE** (sigil table, implicit prose, candidate-building table, `resolve_from` wording, and a new interpolation-anchoring section)
+- [x] **[parallel]** Update the `biscuit-file` skill reference to the ratified terminology and precedence; refresh its `hash:` via `md hash <file>` — **DONE** (`.claude/skills/biscuit-file/references/file-references.md`; the file carries no `hash:` frontmatter, so there was nothing to refresh)
 
 **Checkpoint 4:** `just test` + `just lint` green in `biscuit-file`. Docs, skill,
 implementation, and tests agree on repository-first (acceptance 7). Downstream
