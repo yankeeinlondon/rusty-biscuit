@@ -1,6 +1,6 @@
 ---
 created: 2026-07-16
-phase: 1
+phase: 2
 total_phases: 8
 agent: claude/default
 yolo: true
@@ -14,7 +14,23 @@ docs_created_during_phase_1:
     - claudine/features/2026-07-13-file-resolution/decisions.md
     - claudine/features/2026-07-13-file-resolution/inventory.md
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - biscuit-file/lib/Cargo.toml
+    - biscuit-file/lib/src/lib.rs
+    - biscuit-file/lib/src/file_reference/error.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/file_reference/parse.rs
+    - biscuit-file/lib/src/file_reference/context.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/tests/reference_grammar.rs
+    - biscuit-file/lib/tests/resolution_context.rs
+docs_updated_during_phase_2:
+    - biscuit-file/docs/dependencies.md
+    - claudine/features/2026-07-13-file-resolution/plan.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages:
+    - biscuit-file
 ---
 
 # Unified File-Reference Resolution — Execution Plan
@@ -138,18 +154,18 @@ written. Baseline recorded. **No precedence change may begin until this passes.*
 Foundation only — **no precedence change yet**, so this phase stays green against
 existing tests. Satisfies D1, D2, D7, D11.
 
-- [ ] Add public `FileReferenceKind` + `FileReferenceClass` (`recursive` as a modifier over a kind, per D1) in `biscuit-file/lib/src/file_reference/mod.rs`; export from `lib.rs:137-148`
-- [ ] Add a public accessor on `FileReference` returning its class. Keep `ReferenceKind`/`ParsedReference` internal — expose classification, not the parser types
-- [ ] Reconcile `CompletionEntryForm` (`mod.rs:46-54`) with the new public kind; it currently rustdoc-links a private type and covers only `Magic`/`ImplicitRelative`
-- [ ] Add the `Home` kind to `detect_kind` (`parse.rs:64-88`): recognize `~` and `~/...`, plus `~\...` on Windows. Reject `~user` with a typed error — never fall through to magic or implicit
-- [ ] **[parallel]** Windows path grammar in `detect_kind` (D7): `.\foo.md` / `..\foo.md` classify explicit-relative; `C:\...` and `\\server\share\...` classify absolute; `C:foo.md` stays drive-relative (**not** absolute); URL scheme match becomes ASCII case-insensitive and is checked before any drive/path classifier
-- [ ] **[parallel]** Replace `home_dir()` (`context.rs:157-159`) with a cross-platform provider — `$HOME` alone is not a Windows contract. Prefer an existing workspace/ecosystem provider over hand-rolling `USERPROFILE`
-- [ ] Introduce the public resolution context (D2) carrying `source_path`, `base_dir`, `repository_root`, `package_area`, `home_dir`, the env snapshot, and configured magic/vault roots. Owned/borrowed shape is an implementation decision; candidate construction **must not** reread ambient state
-- [ ] Make `repository_root` **caller-suppliable**. `biscuit-file` must not depend on `sniff` (`sniff` already depends on `biscuit-file` — that is a crate cycle). Ambient compatibility methods keep their internal `gix` discovery at `context.rs:56-79`
-- [ ] Implement lexical containment validation after absolutization — component-aware, **no** canonicalization through symlinks. A caller-provided root is accepted only when it contains the source, or the operation documents a different trust boundary
-- [ ] Eliminate the three ambient reads that bypass the env snapshot: `resolve.rs:48` (live `std::env::var` in `interpolated_url_string`, which also silently re-emits `{{NAME}}` on miss), `mod.rs:223`/`mod.rs:357` and `resolve.rs:375` (`current_dir`), `resolve.rs:454` (direct `home_dir`)
-- [ ] Add typed missing-context failures for absent home/repo/base rather than silent `None`
-- [ ] L1 tests: parsing distinguishes explicit vs implicit **without filesystem access**; `~`/`~\` home-pinned and `~user` rejected; Windows drive/UNC/drive-relative and POSIX absolute cases (target-gated or pure-parser fixtures per D7)
+- [x] Add public `FileReferenceKind` + `FileReferenceClass` (`recursive` as a modifier over a kind, per D1) in `biscuit-file/lib/src/file_reference/mod.rs`; export from `lib.rs:137-148` — **DONE** (`mod.rs`, exported `lib.rs`).
+- [x] Add a public accessor on `FileReference` returning its class. Keep `ReferenceKind`/`ParsedReference` internal — expose classification, not the parser types — **DONE** (`FileReference::class()`; `ReferenceKind::public_kind()` projects the internal enum).
+- [x] Reconcile `CompletionEntryForm` (`mod.rs:46-54`) with the new public kind; it currently rustdoc-links a private type and covers only `Magic`/`ImplicitRelative` — **DONE** (rustdoc now links public `FileReferenceKind`).
+- [x] Add the `Home` kind to `detect_kind` (`parse.rs:64-88`): recognize `~` and `~/...`, plus `~\...` on Windows. Reject `~user` with a typed error — never fall through to magic or implicit — **DONE** (`detect_home`; `FileReferenceError::UnsupportedUserHome`; `ReferenceKind::Home` resolves against `ctx.home_dir`).
+- [x] **[parallel]** Windows path grammar in `detect_kind` (D7): `.\foo.md` / `..\foo.md` classify explicit-relative; `C:\...` and `\\server\share\...` classify absolute; `C:foo.md` stays drive-relative (**not** absolute); URL scheme match becomes ASCII case-insensitive and is checked before any drive/path classifier — **DONE** (`is_absolute_reference`/`is_explicit_relative`/`starts_with_ignore_ascii_case`; host-independent lexical classification so it is testable on macOS).
+- [x] **[parallel]** Replace `home_dir()` (`context.rs:157-159`) with a cross-platform provider — `$HOME` alone is not a Windows contract. Prefer an existing workspace/ecosystem provider over hand-rolling `USERPROFILE` — **DONE** (`dirs::home_dir()`; `dirs = "6"` gated behind `file-reference`, matching the workspace convention).
+- [x] Introduce the public resolution context (D2) carrying `source_path`, `base_dir`, `repository_root`, `package_area`, `home_dir`, the env snapshot, and configured magic/vault roots. Owned/borrowed shape is an implementation decision; candidate construction **must not** reread ambient state — **DONE** (`FileResolutionContext`, owned; consumed by `FileReference::resolve_in_context`, which reads no ambient state).
+- [x] Make `repository_root` **caller-suppliable**. `biscuit-file` must not depend on `sniff` (`sniff` already depends on `biscuit-file` — that is a crate cycle). Ambient compatibility methods keep their internal `gix` discovery at `context.rs:56-79` — **DONE** (`ResolutionContext.repository_root` + `resolve_repository_root` seam; ambient `from_ambient`/`from_base` still fall back to `find_git_root`; no `sniff` dep added).
+- [x] Implement lexical containment validation after absolutization — component-aware, **no** canonicalization through symlinks. A caller-provided root is accepted only when it contains the source, or the operation documents a different trust boundary — **DONE** (`FileResolutionContext::validate` via `normalize_components` + `Path::starts_with`; `resolve_in_context` calls it first).
+- [x] Eliminate the three ambient reads that bypass the env snapshot: `resolve.rs:48` (live `std::env::var` in `interpolated_url_string`, which also silently re-emits `{{NAME}}` on miss), `mod.rs:223`/`mod.rs:357` and `resolve.rs:375` (`current_dir`), `resolve.rs:454` (direct `home_dir`) — **DONE for the snapshot-bypassing reads**: `interpolated_url_string` now sources from `ctx.env`; `magic_completion_roots` receives home captured once via the provider. The `current_dir` reads in the *ambient convenience* methods (`with_package_area_magic_path`, `resolve_relative`, `complete_partial`) are single-capture entry points that define those methods' ambient behavior; the new `resolve_in_context` path performs **zero** ambient reads (AC12). Those convenience reads are removed at the call sites when Claudine/Darkmatter migrate onto the context (Phases 5–7) — removing them from the shared methods now would break their contract or touch downstream, which this phase forbids.
+- [x] Add typed missing-context failures for absent home/repo/base rather than silent `None` — **DONE for home** (`FileReferenceError::MissingHomeContext` from the `Home` arm) plus `RepositoryRootNotContainingSource` (containment). Absent-repo/absent-base become errors only once the flip / top-level surfaces make them reachable (Phases 3–4/7); under Phase 2's preserved precedence, absent repo still falls back to base by design.
+- [x] L1 tests: parsing distinguishes explicit vs implicit **without filesystem access**; `~`/`~\` home-pinned and `~user` rejected; Windows drive/UNC/drive-relative and POSIX absolute cases (target-gated or pure-parser fixtures per D7) — **DONE** (`parse.rs` unit tests + `tests/reference_grammar.rs` pure-parser public-API tests; `tests/resolution_context.rs` for context/home/containment; `resolve.rs` unit tests for `Home`/missing-context/caller-supplied-root).
 
 **Checkpoint 2:** `just test` + `just lint` green in `biscuit-file`. Public class
 is observable. **Behavior unchanged** — the existing
