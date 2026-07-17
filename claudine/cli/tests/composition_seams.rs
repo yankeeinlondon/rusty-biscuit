@@ -121,6 +121,46 @@ const SUBTREE_COMPOSE_BASELINE: &[AllowedSite] = &[
     },
 ];
 
+/// Every production `print!`/`println!`/`eprint!`/`eprintln!` on a transition
+/// path.
+///
+/// Phase 12 requires that terminal status and diagnostics on any transition
+/// path render through `TerminalRenderable` components (`StatusBlock`,
+/// `Prose`, lists, tables) rather than ad hoc printing. A raw `println!`
+/// bypasses the terminal's capability detection, color-mode resolution, and
+/// width contract, and — on a *transition* path specifically — is how an
+/// untyped message ends up standing in for a typed diagnostic.
+///
+/// Scope is the transition surface, not the whole CLI: the files that own
+/// document identity, hand-off, and lifecycle error routing. A repo-wide ban
+/// would false-positive on the many legitimate output paths that build their
+/// text through a component and print it at the boundary.
+const TRANSITION_PRINT_BASELINE: &[AllowedSite] = &[AllowedSite {
+    site: "harness_orch::loop_control::classify_attempt_phase",
+    calls: 1,
+    reason: "not ad hoc: the content is built by `output::format_user_interrupt_status()` \
+             and this is only the boundary write. It reports a Ctrl+C to the operator \
+             before the lifecycle guard closes, which is a status line rather than a \
+             transition diagnostic.",
+}];
+
+/// The transition-path files [`TRANSITION_PRINT_BASELINE`] governs, relative to
+/// the package area.
+const TRANSITION_PATH_FILES: &[&str] = &[
+    "cli/src/commands/wrap/harness_orch/loop_control.rs",
+    "cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs",
+    "cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs",
+    "cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs",
+    "cli/src/commands/wrap/harness_orch/loop_control/proxy.rs",
+    "cli/src/commands/wrap/harness_orch/prompt.rs",
+    "lib/src/composition/coordinator/commit.rs",
+    "lib/src/composition/coordinator/document.rs",
+    "lib/src/composition/coordinator/handoff.rs",
+    "lib/src/composition/coordinator/invocation.rs",
+    "lib/src/composition/coordinator/transition.rs",
+    "lib/src/composition/prepare/service.rs",
+];
+
 /// One allowlisted site: a stable identity, an expected occurrence count, and
 /// the justification a reviewer needs to judge a change to this list.
 struct AllowedSite {
@@ -176,6 +216,83 @@ fn no_new_optional_proxy_target_channel() {
     assert_baseline(&found, PROXY_TARGET_CHANNEL_BASELINE, "optional proxy-target channel", "R1 bans a second optional proxy-target channel: an `Option`-shaped target \
          can be silently dropped by a caller that forgets to consume it, which is \
          the motivating bug. Return the typed document transition instead.");
+}
+
+#[test]
+fn no_ad_hoc_printing_on_a_transition_path() {
+    let found = scan_files(TRANSITION_PATH_FILES, find_print_macros);
+    assert_baseline(
+        &found,
+        TRANSITION_PRINT_BASELINE,
+        "transition-path print macro",
+        "Terminal status and diagnostics on a transition path render through \
+         `TerminalRenderable` components — `StatusBlock` for a diagnostic, `Prose` for \
+         a message. A raw print bypasses capability detection, color-mode resolution, \
+         and the width contract, and is how an untyped string ends up standing in for a \
+         typed diagnostic. Build the component instead, or add the site to \
+         `TRANSITION_PRINT_BASELINE` with a reason saying why it cannot.",
+    );
+}
+
+/// Scan an explicit file list rather than the whole tree.
+///
+/// [`scan_all`]'s finders ban a construct everywhere; this one bans a construct
+/// on a named surface. `print!` is legitimate in most of the CLI and forbidden
+/// on a transition path, so the guard needs the narrower scope. A listed file
+/// that has been moved or deleted fails loudly — a guard pointed at a
+/// nonexistent path silently guards nothing.
+fn scan_files(files: &[&str], finder: impl Fn(&[u8]) -> Vec<Occurrence>) -> Vec<Found> {
+    let root = area_root();
+    let mut found = Vec::new();
+    for rel in files {
+        let path = root.join(rel);
+        let src = fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "transition-path file {rel} is unreadable: {e}. If it moved, update \
+                 `TRANSITION_PATH_FILES`; the guard cannot protect a path that is not there."
+            )
+        });
+        let sanitized = sanitize(&src);
+        let module = module_identity(rel);
+        for occurrence in finder(&sanitized) {
+            let item = enclosing_item(&sanitized, occurrence.offset)
+                .unwrap_or_else(|| "<file scope>".to_string());
+            let mut site = format!("{module}::{item}");
+            if let Some(name) = occurrence.name {
+                site.push_str("::");
+                site.push_str(&name);
+            }
+            found.push(Found {
+                site,
+                path: (*rel).to_string(),
+                line: line_of(&sanitized, occurrence.offset),
+            });
+        }
+    }
+    found.sort();
+    found
+}
+
+/// Find `print!`/`println!`/`eprint!`/`eprintln!` invocations.
+///
+/// Matches on the macro-bang form so a local function named `print` or a field
+/// named `println` cannot trip the guard. `sanitize` has already blanked
+/// comments, string literals, and `#[cfg(test)]` bodies, so prose and test
+/// helpers are out of scope by construction.
+fn find_print_macros(src: &[u8]) -> Vec<Occurrence> {
+    let mut out = Vec::new();
+    for needle in [b"println!".as_slice(), b"print!", b"eprintln!", b"eprint!"] {
+        for offset in find_all(src, needle) {
+            // `eprintln!` contains `println!`; skip the inner match so one call
+            // is not counted twice.
+            let preceded_by_ident = offset > 0 && is_ident_byte(src[offset - 1]);
+            if !preceded_by_ident {
+                out.push(Occurrence { offset, name: None });
+            }
+        }
+    }
+    out.sort_by_key(|occurrence| occurrence.offset);
+    out
 }
 
 /// Compare scanned sites against a seeded baseline, failing on a new site, a

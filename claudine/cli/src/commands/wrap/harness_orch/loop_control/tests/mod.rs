@@ -136,6 +136,34 @@ fn materialized(frontmatter: serde_json::Value) -> MaterializedHarnessPrompt {
     }
 }
 
+/// A real [`ProxyCommitError::Resolution`] for a target that does not exist.
+///
+/// Built by driving `commit_proxy` rather than by constructing the variant, so
+/// the carried `HarnessError` is the resolver's own and the `err.*` facets a
+/// stack observes are the ones production would see.
+fn unresolvable_commit_error(source_path: &Path) -> claudine::composition::ProxyCommitError {
+    let mut ledger = claudine::composition::RunLedger::new(
+        source_path.to_path_buf(),
+        claudine::composition::SharedApprovalCache::default(),
+    );
+    let request = claudine::composition::EvaluatedProxyRequest::new(
+        source_path
+            .parent()
+            .expect("the fixture source lives in a directory")
+            .join("no-such-target.md")
+            .display()
+            .to_string(),
+        indexmap::IndexMap::new(),
+        claudine::composition::ProxyProvenance::new(
+            source_path.to_path_buf(),
+            claudine::composition::ActionLocation::new(LifecycleSignal::Failure, 0, 0),
+            vec![source_path.to_path_buf()],
+        ),
+    );
+    claudine::composition::commit_proxy(&mut ledger, request, source_path.parent())
+        .expect_err("a target that does not exist cannot be committed")
+}
+
 /// Number of lines a stack's `append_line` side effect wrote — i.e. the
 /// number of times the stack actually executed its side effects.
 fn line_count(path: &Path) -> usize {

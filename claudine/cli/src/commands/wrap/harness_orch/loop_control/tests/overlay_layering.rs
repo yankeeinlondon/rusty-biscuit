@@ -720,6 +720,17 @@ fn a_file_valued_overlay_property_resolves_through_the_targets_own_context() {
 ///
 /// The target authors a *valid* `topic`, so the failure is attributable to the
 /// overlay rather than to the property having been missing all along.
+///
+/// **Rewritten by Phase 12, intentionally.** This asserted
+/// `ComposeFailed(SchemaValidationFailed)` — the *uncategorized* compose
+/// failure. That was the route drift Phase 8's own scope note recorded and
+/// handed to Phase 12: the harness route composed through
+/// `prepare_direct_with_prompt` while `compose` and `sequence` composed through
+/// `prepare_direct_with_schema`, so this document surfaced a different typed
+/// identity depending on how it was reached. `prepare_document` now routes
+/// through the schema layer, so the categorized `SchemaValidation` arrives here
+/// exactly as it always did on the direct route. The pre-launch timing this
+/// test's name pins is unchanged.
 #[test]
 fn an_invalid_overlay_fails_the_targets_schema_before_any_launch() {
     let fx = overlay_fixture(
@@ -738,10 +749,12 @@ fn an_invalid_overlay_fails_the_targets_schema_before_any_launch() {
     assert!(
         matches!(
             composition,
-            claudine::composition::CompositionError::ComposeFailed(
-                darkmatter::markdown::MarkdownError::SchemaValidationFailed { .. }
-            )
+            claudine::composition::CompositionError::SchemaValidation { problems, .. }
+                if problems.iter().any(|problem| problem == "/topic")
         ),
-        "the target's own schema failure surfaces, not a proxy-specific one: {composition:?}"
+        "the target's own schema failure surfaces, categorized and naming the \
+         offending property — not a proxy-specific error and not the \
+         uncategorized compose failure the harness route used to return: \
+         {composition:?}"
     );
 }

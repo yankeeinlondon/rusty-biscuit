@@ -479,3 +479,180 @@ fn a_refused_hop_leaves_the_active_documents_lifecycle_config_installed() {
         "a refused hand-off owes no boot"
     );
 }
+
+// -- typed identity across the error chain ----------------------------------
+//
+// Phase 12 of `features/2026-07-13-proxy-with`. `ProxyCommitError`'s variants
+// carry their concrete causes, but that only helps if the causes are
+// *reachable*: every renderer selects its styled block by walking `source()`
+// and downcasting (`crate::output::error_walker`), so a `source()` returning
+// `None` renders a perfectly good typed error as a bare `Display` string. These
+// pin the trait plumbing rather than the data — the data was already right when
+// the plumbing was not, and only the plumbing is what production reads.
+
+/// The runtime context these tests all build identically.
+fn adopt_context(fx: &Fixture) -> LifecycleRuntimeContext<'_> {
+    LifecycleRuntimeContext {
+        settings: &fx.settings,
+        messaging: &fx.messaging,
+        term: &fx.term,
+        source_path: &fx.source_path,
+        repo_root: Some(fx._dir.path()),
+        launch_area: None,
+        context: None,
+    }
+}
+
+/// A rejected hop's typed cause must survive the walk the renderer performs.
+#[test]
+fn a_rejected_hop_exposes_its_typed_cause_to_the_error_chain() {
+    let AdoptFixture { fx, target } = adopt_fixture();
+    let emitter = RecordingEmitter::default();
+    let ctx = adopt_context(&fx);
+    let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
+    let mut state = prompt_state(&fx.source_path);
+    let mut coord = coordinator(&fx.source_path);
+
+    coord
+        .adopt(
+            request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
+            Some(fx._dir.path()),
+            &mut state,
+            &mut guard,
+            &mut ControlBudgets::default(),
+        )
+        .expect("the first hop is uncontested");
+    let _ = coord.take_bootstrap_pending();
+
+    let error = coord
+        .adopt(
+            request_for(
+                &target,
+                &fx.source_path,
+                vec![fx.source_path.clone(), target.clone()],
+            ),
+            Some(fx._dir.path()),
+            &mut state,
+            &mut guard,
+            &mut ControlBudgets::default(),
+        )
+        .expect_err("an A->B->A cycle must be refused");
+
+    let source = std::error::Error::source(&error).expect(
+        "a rejected hop must expose its cause: the renderer selects the styled block \
+         by walking `source()`, so `None` renders the typed cycle error as a bare string",
+    );
+    assert!(
+        source
+            .downcast_ref::<claudine::composition::CompositionError>()
+            .is_some_and(|composition| matches!(
+                composition,
+                claudine::composition::CompositionError::LifecycleProxyCycle { .. }
+            )),
+        "the walk must reach the typed `LifecycleProxyCycle` — that downcast is \
+         literally what `error_walker` performs to pick the renderer"
+    );
+}
+
+/// The same for the other variant: a resolution failure's typed `HarnessError`
+/// must be reachable too, or a missing proxy target loses its diagnostic facets
+/// (`err.code` / `err.detail.*`) at the render boundary.
+#[test]
+fn an_unresolvable_target_exposes_its_typed_cause_to_the_error_chain() {
+    let AdoptFixture { fx, target: _ } = adopt_fixture();
+    let emitter = RecordingEmitter::default();
+    let ctx = adopt_context(&fx);
+    let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
+    let mut state = prompt_state(&fx.source_path);
+    let mut coord = coordinator(&fx.source_path);
+
+    let missing = fx._dir.path().join("nope.md");
+    let error = coord
+        .adopt(
+            request_for(&fx.source_path, &missing, vec![fx.source_path.clone()]),
+            Some(fx._dir.path()),
+            &mut state,
+            &mut guard,
+            &mut ControlBudgets::default(),
+        )
+        .expect_err("an unresolvable target must be refused");
+
+    let source = std::error::Error::source(&error)
+        .expect("a resolution failure must expose its typed `HarnessError`");
+    assert!(
+        source
+            .downcast_ref::<claudine::harness::HarnessError>()
+            .is_some(),
+        "the walk must reach the resolver's typed failure, whose `Diagnostic` facets \
+         a `failure`/`finalize` stack reads as `err.code` / `err.detail.*`"
+    );
+}
+
+/// A refused hand-off's `err` payload is built from the concrete cause rather
+/// than from a rendered message, so a `failure.stack` branching on `err.kind`
+/// branches correctly per variant.
+#[test]
+fn a_refused_handoff_projects_typed_err_facets_per_variant() {
+    use claudine::composition::lifecycle_context::LifecycleErrorInfo;
+
+    let AdoptFixture { fx, target } = adopt_fixture();
+    let emitter = RecordingEmitter::default();
+    let ctx = adopt_context(&fx);
+    let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
+    let mut state = prompt_state(&fx.source_path);
+    let mut coord = coordinator(&fx.source_path);
+
+    let missing = fx._dir.path().join("nope.md");
+    let resolution = coord
+        .adopt(
+            request_for(&fx.source_path, &missing, vec![fx.source_path.clone()]),
+            Some(fx._dir.path()),
+            &mut state,
+            &mut guard,
+            &mut ControlBudgets::default(),
+        )
+        .expect_err("an unresolvable target must be refused");
+    let resolution_info = LifecycleErrorInfo::from_proxy_commit_error(&resolution);
+    assert_eq!(
+        resolution_info.kind, "HarnessError",
+        "a resolution failure must reach the stack as the resolver's own type, not \
+         as a generic action failure"
+    );
+
+    coord
+        .adopt(
+            request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
+            Some(fx._dir.path()),
+            &mut state,
+            &mut guard,
+            &mut ControlBudgets::default(),
+        )
+        .expect("the first hop is uncontested");
+    let _ = coord.take_bootstrap_pending();
+    let rejection = coord
+        .adopt(
+            request_for(
+                &target,
+                &fx.source_path,
+                vec![fx.source_path.clone(), target.clone()],
+            ),
+            Some(fx._dir.path()),
+            &mut state,
+            &mut guard,
+            &mut ControlBudgets::default(),
+        )
+        .expect_err("an A->B->A cycle must be refused");
+    let rejection_info = LifecycleErrorInfo::from_proxy_commit_error(&rejection);
+
+    assert_eq!(
+        rejection_info.kind, "CompositionError",
+        "a cycle is a composition-level refusal and must say so"
+    );
+    assert_ne!(
+        resolution_info.kind, rejection_info.kind,
+        "the two refusal causes must stay distinguishable to a stack that branches \
+         on `err.kind` — collapsing both to one label is exactly the stringification \
+         this phase removes"
+    );
+    assert!(!resolution_info.msg.is_empty() && !rejection_info.msg.is_empty());
+}

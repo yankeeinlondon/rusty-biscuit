@@ -1439,6 +1439,15 @@ fn level2_lifecycle_initialize_proxy_respects_target_error() {
 
 /// `initialize.stack` proxying back and forth between two documents is caught
 /// by the cycle/hop-limit guard rather than looping forever.
+///
+/// Waits for the compose command to *exit* rather than for `target-init` in the
+/// log. The log marker is written by the target's `initialize`, which runs
+/// **before** the back-proxy is refused — so waiting on it and capturing after a
+/// fixed grace period raced the error block onto the pane, and the race widened
+/// when Phase 12 gave `LifecycleProxyCycle` a real `StatusBlock` (a taller block
+/// takes longer to render than the bare `Display` line it replaced). The
+/// sentinel is echoed only once claudine has exited and flushed, so it is the
+/// honest wait for an assertion about final output.
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_proxy_cycle_guarded() {
@@ -1450,7 +1459,7 @@ fn level2_lifecycle_initialize_proxy_cycle_guarded() {
          - action: {append_line: ['events.log', 'target-init']}\n    \
          - action: {proxy: '@doc.md'}\n---\ntarget body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, false);
-    let pane = run_in_tmux_for(&staged, "target-init");
+    let pane = run_compose_await_exit(&staged);
 
     let lines = event_lines(&staged);
 
