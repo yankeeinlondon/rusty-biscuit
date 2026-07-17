@@ -1,19 +1,21 @@
 //! `rendezvous-daemon` binary entry point.
 //!
-//! Phase 1 booted the gRPC server on a Unix Domain Socket. Phase 2 also
-//! brings up the persistence stack: a redb file as the source of truth
-//! for Loro snapshots and a DuckDB analytical projection driven by a
-//! flume-based micro-batching pipeline. Networking, pairing, and sync
-//! subsystems arrive in later phases.
+//! Boots the gRPC server on the host's local endpoint — a Unix-domain socket on
+//! macOS, Linux, and WSL, a named pipe on Windows — alongside the persistence
+//! stack (a redb file as the source of truth for Loro snapshots and a DuckDB
+//! analytical projection driven by a flume-based micro-batching pipeline) and
+//! the QUIC/mDNS networking stack.
 
+use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use rendezvous_core::socket::default_socket_path;
+use rendezvous_core::local_endpoint::{LocalEndpoint, LocalEndpointError, default_local_endpoint};
+use rendezvous_daemon::local_transport::spawn_local_server;
 use rendezvous_daemon::private_dir::default_data_dir;
-use rendezvous_daemon::server::{DaemonConfig, NetworkConfig, ServerError, spawn_uds_server};
+use rendezvous_daemon::server::{DaemonConfig, NetworkConfig, ServerError};
 use tracing_subscriber::EnvFilter;
 
 /// CLI arguments for the daemon.
@@ -23,11 +25,12 @@ use tracing_subscriber::EnvFilter;
     about = "Rendezvous companion daemon (Phase 2: session-log persistence)"
 )]
 struct Cli {
-    /// Override the Unix Domain Socket path. Defaults to the value
-    /// resolved by `rendezvous_core::socket::default_socket_path`
-    /// (also honouring `$RENDEZVOUS_SOCKET`).
-    #[arg(long = "socket", env = "RENDEZVOUS_SOCKET")]
-    socket: Option<PathBuf>,
+    /// Override the local endpoint the daemon listens on: a Unix socket path
+    /// on Unix, a `\\.\pipe\...` name on Windows. Defaults to the per-user
+    /// endpoint resolved by
+    /// `rendezvous_core::local_endpoint::default_local_endpoint`.
+    #[arg(long = "endpoint", env = "RENDEZVOUS_ENDPOINT")]
+    endpoint: Option<OsString>,
 
     /// Directory used for the daemon's persistent state (node-identity seed,
     /// redb file, and DuckDB projection). Defaults to `$RENDEZVOUS_DATA_DIR`
@@ -84,7 +87,7 @@ async fn run() -> Result<(), ServerError> {
     init_tracing();
 
     let cli = Cli::parse();
-    let socket_path = cli.socket.unwrap_or_else(default_socket_path);
+    let endpoint = resolve_endpoint(cli.endpoint.as_deref())?;
     let data_dir = match cli.data_dir {
         Some(explicit) => explicit,
         None => default_data_dir()?,
@@ -108,7 +111,7 @@ async fn run() -> Result<(), ServerError> {
         }
         config = config.with_networking(networking);
     }
-    let handle = spawn_uds_server(socket_path, config)?;
+    let handle = spawn_local_server(endpoint, config)?;
 
     tracing::info!(
         endpoint = %handle.local_endpoint(),
@@ -122,6 +125,15 @@ async fn run() -> Result<(), ServerError> {
 
     handle.shutdown().await?;
     Ok(())
+}
+
+/// The endpoint from an explicit `--endpoint` / `$RENDEZVOUS_ENDPOINT` value,
+/// or the per-user default.
+fn resolve_endpoint(explicit: Option<&std::ffi::OsStr>) -> Result<LocalEndpoint, LocalEndpointError> {
+    match explicit {
+        Some(value) => LocalEndpoint::from_override(value),
+        None => default_local_endpoint(),
+    }
 }
 
 fn init_tracing() {

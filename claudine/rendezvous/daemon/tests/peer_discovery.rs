@@ -1,45 +1,26 @@
 //! Phase-4 end-to-end validation.
 //!
 //! These tests exercise the networking stack from the outside: two
-//! daemons are spun up on ephemeral UDS paths and either (a) handed a
+//! daemons are spun up on private, per-test local endpoints and either (a) handed a
 //! manual invitation to dial each other or (b) left to discover each
 //! other over mDNS multicast. The validation requires the QUIC
 //! handshake to complete and the peer registries to converge to a
 //! `CONNECTED` view of the remote node.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::Path;
 use std::time::{Duration, Instant};
 
-use rendezvous_client::connect_uds;
+use rendezvous_client::connect;
 use rendezvous_core::{
     AppendEntryRequest, ConnectToPeerRequest, CreateInvitationRequest, ListChunkEntriesRequest,
     ListPeersRequest, ListSessionChunksRequest, PeerConnectionState, PeerSource,
     SyncWithPeerRequest,
 };
-use rendezvous_daemon::server::{DaemonConfig, NetworkConfig, ServerHandle, spawn_uds_server};
+use rendezvous_core::local_endpoint::{LocalEndpoint, test_support::private_endpoint};
+use rendezvous_daemon::local_transport::spawn_local_server;
+use rendezvous_daemon::server::{DaemonConfig, NetworkConfig, ServerHandle};
 use tempfile::TempDir;
 use tokio::time::sleep;
-
-/// A private directory to hold the endpoint.
-///
-/// `tempfile` creates 0755 directories, which the daemon refuses: the endpoint
-/// directory is the Unix security boundary. The real default resolves into a
-/// private directory, so a fixture has to build one too rather than dropping
-/// the socket straight into the temp root.
-fn runtime_socket(tmp: &TempDir, name: &str) -> std::path::PathBuf {
-    use std::os::unix::fs::DirBuilderExt;
-
-    let dir = tmp.path().join("runtime");
-    if !dir.exists() {
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&dir)
-            .expect("create runtime dir");
-    }
-    dir.join(format!("{name}.sock"))
-}
-
 
 fn networking_config(mdns_enabled: bool) -> NetworkConfig {
     NetworkConfig {
@@ -54,11 +35,14 @@ fn daemon_config(tmp: &TempDir, name: &str, mdns_enabled: bool) -> DaemonConfig 
         .with_networking(networking_config(mdns_enabled))
 }
 
-async fn boot_daemon(tmp: &TempDir, name: &str, mdns_enabled: bool) -> (ServerHandle, std::path::PathBuf) {
-    let socket = runtime_socket(tmp, name);
-    let handle = spawn_uds_server(socket.clone(), daemon_config(tmp, name, mdns_enabled))
+async fn boot_daemon(
+    tmp: &TempDir,
+    name: &str,
+    mdns_enabled: bool,
+) -> (ServerHandle, LocalEndpoint) {
+    let socket = private_endpoint(tmp.path(), name);
+    let handle = spawn_local_server(socket.clone(), daemon_config(tmp, name, mdns_enabled))
         .expect("spawn daemon");
-    wait_until_bound(&socket).await;
     (handle, socket)
 }
 
@@ -69,7 +53,7 @@ async fn two_daemons_connect_via_manual_invitation() {
     let (bob, bob_sock) = boot_daemon(&tmp, "bob", false).await;
 
     // Bob creates an invitation; Alice consumes it.
-    let mut bob_client = connect_uds(bob_sock.clone()).await.expect("bob connect");
+    let mut bob_client = connect(&bob_sock).await.expect("bob connect");
     let invitation = bob_client
         .create_invitation(CreateInvitationRequest {
             advertise_addr: String::new(),
@@ -81,7 +65,7 @@ async fn two_daemons_connect_via_manual_invitation() {
     assert!(!invitation.invitation.is_empty(), "invitation must be set");
     assert_eq!(invitation.node_id, bob.node_id());
 
-    let mut alice_client = connect_uds(alice_sock.clone()).await.expect("alice connect");
+    let mut alice_client = connect(&alice_sock).await.expect("alice connect");
     let response = alice_client
         .connect_to_peer(ConnectToPeerRequest {
             invitation: invitation.invitation,
@@ -129,7 +113,7 @@ async fn real_two_daemons_discover_each_other_via_mdns() {
     let (alice, alice_sock) = boot_daemon(&tmp, "alice", true).await;
     let (bob, _bob_sock) = boot_daemon(&tmp, "bob", true).await;
 
-    let mut alice_client = connect_uds(alice_sock.clone()).await.expect("alice connect");
+    let mut alice_client = connect(&alice_sock).await.expect("alice connect");
 
     let deadline = Instant::now() + Duration::from_secs(15);
     let target_node = bob.node_id();
@@ -182,16 +166,6 @@ async fn wait_for_inbound(
     }
 }
 
-async fn wait_until_bound(path: &Path) {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !path.exists() {
-        if Instant::now() >= deadline {
-            panic!("socket {} never appeared", path.display());
-        }
-        sleep(Duration::from_millis(10)).await;
-    }
-}
-
 /// **mDNS unpaired data-exchange boundary** — Two daemons discover each
 /// other over real mDNS. Before the operator approves the pairing, any
 /// attempt to sync session-log deltas MUST fail and the receiver's redb
@@ -208,8 +182,8 @@ async fn real_mdns_discovered_peer_cannot_sync_before_approval() {
     let alice_node = alice.node_id();
     let bob_node = bob.node_id();
 
-    let mut alice_client = connect_uds(alice_sock.clone()).await.expect("alice connect");
-    let mut bob_client = connect_uds(bob_sock.clone()).await.expect("bob connect");
+    let mut alice_client = connect(&alice_sock).await.expect("alice connect");
+    let mut bob_client = connect(&bob_sock).await.expect("bob connect");
 
     // Bob writes a "secret" entry in his own namespace.
     bob_client

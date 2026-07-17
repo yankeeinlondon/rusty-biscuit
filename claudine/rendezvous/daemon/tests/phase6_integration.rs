@@ -12,39 +12,21 @@
 //! ID, not the local daemon's.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use rendezvous_client::connect_uds;
+use rendezvous_client::connect;
 use rendezvous_core::{
     AppendEntryRequest, ApprovePeerRequest, ChunkConfig, ConnectToPeerRequest,
     CreateInvitationRequest, ListChunkEntriesRequest, ListSessionChunksRequest, PeerConnectionState,
     QueryProjectionRequest, RendezvousClient, SyncWithPeerRequest,
 };
-use rendezvous_daemon::server::{DaemonConfig, NetworkConfig, ServerHandle, spawn_uds_server};
+use rendezvous_core::local_endpoint::{LocalEndpoint, test_support::private_endpoint};
+use rendezvous_daemon::local_transport::spawn_local_server;
+use rendezvous_daemon::server::{DaemonConfig, NetworkConfig, ServerHandle};
 use tempfile::TempDir;
 use tokio::time::sleep;
 use tonic::transport::Channel;
-
-/// A private directory to hold the endpoint.
-///
-/// `tempfile` creates 0755 directories, which the daemon refuses: the endpoint
-/// directory is the Unix security boundary. The real default resolves into a
-/// private directory, so a fixture has to build one too rather than dropping
-/// the socket straight into the temp root.
-fn runtime_socket(tmp: &TempDir, name: &str) -> std::path::PathBuf {
-    use std::os::unix::fs::DirBuilderExt;
-
-    let dir = tmp.path().join("runtime");
-    if !dir.exists() {
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&dir)
-            .expect("create runtime dir");
-    }
-    dir.join(format!("{name}.sock"))
-}
-
 
 fn networking_config() -> NetworkConfig {
     NetworkConfig {
@@ -62,7 +44,7 @@ fn base_config(data_dir: PathBuf) -> DaemonConfig {
 async fn boot_daemon(
     tmp: &TempDir,
     name: &str,
-) -> (ServerHandle, PathBuf) {
+) -> (ServerHandle, LocalEndpoint) {
     let data_dir = tmp.path().join(name);
     boot_daemon_with(tmp, name, base_config(data_dir)).await
 }
@@ -71,21 +53,10 @@ async fn boot_daemon_with(
     tmp: &TempDir,
     name: &str,
     config: DaemonConfig,
-) -> (ServerHandle, PathBuf) {
-    let socket = runtime_socket(tmp, name);
-    let handle = spawn_uds_server(socket.clone(), config).expect("spawn daemon");
-    wait_until_bound(&socket).await;
+) -> (ServerHandle, LocalEndpoint) {
+    let socket = private_endpoint(tmp.path(), name);
+    let handle = spawn_local_server(socket.clone(), config).expect("spawn daemon");
     (handle, socket)
-}
-
-async fn wait_until_bound(path: &Path) {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !path.exists() {
-        if Instant::now() >= deadline {
-            panic!("socket {} never appeared", path.display());
-        }
-        sleep(Duration::from_millis(10)).await;
-    }
 }
 
 async fn pair_and_connect(
@@ -217,8 +188,8 @@ async fn two_nodes_converge_across_namespaces() {
     let alice_node = alice.node_id();
     let bob_node = bob.node_id();
 
-    let mut alice_client = connect_uds(alice_sock).await.expect("alice client");
-    let mut bob_client = connect_uds(bob_sock).await.expect("bob client");
+    let mut alice_client = connect(&alice_sock).await.expect("alice client");
+    let mut bob_client = connect(&bob_sock).await.expect("bob client");
 
     pair_and_connect(&alice, &mut alice_client, &bob, &mut bob_client).await;
 
@@ -287,8 +258,8 @@ async fn chunk_rotation_propagates_through_sync() {
     .await;
     let alice_node = alice.node_id();
 
-    let mut alice_client = connect_uds(alice_sock).await.expect("alice client");
-    let mut bob_client = connect_uds(bob_sock).await.expect("bob client");
+    let mut alice_client = connect(&alice_sock).await.expect("alice client");
+    let mut bob_client = connect(&bob_sock).await.expect("bob client");
 
     pair_and_connect(&alice, &mut alice_client, &bob, &mut bob_client).await;
 
@@ -340,8 +311,8 @@ async fn restart_replays_state_and_resumes_sync() {
     let alice_node = alice.node_id();
     let bob_node = bob.node_id();
 
-    let mut alice_client = connect_uds(alice_sock.clone()).await.expect("alice client");
-    let mut bob_client = connect_uds(bob_sock.clone()).await.expect("bob client");
+    let mut alice_client = connect(&alice_sock).await.expect("alice client");
+    let mut bob_client = connect(&bob_sock).await.expect("bob client");
 
     pair_and_connect(&alice, &mut alice_client, &bob, &mut bob_client).await;
     for i in 0..4 {
@@ -357,7 +328,7 @@ async fn restart_replays_state_and_resumes_sync() {
         boot_daemon_with(&tmp, "alice", base_config(alice_dir.clone())).await;
     assert_eq!(alice2.node_id(), alice_node, "identity must persist across restart");
 
-    let mut alice_client2 = connect_uds(alice_sock2).await.expect("alice2 client");
+    let mut alice_client2 = connect(&alice_sock2).await.expect("alice2 client");
 
     // The pre-restart entries must be visible from the rehydrated state.
     let recovered = collect_messages(&mut alice_client2, &alice_node, "rs").await;
@@ -441,8 +412,8 @@ async fn sync_fails_when_only_one_side_is_paired() {
     let (alice, alice_sock) = boot_daemon(&tmp, "alice").await;
     let (bob, bob_sock) = boot_daemon(&tmp, "bob").await;
 
-    let mut alice_client = connect_uds(alice_sock).await.expect("alice client");
-    let mut bob_client = connect_uds(bob_sock).await.expect("bob client");
+    let mut alice_client = connect(&alice_sock).await.expect("alice client");
+    let mut bob_client = connect(&bob_sock).await.expect("bob client");
 
     // Bob writes a "secret" entry that must NOT leak to Alice.
     append(&mut bob_client, "secret", "bob", "do-not-leak").await;
@@ -501,8 +472,8 @@ async fn paired_peer_cannot_write_foreign_namespace() {
     let (alice, alice_sock) = boot_daemon(&tmp, "alice").await;
     let (bob, bob_sock) = boot_daemon(&tmp, "bob").await;
 
-    let mut alice_client = connect_uds(alice_sock).await.expect("alice client");
-    let mut bob_client = connect_uds(bob_sock).await.expect("bob client");
+    let mut alice_client = connect(&alice_sock).await.expect("alice client");
+    let mut bob_client = connect(&bob_sock).await.expect("bob client");
 
     pair_and_connect(&alice, &mut alice_client, &bob, &mut bob_client).await;
 
@@ -551,8 +522,8 @@ async fn crash_recovery_replays_accepted_envelope() {
     let (bob, bob_sock) = boot_daemon(&tmp, "bob").await;
     let alice_node = alice.node_id();
 
-    let mut alice_client = connect_uds(alice_sock).await.expect("alice client");
-    let mut bob_client = connect_uds(bob_sock).await.expect("bob client");
+    let mut alice_client = connect(&alice_sock).await.expect("alice client");
+    let mut bob_client = connect(&bob_sock).await.expect("bob client");
 
     pair_and_connect(&alice, &mut alice_client, &bob, &mut bob_client).await;
 
@@ -583,7 +554,7 @@ async fn crash_recovery_replays_accepted_envelope() {
 
     let (alice2, alice_sock2) =
         boot_daemon_with(&tmp, "alice", base_config(tmp.path().join("alice"))).await;
-    let mut alice_client2 = connect_uds(alice_sock2).await.expect("alice2 client");
+    let mut alice_client2 = connect(&alice_sock2).await.expect("alice2 client");
 
     let recovered = collect_messages(&mut alice_client2, &alice_node, "crash").await;
     assert!(
@@ -618,8 +589,8 @@ async fn poc_demo_end_to_end_flow() {
     let alice_node = alice.node_id();
     let bob_node = bob.node_id();
 
-    let mut alice_client = connect_uds(alice_sock).await.expect("alice client");
-    let mut bob_client = connect_uds(bob_sock).await.expect("bob client");
+    let mut alice_client = connect(&alice_sock).await.expect("alice client");
+    let mut bob_client = connect(&bob_sock).await.expect("bob client");
 
     // 1-2. Pair + connect.
     pair_and_connect(&alice, &mut alice_client, &bob, &mut bob_client).await;
@@ -693,8 +664,8 @@ async fn invitation_pairing_deferred_until_identity_confirmed() {
     let alice_node = alice.node_id();
     let bob_node = bob.node_id();
 
-    let mut alice_client = connect_uds(alice_sock).await.expect("alice client");
-    let mut bob_client = connect_uds(bob_sock).await.expect("bob client");
+    let mut alice_client = connect(&alice_sock).await.expect("alice client");
+    let mut bob_client = connect(&bob_sock).await.expect("bob client");
 
     // Only Alice (the inviter/responder) approves Bob. Bob does NOT
     // explicitly approve Alice — the initiator auto-pairs after the
@@ -788,8 +759,8 @@ async fn projection_is_idempotent_across_repeated_syncs() {
     let alice_node = alice.node_id();
     let bob_node = bob.node_id();
 
-    let mut alice_client = connect_uds(alice_sock).await.expect("alice client");
-    let mut bob_client = connect_uds(bob_sock).await.expect("bob client");
+    let mut alice_client = connect(&alice_sock).await.expect("alice client");
+    let mut bob_client = connect(&bob_sock).await.expect("bob client");
 
     pair_and_connect(&alice, &mut alice_client, &bob, &mut bob_client).await;
 
@@ -858,8 +829,8 @@ async fn capability_registers_converge_across_mesh() {
     let tmp = TempDir::new().expect("tempdir");
     let (alice, alice_socket) = boot_daemon(&tmp, "alice").await;
     let (bob, bob_socket) = boot_daemon(&tmp, "bob").await;
-    let mut alice_client = connect_uds(&alice_socket).await.expect("alice client");
-    let mut bob_client = connect_uds(&bob_socket).await.expect("bob client");
+    let mut alice_client = connect(&alice_socket).await.expect("alice client");
+    let mut bob_client = connect(&bob_socket).await.expect("bob client");
     pair_and_connect(&alice, &mut alice_client, &bob, &mut bob_client).await;
 
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -942,8 +913,8 @@ async fn repos_register_converges_across_mesh() {
         base_config(tmp.path().join("alice")).with_repo_scan_roots(vec![scan_root]);
     let (alice, alice_socket) = boot_daemon_with(&tmp, "alice", alice_config).await;
     let (bob, bob_socket) = boot_daemon(&tmp, "bob").await;
-    let mut alice_client = connect_uds(&alice_socket).await.expect("alice client");
-    let mut bob_client = connect_uds(&bob_socket).await.expect("bob client");
+    let mut alice_client = connect(&alice_socket).await.expect("alice client");
+    let mut bob_client = connect(&bob_socket).await.expect("bob client");
     pair_and_connect(&alice, &mut alice_client, &bob, &mut bob_client).await;
 
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -989,8 +960,8 @@ async fn active_sessions_converge_across_mesh() {
     let tmp = TempDir::new().expect("tempdir");
     let (alice, alice_socket) = boot_daemon(&tmp, "alice").await;
     let (bob, bob_socket) = boot_daemon(&tmp, "bob").await;
-    let mut alice_client = connect_uds(&alice_socket).await.expect("alice client");
-    let mut bob_client = connect_uds(&bob_socket).await.expect("bob client");
+    let mut alice_client = connect(&alice_socket).await.expect("alice client");
+    let mut bob_client = connect(&bob_socket).await.expect("bob client");
     pair_and_connect(&alice, &mut alice_client, &bob, &mut bob_client).await;
 
     alice_client

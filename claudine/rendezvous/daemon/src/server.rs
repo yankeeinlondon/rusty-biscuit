@@ -36,12 +36,6 @@ use crate::session_log::{SessionLogError, SessionLogManager};
 use crate::storage::{Storage, StorageError};
 use crate::sync::SyncService;
 
-/// Re-exported so the daemon-spawning fixtures that still import it from this
-/// module keep resolving while their migration to
-/// [`spawn_local_server`](crate::local_transport::spawn_local_server) lands.
-#[cfg(unix)]
-pub use crate::local_transport::spawn_uds_server;
-
 /// Configuration for the persistence stack the daemon spawns alongside
 /// the gRPC server.
 #[derive(Clone, Debug)]

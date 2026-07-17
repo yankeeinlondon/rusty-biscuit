@@ -165,6 +165,39 @@ async fn concurrent_clients_are_each_given_an_instance() {
     handle.shutdown().await.expect("shutdown");
 }
 
+/// `reject_remote_clients(true)` is the other half of the boundary the DACL
+/// starts: without it a pipe is reachable over SMB, so a host that shares its
+/// pipe namespace would expose the local control plane to the network.
+///
+/// The remote form is the same pipe reached through the network redirector
+/// rather than the local device. Which error comes back depends on whether the
+/// runner has the redirector and file sharing enabled at all, so this asserts
+/// the property that matters — a remote-form open never *succeeds* — instead of
+/// pinning one errno that varies by host configuration.
+#[tokio::test]
+async fn a_remote_form_client_is_refused_while_the_local_one_is_served() {
+    let tmp = TempDir::new().expect("tempdir");
+    let name = pipe_name("remote");
+    let handle = spawn_at(&tmp, &name).expect("spawn daemon");
+
+    // Control: the local device path is served, so a refusal below is the
+    // remote-client rule and not a dead daemon.
+    ClientOptions::new()
+        .open(&name)
+        .expect("the local form must be served");
+
+    let remote = OsString::from(format!(
+        r"\\localhost\pipe\claudine-rendezvous-test-remote-{}",
+        std::process::id()
+    ));
+    assert!(
+        ClientOptions::new().open(&remote).is_err(),
+        "a client arriving through the network redirector must never be served"
+    );
+
+    handle.shutdown().await.expect("shutdown");
+}
+
 /// A named pipe has no filesystem entry, so "released" means the name stops
 /// resolving once the last handle closes.
 #[tokio::test]

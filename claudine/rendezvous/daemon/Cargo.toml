@@ -57,6 +57,7 @@ tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 rendezvous-client = { path = "../client" }
+rendezvous-core = { path = "../core", features = ["test-support"] }
 
 # umask(2) has no std wrapper, and the socket-mode test's whole point is that
 # the daemon's mode does not come from the umask.

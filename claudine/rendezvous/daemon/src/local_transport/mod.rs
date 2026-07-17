@@ -70,20 +70,3 @@ pub fn spawn_local_server(
         windows::serve(endpoint, prepared)
     }
 }
-
-/// Boot a daemon on the Unix socket at `socket_path`.
-///
-/// A test seam, kept because a fixture that has just built a private temporary
-/// directory has a `PathBuf` and no reason to say "Unix" twice. Production
-/// callers use [`spawn_local_server`], which does not assume a transport.
-///
-/// ## Errors
-///
-/// As [`spawn_local_server`].
-#[cfg(unix)]
-pub fn spawn_uds_server(
-    socket_path: std::path::PathBuf,
-    config: DaemonConfig,
-) -> Result<ServerHandle, ServerError> {
-    spawn_local_server(LocalEndpoint::UnixSocket(socket_path), config)
-}
