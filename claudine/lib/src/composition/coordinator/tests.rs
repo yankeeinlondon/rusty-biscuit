@@ -312,6 +312,45 @@ mod active_document_state {
         assert_eq!(state.iteration().attempt().resume_followup(), Some("keep going"));
     }
 
+    fn a_key(provider: &str) -> SessionCompatibilityKey {
+        SessionCompatibilityKey {
+            provider: provider.to_string(),
+            ..SessionCompatibilityKey::default()
+        }
+    }
+
+    #[test]
+    fn resume_carries_the_session_compatibility_key_forward_with_the_session() {
+        let mut state = ActiveDocumentState::initial();
+        state.iteration_mut().attempt_mut().adopt_session("s-1".into());
+        let key = a_key("claude");
+        state
+            .iteration_mut()
+            .attempt_mut()
+            .set_compat_key(key.clone());
+
+        state
+            .iteration_mut()
+            .resume_attempt("s-1".into(), Some("keep going".into()));
+
+        // The key that opened the session travels forward so the resumed attempt
+        // can compare its refreshed plan against it.
+        assert_eq!(state.iteration().attempt().compat_key(), Some(&key));
+    }
+
+    #[test]
+    fn retry_drops_the_compatibility_key_because_it_opens_a_fresh_session() {
+        let mut state = ActiveDocumentState::initial();
+        state
+            .iteration_mut()
+            .attempt_mut()
+            .set_compat_key(a_key("claude"));
+
+        state.iteration_mut().retry_attempt();
+
+        assert_eq!(state.iteration().attempt().compat_key(), None);
+    }
+
     #[test]
     fn retry_cannot_reset_its_own_budget_by_replacing_the_attempt() {
         let mut state = ActiveDocumentState::initial();
@@ -383,6 +422,111 @@ mod active_document_state {
         assert_eq!(target.iteration().attempt().session_id(), None);
         assert_eq!(target.iteration().retry_budget().ceiling(), None);
         assert_eq!(target.iteration().resume_budget().ceiling(), None);
+    }
+}
+
+mod session_compatibility_key {
+    use super::*;
+
+    /// A fully populated key; each facet test clones this and flips one field.
+    fn base_key() -> SessionCompatibilityKey {
+        SessionCompatibilityKey {
+            provider: "claude".to_string(),
+            model: Some("claude-sonnet".to_string()),
+            binary: "claude@/usr/bin/claude".to_string(),
+            resume_protocol: "claude:true".to_string(),
+            workspace_cwd: "/repo".to_string(),
+            permission_mode: "prompt".to_string(),
+            interactivity: "non-interactive".to_string(),
+            structured_output: "true:false".to_string(),
+            system_prompt: "none".to_string(),
+            mcp_servers: vec!["fs".to_string(), "git".to_string()],
+            extra: std::collections::BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn an_unchanged_key_is_compatible_with_itself() {
+        let key = base_key();
+        assert!(key.is_compatible(&key));
+        assert!(key.incompatibilities(&key).is_empty());
+    }
+
+    /// Each launch facet, flipped in isolation, must flip the key to
+    /// incompatible and name exactly that facet.
+    #[test]
+    fn each_facet_change_is_named_in_isolation() {
+        type Mutate = fn(&mut SessionCompatibilityKey);
+        let cases: &[(&str, Mutate)] = &[
+            ("provider", |k| k.provider = "codex".to_string()),
+            ("model", |k| k.model = Some("gpt-5".to_string())),
+            ("profile/binary", |k| k.binary = "codex@/usr/bin/codex".to_string()),
+            ("resume protocol", |k| k.resume_protocol = "claude:false".to_string()),
+            ("workspace CWD", |k| k.workspace_cwd = "/other".to_string()),
+            ("permission mode", |k| k.permission_mode = "bypass".to_string()),
+            ("interactivity", |k| k.interactivity = "interactive".to_string()),
+            ("structured-output mode", |k| k.structured_output = "false:false".to_string()),
+            ("system prompt", |k| k.system_prompt = "digest-2".to_string()),
+            ("MCP server set", |k| k.mcp_servers = vec!["fs".to_string()]),
+        ];
+        for (facet, mutate) in cases {
+            let base = base_key();
+            let mut changed = base.clone();
+            mutate(&mut changed);
+            let named = base.incompatibilities(&changed);
+            assert_eq!(
+                named,
+                vec![facet.to_string()],
+                "changing `{facet}` must name exactly that facet",
+            );
+            assert!(!base.is_compatible(&changed));
+        }
+    }
+
+    #[test]
+    fn dropping_a_pinned_model_is_an_incompatibility() {
+        let base = base_key();
+        let mut changed = base.clone();
+        changed.model = None;
+        assert_eq!(base.incompatibilities(&changed), vec!["model".to_string()]);
+    }
+
+    #[test]
+    fn mcp_server_set_compares_by_membership_not_order() {
+        let base = base_key();
+        let mut reordered = base.clone();
+        reordered.mcp_servers = vec!["git".to_string(), "fs".to_string()];
+        // The extractor sorts the set, so a producer that lists servers in a
+        // different order must still compare equal here.
+        reordered.mcp_servers.sort();
+        let mut sorted_base = base.clone();
+        sorted_base.mcp_servers.sort();
+        assert!(sorted_base.is_compatible(&reordered));
+    }
+
+    #[test]
+    fn provider_specific_identity_is_named_by_key() {
+        let base = base_key();
+        let mut changed = base.clone();
+        changed
+            .extra
+            .insert("workspace_trust".to_string(), "off".to_string());
+        assert_eq!(
+            base.incompatibilities(&changed),
+            vec!["provider identity `workspace_trust`".to_string()],
+        );
+    }
+
+    #[test]
+    fn multiple_changed_facets_are_all_named() {
+        let base = base_key();
+        let mut changed = base.clone();
+        changed.model = Some("other".to_string());
+        changed.workspace_cwd = "/elsewhere".to_string();
+        let named = base.incompatibilities(&changed);
+        assert!(named.contains(&"model".to_string()));
+        assert!(named.contains(&"workspace CWD".to_string()));
+        assert_eq!(named.len(), 2);
     }
 }
 

@@ -795,6 +795,30 @@ pub enum CompositionError {
         source_path: PathBuf,
     },
 
+    /// A `resume` retained a live provider session, but a canonical refresh of
+    /// the document changed a launch property the provider fixed when the
+    /// session was opened (spec R8). Feeding the refreshed launch plan into the
+    /// old session would run it under a stale contract, so the resume refuses.
+    ///
+    /// Raised at runtime, after the refresh and before any provider attempt:
+    /// the session-compatibility key of the launch that opened the session no
+    /// longer matches the key of the freshly prepared plan.
+    #[error(
+        "lifecycle `resume` cannot reuse the live session: a canonical refresh \
+         changed incompatible launch propert{plural} ({facets}); retry instead \
+         to start a fresh session ({source_path})",
+        plural = if facets.len() == 1 { "y" } else { "ies" },
+        facets = facets.join(", "),
+        source_path = source_path.display()
+    )]
+    LifecycleResumeIncompatible {
+        /// The prompt file whose stack requested resume.
+        source_path: PathBuf,
+        /// The launch facets that changed across the refresh, named for the
+        /// operator.
+        facets: Vec<String>,
+    },
+
     /// A flow-control action is valid in the event (placement is universal),
     /// but its runtime effect — run-loop re-entry (`retry`), hand-off
     /// (`proxy`), or the deferred-queue (`requeue`) — is not wired for events

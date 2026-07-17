@@ -770,6 +770,29 @@ fn missing_properties_hint_appears_inside_block_quote_border() {
 }
 
 #[test]
+fn resume_incompatible_status_block_names_each_changed_facet() {
+    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+    let err = CompositionError::LifecycleResumeIncompatible {
+        source_path: PathBuf::from("prompts/deploy.md"),
+        facets: vec!["model".to_string(), "workspace CWD".to_string()],
+    };
+    let term = Terminal::new_optimistic(80);
+    let rendered = strip_escape_codes(err.report_block_error(&term));
+
+    assert!(
+        rendered.contains("model") && rendered.contains("workspace CWD"),
+        "the diagnostic must name every changed facet: {rendered}"
+    );
+    assert!(
+        rendered.to_lowercase().contains("retry"),
+        "the diagnostic must recommend retry: {rendered}"
+    );
+    // `Display` (the log/JSON surface) must also carry the facets.
+    assert!(err.to_string().contains("model"));
+}
+
+#[test]
 fn schema_load_hint_appears_inside_block_quote_border() {
     use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 

@@ -35,7 +35,7 @@ pub use commit::{ProxyCommitError, commit_proxy};
 
 pub use active::{
     ActiveDocumentState, AttemptOutcome, ControlBudget, ControlBudgetKind, DocumentIteration,
-    ProviderAttempt,
+    ProviderAttempt, SessionCompatibilityKey,
 };
 pub use document::{DocumentOverlay, PreparedDocument};
 pub use handoff::{

@@ -508,6 +508,35 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                      document, or guard the `proxy` with a `when:` condition that stops it.",
                 )
         }
+        CompositionError::LifecycleResumeIncompatible {
+            source_path,
+            facets,
+        } => {
+            let file_link = render_file_link(source_path);
+            let rendered_facets = facets
+                .iter()
+                .map(|facet| format!("<cyan>`{facet}`</cyan>"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let body = format!(
+                "A lifecycle <cyan>`resume`</cyan> in {file_link} kept a live provider \
+                 session, but a canonical refresh changed launch propert{plural} the \
+                 provider fixed when the session opened: {rendered_facets}.\n\nResuming \
+                 would mix the live session with a different launch plan.",
+                plural = if facets.len() == 1 { "y" } else { "ies" },
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "resume incompatible after refresh",
+                ))
+                .body(body)
+                .hint(
+                    "A session cannot be resumed under launch settings it was not opened \
+                     with. Use `retry` to start a fresh session with the new plan, or keep \
+                     the changed propert(ies) stable across the resume.",
+                )
+        }
         CompositionError::LifecycleProxyTargetBootstrapFailed {
             target_path,
             source_path,

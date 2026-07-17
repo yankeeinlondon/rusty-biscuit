@@ -6,13 +6,16 @@
 
 //! The one place a proxy request becomes a committed handoff.
 //!
-//! [`commit_proxy`] is the sole caller of
+//! [`commit_proxy`] is the sole *committing* caller of
 //! [`resolve_proxy_target`][crate::composition::resolve_proxy_target] and the
 //! sole route to a [`HopApproval`], so resolution and hop/cycle validation
 //! happen exactly once per hop, in one order, for every proxy producer. A
 //! downstream layer receives a [`ProxyHandoff`] whose target is already
 //! resolved and already approved, and has no entry point to resolve a target
-//! string itself.
+//! into a committed handoff itself. (The CLI pipeline also resolves a target
+//! read-only, without approving a hop, to peek whether it declares a `loop:`
+//! and decide loop ownership before committing — that pre-check produces no
+//! handoff and mutates no ledger.)
 
 use std::path::{Path, PathBuf};
 

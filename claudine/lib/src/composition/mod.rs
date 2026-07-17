@@ -45,8 +45,8 @@ pub use coordinator::{
     ControlBudgetKind, DocumentIteration, DocumentOverlay, DocumentTransition,
     EvaluatedProxyRequest, HopApproval, HopRejection, InvocationInputs, InvocationInputsDraft,
     LaunchDiscovery, LedgerMut, PreparedDocument, ProviderAttempt, ProxyCommitError, ProxyHandoff,
-    ProxyProvenance, ResolvedProxyTarget, RunLedger, TransitionAbort, TransitionRecord,
-    commit_proxy,
+    ProxyProvenance, ResolvedProxyTarget, RunLedger, SessionCompatibilityKey, TransitionAbort,
+    TransitionRecord, commit_proxy,
 };
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 pub use error::{
