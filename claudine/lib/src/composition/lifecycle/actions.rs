@@ -28,7 +28,8 @@
 //! - [`ExpressionFunctionAction`] — read-only Darkmatter expression
 //!   functions invoked for their result.
 
-use darkmatter::markdown::compose::expression::Expr;
+use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder};
+use indexmap::IndexMap;
 
 use super::LifecycleSignal;
 
@@ -126,6 +127,10 @@ pub enum LifecycleControlAction {
     Proxy {
         /// File reference expression resolving to the target prompt path.
         target: Expr,
+        /// Transient top-level frontmatter overlay for the immediate target,
+        /// authored as key/value `with:`. Empty when `with:` was omitted or
+        /// authored as `{}`.
+        with: ProxyWith,
     },
 
     /// `retry` / `retry(N)` — try the current prompt again. Whether re-entry
@@ -198,6 +203,81 @@ impl LifecycleControlAction {
             Self::Skip => matches!(event, LifecycleSignal::Initialize),
             _ => true,
         }
+    }
+}
+
+/// The authored `proxy.with` mapping — a transient top-level frontmatter
+/// overlay for the immediate proxy target.
+///
+/// Values are held in their authored JSON shape. They are resolved once, at
+/// the source handoff, against the source document's lifecycle context; this
+/// type is the parse-time carrier, not the evaluated overlay.
+///
+/// Keys are static YAML strings by construction: [`ProxyWith::new`] is the
+/// only constructor and rejects a key carrying an interpolation span, so a
+/// downstream consumer never has to re-check for a dynamic key.
+///
+/// ## Examples
+///
+/// ```
+/// use claudine::composition::lifecycle::actions::ProxyWith;
+/// use indexmap::IndexMap;
+///
+/// let mut authored = IndexMap::new();
+/// authored.insert("iteration".to_string(), serde_json::json!("{{ iteration }}"));
+/// let with = ProxyWith::new(authored).expect("static key");
+/// assert_eq!(with.len(), 1);
+///
+/// let mut dynamic = IndexMap::new();
+/// dynamic.insert("{{ key }}".to_string(), serde_json::json!(1));
+/// assert_eq!(ProxyWith::new(dynamic).unwrap_err(), "{{ key }}");
+/// ```
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ProxyWith(IndexMap<String, serde_json::Value>);
+
+impl ProxyWith {
+    /// Build an overlay from an authored mapping.
+    ///
+    /// ## Errors
+    ///
+    /// Returns the offending key when it carries a `{{ … }}` or `$( … )`
+    /// span. `with:` keys name target frontmatter properties and are never
+    /// interpolated, so a span in a key is an authoring error rather than a
+    /// value to resolve later.
+    pub fn new(authored: IndexMap<String, serde_json::Value>) -> Result<Self, String> {
+        for key in authored.keys() {
+            if !ExpressionFinder::find_all_plain(key).is_empty() || key.contains("$(") {
+                return Err(key.clone());
+            }
+        }
+        Ok(Self(authored))
+    }
+
+    #[allow(missing_docs)]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    #[allow(missing_docs)]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// The authored value for `key`, or `None` when the overlay does not set
+    /// that property.
+    pub fn get(&self, key: &str) -> Option<&serde_json::Value> {
+        self.0.get(key)
+    }
+
+    /// Iterate the overlay's properties.
+    ///
+    /// Order is deterministic but is **not** the authored order: `serde_json`
+    /// is built without `preserve_order`, so frontmatter parsing has already
+    /// normalized a nested mapping's keys to sorted order before they reach
+    /// here. Overlay semantics are per-key, so no consumer may depend on
+    /// order for meaning.
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &serde_json::Value)> {
+        self.0.iter()
     }
 }
 

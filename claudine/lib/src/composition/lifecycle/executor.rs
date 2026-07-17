@@ -1144,7 +1144,7 @@ impl StackExecutionContext<'_> {
             C::Error { reason } => StackControl::Error {
                 reason: self.eval_opt_string(reason.as_ref(), fm)?,
             },
-            C::Proxy { target } => StackControl::Proxy {
+            C::Proxy { target, .. } => StackControl::Proxy {
                 target: self.render_message(target, fm)?,
             },
             C::Retry {

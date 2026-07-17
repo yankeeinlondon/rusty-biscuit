@@ -150,7 +150,10 @@ fn iter_action_expressions<'a>(
                     });
                 }
             }
-            LifecycleControlAction::Proxy { target } => surfaces.push(LifecycleExpressionSurface {
+            // `with` values are authored JSON, not parsed `Expr` trees, so
+            // there is no expression surface to scan here. They resolve at the
+            // source handoff.
+            LifecycleControlAction::Proxy { target, .. } => surfaces.push(LifecycleExpressionSurface {
                 property: format!("{prefix}.target"),
                 signal,
                 expr: target,
