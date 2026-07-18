@@ -121,7 +121,13 @@ pub use sequence::{
 };
 pub use sequence::preflight::{
     DiscoveredCommand, GroupExecution, PreflightAction, PreflightGraph, PreflightGroup,
-    PreflightStep, PreflightTask, PromptDocument, build_preflight_graph, reject_non_sequence_kind,
+    PreflightStep, PreflightTask, PromptDocument, build_preflight_graph,
+    build_preflight_graph_with_context, reject_non_sequence_kind,
+};
+pub use sequence::task::{
+    DEFAULT_COMMAND_TIMEOUT, PromptRunOutcome, PromptTaskRequest, PromptTaskRunner,
+    ShellCommandOutput, SystemTaskShell, TaskDiagnostic, TaskExecution, TaskOutcome, TaskShellRunner,
+    TaskStage, TaskStatus, UnavailablePromptRunner,
 };
 pub use types::{
     AgentHint, AgentResolutionState, AmbientVariable, CompositionClosurePlan,

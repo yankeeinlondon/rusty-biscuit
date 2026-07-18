@@ -141,7 +141,28 @@ pub fn build_preflight_graph(
     plan: &SequencePlan,
     source: &ResolvedCompositionSource,
 ) -> Result<PreflightGraph, CompositionError> {
-    let mut loader = Loader::new(source)?;
+    build_preflight_graph_with_context(plan, source, ComposeContext::capture())
+}
+
+/// [`build_preflight_graph`] against a caller-supplied `ctx.*`/`env.*` snapshot.
+///
+/// A caller that already captured a context for this composition passes it here
+/// so shell early-binding resolves against the *same* snapshot the body and the
+/// lifecycle stacks see — the divergence
+/// [`StackExecutionContext::prepared_context`][ctx] exists to prevent — instead
+/// of re-probing the environment a second time.
+///
+/// ## Errors
+///
+/// As [`build_preflight_graph`].
+///
+/// [ctx]: super::super::lifecycle::executor::StackExecutionContext::prepared_context
+pub fn build_preflight_graph_with_context(
+    plan: &SequencePlan,
+    source: &ResolvedCompositionSource,
+    context: ComposeContext,
+) -> Result<PreflightGraph, CompositionError> {
+    let mut loader = Loader::new(source, context);
     loader.walk_plan(plan)?;
     Ok(loader.graph)
 }
@@ -165,15 +186,15 @@ struct Loader<'a> {
 }
 
 impl<'a> Loader<'a> {
-    fn new(source: &'a ResolvedCompositionSource) -> Result<Self, CompositionError> {
-        Ok(Self {
+    fn new(source: &'a ResolvedCompositionSource, context: ComposeContext) -> Self {
+        Self {
             graph: PreflightGraph::default(),
             ancestry: Vec::new(),
             documents: HashMap::new(),
             source,
             source_path: canonical(&source.resolved_path),
-            context: ComposeContext::capture(),
-        })
+            context,
+        }
     }
 
     fn walk_plan(&mut self, plan: &SequencePlan) -> Result<(), CompositionError> {

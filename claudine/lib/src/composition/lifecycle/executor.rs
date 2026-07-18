@@ -463,6 +463,88 @@ impl StackExecutionContext<'_> {
         None
     }
 
+    /// Run one already-parsed action stack — a task's `setup:` or `teardown:`.
+    ///
+    /// A task stack has no event block of its own, so it never emits top-level
+    /// communication; only the items run. Mutations reach the live cell exactly
+    /// as they do for an event stack.
+    pub fn execute_action_stack(
+        &self,
+        items: &[super::actions::LifecycleStackItem],
+    ) -> LifecycleEventOutcome {
+        self.execute_stack(items)
+    }
+
+    /// Dispatch one action as a task's `side_effect:` primary and return the
+    /// value the effect produced.
+    ///
+    /// Only a side-effect action is executable work: the standard grammar also
+    /// admits communication and flow-control verbs, and those are rejected here
+    /// rather than silently succeeding with no effect.
+    ///
+    /// `no_error: true` keeps its dispatch-only meaning — a failed effect is
+    /// suppressed and yields `Value::Null`, while an expression-layer raise
+    /// still surfaces.
+    ///
+    /// ## Errors
+    ///
+    /// Returns the error snapshot for an unsuppressed dispatch failure, an
+    /// expression-layer raise, or a non-side-effect action.
+    pub fn dispatch_task_side_effect(
+        &self,
+        action: &LifecycleAction,
+    ) -> Result<Value, LifecycleErrorInfo> {
+        let mut working: Map<String, Value> = match self.live_frontmatter {
+            Some(cell) => cell.borrow().clone(),
+            None => self.frontmatter.clone(),
+        };
+        let result = self.dispatch_task_side_effect_inner(action, &mut working);
+        if let Some(cell) = self.live_frontmatter {
+            *cell.borrow_mut() = working;
+        }
+        result
+    }
+
+    /// The dispatch half of [`Self::dispatch_task_side_effect`], against a
+    /// caller-owned working map.
+    fn dispatch_task_side_effect_inner(
+        &self,
+        action: &LifecycleAction,
+        working: &mut Map<String, Value>,
+    ) -> Result<Value, LifecycleErrorInfo> {
+        let dispatched = match &action.kind {
+            LifecycleActionKind::SideEffect(effect) => {
+                self.dispatch_side_effect(&effect.verb, &effect.args, working)
+            }
+            LifecycleActionKind::ExpressionFunction(func)
+                if is_known_side_effect(&func.function) =>
+            {
+                self.dispatch_side_effect(&func.function, &func.args, working)
+            }
+            _ => {
+                return Err(LifecycleErrorInfo::from_action_failure(
+                    "side_effect",
+                    "value is not a side-effect action",
+                ));
+            }
+        };
+        match dispatched {
+            Ok(value) => Ok(value),
+            Err(ActionFailure::Dispatch(info)) if action.no_error => {
+                warn!(
+                    kind = info.kind,
+                    variant = %info.variant,
+                    message = %info.msg,
+                    "task side effect errored (no_error: suppressed)"
+                );
+                Ok(Value::Null)
+            }
+            Err(failure) => Err(match failure {
+                ActionFailure::Evaluation(info) | ActionFailure::Dispatch(info) => info,
+            }),
+        }
+    }
+
     /// Return a copy of this context targeting a different lifecycle signal.
     ///
     /// Used by [`LifecycleRunGuard::execute_event`](super::lifecycle::LifecycleRunGuard::execute_event)

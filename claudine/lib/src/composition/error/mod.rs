@@ -1446,6 +1446,122 @@ pub enum CompositionError {
         source: Option<Box<MarkdownError>>,
     },
 
+    // -- Atomic task execution (phase 7) ---------------------------------------
+    /// A task's `timeout:` value is not a duration the repository's parser
+    /// accepts.
+    ///
+    /// A bare integer is deliberately rejected along with `0s`: the unit is part
+    /// of the grammar, and an unbounded shell command has no expression here
+    /// (spec → *Task Resolution and Lifecycle Semantics*).
+    #[error("`timeout` in {} is not a valid duration: {source}", context.task)]
+    SequenceTaskTimeoutInvalid {
+        /// Where it was authored and what it said. Boxed — the *context*, never
+        /// the cause — so the variant stays under the `result_large_err` floor
+        /// while the `HarnessError` remains an unboxed, downcastable chain
+        /// member (the rule [`InvalidFileReference`] records).
+        ///
+        /// [`InvalidFileReference`]: CompositionError::InvalidFileReference
+        context: Box<TaskTimeoutContext>,
+        /// The parser's typed rejection.
+        #[source]
+        source: crate::harness::HarnessError,
+    },
+
+    /// A task's shell command finished with a non-zero exit code.
+    #[error("command `{command}` in {task} exited with code {code}")]
+    SequenceTaskShellExit {
+        /// A label locating the task.
+        task: String,
+        /// The approved command bytes that ran.
+        command: String,
+        /// The process exit code.
+        code: i32,
+    },
+
+    /// A task's shell command exceeded its per-command timeout and was killed.
+    #[error("command `{command}` in {task} timed out after {seconds}s")]
+    SequenceTaskShellTimeout {
+        /// A label locating the task.
+        task: String,
+        /// The approved command bytes that ran.
+        command: String,
+        /// The elapsed budget, in seconds.
+        seconds: f64,
+    },
+
+    /// A task's shell command could not be spawned at all.
+    #[error("command `{command}` in {task} failed to run: {source}")]
+    SequenceTaskShellSpawn {
+        /// A label locating the task.
+        task: String,
+        /// The approved command bytes that were attempted.
+        command: String,
+        /// The underlying spawn/wait failure.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// A task's `prompt:` document ran to completion but reported failure.
+    #[error("prompt `{path}` in {task} exited with code {code}")]
+    SequenceTaskPromptFailed {
+        /// A label locating the task.
+        task: String,
+        /// The composed document.
+        path: PathBuf,
+        /// The provider's exit code.
+        code: i32,
+    },
+
+    /// A task's `side_effect:` value is not a side-effect action.
+    ///
+    /// The value uses the standard lifecycle action grammar, which also admits
+    /// communication and flow-control verbs; only a side effect is executable
+    /// work, so anything else is an authoring error rather than a silent no-op.
+    #[error("`side_effect` in {task} is not a side-effect action: {problem}")]
+    SequenceTaskInvalidSideEffect {
+        /// A label locating the task.
+        task: String,
+        /// What the value was instead.
+        problem: String,
+    },
+
+    /// A task parameter targets a reserved key.
+    #[error(
+        "parameter `{key}` in {task} targets a reserved key; `state`, `previous`, `next`, \
+         `outputs`, and `sequence_id` are executor-owned views"
+    )]
+    SequenceTaskParamReserved {
+        /// A label locating the task.
+        task: String,
+        /// The refused parameter name.
+        key: String,
+    },
+
+    /// A task value failed just-in-time evaluation against the effective state.
+    #[error("`{field}` in {task} could not be evaluated: {message}")]
+    SequenceTaskValueResolution {
+        /// A label locating the task.
+        task: String,
+        /// The task field being evaluated (`params.topic`, `timeout`).
+        field: String,
+        /// The underlying evaluation failure.
+        message: String,
+        /// The typed lower-layer failure.
+        #[source]
+        source: Box<MarkdownError>,
+    },
+
+    /// A task shape reached execution that only a later phase can schedule.
+    #[error("{construct} in {task} is not executable yet: {detail}")]
+    SequenceTaskUnsupported {
+        /// A label locating the task.
+        task: String,
+        /// The construct that was reached.
+        construct: String,
+        /// What the author should do instead.
+        detail: String,
+    },
+
     /// One or more sequence steps failed provider/model resolution in non-TTY mode.
     #[error("sequence selection failed for {failure_count} step(s): {failures:?}")]
     SequenceSelectionFailed {
@@ -2340,6 +2456,16 @@ fn format_missing_names(missing: &[MissingProperty]) -> String {
         .map(|m| m.name.as_str())
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// Where a rejected task `timeout:` was authored, for
+/// [`CompositionError::SequenceTaskTimeoutInvalid`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskTimeoutContext {
+    /// A label locating the task.
+    pub task: String,
+    /// The authored value, rendered.
+    pub raw: String,
 }
 
 /// Per-step missing-property record for [`CompositionError::SequenceMissingProperties`].

@@ -65,13 +65,17 @@ pub fn is_reserved_state_key(key: &str) -> bool {
 /// - `shell`: `timeout` — a per-command duration.
 /// - `side_effect`: no additions.
 /// - `group`: no additions (a group configures itself in its own object).
-/// - `task`: no additions — an external `task:` reference is immutable at the
-///   referencing site (no v1 patching/overriding).
+/// - `task`: **nothing at all** — an external `task:` reference expands the
+///   referenced file exclusively and immutably, so even a referencing-site
+///   `name:` would be a patch the expansion silently discards. A sequence step
+///   is unaffected: its `name` is the step's state name, extracted before task
+///   options are read.
 pub fn allowed_task_options(field: ExecutableField) -> &'static [&'static str] {
     match field {
         ExecutableField::Prompt => &["name", "setup", "teardown", "params", "operation", "flow"],
         ExecutableField::Shell => &["name", "setup", "teardown", "timeout"],
         ExecutableField::SideEffect => &["name", "setup", "teardown"],
-        ExecutableField::Group | ExecutableField::Task => &["name"],
+        ExecutableField::Group => &["name"],
+        ExecutableField::Task => &[],
     }
 }
