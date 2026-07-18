@@ -99,6 +99,11 @@ pub struct PrepareOptions {
     /// default) preserves the legacy ambient-CWD behavior for library-only
     /// callers and tests.
     pub file_ref_fallback_dir: Option<PathBuf>,
+    /// Frontmatter keys whose object values render their `name` field in inline
+    /// string context (`{{state}}` → the name). Sequence preparation sets this
+    /// to the reserved overlay keys (`state`/`previous`/`next`); every other
+    /// caller leaves it empty, so this is a no-op for `compose`/`inline-compose`.
+    pub name_coercion_keys: Vec<String>,
 }
 
 /// Walk up from a file path to find the nearest `.git` directory.
@@ -186,6 +191,9 @@ pub fn prepare_direct(
     };
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);
+    }
+    if !options.name_coercion_keys.is_empty() {
+        compose_opts = compose_opts.with_name_coercion_keys(options.name_coercion_keys.clone());
     }
     if let Some(approved) = options.pre_approved_commands {
         compose_opts = compose_opts.with_pre_approved_commands(approved);
@@ -362,6 +370,9 @@ pub fn prepare_inline(
     };
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);
+    }
+    if !options.name_coercion_keys.is_empty() {
+        compose_opts = compose_opts.with_name_coercion_keys(options.name_coercion_keys.clone());
     }
     if let Some(approved) = options.pre_approved_commands {
         compose_opts = compose_opts.with_pre_approved_commands(approved);
