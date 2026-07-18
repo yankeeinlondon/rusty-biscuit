@@ -8,7 +8,6 @@
 //! for the contract this module implements.
 
 use std::ffi::OsStr;
-use std::io::Read;
 use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
@@ -57,12 +56,125 @@ pub(crate) mod timeouts {
     /// Program `--version` probes.
     pub(crate) const PROGRAM_SCHEMA: Duration = Duration::from_secs(3);
 
+    /// Explicit remote-tracking refresh (`git fetch`).
+    pub(crate) const REMOTE_REFRESH: Duration = Duration::from_secs(30);
+
     /// NTP status queries.
     pub(crate) const NTP: Duration = Duration::from_secs(3);
 }
 
 /// How often the deadline is checked while the child runs.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+#[cfg(unix)]
+mod pipe_reader {
+    use std::io::Read;
+    use std::os::fd::AsRawFd;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    pub(super) struct DrainControl {
+        active: Arc<AtomicBool>,
+    }
+
+    impl DrainControl {
+        pub(super) fn new() -> Self {
+            Self {
+                active: Arc::new(AtomicBool::new(true)),
+            }
+        }
+
+        pub(super) fn configure<R>(&self, _pipe: &R) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        pub(super) fn spawn<R>(&self, mut pipe: R) -> std::thread::JoinHandle<Vec<u8>>
+        where
+            R: AsRawFd + Read + Send + 'static,
+        {
+            let active = Arc::clone(&self.active);
+            std::thread::spawn(move || {
+                let mut output = Vec::new();
+                let mut chunk = [0_u8; 8192];
+                let fd = pipe.as_raw_fd();
+                let mut cleanup_deadline = None;
+                loop {
+                    if !active.load(Ordering::Relaxed) {
+                        let deadline = cleanup_deadline
+                            .get_or_insert_with(|| Instant::now() + Duration::from_millis(50));
+                        if Instant::now() >= *deadline {
+                            break;
+                        }
+                    }
+                    let mut poll_fd = libc::pollfd {
+                        fd,
+                        events: libc::POLLIN,
+                        revents: 0,
+                    };
+                    // SAFETY: `poll_fd` points to one valid entry and `fd`
+                    // remains owned by `pipe` for the lifetime of this thread.
+                    let ready = unsafe { libc::poll(&mut poll_fd, 1, 10) };
+                    if ready == 0 {
+                        if cleanup_deadline.is_some() {
+                            break;
+                        }
+                        continue;
+                    }
+                    if ready == -1 {
+                        if std::io::Error::last_os_error().kind()
+                            == std::io::ErrorKind::Interrupted
+                        {
+                            continue;
+                        }
+                        break;
+                    }
+                    match pipe.read(&mut chunk) {
+                        Ok(0) => break,
+                        Ok(read) => output.extend_from_slice(&chunk[..read]),
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                        Err(_) => break,
+                    }
+                }
+                output
+            })
+        }
+
+        pub(super) fn finish(&self) {
+            self.active.store(false, Ordering::Relaxed);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+mod pipe_reader {
+    use std::io::Read;
+
+    pub(super) struct DrainControl;
+
+    impl DrainControl {
+        pub(super) fn new() -> Self {
+            Self
+        }
+
+        pub(super) fn configure<R>(&self, _pipe: &R) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        pub(super) fn spawn<R>(&self, mut pipe: R) -> std::thread::JoinHandle<Vec<u8>>
+        where
+            R: Read + Send + 'static,
+        {
+            std::thread::spawn(move || {
+                let mut output = Vec::new();
+                let _ = pipe.read_to_end(&mut output);
+                output
+            })
+        }
+
+        pub(super) fn finish(&self) {}
+    }
+}
 
 #[cfg(unix)]
 mod process_tree {
@@ -284,16 +396,28 @@ where
     A: AsRef<OsStr>,
 {
     let mut command = Command::new(program.as_ref());
+    command.args(args.iter().map(AsRef::as_ref));
+    run_command_with_timeout(&mut command, timeout)
+}
+
+/// Runs a configured command under an explicit deadline, capturing both pipes.
+///
+/// This is the builder-capable form of [`run_with_timeout`]. The caller's
+/// executable, arguments, working directory, and environment are preserved;
+/// this boundary owns stdin and captured stdout/stderr so it can enforce the
+/// same supervision contract for every subprocess.
+pub(crate) fn run_command_with_timeout(
+    command: &mut Command,
+    timeout: Duration,
+) -> Result<CapturedOutput, ProcessError> {
     command
-        .args(args.iter().map(AsRef::as_ref))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    process_tree::configure(&mut command);
+    process_tree::configure(command);
 
-    let mut child = command
-        .spawn()
-        .map_err(ProcessError::Spawn)?;
+    let program = command.get_program().to_owned();
+    let mut child = command.spawn().map_err(ProcessError::Spawn)?;
     performance::increment_counter(counters::PROC_SPAWNS, 1);
     let process_tree = match process_tree::ProcessTree::attach(&child) {
         Ok(process_tree) => process_tree,
@@ -304,22 +428,29 @@ where
         }
     };
 
-    // Drain both pipes concurrently with the wait. `take()` moves the handles out
-    // so dropping `child` later cannot close them from under the readers.
-    let stdout_handle = child.stdout.take().map(|mut pipe| {
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = pipe.read_to_end(&mut buf);
-            buf
+    // Unix pipe readers use bounded readiness polling because a descendant can
+    // leave the process group while retaining an inherited write end. Windows
+    // Job Objects provide real tree containment, so EOF remains authoritative.
+    let drain_control = pipe_reader::DrainControl::new();
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    if let Err(error) = stdout
+        .as_ref()
+        .map(|pipe| drain_control.configure(pipe))
+        .transpose()
+        .and_then(|_| {
+            stderr
+                .as_ref()
+                .map(|pipe| drain_control.configure(pipe))
+                .transpose()
         })
-    });
-    let stderr_handle = child.stderr.take().map(|mut pipe| {
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = pipe.read_to_end(&mut buf);
-            buf
-        })
-    });
+    {
+        let _ = process_tree.terminate();
+        let _ = child.wait();
+        return Err(ProcessError::Spawn(error));
+    }
+    let stdout_handle = stdout.map(|pipe| drain_control.spawn(pipe));
+    let stderr_handle = stderr.map(|pipe| drain_control.spawn(pipe));
 
     let start = Instant::now();
     let result = loop {
@@ -329,9 +460,9 @@ where
                 if start.elapsed() >= timeout {
                     performance::increment_counter(counters::PROC_TIMEOUTS, 1);
                     warn!(
-                        program = %program.as_ref().to_string_lossy(),
+                        program = %program.to_string_lossy(),
                         timeout_ms = timeout.as_millis(),
-                        "subprocess exceeded its deadline; killing process tree"
+                        "subprocess exceeded its deadline; terminating supervised processes"
                     );
                     let _ = process_tree.terminate();
                     // Reap, so the killed child cannot linger as a zombie.
@@ -349,13 +480,15 @@ where
     };
 
     // The direct child may exit while a descendant still owns an inherited pipe
-    // handle. End the tree before joining readers so those handles cannot extend
-    // the helper's advertised deadline.
+    // handle. Terminate the process group or Job Object before joining readers;
+    // cancellable Unix readers cover descendants that escaped the group.
     let _ = process_tree.terminate();
+    drain_control.finish();
 
-    // The process tree has ended, so every inherited pipe write handle is closed
-    // and both readers see EOF. Join on every path so no drain thread can outlive
-    // this call. A panicked reader degrades to empty output.
+    // Unix readers drain every byte already available, then stop at the bounded
+    // poll interval; they never require EOF from a session-detached descendant.
+    // Windows readers observe EOF after Job Object termination. A panic degrades
+    // to empty output.
     let stdout = stdout_handle
         .map(|h| h.join().unwrap_or_default())
         .unwrap_or_default();
@@ -395,6 +528,13 @@ mod tests {
     const LARGE_OUTPUT_CHILD: &str = "process::tests::child_writes_large_output";
     const PIPE_HOLDING_CHILD: &str = "process::tests::child_spawns_pipe_holding_descendant";
     const PIPE_HOLDING_DESCENDANT: &str = "process::tests::pipe_holding_descendant";
+    const CONFIGURED_CHILD: &str = "process::tests::configured_child";
+    #[cfg(unix)]
+    const DETACHED_PIPE_HOLDING_CHILD: &str =
+        "process::tests::child_spawns_detached_pipe_holding_descendant";
+    #[cfg(unix)]
+    const DETACHED_PIPE_HOLDING_DESCENDANT: &str =
+        "process::tests::detached_pipe_holding_descendant";
     const SLEEPING_CHILD: &str = "process::tests::child_sleeps";
 
     fn test_child_args(name: &str) -> Vec<std::ffi::OsString> {
@@ -423,6 +563,16 @@ mod tests {
 
     #[test]
     #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    fn configured_child() {
+        println!(
+            "{}|{}",
+            std::env::current_dir().unwrap().display(),
+            std::env::var("SNIFF_CONFIGURED_CHILD").unwrap_or_default()
+        );
+    }
+
+    #[test]
+    #[ignore = "subprocess fixture invoked by the process behavior tests"]
     fn child_spawns_pipe_holding_descendant() {
         let executable = std::env::current_exe().expect("current test executable should resolve");
         let args = test_child_args(PIPE_HOLDING_DESCENDANT);
@@ -436,6 +586,50 @@ mod tests {
     #[ignore = "subprocess fixture invoked by the process behavior tests"]
     fn pipe_holding_descendant() {
         std::thread::sleep(Duration::from_secs(30));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    fn child_spawns_detached_pipe_holding_descendant() {
+        let executable = std::env::current_exe().expect("current test executable should resolve");
+        let args = test_child_args(DETACHED_PIPE_HOLDING_DESCENDANT);
+        let descendant = std::process::Command::new(executable)
+            .args(args)
+            .spawn()
+            .expect("detached pipe-holding descendant should spawn");
+        let descendant_pid = libc::pid_t::try_from(descendant.id())
+            .expect("descendant process ID should fit pid_t");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            // SAFETY: `descendant_pid` names the child spawned above. A session
+            // leader's process-group ID equals its PID.
+            if unsafe { libc::getpgid(descendant_pid) } == descendant_pid {
+                std::thread::sleep(Duration::from_secs(30));
+                return;
+            }
+            std::thread::sleep(POLL_INTERVAL);
+        }
+        panic!("descendant did not establish its own session");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    fn detached_pipe_holding_descendant() {
+        use std::io::Write;
+
+        // SAFETY: this fixture is a fresh child and is not a process-group
+        // leader, so it can establish an isolated session for the regression.
+        assert_ne!(unsafe { libc::setsid() }, -1, "setsid should succeed");
+        let mut stdout = std::io::stdout();
+        let mut stderr = std::io::stderr();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while Instant::now() < deadline {
+            if stdout.write_all(b"o").is_err() || stderr.write_all(b"e").is_err() {
+                return;
+            }
+        }
     }
 
     /// A child that outstrips its pipe buffer must still be captured whole.
@@ -472,6 +666,31 @@ mod tests {
         assert!(out.stderr.len() >= 1_048_576);
     }
 
+    #[test]
+    fn configured_command_preserves_cwd_and_environment() {
+        let executable = std::env::current_exe().expect("current test executable should resolve");
+        let args = test_child_args(CONFIGURED_CHILD);
+        let working_dir = tempfile::tempdir().expect("temporary working directory should exist");
+        let mut command = Command::new(executable);
+        command
+            .args(args)
+            .current_dir(working_dir.path())
+            .env("SNIFF_CONFIGURED_CHILD", "preserved");
+
+        let output = run_command_with_timeout(&mut command, Duration::from_secs(5))
+            .expect("configured child should complete");
+
+        assert!(output.status.success());
+        let expected = format!(
+            "{}|preserved",
+            working_dir.path().canonicalize().unwrap().display()
+        );
+        assert!(
+            output.stdout_lossy().lines().any(|line| line == expected),
+            "configured child output should contain the preserved cwd and environment"
+        );
+    }
+
     /// Tests inject a short deadline rather than sleeping for a production one.
     #[test]
     fn a_hung_child_is_killed_at_its_deadline() {
@@ -502,6 +721,34 @@ mod tests {
         assert!(
             start.elapsed() < Duration::from_secs(5),
             "descendant-held pipes must not delay reader joins"
+        );
+    }
+
+    /// A Unix descendant can escape the helper's process group with `setsid`
+    /// while retaining both inherited pipes. Reader cleanup must remain bounded
+    /// even though Unix has no Job Object equivalent to contain that process.
+    #[cfg(unix)]
+    #[test]
+    fn a_session_detached_descendant_cannot_block_pipe_cleanup() {
+        let executable = std::env::current_exe().expect("current test executable should resolve");
+        let args = test_child_args(DETACHED_PIPE_HOLDING_CHILD);
+        let start = Instant::now();
+        let result = run_with_timeout(executable, &args, Duration::from_secs(3));
+
+        assert!(matches!(result, Err(ProcessError::Timeout)));
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "session-detached pipe holders must not delay reader cleanup"
+        );
+
+        // The original child was reaped even though its detached descendant is
+        // no longer addressable through the original process group.
+        // SAFETY: WNOHANG only reports already-exited children.
+        let rc = unsafe { libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) };
+        assert_eq!(rc, -1, "the direct child should not remain waitable");
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ECHILD)
         );
     }
 

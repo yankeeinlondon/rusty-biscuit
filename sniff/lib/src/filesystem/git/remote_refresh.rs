@@ -8,6 +8,7 @@ use gix::bstr::ByteSlice;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 use tracing::warn;
 
 use super::discovery::resolve_base_branch;
@@ -15,6 +16,7 @@ use super::status::get_repo_status_counts;
 use super::types::*;
 use crate::SniffError;
 use crate::performance::{self, counters};
+use crate::process::{CapturedOutput, ProcessError, run_command_with_timeout, timeouts};
 
 #[derive(Debug, Clone)]
 struct ObservedBranch {
@@ -587,6 +589,23 @@ pub(crate) fn get_remotes_from_snapshot(
 /// (up to `max_concurrency`, clamped to 1–3) to reduce latency.  Terminal
 /// prompts are disabled so CLI use does not block on credential input.
 pub(crate) fn refresh_remote_tracking_refs(repo: &gix::Repository, max_concurrency: usize) {
+    refresh_remote_tracking_refs_with_runner(
+        repo,
+        max_concurrency,
+        timeouts::REMOTE_REFRESH,
+        &run_command_with_timeout,
+    );
+}
+
+type CommandRunner<'a> =
+    dyn Fn(&mut Command, Duration) -> Result<CapturedOutput, ProcessError> + Sync + 'a;
+
+fn refresh_remote_tracking_refs_with_runner(
+    repo: &gix::Repository,
+    max_concurrency: usize,
+    timeout: Duration,
+    runner: &CommandRunner<'_>,
+) {
     let Some(repo_root) = repo.workdir() else {
         return;
     };
@@ -603,7 +622,7 @@ pub(crate) fn refresh_remote_tracking_refs(repo: &gix::Repository, max_concurren
 
     // Serial path for a single remote — avoid threading overhead.
     if remote_names.len() == 1 {
-        fetch_single_remote(repo_root, &remote_names[0]);
+        fetch_single_remote(repo_root, &remote_names[0], timeout, runner);
         return;
     }
 
@@ -619,7 +638,7 @@ pub(crate) fn refresh_remote_tracking_refs(repo: &gix::Repository, max_concurren
                 let name = name.clone();
                 let repo_root = &repo_root;
                 handles.push(s.spawn(move || {
-                    fetch_single_remote(repo_root, &name);
+                    fetch_single_remote(repo_root, &name, timeout, runner);
                 }));
             }
             // Wait for the current batch before starting the next.
@@ -633,14 +652,18 @@ pub(crate) fn refresh_remote_tracking_refs(repo: &gix::Repository, max_concurren
 }
 
 /// Run `git fetch --quiet --prune <remote>` for a single remote.
-fn fetch_single_remote(repo_root: &std::path::Path, remote_name: &str) {
-    performance::increment_counter(counters::PROC_SPAWNS, 1);
-    let _ = Command::new("git")
+fn fetch_single_remote(
+    repo_root: &std::path::Path,
+    remote_name: &str,
+    timeout: Duration,
+    runner: &CommandRunner<'_>,
+) {
+    let mut command = Command::new("git");
+    command
         .current_dir(repo_root)
         .env("GIT_TERMINAL_PROMPT", "0")
-        .args(["fetch", "--quiet", "--prune", remote_name])
-        .status()
-        .map_err(|e| {
+        .args(["fetch", "--quiet", "--prune", remote_name]);
+    let _ = runner(&mut command, timeout).map_err(|e| {
             warn!(remote = remote_name, error = %e, "git fetch failed");
             e
         });
@@ -1043,7 +1066,24 @@ mod tests {
     use super::*;
     use git2::Repository;
     use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tempfile::TempDir;
+
+    const REFRESH_TIMEOUT_CHILD: &str =
+        "filesystem::git::remote_refresh::tests::refresh_timeout_child";
+
+    fn refresh_fixture_args() -> Vec<std::ffi::OsString> {
+        [REFRESH_TIMEOUT_CHILD, "--exact", "--ignored", "--nocapture"]
+            .into_iter()
+            .map(Into::into)
+            .collect()
+    }
+
+    #[test]
+    #[ignore = "subprocess fixture invoked by the remote refresh timeout test"]
+    fn refresh_timeout_child() {
+        std::thread::sleep(Duration::from_secs(30));
+    }
 
     /// Creates a temporary git repo with a single file committed.
     fn setup_repo() -> (TempDir, Repository) {
@@ -1429,6 +1469,40 @@ mod tests {
         let gix_repo = gix::open(repo.workdir().unwrap()).unwrap();
         // Concurrency of 0 should be clamped to 1.
         refresh_remote_tracking_refs(&gix_repo, 0);
+    }
+
+    #[test]
+    fn remote_refresh_preserves_builder_configuration_and_honors_timeout() {
+        let (dir, repo) = setup_repo();
+        repo.remote("origin", "https://example.invalid/repo")
+            .unwrap();
+        let gix_repo = gix::open(dir.path()).unwrap();
+        let calls = AtomicUsize::new(0);
+        let runner = |command: &mut Command, timeout| {
+            calls.fetch_add(1, Ordering::Relaxed);
+            assert_eq!(timeout, Duration::ZERO);
+            assert_eq!(command.get_program(), "git");
+            assert_eq!(command.get_current_dir(), Some(dir.path()));
+            assert_eq!(
+                command.get_args().collect::<Vec<_>>(),
+                ["fetch", "--quiet", "--prune", "origin"].map(std::ffi::OsStr::new)
+            );
+            assert!(command.get_envs().any(|(key, value)| {
+                key == "GIT_TERMINAL_PROMPT" && value == Some(std::ffi::OsStr::new("0"))
+            }));
+
+            let executable =
+                std::env::current_exe().expect("current test executable should resolve");
+            let mut fixture = Command::new(executable);
+            fixture.args(refresh_fixture_args());
+            run_command_with_timeout(&mut fixture, timeout)
+        };
+
+        let start = std::time::Instant::now();
+        refresh_remote_tracking_refs_with_runner(&gix_repo, 2, Duration::ZERO, &runner);
+
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert!(start.elapsed() < Duration::from_secs(5));
     }
 
     #[cfg(target_os = "macos")]

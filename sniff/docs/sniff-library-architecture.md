@@ -344,17 +344,20 @@ early stop is used.
 
 ### Subprocess Deadlines
 
-Every subprocess goes through `process::run_with_timeout`, which owns the deadline, concurrent pipe
-draining, and process-tree termination/reaping. Unix probes run in a dedicated process group;
+Every subprocess goes through `process::run_with_timeout` or its builder-capable
+`process::run_command_with_timeout` form, which own the deadline, concurrent pipe draining, and
+process-tree termination/reaping. The builder form preserves caller-configured working directories
+and environments. Unix probes run in a dedicated process group;
 Windows probes run in a kill-on-close Job Object. Descendant-held pipe handles therefore cannot
 extend the helper's deadline. **Never poll `try_wait()` over a piped stdout you are not draining** —
 the child blocks in `write()` past one pipe buffer (64 KiB Linux, ~16 KiB macOS), never exits, and
 gets killed at its deadline with its output lost.
 
 Deadlines are policy and live in `process::timeouts`: 3s for service, Windows locale, BurntToast,
-program-schema, and NTP commands; 5s for `diskutil`; and 2s for host-capability probes. Changing one
-is a policy change, not an incidental refactor. Tests inject short deadlines rather than sleeping for
-a production one.
+program-schema, and NTP commands; 5s for `diskutil`; 2s for host-capability probes; and 30s for
+explicit remote refresh. Installation commands use the caller's `InstallOptions::timeout_secs`
+(30s by default). Changing one is a policy change, not an incidental refactor. Tests inject short
+deadlines rather than sleeping for a production one.
 
 Service enrichment is chunked, not per-service: systemd was `1 + N_running` spawns and runit was `N`;
 both now batch at `ENRICHMENT_CHUNK` (128), which bounds command-line length only — not how many
