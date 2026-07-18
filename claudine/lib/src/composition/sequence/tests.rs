@@ -1076,13 +1076,13 @@ fn item_fields_shadow_document_globals() {
 
 // -- Sequence Plus: characterization + clean-break guardrails --------------
 //
-// Phase 1 of the Sequence Plus refactor freezes the retained pre-refactor
-// contract and pins the deliberate removals. The clean-break/blocked tests
-// below encode the *target* behavior and are `#[ignore]`d until the phase that
-// implements each removal; un-ignoring them (and updating the paired
-// characterization test) is the checkpoint for that phase. They are kept green-
-// suite-neutral on purpose: the harness gates each phase on a passing `just
-// test`, so a permanently-red test would block every subsequent phase.
+// These pin the deliberate removals of the Sequence Plus clean break: the
+// retired root overlay names, the external `list:` shape, and group `loop`.
+// Each was authored `#[ignore]`d in Phase 1 against behavior that did not yet
+// exist, then un-ignored by the phase that implemented the removal — overlay
+// names and `list:` in Phase 3, group `loop` in Phase 5. All now run in the
+// default suite, so a regression that reinstates any retired name or shape
+// fails `just test` rather than passing silently.
 
 mod clean_break {
     use super::*;

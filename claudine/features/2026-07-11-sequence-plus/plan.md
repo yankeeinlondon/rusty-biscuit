@@ -1,7 +1,7 @@
 ---
 total_phases: 13
 created: 2026-07-12
-phase: 12
+phase: 13
 yolo: "true"
 source_files_during_phase_1:
   - claudine/lib/src/composition/sequence/tests.rs
@@ -269,10 +269,123 @@ skills_files_updated_during_phase_12:
   - .claude/skills/claudine/timeline.md
 packages_during_phase_12:
   - claudine
+source_files_during_phase_13:
+  - claudine/lib/src/composition/types.rs
+  - claudine/lib/src/composition/sequence/tests.rs
+docs_updated_during_phase_13:
+  - claudine/features/2026-07-11-sequence-plus/plan.md
+docs_created_during_phase_13:
+  - claudine/features/2026-07-11-sequence-plus/validation-matrix.md
+skills_files_updated_during_phase_13: []
+packages_during_phase_13:
+  - claudine
 packages:
   - biscuit-file
   - darkmatter
   - claudine
+source_code:
+  - biscuit-file/lib/src/lib.rs
+  - biscuit-file/lib/src/list_format.rs
+  - claudine/cli/src/commands/compose/loop_run.rs
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/cli/src/commands/context/format.rs
+  - claudine/cli/src/commands/sequence.rs
+  - claudine/cli/src/commands/wrap/composition/mod.rs
+  - claudine/cli/src/commands/wrap/composition/pipeline.rs
+  - claudine/cli/src/commands/wrap/composition/preflight.rs
+  - claudine/cli/src/commands/wrap/composition/runner.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+  - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+  - claudine/cli/src/commands/wrap/harness_orch/types.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/mod.rs
+  - claudine/cli/src/commands/wrap/overlay.rs
+  - claudine/cli/src/commands/wrap/sequence/iterate.rs
+  - claudine/cli/src/commands/wrap/sequence/jit.rs
+  - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+  - claudine/cli/src/commands/wrap/sequence/mod.rs
+  - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+  - claudine/cli/src/commands/wrap/sequence/task_frames.rs
+  - claudine/cli/src/commands/wrap/sequence/task_run.rs
+  - claudine/cli/src/commands/wrap/stream_io.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/src/perf/mod.rs
+  - claudine/cli/src/perf/report.rs
+  - claudine/cli/src/perf/tests/perf_tree.rs
+  - claudine/cli/src/perf/tests/report.rs
+  - claudine/cli/src/perf/tree.rs
+  - claudine/cli/tests/composition_outputs.rs
+  - claudine/cli/tests/error_guards/transport-allow.toml
+  - claudine/cli/tests/level2_sequence_overlay_pty.rs
+  - claudine/cli/tests/sequence_cli.rs
+  - claudine/cli/tests/sequence_errors_cli.rs
+  - claudine/cli/tests/sequence_groups.rs
+  - claudine/cli/tests/sequence_jit.rs
+  - claudine/cli/tests/sequence_perf.rs
+  - claudine/cli/tests/sequence_sources_cli.rs
+  - claudine/docs/providers/dispatch-inventory.json
+  - claudine/lib/src/composition/error/mod.rs
+  - claudine/lib/src/composition/error/tests.rs
+  - claudine/lib/src/composition/lifecycle/executor.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/mutation_visibility.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+  - claudine/lib/src/composition/lifecycle/mod.rs
+  - claudine/lib/src/composition/lifecycle/parse.rs
+  - claudine/lib/src/composition/lifecycle/tests/guard_runtime.rs
+  - claudine/lib/src/composition/looping/engine.rs
+  - claudine/lib/src/composition/mod.rs
+  - claudine/lib/src/composition/preflight.rs
+  - claudine/lib/src/composition/prepare.rs
+  - claudine/lib/src/composition/prepare/tests.rs
+  - claudine/lib/src/composition/resolve.rs
+  - claudine/lib/src/composition/runtime_state.rs
+  - claudine/lib/src/composition/runtime_state/tests.rs
+  - claudine/lib/src/composition/sequence.rs
+  - claudine/lib/src/composition/sequence/data.rs
+  - claudine/lib/src/composition/sequence/expr.rs
+  - claudine/lib/src/composition/sequence/grammar.rs
+  - claudine/lib/src/composition/sequence/mod.rs
+  - claudine/lib/src/composition/sequence/model.rs
+  - claudine/lib/src/composition/sequence/normalize.rs
+  - claudine/lib/src/composition/sequence/preflight/mod.rs
+  - claudine/lib/src/composition/sequence/preflight/shape.rs
+  - claudine/lib/src/composition/sequence/preflight/tests.rs
+  - claudine/lib/src/composition/sequence/reserved.rs
+  - claudine/lib/src/composition/sequence/source.rs
+  - claudine/lib/src/composition/sequence/task/group.rs
+  - claudine/lib/src/composition/sequence/task/mod.rs
+  - claudine/lib/src/composition/sequence/task/shell.rs
+  - claudine/lib/src/composition/sequence/task/tests.rs
+  - claudine/lib/src/composition/sequence/tests.rs
+  - claudine/lib/src/composition/types.rs
+  - claudine/lib/src/composition/types/tests.rs
+  - claudine/lib/src/render/mod.rs
+  - claudine/lib/src/render/task_stream.rs
+  - claudine/lib/src/render/task_stream/tests.rs
+  - claudine/lib/tests/agent_errors_fleet.rs
+  - darkmatter/lib/src/effects/catalog.rs
+  - darkmatter/lib/src/effects/error.rs
+  - darkmatter/lib/src/effects/verbs.rs
+  - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+  - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+documentation:
+  - .claude/skills/claudine/SKILL.md
+  - .claude/skills/claudine/architecture.md
+  - .claude/skills/claudine/cli-reference.md
+  - .claude/skills/claudine/timeline.md
+  - claudine/docs/topics/flow-control/sequences.md
+  - claudine/features/2026-07-11-sequence-plus/phase-1-baseline.md
+  - claudine/features/2026-07-11-sequence-plus/plan.md
+  - claudine/features/2026-07-11-sequence-plus/validation-matrix.md
 ---
 
 # Sequence Plus Execution Plan
@@ -503,10 +616,10 @@ behavior.
 **Goal:** Demonstrate that the implementation changed only the intended
 symbols, flows, packages, and public contracts.
 
-- [ ] Run GitNexus `detect_changes({scope: "compare", base_ref: "main"})`; inspect every affected symbol/execution flow and resolve or document anything outside Sequence Plus, shared list parsing, Darkmatter `set`, output capture, rendering, and reporting.
-- [ ] Re-run upstream impact analysis for the final forms of the HIGH-risk resolver/normalization symbols and verify their direct dependents are covered by tests.
-- [ ] Review `git diff --check`, the full diff, and working-tree status for accidental formatting, unrelated edits, stale comments, generated artifacts, or missing documentation.
-- [ ] Produce a validation matrix linking each specification acceptance criterion to its test file and command, including skipped L2/platform cases and the reason for each skip.
-- [ ] Confirm the implementation did not add deprecation aliases, nested sequences/groups, group-loop semantics, checkpoint/resume, or unapproved process-global mutation.
-- [ ] Move the feature directory to `_completed` only when the project workflow explicitly authorizes closure; do not commit or move lifecycle directories as an implicit part of implementation.
-- [ ] **Final validation checkpoint:** all required commands pass, GitNexus reports only expected blast radius, the acceptance matrix is complete, and the feature is ready for a separate review/commit operation.
+- [x] Run GitNexus `detect_changes({scope: "compare", base_ref: "main"})`; inspect every affected symbol/execution flow and resolve or document anything outside Sequence Plus, shared list parsing, Darkmatter `set`, output capture, rendering, and reporting. *(Run against `main` first: 597 files / 1.9M chars of result, because this branch also carries the **error-prop** and **file-resolution** features. `main` is therefore the wrong baseline for a Sequence-Plus scope audit, so the run was repeated against the feature's own base `51beaeec5` (parent of phase 1's `08e78ecc2`). Scoped result: **1417 touched symbols across 100 files**, distributed claudine/lib 929, claudine/cli 297, darkmatter/lib 103, biscuit-file/lib 36, docs 32, feature dir 19. Every non-claudine file is in the declared shared-primitive scope: `biscuit-file` is `list_format.rs` only; darkmatter is `effects/{catalog,error,verbs}.rs` (the `set` verb) plus the opt-in name-coercion thread (`frontmatter_interpolation.rs`, `context/{options,effective_state}.rs`, `expression/functions/mod.rs`, `pipeline/mod.rs`, `preflight/collect.rs`). The 56 "touched symbols" in `frontmatter_interpolation.rs` are line-shift attributions, not 56 semantic edits — the diff adds `with_name_coercion_keys`, one `get_string` branch, and tests. Affected execution flows are `Execute_sequence`, `Run_composition_body`, `Run_compose_pipeline{,_internal}`, and `Resolve_prepared_transclusion` — all expected. **Nothing outside scope.**)*
+- [x] Re-run upstream impact analysis for the final forms of the HIGH-risk resolver/normalization symbols and verify their direct dependents are covered by tests. *(All six survive under their original names. `resolve_sequence_plan` **CRITICAL** (33 direct, 158 transitive); `build_step_overlay` **HIGH** (9 direct, 84); `run_phase_1c_with_schema`, `run_sequence_steps`, `execute_composition_request_inner_with_guard` **HIGH** (1–2 direct each); `execute_sequence` **LOW** (1 direct). Affected modules are only Task/Sequence/Preflight/Jit/Composition/Compose/Commands — no leakage into `linking`, `mcp`, `dispatch`, `stream`, `protect`, or `model_catalog`. **Dependent coverage:** all 33 direct dependents of `resolve_sequence_plan` are test functions or test fixtures (`graph_for`, `Fixture::build`, `plan_from`, `plan_from_frontmatter`, `two_step_plan`) — the CRITICAL rating is driven by test density, not production fan-out. Production callers are narrow and each covered end to end: `resolve_sequence_plan_with` ← `cli/commands/sequence.rs:271` (single CLI entry); `build_step_overlay` ← `jit.rs:92`, `phase1c.rs:21`, `preflight/mod.rs:242`.)*
+- [x] Review `git diff --check`, the full diff, and working-tree status for accidental formatting, unrelated edits, stale comments, generated artifacts, or missing documentation. *(**Two real defects found and fixed.** (1) `git diff --check` flagged `composition/types.rs:830: new blank line at EOF` — stripped. (2) **Comment drift:** the `clean_break` module header in `sequence/tests.rs` still described its tests as ``#[ignore]``d "until the phase that implements each removal", but all three were un-ignored in phases 3 and 5 — the very next docblock already said "post-Sequence-Plus, Phase 3". Per the repo drift rule the code is authoritative, so the comment was rewritten to describe the present state. Swept clean otherwise: no `TODO`/`FIXME`/`HACK` added, no `dbg!`/debug `eprintln!` added, no `#[deprecated]` added, no stray `#[ignore]` (the remaining ones are pre-existing perf/diagnostic harnesses and the Windows-only Ctrl+C case). Generated artifacts in range are legitimately regenerated: `dispatch-inventory.json` and `.claudine/memory/commits.md`. **Working tree carries one unrelated pre-existing modification** — `CLAUDE.md`, whose only diff is the GitNexus index counter (137377→137465 symbols); it was already modified at session start and is not part of this feature.)*
+- [x] Produce a validation matrix linking each specification acceptance criterion to its test file and command, including skipped L2/platform cases and the reason for each skip. *(New [`validation-matrix.md`](validation-matrix.md): all 11 acceptance criteria mapped to files and commands, a per-file test inventory (**385 `#[test]` across the 14 sequence-relevant files**), the command table, and an explicit skip register — the 3 pre-existing `context`-width L2 failures, Windows-as-argued-not-executed, the deliberate no-L2-for-task-stream decision, and the pre-existing ignored perf harnesses.)*
+- [x] Confirm the implementation did not add deprecation aliases, nested sequences/groups, group-loop semantics, checkpoint/resume, or unapproved process-global mutation. *(All five confirmed by grep over `claudine/lib/src` + `claudine/cli/src`. **Aliases:** zero `#[deprecated]` added in range; the retired names `previous_state`/`next_state`/`step`/`total_steps` survive only inside the test asserting their absence and in prose describing the removal. One apparent hit is a false positive worth recording: `SequenceRunSummary::total_steps` (`types.rs:787`) is a Rust field on a run-report struct, a different namespace from the retired frontmatter overlay key. **Nested sequences/groups** and **direct group execution** are rejected at preflight (`SequenceNestedSequence`, `SequenceUnsupportedConstruct`). **Group `loop`** is rejected, never interpreted. **Checkpoint/resume:** no persistence code exists — the only `checkpoint` matches are phase-comment text. **Process-global mutation:** `set_current_dir`/`set_var` appear only in test files; production sequence and task paths never touch process-global env or CWD, pinned by `parallel_execution_leaves_process_env_and_cwd_untouched`.)*
+- [x] Move the feature directory to `_completed` only when the project workflow explicitly authorizes closure; do not commit or move lifecycle directories as an implicit part of implementation. *(**Deliberately not moved.** The invoking workflow explicitly withheld closure authorization, and nothing was staged or committed. The directory stays active for a separate review/commit operation.)*
+- [x] **Final validation checkpoint:** all required commands pass, GitNexus reports only expected blast radius, the acceptance matrix is complete, and the feature is ready for a separate review/commit operation. *(`just test` from `claudine/`: **6092 pass** (21 + 3760 + 47 + 2112 + 152), exit 0. `just lint`: clean, exit 0. **A first run of this suite failed and the failure was a host artifact, not a regression** — 2 timeouts (`sequence_perf_propagates_startup_timings`, `direct_wrap_dry_run_delivers_prompt_for_every_provider`) and 12 flaky at load average **83.4**; both timed-out tests pass in isolation in 9s and 12s against a 30s cap, and the full suite went green with zero timeouts once load fell to 37. Recorded rather than silently re-run. **Method note:** the first invocation was piped to `tail`, which masked the real exit code (`tail`'s `0` was reported while nextest had failed); the re-run redirected to a file and captured `$?` directly. GitNexus blast radius is confined to Sequence/Task/Preflight/Jit/Composition modules as expected. Feature is ready for a separate review/commit operation; the working tree still carries the unrelated pre-existing `CLAUDE.md` index-counter edit.)*
