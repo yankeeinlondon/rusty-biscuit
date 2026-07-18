@@ -1,12 +1,14 @@
-//! The wrapper's destination for attributed group-task frames.
+//! The wrapper's destination for attributed task frames.
 //!
-//! The library renders a task's header and footer; this is where those lines
-//! meet the terminal. Two contracts hold here:
+//! The library renders a task's header, body, and footer; this is where those
+//! lines meet the terminal. Two contracts hold here:
 //!
-//! - **Stderr, not stdout.** Headers, footers, status, and warnings are status
-//!   rendering; provider and task *data* stays on stdout undecorated, which is
-//!   also what keeps the `outputs` capture boundary clean.
-//! - **One coordinator.** Frames go through the process-wide
+//! - **Two channels, one contract.** Headers, footers, and warnings are status
+//!   rendering and go to stderr; task and provider *data* goes to stdout. The
+//!   bar the data carries is decoration added on the way out — the payload
+//!   captured for `outputs` is the undecorated text it was rendered from, which
+//!   is what keeps the capture boundary clean.
+//! - **One coordinator.** Both channels go through the process-wide
 //!   [`StreamOutput`], so a sibling task cannot land a line — or half an ANSI
 //!   escape — inside another task's frame group.
 
@@ -16,7 +18,7 @@ use claudine::render::TaskStreamSink;
 
 use crate::commands::wrap::stream_io::StreamOutput;
 
-/// Writes group-task frames to stderr through the shared coordinator.
+/// Writes task frames to their channel through the shared coordinator.
 pub(crate) struct SequenceTaskSink {
     output: Arc<StreamOutput>,
 }
@@ -36,5 +38,12 @@ impl TaskStreamSink for SequenceTaskSink {
             return;
         }
         self.output.emit_stderr_frames(frames);
+    }
+
+    fn write_data_frames(&self, frames: &[String]) {
+        if frames.is_empty() {
+            return;
+        }
+        self.output.emit_stdout_frames(frames);
     }
 }

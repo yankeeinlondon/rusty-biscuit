@@ -44,6 +44,35 @@ fn run(workspace: &Path, path_dir: &Path, args: &[&str]) -> (String, String, i32
     )
 }
 
+/// Run with ANSI intact, so bar colors can be compared across the two channels.
+///
+/// `FORCE_COLOR=1` is what routes claudine through an optimistic color terminal
+/// when neither stream is a TTY; without it the palette collapses and a body
+/// line cannot be matched to its header by color.
+fn run_in_color(workspace: &Path, path_dir: &Path, args: &[&str]) -> (String, String, i32) {
+    let output = cargo_bin_cmd!("claudine")
+        .env("FORCE_COLOR", "1")
+        .env("COLUMNS", "100")
+        .env("HOME", workspace)
+        .env("PATH", augmented_path(path_dir))
+        .current_dir(workspace)
+        .args(args)
+        .assert()
+        .get_output()
+        .clone();
+    (
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
+/// The rendered gutter of one framed line: everything through the bar glyph,
+/// SGR sequences included. This *is* the attribution token.
+fn bar_prefix(line: &str) -> Option<&str> {
+    line.find('│').map(|byte| &line[..byte + '│'.len_utf8()])
+}
+
 /// Read the trace file group tasks append to, one line per command.
 fn trace(workspace: &Path) -> Vec<String> {
     fs::read_to_string(workspace.join("trace.txt"))
@@ -649,9 +678,10 @@ Body.
 }
 
 /// Concurrent members must be attributable without color: each announces itself
-/// by name and closes with its own outcome and duration, all on stderr.
+/// by name and closes with its own outcome and duration on stderr, and its body
+/// output lands framed on stdout in between.
 #[test]
-fn parallel_group_members_are_attributed_by_name_on_stderr() {
+fn parallel_group_members_are_attributed_across_both_channels() {
     let workspace = tempdir().unwrap();
     let path_dir = fake_goose(workspace.path());
     let md = workspace.path().join("seq.md");
@@ -696,6 +726,90 @@ Body.
     assert!(
         !stdout.contains("▶ fetch-data"),
         "a header leaked onto stdout: {stdout}"
+    );
+
+    // The body is the point: each task's actual output must reach stdout inside
+    // the same bar geometry its header and footer used, not fall outside the
+    // framing (spec → *Reporting Concurrency*).
+    for payload in ["fetched", "rendered"] {
+        let framed = stdout
+            .lines()
+            .find(|line| line.contains(payload))
+            .unwrap_or_else(|| panic!("`{payload}` never reached stdout: {stdout}"));
+        assert!(
+            framed.starts_with("│ ") || framed.starts_with("  "),
+            "body line `{framed}` is outside the task framing"
+        );
+        assert!(
+            !stderr.contains(payload),
+            "task data leaked onto stderr: {stderr}"
+        );
+    }
+}
+
+/// A body line's bar must be the *same* bar its own header carried.
+///
+/// This is the assertion that makes interleaved concurrent output readable: the
+/// header names the task and the body carries only the color, so if the two do
+/// not agree the attribution is a lie. Colors are compared across the two
+/// channels because that is exactly how a reader resolves them on a terminal.
+#[test]
+fn parallel_body_lines_carry_their_own_tasks_bar_color() {
+    let workspace = tempdir().unwrap();
+    let path_dir = fake_goose(workspace.path());
+    let md = workspace.path().join("seq.md");
+    fs::write(
+        &md,
+        r#"---
+sequence:
+  - name: alpha
+    group:
+      name: bundle
+      execution: parallel
+      tasks:
+        - name: fetch-data
+          shell: "printf 'fetched\n'"
+        - name: render-page
+          shell: "printf 'rendered\n'"
+---
+
+Body.
+"#,
+    )
+    .unwrap();
+
+    let (stdout, stderr, code) = run_in_color(
+        workspace.path(),
+        &path_dir,
+        &["sequence", "--goose", "--yolo", "seq.md"],
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+
+    let mut bars = Vec::new();
+    for (name, payload) in [("fetch-data", "fetched"), ("render-page", "rendered")] {
+        let header = stderr
+            .lines()
+            .find(|line| strip_ansi(line).contains(&format!("▶ {name}")))
+            .unwrap_or_else(|| panic!("no header for `{name}`:\n{stderr}"));
+        let body = stdout
+            .lines()
+            .find(|line| line.contains(payload))
+            .unwrap_or_else(|| panic!("`{payload}` never reached stdout:\n{stdout}"));
+
+        let header_bar = bar_prefix(header)
+            .unwrap_or_else(|| panic!("header for `{name}` drew no bar: {header:?}"));
+        let body_bar =
+            bar_prefix(body).unwrap_or_else(|| panic!("body for `{name}` drew no bar: {body:?}"));
+        assert_eq!(
+            header_bar, body_bar,
+            "`{name}`'s body line is attributed to a different task than its header"
+        );
+        bars.push(body_bar.to_string());
+    }
+
+    assert_ne!(
+        bars[0], bars[1],
+        "two concurrent tasks drew the same bar, so their body lines are indistinguishable"
     );
 }
 

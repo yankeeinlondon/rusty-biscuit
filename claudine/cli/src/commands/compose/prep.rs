@@ -679,6 +679,8 @@ fn build_execution_request(
         provider_args_explicit: shared.provider_args_explicit,
         runtime_state: Some(runtime_state),
         suppress_output_commit: false,
+        // Not a sequence task: nothing owns a bar for this run.
+        task_frame_writer: None,
     }
 }
 

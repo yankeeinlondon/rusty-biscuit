@@ -497,6 +497,7 @@ pub(super) fn run_composition_body(
         guard,
         proxy_source,
         true,
+        request.task_frame_writer.clone(),
     )?;
     if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
         collector.set_agent_perf(perf);

@@ -78,6 +78,11 @@ struct HarnessLoopCtx<'a, 'guard> {
     lifecycle_guard: &'a mut claudine::composition::LifecycleRunGuard<'guard>,
     initial_proxy_target: Option<&'a Path>,
     emit_prompt_timing: bool,
+    /// Frames this run's live provider stdout under one sequence task's bar.
+    ///
+    /// Owned, not borrowed: the stdout reader thread takes it. `None` for the
+    /// wrapper-passthrough path, which has no task to attribute to.
+    task_frame_writer: Option<claudine::render::TaskFrameWriter>,
 }
 
 mod control_dispatch;
@@ -135,6 +140,7 @@ pub(crate) fn run_harness_loop(
     // pass `false` to suppress the header entirely; composition callers
     // pass `true`.
     emit_prompt_timing: bool,
+    task_frame_writer: Option<claudine::render::TaskFrameWriter>,
 ) -> Result<HarnessLoopResult> {
     let ctx = HarnessLoopCtx {
         provider,
@@ -166,6 +172,7 @@ pub(crate) fn run_harness_loop(
         lifecycle_guard,
         initial_proxy_target,
         emit_prompt_timing,
+        task_frame_writer,
     };
     match run_harness_loop_inner(ctx)? {
         LoopStep::Return(result) => Ok(result),
@@ -938,6 +945,8 @@ fn execute_attempt_phase(
         term,
         &mut child_spawned,
         prompt_timing,
+        // Cloned per attempt: a retry starts with an empty partial-line buffer.
+        state.run.task_frame_writer.clone(),
     );
 
     // Mark launched as soon as spawn succeeded — before propagating

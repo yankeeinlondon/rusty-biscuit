@@ -471,6 +471,8 @@ fn build_body_request(
         runtime_state: Some(std::sync::Arc::clone(runtime_state)),
         // The default body *is* the step: the executor owns its output commit.
         suppress_output_commit: false,
+        // A bodyless sequence step renders under the step header, not a task bar.
+        task_frame_writer: None,
     }
 }
 

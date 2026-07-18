@@ -40,6 +40,7 @@ pub(crate) fn execute_harness_attempt(
     term: &Terminal,
     child_spawned: &mut bool,
     prompt_timing: Option<claudine::stream::prompt_timing::PromptTimingContext>,
+    task_frame_writer: Option<claudine::render::TaskFrameWriter>,
 ) -> Result<(
     claudine::harness::AttemptOutcome,
     Option<crate::perf::AgentExecutionPerf>,
@@ -236,6 +237,7 @@ pub(crate) fn execute_harness_attempt(
                 Some(section_stream.tracker()),
                 content_early_rx,
                 signal_hub,
+                task_frame_writer,
             )?
         };
         let api_duration_ms = stream_result.data.duration_ms;

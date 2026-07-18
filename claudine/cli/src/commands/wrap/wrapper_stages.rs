@@ -523,6 +523,8 @@ pub(crate) fn run_execution_stage(
             &mut lifecycle_guard,
             None,
             true,
+            // Wrapper passthrough: no sequence task owns this stream.
+            None,
         )?;
         if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
             collector.set_agent_perf(perf);

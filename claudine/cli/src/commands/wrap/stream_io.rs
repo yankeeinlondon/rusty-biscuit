@@ -87,6 +87,30 @@ impl StreamOutput {
         let _ = stderr.flush();
     }
 
+    /// Emit already-rendered lines to stdout as one indivisible write.
+    ///
+    /// The stdout twin of [`emit_stderr_frames`](Self::emit_stderr_frames), for
+    /// attributed *task data*. Same atomicity contract: a sibling task must not
+    /// be able to land a line inside another's frame group.
+    pub(crate) fn emit_stdout_frames(&self, frames: &[String]) {
+        #[cfg(test)]
+        if let Some(buf) = &self.test_recorder {
+            let mut buf = buf.lock().unwrap_or_else(|e| e.into_inner());
+            buf.extend(frames.iter().map(|line| (true, line.clone())));
+            return;
+        }
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut stdout = io::stdout().lock();
+        if !inner.last_stdout_newline {
+            let _ = stdout.write_all(b"\n");
+        }
+        for line in frames {
+            let _ = writeln!(stdout, "{line}");
+        }
+        let _ = stdout.flush();
+        inner.last_stdout_newline = true;
+    }
+
     /// Construct a test-only coordinator that captures emissions into the
     /// provided buffer instead of writing to real stdout/stderr.
     #[cfg(test)]

@@ -158,6 +158,8 @@ pub(crate) fn run_structured_stream_session(
             Some(section_stream.tracker()),
             content_early_rx,
             signal_hub,
+            // Direct wrapper path: no sequence task owns this stream.
+            None,
         )?
     };
     let mut summary = stream_result.data;

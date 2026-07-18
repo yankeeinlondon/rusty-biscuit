@@ -10,6 +10,23 @@
 //! (`suppress_output_commit`). The task executor publishes the entry only after
 //! `teardown` completes, because a teardown that fails converts an otherwise
 //! successful task to failure and owes no output.
+//!
+//! ## Known gap: prompt-task body framing
+//!
+//! Shell and side-effect body text reaches stdout through the task's
+//! [`TaskLiveOutput`], so it carries the task's bar. A `prompt:` task's provider
+//! text does **not**: it is already written to stdout live by the wrapper's own
+//! semantic stream, which reaches `StreamOutput` through
+//! `LiveSemanticSink`. Re-framing the final assistant text here would print it
+//! twice, so it is deliberately left alone.
+//!
+//! Closing the gap means giving that path a per-task decorator. It cannot be
+//! set on the coordinator: `StreamOutput::shared()` is a process-wide singleton
+//! precisely because `last_stdout_newline` models the one real stdout cursor,
+//! and a parallel group has several provider sessions on it at once. The
+//! decorator therefore has to be threaded from
+//! `execute_composition_request_inner` down to `LiveSemanticSink` — six
+//! signatures and three context structs — which is why it is not done here.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -24,7 +41,7 @@ use claudine::composition::sequence::task::{
     PromptRunOutcome, PromptTaskRequest, PromptTaskRunner, SystemTaskShell, TaskExecution,
     TaskOutcome, TaskStatus,
 };
-use claudine::render::TaskStreamSink;
+use claudine::render::{TaskBar, TaskLiveOutput, TaskStream, TaskStreamSink};
 use claudine::system_prompt::SystemPromptArgs;
 use darkmatter::effects::EffectEngine;
 use darkmatter::markdown::compose::EffectiveStateBuilder;
@@ -107,7 +124,23 @@ pub(super) fn run_step_task(
     let shell = SystemTaskShell;
     // `--silent` drops the sink entirely rather than rendering frames nobody
     // reads; the library then skips the render altogether.
-    let sink = (!run.silent).then(SequenceTaskSink::new);
+    let sink: Option<Arc<dyn TaskStreamSink>> = (!run.silent)
+        .then(|| Arc::new(SequenceTaskSink::new()) as Arc<dyn TaskStreamSink>);
+    // A lone step already has the step header and footer for attribution, so
+    // this stream contributes body framing only — never `open`/`close`. The bar
+    // is invisible so serial and group work share one left edge (spec →
+    // *Reporting Concurrency*). A `group:` task's members replace it with their
+    // own stream, and a group never emits body text of its own.
+    let live = sink.as_ref().map(|sink| {
+        TaskLiveOutput::new(
+            TaskStream::new(
+                task.name.clone().unwrap_or_else(|| task.label.clone()),
+                TaskBar::Invisible,
+                term.clone(),
+            ),
+            Arc::clone(sink),
+        )
+    });
 
     let outcome = TaskExecution {
         task,
@@ -120,7 +153,8 @@ pub(super) fn run_step_task(
         shell: &shell,
         prompt: &prompt_runner,
         interrupt: Some(run.interrupted.as_ref()),
-        stream: sink.as_ref().map(|sink| sink as &dyn TaskStreamSink),
+        stream: sink.as_ref(),
+        live: live.as_ref(),
     }
     .run();
 
@@ -308,6 +342,8 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
                 .or_else(|| Some(std::sync::Arc::clone(self.runtime_state))),
             // The task executor publishes the entry after `teardown`, not here.
             suppress_output_commit: true,
+            // Carries this task's bar to the thread draining the child's stdout.
+            task_frame_writer: request.frame_writer.clone(),
         };
 
         let outcome = execute_composition_request_inner(
