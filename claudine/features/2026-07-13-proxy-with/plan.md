@@ -165,6 +165,16 @@ docs_updated_during_phase_8:
     - claudine/features/2026-07-13-proxy-with/plan.md
 docs_created_during_phase_8: []
 skills_files_updated_during_phase_8: []
+# REVIEW-5 RESOLUTION (2026-07-17): the R6 launch rebuild, R7 loop ownership, and
+# R8 resume compatibility key that the Phase 9-13 comments below record as
+# "blocked / not started / #[ignore]d" ALL LANDED via review-5 findings 1-6, on
+# the surfaced-coordinator path (`compose/prep.rs::prepare_and_run_active_document`).
+# The previously-blocked criteria (7, 9-launch, 10, 15) now map to passing tests
+# and the two `#[ignore]`d reproductions are enabled. The phase comments below are
+# preserved as the historical record; read them through this note. See
+# `notes/acceptance-map.md` for the current mapping and the narrow remaining gaps
+# (profile/binary sub-selection, argv entrypoint, MCP runtime injection; latent
+# resume-refusal).
 # Phase 9 is PARTIAL: the shell-approval group (R9) is complete and tested; the
 # launch-rebuild group (R6) is unstarted. `phase` therefore stays at 8 — see the
 # Phase 9 validation checkpoint for why R6 admits no safe partial landing.
@@ -353,6 +363,24 @@ packages:
 ---
 
 # Execution Plan — Canonical Document Handoffs and Transient Proxy Frontmatter (`with:`)
+
+> **review-5 resolution (2026-07-17).** This plan's Phase 9-13 checkpoints record
+> the R6 target-specific launch rebuild, R7 loop ownership, and R8 resume
+> session-compatibility key as *blocked on R6 / not started / reproduced by
+> `#[ignore]`d L2 rows*. **Those blockers are resolved.** review-5 findings 1-6
+> landed the launch rebuild on the **surfaced-coordinator** path — a proxied
+> target surfaces its handoff to the command-owned coordinator, which re-prepares
+> it as a fresh document through `compose/prep.rs::prepare_and_run_active_document`,
+> rebuilding provider, model, document-loop ownership, `ComposeContext`, child
+> CWD, and system-prompt delivery from the target's own frontmatter. The two
+> `#[ignore]`d reproductions are enabled and pass, and criteria 7, 9-launch, 10,
+> and 15 now map to passing tests (`notes/acceptance-map.md`, 30/30). The
+> statements below are the historical phase record; read them through this note.
+> Narrow work remains, tracked in the acceptance map: profile/binary
+> *sub-selection*, argv *entrypoint*, and MCP *runtime injection* stay borrowed on
+> the in-harness `rebuild_target_launch` fallback (they diverge only under a
+> provider *switch*), and the facet-mutating resume refusal is latent (no
+> compat-key facet mutates per-resume today).
 
 ## How to read this plan
 

@@ -4,10 +4,11 @@ ready: false
 agent: codex/default
 created: 2026-07-17T13:36:20-07:00
 spec: 2026-07-13-proxy-with/spec.md
-implemented: false
+implemented: true
 description: A **feature** review of `2026-07-13-proxy-with/spec.md`
 feature: 2026-07-13-proxy-with/review-4.md
 previous: 2026-07-13-proxy-with/review-3.md
+next: 2026-07-13-proxy-with/review-5.md
 ---
 
 # Review 4: Proxy With
