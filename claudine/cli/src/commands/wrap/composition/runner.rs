@@ -154,6 +154,15 @@ pub(super) fn run_composition_body(
     // observed. It also delivers the target's prompt itself (seed `None`).
     let adopting = request.adopted_handoff.is_some();
 
+    // Whether this document's canonical preparation withheld its schema verdict
+    // because the document declares an `initialize` of its own (R4). The setup
+    // pipeline routes that event below; the harness loop then owes the stabilized
+    // reread that sees any initialize-time mutation and reaches the verdict. An
+    // adopted target is excluded — its full staged bootstrap already covers both,
+    // and a document that hands off never reaches a verdict at all.
+    let stabilize_after_initialize =
+        request.prepared.schema_verdict_deferred && !adopting && !hands_off;
+
     // Composed frontmatter / source-derived base dir, reused by every
     // composition-preflight failure path so the blocked+finalize stacks
     // see the same `frontmatter` and `base_dir` namespaces the
@@ -467,7 +476,20 @@ pub(super) fn run_composition_body(
         request.step_timeout.clone(),
         request.stall_timeout.clone(),
         request.model.clone(),
-        request.yolo,
+        // R8 — the immutable half of every per-attempt launch rebuild. The
+        // caller's own decisions (explicit provider, `--yolo`, whether MCP is in
+        // play) stay authoritative at every retry and resume; the document half
+        // is what a canonical refresh is allowed to move.
+        crate::commands::wrap::harness_orch::LaunchRebuildIntent {
+            explicit_provider: request.explicit_provider,
+            fallback_provider: provider,
+            fallback_binary: binary_path.as_path().to_path_buf(),
+            installed_snapshot: request.installed_snapshot.clone(),
+            default_non_interactive: effective_non_interactive,
+            cli_yolo: request.yolo,
+            is_inline,
+            mcp_enabled: request.mcp || !request.mcp_use.is_empty(),
+        },
         &harness_base_args,
         &env_plan.env,
         &mut prompt_state,
@@ -490,6 +512,7 @@ pub(super) fn run_composition_body(
         initial_transition,
         request.handoff_ledger.clone(),
         request.adopted_handoff.clone(),
+        stabilize_after_initialize,
         true,
     )?;
     if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {

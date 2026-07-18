@@ -387,6 +387,36 @@ impl CompositionKind {
         }
     }
 
+    /// Prepare through the canonical document service at an explicit schema
+    /// stage.
+    ///
+    /// Preferred over [`prepare_with_schema`](Self::prepare_with_schema) on the
+    /// single-execution path: a document whose own `initialize` may add or repair
+    /// a schema property must not be judged before that event runs (R4), and the
+    /// canonical service records the deferral on the prepared composition so the
+    /// harness knows a stabilized reread is still owed.
+    ///
+    /// ## Errors
+    ///
+    /// See [`prepare_with_schema`](Self::prepare_with_schema). A deferred stage
+    /// surfaces every non-schema preparation failure and no schema verdict.
+    pub(crate) fn prepare_staged(
+        self,
+        source: &ResolvedCompositionSource,
+        options: PrepareOptions,
+        entry: claudine::composition::DocumentEntryReason,
+        schema: claudine::composition::SchemaStage,
+    ) -> Result<PreparedComposition, CompositionError> {
+        claudine::composition::prepare_document(claudine::composition::DocumentPreparation {
+            entry,
+            mode: self.mode(),
+            source,
+            prompt_source: claudine::composition::PromptSource::ComposedBody,
+            schema,
+            options,
+        })
+    }
+
     /// Schema-agnostic prepare function for this command.
     ///
     /// Used on loop iterations after the first, where the seed pass has

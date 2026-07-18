@@ -49,6 +49,26 @@ use crate::commands::wrap::overlay::merge_frontmatter_overlay;
 use crate::commands::wrap::wrap_terminal;
 use crate::output::emit_execution_header;
 
+/// Whether this document owes its schema verdict to the stabilized reread taken
+/// after its own `initialize` runs.
+///
+/// R4 puts `initialize` before schema validation precisely so a document can add
+/// or repair a schema property from its own bootstrap. Reaching the verdict
+/// first would fail the document for a violation the next stage is about to fix.
+/// A document that declares no `initialize` has nothing to wait for and is
+/// judged where it is read.
+///
+/// Keyed on the *authored* key, not on the parsed lifecycle: a malformed or
+/// empty `initialize:` must still defer, because the pipeline routes it either
+/// way and something downstream owes the verdict.
+fn defers_schema_verdict_to_initialize(source: &ResolvedCompositionSource) -> bool {
+    source
+        .markdown
+        .frontmatter()
+        .as_map()
+        .contains_key("initialize")
+}
+
 /// Enrich a `color_eyre::Report` with a frontmatter excerpt when its root
 /// cause is a frontmatter-rooted [`CompositionError`].
 ///
@@ -171,7 +191,15 @@ pub(crate) fn run_composition_inner(
     // paths resolve here exactly as they will at prepare time and event time,
     // rather than depending on the soon-to-be-mutated process CWD.
     let launch_area_fallback = std::env::current_dir().ok();
-    let (source, set_overrides) = {
+    // A document whose own `initialize` may supply or repair a schema property
+    // is not judged here: R4 puts `initialize` first, and the post-`initialize`
+    // stabilized reread reaches the verdict instead. Interactive collection goes
+    // with it — prompting the caller for a value the document is about to write
+    // itself would be a question with a wrong answer.
+    let defer_verdict = defers_schema_verdict_to_initialize(&source);
+    let (source, set_overrides) = if defer_verdict {
+        (source, set_overrides)
+    } else {
         let interactive_opts = resolve_interactive_options(shared.silent);
         let term = crate::log::terminal();
         let pre = pre_validate_with_interactive_collection(
@@ -379,42 +407,15 @@ pub(crate) fn prepare_and_run_active_document(
         claudine::harness::report::report_proxy_handoff(&source.resolved_path, &wrap_terminal());
     }
 
-    // R10 — the target's schema verdict is reached by Claudine's typed layer,
-    // not by whichever layer happens to compose the document first.
-    //
-    // The caller's own document is pre-validated once at the invocation boundary
-    // (`run_composition_inner`), before the pre-flight compose, precisely so the
-    // user-visible surface is a typed `CompositionError` rather than
-    // Darkmatter's raw `MarkdownError::SchemaValidationFailed`. A proxied target
-    // enters here instead, and used to reach the pre-flight compose below with
-    // no pre-validation in front of it — so the *same document failing the same
-    // way* rendered `CompositionError: schema validation` (with problem list and
-    // frontmatter excerpt) when invoked directly and `MarkdownError: schema
-    // validation failed` (different remediation, no excerpt) when reached
-    // through a proxy. That is exactly the cross-route typed identity AC28
-    // requires, and the equivalence the canonical preparation service already
-    // guarantees one layer down.
-    //
-    // Non-interactive by construction: interactive collection of missing
-    // required values belongs to the invocation boundary, where the caller is
-    // still at the prompt. A target adopted mid-run inherits the caller's
-    // collected values through `set_overrides` and surfaces anything still
-    // missing as the typed `MissingProperties` diagnostic.
-    //
-    // Invalid *optional* values are elided here, so the cleaned source and
-    // overrides — not the originals — flow into eager resolution, the pre-flight
-    // compose, and preparation.
-    let (source, set_overrides) = if first {
-        (source, set_overrides)
+    // Who owns this document's schema verdict. A proxied target always defers:
+    // the harness's staged bootstrap reads it once before its `initialize` and
+    // once after, and only the second read judges it. The caller's own document
+    // defers when it declares an `initialize` of its own — the setup pipeline
+    // routes that event, and the harness then stabilizes and judges.
+    let schema_stage = if first && !defers_schema_verdict_to_initialize(&source) {
+        claudine::composition::SchemaStage::Validate
     } else {
-        let pre = claudine::composition::pre_validate_schema(
-            &source,
-            set_overrides.as_ref(),
-            launch_area_fallback.as_deref(),
-        )
-        .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
-        emit_dropped_optional_warnings(&pre.dropped_optionals);
-        (pre.source, pre.set_overrides)
+        claudine::composition::SchemaStage::DeferToStabilizedReread
     };
 
     // Phase 2 (2026-05-09-slow-prep): build the per-invocation prep context
@@ -532,7 +533,14 @@ pub(crate) fn prepare_and_run_active_document(
             // then launch-area — exactly as the main prepare pass and the
             // lifecycle events do. Without it the preflight's built-in schema
             // validation would fall back to the (already-mutated) process CWD.
-            .with_file_ref_fallback_dir(prep_context.launch_workspace.launch_cwd.clone());
+            .with_file_ref_fallback_dir(prep_context.launch_workspace.launch_cwd.clone())
+            // Discovery, not judgment: this pass exists to find `::shell`
+            // directives. The verdict belongs to canonical preparation — and for
+            // a document with an `initialize`, to the reread taken after it — so
+            // reporting one here would put the schema ahead of `initialize`
+            // again (R4) and would render Darkmatter's raw error instead of the
+            // typed one the direct route renders (AC28).
+            .with_deferred_schema_verdict(true);
         if let Some(ref overrides) = set_overrides {
             opts = opts.with_set_overrides(overrides.clone());
         }
@@ -583,6 +591,7 @@ pub(crate) fn prepare_and_run_active_document(
         shared,
         current_file.to_string(),
         source,
+        schema_stage,
         prep_context,
         resolved_target,
         env_overrides,
@@ -969,6 +978,9 @@ fn execute_loop_or_single(
     shared: &SharedComposeArgs,
     file: String,
     source: ResolvedCompositionSource,
+    // Whether this preparation owns the document's schema verdict, or defers it
+    // to the post-`initialize` stabilized reread.
+    schema_stage: claudine::composition::SchemaStage,
     prep_context: CompositionPrepContext,
     resolved_target: Option<ResolvedExecutionTarget>,
     env_overrides: BTreeMap<String, String>,
@@ -1035,6 +1047,7 @@ fn execute_loop_or_single(
         shell_working_directory: Some(prep_context.launch_workspace.child_cwd.clone()),
         prepared_context: Some(prepared_context.clone()),
         file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
+        defer_schema_verdict: false,
     };
 
     if !shared.dry_run {
@@ -1108,7 +1121,7 @@ fn execute_loop_or_single(
             CompositionKind::Direct => info_span!("compose_prep.prepare_direct").entered(),
             CompositionKind::Inline => info_span!("compose_prep.prepare_inline").entered(),
         };
-        kind.prepare_with_schema(
+        kind.prepare_staged(
             &source,
             PrepareOptions {
                 set_overrides,
@@ -1121,7 +1134,14 @@ fn execute_loop_or_single(
                 ),
                 prepared_context: Some(prepared_context.clone()),
                 file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
+                defer_schema_verdict: false,
             },
+            if adopted_handoff.is_some() {
+                claudine::composition::DocumentEntryReason::ProxyTarget
+            } else {
+                claudine::composition::DocumentEntryReason::Direct
+            },
+            schema_stage,
         )
         .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?
     };

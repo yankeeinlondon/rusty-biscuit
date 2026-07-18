@@ -324,6 +324,7 @@ fn run_phase_1c_attempt(
             // `ctx.*` resolves identically at audit and execution time (R5/R9).
             prepared_context: Some(step_prepared_context.clone()),
             file_ref_fallback_dir: launch_area.map(std::path::Path::to_path_buf),
+            defer_schema_verdict: false,
         };
 
         // Inline steps prepare via `prepare_inline_with_schema` so the

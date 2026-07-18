@@ -496,7 +496,22 @@ pub(crate) fn run_execution_stage(
             cli_step_timeout.clone(),
             args.stall_timeout.clone(),
             args.model.clone(),
-            args.yolo,
+            // A direct wrapper passthrough is invoked *as* a provider
+            // (`claudine claude …`), so the provider is explicit invocation
+            // intent and no re-read can move it. The passthrough document is a
+            // provider memory file, not a composed prompt: it carries no
+            // selection hints and its body is never lexed for MCP tags, so the
+            // rebuilt identity is stable across every attempt here.
+            harness_orch::LaunchRebuildIntent {
+                explicit_provider: Some(provider),
+                fallback_provider: provider,
+                fallback_binary: binary_path.to_path_buf(),
+                installed_snapshot: None,
+                default_non_interactive: effective_non_interactive,
+                cli_yolo: args.yolo,
+                is_inline: false,
+                mcp_enabled: false,
+            },
             &harness_base_args,
             &env_plan.env,
             &mut prompt_state,
@@ -519,21 +534,27 @@ pub(crate) fn run_execution_stage(
             // A direct wrapper passthrough has no `initialize` route to hand
             // off from; the run starts on the document it was given.
             claudine::composition::DocumentTransition::Continue,
-            // The direct passthrough owns no command-level invocation ledger, so
-            // a terminal-event proxy has nothing to commit against and can never
-            // surface a handoff (rejected explicitly below).
+            // The direct passthrough prepares no active document, so it owns no
+            // coordinator that could bring a proxy target up under the target's
+            // own launch bundle. The harness refuses such a hand-off with a typed
+            // diagnostic (R3/R6/AC10) instead of adopting it against this
+            // invocation's profile/argv/MCP, so no handoff can surface here.
             None,
             // No proxy reached this document, so there is no committed handoff to
             // adopt: the passthrough runs the document it was given directly.
             None,
+            // The passthrough prompt comes from argv or stdin; the document is a
+            // provider memory file, judged (if at all) where it was prepared. No
+            // deferred verdict, so nothing to stabilize.
+            false,
             // Has a prompt file (the passthrough document), so it emits the
             // prompt-scoped timing header like a composition caller.
             true,
         )?;
         // The passthrough passes `None` for the ledger and `Continue` for the
-        // initial transition, so the harness loop can never produce a surfaced
-        // handoff. If one ever arrives, an invariant upstream broke; reject it
-        // rather than silently discarding it.
+        // initial transition, so a hand-off is refused inside the harness and the
+        // loop can never produce a surfaced one. If one ever arrives, an
+        // invariant upstream broke; reject it rather than silently discarding it.
         if let Some(handoff) = surfaced_handoff {
             return Err(eyre!(
                 "direct wrapper passthrough surfaced an impossible proxy handoff: {handoff:?}"
