@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-use biscuit_file::{FileReference, FileResolutionContext};
+use biscuit_file::{FileReference, FileReferenceKind, FileResolutionContext};
 use regex::Regex;
 
 use super::error::{CompositionError, SequenceLoadCause};
@@ -80,7 +80,7 @@ pub fn resolve_sequence_plan(
 ///   source document's directory (D4);
 /// - explicit (`./foo.yaml`, `../foo.yaml`) — pinned to the source directory;
 /// - `@foo` — magic-root search; `!foo` — package-area; `vault:foo` — vault;
-/// - `~foo` / `~/foo` — the user's home directory (the shared `Home` kind);
+/// - `~`, `~/foo` — the user's home directory (the shared `Home` kind; `~user` unsupported);
 /// - absolute paths resolve to themselves.
 ///
 /// The reference is authored *inside* the composition source, so per D2 the
@@ -106,7 +106,7 @@ fn resolve_sequence_reference(raw: &str, source_path: &Path) -> Result<PathBuf, 
         })?;
 
     let base_dir = source_path.parent().unwrap_or_else(|| Path::new("."));
-    let ctx = FileResolutionContext::new(base_dir).with_source_path(source_path);
+    let ctx = build_sequence_resolution_context(&file_ref, base_dir, source_path);
 
     file_ref
         .resolve_in_context(&ctx)
@@ -118,6 +118,40 @@ fn resolve_sequence_reference(raw: &str, source_path: &Path) -> Result<PathBuf, 
             context: format!("`{raw}`"),
             source: SequenceLoadCause::NotFound,
         })
+}
+
+/// Capture the request-scoped resolution anchors for an external sequence
+/// reference authored inside a composition source.
+///
+/// Per D2/D10 the document-backed context is authoritative: the worktree root
+/// and package area are discovered once here (via `sniff`, which Claudine
+/// already depends on) and passed in, so `FileReference` resolution never
+/// re-probes git or Cargo state per reference. `sniff::filesystem::git::repo_root`
+/// preserves the authored (symlink) path so the context's lexical-containment
+/// check against `base_dir` holds. Package-area discovery is skipped for every
+/// reference kind except `!`, whose resolution is the only one that consumes it.
+fn build_sequence_resolution_context(
+    file_ref: &FileReference,
+    base_dir: &Path,
+    source_path: &Path,
+) -> FileResolutionContext {
+    let mut ctx = FileResolutionContext::new(base_dir).with_source_path(source_path);
+
+    let Ok(Some(repo_root)) = sniff::filesystem::git::repo_root(base_dir) else {
+        return ctx;
+    };
+    if !base_dir.starts_with(&repo_root) {
+        return ctx;
+    }
+    ctx = ctx.with_repository_root(repo_root.clone());
+
+    if file_ref.class().kind == FileReferenceKind::Package
+        && let Ok(Some(repo)) = sniff::filesystem::detect_repo(&repo_root)
+        && let Some(area) = repo.package_area_label_for_dir(base_dir)
+    {
+        ctx = ctx.with_package_area(repo_root.join(area.as_ref()));
+    }
+    ctx
 }
 
 /// Build a step overlay for the given step index within a plan.

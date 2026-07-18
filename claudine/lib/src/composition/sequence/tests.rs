@@ -466,6 +466,57 @@ edition = "2024"
     );
 }
 
+/// The adapter captures the package area at the request boundary (via `sniff`)
+/// and supplies it on the explicit context, so a `!` reference resolves under
+/// the package area even when a same-named file also sits at the repository
+/// root. A plain repository-root fallback would have selected the root twin;
+/// the captured package-area anchor is authoritative (D2).
+#[test]
+fn package_reference_uses_captured_package_area_over_repository_root() {
+    let dir = TempDir::new().unwrap();
+    init_git_repo(dir.path());
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+resolver = "2"
+members = ["claudine/lib"]
+"#,
+    )
+    .unwrap();
+
+    let package_root = dir.path().join("claudine");
+    fs::create_dir_all(package_root.join("lib/src")).unwrap();
+    fs::write(
+        package_root.join("lib/Cargo.toml"),
+        r#"[package]
+name = "claudine"
+version = "0.1.0"
+edition = "2024"
+"#,
+    )
+    .unwrap();
+    fs::write(package_root.join("lib/src/lib.rs"), "pub fn run() {}\n").unwrap();
+
+    // Same basename at the repository root and the package area. Package
+    // resolution must select the package-area copy, proving the captured area
+    // anchor is used rather than a repository-root fallback.
+    fs::write(dir.path().join("steps.yaml"), "sequence:\n  - root\n").unwrap();
+    let target = package_root.join("steps.yaml");
+    fs::write(&target, "sequence:\n  - pkg\n").unwrap();
+
+    let source_path = package_root.join("lib/docs/guide.md");
+    fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+    fs::write(&source_path, "---\n---\nbody\n").unwrap();
+
+    let resolved = resolve_sequence_reference("!steps.yaml", &source_path).unwrap();
+    assert_eq!(
+        resolved.canonicalize().unwrap(),
+        target.canonicalize().unwrap(),
+        "package reference must resolve under the captured package area, not the repository root",
+    );
+}
+
 #[test]
 #[serial]
 fn vault_reference_uses_vault_environment_roots() {
