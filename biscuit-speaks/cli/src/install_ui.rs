@@ -31,6 +31,10 @@ impl InstallInterviewDelegate for SoYouSayInstallUi {
                 println!();
                 println!("{}", strip_prose_tags(prose).yellow());
             }
+            InstallInterviewEvent::TimeoutWarning { prose } => {
+                println!();
+                println!("{}", strip_prose_tags(prose).yellow());
+            }
             InstallInterviewEvent::CapturedOutput { stream, body } => {
                 let prefix = match stream {
                     InstallOutputStream::Stdout => "│".dimmed().to_string(),

@@ -36,6 +36,9 @@ use super::options::{
 /// - The package name contains invalid characters
 /// - The installation method is not supported (e.g., RemoteBash)
 /// - The command execution fails
+/// - The command was killed at its deadline
+///   ([`SniffInstallationError::InstallationTimedOut`], never conflated with
+///   an ordinary non-zero exit)
 ///
 /// ## Examples
 ///
@@ -48,7 +51,20 @@ pub fn execute_install(
     method: &InstallationMethod,
     opts: &InstallOptions,
 ) -> Result<InstallResult, SniffInstallationError> {
-    match execute_install_captured(method, opts) {
+    install_result_from_outcome(method, opts, execute_install_captured(method, opts))
+}
+
+/// Projects a captured outcome onto the legacy `Result` contract.
+///
+/// A timed-out attempt becomes [`SniffInstallationError::InstallationTimedOut`]
+/// rather than `PackageManagerFailed`, because the package manager never
+/// reported a verdict and a detached descendant may still be running.
+fn install_result_from_outcome(
+    method: &InstallationMethod,
+    opts: &InstallOptions,
+    outcome: InstallCapturedOutcome,
+) -> Result<InstallResult, SniffInstallationError> {
+    match outcome {
         InstallCapturedOutcome::SetupError(e) => Err(e),
         InstallCapturedOutcome::Completed(r) if r.success => Ok(InstallResult {
             command: r.command,
@@ -57,6 +73,13 @@ pub fn execute_install(
             stdout: r.stdout,
             stderr: r.stderr,
         }),
+        InstallCapturedOutcome::Completed(r) if r.timed_out => {
+            Err(SniffInstallationError::InstallationTimedOut {
+                pkg: method.package_name().to_string(),
+                manager: method.manager_name().to_string(),
+                timeout_secs: opts.timeout_secs,
+            })
+        }
         InstallCapturedOutcome::Completed(r) => Err(SniffInstallationError::PackageManagerFailed {
             pkg: method.package_name().to_string(),
             manager: method.manager_name().to_string(),
@@ -75,27 +98,19 @@ pub fn execute_install(
 ///
 /// ## Errors
 ///
-/// Returns an error if versioned installation is not supported for this method.
+/// Returns an error if versioned installation is not supported for this method,
+/// or [`SniffInstallationError::InstallationTimedOut`] if the command was
+/// killed at its deadline.
 pub fn execute_versioned_install(
     method: &InstallationMethod,
     version: &str,
     opts: &InstallOptions,
 ) -> Result<InstallResult, SniffInstallationError> {
-    match execute_versioned_install_captured(method, version, opts) {
-        InstallCapturedOutcome::SetupError(e) => Err(e),
-        InstallCapturedOutcome::Completed(r) if r.success => Ok(InstallResult {
-            command: r.command,
-            executed: r.executed,
-            exit_code: r.exit_code,
-            stdout: r.stdout,
-            stderr: r.stderr,
-        }),
-        InstallCapturedOutcome::Completed(r) => Err(SniffInstallationError::PackageManagerFailed {
-            pkg: method.package_name().to_string(),
-            manager: method.manager_name().to_string(),
-            msg: r.stderr,
-        }),
-    }
+    install_result_from_outcome(
+        method,
+        opts,
+        execute_versioned_install_captured(method, version, opts),
+    )
 }
 
 type CommandRunner<'a> =
@@ -460,6 +475,10 @@ mod tests {
         };
         assert!(result.executed);
         assert!(!result.success);
+        assert!(
+            result.timed_out,
+            "a deadline kill must be distinguishable from an ordinary failure"
+        );
         assert_eq!(result.exit_code, None);
         assert_eq!(result.stderr, "timed out");
     }
@@ -557,6 +576,71 @@ mod tests {
         );
 
         assert_timeout(outcome);
+    }
+
+    #[test]
+    fn legacy_install_reports_timeout_as_distinct_error() {
+        let method = InstallationMethod::Brew("ripgrep");
+        let opts = InstallOptions::default().with_timeout(0);
+        let runner = |_: &mut Command, timeout| run_timeout_fixture(timeout);
+
+        let outcome = execute_install_captured_with_runner(&method, &opts, &runner);
+        let err = install_result_from_outcome(&method, &opts, outcome)
+            .expect_err("a killed installer must not report success");
+
+        match err {
+            SniffInstallationError::InstallationTimedOut {
+                pkg,
+                manager,
+                timeout_secs,
+            } => {
+                assert_eq!(pkg, "ripgrep");
+                assert_eq!(manager, "brew");
+                assert_eq!(timeout_secs, 0);
+            }
+            other => panic!("timeout must not be conflated with a package-manager failure: {other}"),
+        }
+    }
+
+    #[test]
+    fn legacy_versioned_install_reports_timeout_as_distinct_error() {
+        let method = InstallationMethod::Cargo("bat");
+        let opts = InstallOptions::default().with_timeout(0);
+        let runner = |_: &mut Command, timeout| run_timeout_fixture(timeout);
+
+        let outcome =
+            execute_versioned_install_captured_with_runner(&method, "0.24.0", &opts, &runner);
+        let err = install_result_from_outcome(&method, &opts, outcome)
+            .expect_err("a killed installer must not report success");
+
+        assert!(
+            matches!(err, SniffInstallationError::InstallationTimedOut { .. }),
+            "expected InstallationTimedOut, got {err}"
+        );
+    }
+
+    #[test]
+    fn legacy_install_still_reports_ordinary_failure_as_package_manager_failed() {
+        // Contrast case for the timeout arm: a non-timeout failure must keep
+        // the pre-existing error so the new variant stays load-bearing.
+        let method = InstallationMethod::Brew("ripgrep");
+        let opts = InstallOptions::default();
+        let runner = |_: &mut Command, _| {
+            Err(ProcessError::Spawn(std::io::Error::other(
+                "brew is not installed",
+            )))
+        };
+
+        let outcome = execute_install_captured_with_runner(&method, &opts, &runner);
+        let err = install_result_from_outcome(&method, &opts, outcome)
+            .expect_err("a spawn failure must not report success");
+
+        match err {
+            SniffInstallationError::PackageManagerFailed { msg, .. } => {
+                assert!(msg.contains("brew is not installed"), "msg: {msg}");
+            }
+            other => panic!("expected PackageManagerFailed, got {other}"),
+        }
     }
 
     #[test]

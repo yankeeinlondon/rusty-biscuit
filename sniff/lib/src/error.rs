@@ -164,6 +164,22 @@ pub enum SniffInstallationError {
         msg: String,
     },
 
+    /// The install command was killed at its deadline rather than exiting.
+    ///
+    /// Distinct from [`SniffInstallationError::PackageManagerFailed`]: the
+    /// package manager never reached a verdict, so the host may hold a
+    /// partial install. On Unix termination is best-effort — a descendant
+    /// that detached with `setsid()` outlives the kill and may still be
+    /// modifying the host. Callers that surface this to a user must say so.
+    #[error(
+        "The package manager {manager} did not finish installing {pkg} within {timeout_secs}s and was terminated; a detached installer process may still be modifying this host"
+    )]
+    InstallationTimedOut {
+        pkg: String,
+        manager: String,
+        timeout_secs: u64,
+    },
+
     #[error("The package {pkg} is not installable on {os}!")]
     NotInstallableOnOs { pkg: String, os: String },
 

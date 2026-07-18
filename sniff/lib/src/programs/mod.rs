@@ -144,7 +144,8 @@ pub use install::{
     InstallOutputStream, InstallPlan, InstallPlanOption, InstallPlanReason, InstallResult,
     InstallStatusKind, RetryChoice, RetryPrompt, RetryPromptChoice, build_install_announcement,
     build_install_failure_status, build_install_plan, build_install_success_status,
-    build_retry_choice_prose, build_retry_quit_prose, execute_install, execute_versioned_install,
+    build_install_timeout_warning, build_retry_choice_prose, build_retry_quit_prose,
+    execute_install, execute_versioned_install,
     get_install_command, get_versioned_install_command, run_install_interview,
 };
 pub use inventory::Program;

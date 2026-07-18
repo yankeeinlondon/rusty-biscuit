@@ -57,6 +57,16 @@ impl InstallInterviewDelegate for CliInstallUi {
                 self.emit(&line);
             }
 
+            InstallInterviewEvent::TimeoutWarning { prose } => {
+                let rendered = Prose::new(prose.clone()).render(&self.terminal);
+                let line = if rendered.ends_with('\n') {
+                    rendered
+                } else {
+                    format!("{rendered}\n")
+                };
+                self.emit(&line);
+            }
+
             InstallInterviewEvent::CapturedOutput {
                 stream: InstallOutputStream::Stdout,
                 body,
