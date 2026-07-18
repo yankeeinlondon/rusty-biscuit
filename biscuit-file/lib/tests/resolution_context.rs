@@ -100,6 +100,88 @@ fn home_reference_resolves_against_context_home() {
     );
 }
 
+/// Native Windows must discover the user's home from the OS profile API, not
+/// the frequently-unset `HOME` variable (D11 / Acceptance Criterion 11).
+///
+/// Unlike the injected-`with_home_dir` case above, this exercises default
+/// discovery at the capture boundary: `HOME` is cleared, yet `~/...` still
+/// resolves under the native profile directory.
+#[cfg(target_os = "windows")]
+#[test]
+#[serial_test::serial]
+fn home_reference_resolves_from_native_profile_without_home_env() {
+    let native_home = biscuit_file::home_dir().expect("native Windows profile directory");
+
+    // A uniquely named probe inside the real profile directory; dropped on
+    // scope exit so the test leaves the home directory as it found it.
+    let probe = tempfile::Builder::new()
+        .prefix("biscuit-file-home-probe-")
+        .suffix(".toml")
+        .tempfile_in(&native_home)
+        .expect("write a probe file into the native home directory");
+    let file_name = probe
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+
+    let prior_home = std::env::var_os("HOME");
+    // SAFETY: env mutation is serialized against other tests via `#[serial]`.
+    unsafe { std::env::remove_var("HOME") };
+
+    let base = TempDir::new().unwrap();
+    let ctx = FileResolutionContext::new(base.path());
+    let resolved = FileReference::new(&format!("~/{file_name}"))
+        .unwrap()
+        .resolve_in_context(&ctx);
+
+    // Restore `HOME` before asserting so a panic cannot leak process state.
+    if let Some(prior) = prior_home {
+        // SAFETY: see above.
+        unsafe { std::env::set_var("HOME", prior) };
+    }
+
+    assert_eq!(
+        resolved.unwrap().as_deref(),
+        Some(probe.path()),
+        "`~/...` must resolve under the native profile directory without `$HOME`",
+    );
+}
+
+/// On POSIX, default home discovery (no injected `with_home_dir`) must honor
+/// `$HOME`, the mirror of the native-Windows profile path above.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn home_reference_resolves_from_home_env_on_posix() {
+    let home = TempDir::new().unwrap();
+    fs::write(home.path().join("cfg.toml"), b"cfg").unwrap();
+
+    let prior_home = std::env::var_os("HOME");
+    // SAFETY: env mutation is serialized against other tests via `#[serial]`.
+    unsafe { std::env::set_var("HOME", home.path()) };
+
+    let base = TempDir::new().unwrap();
+    let ctx = FileResolutionContext::new(base.path());
+    let resolved = FileReference::new("~/cfg.toml")
+        .unwrap()
+        .resolve_in_context(&ctx);
+
+    // Restore `HOME` before asserting so a panic cannot leak process state.
+    match prior_home {
+        // SAFETY: see above.
+        Some(prior) => unsafe { std::env::set_var("HOME", prior) },
+        None => unsafe { std::env::remove_var("HOME") },
+    }
+
+    assert_eq!(
+        resolved.unwrap().as_deref(),
+        Some(home.path().join("cfg.toml").as_path()),
+        "`~/cfg.toml` must resolve under `$HOME` by default on POSIX",
+    );
+}
+
 #[test]
 fn magic_roots_come_from_the_context() {
     let magic = TempDir::new().unwrap();

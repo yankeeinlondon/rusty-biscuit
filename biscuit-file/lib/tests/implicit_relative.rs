@@ -441,29 +441,36 @@ mod partial_completion {
 
     #[test]
     #[serial]
-    fn magic_without_home_only_returns_repo_root() {
+    fn magic_without_home_env_still_discovers_native_home() {
         let tmp_repo = TempDir::new().unwrap();
         let repo_root = tmp_repo.path();
         git_init(repo_root);
         let repo_root_canon = repo_root.canonicalize().unwrap();
 
-        // Unset HOME while the test runs.
+        // Unset HOME while the test runs. Unlike a bare `$HOME` read, the shared
+        // cross-platform provider still supplies the native profile home (D11),
+        // so the home leg persists in the magic search order.
         let previous_home = env::var_os("HOME");
         unsafe { env::remove_var("HOME") };
 
         let completion = FileReference::complete_partial("@", &repo_root_canon)
             .unwrap()
             .expect("magic form is supported");
+        // Capture the provider's home under the same HOME-unset condition the
+        // completion saw, so the expectation tracks the same source.
+        let native_home = biscuit_file::home_dir();
 
         // Restore HOME before asserting so a panic still cleans up.
         if let Some(v) = previous_home {
             unsafe { env::set_var("HOME", v) };
         }
 
+        let mut expected = vec![repo_root_canon];
+        expected.extend(native_home);
         assert_eq!(
             completion.roots(),
-            &[repo_root_canon],
-            "HOME-unset should leave only the git-root entry",
+            expected.as_slice(),
+            "the native home leg persists even when $HOME is unset",
         );
     }
 
