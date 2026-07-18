@@ -63,7 +63,6 @@ enum LoopStep {
 struct HarnessLoopCtx<'a, 'guard> {
     provider: Provider,
     profile: &'a dyn super::super::profile::WrapperProfile,
-    binary_path: &'a Path,
     child_cwd: &'a Path,
     effective_non_interactive: bool,
     cli_timeout: Option<String>,
@@ -77,12 +76,10 @@ struct HarnessLoopCtx<'a, 'guard> {
     /// the refreshed document against (R8). Its document half is what makes the
     /// resume-compatibility facets movable across a canonical refresh.
     launch_intent: LaunchRebuildIntent,
-    base_args: &'a [String],
     base_env: &'a HashMap<OsString, OsString>,
     prompt_state: &'a mut HarnessPromptState,
     repo_root: Option<&'a Path>,
     shell_options: claudine::harness::ShellApprovalOptions,
-    use_structured: bool,
     structured_codex_output: Option<&'a super::super::policy::StructuredCodexOutput>,
     stdout_noise: &'a [&'a str],
     stderr_noise: &'a [&'a str],
@@ -136,7 +133,7 @@ use error_routing::*;
 use lifecycle_events::*;
 use proxy::*;
 pub(crate) use target_launch::LaunchRebuildIntent;
-use target_launch::{rebuild_launch_env, rebuild_launch_identity, rebuild_target_launch};
+use target_launch::{RebuiltLaunchIdentity, rebuild_launch_identity, rebuild_target_launch};
 #[allow(unused_imports)] // entirely dead_code until the rendezvous backend lands
 use requeue::*;
 
@@ -145,7 +142,6 @@ use requeue::*;
 pub(crate) fn run_harness_loop(
     provider: Provider,
     profile: &dyn super::super::profile::WrapperProfile,
-    binary_path: &Path,
     child_cwd: &Path,
     effective_non_interactive: bool,
     cli_timeout: Option<String>,
@@ -153,12 +149,10 @@ pub(crate) fn run_harness_loop(
     cli_stall_timeout: Option<String>,
     cli_model: Option<String>,
     launch_intent: LaunchRebuildIntent,
-    base_args: &[String],
     base_env: &HashMap<OsString, OsString>,
     prompt_state: &mut HarnessPromptState,
     repo_root: Option<&Path>,
     shell_options: claudine::harness::ShellApprovalOptions,
-    use_structured: bool,
     structured_codex_output: Option<&super::super::policy::StructuredCodexOutput>,
     stdout_noise: &[&str],
     stderr_noise: &[&str],
@@ -199,7 +193,6 @@ pub(crate) fn run_harness_loop(
     let ctx = HarnessLoopCtx {
         provider,
         profile,
-        binary_path,
         child_cwd,
         effective_non_interactive,
         cli_timeout,
@@ -207,12 +200,10 @@ pub(crate) fn run_harness_loop(
         cli_stall_timeout,
         cli_model,
         launch_intent,
-        base_args,
         base_env,
         prompt_state,
         repo_root,
         shell_options,
-        use_structured,
         structured_codex_output,
         stdout_noise,
         stderr_noise,
@@ -332,8 +323,26 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
     }
 }
 
-struct PreparedHarnessAttempt {
+/// One document read plus the launch bundle rebuilt from *that same read*.
+///
+/// R8 requires an attempt's refreshed body, lifecycle, context, and launch plan
+/// to come from one coherent prepared document. Pairing the two in one value is
+/// what makes that structural rather than conventional: the child-environment
+/// overlay and the session-compatibility key are now derived from a single
+/// rebuild, so the key cannot describe a different plan than the environment the
+/// child receives.
+///
+/// It is the whole launch plan: provider argv, the spawned profile and binary,
+/// the session mode, the permission mode, and MCP runtime injection all come
+/// from this one value, via the re-entrant builder in
+/// [`crate::commands::wrap::launch_plan`].
+struct AttemptDocument {
     materialized: MaterializedHarnessPrompt,
+    launch: RebuiltLaunchIdentity,
+}
+
+struct PreparedHarnessAttempt {
+    document: AttemptDocument,
     plan: claudine::harness::HarnessPlan,
 }
 
@@ -452,7 +461,7 @@ fn prepare_attempt_phase(
     } else {
         claudine::composition::SchemaStage::Validate
     };
-    let mut materialized = materialize_attempt_prompt_phase(
+    let mut document = materialize_attempt_prompt_phase(
         &mut prompt,
         &mut lifecycle,
         &control,
@@ -463,7 +472,7 @@ fn prepare_attempt_phase(
         &mut prompt,
         &mut lifecycle,
         &mut control,
-        &mut materialized,
+        &mut document,
     )? {
         return Ok(PhaseResult::Transition(Box::new(step)));
     }
@@ -472,19 +481,19 @@ fn prepare_attempt_phase(
         &mut prompt,
         &mut lifecycle,
         &control,
-        &materialized,
+        &document.materialized,
     )?;
 
     if let Some(step) = start_lifecycle_phase(
         &mut prompt,
         &mut lifecycle,
         &mut control,
-        &materialized,
+        &document.materialized,
     )? {
         return Ok(PhaseResult::Transition(Box::new(step)));
     }
 
-    Ok(PhaseResult::Ready(PreparedHarnessAttempt { materialized, plan }))
+    Ok(PhaseResult::Ready(PreparedHarnessAttempt { document, plan }))
 }
 
 fn start_lifecycle_phase(
@@ -780,11 +789,12 @@ fn bootstrap_adopted_document_phase(
     prompt: &mut AttemptPromptPreparation<'_>,
     lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
     control: &mut AttemptRetryProxyControl<'_>,
-    materialized: &mut MaterializedHarnessPrompt,
+    document: &mut AttemptDocument,
 ) -> Result<Option<LoopStep>> {
     let Some(stage) = control.coordinator.take_bootstrap_pending() else {
         return Ok(None);
     };
+    let materialized = &mut document.materialized;
 
     // A directly-invoked document has already been through stages 1-3: its
     // bootstrap read is the caller-prepared composition, and the setup pipeline
@@ -810,12 +820,16 @@ fn bootstrap_adopted_document_phase(
     ) {
         return Err(bootstrap_blocked(prompt, lifecycle, materialized, &error));
     }
-    *materialized = materialize_attempt_prompt_phase(
+    // The stabilized reread replaces the document *and* the launch bundle
+    // together: a launch plan rebuilt from the pre-`initialize` read would
+    // describe a document that is no longer the one about to run.
+    *document = materialize_attempt_prompt_phase(
         prompt,
         lifecycle,
         control,
         claudine::composition::SchemaStage::Validate,
     )?;
+    let materialized = &mut document.materialized;
     let stabilized_lifecycle = match materialized.lifecycle.clone() {
         Some(config) => config,
         None => {
@@ -851,7 +865,7 @@ fn bootstrap_adopted_document_phase(
     // model.
     //
     // Nothing is cached for later attempts: every subsequent attempt re-reads the
-    // document and runs `rebuild_launch_env` against that read
+    // document and rebuilds its launch bundle against that read
     // (`materialize_attempt_prompt_phase`), so the identity always comes from the
     // document about to run rather than from this one adoption-time snapshot.
     //
@@ -868,13 +882,20 @@ fn bootstrap_adopted_document_phase(
             .map(Path::to_path_buf)
             .or_else(|| prompt.repo_root.map(Path::to_path_buf))
             .unwrap_or_else(|| prompt.child_cwd.to_path_buf());
-        let rebuild = rebuild_target_launch(
+        let rebuild = match rebuild_target_launch(
             control.launch_intent,
             control.cli_model,
             prompt.repo_root,
             &launch_area,
             materialized,
-        );
+        ) {
+            Ok(rebuild) => rebuild,
+            // The adopted target's own frontmatter names a launch plan this
+            // invocation cannot assemble for it. Route through the target's
+            // `blocked`/`finalize` rather than launching it against the router's
+            // bundle — the whole point of the R6 rebuild.
+            Err(error) => return Err(bootstrap_blocked(prompt, lifecycle, materialized, &error)),
+        };
         apply_target_env_overrides(materialized, &rebuild.env_overrides);
         lifecycle
             .guard
@@ -986,6 +1007,42 @@ fn surface_or_adopt_terminal_proxy(
             handoff_without_owning_coordinator(&request, provider),
             loop_start,
         )),
+    }
+}
+
+/// Route a launch-plan rebuild failure through the document's own
+/// `failure`/`finalize` stacks.
+///
+/// Reached when a refreshed document names a launch plan this invocation cannot
+/// assemble for it — a provider move while a system prompt is composed into the
+/// old provider's argv, or a rebuilt provider with no MCP injector. Refusing
+/// here is the point: the alternative is launching a fresh session against a
+/// bundle the document did not choose, which is exactly the R8 incoherence the
+/// rebuild exists to prevent.
+#[allow(clippy::too_many_arguments)]
+fn launch_plan_failure(
+    lifecycle_guard: &mut claudine::composition::LifecycleRunGuard<'_>,
+    materialized: &MaterializedHarnessPrompt,
+    source_path: &Path,
+    repo_root: Option<&Path>,
+    term: &Terminal,
+    effect_engine: &EffectEngine,
+    error: &dyn std::fmt::Display,
+    loop_start: std::time::Instant,
+) -> color_eyre::eyre::Report {
+    let err_info = LifecycleErrorInfo::from_action_failure("launch_plan", error.to_string());
+    match emit_failure_finalize_with_err(
+        lifecycle_guard,
+        materialized,
+        source_path,
+        repo_root,
+        term,
+        effect_engine,
+        &err_info,
+        loop_start,
+    ) {
+        Some(composition) => composition.into(),
+        None => eyre!("{error}"),
     }
 }
 
@@ -1103,7 +1160,7 @@ fn materialize_attempt_prompt_phase(
     // Whether this read owns the document's schema verdict. Every read except
     // the one taken before a document's own `initialize` does.
     schema: claudine::composition::SchemaStage,
-) -> Result<MaterializedHarnessPrompt> {
+) -> Result<AttemptDocument> {
     let attempt = control.active.iteration().attempt().number();
     // The resume follow-up, when this attempt is a resume, is the provider
     // input the model recorded on the attempt slice — it overrides the composed
@@ -1122,8 +1179,46 @@ fn materialize_attempt_prompt_phase(
     let effect_engine = lifecycle.effect_engine;
     let term = lifecycle.term;
     let loop_start = lifecycle.loop_start;
+    let launch_intent = control.launch_intent;
+    let cli_model = control.cli_model;
+    let source_path = prompt_state.source_path.clone();
+    // The one rebuild an attempt performs. Every downstream consumer — the child
+    // environment overlay below, the spawn, and the session-compatibility key —
+    // reads this single value, so the plan the key describes is by construction
+    // the plan the attempt runs with (R8).
+    let rebuild = |materialized: &MaterializedHarnessPrompt| {
+        rebuild_launch_identity(
+            launch_intent,
+            cli_model,
+            repo_root,
+            materialized,
+            Some(source_path.as_path()),
+        )
+    };
     if let Some(seed) = initial_materialized.take() {
-        return Ok(seed);
+        // The seeded first attempt keeps the environment overlay the command
+        // coordinator's own canonical preparation installed — this document is
+        // exactly the one the invocation built its launch bundle from, so
+        // re-overlaying a rebuild would substitute a second capture for the one
+        // the run was planned against. The bundle is still rebuilt, because the
+        // compatibility key this attempt stores has to be derived the same way as
+        // the one a later resume will compare against it.
+        let launch = rebuild(&seed).map_err(|error| {
+            launch_plan_failure(
+                lifecycle_guard,
+                &seed,
+                &source_path,
+                repo_root,
+                term,
+                effect_engine,
+                &error,
+                loop_start,
+            )
+        })?;
+        return Ok(AttemptDocument {
+            materialized: seed,
+            launch,
+        });
     }
     // R8 — this is a fresh-read boundary: the document has just been re-read from
     // disk, so its launch identity is rebuilt from *that* read rather than
@@ -1132,16 +1227,14 @@ fn materialize_attempt_prompt_phase(
     // Two things depend on the rebuild being live rather than frozen. The
     // provider child must launch under the refreshed document's own
     // `AGENT`/`MODEL`/`YOLO` (R6, for a proxied target and for every later loop
-    // iteration alike). And the session-compatibility key, which
-    // `execute_attempt_phase` derives from the same rebuild, must move when the
-    // refreshed document moves — otherwise a `resume` whose refresh changed the
-    // launch plan would silently run the live session under a plan it was not
-    // opened with, which is precisely what AC15 requires be refused.
+    // iteration alike). And the session-compatibility key, derived from this same
+    // bundle, must move when the refreshed document moves — otherwise a `resume`
+    // whose refresh changed the launch plan would silently run the live session
+    // under a plan it was not opened with, which is precisely what AC15 requires
+    // be refused.
     //
     // For an unchanged document this reproduces the identity the invocation
     // already installed, so the key compares equal and the resume proceeds.
-    let launch_intent = control.launch_intent;
-    let cli_model = control.cli_model;
     info_span!(
         "harness_materialize_prompt",
         attempt,
@@ -1156,10 +1249,13 @@ fn materialize_attempt_prompt_phase(
             schema,
         )
     })
-    .map(|mut materialized| {
-        let refreshed = rebuild_launch_env(launch_intent, cli_model, repo_root, &materialized);
-        apply_target_env_overrides(&mut materialized, &refreshed);
-        materialized
+    .and_then(|mut materialized| {
+        let launch = rebuild(&materialized).map_err(color_eyre::eyre::Report::from)?;
+        apply_target_env_overrides(&mut materialized, &launch.env_overrides);
+        Ok(AttemptDocument {
+            materialized,
+            launch,
+        })
     })
     .map_err(|error| {
         // Canonical preparation returns concrete `CompositionError`s (a target's
@@ -1337,17 +1433,11 @@ fn execute_attempt_phase(
     state: &mut HarnessLoopState<'_, '_>,
     prepared: PreparedHarnessAttempt,
 ) -> Result<ExecutedHarnessAttempt> {
-    let provider = state.run.provider;
-    let profile = state.run.profile;
-    let binary_path = state.run.binary_path;
     let child_cwd = state.run.child_cwd;
-    let effective_non_interactive = state.run.effective_non_interactive;
     let cli_timeout = &state.run.cli_timeout;
     let cli_step_timeout = &state.run.cli_step_timeout;
     let cli_stall_timeout = &state.run.cli_stall_timeout;
-    let base_args = state.run.base_args;
     let base_env = state.run.base_env;
-    let use_structured = state.run.use_structured;
     let structured_codex_output = state.run.structured_codex_output;
     let stdout_noise = state.run.stdout_noise;
     let stderr_noise = state.run.stderr_noise;
@@ -1373,7 +1463,23 @@ fn execute_attempt_phase(
     let lifecycle_guard = &mut *state.run.lifecycle_guard;
     let effect_engine = &state.effect_engine;
     let loop_start = state.loop_start;
-    let PreparedHarnessAttempt { materialized, plan } = prepared;
+    let PreparedHarnessAttempt { document, plan } = prepared;
+    // R8 — the one bundle this attempt's own fresh read produced, and the sole
+    // authority for the launch. The provider spawned, its profile and binary,
+    // the argv, the session mode, the structured-output shape, the permission
+    // mode, and the MCP runtime injection all come from here; so does the
+    // session-compatibility key below. There is no invocation-fixed launch state
+    // left for the key to disagree with.
+    let AttemptDocument {
+        materialized,
+        launch: rebuilt,
+    } = document;
+    let provider = rebuilt.provider;
+    let profile = rebuilt.profile;
+    let binary_path = rebuilt.binary_path.as_path();
+    let effective_non_interactive = rebuilt.non_interactive;
+    let use_structured = rebuilt.use_structured;
+    let base_args = rebuilt.args.as_slice();
 
     let launch = build_harness_launch(
         provider,
@@ -1382,6 +1488,7 @@ fn execute_attempt_phase(
         base_env,
         resume_session.as_deref(),
         &materialized,
+        &rebuilt.launch_env,
         effective_non_interactive,
         cli_timeout.clone(),
         plan.timeout,
@@ -1425,9 +1532,8 @@ fn execute_attempt_phase(
     )
     .entered();
 
-    // R8 — compute the session-compatibility key for this attempt from the launch
-    // plan the attempt's *own* fresh read resolves to, then compare before the
-    // provider is spawned.
+    // R8 — the session-compatibility key describes the bundle this attempt's own
+    // fresh read produced, and is compared before the provider is spawned.
     //
     // Both sides of the comparison come from `rebuild_launch_identity` rather
     // than from the invocation-fixed `state.run` values. That is what makes the
@@ -1437,13 +1543,6 @@ fn execute_attempt_phase(
     // permission mode / interactivity / structured-output mode, and the resume is
     // refused naming exactly those facets. `child_cwd` alone stays invocation-read
     // — it has no document surface for a refresh to move.
-    let rebuilt = rebuild_launch_identity(
-        &state.run.launch_intent,
-        state.run.cli_model.as_deref(),
-        repo_root,
-        &materialized,
-        Some(prompt_state.source_path.as_path()),
-    );
     let launch_key = session_compat_key(
         rebuilt.provider,
         rebuilt.profile,

@@ -17,6 +17,11 @@ pub(crate) fn build_harness_launch(
     // separate resume directive on the prompt state to consume.
     resume_session: Option<&str>,
     materialized: &MaterializedHarnessPrompt,
+    // R8 — the rebuilt plan's environment overlay (MCP runtime injection, the
+    // OpenCode inline config, the permission mode). Applied beneath
+    // `materialized.env_overrides`, which stays authoritative for the
+    // `AGENT`/`MODEL`/`YOLO` triple the document resolved.
+    launch_env: &[(OsString, OsString)],
     effective_non_interactive: bool,
     cli_timeout: Option<String>,
     plan_timeout: Option<std::time::Duration>,
@@ -47,6 +52,9 @@ pub(crate) fn build_harness_launch(
     )?;
 
     let mut env = base_env.clone();
+    for (key, value) in launch_env {
+        env.insert(key.clone(), value.clone());
+    }
     for (key, value) in &materialized.env_overrides {
         env.insert(key.clone().into(), value.clone().into());
     }

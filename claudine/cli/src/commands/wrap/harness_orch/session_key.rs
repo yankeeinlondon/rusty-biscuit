@@ -37,9 +37,17 @@
 //!   argv is invocation-fixed and the system prompt was already *composed* into
 //!   it, so `system_prompt` cannot move across a same-document refresh — the
 //!   file digest re-read here only re-reads a temp file the invocation wrote.
-//! - **Invocation-fixed** (`workspace_cwd`, `system_prompt`): neither has a
-//!   document surface a refresh can move, so both are carried in the key for
-//!   completeness and proven at the projection layer (L1) only.
+//! - **Immutable invocation inputs** (`workspace_cwd`, `system_prompt`): R8
+//!   defines both as facets no same-document resume can move — the child CWD is
+//!   resolved from the launch directory before any document is read, and the
+//!   system prompt's content is composed once and captured. They are carried in
+//!   the key for completeness and proven where they are computed rather than by
+//!   an end-to-end refusal, because no document mutation can produce one. The
+//!   structural claims are held by
+//!   `composition::prep_context::tests::prep_context_launch_workspace_split_contract_unit`
+//!   and
+//!   `launch_plan::tests::rewriting_the_discovered_system_prompt_moves_no_delivered_content`;
+//!   the projections themselves by the tests in this module.
 //! - **Provider-contributed** ([`SessionCompatibilityKey::extra`]): not yet
 //!   populated. No provider adapter currently contributes a precise resume
 //!   identity, so the map is left empty rather than filled with a heuristic. The

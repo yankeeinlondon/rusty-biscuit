@@ -15,9 +15,22 @@
 //!   session-compatibility key has to see in order to refuse mixing a live
 //!   session with a newly prepared launch plan.
 //!
-//! All three paths share [`rebuild_launch_identity`]; [`rebuild_launch_env`]
-//! projects its `AGENT`/`MODEL`/`YOLO` half, and [`rebuild_target_launch`] adds
+//! Both paths share [`rebuild_launch_identity`]; [`rebuild_target_launch`] adds
 //! the early-binding context proxy adoption needs.
+//!
+//! ## One rebuild per attempt
+//!
+//! [`rebuild_launch_identity`] runs **once** per attempt, at the fresh-read
+//! boundary that produces the document, and its result is paired with that
+//! document (`AttemptDocument`). The attempt previously rebuilt twice — an
+//! env-only projection for the child environment and a second, independently
+//! computed one for the compatibility key — which meant two values that were
+//! only equal by convention. Now the child-environment overlay and the key are
+//! both derived from the one bundle, so the key cannot describe a different
+//! environment than the child receives.
+//!
+//! That one bundle is also what the child is spawned with — argv, profile, and
+//! MCP injection included. See "The launch this rebuild reaches" below.
 //!
 //! ## Scope
 //!
@@ -43,28 +56,40 @@
 //!
 //! ### Facets deliberately outside the rebuild
 //!
-//! - **Workspace/child CWD** has no frontmatter surface at all: it comes from
-//!   the launch workspace and `--repo`. Nothing a document can write moves it,
-//!   so the key reads the invocation's `child_cwd` directly and the facet stays
-//!   projection-only.
-//! - **System-prompt content** is composed once, at invocation, into the
-//!   provider-native argv (`profile::apply_system_prompt`). A document has no
-//!   `system_prompt:` surface, and rewriting the `--append-system-prompt` file
-//!   after the fact changes nothing, because the argv already carries the
-//!   composed text (or a temp file written at invocation). Re-composing it per
-//!   attempt would be a launch-pipeline re-entry, not a document rebuild, so the
-//!   facet stays projection-only.
+//! R8 defines exactly two of the key's facets as *immutable invocation inputs*:
+//! no same-document resume can move them, so the rebuild has nothing to
+//! recompute and the key reads the invocation's own value.
 //!
-//! ## The launch this rebuild reaches, and the one it does not
+//! - **Workspace/child CWD** is resolved from the process's launch directory
+//!   before any document is read. The complete set of document surfaces over
+//!   launch identity is `agent:`/`model:`/`interactive:` — none names a
+//!   directory — and the resolver deliberately prefers the launch repository
+//!   over the document's own, so even a proxy into a sibling clone leaves the
+//!   child where it started (`composition::prep_context::tests::
+//!   prep_context_launch_workspace_split_contract_unit`).
+//! - **System-prompt *content*** is composed once, at invocation, and captured.
+//!   A document has no `system_prompt:` surface, and rewriting the discovered
+//!   `system-prompt.md` between attempts moves neither delivery path — proven by
+//!   `launch_plan::tests::rewriting_the_discovered_system_prompt_moves_no_delivered_content`.
+//!   Its *delivery* is not in this bucket: it is rebuilt per provider (see
+//!   [`super::super::super::launch_plan`]), so it moves exactly when the
+//!   provider facet moves, which already refuses.
 //!
-//! The rebuilt identity feeds the compatibility key on every route. It also
-//! feeds the child environment via the materialized prompt's `env_overrides`
-//! (which [`super::super::build_harness_launch`] overlays onto the base env).
+//! ## The launch this rebuild reaches
 //!
-//! It does **not** rebuild the provider argv, MCP runtime injection, or the
-//! profile the harness actually spawns: those are assembled once by the
-//! invocation pipeline. Two different callers live with that, and they live
-//! with it for two different reasons.
+//! The rebuilt bundle is the launch. It carries the provider, profile, and
+//! binary the harness spawns, the provider argv, the session mode and
+//! structured-output shape, the permission mode, and the MCP runtime injection —
+//! and the compatibility key is computed from that same value. There is no
+//! invocation-fixed launch state left for the key to disagree with.
+//!
+//! Argv and MCP injection come from [`super::super::super::launch_plan`], a
+//! re-entrant builder the invocation feeds once with the results of every side
+//! effect it performed (temp files, shadow HOME, ambiguity resolutions). A
+//! rebuild whose facets match the invocation's gets that recorded plan back
+//! verbatim, so an unchanged document is byte-identical to the invocation by
+//! construction; a rebuild that moved a facet replays the producers around the
+//! recorded invocation-fixed slices.
 //!
 //! ### Proxy adoption — the target's full bundle is built above the harness
 //!
@@ -72,24 +97,35 @@
 //! already re-prepared. Every route that reaches it carries a run ledger, so the
 //! handoff surfaced up and the target was rebuilt as a fresh document through
 //! `commands::compose::prep::prepare_and_run_active_document` — which re-enters
-//! the production selection/MCP/argv pipeline and rebuilds profile/binary
-//! sub-selection, the argv entrypoint, MCP runtime injection, child CWD, and
-//! system-prompt delivery from the target's own frontmatter. What is rebuilt
-//! here is the remainder: the lifecycle early-binding context and the
-//! `AGENT`/`MODEL`/`YOLO` env for the target's staged bootstrap.
+//! the production selection/MCP/argv pipeline from the target's own frontmatter.
+//! What is rebuilt here is the remainder: the lifecycle early-binding context and
+//! the `AGENT`/`MODEL`/`YOLO` env for the target's staged bootstrap.
 //!
 //! A handoff with no ledger to surface to has no such coordinator, and is
 //! therefore **refused** rather than adopted against a borrowed bundle — see
 //! `super::surface_or_adopt_terminal_proxy`. There is no reduced launch path.
 //!
-//! ### Retry/resume refresh — bounded, and in the safe direction
+//! ### Retry and resume, which differ on purpose
 //!
-//! At a same-document fresh-read boundary there is no coordinator re-entry at
-//! all. A resume whose refresh moved provider, interactivity, permission mode,
-//! or structured-output mode is **refused** rather than run against a launch
-//! plan the session was not opened with, which is what R8 asks for. A *retry*
-//! on that path still launches under the invocation's argv; that residue is
-//! tracked against AC15 rather than here.
+//! At a same-document fresh-read boundary there is no coordinator re-entry, so
+//! this rebuild is the whole story — and the two verbs want opposite things
+//! from it.
+//!
+//! A **resume** reuses a live provider session the old plan opened, so a moved
+//! facet is a genuine conflict: it is **refused** with the facets named, rather
+//! than run against a plan the session was not opened with.
+//!
+//! A **retry** opens a *fresh* session, so there is nothing to conflict with. It
+//! simply launches under the rebuilt plan: a document that changes `agent:`,
+//! `interactive:`, permission mode, or its MCP `#tag` set before a retry gets a
+//! child spawned from the refreshed plan, not the invocation's. That is what
+//! R8's "one coherent prepared document" asks for, and what review-8 finding 2
+//! reported missing.
+//!
+//! Only where a path recorded no replay inputs (the direct provider wrappers,
+//! whose facets are pinned by invocation intent anyway) does a moved facet
+//! refuse instead — assembling a plan from empty slices would silently drop the
+//! MCP injection or system prompt the invocation performed.
 
 use std::path::{Path, PathBuf};
 
@@ -97,6 +133,7 @@ use claudine::composition::{AgentHint, InstalledProviderSnapshot};
 use claudine::model_catalog::ModelCatalogService;
 use claudine::provider::Provider;
 
+use super::super::super::launch_plan;
 use super::super::super::profile::{WrapperProfile, profile_for_provider};
 
 use super::super::MaterializedHarnessPrompt;
@@ -107,7 +144,7 @@ use super::super::MaterializedHarnessPrompt;
 /// "Immutable" is the R8 sense: these are the caller's own decisions, which stay
 /// authoritative at every document, retry, and resume of the invocation. Only
 /// the document half of the rebuild moves.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct LaunchRebuildIntent {
     /// Explicit `--claude` / `--codex` / … — authoritative over any frontmatter
     /// `agent:`, exactly as it is for a direct invocation.
@@ -135,6 +172,11 @@ pub(crate) struct LaunchRebuildIntent {
     /// MCP off no document tag participates in the launch, so none may move the
     /// MCP facet either.
     pub(crate) mcp_enabled: bool,
+    /// The invocation-fixed half of the re-entrant launch-plan builder: every
+    /// effect the command phase performed once, recorded so a per-attempt
+    /// rebuild can re-derive argv and the environment overlay without repeating
+    /// any of them. See [`crate::commands::wrap::launch_plan`].
+    pub(crate) launch_plan_inputs: crate::commands::wrap::launch_plan::LaunchPlanInputs,
 }
 
 /// The launch properties a resume cannot renegotiate, recomputed from one
@@ -143,6 +185,7 @@ pub(crate) struct LaunchRebuildIntent {
 /// Built by [`rebuild_launch_identity`]. Both sides of the R8 compatibility
 /// comparison are derived from this, so a document mutation that moves any field
 /// here is a named incompatible facet on the next resume.
+#[derive(Clone)]
 pub(crate) struct RebuiltLaunchIdentity {
     pub(crate) provider: Provider,
     pub(crate) profile: &'static dyn WrapperProfile,
@@ -158,6 +201,15 @@ pub(crate) struct RebuiltLaunchIdentity {
     pub(crate) mcp_tags: Vec<String>,
     /// `AGENT`/`MODEL`/`YOLO` overlays for the provider child's environment.
     pub(crate) env_overrides: Vec<(String, String)>,
+    /// The provider argv this attempt launches with, rebuilt from the refreshed
+    /// document. Identical to the invocation's own argv whenever the document
+    /// moved no launch facet — see [`crate::commands::wrap::launch_plan`].
+    pub(crate) args: Vec<String>,
+    /// The environment overlay the rebuilt plan contributes (MCP runtime
+    /// injection, the OpenCode inline config, the permission mode). Applied
+    /// beneath [`Self::env_overrides`], which stays authoritative for
+    /// `AGENT`/`MODEL`/`YOLO`.
+    pub(crate) launch_env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
 }
 
 /// Recompute the full launch identity from one refreshed read of a document.
@@ -170,7 +222,7 @@ pub(crate) fn rebuild_launch_identity(
     repo_root: Option<&Path>,
     document: &MaterializedHarnessPrompt,
     source_path: Option<&Path>,
-) -> RebuiltLaunchIdentity {
+) -> Result<RebuiltLaunchIdentity, crate::commands::wrap::launch_plan::LaunchPlanError> {
     let snapshot = intent.installed_snapshot.as_ref();
     let provider = intent
         .explicit_provider
@@ -188,34 +240,6 @@ pub(crate) fn rebuild_launch_identity(
         .interactive
         .map_or(intent.default_non_interactive, |interactive| !interactive);
 
-    // Mirrors the command phase: `--yolo` is a request, and the provider decides
-    // whether its bypass applies in this mode. A provider whose bypass is
-    // non-interactive-only silently declines in an interactive session, which is
-    // a genuine change of permission mode.
-    let yolo = intent.cli_yolo && {
-        let mut scratch_args: Vec<String> = Vec::new();
-        let mut scratch_env: Vec<(String, String)> = Vec::new();
-        profile
-            .apply_yolo_for_mode(&mut scratch_args, &mut scratch_env, !non_interactive)
-            .map(|outcome| outcome.applied)
-            .unwrap_or(false)
-    };
-
-    // Mirrors the command phase's structured-streaming decision, then asks the
-    // production Codex predicate itself rather than restating which provider it
-    // singles out — the scratch argv it would decorate is discarded.
-    let use_structured = profile.supports_structured_stream() && non_interactive;
-    let structured_codex = {
-        let mut scratch_args: Vec<String> = Vec::new();
-        crate::commands::exec_prep::prepare_codex_structured_output(
-            provider,
-            use_structured,
-            !non_interactive && intent.is_inline,
-            &mut scratch_args,
-        )
-        .is_some()
-    };
-
     // Lexed from the document on disk, not from `document.prompt`: a resume
     // attempt deliberately substitutes the follow-up message for the composed
     // body (R8), so the prompt field carries the follow-up rather than the text
@@ -232,19 +256,39 @@ pub(crate) fn rebuild_launch_identity(
         _ => Vec::new(),
     };
 
-    let env_overrides = launch_env_overrides(provider, cli_model, yolo, repo_root, document);
+    let model = resolve_launch_model(provider, cli_model, repo_root, document);
 
-    RebuiltLaunchIdentity {
+    // The single re-entrant rebuild. `--yolo` is a request; whether it *applies*
+    // is the profile's decision in this mode, and the plan is what makes it —
+    // there is no second scratch derivation to disagree with the argv that
+    // actually ships. Same for the structured-output shape.
+    let facets = launch_plan::DocumentLaunchFacets {
+        provider,
+        non_interactive,
+        yolo_requested: intent.cli_yolo,
+        is_inline: intent.is_inline,
+        model: model.clone(),
+        mcp_body_tags: mcp_tags.clone(),
+    };
+    let use_structured = facets.use_structured();
+    let plan = launch_plan::build_launch_plan(&intent.launch_plan_inputs, &facets)?;
+
+    let env_overrides =
+        launch_env_overrides(provider, model.as_deref(), plan.yolo_applied);
+
+    Ok(RebuiltLaunchIdentity {
         provider,
         profile,
         binary_path,
         non_interactive,
-        yolo,
+        yolo: plan.yolo_applied,
         use_structured,
-        structured_codex,
+        structured_codex: plan.structured_codex,
         mcp_tags,
         env_overrides,
-    }
+        args: plan.args,
+        launch_env: plan.env_overlay,
+    })
 }
 
 /// Pick the provider a frontmatter `agent:` hint names.
@@ -300,29 +344,18 @@ pub(super) struct TargetLaunchRebuild {
     pub(super) prepared_context: darkmatter::markdown::compose::ComposeContext,
 }
 
-/// The `AGENT`/`MODEL`/`YOLO` half of [`rebuild_launch_identity`], for the
-/// callers that only need to overlay the child environment.
+/// Resolve the model the refreshed document launches with, under R6 precedence:
+/// explicit `--model` beats the document's own `model:`, validated against the
+/// same catalog a direct invocation uses.
 ///
-/// Passes no source path because the environment overlay has no MCP component;
-/// only the compatibility key reads [`RebuiltLaunchIdentity::mcp_tags`].
-pub(super) fn rebuild_launch_env(
-    intent: &LaunchRebuildIntent,
-    cli_model: Option<&str>,
-    repo_root: Option<&Path>,
-    document: &MaterializedHarnessPrompt,
-) -> Vec<(String, String)> {
-    rebuild_launch_identity(intent, cli_model, repo_root, document, None).env_overrides
-}
-
-/// Project a resolved provider/model/yolo triple into the `AGENT`/`MODEL`/`YOLO`
-/// child environment.
-fn launch_env_overrides(
+/// One answer serves both the launch plan's argv and the `MODEL` environment, so
+/// the two cannot describe different models.
+fn resolve_launch_model(
     provider: Provider,
     cli_model: Option<&str>,
-    yolo: bool,
     repo_root: Option<&Path>,
     document: &MaterializedHarnessPrompt,
-) -> Vec<(String, String)> {
+) -> Option<String> {
     let selection_config =
         crate::commands::wrap::composition::load_selection_config_for_repo(repo_root);
     let catalog = match &selection_config {
@@ -335,11 +368,20 @@ fn launch_env_overrides(
         cli_model,
         Some(&catalog),
     );
+    model
+}
 
+/// Project a resolved provider/model/yolo triple into the `AGENT`/`MODEL`/`YOLO`
+/// child environment.
+fn launch_env_overrides(
+    provider: Provider,
+    model: Option<&str>,
+    yolo: bool,
+) -> Vec<(String, String)> {
     let mut env_overrides: Vec<(String, String)> = Vec::new();
     env_overrides.push(("AGENT".to_string(), provider.as_slug().to_string()));
-    if let Some(model) = &model {
-        env_overrides.push(("MODEL".to_string(), model.clone()));
+    if let Some(model) = model {
+        env_overrides.push(("MODEL".to_string(), model.to_string()));
     }
     env_overrides.push(("YOLO".to_string(), yolo.to_string()));
     env_overrides
@@ -358,8 +400,11 @@ pub(super) fn rebuild_target_launch(
     repo_root: Option<&Path>,
     launch_area: &Path,
     target: &MaterializedHarnessPrompt,
-) -> TargetLaunchRebuild {
-    let env_overrides = rebuild_launch_env(intent, cli_model, repo_root, target);
+) -> Result<TargetLaunchRebuild, crate::commands::wrap::launch_plan::LaunchPlanError> {
+    // Passes no source path: the environment overlay has no MCP component, and
+    // only the compatibility key reads [`RebuiltLaunchIdentity::mcp_tags`].
+    let env_overrides =
+        rebuild_launch_identity(intent, cli_model, repo_root, target, None)?.env_overrides;
 
     // Rebuild the early-binding context the same way the pipeline builds the
     // router's lifecycle context (see `construct_lifecycle_runtime`): capture at
@@ -373,287 +418,11 @@ pub(super) fn rebuild_target_launch(
         prepared_context.env_mut().insert(key.clone(), value.clone());
     }
 
-    TargetLaunchRebuild {
+    Ok(TargetLaunchRebuild {
         env_overrides,
         prepared_context,
-    }
+    })
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use claudine::composition::{EffectiveSelectionHints, ModelHint};
-
-    /// The invocation intent an unchanged run resolves against: Goose,
-    /// non-interactive, nothing explicit, MCP in play so a body tag counts.
-    fn intent() -> LaunchRebuildIntent {
-        LaunchRebuildIntent {
-            explicit_provider: None,
-            fallback_provider: Provider::Goose,
-            fallback_binary: PathBuf::from("/usr/bin/goose"),
-            installed_snapshot: None,
-            default_non_interactive: true,
-            cli_yolo: false,
-            is_inline: false,
-            mcp_enabled: true,
-        }
-    }
-
-    /// Build a materialized prompt carrying a target's `model:` hint plus a
-    /// matching effective-frontmatter object, as canonical preparation would.
-    fn target_with_model(model: Option<&str>) -> MaterializedHarnessPrompt {
-        let (selection_hints, frontmatter) = match model {
-            Some(model) => (
-                EffectiveSelectionHints {
-                    model: Some(ModelHint::Single(model.to_string())),
-                    ..EffectiveSelectionHints::default()
-                },
-                serde_json::json!({ "model": model }),
-            ),
-            None => (
-                EffectiveSelectionHints::default(),
-                serde_json::json!({ "title": "no model" }),
-            ),
-        };
-        document(selection_hints, frontmatter, "body")
-    }
-
-    fn document(
-        selection_hints: EffectiveSelectionHints,
-        frontmatter: serde_json::Value,
-        prompt: &str,
-    ) -> MaterializedHarnessPrompt {
-        MaterializedHarnessPrompt {
-            live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&frontmatter),
-            frontmatter,
-            prompt: prompt.to_string(),
-            env_overrides: Vec::new(),
-            selection_hints,
-            inline_closure_plan: None,
-            lifecycle: None,
-        }
-    }
-
-    fn with_hints(hints: EffectiveSelectionHints) -> MaterializedHarnessPrompt {
-        document(hints, serde_json::json!({ "title": "t" }), "body")
-    }
-
-    fn value_of<'a>(overrides: &'a [(String, String)], key: &str) -> Option<&'a str> {
-        overrides
-            .iter()
-            .find(|(k, _)| k == key)
-            .map(|(_, v)| v.as_str())
-    }
-
-    /// A target that pins its own `model:` resolves it into the rebuilt launch
-    /// identity — the `AGENT`/`MODEL`/`YOLO` env AND the early-binding context
-    /// that lifecycle `env.*` reads. This is the launch facet the L2 pinned-model
-    /// equivalence test observes through the target's `success` stack.
-    #[test]
-    fn rebuild_projects_target_model_into_env_and_context() {
-        // A namespaced local-runner id is catalog-valid by construction, so this
-        // is independent of the host's live model listings.
-        let target = target_with_model(Some("llamacpp/probe-model-x"));
-        let rebuild = rebuild_target_launch(&intent(), None, None, Path::new("."), &target);
-
-        assert_eq!(value_of(&rebuild.env_overrides, "AGENT"), Some("goose"));
-        assert_eq!(
-            value_of(&rebuild.env_overrides, "MODEL"),
-            Some("llamacpp/probe-model-x"),
-            "the target's own pinned model must reach the launch env",
-        );
-        assert_eq!(value_of(&rebuild.env_overrides, "YOLO"), Some("false"));
-        assert_eq!(
-            rebuild.prepared_context.env().get("MODEL").map(String::as_str),
-            Some("llamacpp/probe-model-x"),
-            "the lifecycle early-binding context must carry the target's model",
-        );
-    }
-
-    /// Explicit `--model` is immutable invocation intent: it stays authoritative
-    /// over the target's frontmatter `model:` exactly as it would for a direct
-    /// invocation under the same CLI arguments.
-    #[test]
-    fn rebuild_keeps_explicit_cli_model_authoritative() {
-        let target = target_with_model(Some("llamacpp/probe-model-x"));
-        let rebuild = rebuild_target_launch(
-            &intent(),
-            Some("llamacpp/cli-pinned"),
-            None,
-            Path::new("."),
-            &target,
-        );
-
-        assert_eq!(
-            value_of(&rebuild.env_overrides, "MODEL"),
-            Some("llamacpp/cli-pinned"),
-            "explicit --model must win over the target frontmatter model",
-        );
-    }
-
-    /// A target with no `model:` produces no `MODEL` overlay (matching
-    /// `install_agent_env_for_composition`), so the child env falls through to
-    /// the provider default rather than a stale router model.
-    #[test]
-    fn rebuild_omits_model_when_target_pins_none() {
-        let target = target_with_model(None);
-        let rebuild = rebuild_target_launch(&intent(), None, None, Path::new("."), &target);
-
-        assert_eq!(value_of(&rebuild.env_overrides, "AGENT"), Some("goose"));
-        assert_eq!(
-            value_of(&rebuild.env_overrides, "MODEL"),
-            None,
-            "no frontmatter model means no MODEL overlay",
-        );
-    }
-
-    /// The property the whole R8 comparison rests on: the rebuild is a pure
-    /// function of (document, intent), so an unchanged document cannot produce a
-    /// false refusal no matter how many attempts run.
-    #[test]
-    fn an_unchanged_document_rebuilds_to_an_identical_identity() {
-        let doc = target_with_model(Some("llamacpp/probe-model-x"));
-        let first = rebuild_launch_identity(&intent(), None, None, &doc, None);
-        let second = rebuild_launch_identity(&intent(), None, None, &doc, None);
-
-        assert_eq!(first.provider, second.provider);
-        assert_eq!(first.binary_path, second.binary_path);
-        assert_eq!(first.non_interactive, second.non_interactive);
-        assert_eq!(first.yolo, second.yolo);
-        assert_eq!(first.use_structured, second.use_structured);
-        assert_eq!(first.structured_codex, second.structured_codex);
-        assert_eq!(first.mcp_tags, second.mcp_tags);
-        assert_eq!(first.env_overrides, second.env_overrides);
-    }
-
-    /// Frontmatter `agent:` moves the provider — and with it the binary and the
-    /// resume protocol the compatibility key reads.
-    #[test]
-    fn frontmatter_agent_moves_the_provider_and_its_binary() {
-        let base = rebuild_launch_identity(&intent(), None, None, &with_hints(
-            EffectiveSelectionHints::default(),
-        ), None);
-        let switched = rebuild_launch_identity(&intent(), None, None, &with_hints(
-            EffectiveSelectionHints {
-                agent: Some(AgentHint::Single(Provider::Claude)),
-                ..EffectiveSelectionHints::default()
-            },
-        ), None);
-
-        assert_eq!(base.provider, Provider::Goose);
-        assert_eq!(switched.provider, Provider::Claude);
-        assert_ne!(
-            base.binary_path, switched.binary_path,
-            "a provider switch must move the binary the key records",
-        );
-    }
-
-    /// Explicit CLI provider selection is immutable invocation intent: a
-    /// frontmatter `agent:` cannot move it, so it can never refuse a resume.
-    #[test]
-    fn an_explicit_cli_provider_pins_the_rebuilt_provider() {
-        let pinned = LaunchRebuildIntent {
-            explicit_provider: Some(Provider::Goose),
-            ..intent()
-        };
-        let rebuilt = rebuild_launch_identity(&pinned, None, None, &with_hints(
-            EffectiveSelectionHints {
-                agent: Some(AgentHint::Single(Provider::Claude)),
-                ..EffectiveSelectionHints::default()
-            },
-        ), None);
-
-        assert_eq!(rebuilt.provider, Provider::Goose);
-    }
-
-    /// Frontmatter `interactive:` moves the session mode, and the
-    /// structured-output mode that mode implies moves with it.
-    #[test]
-    fn frontmatter_interactive_moves_the_mode_and_structured_output() {
-        // OpenCode has a stream protocol, so structured streaming is on for it in
-        // non-interactive mode; Goose has none and would hide the flip.
-        let streaming = LaunchRebuildIntent {
-            fallback_provider: Provider::OpenCode,
-            ..intent()
-        };
-        let base = rebuild_launch_identity(&streaming, None, None, &with_hints(
-            EffectiveSelectionHints::default(),
-        ), None);
-        let interactive = rebuild_launch_identity(&streaming, None, None, &with_hints(
-            EffectiveSelectionHints {
-                interactive: Some(true),
-                ..EffectiveSelectionHints::default()
-            },
-        ), None);
-
-        assert!(base.non_interactive);
-        assert!(!interactive.non_interactive);
-        assert!(
-            base.use_structured && !interactive.use_structured,
-            "structured streaming is non-interactive only, so the mode flip must move it",
-        );
-    }
-
-    /// `--yolo` records the permission mode the provider actually achieves, not
-    /// the one that was asked for: a provider whose bypass is non-interactive
-    /// only declines in an interactive session, which is a real mode change.
-    #[test]
-    fn the_permission_mode_records_what_yolo_achieved_not_what_was_asked() {
-        // OpenCode's bypass is non-interactive only; Goose sets an env var that
-        // applies in either mode and would hide the difference.
-        let requested = LaunchRebuildIntent {
-            cli_yolo: true,
-            fallback_provider: Provider::OpenCode,
-            ..intent()
-        };
-        let non_interactive = rebuild_launch_identity(&requested, None, None, &with_hints(
-            EffectiveSelectionHints::default(),
-        ), None);
-        let interactive = rebuild_launch_identity(&requested, None, None, &with_hints(
-            EffectiveSelectionHints {
-                interactive: Some(true),
-                ..EffectiveSelectionHints::default()
-            },
-        ), None);
-
-        assert!(non_interactive.yolo);
-        assert!(
-            !interactive.yolo,
-            "OpenCode bypass is non-interactive only, so an interactive refresh drops it",
-        );
-    }
-
-    /// MCP `#tag`s lexed from the document **on disk** participate in the
-    /// identity — but only when MCP is in play for the invocation at all.
-    ///
-    /// Reading the source rather than `document.prompt` is what makes the signal
-    /// survive a resume, whose prompt field carries the follow-up message.
-    #[test]
-    fn body_mcp_tags_are_lexed_from_disk_and_only_when_mcp_is_enabled() {
-        let dir = tempfile::tempdir().unwrap();
-        let source = dir.path().join("doc.md");
-        std::fs::write(&source, "---\ntitle: t\n---\nwork on #calendar today\n").unwrap();
-        // The prompt field deliberately carries a resume follow-up, proving the
-        // tags do not come from it.
-        let doc = document(
-            EffectiveSelectionHints::default(),
-            serde_json::json!({ "title": "t" }),
-            "please finish the resumed work",
-        );
-
-        let enabled =
-            rebuild_launch_identity(&intent(), None, None, &doc, Some(source.as_path()));
-        assert_eq!(enabled.mcp_tags, vec!["calendar".to_string()]);
-
-        let off = LaunchRebuildIntent {
-            mcp_enabled: false,
-            ..intent()
-        };
-        assert!(
-            rebuild_launch_identity(&off, None, None, &doc, Some(source.as_path()))
-                .mcp_tags
-                .is_empty(),
-            "with MCP off no body tag participates in the launch, so none may refuse a resume",
-        );
-    }
-}
+mod tests;

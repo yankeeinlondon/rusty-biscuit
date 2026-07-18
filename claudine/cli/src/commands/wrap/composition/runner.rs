@@ -74,6 +74,8 @@ pub(super) struct CompositionRunCtx<'a> {
     pub profile: &'static dyn WrapperProfile,
     pub effective_non_interactive: bool,
     pub args_before_prompt: &'a Vec<String>,
+    /// R8 — the invocation-fixed half of the re-entrant launch-plan builder.
+    pub launch_plan_inputs: &'a crate::commands::wrap::launch_plan::LaunchPlanInputs,
     pub child_cwd: &'a Path,
     pub use_structured: bool,
     pub structured_codex_output: &'a Option<StructuredCodexOutput>,
@@ -126,6 +128,7 @@ pub(super) fn run_composition_body(
     let profile = ctx.profile;
     let effective_non_interactive = ctx.effective_non_interactive;
     let args_before_prompt = ctx.args_before_prompt;
+    let launch_plan_inputs = ctx.launch_plan_inputs;
     let child_cwd = ctx.child_cwd;
     let use_structured = ctx.use_structured;
     let structured_codex_output = ctx.structured_codex_output;
@@ -469,7 +472,6 @@ pub(super) fn run_composition_body(
     let (exit_code, harness_perf, harness_signals, surfaced_handoff) = run_harness_loop(
         provider,
         profile,
-        binary_path.as_path(),
         child_cwd,
         effective_non_interactive,
         request.timeout.clone(),
@@ -489,13 +491,12 @@ pub(super) fn run_composition_body(
             cli_yolo: request.yolo,
             is_inline,
             mcp_enabled: request.mcp || !request.mcp_use.is_empty(),
+            launch_plan_inputs: launch_plan_inputs.clone(),
         },
-        &harness_base_args,
         &env_plan.env,
         &mut prompt_state,
         effective_repo_root,
         shell_options.clone(),
-        use_structured,
         structured_codex_output.as_ref(),
         stdout_noise,
         stderr_noise,

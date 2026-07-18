@@ -97,11 +97,19 @@ struct EnvironmentPhase {
     env_plan: env::EnvPlan,
     effective_prompt: String,
     mcp_extra_args: Vec<String>,
+    /// R8 — the MCP inputs a per-attempt rebuild recomputes injection from,
+    /// with the invocation's ambiguity resolutions already baked in so a retry
+    /// never has to prompt. `None` when MCP is not in play.
+    mcp_rebuild: Option<crate::commands::wrap::launch_plan::McpRebuildInputs>,
+    /// `OPENCODE_CONFIG_CONTENT` as it stood before the MCP fold.
+    opencode_config_base: Option<String>,
 }
 
 struct CommandPhase {
     effective_sp: claudine::system_prompt::ResolvedSystemPrompt,
     args_before_prompt: Vec<String>,
+    /// R8 — the re-entrant launch-plan builder's invocation-fixed half.
+    launch_plan_inputs: crate::commands::wrap::launch_plan::LaunchPlanInputs,
     use_structured: bool,
     structured_codex_output: Option<crate::commands::wrap::policy::StructuredCodexOutput>,
     stdout_noise: &'static [&'static str],
@@ -449,6 +457,14 @@ fn prepare_environment_and_mcp(
 
         let mut effective_prompt = request.prepared.prompt.clone();
         let mut mcp_extra_args = Vec::new();
+        // Captured before any fold so a per-attempt rebuild can reassemble the
+        // MCP → YOLO → system-prompt chain from the same base this invocation
+        // folded onto.
+        let opencode_config_base = env_plan
+            .env
+            .get(std::ffi::OsStr::new("OPENCODE_CONFIG_CONTENT"))
+            .map(|v| v.to_string_lossy().into_owned());
+        let mut mcp_rebuild: Option<crate::commands::wrap::launch_plan::McpRebuildInputs> = None;
         if request.mcp || !request.mcp_use.is_empty() {
             use claudine::mcp::catalog::McpCatalogStore;
             use claudine::mcp::inject::injector_for_provider;
@@ -462,6 +478,12 @@ fn prepare_environment_and_mcp(
             let prompt_is_interactive = request.session_interactive
                 && std::io::stdin().is_terminal()
                 && std::io::stdout().is_terminal();
+            // Ambiguity is resolved exactly once, here, where an operator may
+            // still be present. Every resolution is recorded so a per-attempt
+            // rebuild can replay this decision by lookup — `Select` must never
+            // be reachable from a retry, which has no terminal to prompt on.
+            let mut ambiguity_resolutions: std::collections::HashMap<String, String> =
+                std::collections::HashMap::new();
             let session = compute_session_set(
                 &catalog,
                 repo_root_ref,
@@ -471,12 +493,16 @@ fn prepare_environment_and_mcp(
                     if request.strict || effective_non_interactive || !prompt_is_interactive {
                         return None;
                     }
-                    Select::new(
+                    let chosen = Select::new(
                         &format!("`#{tag}` matched multiple MCP servers. Choose one:"),
                         candidates.to_vec(),
                     )
                     .prompt()
-                    .ok()
+                    .ok();
+                    if let Some(id) = chosen.as_ref() {
+                        ambiguity_resolutions.insert(tag.to_string(), id.clone());
+                    }
+                    chosen
                 },
             )
             .map_err(|e| eyre!("MCP session error: {e}"))?;
@@ -522,6 +548,23 @@ fn prepare_environment_and_mcp(
 
             effective_prompt = session.cleaned_prompt.unwrap_or(cleaned_prompt);
 
+            // Materialized whenever MCP is in play, not only when *this*
+            // provider's injector needs one: a refreshed document can move the
+            // provider to a shadow-HOME injector at a retry boundary, and the
+            // rebuild must find one already on disk rather than create it.
+            let mcp_repo_root = repo_root_ref.map(std::path::Path::to_path_buf);
+            crate::commands::exec_prep::ensure_shadow_home(
+                provider,
+                !session.servers.is_empty(),
+                &mut env_plan,
+            )?;
+            mcp_rebuild = Some(crate::commands::wrap::launch_plan::McpRebuildInputs {
+                explicit_use: request.mcp_use.clone(),
+                repo_root: mcp_repo_root,
+                shadow_home: env_plan.shadow_home_path.clone(),
+                ambiguity_resolutions,
+            });
+
             if let Some(injector) = injector_for_provider(provider) {
                 if !session.servers.is_empty() {
                     crate::commands::exec_prep::ensure_shadow_home(
@@ -561,6 +604,8 @@ fn prepare_environment_and_mcp(
             env_plan,
             effective_prompt,
             mcp_extra_args,
+            mcp_rebuild,
+            opencode_config_base,
         })
     })())
 }
@@ -593,6 +638,8 @@ fn construct_argv_and_system_prompt(
             env_plan,
             effective_prompt,
             mcp_extra_args,
+            mcp_rebuild,
+            opencode_config_base,
         } = environment;
         let silent = request.silent;
         let quiet = request.quiet;
@@ -705,6 +752,12 @@ fn construct_argv_and_system_prompt(
             )
             .map_err(crate::commands::exec_prep::ModelStageError::into_report)?;
 
+        // R8 — from here to the MCP fold, every append is invocation-fixed: no
+        // document surface moves `--output`, the system prompt, or `--sandbox`.
+        // Each slice is recorded at its own boundary so a per-attempt rebuild
+        // can splice them back in at the same positions.
+        let argv_after_model = child_args.len();
+
         // Universal --output flag
         if let Some(ref output_str) = request.output {
             let format: super::super::profile::OutputFormat = (*output_str).into();
@@ -715,6 +768,8 @@ fn construct_argv_and_system_prompt(
                 log::warn(&warn);
             }
         }
+        let output_format_args = child_args[argv_after_model..].to_vec();
+        let argv_after_output = child_args.len();
 
         record_substage(perf_collector, last_checkpoint, "argv assembly");
 
@@ -767,6 +822,10 @@ fn construct_argv_and_system_prompt(
         );
 
         let mut sp_artifacts: Vec<super::super::system_prompt::SystemPromptArtifact> = Vec::new();
+        // OpenCode delivers its system prompt through the same inline config the
+        // MCP and YOLO producers write; recorded so a rebuild can re-fold it
+        // last, exactly as the invocation does.
+        let mut system_prompt_opencode_config: Option<String> = None;
 
         match &effective_sp {
             claudine::system_prompt::ResolvedSystemPrompt::None
@@ -791,6 +850,7 @@ fn construct_argv_and_system_prompt(
                     // prevent. Route it through the same merge the MCP fold uses so
                     // `instructions`, `mcp`, and `permission` coexist.
                     if k == std::ffi::OsStr::new("OPENCODE_CONFIG_CONTENT") {
+                        system_prompt_opencode_config = Some(v.to_string_lossy().into_owned());
                         let injected = std::collections::HashMap::from([(
                             "OPENCODE_CONFIG_CONTENT".to_string(),
                             v.to_string_lossy().to_string(),
@@ -812,6 +872,8 @@ fn construct_argv_and_system_prompt(
             }
         }
         let _ = &sp_artifacts;
+        let system_prompt_args = child_args[argv_after_output..].to_vec();
+        let argv_after_system_prompt = child_args.len();
 
         // Universal --sandbox flag
         if request.sandbox
@@ -821,6 +883,7 @@ fn construct_argv_and_system_prompt(
         {
             log::warn(&warn);
         }
+        let sandbox_args = child_args[argv_after_system_prompt..].to_vec();
 
         record_substage(perf_collector, last_checkpoint, "system prompt");
 
@@ -905,6 +968,74 @@ fn construct_argv_and_system_prompt(
         // Snapshot args before prompt delivery so the harness loop gets a
         // prompt-free base (the harness manages prompt delivery itself).
         let args_before_prompt = child_args.clone();
+
+        // R8 — record the inputs and the resulting plan so a per-attempt rebuild
+        // can re-derive one for a refreshed document without repeating any of the
+        // effects above (temp-file writes, shadow-HOME materialization, warnings,
+        // the ambiguity prompt). An unchanged document's facets compare equal and
+        // get `args_before_prompt` back verbatim.
+        let launch_plan_inputs = {
+            use crate::commands::wrap::launch_plan as lp;
+            // The harness manages prompt delivery itself, so the plan it compares
+            // against is the harness base argv (`runner.rs`), not this one.
+            let mut recorded_args = args_before_prompt.clone();
+            if !use_structured {
+                profile.prepare_captured_output(&mut recorded_args);
+            }
+            let mut env_overlay: Vec<(std::ffi::OsString, std::ffi::OsString)> = Vec::new();
+            for key in ["YOLO", "MODEL", "OPENCODE_CONFIG_CONTENT"] {
+                if let Some(value) = env_plan.env.get(std::ffi::OsStr::new(key)) {
+                    env_overlay.push((key.into(), value.clone()));
+                }
+            }
+            let mut mcp_body_tags: Vec<String> = mcp_rebuild
+                .as_ref()
+                .map(|_| {
+                    claudine::mcp::session::lex_tags(&request.prepared.prompt).1
+                })
+                .unwrap_or_default();
+            mcp_body_tags.sort();
+            mcp_body_tags.dedup();
+            lp::LaunchPlanInputs {
+                provider_args_tail: request.provider_args.clone(),
+                output_format_args,
+                system_prompt_args,
+                system_prompt_opencode_config,
+                system_prompt: Some(effective_sp.clone()),
+                system_prompt_cwd: launch_cwd.clone(),
+                system_prompt_scoped_tmp: scoped_tmp.clone(),
+                sandbox_args,
+                has_model_env: env_plan
+                    .env
+                    .contains_key(&std::ffi::OsString::from("MODEL")),
+                mcp: mcp_rebuild.clone(),
+                opencode_config_base: opencode_config_base.clone(),
+                codex_last_message_path: structured_codex_output
+                    .as_ref()
+                    .map(|o| o.last_message_path.clone())
+                    .unwrap_or_else(|| {
+                        std::env::temp_dir().join(format!(
+                            "claudine-codex-last-message-{}.txt",
+                            uuid::Uuid::new_v4()
+                        ))
+                    }),
+                invocation: lp::RecordedLaunch {
+                    facets: lp::DocumentLaunchFacets {
+                        provider,
+                        non_interactive: effective_non_interactive,
+                        yolo_requested: request.yolo,
+                        is_inline,
+                        model: target.model.clone(),
+                        mcp_body_tags,
+                    },
+                    args: recorded_args,
+                    env_overlay,
+                    structured_codex: structured_codex_output.is_some(),
+                },
+                replay_supported: true,
+            }
+        };
+
         let prompt_source = super::super::profile::PromptSource::Inline(effective_prompt.clone());
         let delivery =
             profile.prompt_delivery(&child_args, effective_prompt, effective_non_interactive)?;
@@ -951,6 +1082,7 @@ fn construct_argv_and_system_prompt(
         Ok(CommandPhase {
             effective_sp,
             args_before_prompt,
+            launch_plan_inputs,
             use_structured,
             structured_codex_output,
             stdout_noise,
@@ -1297,6 +1429,7 @@ fn provider_run_handoff(
     let CommandPhase {
         effective_sp,
         args_before_prompt,
+        launch_plan_inputs,
         use_structured,
         structured_codex_output,
         stdout_noise,
@@ -1352,6 +1485,7 @@ fn provider_run_handoff(
         profile,
         effective_non_interactive,
         args_before_prompt,
+        launch_plan_inputs,
         child_cwd,
         use_structured,
         structured_codex_output,
