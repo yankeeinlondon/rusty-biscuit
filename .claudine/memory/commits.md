@@ -144,3 +144,11 @@ do not belong here.
   `git diff --staged --stat --ignore-all-space --ignore-blank-lines` or
   `--numstat --ignore-all-space --ignore-blank-lines`. Zero output means no
   non-whitespace changes remain.
+- `git reflog -1` is unreliable as a post-commit lookup when other agents are
+  committing against the same worktree in parallel: any operation that lands
+  between your commit and your read — e.g. an unrelated `chore: refresh
+  GitNexus index counts` commit from a sibling agent — displaces the top of
+  reflog and your hash becomes `HEAD@{1}` (or deeper), not `HEAD@{0}`. Recover
+  with `git reflog --grep '<subject-substring>' -1` to filter by commit
+  message, then verify that hash with `git show --name-status <hash>` and
+  `git log -1 --format=%B <hash>`.
