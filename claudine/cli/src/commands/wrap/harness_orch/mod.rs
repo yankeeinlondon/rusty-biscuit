@@ -9,7 +9,7 @@ mod types;
 pub(crate) use attempt::execute_harness_attempt;
 pub(crate) use launch::build_harness_launch;
 pub(crate) use session_key::session_compat_key;
-pub(crate) use loop_control::run_harness_loop;
+pub(crate) use loop_control::{LaunchRebuildIntent, run_harness_loop};
 pub(crate) use prompt::{
     find_wrapper_harness_source, materialize_harness_prompt, materialize_passthrough_harness_seed,
     materialized_harness_prompt_from_prepared, preflight_proxy_target,

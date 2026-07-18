@@ -280,7 +280,7 @@ pub(super) fn route_handoff_failure(
     loop_start: std::time::Instant,
 ) -> color_eyre::eyre::Report {
     let info = LifecycleErrorInfo::from_proxy_commit_error(&error);
-    let raised = emit_blocked_finalize_with_err(
+    route_refused_handoff(
         guard,
         materialized,
         source_path,
@@ -288,6 +288,67 @@ pub(super) fn route_handoff_failure(
         term,
         effect_engine,
         &info,
+        error,
+        loop_start,
+    )
+}
+
+/// Route a hand-off the invoked command owns no coordinator for through the
+/// same source-owned `blocked`/`finalize` transition as a refused commit.
+///
+/// Refusal happens *before* any commit, so the source is unambiguously still
+/// the active document and owes its closure — the AC29 routing contract is
+/// identical to a cycle or resolution refusal, only the typed cause differs.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn route_unowned_handoff(
+    guard: &mut claudine::composition::LifecycleRunGuard<'_>,
+    materialized: &MaterializedHarnessPrompt,
+    source_path: &Path,
+    repo_root: Option<&Path>,
+    term: &Terminal,
+    effect_engine: &EffectEngine,
+    error: CompositionError,
+    loop_start: std::time::Instant,
+) -> color_eyre::eyre::Report {
+    let info = LifecycleErrorInfo::from_composition_error(&error);
+    route_refused_handoff(
+        guard,
+        materialized,
+        source_path,
+        repo_root,
+        term,
+        effect_engine,
+        &info,
+        error,
+        loop_start,
+    )
+}
+
+/// The shared tail both refusal routes take once their typed cause is snapshot
+/// into `err.*`.
+#[allow(clippy::too_many_arguments)]
+fn route_refused_handoff<E>(
+    guard: &mut claudine::composition::LifecycleRunGuard<'_>,
+    materialized: &MaterializedHarnessPrompt,
+    source_path: &Path,
+    repo_root: Option<&Path>,
+    term: &Terminal,
+    effect_engine: &EffectEngine,
+    info: &LifecycleErrorInfo,
+    error: E,
+    loop_start: std::time::Instant,
+) -> color_eyre::eyre::Report
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    let raised = emit_blocked_finalize_with_err(
+        guard,
+        materialized,
+        source_path,
+        repo_root,
+        term,
+        effect_engine,
+        info,
         loop_start,
     );
     // A raise inside the catch stacks supersedes the hand-off failure: the run
@@ -298,6 +359,26 @@ pub(super) fn route_handoff_failure(
     match raised {
         Some(evaluation_error) => evaluation_error.into(),
         None => color_eyre::eyre::Report::new(error),
+    }
+}
+
+/// Build the typed diagnostic for a hand-off raised where no coordinator can
+/// consume it (R3/R6/AC10, spec "Errors and Diagnostics": *any supported
+/// transition returned without an owning coordinator able to consume it*).
+///
+/// Nothing is committed and nothing is resolved: the request is refused while
+/// it is still an [`EvaluatedProxyRequest`], so the ledger, the active document,
+/// and the target are all untouched. The provenance names the `proxy` action the
+/// user actually authored, which is the only line they can act on.
+pub(super) fn handoff_without_owning_coordinator(
+    request: &EvaluatedProxyRequest,
+    provider: Provider,
+) -> CompositionError {
+    CompositionError::LifecycleProxyWithoutOwningCoordinator {
+        source_path: request.provenance().source_path().to_path_buf(),
+        property: request.provenance().location().to_string(),
+        target: request.target().to_string(),
+        command: format!("claudine {}", provider.as_slug()),
     }
 }
 

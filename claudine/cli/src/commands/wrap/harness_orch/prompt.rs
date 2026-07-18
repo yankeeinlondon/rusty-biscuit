@@ -157,6 +157,10 @@ pub(crate) fn materialize_harness_prompt(
     // exactly this attempt; a retry or a first attempt passes `None` and the
     // document's own `prompt_tail` is appended instead.
     resume_followup: Option<&str>,
+    // Whether this read owns the document's schema verdict. The pre-`initialize`
+    // bootstrap read defers it to the stabilized reread taken after
+    // `initialize` has had its chance to add or repair the property (R4).
+    schema: claudine::composition::SchemaStage,
 ) -> Result<MaterializedHarnessPrompt> {
     let source = load_overlaid_source(state)?;
     let options = harness_prepare_options(state, child_cwd);
@@ -192,6 +196,7 @@ pub(crate) fn materialize_harness_prompt(
         mode,
         source: &source,
         prompt_source,
+        schema,
         options,
     })?;
 
@@ -229,7 +234,7 @@ pub(crate) fn materialize_harness_prompt(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claudine::composition::{CallerInputLayers, DocumentEntryReason};
+    use claudine::composition::{CallerInputLayers, DocumentEntryReason, SchemaStage};
     use std::collections::BTreeMap;
 
     fn compose_state(source_path: &Path, input_layers: CallerInputLayers) -> HarnessPromptState {
@@ -267,7 +272,7 @@ mod tests {
             },
         );
 
-        let materialized = materialize_harness_prompt(&state, None, dir.path(), None).unwrap();
+        let materialized = materialize_harness_prompt(&state, None, dir.path(), None, SchemaStage::Validate).unwrap();
         assert_eq!(
             materialized.prompt.trim(),
             "codex/gpt-5",
@@ -326,7 +331,7 @@ mod tests {
 
         // The re-materialize compose now expands the frontmatter command against
         // the augmented pre-approved set instead of failing NotPreApproved.
-        let materialized = materialize_harness_prompt(&state, None, dir.path(), None).unwrap();
+        let materialized = materialize_harness_prompt(&state, None, dir.path(), None, SchemaStage::Validate).unwrap();
         assert_eq!(materialized.prompt.trim(), "reviewing spec.md");
     }
 }

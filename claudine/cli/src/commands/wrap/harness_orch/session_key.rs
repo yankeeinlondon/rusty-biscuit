@@ -12,15 +12,18 @@
 //!
 //! ## Which facets are authoritative
 //!
+//! - **Rebuild-derived** (`provider`, `binary`, `resume_protocol`,
+//!   `permission_mode`, `interactivity`, `structured_output`, and the document
+//!   half of `mcp_servers`): read from the
+//!   [`RebuiltLaunchIdentity`][super::loop_control::target_launch::RebuiltLaunchIdentity]
+//!   the attempt's own fresh read produced. That rebuild runs at every
+//!   retry/resume fresh-read boundary against the document just re-read from
+//!   disk, so each of these facets moves when the refreshed frontmatter or body
+//!   moves it, which is what makes the AC15 refusal reachable rather than latent.
 //! - **Environment-derived** (`model`, and the environment MCP signals): read
 //!   from [`AttemptLaunch::env`], the exact child environment the provider is
-//!   spawned with. This is the effective value *after* the launch-identity
-//!   rebuild overlays its `AGENT`/`MODEL`/`YOLO` env. That rebuild runs at every
-//!   retry/resume fresh-read boundary against the document just re-read from
-//!   disk (`loop_control::materialize_attempt_prompt_phase` →
-//!   `target_launch::rebuild_launch_env`), which is what makes `model` a facet
-//!   a canonical refresh can actually move — and therefore what makes the AC15
-//!   refusal reachable rather than latent.
+//!   spawned with — the effective value *after* the rebuild overlays its
+//!   `AGENT`/`MODEL`/`YOLO` env.
 //! - **Argv-derived** (`system_prompt`, the argv MCP flags): read from the
 //!   invocation's *canonical* argv — the pre-resume-normalization argv, the same
 //!   for the session-opening attempt and the resume attempt. It is deliberately
@@ -30,13 +33,13 @@
 //!   system-prompt and MCP flags because the live session already holds them.
 //!   Comparing the resume's stripped argv against the opener's full argv would
 //!   flag every such resume as incompatible — a false refusal. The canonical argv
-//!   keeps the comparison apples-to-apples. A consequence worth knowing: because
-//!   the argv a refresh compares against is invocation-fixed, the argv-derived
-//!   facets — `system_prompt` and the argv MCP flags — cannot move across a
-//!   same-document refresh, so no L2 row can drive *their* refusal. They are
-//!   proven at the projection layer (L1) only. A proxy to a target that changes
-//!   them re-prepares through the command coordinator, which opens a new session
-//!   rather than resuming, so there is nothing for the key to refuse.
+//!   keeps the comparison apples-to-apples. A consequence worth knowing: the
+//!   argv is invocation-fixed and the system prompt was already *composed* into
+//!   it, so `system_prompt` cannot move across a same-document refresh — the
+//!   file digest re-read here only re-reads a temp file the invocation wrote.
+//! - **Invocation-fixed** (`workspace_cwd`, `system_prompt`): neither has a
+//!   document surface a refresh can move, so both are carried in the key for
+//!   completeness and proven at the projection layer (L1) only.
 //! - **Provider-contributed** ([`SessionCompatibilityKey::extra`]): not yet
 //!   populated. No provider adapter currently contributes a precise resume
 //!   identity, so the map is left empty rather than filled with a heuristic. The
@@ -86,6 +89,7 @@ pub(crate) fn session_compat_key(
     use_structured: bool,
     structured_codex: bool,
     canonical_args: &[String],
+    document_mcp_tags: &[String],
     launch: &AttemptLaunch,
 ) -> SessionCompatibilityKey {
     let child_env = &launch.env;
@@ -106,7 +110,7 @@ pub(crate) fn session_compat_key(
         .to_string(),
         structured_output: format!("{use_structured}:{structured_codex}"),
         system_prompt: system_prompt_digest(canonical_args),
-        mcp_servers: mcp_signal_set(canonical_args, child_env),
+        mcp_servers: mcp_signal_set(canonical_args, child_env, document_mcp_tags),
         extra: std::collections::BTreeMap::new(),
     }
 }
@@ -153,16 +157,28 @@ fn system_prompt_digest(args: &[String]) -> String {
     parts.join("|")
 }
 
-/// MCP identity visible at this layer: the MCP argv flags and their values, plus
-/// the MCP-carrying environment (the shadow config content OpenCode injects and
-/// any `*MCP*` variable). Sorted so the set, not its order, defines equality.
+/// MCP identity visible at this layer: the MCP argv flags and their values, the
+/// MCP-carrying environment (the shadow config content OpenCode injects and any
+/// `*MCP*` variable), and the `#tag` set the refreshed document's own body
+/// selects servers with. Sorted so the set, not its order, defines equality.
 ///
 /// This is a signal set, not an enumerated server list: it fingerprints the MCP
-/// configuration as it is actually delivered on argv/env, which is sufficient to
-/// detect a change across a refresh. A provider adapter that can enumerate a
-/// precise server set would contribute it through [`SessionCompatibilityKey::extra`].
-fn mcp_signal_set(args: &[String], child_env: &HashMap<OsString, OsString>) -> Vec<String> {
-    let mut signals: Vec<String> = Vec::new();
+/// configuration as it is actually delivered on argv/env plus the document input
+/// that would select it, which is sufficient to detect a change across a refresh.
+/// A provider adapter that can enumerate a precise server set would contribute it
+/// through [`SessionCompatibilityKey::extra`].
+///
+/// `document_mcp_tags` is empty whenever MCP is not enabled for the invocation,
+/// so a `#tag` that participates in no server selection cannot refuse a resume.
+fn mcp_signal_set(
+    args: &[String],
+    child_env: &HashMap<OsString, OsString>,
+    document_mcp_tags: &[String],
+) -> Vec<String> {
+    let mut signals: Vec<String> = document_mcp_tags
+        .iter()
+        .map(|tag| format!("doc-tag:{tag}"))
+        .collect();
     let mut iter = args.iter().peekable();
     while let Some(arg) = iter.next() {
         if arg.to_ascii_lowercase().contains("mcp") {

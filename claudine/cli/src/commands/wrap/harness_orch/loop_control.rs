@@ -25,6 +25,7 @@ use color_eyre::eyre::{Result, eyre};
 use darkmatter::effects::EffectEngine;
 use std::collections::HashMap;
 use std::ffi::OsString;
+use std::io::IsTerminal;
 use std::path::Path;
 use tracing::info_span;
 
@@ -68,12 +69,14 @@ struct HarnessLoopCtx<'a, 'guard> {
     cli_timeout: Option<String>,
     cli_step_timeout: Option<String>,
     cli_stall_timeout: Option<String>,
-    // Immutable invocation-level launch intent, retained so the R6 target launch
-    // rebuild can re-resolve a proxied target's model while keeping explicit CLI
-    // intent authoritative. `cli_model` is `--model` (wins over any target
-    // frontmatter `model:`); `yolo` is the invocation's bypass intent.
+    // Explicit `--model`, which wins over any document frontmatter `model:` at
+    // every rebuild. The rest of the immutable launch intent lives in
+    // `launch_intent` below.
     cli_model: Option<String>,
-    yolo: bool,
+    /// The immutable invocation intent every per-attempt launch rebuild resolves
+    /// the refreshed document against (R8). Its document half is what makes the
+    /// resume-compatibility facets movable across a canonical refresh.
+    launch_intent: LaunchRebuildIntent,
     base_args: &'a [String],
     base_env: &'a HashMap<OsString, OsString>,
     prompt_state: &'a mut HarnessPromptState,
@@ -96,11 +99,13 @@ struct HarnessLoopCtx<'a, 'guard> {
     term: &'a Terminal,
     lifecycle_guard: &'a mut claudine::composition::LifecycleRunGuard<'guard>,
     initial_transition: DocumentTransition,
-    // The one invocation-wide ledger, shared with the command coordinator, when
-    // this run has one (compose / inline-compose). A terminal-event proxy commits
-    // against it and surfaces the committed handoff up rather than adopting in
-    // place. `None` for a sequence step (its proxy stays contained) and for the
-    // direct wrapper passthrough.
+    // The ledger of the coordinator that owns this run, when one exists: the
+    // invocation-wide ledger for `compose`/`inline-compose`, or a `sequence`
+    // step's own per-step ledger. A terminal-event proxy commits against it and
+    // surfaces the committed handoff up rather than adopting in place. `None`
+    // only for the direct wrapper passthrough, which prepares no active document
+    // and therefore refuses a hand-off instead of consuming one — see
+    // [`surface_or_adopt_terminal_proxy`].
     handoff_ledger: Option<SharedRunLedger>,
     // An already-committed proxy handoff whose target this run adopts for its
     // staged bootstrap. `Some` when the command coordinator re-prepares a
@@ -109,6 +114,11 @@ struct HarnessLoopCtx<'a, 'guard> {
     // stabilized reread → audit) without re-committing. `None` for a
     // directly-invoked document.
     adopted_handoff: Option<Box<claudine::composition::ProxyHandoff>>,
+    // `true` when this run's document deferred its schema verdict because it
+    // declares an `initialize` the setup pipeline has already routed. The loop
+    // then owes it the tail of the staged boot — the stabilized reread and the
+    // full audit — which is where the verdict is finally reached (R4).
+    stabilize_after_initialize: bool,
     emit_prompt_timing: bool,
 }
 
@@ -121,11 +131,12 @@ mod requeue;
 mod target_launch;
 
 use control_dispatch::*;
-use coordinator::ActiveDocumentCoordinator;
+use coordinator::{ActiveDocumentCoordinator, BootstrapStage};
 use error_routing::*;
 use lifecycle_events::*;
 use proxy::*;
-use target_launch::{rebuild_launch_env, rebuild_target_launch};
+pub(crate) use target_launch::LaunchRebuildIntent;
+use target_launch::{rebuild_launch_env, rebuild_launch_identity, rebuild_target_launch};
 #[allow(unused_imports)] // entirely dead_code until the rendezvous backend lands
 use requeue::*;
 
@@ -141,7 +152,7 @@ pub(crate) fn run_harness_loop(
     cli_step_timeout: Option<String>,
     cli_stall_timeout: Option<String>,
     cli_model: Option<String>,
-    yolo: bool,
+    launch_intent: LaunchRebuildIntent,
     base_args: &[String],
     base_env: &HashMap<OsString, OsString>,
     prompt_state: &mut HarnessPromptState,
@@ -174,6 +185,9 @@ pub(crate) fn run_harness_loop(
     // staged bootstrap, or `None` for a directly-invoked document. See
     // [`HarnessLoopCtx::adopted_handoff`].
     adopted_handoff: Option<Box<claudine::composition::ProxyHandoff>>,
+    // Whether a directly-invoked document still owes the post-`initialize`
+    // stabilized reread. See [`HarnessLoopCtx::stabilize_after_initialize`].
+    stabilize_after_initialize: bool,
     // When `true`, every structured-stream attempt in the harness loop
     // emits the prompt-scoped timing header and — if the parsed plan
     // carries `timeout_warn` / `step_timeout_warn` — their fire-once
@@ -192,7 +206,7 @@ pub(crate) fn run_harness_loop(
         cli_step_timeout,
         cli_stall_timeout,
         cli_model,
-        yolo,
+        launch_intent,
         base_args,
         base_env,
         prompt_state,
@@ -215,6 +229,7 @@ pub(crate) fn run_harness_loop(
         initial_transition,
         handoff_ledger,
         adopted_handoff,
+        stabilize_after_initialize,
         emit_prompt_timing,
     };
     match run_harness_loop_inner(ctx)? {
@@ -296,6 +311,13 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
                 &mut active,
             );
         }
+        // A directly-invoked document that deferred its verdict arms only the
+        // tail of the boot. `arm_stabilization` yields to an already-armed full
+        // bootstrap, so a document that is both adopted and initialize-declaring
+        // still runs exactly one boot.
+        if run.stabilize_after_initialize {
+            coordinator.arm_stabilization();
+        }
         let initial_materialized = run.initial_materialized.take();
         Ok(Self {
             run,
@@ -343,10 +365,13 @@ struct AttemptRetryProxyControl<'a> {
     /// when a proxied target's launch identity is recomputed. Explicit `--model`
     /// stays authoritative over any target frontmatter `model:`.
     cli_model: Option<&'a str>,
-    yolo: bool,
-    /// The shared invocation ledger (compose path) a terminal-event proxy commits
-    /// against before surfacing up, or `None` for the sequence-contained path
-    /// (which adopts in place on the harness-local coordinator).
+    /// The immutable invocation intent the per-attempt launch rebuild resolves
+    /// the refreshed document against (R8).
+    launch_intent: &'a LaunchRebuildIntent,
+    /// The owning coordinator's ledger a terminal-event proxy commits against
+    /// before surfacing up — the invocation ledger on the compose path, the
+    /// step's own ledger inside a `sequence`. `None` only for the direct wrapper
+    /// passthrough, where a hand-off is refused rather than consumed.
     handoff_ledger: Option<&'a SharedRunLedger>,
 }
 
@@ -404,7 +429,7 @@ fn prepare_attempt_phase(
         provider: state.run.provider,
         profile: state.run.profile,
         cli_model: state.run.cli_model.as_deref(),
-        yolo: state.run.yolo,
+        launch_intent: &state.run.launch_intent,
         handoff_ledger: state.run.handoff_ledger.as_ref(),
     };
     let _attempt_cycle_span = info_span!(
@@ -419,8 +444,20 @@ fn prepare_attempt_phase(
         .harness_context
         .refresh(&prompt.prompt_state.source_path, prompt.repo_root);
     preflight_pending_proxy_phase(&mut prompt, &mut lifecycle, &control)?;
-    let mut materialized =
-        materialize_attempt_prompt_phase(&mut prompt, &mut lifecycle, &control)?;
+    // A document still owing its staged boot is being read *before* its own
+    // `initialize`, which may add or repair the very property a schema verdict
+    // would reject; the stabilized reread inside the boot judges it instead (R4).
+    let bootstrap_read_schema = if control.coordinator.bootstrap_pending() {
+        claudine::composition::SchemaStage::DeferToStabilizedReread
+    } else {
+        claudine::composition::SchemaStage::Validate
+    };
+    let mut materialized = materialize_attempt_prompt_phase(
+        &mut prompt,
+        &mut lifecycle,
+        &control,
+        bootstrap_read_schema,
+    )?;
 
     if let Some(step) = bootstrap_adopted_document_phase(
         &mut prompt,
@@ -564,12 +601,11 @@ fn start_lifecycle_phase(
                     // attempt has run at `start`, so no perf/signals ride along.
                     return Ok(Some(surface_or_adopt_terminal_proxy(
                         handoff_ledger,
-                        coordinator,
+                        provider,
                         request,
                         repo_root,
                         prompt_state,
                         lifecycle_guard,
-                        active,
                         materialized,
                         term,
                         effect_engine,
@@ -613,48 +649,25 @@ fn start_lifecycle_phase(
     Ok(None)
 }
 
-/// Run a newly adopted document's staged canonical boot.
+/// Stages 1-3 of the staged boot: the bootstrap read's narrow initialize-shell
+/// gate, then `initialize` itself.
 ///
-/// The staging exists because of an ordering conflict: `initialize` may mutate
-/// the document, and the full audit has to read the document it will actually
-/// execute. Auditing everything first and then letting `initialize` rewrite the
-/// file underneath the audit is the drift; running `initialize` first with
-/// nothing approved is a hole. So the boot splits:
-///
-/// 1. the **bootstrap read** — the document as adopted, composed with the
-///    caller's input layers, giving the lifecycle surface `initialize` needs;
-/// 2. the **narrow safety gate** — approve only the shell commands
-///    `initialize` could select, against that same read;
-/// 3. `initialize` itself, through the normal evaluator, consuming
-///    `skip`/`error`/`proxy` atomically;
-/// 4. the **stabilized reread** — a fresh read, so an initialize-time file or
-///    frontmatter mutation is visible, with the caller's layers reapplied
-///    through the same assembly point;
-/// 5. the **full audit** over every lifecycle surface, which reuses the gate's
-///    approvals from the invocation-wide cache rather than prompting twice.
-///
-/// `initialize` fires exactly once across all five stages: only step 3 emits
-/// it, and the reread re-points the guard's config without touching its
-/// emission ledger.
+/// Returns `Some(step)` when `initialize` ended the run — a clean `skip`, or a
+/// chained proxy that hands the run to a further target — and `None` when the
+/// document is cleared to stabilize.
 ///
 /// ## Errors
 ///
-/// The boundary is stage 2/3: a failure before the target's lifecycle config
-/// is installed has no target catch events to route to, and the source's were
-/// discarded by the clean handoff, so it surfaces as its own typed diagnostic.
-/// From stage 3 on, the target owns the run and a stabilized-reread or audit
-/// failure routes through its ordinary `blocked`/`finalize` — once, because
-/// each stage either routes or propagates, never both.
-fn bootstrap_adopted_document_phase(
+/// A failure here is deliberately *not* routed through the document's own
+/// `blocked`/`finalize`: its lifecycle config is not installed until the gate
+/// passes, and the source's was discarded by the clean handoff, so there is no
+/// legitimate catch surface to fire. It surfaces as its own typed diagnostic.
+fn run_initialize_stages(
     prompt: &mut AttemptPromptPreparation<'_>,
     lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
     control: &mut AttemptRetryProxyControl<'_>,
     materialized: &mut MaterializedHarnessPrompt,
 ) -> Result<Option<LoopStep>> {
-    if !control.coordinator.take_bootstrap_pending() {
-        return Ok(None);
-    }
-
     // Stage 1 — the bootstrap read is `materialized`, already composed against
     // the caller's input layers by the shared assembly point. Its lifecycle
     // came from canonical preparation, so its shell commands are C3-resolved:
@@ -709,12 +722,11 @@ fn bootstrap_adopted_document_phase(
             // Only the direct-passthrough (no shared ledger) still adopts in place.
             return Ok(Some(surface_or_adopt_terminal_proxy(
                 control.handoff_ledger,
-                control.coordinator,
+                control.provider,
                 request,
                 prompt.repo_root,
                 prompt.prompt_state,
                 lifecycle.guard,
-                control.active,
                 materialized,
                 lifecycle.term,
                 lifecycle.effect_engine,
@@ -724,9 +736,73 @@ fn bootstrap_adopted_document_phase(
             )?));
         }
     }
+    Ok(None)
+}
+
+/// Run a document's staged canonical boot.
+///
+/// A newly adopted proxy target runs all five stages. A directly-invoked
+/// document that declares its own `initialize` enters at stage 4: the setup
+/// pipeline already ran the equivalent of stages 1-3 for it, and re-running
+/// them here would emit `initialize` twice.
+///
+/// The staging exists because of an ordering conflict: `initialize` may mutate
+/// the document, and the full audit has to read the document it will actually
+/// execute. Auditing everything first and then letting `initialize` rewrite the
+/// file underneath the audit is the drift; running `initialize` first with
+/// nothing approved is a hole. So the boot splits:
+///
+/// 1. the **bootstrap read** — the document as adopted, composed with the
+///    caller's input layers, giving the lifecycle surface `initialize` needs;
+/// 2. the **narrow safety gate** — approve only the shell commands
+///    `initialize` could select, against that same read;
+/// 3. `initialize` itself, through the normal evaluator, consuming
+///    `skip`/`error`/`proxy` atomically;
+/// 4. the **stabilized reread** — a fresh read, so an initialize-time file or
+///    frontmatter mutation is visible, with the caller's layers reapplied
+///    through the same assembly point;
+/// 5. the **full audit** over every lifecycle surface, which reuses the gate's
+///    approvals from the invocation-wide cache rather than prompting twice.
+///
+/// `initialize` fires exactly once across all five stages: only step 3 emits
+/// it, and the reread re-points the guard's config without touching its
+/// emission ledger.
+///
+/// ## Errors
+///
+/// The boundary is stage 2/3: a failure before the target's lifecycle config
+/// is installed has no target catch events to route to, and the source's were
+/// discarded by the clean handoff, so it surfaces as its own typed diagnostic.
+/// From stage 3 on, the target owns the run and a stabilized-reread or audit
+/// failure routes through its ordinary `blocked`/`finalize` — once, because
+/// each stage either routes or propagates, never both.
+fn bootstrap_adopted_document_phase(
+    prompt: &mut AttemptPromptPreparation<'_>,
+    lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
+    control: &mut AttemptRetryProxyControl<'_>,
+    materialized: &mut MaterializedHarnessPrompt,
+) -> Result<Option<LoopStep>> {
+    let Some(stage) = control.coordinator.take_bootstrap_pending() else {
+        return Ok(None);
+    };
+
+    // A directly-invoked document has already been through stages 1-3: its
+    // bootstrap read is the caller-prepared composition, and the setup pipeline
+    // routed its `initialize`. Re-running them here would emit `initialize` a
+    // second time. What it has not had is the reread that sees its own
+    // initialize-time mutations — and therefore its schema verdict.
+    if stage == BootstrapStage::Full
+        && let Some(step) = run_initialize_stages(prompt, lifecycle, control, materialized)?
+    {
+        return Ok(Some(step));
+    }
 
     // Stage 4 — the stabilized reread. `initialize` may have rewritten the
     // document or its frontmatter; the run executes what is on disk now.
+    //
+    // Kept so a direct document can tell whether its own `initialize` changed
+    // the prompt the operator was already shown.
+    let reported_prompt = materialized.prompt.clone();
     if let Err(error) = preflight_proxy_target(
         prompt.prompt_state,
         prompt.harness_context.shell_options(),
@@ -734,7 +810,12 @@ fn bootstrap_adopted_document_phase(
     ) {
         return Err(bootstrap_blocked(prompt, lifecycle, materialized, &error));
     }
-    *materialized = materialize_attempt_prompt_phase(prompt, lifecycle, control)?;
+    *materialized = materialize_attempt_prompt_phase(
+        prompt,
+        lifecycle,
+        control,
+        claudine::composition::SchemaStage::Validate,
+    )?;
     let stabilized_lifecycle = match materialized.lifecycle.clone() {
         Some(config) => config,
         None => {
@@ -773,27 +854,46 @@ fn bootstrap_adopted_document_phase(
     // document and runs `rebuild_launch_env` against that read
     // (`materialize_attempt_prompt_phase`), so the identity always comes from the
     // document about to run rather than from this one adoption-time snapshot.
-    let launch_area = lifecycle
-        .guard
-        .context()
-        .launch_area
-        .map(Path::to_path_buf)
-        .or_else(|| prompt.repo_root.map(Path::to_path_buf))
-        .unwrap_or_else(|| prompt.child_cwd.to_path_buf());
-    let rebuild = rebuild_target_launch(
-        control.provider,
-        control.cli_model,
-        control.yolo,
-        prompt.repo_root,
-        &launch_area,
-        materialized,
-    );
-    apply_target_env_overrides(materialized, &rebuild.env_overrides);
-    lifecycle
-        .guard
-        .set_proxy_prepared_context(rebuild.prepared_context);
+    //
+    // Only a *proxied* target needs it. A directly-invoked document's launch
+    // bundle was built from this same document by the command coordinator, and
+    // its lifecycle context is the prepared snapshot R5 pins; replacing either
+    // from here would substitute a second capture for the one the run was
+    // planned against. Its prompt was likewise already reported.
+    if stage == BootstrapStage::Full {
+        let launch_area = lifecycle
+            .guard
+            .context()
+            .launch_area
+            .map(Path::to_path_buf)
+            .or_else(|| prompt.repo_root.map(Path::to_path_buf))
+            .unwrap_or_else(|| prompt.child_cwd.to_path_buf());
+        let rebuild = rebuild_target_launch(
+            control.launch_intent,
+            control.cli_model,
+            prompt.repo_root,
+            &launch_area,
+            materialized,
+        );
+        apply_target_env_overrides(materialized, &rebuild.env_overrides);
+        lifecycle
+            .guard
+            .set_proxy_prepared_context(rebuild.prepared_context);
 
-    if prompt.effective_non_interactive {
+        if prompt.effective_non_interactive {
+            crate::output::log_compose_prompt(
+                &materialized.prompt,
+                prompt.detail_requested,
+                prompt.silent,
+                false,
+                lifecycle.term,
+            );
+        }
+    } else if prompt.effective_non_interactive && materialized.prompt != reported_prompt {
+        // The direct document's prompt was reported before its own `initialize`
+        // ran. It changed since, and what the operator was shown is not what the
+        // agent will receive — so show the delivered text. Unchanged prompts stay
+        // reported once.
         crate::output::log_compose_prompt(
             &materialized.prompt,
             prompt.detail_requested,
@@ -805,12 +905,11 @@ fn bootstrap_adopted_document_phase(
     Ok(None)
 }
 
-/// Resolve a terminal-event proxy request either by surfacing it up to the
-/// command coordinator (when a coordinator ledger is present) or by adopting it
-/// in place (legacy harness-local coordinator).
+/// Surface a terminal-event proxy request up to the command coordinator that
+/// owns the invocation, or refuse it when the invoked command owns none.
 ///
 /// This is the one place a terminal-recovery / `start`-stack proxy is turned
-/// into a loop step, so the two ownership models converge here:
+/// into a loop step, so both outcomes converge here:
 ///
 /// - **Coordinator-owned** (`handoff_ledger` is `Some`): the harness commits the
 ///   request against the coordinator's ledger while the source document's stacks
@@ -822,20 +921,35 @@ fn bootstrap_adopted_document_phase(
 ///   coordinator and each `sequence` step's contained coordinator take this arm:
 ///   a sequence step surfaces to the step's own per-step ledger, staying inside
 ///   the step while still rebuilding launch state above the harness (R1).
-/// - **Harness-local** (`handoff_ledger` is `None`): the proxy adopts in place on
-///   the harness-local coordinator.
+/// - **Unowned** (`handoff_ledger` is `None`): the direct provider wrappers
+///   (`claudine claude`, `claudine goose`, …) prepare no active document, so
+///   there is no coordinator to surface to. The request is refused with a typed
+///   diagnostic rather than adopted in place.
 ///
-/// A refused hop routes through the source's `blocked`/`finalize` with the typed
-/// commit error in both models, since the source is still the active document.
+/// ### Why the unowned arm refuses instead of adopting
+///
+/// Adopting here was the R3 "reduced harness path": it repointed the harness's
+/// own source document and let the target run under the *invocation's* profile,
+/// binary, argv entrypoint, and MCP runtime injection, because nothing on this
+/// path can re-enter the selection/MCP/argv pipeline that builds them. Those
+/// facets genuinely diverge — a target's frontmatter `interactive:` moves the
+/// session mode and with it the argv and structured-output shape, and its body
+/// `#tag`s select a different MCP server set — so the adopted target launched
+/// against a bundle its own frontmatter did not choose. R6/AC10 require every
+/// document-dependent launch decision to be rebuilt for the active target, and
+/// the spec's diagnostics list names this exact refusal: *any supported
+/// transition returned without an owning coordinator able to consume it*.
+///
+/// A refused hop routes through the source's `blocked`/`finalize` in both arms,
+/// since the source is still the active document either way (AC29).
 #[allow(clippy::too_many_arguments)]
 fn surface_or_adopt_terminal_proxy(
     handoff_ledger: Option<&SharedRunLedger>,
-    coordinator: &mut ActiveDocumentCoordinator,
+    provider: Provider,
     request: EvaluatedProxyRequest,
     repo_root: Option<&Path>,
     prompt_state: &mut HarnessPromptState,
     lifecycle_guard: &mut claudine::composition::LifecycleRunGuard<'_>,
-    active: &mut claudine::composition::ActiveDocumentState,
     materialized: &MaterializedHarnessPrompt,
     term: &Terminal,
     effect_engine: &EffectEngine,
@@ -862,19 +976,16 @@ fn surface_or_adopt_terminal_proxy(
                 loop_start,
             )),
         },
-        None => match coordinator.adopt(request, repo_root, prompt_state, lifecycle_guard, active) {
-            Ok(()) => Ok(LoopStep::NextAttempt),
-            Err(error) => Err(route_handoff_failure(
-                lifecycle_guard,
-                materialized,
-                &prompt_state.source_path,
-                repo_root,
-                term,
-                effect_engine,
-                error,
-                loop_start,
-            )),
-        },
+        None => Err(route_unowned_handoff(
+            lifecycle_guard,
+            materialized,
+            &prompt_state.source_path,
+            repo_root,
+            term,
+            effect_engine,
+            handoff_without_owning_coordinator(&request, provider),
+            loop_start,
+        )),
     }
 }
 
@@ -989,6 +1100,9 @@ fn materialize_attempt_prompt_phase(
     prompt: &mut AttemptPromptPreparation<'_>,
     lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
     control: &AttemptRetryProxyControl<'_>,
+    // Whether this read owns the document's schema verdict. Every read except
+    // the one taken before a document's own `initialize` does.
+    schema: claudine::composition::SchemaStage,
 ) -> Result<MaterializedHarnessPrompt> {
     let attempt = control.active.iteration().attempt().number();
     // The resume follow-up, when this attempt is a resume, is the provider
@@ -1018,27 +1132,32 @@ fn materialize_attempt_prompt_phase(
     // Two things depend on the rebuild being live rather than frozen. The
     // provider child must launch under the refreshed document's own
     // `AGENT`/`MODEL`/`YOLO` (R6, for a proxied target and for every later loop
-    // iteration alike). And the session-compatibility key, which reads the
-    // resolved launch bundle's effective child env, must move when the refreshed
-    // frontmatter moves — otherwise a `resume` whose refresh changed `model:`
-    // would silently run the live session under a plan it was not opened with,
-    // which is precisely what AC15 requires be refused.
+    // iteration alike). And the session-compatibility key, which
+    // `execute_attempt_phase` derives from the same rebuild, must move when the
+    // refreshed document moves — otherwise a `resume` whose refresh changed the
+    // launch plan would silently run the live session under a plan it was not
+    // opened with, which is precisely what AC15 requires be refused.
     //
     // For an unchanged document this reproduces the identity the invocation
     // already installed, so the key compares equal and the resume proceeds.
-    let provider = control.provider;
+    let launch_intent = control.launch_intent;
     let cli_model = control.cli_model;
-    let yolo = control.yolo;
     info_span!(
         "harness_materialize_prompt",
         attempt,
         source_path = %prompt_state.source_path.display(),
     )
     .in_scope(|| {
-        materialize_harness_prompt(prompt_state, repo_root, child_cwd, resume_followup.as_deref())
+        materialize_harness_prompt(
+            prompt_state,
+            repo_root,
+            child_cwd,
+            resume_followup.as_deref(),
+            schema,
+        )
     })
     .map(|mut materialized| {
-        let refreshed = rebuild_launch_env(provider, cli_model, yolo, repo_root, &materialized);
+        let refreshed = rebuild_launch_env(launch_intent, cli_model, repo_root, &materialized);
         apply_target_env_overrides(&mut materialized, &refreshed);
         materialized
     })
@@ -1052,6 +1171,23 @@ fn materialize_attempt_prompt_phase(
         let err_info = match error.downcast_ref::<claudine::composition::CompositionError>() {
             Some(composition) => LifecycleErrorInfo::from_composition_error(composition),
             None => LifecycleErrorInfo::from_action_failure("materialize", error.to_string()),
+        };
+        // Attach the frontmatter excerpt the direct route attaches at its own
+        // render boundary. Enrichment happens *after* `err_info` above because
+        // it wraps the error, and the classification reads the unwrapped
+        // variant. The document is re-read from disk rather than carried,
+        // because a fresh read is exactly what this stage just composed.
+        let error = match error.downcast::<claudine::composition::CompositionError>() {
+            Ok(typed) => {
+                let stderr_is_tty = std::io::stderr().is_terminal()
+                    || std::env::var_os("FORCE_COLOR").is_some();
+                let source_text =
+                    std::fs::read_to_string(&prompt_state.source_path).unwrap_or_default();
+                color_eyre::Report::from(
+                    typed.enrich_frontmatter_text(&source_text, stderr_is_tty),
+                )
+            }
+            Err(other) => other,
         };
         let empty = empty_materialized_prompt();
         match emit_blocked_finalize_with_err(
@@ -1289,21 +1425,36 @@ fn execute_attempt_phase(
     )
     .entered();
 
-    // R8 — compute the session-compatibility key for this attempt from the
-    // resolved launch bundle (its effective child env) plus the canonical argv,
-    // then compare before the provider is spawned. Built here, after
-    // `build_harness_launch`, so it reads the launch state actually about to run
-    // — including the R6 target-launch env overlay — not frozen pre-launch inputs.
+    // R8 — compute the session-compatibility key for this attempt from the launch
+    // plan the attempt's *own* fresh read resolves to, then compare before the
+    // provider is spawned.
+    //
+    // Both sides of the comparison come from `rebuild_launch_identity` rather
+    // than from the invocation-fixed `state.run` values. That is what makes the
+    // key movable: a refreshed document that changes `agent:`, `model:`, or
+    // `interactive:`, or that changes the `#tag` set the body selects MCP servers
+    // with, resolves to a different provider / binary / resume protocol /
+    // permission mode / interactivity / structured-output mode, and the resume is
+    // refused naming exactly those facets. `child_cwd` alone stays invocation-read
+    // — it has no document surface for a refresh to move.
+    let rebuilt = rebuild_launch_identity(
+        &state.run.launch_intent,
+        state.run.cli_model.as_deref(),
+        repo_root,
+        &materialized,
+        Some(prompt_state.source_path.as_path()),
+    );
     let launch_key = session_compat_key(
-        provider,
-        profile,
-        binary_path,
+        rebuilt.provider,
+        rebuilt.profile,
+        &rebuilt.binary_path,
         child_cwd,
-        state.run.yolo,
-        effective_non_interactive,
-        use_structured,
-        structured_codex_output.is_some(),
+        rebuilt.yolo,
+        rebuilt.non_interactive,
+        rebuilt.use_structured,
+        rebuilt.structured_codex,
         base_args,
+        &rebuilt.mcp_tags,
         &launch,
     );
     // A resume carries the key of the session-producing attempt forward with the
@@ -1569,12 +1720,11 @@ fn classify_attempt_phase(
             TerminalRecovery::Proxy(request) => {
                 return surface_or_adopt_terminal_proxy(
                     handoff_ledger.as_ref(),
-                    coordinator,
+                    provider,
                     request,
                     repo_root,
                     prompt_state,
                     lifecycle_guard,
-                    active,
                     &materialized,
                     term,
                     effect_engine,
@@ -1652,12 +1802,11 @@ fn classify_attempt_phase(
             TerminalRecovery::Proxy(request) => {
                 return surface_or_adopt_terminal_proxy(
                     handoff_ledger.as_ref(),
-                    coordinator,
+                    provider,
                     request,
                     repo_root,
                     prompt_state,
                     lifecycle_guard,
-                    active,
                     &materialized,
                     term,
                     effect_engine,
@@ -1709,12 +1858,11 @@ fn classify_attempt_phase(
         TerminalRecovery::Proxy(request) => {
             return surface_or_adopt_terminal_proxy(
                 handoff_ledger.as_ref(),
-                coordinator,
+                provider,
                 request,
                 repo_root,
                 prompt_state,
                 lifecycle_guard,
-                active,
                 &materialized,
                 term,
                 effect_engine,

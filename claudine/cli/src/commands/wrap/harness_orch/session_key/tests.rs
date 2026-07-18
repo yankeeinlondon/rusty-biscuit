@@ -41,6 +41,8 @@ struct Inputs {
     /// The effective child environment the provider is spawned with (already
     /// carrying any per-attempt overlay).
     child_env: HashMap<OsString, OsString>,
+    /// MCP `#tag`s the refreshed document body selects servers with.
+    document_mcp_tags: Vec<String>,
 }
 
 impl Default for Inputs {
@@ -54,6 +56,7 @@ impl Default for Inputs {
             child_cwd: PathBuf::from("/repo"),
             canonical_args: Vec::new(),
             child_env: HashMap::new(),
+            document_mcp_tags: Vec::new(),
         }
     }
 }
@@ -70,6 +73,7 @@ fn key_of(inputs: &Inputs) -> SessionCompatibilityKey {
         inputs.use_structured,
         inputs.structured_codex,
         &inputs.canonical_args,
+        &inputs.document_mcp_tags,
         &launch,
     )
 }
@@ -155,6 +159,7 @@ fn swapping_the_provider_changes_provider_binary_and_resume_protocol() {
         true,
         true,
         false,
+        &[],
         &[],
         &launch,
     );
@@ -292,6 +297,7 @@ fn resume_only_differences_do_not_change_the_key() {
         true,
         false,
         &system_prompt_args,
+        &[],
         &resume_launch,
     );
     assert!(
@@ -299,5 +305,21 @@ fn resume_only_differences_do_not_change_the_key() {
         "a resume that only re-points argv and swaps the prompt must stay compatible; \
          differed on {:?}",
         base.incompatibilities(&resume_key),
+    );
+}
+
+/// A `#tag` the refreshed body added moves the MCP facet: a fresh preparation of
+/// that document would select a different server set, so the live session and the
+/// new plan disagree.
+#[test]
+fn a_changed_document_mcp_tag_projects_the_mcp_facet() {
+    let base = key_of(&Inputs::default());
+    let tagged = key_of(&Inputs {
+        document_mcp_tags: vec!["calendar".to_string()],
+        ..Inputs::default()
+    });
+    assert_eq!(
+        base.incompatibilities(&tagged),
+        vec!["MCP server set".to_string()]
     );
 }

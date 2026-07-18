@@ -31,9 +31,25 @@ use super::super::HarnessPromptState;
 /// provider-attempt harness swapped its own source in place from inside a
 /// terminal-control dispatch, which is why the loop route and the single
 /// route could disagree about what the active document was.
+/// How much of the staged canonical boot a document still owes.
+///
+/// A freshly adopted proxy target owes all of it. A directly-invoked document
+/// whose `initialize` was already routed by the setup pipeline owes only the
+/// tail: the stabilized reread that reaches its schema verdict, and the audit
+/// over the document `initialize` may have just rewritten. Both tails are the
+/// same code — which is the point, since the two routes must render the same
+/// diagnostic for the same failure (AC28).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum BootstrapStage {
+    /// Narrow initialize-shell gate → `initialize` → stabilized reread → audit.
+    Full,
+    /// Stabilized reread → audit, for a document whose `initialize` already ran.
+    StabilizeOnly,
+}
+
 pub(super) struct ActiveDocumentCoordinator {
     ledger: RunLedger,
-    bootstrap_pending: bool,
+    bootstrap_pending: Option<BootstrapStage>,
     active_provenance: Option<ProxyProvenance>,
 }
 
@@ -46,7 +62,7 @@ impl ActiveDocumentCoordinator {
     pub(super) fn new(origin: std::path::PathBuf, approval_cache: SharedApprovalCache) -> Self {
         Self {
             ledger: RunLedger::new(origin, approval_cache),
-            bootstrap_pending: false,
+            bootstrap_pending: None,
             active_provenance: None,
         }
     }
@@ -76,12 +92,25 @@ impl ActiveDocumentCoordinator {
     /// this only records *how far along* an already-committed handoff is.
     /// Phase 7 owns the staged bootstrap this gates.
     pub(super) fn bootstrap_pending(&self) -> bool {
-        self.bootstrap_pending
+        self.bootstrap_pending.is_some()
     }
 
-    /// Consume the bootstrap-pending flag, returning whether it was set.
-    pub(super) fn take_bootstrap_pending(&mut self) -> bool {
-        std::mem::take(&mut self.bootstrap_pending)
+    /// Consume the pending stage, returning which one was owed.
+    pub(super) fn take_bootstrap_pending(&mut self) -> Option<BootstrapStage> {
+        self.bootstrap_pending.take()
+    }
+
+    /// Arm the tail of the staged boot for a directly-invoked document.
+    ///
+    /// The setup pipeline routed this document's `initialize` already, so only
+    /// the stabilized reread and the full audit are still owed. Arming it is
+    /// what lets a direct document's `initialize` add or repair a schema
+    /// property before the verdict is reached — the same order a proxy target
+    /// gets from [`adopt_committed`](Self::adopt_committed).
+    pub(super) fn arm_stabilization(&mut self) {
+        if self.bootstrap_pending.is_none() {
+            self.bootstrap_pending = Some(BootstrapStage::StabilizeOnly);
+        }
     }
 
     /// Commit `request` and repoint the run at its target.
@@ -146,7 +175,7 @@ impl ActiveDocumentCoordinator {
         // closure after the source has already ended. The target's own config is
         // installed by its staged boot, once it exists.
         lifecycle_guard.set_config(LifecycleConfig::default());
-        self.bootstrap_pending = true;
+        self.bootstrap_pending = Some(BootstrapStage::Full);
         Ok(())
     }
 
@@ -179,6 +208,6 @@ impl ActiveDocumentCoordinator {
         *active = ActiveDocumentState::initial();
         lifecycle_guard.reset_for_proxy();
         lifecycle_guard.set_config(LifecycleConfig::default());
-        self.bootstrap_pending = true;
+        self.bootstrap_pending = Some(BootstrapStage::Full);
     }
 }
