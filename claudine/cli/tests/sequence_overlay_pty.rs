@@ -1,4 +1,4 @@
-//! Level 2 PTY tests for `claudine sequence` interactive schema-property
+//! Level 1 PTY tests for `claudine sequence` interactive schema-property
 //! collection.
 //!
 //! Split out of `level2_schema_prompt_pty.rs`: this binary owns the
@@ -9,14 +9,31 @@
 //! `level2_schema_prompt_pty.rs`. Shared PTY harness helpers live in
 //! `common::pty`.
 //!
-//! Gating: `#![cfg(unix)]`, `require_level!(Level::L2, pty_available(),
-//! ...)` so the test skips cleanly without a PTY and panics under
-//! `BISCUIT_TEST_LEVEL_REQUIRED=2`.
+//! ## Tier
+//!
+//! **Level 1, not Level 2**, despite the file's former `level2_` name. These
+//! tests drive an `expectrl` pseudo-terminal, which is in-process I/O plumbing
+//! — `test_toolkit::Level::L1` is defined as "in-process or PTY-based tests".
+//! Level 2 means a *real terminal emulator* reached through
+//! `biscuit-test-harness` (tmux/WezTerm/Kitty), where the emulator's own
+//! capability handshake, folding, and SGR re-emission are part of what is under
+//! test. A PTY reproduces none of that. Terminal-visible task-stream rendering
+//! is covered at the real Level 2 in
+//! `level2_sequence_task_stream_capture.rs`.
+//!
+//! The name carries no tier prefix, which is what puts them in `just test`:
+//! `_test` and `_sanity` both filter out `level2_`/`level3_`/`browser_`/
+//! `real_`/`slow_`, so any of those prefixes would have left this binary
+//! running in no canonical recipe at all.
+//!
+//! Gating: `#![cfg(unix)]`, `require_level!(Level::L1, pty_available(), ...)`
+//! so the test skips cleanly without a PTY and panics under
+//! `BISCUIT_TEST_LEVEL_REQUIRED=1`.
 //!
 //! Run via the canonical recipe:
 //!
 //! ```text
-//! just test-l2
+//! just test
 //! ```
 
 #![cfg(unix)]
@@ -89,12 +106,12 @@ fn stage_goose_counter_stub(bin_dir: &std::path::Path, count_path: &std::path::P
 
 #[test]
 #[serial_test::serial(pty)]
-fn level2_pty_sequence_prompt_dedupes_and_launches_all_steps() {
+fn pty_sequence_prompt_dedupes_and_launches_all_steps() {
     // Both steps require `topic` but the schema only declares it once.
     // The interactive collector must prompt for `topic` EXACTLY ONCE
     // (dedupe), reuse the answer for every step, and only launch the
     // provider AFTER the prompt has been satisfied.
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let workspace = tempdir().unwrap();
     let bin_dir = workspace.path().join("bin");
@@ -195,7 +212,7 @@ fn level2_pty_sequence_prompt_dedupes_and_launches_all_steps() {
 
 #[test]
 #[serial_test::serial(pty)]
-fn level2_pty_sequence_step_overlay_satisfies_required_property() {
+fn pty_sequence_step_overlay_satisfies_required_property() {
     // The reserved overlay key `state` is set to each step's generated
     // `step_state` **object** (`name`/`id`/`index`/`count`/…). A schema that
     // requires `state` is therefore satisfied by every step's overlay, so the
@@ -211,7 +228,7 @@ fn level2_pty_sequence_step_overlay_satisfies_required_property() {
     // report must honor the per-step effective override map: `state`
     // must appear as Valid for every step (because the overlay supplies
     // it) even while the user is being prompted for the missing `topic`.
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let workspace = tempdir().unwrap();
     let bin_dir = workspace.path().join("bin");
@@ -315,7 +332,7 @@ exit 0
 
 #[test]
 #[serial_test::serial(pty)]
-fn level2_pty_sequence_status_report_honors_setter_supplied_required() {
+fn pty_sequence_status_report_honors_setter_supplied_required() {
     // The schema requires TWO properties, `topic` and `tier`. The user
     // supplies `tier` via a CLI `--set` / shorthand setter, so the
     // interactive prompt should only fire for `topic`. The status report
@@ -327,7 +344,7 @@ fn level2_pty_sequence_status_report_honors_setter_supplied_required() {
     // user `--set` overrides and the per-step overlay, so `tier` would
     // appear as missing in the pre-prompt diagnostic even though every
     // step's prepare step had already accepted the supplied value.
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let workspace = tempdir().unwrap();
     let bin_dir = workspace.path().join("bin");
@@ -464,8 +481,8 @@ fn stage_provider_launch_stub(
 
 #[test]
 #[serial_test::serial(pty)]
-fn level2_pty_sequence_invalid_agent_shows_preprompt_before_review() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn pty_sequence_invalid_agent_shows_preprompt_before_review() {
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let workspace = tempdir().unwrap();
     let bin_dir = workspace.path().join("bin");
@@ -521,8 +538,8 @@ fn level2_pty_sequence_invalid_agent_shows_preprompt_before_review() {
 
 #[test]
 #[serial_test::serial(pty)]
-fn level2_pty_sequence_zero_installed_list_shows_preprompt_before_review() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn pty_sequence_zero_installed_list_shows_preprompt_before_review() {
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let workspace = tempdir().unwrap();
     let bin_dir = workspace.path().join("bin");
@@ -580,13 +597,13 @@ fn level2_pty_sequence_zero_installed_list_shows_preprompt_before_review() {
 
 #[test]
 #[serial_test::serial(pty)]
-fn level2_pty_sequence_stderr_tty_with_stdout_redirected_prompts() {
+fn pty_sequence_stderr_tty_with_stdout_redirected_prompts() {
     // The core gate fix: `sequence doc.md > out.md` keeps `stderr` on the
     // terminal but redirects `stdout` to a file. The agent-resolution gate
     // keys off `stderr` only, so the prompting state must reach the review
     // screen (emitting the pre-prompt) rather than aborting with the no-TTY
     // `agent resolution failed` error the old `stdin && stdout` gate produced.
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let workspace = tempdir().unwrap();
     let bin_dir = workspace.path().join("bin");
@@ -661,14 +678,14 @@ fn level2_pty_sequence_stderr_tty_with_stdout_redirected_prompts() {
 
 #[test]
 #[serial_test::serial(pty)]
-fn level2_pty_sequence_auto_selectable_skips_review_and_launches() {
+fn pty_sequence_auto_selectable_skips_review_and_launches() {
     // The review-5 High finding: auto-selectable states (`Selected` /
     // `ListOneInstalled`) must bypass the review screen on a TTY, exactly like
     // direct compose's `resolve_live_target_with_tty` returns before the picker.
     // A one-installed-list hint (`agent: [goose, gemini]` with only `goose`
     // staged) classifies as `ListOneInstalled`, so the provider must launch with
     // no alternate-screen review UI and no keyboard input.
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let workspace = tempdir().unwrap();
     let bin_dir = workspace.path().join("bin");
