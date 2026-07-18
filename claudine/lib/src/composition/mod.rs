@@ -108,7 +108,11 @@ pub use select::{
     resolve_target_non_tty, resolve_target_non_tty_with_catalog, resolve_target_non_tty_with_hints,
     select_provider,
 };
-pub use sequence::{build_step_overlay, resolve_sequence_plan};
+pub use sequence::{
+    ExecutableField, ExternalTaskRef, GroupRef, OutputEntry, RuntimeMutation, SequencePlan,
+    SequenceSource, SequenceStep, SequenceStepOverlay, StepExecutable, StepState,
+    build_step_overlay, resolve_sequence_plan,
+};
 pub use types::{
     AgentHint, AgentResolutionState, AmbientVariable, CompositionClosurePlan,
     CompositionExecutionRequest, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
@@ -118,6 +122,5 @@ pub use types::{
     ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
     ResolvedCompositionSource, ResolvedExecutionTarget, ResolvedSessionInteractivity,
     SelectedProvider, SelectionReason, SessionInteractivitySource, SequenceExecutionOptions,
-    SequencePlan, SequenceRunSummary, SequenceSource, SequenceStep, SequenceStepDraft,
-    SequenceStepOverlay, SequenceStepResult, SharedApprovalCache,
+    SequenceRunSummary, SequenceStepDraft, SequenceStepResult, SharedApprovalCache,
 };

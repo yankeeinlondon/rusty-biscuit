@@ -1,8 +1,11 @@
 use super::*;
+use super::source::{render_simple_template, resolve_sequence_reference};
+use crate::composition::error::SequenceLoadCause;
 use darkmatter::markdown::{Frontmatter, Markdown};
 use serde_json::json;
 use serial_test::serial;
 use std::fs;
+use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
 
@@ -705,9 +708,12 @@ fn missing_environment_variable_surface_is_preserved() {
 fn external_template_non_string_value_fails() {
     let dir = TempDir::new().unwrap();
     let yaml_path = dir.path().join("bad.yaml");
+    // `rank` is a non-reserved template key with a non-string value; the
+    // wrong-type check must fire (a reserved key like `count` would trip the
+    // reserved-key check first — see `external_template_reserved_key_fails`).
     fs::write(
         &yaml_path,
-        "kind: sequence\ntemplate:\n  count: 42\nlist:\n  - name: One\n",
+        "kind: sequence\ntemplate:\n  rank: 42\nlist:\n  - name: One\n",
     )
     .unwrap();
 
@@ -786,57 +792,208 @@ fn sequence_load_cause_home_dir_display() {
 
 // -- build_step_overlay ---------------------------------------------------
 
+/// Normalize a list of scalar names into a plan for overlay assertions.
+fn scalar_plan(names: &[&str]) -> SequencePlan {
+    let items: Vec<serde_json::Value> = names.iter().map(|n| json!(n)).collect();
+    normalize::normalize_plan(&items, SequenceSource::Inline, Path::new("/seq/doc.md"), true)
+        .expect("scalar plan normalizes")
+}
+
 #[test]
 fn overlay_for_single_step_sequence() {
-    let plan = SequencePlan {
-        source: SequenceSource::Inline,
-        steps: vec![SequenceStep {
-            index: 0,
-            name: "only".to_string(),
-            raw_state: json!("only"),
-        }],
-        document_fail_fast: true,
-    };
+    let plan = scalar_plan(&["only"]);
     let overlay = build_step_overlay(&plan, 0);
-    assert!(overlay.is_first);
-    assert!(overlay.is_last);
-    assert_eq!(overlay.step, 1);
-    assert_eq!(overlay.total_steps, 1);
-    assert!(overlay.previous_state.is_null());
-    assert!(overlay.next_state.is_null());
+    assert!(overlay.state.is_first);
+    assert!(overlay.state.is_last);
+    assert_eq!(overlay.state.index, 1);
+    assert_eq!(overlay.state.count, 1);
+    // Absent neighbors are `None` (rendered as `null`), never empty-named states.
+    assert!(overlay.previous.is_none());
+    assert!(overlay.next.is_none());
 }
 
 #[test]
 fn overlay_for_middle_step() {
-    let plan = SequencePlan {
-        source: SequenceSource::Inline,
-        steps: vec![
-            SequenceStep {
-                index: 0,
-                name: "a".into(),
-                raw_state: json!("a"),
-            },
-            SequenceStep {
-                index: 1,
-                name: "b".into(),
-                raw_state: json!("b"),
-            },
-            SequenceStep {
-                index: 2,
-                name: "c".into(),
-                raw_state: json!("c"),
-            },
-        ],
-        document_fail_fast: true,
-    };
+    let plan = scalar_plan(&["a", "b", "c"]);
     let overlay = build_step_overlay(&plan, 1);
-    assert!(!overlay.is_first);
-    assert!(!overlay.is_last);
-    assert_eq!(overlay.step, 2);
-    assert_eq!(overlay.total_steps, 3);
-    assert_eq!(overlay.state, json!("b"));
-    assert_eq!(overlay.previous_state, json!("a"));
-    assert_eq!(overlay.next_state, json!("c"));
+    assert!(!overlay.state.is_first);
+    assert!(!overlay.state.is_last);
+    assert_eq!(overlay.state.index, 2);
+    assert_eq!(overlay.state.count, 3);
+    assert_eq!(overlay.state.name, "b");
+    assert_eq!(overlay.previous.as_ref().unwrap().name, "a");
+    assert_eq!(overlay.next.as_ref().unwrap().name, "c");
+}
+
+// -- Sequence Plus: state normalization, ids, sequence_id, overlay ---------
+
+#[test]
+fn scalar_step_normalizes_to_named_state() {
+    let plan = scalar_plan(&["alpha", "beta"]);
+    let state = &plan.steps[0].state;
+    assert_eq!(state.name, "alpha");
+    assert_eq!(state.id, "alpha");
+    assert_eq!(state.index, 1);
+    assert_eq!(state.count, 2);
+    assert!(state.is_first);
+    assert!(!state.is_last);
+    // Authored raw value is preserved verbatim for provenance.
+    assert_eq!(plan.steps[0].raw_state, json!("alpha"));
+}
+
+#[test]
+fn duplicate_names_get_deterministic_id_suffixes() {
+    let plan = scalar_plan(&["Build", "build", "build"]);
+    // Dasherized bases collide; the first keeps the base, later ones take the
+    // lowest free `-<n>` starting at `-2`.
+    assert_eq!(plan.steps[0].state.id, "build");
+    assert_eq!(plan.steps[1].state.id, "build-2");
+    assert_eq!(plan.steps[2].state.id, "build-3");
+    // Names are unchanged; only the generated id disambiguates.
+    assert_eq!(plan.steps[1].state.name, "build");
+}
+
+#[test]
+fn dasherize_handles_punctuation_and_empty_fallback() {
+    let plan = scalar_plan(&["Claude Code!", "***", "***"]);
+    assert_eq!(plan.steps[0].state.id, "claude-code");
+    // No alphanumerics → the `state` fallback, then dedup.
+    assert_eq!(plan.steps[1].state.id, "state");
+    assert_eq!(plan.steps[2].state.id, "state-2");
+}
+
+#[test]
+fn sequence_id_is_lowercase_hex_and_copied_into_every_state() {
+    let plan = scalar_plan(&["a", "b", "c"]);
+    assert_eq!(plan.sequence_id.len(), 16);
+    assert!(
+        plan.sequence_id
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+        "sequence_id must be lowercase hex: {}",
+        plan.sequence_id
+    );
+    for step in &plan.steps {
+        assert_eq!(step.state.sequence_id, plan.sequence_id);
+    }
+    let overlay = build_step_overlay(&plan, 0);
+    assert_eq!(overlay.sequence_id, plan.sequence_id);
+}
+
+#[test]
+fn separate_invocations_get_distinct_sequence_ids() {
+    let a = scalar_plan(&["a", "b"]);
+    let b = scalar_plan(&["a", "b"]);
+    // The monotonic counter guarantees distinct tokens even for identical input.
+    assert_ne!(a.sequence_id, b.sequence_id);
+}
+
+#[test]
+fn overlay_as_set_overrides_emits_new_root_keys_and_reserves_them() {
+    let plan = scalar_plan(&["a", "b"]);
+    let user_set = json!({"color": "red", "state": "should-lose", "sequence_id": "nope"});
+    let overrides = build_step_overlay(&plan, 0).as_set_overrides(Some(user_set));
+    let map = overrides.as_object().unwrap();
+
+    // Always-present root keys.
+    assert!(map["state"].is_object());
+    assert_eq!(map["state"]["name"], json!("a"));
+    assert_eq!(map["state"]["index"], json!(1));
+    assert!(map["outputs"].is_array());
+    assert_eq!(map["outputs"], json!([]));
+    assert!(map["sequence_id"].is_string());
+    // First step: previous is null, next is the second state object.
+    assert!(map["previous"].is_null());
+    assert_eq!(map["next"]["name"], json!("b"));
+
+    // Reserved overlay keys always win over user setters.
+    assert_eq!(map["state"]["name"], json!("a"));
+    assert_ne!(map["sequence_id"], json!("nope"));
+    // Non-reserved user keys survive.
+    assert_eq!(map["color"], json!("red"));
+}
+
+#[test]
+fn object_step_extracts_state_and_rejects_reserved_state_key() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        &[(
+            "sequence",
+            json!([{"name": "alpha", "id": "hand-picked"}]),
+        )],
+        "Prompt",
+    );
+    let err = resolve_sequence_plan(&source).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            CompositionError::SequenceReservedStateKey { index: 0, ref key } if key == "id"
+        ),
+        "authoring the generated `id` key must be rejected, got: {err:?}"
+    );
+}
+
+#[test]
+fn object_step_rejects_two_executables() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        &[(
+            "sequence",
+            json!([{"name": "alpha", "shell": "just test", "prompt": "@p.md"}]),
+        )],
+        "Prompt",
+    );
+    let err = resolve_sequence_plan(&source).unwrap_err();
+    assert!(
+        matches!(err, CompositionError::SequenceExclusiveExecutable { index: 0, .. }),
+        "two executable fields must be rejected, got: {err:?}"
+    );
+}
+
+#[test]
+fn shell_step_rejects_prompt_only_task_option() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        &[(
+            "sequence",
+            json!([{"name": "alpha", "shell": "just test", "params": {"x": 1}}]),
+        )],
+        "Prompt",
+    );
+    let err = resolve_sequence_plan(&source).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            CompositionError::SequenceInvalidTaskField { index: 0, ref field, ref executable }
+                if field == "params" && executable == "shell"
+        ),
+        "`params` on a shell task must be rejected, got: {err:?}"
+    );
+}
+
+#[test]
+fn single_executable_step_extracts_executable_and_options() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        &[(
+            "sequence",
+            json!([{"name": "review", "prompt": "@p.md", "params": {"topic": "x"}, "color": "blue"}]),
+        )],
+        "Prompt",
+    );
+    let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+    let step = &plan.steps[0];
+    let executable = step.executable.as_ref().expect("executable extracted");
+    assert_eq!(executable.field, ExecutableField::Prompt);
+    assert_eq!(executable.options.get("params"), Some(&json!({"topic": "x"})));
+    // Arbitrary state stays in the generated state; task keys never leak into it.
+    assert_eq!(step.state.extra.get("color"), Some(&json!("blue")));
+    assert!(!step.state.extra.contains_key("prompt"));
+    assert!(!step.state.extra.contains_key("params"));
 }
 
 // -- render_simple_template -----------------------------------------------
@@ -879,53 +1036,33 @@ mod clean_break {
     use super::*;
 
     fn two_step_plan() -> SequencePlan {
-        SequencePlan {
-            source: SequenceSource::Inline,
-            steps: vec![
-                SequenceStep {
-                    index: 0,
-                    name: "a".into(),
-                    raw_state: json!("a"),
-                },
-                SequenceStep {
-                    index: 1,
-                    name: "b".into(),
-                    raw_state: json!("b"),
-                },
-            ],
-            document_fail_fast: true,
-        }
+        scalar_plan(&["a", "b"])
     }
 
-    /// Characterization guardrail (pre-Sequence-Plus). The current per-step
-    /// overlay emits exactly these seven reserved keys. Phase 3 intentionally
-    /// renames `previous_state`/`next_state` → `previous`/`next` (full
-    /// `step_state` objects) and moves `step`/`total_steps`/`is_first`/`is_last`
-    /// inside each `step_state` as `index`/`count`/`is_first`/`is_last`. When
-    /// that lands, update this test in lockstep with the paired
-    /// `legacy_overlay_names_removed`.
+    /// Characterization guardrail (post-Sequence-Plus, Phase 3). The per-step
+    /// overlay now emits exactly these five root keys; the retired
+    /// `previous_state`/`next_state`/`step`/`total_steps`/`is_first`/`is_last`
+    /// names moved inside each `step_state` as `index`/`count`/`is_first`/
+    /// `is_last`, and `previous`/`next` carry full `step_state` objects.
     #[test]
     fn characterize_current_overlay_keys() {
         let plan = two_step_plan();
         let overrides = build_step_overlay(&plan, 0).as_set_overrides(None);
         let map = overrides.as_object().expect("overlay is a JSON object");
 
-        for key in [
-            "state",
-            "previous_state",
-            "next_state",
-            "is_first",
-            "is_last",
-            "step",
-            "total_steps",
-        ] {
-            assert!(map.contains_key(key), "current overlay must emit `{key}`");
+        for key in ["state", "previous", "next", "sequence_id", "outputs"] {
+            assert!(map.contains_key(key), "overlay must emit `{key}`");
         }
         assert_eq!(
             map.len(),
-            7,
-            "current overlay emits exactly seven reserved keys: {map:?}"
+            5,
+            "overlay emits exactly five reserved root keys: {map:?}"
         );
+        // The generated position fields live inside each state, not at the root.
+        let state = map["state"].as_object().unwrap();
+        for inner in ["index", "count", "is_first", "is_last", "id", "sequence_id"] {
+            assert!(state.contains_key(inner), "state must carry `{inner}`");
+        }
     }
 
     /// Clean break (RATIFIED 2026-07-12): the legacy overlay names
@@ -933,7 +1070,6 @@ mod clean_break {
     /// `previous`/`next` carry full `step_state` objects and `index`/`count`
     /// move inside each state; no deprecation aliases are provided.
     #[test]
-    #[ignore = "clean-break target: overlay rename lands in Phase 3 (sequence-plus)"]
     fn legacy_overlay_names_removed() {
         let plan = two_step_plan();
         let overrides = build_step_overlay(&plan, 0).as_set_overrides(None);
@@ -945,6 +1081,9 @@ mod clean_break {
                 "retired overlay key `{retired}` must not be emitted",
             );
         }
+        // The retired root booleans are also gone (they live inside `state`).
+        assert!(!map.contains_key("is_first"));
+        assert!(!map.contains_key("is_last"));
     }
 
     /// Clean break (RATIFIED 2026-07-12): the external-only `kind: sequence` +
