@@ -161,3 +161,41 @@ close without external execution or unrelated public API expansion.
   example on each native OS; and retain all three tables plus the test/lint run links
   under that same identifier. Cross-compilation, Docker, WSL, or results from a
   different tree do not close this finding.
+
+## Review 6 deferred items
+
+### Finding 1: native Linux and Windows Level-1 execution remains absent
+
+- **Review mapping:** "High: native Linux and Windows Level-1 execution remains absent"
+  in [review-6.md](review-6.md).
+- **Exact implementation evaluated:** the dirty worktree rooted at
+  `c864518c5` during the 2026-07-18 review-cycle-6 implementation, plus the cycle-6
+  changes to `sniff/lib/src/filesystem/repo/aggregate_view.rs`,
+  `sniff/lib/src/performance.rs`, `sniff/lib/src/process.rs`,
+  `sniff/cli/src/commands/mod.rs`, and `sniff/docs/sniff-library-architecture.md`.
+  Final closure must use one identifier for the completed cycle-6 tree.
+- **Host evidence:** `uname -a` reported native arm64 macOS (Darwin 25.5.0).
+  `rustup target list --installed` reported `aarch64-apple-darwin`, `wasm32-wasip1`,
+  `wasm32-wasip2`, and `x86_64-pc-windows-gnu` — no Linux target, and the Windows
+  target cannot execute on this host. This host cannot reproduce Windows Job Objects,
+  Linux `/proc` process discovery, native path and case behavior, or the
+  filesystem work-count fixtures.
+- **Why deferred:** unchanged from cycle 5. The session is non-interactive and
+  prohibits VM startup, external workflow triggers, tool installation, commits, and
+  pushes, so no authorized path exists from this macOS workspace to run the exact
+  implementation natively on Linux and Windows or to retain a matched three-OS
+  work-count artifact set. This is a platform and execution-authority constraint,
+  not a CPU-load deferral.
+- **Cycle-6 relevance note:** this cycle changed Unix-specific process-tree
+  termination (`sniff/lib/src/process.rs`), so the native Linux leg is now more
+  load-bearing than in previous cycles. The new cumulative descendant tracking and
+  PID-identity revalidation were exercised natively on macOS only; Linux `/proc`
+  descendant discovery through `sysinfo` and the `setsid` escape fixture must be run
+  natively on Linux before this finding closes. The Windows Job Object path was not
+  changed this cycle and was verified only by cross-compilation.
+- **To close:** publish one immutable completed cycle-6 implementation identifier to
+  an authorized runner source; obtain green native `cd sniff && just test` and
+  `cd sniff && just lint` runs on macOS, Linux, and Windows; run the `work_counts`
+  example on each native OS; and retain all three tables plus the test and lint run
+  links under that same identifier. Cross-compilation, Docker, WSL, or results from a
+  different tree do not close this finding.
