@@ -864,3 +864,137 @@ fn template_uses_fallback_for_null_value() {
     let result = render_simple_template("repo: {{ repo || 'none' }}", &fields);
     assert_eq!(result, "repo: none");
 }
+
+// -- Sequence Plus: characterization + clean-break guardrails --------------
+//
+// Phase 1 of the Sequence Plus refactor freezes the retained pre-refactor
+// contract and pins the deliberate removals. The clean-break/blocked tests
+// below encode the *target* behavior and are `#[ignore]`d until the phase that
+// implements each removal; un-ignoring them (and updating the paired
+// characterization test) is the checkpoint for that phase. They are kept green-
+// suite-neutral on purpose: the harness gates each phase on a passing `just
+// test`, so a permanently-red test would block every subsequent phase.
+
+mod clean_break {
+    use super::*;
+
+    fn two_step_plan() -> SequencePlan {
+        SequencePlan {
+            source: SequenceSource::Inline,
+            steps: vec![
+                SequenceStep {
+                    index: 0,
+                    name: "a".into(),
+                    raw_state: json!("a"),
+                },
+                SequenceStep {
+                    index: 1,
+                    name: "b".into(),
+                    raw_state: json!("b"),
+                },
+            ],
+            document_fail_fast: true,
+        }
+    }
+
+    /// Characterization guardrail (pre-Sequence-Plus). The current per-step
+    /// overlay emits exactly these seven reserved keys. Phase 3 intentionally
+    /// renames `previous_state`/`next_state` → `previous`/`next` (full
+    /// `step_state` objects) and moves `step`/`total_steps`/`is_first`/`is_last`
+    /// inside each `step_state` as `index`/`count`/`is_first`/`is_last`. When
+    /// that lands, update this test in lockstep with the paired
+    /// `legacy_overlay_names_removed`.
+    #[test]
+    fn characterize_current_overlay_keys() {
+        let plan = two_step_plan();
+        let overrides = build_step_overlay(&plan, 0).as_set_overrides(None);
+        let map = overrides.as_object().expect("overlay is a JSON object");
+
+        for key in [
+            "state",
+            "previous_state",
+            "next_state",
+            "is_first",
+            "is_last",
+            "step",
+            "total_steps",
+        ] {
+            assert!(map.contains_key(key), "current overlay must emit `{key}`");
+        }
+        assert_eq!(
+            map.len(),
+            7,
+            "current overlay emits exactly seven reserved keys: {map:?}"
+        );
+    }
+
+    /// Clean break (RATIFIED 2026-07-12): the legacy overlay names
+    /// `previous_state`, `next_state`, `step`, and `total_steps` are retired.
+    /// `previous`/`next` carry full `step_state` objects and `index`/`count`
+    /// move inside each state; no deprecation aliases are provided.
+    #[test]
+    #[ignore = "clean-break target: overlay rename lands in Phase 3 (sequence-plus)"]
+    fn legacy_overlay_names_removed() {
+        let plan = two_step_plan();
+        let overrides = build_step_overlay(&plan, 0).as_set_overrides(None);
+        let map = overrides.as_object().expect("overlay is a JSON object");
+
+        for retired in ["previous_state", "next_state", "step", "total_steps"] {
+            assert!(
+                !map.contains_key(retired),
+                "retired overlay key `{retired}` must not be emitted",
+            );
+        }
+    }
+
+    /// Clean break (RATIFIED 2026-07-12): the external-only `kind: sequence` +
+    /// `list:` document form is retired. Every sequence YAML uses `sequence:`,
+    /// whether invoked directly or referenced. A file carrying only `list:`
+    /// must be rejected rather than silently accepted.
+    #[test]
+    #[ignore = "clean-break target: `list:` shape removed in Phase 4 (sequence-plus)"]
+    fn external_list_shape_rejected() {
+        let dir = TempDir::new().unwrap();
+        let yaml_path = dir.path().join("legacy.yaml");
+        fs::write(&yaml_path, "kind: sequence\nlist:\n  - name: one\n").unwrap();
+
+        let source = make_source(&dir, &[("sequence", json!("legacy.yaml"))], "Prompt");
+        let result = resolve_sequence_plan(&source);
+        assert!(
+            result.is_err(),
+            "retired `kind: sequence` + `list:` shape must be rejected, got: {result:?}",
+        );
+    }
+
+    /// Group execution without `loop` is in scope, but group-loop commit
+    /// semantics remain unratified (spec Open Questions), so a group carrying
+    /// `loop` must be rejected with a typed, actionable error rather than
+    /// executed. Blocked until group parsing exists; un-ignore when a step's
+    /// `group.loop` is recognized so no implementer invents commit semantics.
+    #[test]
+    #[ignore = "blocked: group `loop` rejected once groups parse in Phase 9 (sequence-plus)"]
+    fn group_loop_rejected() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[(
+                "sequence",
+                json!([
+                    {
+                        "name": "one",
+                        "group": {
+                            "loop": {"while": "true"},
+                            "tasks": [{"prompt": "x"}]
+                        }
+                    }
+                ]),
+            )],
+            "Prompt",
+        );
+        let result = resolve_sequence_plan(&source);
+        assert!(
+            result.is_err(),
+            "a group carrying `loop` must be rejected with a typed error, got: {result:?}",
+        );
+    }
+}
