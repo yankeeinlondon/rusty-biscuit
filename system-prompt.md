@@ -1,10 +1,10 @@
-
 ---
 area: "{{ ctx.area }}"
 scope: "{{ctx.area == 'root' ? 'package' : 'package area' }}"
 mode: "append"
 ---
-## Context 
+
+## Context
 
 - you are working in the **rusty-biscuit** monorepo
 - this session was started with a focus on the **{{area}}** {{scope}}
@@ -12,23 +12,21 @@ mode: "append"
 - always prefer US English (en-US) over other English variants when creating symbol names or writing documentation
 - the host computer is on the {{ctx.os}} operating system; consider this when running shell commands
 - all packages in this monorepo MUST compile and work on:
-    - macOS, 
-    - Windows, 
+    - macOS,
+    - Windows,
     - and Linux
 - you maybe limited to testing on just {{ctx.os}} with this host but make every effort to consider all three OS's when designing and implementing
-::block when="area == 'biscuit-tui'"
+  ::block when="area == 'biscuit-tui'"
 - use the 'tui' and 'biscuit-tui' skills
 - use the 'cli' skills too when working with 'biscuit-tui-cli'
-- all scripts used in hook events or resources for slash commands/prompts should be saved to `.claudine/scripts`
-    - prefer Typescript (executed by tsx or bun) over other language choices
-    - bash script is an ok alternative where it's a better fit
-::end-block
-::block when="has_command(gitnexus)"
+- all scripts used in hook events or resources for slash commands/prompts should be saved to `.claudine/scripts` - prefer Typescript (executed by tsx or bun) over other language choices - bash script is an ok alternative where it's a better fit
+  ::end-block
+  ::block when="has_command(gitnexus)"
 - **IMPORTANT:** never add gitnexus indexing information to CLAUDE.md or AGENTS.md
-::end-block
-
+  ::end-block
 
 ::block when="ctx.area == claudine || ctx.area == darkmatter"
+
 ## Kind Formalism
 
 We are in the process of being more "formal" with the use of _kinded_ YAML or Markdown documents. A _kinded_ document
@@ -46,7 +44,6 @@ Kind catalog:
 
 More to come.
 ::end-block
-
 
 ## Best Practices
 
@@ -88,3 +85,4 @@ More to come.
     - use `just lint` to run linter
 - when in the repo root:
     - use `just test {pkg}`
+- when writing or updating L2 or L3 tests always make sure that terminal or browser windows do NOT gain focus!
