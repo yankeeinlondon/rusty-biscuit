@@ -131,7 +131,7 @@ pub fn current_worktree_name_with_repo(repo: &super::GitRepo) -> Option<String> 
     repo.with_cached_gix(current_worktree_name_from_gix)
 }
 
-fn current_worktree_name_from_gix(repo: &gix::Repository) -> Option<String> {
+pub(crate) fn current_worktree_name_from_gix(repo: &gix::Repository) -> Option<String> {
     // Not a linked worktree — either the main repo or a bare repo.
     if !is_linked_worktree(repo) {
         return None;
@@ -145,7 +145,9 @@ fn current_worktree_name_from_gix(repo: &gix::Repository) -> Option<String> {
         .map(String::from)
 }
 
-fn list_worktrees_from_gix(discovered: &gix::Repository) -> Result<Vec<WorktreeEntry>, Box<dyn Error>> {
+pub(crate) fn list_worktrees_from_gix(
+    discovered: &gix::Repository,
+) -> Result<Vec<WorktreeEntry>, Box<dyn Error>> {
     // If discovery landed on a linked worktree, open the base repository so
     // that worktree enumeration includes the main worktree as well.
     let base_repo = if is_linked_worktree(discovered) {

@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::cell::{Cell, RefCell};
@@ -9,6 +9,11 @@ use tracing::{debug, instrument, warn};
 
 use crate::request::GitRequest;
 use crate::{Result, SniffError};
+
+use super::recent_commits::CommitDescSet;
+use super::worktree::WorktreeEntry;
+
+const AGGREGATE_COMMIT_WINDOW_DAYS: i64 = 3;
 
 const CONVENTIONAL_COMMIT_RE: &str = r"^([a-zA-Z0-9-]+)(?:\(([^)]*)\))?: (.+)$";
 
@@ -853,6 +858,7 @@ impl GitRepo {
             config: GitConfig::default(),
             tracking: Vec::new(),
             file_changes: Vec::new(),
+            aggregate: None,
         }
     }
 
@@ -875,21 +881,24 @@ impl GitRepo {
             super::remote_refresh::refresh_remote_tracking_refs(&self.gix.borrow(), 2);
         }
 
+        let wants_aggregate = request.wants_aggregate();
         let wants_tracking_refs = request.wants_tracking() && current_branch.is_some();
         let needs_ref_snapshot = request.wants_ref_decorations()
             || request.wants_branches()
             || wants_tracking_refs
             || (request.wants_remotes() && request.include_remote_branch_details)
-            || (request.refresh_remote_tracking && request.include_commit_remote_containment);
+            || (request.refresh_remote_tracking && request.include_commit_remote_containment)
+            || wants_aggregate;
         let ref_snapshot = if needs_ref_snapshot {
             self.ensure_cache();
             Some(super::remote_refresh::RefSnapshot::observe(
                 &self.gix.borrow(),
-                request.wants_branches() || wants_tracking_refs,
+                request.wants_branches() || wants_tracking_refs || wants_aggregate,
                 wants_tracking_refs
                     || (request.wants_remotes() && request.include_remote_branch_details)
                     || (request.refresh_remote_tracking
-                        && request.include_commit_remote_containment),
+                        && request.include_commit_remote_containment)
+                    || wants_aggregate,
                 request.wants_ref_decorations(),
             )?)
         } else {
@@ -1033,6 +1042,41 @@ impl GitRepo {
             .map(parse_org_repo)
             .unwrap_or((None, None));
 
+        let aggregate = if wants_aggregate {
+            let refs = ref_snapshot
+                .as_ref()
+                .expect("aggregate request observes local and remote refs");
+            let branches = self.with_cached_gix(|repo| {
+                super::remote_refresh::get_branch_info_from_snapshot(
+                    repo,
+                    current_branch.as_deref(),
+                    refs,
+                )
+            })?;
+            let worktrees = self
+                .with_cached_gix(super::worktree::list_worktrees_from_gix)
+                .map_err(|error| SniffError::SystemInfo {
+                    domain: "git.worktrees",
+                    message: error.to_string(),
+                })?;
+            let current_worktree =
+                self.with_cached_gix(super::worktree::current_worktree_name_from_gix);
+            let commits = super::recent_commits::get_recent_commits_by_duration_with_repo(
+                self,
+                Duration::days(AGGREGATE_COMMIT_WINDOW_DAYS),
+                &format!("last {AGGREGATE_COMMIT_WINDOW_DAYS}d"),
+                None,
+            )?;
+            Some(GitAggregateEvidence {
+                branches,
+                worktrees,
+                current_worktree,
+                commits,
+            })
+        } else {
+            None
+        };
+
         Ok(GitInfo {
             repo_root: self.repo_root.clone(),
             org,
@@ -1052,6 +1096,7 @@ impl GitRepo {
             config,
             tracking,
             file_changes,
+            aggregate,
         })
     }
 }
@@ -1123,6 +1168,20 @@ pub struct GitInfo {
     /// File changes with their status (staged/modified/both/conflicted/untracked).
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub file_changes: Vec<FileChange>,
+    /// Aggregate-only shapes observed through this request's original handle.
+    #[doc(hidden)]
+    #[serde(skip, default)]
+    pub aggregate: Option<GitAggregateEvidence>,
+}
+
+/// Repository evidence needed only by the bare aggregate projection.
+#[doc(hidden)]
+#[derive(Debug, Clone)]
+pub struct GitAggregateEvidence {
+    pub branches: Vec<BranchInfo>,
+    pub worktrees: Vec<WorktreeEntry>,
+    pub current_worktree: Option<String>,
+    pub commits: CommitDescSet,
 }
 
 /// Represents whether the local branch is behind remote tracking branches.

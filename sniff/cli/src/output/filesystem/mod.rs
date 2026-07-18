@@ -1543,6 +1543,7 @@ mod tests {
             config: GitConfig::default(),
             tracking: vec![],
             file_changes,
+            aggregate: None,
         }
     }
 

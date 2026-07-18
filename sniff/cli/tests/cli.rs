@@ -318,6 +318,73 @@ fn repo_aggregate_json_is_valid_object() {
 }
 
 #[test]
+fn repo_aggregate_perf_covers_complete_command() {
+    let (_dir, path) = create_cli_monorepo();
+    let output = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "--perf",
+            "--plain",
+            "repo",
+            "--json",
+        ])
+        .output()
+        .expect("run sniff repo --json --perf");
+
+    assert!(
+        output.status.success(),
+        "aggregate command must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).expect("valid aggregate JSON");
+    let report = &value["performance"];
+    let counters = report["counters"].as_object().expect("performance counters");
+    let stages = report["stages"].as_object().expect("performance stages");
+
+    for (counter, expected) in [
+        ("git.repository_discoveries", 1),
+        ("git.status_walks", 1),
+        ("git.ref_walks", 1),
+        ("git.worktree_opens", 0),
+    ] {
+        assert_eq!(
+            counters.get(counter).and_then(Value::as_u64).unwrap_or(0),
+            expected,
+            "complete aggregate command counter `{counter}`: {counters:?}"
+        );
+    }
+
+    let aggregate_stage = &stages["cli.repo.aggregate_projection"];
+    assert_eq!(aggregate_stage["calls"], 1);
+    let aggregate_ms = aggregate_stage["total_duration_ms"]
+        .as_f64()
+        .expect("aggregate stage duration");
+    let detect_ms = stages["detect.total"]["total_duration_ms"]
+        .as_f64()
+        .expect("detection stage duration");
+    let total_ms = report["total_duration_ms"]
+        .as_f64()
+        .expect("complete command duration");
+    assert!(
+        total_ms >= detect_ms + aggregate_ms,
+        "complete elapsed time must cover detection plus aggregate projection: \
+         total={total_ms}, detection={detect_ms}, aggregate={aggregate_ms}"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cli.repo.aggregate_projection"),
+        "stderr report must include post-detection aggregate projection: {stderr}"
+    );
+    assert!(
+        stderr.contains("git.repository_discoveries: 1")
+            && stderr.contains("git.status_walks: 1"),
+        "stderr report must include complete command-wide bounds: {stderr}"
+    );
+}
+
+#[test]
 fn repo_aggregate_json_excludes_network_and_parameterized_keys() {
     let output = cargo_bin_cmd!("sniff")
         .args(["repo", "--json"])

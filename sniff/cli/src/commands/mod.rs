@@ -1333,7 +1333,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     .performance(cli.perf);
 
-    let mut result = detect_with_plan(plan)?;
+    let mut result = perf.collect(|| detect_with_plan(plan))?;
 
     // Handle package scoping for git actions. Both `--package` and
     // `--package-area` are honored; when both are passed, the resolved package
@@ -1670,19 +1670,25 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // Bare `sniff repo --json` assembles the scope-complete aggregate of its
     // participating children. It must run after the full detection pass so the
-    // library observation can reuse the shared `SniffResult`'s `GitInfo` and
-    // `RepoInfo` rather than re-observing them, and so the builder stays a pure
-    // projection (umbrella spec R2) — the cwd-relative `context` facts are
-    // resolved by `observe_repo_aggregate`, not by the builder.
+    // library completion can reuse the aggregate evidence collected inside the
+    // original Git detection plus the shared `RepoInfo`, and so the builder
+    // stays a pure projection (umbrella spec R2) — the cwd-relative `context`
+    // facts are resolved by `observe_repo_aggregate`, not by the builder.
     if bare_repo_aggregate {
         let dir = base_dir
             .as_deref()
             .unwrap_or_else(|| std::path::Path::new("."));
-        let aggregate =
-            sniff::filesystem::repo::observe_repo_aggregate(dir, result.filesystem.as_ref())?;
-        let value = output::repo_json::build_aggregate_value(&result, &aggregate);
-        output::print_json_value(value, result.performance.as_ref());
-        perf.emit_for_json(result.performance.as_ref());
+        let value = perf.collect(|| {
+            let timer = sniff::performance::StageTimer::start("cli.repo.aggregate_projection");
+            let aggregate =
+                sniff::filesystem::repo::observe_repo_aggregate(dir, result.filesystem.as_ref())?;
+            let value = output::repo_json::build_aggregate_value(&result, &aggregate);
+            timer.finish();
+            Ok::<_, sniff::SniffError>(value)
+        })?;
+        let report = perf.build_report();
+        output::print_json_value(value, report.as_ref());
+        perf.emit_for_json(report.as_ref());
         return Ok(());
     }
 
@@ -2130,13 +2136,18 @@ fn select_git_request(
     if refresh_remotes {
         GitRequest::deep().commit_count(history_count)
     } else if aggregate_json {
-        // Aggregate-only branches, worktrees, and history come from the one
-        // library aggregate observation. Detection supplies detailed status
-        // plus the Git config rendered under `git_status`; enumerating its
-        // current linked worktree here would walk the same status twice.
+        // Aggregate-only branches, worktrees, identity fallback, and file-aware
+        // history are observed inside the original Git detection. Its single
+        // handle and ref snapshot supply the exact projection shapes without a
+        // post-detection rediscovery or another status walk.
         GitRequest::full()
             .commit_count(history_count)
-            .metadata(GitMetadataRequest::none().config(true))
+            .metadata(
+                GitMetadataRequest::none()
+                    .remotes(true)
+                    .config(true)
+                    .aggregate(true),
+            )
     } else if lightweight {
         GitRequest::summary()
     } else if changes_only {
@@ -2201,6 +2212,88 @@ mod tests {
         assert!(!req.wants_commits());
         assert!(!req.wants_branches());
         assert!(!req.wants_worktrees());
+        assert!(req.wants_aggregate());
+    }
+
+    #[test]
+    fn aggregate_command_path_discovers_and_walks_status_once() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"aggregate-fixture\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("tracked.rs"), "fn original() {}\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("Cargo.toml")).unwrap();
+        index.add_path(std::path::Path::new("tracked.rs")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+                .unwrap();
+        }
+        std::fs::write(dir.path().join("tracked.rs"), "fn changed() {}\n").unwrap();
+
+        let request = FilesystemRequest::new()
+            .git(select_git_request(false, false, false, true, 10))
+            .repo(RepoRequest::focused(RepoDetailRequest::all()))
+            .without_file_inventory();
+        let collector = sniff::performance::PerformanceCollector::new_shared();
+        let aggregate = sniff::performance::with_current_collector(
+            Some(collector.clone()),
+            || {
+                let filesystem = sniff::filesystem::detect_filesystem_with_request(
+                    dir.path(),
+                    &request,
+                )?;
+                sniff::filesystem::repo::observe_repo_aggregate(
+                    dir.path(),
+                    Some(&filesystem),
+                )
+            },
+        )
+        .expect("aggregate command path succeeds");
+        let counters = collector.snapshot(std::time::Duration::ZERO).counters;
+
+        assert_eq!(
+            counters
+                .get(sniff::performance::counters::GIT_DISCOVERIES)
+                .copied()
+                .unwrap_or(0),
+            1,
+            "the complete command path shares one repository discovery: {counters:?}"
+        );
+        assert_eq!(
+            counters
+                .get(sniff::performance::counters::GIT_STATUS_WALKS)
+                .copied()
+                .unwrap_or(0),
+            1,
+            "the complete command path shares one status walk: {counters:?}"
+        );
+        assert_eq!(
+            counters
+                .get(sniff::performance::counters::GIT_REF_WALKS)
+                .copied()
+                .unwrap_or(0),
+            1,
+            "aggregate branches reuse the detection ref snapshot: {counters:?}"
+        );
+        assert_eq!(
+            counters
+                .get(sniff::performance::counters::GIT_WORKTREE_OPENS)
+                .copied()
+                .unwrap_or(0),
+            0,
+            "aggregate worktree projection must not independently open checkouts: {counters:?}"
+        );
+        assert_eq!(aggregate.identity.name, "aggregate-fixture");
+        assert!(!aggregate.branches.is_empty());
+        assert_eq!(aggregate.worktrees.len(), 1);
     }
 
     #[test]

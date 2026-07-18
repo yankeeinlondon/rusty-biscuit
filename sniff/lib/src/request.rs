@@ -342,6 +342,9 @@ pub struct GitMetadataRequest {
     pub config: bool,
     /// Enumerate linked worktrees.
     pub worktrees: bool,
+    /// Collect the library-owned evidence for bare aggregate projection.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub aggregate: bool,
 }
 
 impl GitMetadataRequest {
@@ -361,6 +364,7 @@ impl GitMetadataRequest {
             tracking: true,
             config: true,
             worktrees: true,
+            aggregate: false,
         }
     }
 
@@ -409,6 +413,12 @@ impl GitMetadataRequest {
     /// Enumerate linked worktrees.
     pub fn worktrees(mut self, include: bool) -> Self {
         self.worktrees = include;
+        self
+    }
+
+    /// Collect aggregate-only branch, worktree, and file-aware history shapes.
+    pub fn aggregate(mut self, include: bool) -> Self {
+        self.aggregate = include;
         self
     }
 }
@@ -718,6 +728,11 @@ impl GitRequest {
             Some(m) => m.worktrees && self.include_worktrees,
             None => self.include_worktrees,
         }
+    }
+
+    /// Collect the library-owned bare aggregate evidence?
+    pub fn wants_aggregate(&self) -> bool {
+        self.metadata.is_some_and(|metadata| metadata.aggregate)
     }
 }
 

@@ -7,34 +7,23 @@
 //! history, and resolves no cwd-relative context of its own — see the Phase 2
 //! sub-spec, contract C2.
 //!
-//! Cost contract: one `GitRepo::discover` and zero additional status walks per
-//! call. Every working-tree scope bucket is a projection over the
+//! Cost contract: zero repository discoveries and zero additional status walks
+//! per call. Every working-tree scope bucket is a projection over the
 //! `GitInfo.file_changes` the detection pass already collected (contract C1),
 //! not a fresh observation, and the cwd-relative `context` facts resolve over
 //! a single package ownership index (R2.7).
 
 use std::path::Path;
 
-use chrono::Duration;
-
 use crate::filesystem::FilesystemInfo;
 use crate::filesystem::git::recent_commits::CommitDescSet;
-use crate::filesystem::git::{
-    BranchInfo, FileStatus, GitInfo, GitRepo, WorktreeEntry, current_worktree_name_with_repo,
-    get_recent_commits_by_duration_with_repo, list_worktrees_with_repo,
-};
+use crate::filesystem::git::{BranchInfo, FileStatus, GitInfo, WorktreeEntry};
 use crate::filesystem::path_kind::is_source_code_path;
 use crate::filesystem::repo::detection::canonicalize_path;
 use crate::filesystem::repo::ownership::PackageOwnershipIndex;
 use crate::filesystem::repo::types::RepoInfo;
-use crate::filesystem::repo::{RepoIdentity, detect_repo_identity_with_repo};
+use crate::filesystem::repo::RepoIdentity;
 use crate::{Result, SniffError};
-
-/// The default commit window for the bare aggregate.
-///
-/// Matches `sniff repo recent-commits`'s default period so the aggregate's
-/// commit families agree with the focused command's default invocation.
-const DEFAULT_COMMIT_WINDOW_DAYS: i64 = 3;
 
 /// Every repository fact the bare `sniff repo --json` aggregate needs that is
 /// not already present on the detection pass's `FilesystemInfo`.
@@ -96,7 +85,7 @@ pub struct AggregateCwdContext {
     pub package_area_has_source_code_changes: bool,
 }
 
-/// Observe the facts bare `sniff repo --json` needs beyond its detection pass.
+/// Complete the bare `sniff repo --json` facts from its detection pass.
 ///
 /// `filesystem` is the already-detected result for `dir`. Passing it is what
 /// makes this cheap: the `GitInfo` supplies working-tree scope and conflict
@@ -105,16 +94,16 @@ pub struct AggregateCwdContext {
 ///
 /// ## Errors
 ///
-/// Returns [`SniffError::NotARepository`] when `dir` is not inside a git
-/// repository, and [`SniffError::SystemInfo`] when `filesystem` carries a
-/// `GitInfo` whose detection request did not collect per-file changes — see
-/// Notes.
+/// Returns [`SniffError::NotARepository`] when `filesystem` has no Git result,
+/// and [`SniffError::SystemInfo`] when its request omitted per-file changes or
+/// aggregate repository evidence — see Notes.
 ///
 /// ## Notes
 ///
-/// **Precondition:** the caller's detection request must be at or above
-/// `GitRequest::full()`, the floor at which `include_file_changes` is set. A
-/// request below that leaves `GitInfo.file_changes` empty, which is
+/// **Precondition:** the caller's detection request must opt into aggregate
+/// evidence and be at or above `GitRequest::full()`, the floor at which
+/// `include_file_changes` is set. A request below that leaves
+/// `GitInfo.file_changes` empty, which is
 /// indistinguishable from a clean tree by inspection alone. Rather than
 /// silently emit empty scope buckets for a dirty repository, this rejects the
 /// combination it *can* detect: a status that reports dirty while carrying no
@@ -130,38 +119,33 @@ pub fn observe_repo_aggregate(
     // aggregate discovers once and reuses that handle for every fact.
     let dir = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
     let dir = dir.as_path();
-    let git_repo =
-        GitRepo::discover(dir)?.ok_or_else(|| SniffError::NotARepository(dir.to_path_buf()))?;
-
-    let detected_git = filesystem.and_then(|fs| fs.git.as_ref());
-    if let Some(git) = detected_git {
-        ensure_detailed_status(git)?;
-    }
+    let detected_git = filesystem
+        .and_then(|fs| fs.git.as_ref())
+        .ok_or_else(|| SniffError::NotARepository(dir.to_path_buf()))?;
+    ensure_detailed_status(detected_git)?;
+    let evidence = detected_git.aggregate.as_ref().ok_or_else(|| SniffError::SystemInfo {
+        domain: "filesystem.repo.aggregate",
+        message: "the detection request did not collect aggregate repository evidence".to_string(),
+    })?;
 
     let repo = filesystem.and_then(|fs| fs.repo.clone());
     let version = collapse_detected_repo_version(repo.as_ref());
 
-    let file_changes = detected_git.map(|git| git.file_changes.as_slice()).unwrap_or(&[]);
-
-    let commits = get_recent_commits_by_duration_with_repo(
-        &git_repo,
-        Duration::days(DEFAULT_COMMIT_WINDOW_DAYS),
-        &format!("last {DEFAULT_COMMIT_WINDOW_DAYS}d"),
-        repo.as_ref(),
-    )?;
+    let file_changes = detected_git.file_changes.as_slice();
+    let mut commits = evidence.commits.clone();
+    commits.attribute_from_repo(repo.as_ref());
 
     let context = observe_cwd_context(
         dir,
         repo.as_ref(),
-        detected_git,
+        Some(detected_git),
     );
 
     Ok(RepoAggregate {
-        identity: detect_repo_identity_with_repo(&git_repo)?,
-        branches: git_repo.branch_info(false)?,
-        worktrees: list_worktrees_with_repo(&git_repo)
-            .map_err(|e| SniffError::git("list_worktrees", GitAggregateError(e.to_string())))?,
-        current_worktree: current_worktree_name_with_repo(&git_repo),
+        identity: identity_from_detected(detected_git, repo.as_ref(), version.as_deref()),
+        branches: evidence.branches.clone(),
+        worktrees: evidence.worktrees.clone(),
+        current_worktree: evidence.current_worktree.clone(),
         has_merge_conflict: file_changes
             .iter()
             .any(|change| change.status == FileStatus::Conflicted),
@@ -170,6 +154,36 @@ pub fn observe_repo_aggregate(
         commits,
         context,
     })
+}
+
+fn identity_from_detected(
+    git: &GitInfo,
+    repo: Option<&RepoInfo>,
+    version: Option<&str>,
+) -> RepoIdentity {
+    let root_package_name = repo
+        .and_then(|repo| repo.packages.as_deref().map(|packages| (repo, packages)))
+        .and_then(|(repo, packages)| packages.iter().find(|package| package.path == repo.root))
+        .map(|package| package.name.clone());
+    let name = root_package_name
+        .or_else(|| git.repo.clone())
+        .or_else(|| {
+            git.repo_root
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+
+    RepoIdentity {
+        name,
+        version: version.map(str::to_string),
+        language: None,
+        is_monorepo: repo.is_some_and(|repo| repo.is_monorepo),
+        package_count: repo
+            .filter(|repo| repo.is_monorepo)
+            .and_then(|repo| repo.packages.as_ref().map(Vec::len)),
+    }
 }
 
 /// Collapse versions that package detection already resolved from manifests.
@@ -308,19 +322,6 @@ fn ensure_detailed_status(git: &GitInfo) -> Result<()> {
     Ok(())
 }
 
-/// Adapts `list_worktrees`'s boxed error into the `std::error::Error` bound
-/// [`SniffError::git`] requires.
-#[derive(Debug)]
-struct GitAggregateError(String);
-
-impl std::fmt::Display for GitAggregateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for GitAggregateError {}
-
 /// Repository-relative paths in `file_changes` that belong to `scope`.
 ///
 /// The scope predicate and the first-wins-by-path deduplication reproduce
@@ -392,6 +393,7 @@ mod tests {
             config: GitConfig::default(),
             tracking: Vec::new(),
             file_changes,
+            aggregate: None,
         }
     }
 
@@ -510,22 +512,13 @@ mod tests {
     }
 
     mod work_counts {
-        //! The R2 acceptance evidence: bare `sniff repo --json` performs one
-        //! status walk and one repository discovery *in total*, where it
-        //! previously performed one of each in detection plus eight more
-        //! afterwards (four scopes x two path kinds).
-        //!
-        //! The claim is proven as a sum of two independently measured arms —
-        //! detection's git stage, then [`observe_repo_aggregate`] — rather than
-        //! by measuring `detect_filesystem_with_request` as a whole. That is
-        //! deliberate: the filesystem planner runs each domain on a
-        //! `std::thread::scope` thread that installs no collector, so every
-        //! counter recorded inside the git stage is dropped when measured
-        //! through the planner. Summing the arms measures the same work without
-        //! depending on that gap being closed first.
+        //! Library-side R2 evidence. The CLI command-path test measures
+        //! detection and aggregate completion together; these tests pin the
+        //! underlying status and linked-worktree behavior in isolation.
 
         use super::*;
         use crate::filesystem::{FilesystemRequest, detect_filesystem_with_request};
+        use crate::filesystem::git::GitRepo;
         use crate::performance::{counters, testing::measure};
         use crate::request::{GitMetadataRequest, GitRequest};
         use tempfile::TempDir;
@@ -569,7 +562,12 @@ mod tests {
                 .git(
                     GitRequest::full()
                         .commit_count(10)
-                        .metadata(GitMetadataRequest::none().config(true)),
+                        .metadata(
+                            GitMetadataRequest::none()
+                                .remotes(true)
+                                .config(true)
+                                .aggregate(true),
+                        ),
                 )
                 .without_file_inventory()
         }
@@ -584,8 +582,7 @@ mod tests {
             (dir, linked_path)
         }
 
-        /// Arm 1 — detection's git stage walks status exactly once. Measured
-        /// directly rather than through the planner; see the module note.
+        /// Detection's git stage walks status exactly once.
         #[test]
         fn detection_git_stage_walks_status_once() {
             let dir = fixture();
@@ -634,12 +631,9 @@ mod tests {
             );
         }
 
-        /// Arm 2 — the aggregate observation adds no status walk on top of
-        /// detection's one, because every working-tree fact it needs is a
-        /// projection over `GitInfo.file_changes`. This is the assertion that
-        /// fails if the eight `collect_changed_paths` calls ever come back.
+        /// Aggregate completion performs no repository or status observation.
         #[test]
-        fn observation_adds_no_status_walk_and_one_discovery() {
+        fn observation_adds_no_status_walk_or_discovery() {
             let dir = fixture();
             let fs = detect_filesystem_with_request(dir.path(), &aggregate_request())
                 .expect("detection succeeds");
@@ -657,9 +651,9 @@ mod tests {
             );
             assert_eq!(
                 counts.get(counters::GIT_DISCOVERIES),
-                1,
-                "one discovery context must serve identity, branches, worktrees, \
-                 and history; counters: {:?}",
+                0,
+                "identity, branches, worktrees, and history must come from the \
+                 original detection evidence; counters: {:?}",
                 counts.all()
             );
             assert_eq!(
@@ -735,7 +729,7 @@ mod tests {
         use super::*;
         use crate::filesystem::repo::types::Package;
         use crate::filesystem::{FilesystemRequest, detect_filesystem_with_request};
-        use crate::request::GitRequest;
+        use crate::request::{GitMetadataRequest, GitRequest};
         use tempfile::TempDir;
 
         /// A Cargo workspace with one member in each of two areas plus a
@@ -778,7 +772,14 @@ mod tests {
 
         fn detect(root: &Path) -> FilesystemInfo {
             let request = FilesystemRequest::new()
-                .git(GitRequest::full().commit_count(10))
+                .git(
+                    GitRequest::full().commit_count(10).metadata(
+                        GitMetadataRequest::none()
+                            .remotes(true)
+                            .config(true)
+                            .aggregate(true),
+                    ),
+                )
                 .without_file_inventory();
             detect_filesystem_with_request(root, &request).expect("detection succeeds")
         }
@@ -892,8 +893,24 @@ mod tests {
         #[test]
         fn context_facts_default_without_repo_detection() {
             let (_temp, root) = workspace_fixture();
+            let request = FilesystemRequest::new()
+                .git(
+                    GitRequest::full().metadata(
+                        GitMetadataRequest::none()
+                            .remotes(true)
+                            .config(true)
+                            .aggregate(true),
+                    ),
+                )
+                .without_repo()
+                .without_docs()
+                .without_formatting()
+                .without_file_inventory();
+            let filesystem = detect_filesystem_with_request(&root, &request)
+                .expect("detection succeeds");
 
-            let aggregate = observe_repo_aggregate(&root, None).expect("observation succeeds");
+            let aggregate = observe_repo_aggregate(&root, Some(&filesystem))
+                .expect("observation succeeds");
 
             assert_eq!(aggregate.context, AggregateCwdContext::default());
         }
@@ -911,22 +928,19 @@ mod tests {
                     .unwrap();
             }
 
-            let fs = FilesystemInfo {
-                repo: Some(RepoInfo {
-                    is_monorepo: false,
-                    root: root.to_path_buf(),
-                    packages: Some(vec![Package {
-                        path: root.to_path_buf(),
-                        relative: String::new(),
-                        package_area: "root".to_string(),
-                        name: "solo".to_string(),
-                        ..Package::default()
-                    }]),
-                    ..RepoInfo::default()
-                }),
-                git: Some(git_info(Vec::new(), false)),
-                ..Default::default()
-            };
+            let mut fs = detect(root);
+            fs.repo = Some(RepoInfo {
+                is_monorepo: false,
+                root: root.to_path_buf(),
+                packages: Some(vec![Package {
+                    path: root.to_path_buf(),
+                    relative: String::new(),
+                    package_area: "root".to_string(),
+                    name: "solo".to_string(),
+                    ..Package::default()
+                }]),
+                ..RepoInfo::default()
+            });
 
             let aggregate = observe_repo_aggregate(root, Some(&fs)).expect("observation succeeds");
             let context = &aggregate.context;

@@ -1032,6 +1032,7 @@ mod tests {
             config: GitConfig::default(),
             tracking: Vec::new(),
             file_changes: Vec::new(),
+            aggregate: None,
         }
     }
 
@@ -2383,14 +2384,23 @@ mod tests {
                 monorepo_layers: Vec::new(),
                 packages: None,
             };
-            let mut git = fixture_git_info();
-            git.repo_root = repo_root.to_path_buf();
-            git.status = Some(sniff::filesystem::git::RepoStatus::default());
-            let filesystem = FilesystemInfo {
-                repo: Some(repo),
-                git: Some(git),
-                ..Default::default()
-            };
+            let request = sniff::request::FilesystemRequest::new()
+                .git(sniff::request::GitRequest::full().metadata(
+                    sniff::request::GitMetadataRequest::none()
+                        .remotes(true)
+                        .config(true)
+                        .aggregate(true),
+                ))
+                .without_repo()
+                .without_file_inventory()
+                .without_formatting()
+                .without_docs();
+            let mut filesystem = sniff::filesystem::detect_filesystem_with_request(
+                repo_root,
+                &request,
+            )
+            .expect("aggregate fixture detection succeeds");
+            filesystem.repo = Some(repo);
             SniffResult {
                 os: None,
                 hardware: None,
@@ -2698,7 +2708,7 @@ mod tests {
         #[test]
         fn aggregate_observation_errors_instead_of_yielding_partial_json() {
             let bad_path = PathBuf::from("/tmp/not-a-git-repo-for-aggregate-test-42");
-            let result = result_fixture(&bad_path);
+            let result = fixture_with_git_and_repo();
             let outcome =
                 sniff::filesystem::repo::observe_repo_aggregate(&bad_path, result.filesystem.as_ref());
             assert!(

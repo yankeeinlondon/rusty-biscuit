@@ -655,6 +655,26 @@ fn collect_commits_by_count(
 // ---------------------------------------------------------------------------
 
 impl CommitDescSet {
+    /// Attribute an already-observed history set through a detected package catalog.
+    pub(crate) fn attribute_from_repo(&mut self, repo_info: Option<&RepoInfo>) {
+        let ownership_index = repo_info
+            .filter(|info| info.is_monorepo)
+            .and_then(|info| info.packages.as_deref().map(|packages| {
+                PackageOwnershipIndex::from_packages(&info.root, packages)
+            }));
+
+        for commit in &mut self.commits {
+            let files = commit
+                .files
+                .iter()
+                .map(|file| (PathBuf::from(&file.path), file.kind))
+                .collect::<Vec<_>>();
+            (commit.packages, commit.package_areas) =
+                attribute_commit_files(repo_info, ownership_index.as_ref(), &files);
+        }
+        self.packages = repo_info.and_then(|info| info.packages.clone());
+    }
+
     /// Render every commit in the set using the commit-centric layout.
     pub fn describe(&self, plain: bool) -> String {
         self.render_commit_centric(None, plain)
