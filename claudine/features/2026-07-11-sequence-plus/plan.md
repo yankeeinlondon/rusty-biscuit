@@ -1,7 +1,7 @@
 ---
 total_phases: 13
 created: 2026-07-12
-phase: 6
+phase: 7
 yolo: "true"
 source_files_during_phase_1:
   - claudine/lib/src/composition/sequence/tests.rs
@@ -118,6 +118,23 @@ docs_updated_during_phase_6: []
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6: []
 packages_during_phase_6:
+  - claudine
+source_files_during_phase_7:
+  - claudine/lib/src/composition/sequence/task/mod.rs
+  - claudine/lib/src/composition/sequence/task/shell.rs
+  - claudine/lib/src/composition/sequence/task/tests.rs
+  - claudine/lib/src/composition/sequence/mod.rs
+  - claudine/lib/src/composition/sequence/reserved.rs
+  - claudine/lib/src/composition/sequence/preflight/mod.rs
+  - claudine/lib/src/composition/lifecycle/mod.rs
+  - claudine/lib/src/composition/lifecycle/parse.rs
+  - claudine/lib/src/composition/lifecycle/executor.rs
+  - claudine/lib/src/composition/error/mod.rs
+  - claudine/lib/src/composition/mod.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
+packages_during_phase_7:
   - claudine
 packages:
   - biscuit-file
@@ -261,15 +278,15 @@ serial sequence work, lifecycle actions, and loop rematerialization.
 **Goal:** Execute each task variant through one outcome contract before adding
 group or sequence scheduling.
 
-- [ ] Implement a task executor with common setup/primary/teardown orchestration and structured success/failure/interruption, stdout, mutation delta, timing, and primary/secondary diagnostics.
-- [ ] Run setup before the primary action; skip primary on setup failure; run teardown exactly once after setup starts, including after primary failure or interruption, with `err` in scope.
-- [ ] Make teardown failure convert success to failure, retain a primary action error when both fail, attach teardown errors as secondary diagnostics, and preserve `no_error` as dispatch-only suppression.
-- [ ] Implement prompt tasks by JIT-composing the referenced document, selecting inline-compose from that document's configuration, applying JIT-evaluated params with the ratified precedence, and using the preflight target/approval plan.
-- [ ] Implement shell tasks with one or more pre-approved commands, a default `30s` timeout per command, typed duration overrides, rejection of `0s`, declaration-ordered stdout concatenation, and platform-neutral spawning.
-- [ ] Implement side-effect tasks through the standard positional/key/value lifecycle grammar and capture their textual return value or an empty string.
-- [ ] Implement external `task:` as exclusive, immutable expansion of the referenced `kind: task` file; reject referencing-site patches/overrides.
-- [ ] Add unit/integration tests for every task variant, params precedence, setup/teardown ordering, timeout behavior, interruption, secondary errors, and output append timing.
-- [ ] **Validation checkpoint:** the same task fixture produces the specified outcome standalone and when embedded, and no task executes an unapproved shell byte or resolves a reference from the wrong directory.
+- [x] Implement a task executor with common setup/primary/teardown orchestration and structured success/failure/interruption, stdout, mutation delta, timing, and primary/secondary diagnostics. *(`sequence/task/mod.rs`: `TaskExecution::run` → `TaskOutcome` {`status`, `stdout`, `output_committed`, `mutations`, `duration`, `error`, `secondary_errors`}; `run()` never returns `Err` — continuation is the scheduler's `fail_fast` decision, not an error propagating out of one task.)*
+- [x] Run setup before the primary action; skip primary on setup failure; run teardown exactly once after setup starts, including after primary failure or interruption, with `err` in scope. *(`run_stages`; teardown re-enters the stack through `StackExecutionContext::with_error`, so `{{ err.msg }}` reads the primary failure. A stack that will not *parse* fails before setup starts, so no teardown is owed.)*
+- [x] Make teardown failure convert success to failure, retain a primary action error when both fail, attach teardown errors as secondary diagnostics, and preserve `no_error` as dispatch-only suppression. *(`no_error` is untouched — task stacks run through the same `execute_stack` loop, so its dispatch-only scope is inherited rather than re-implemented.)*
+- [x] Implement prompt tasks by JIT-composing the referenced document, selecting inline-compose from that document's configuration, applying JIT-evaluated params with the ratified precedence, and using the preflight target/approval plan. *(`PromptTaskRunner` is the seam — the library never launches a provider; phase 8 supplies the wrapper implementation. The executor owns everything statically decidable: the preflight-resolved path, `inline_compose` read off the graph's `PromptDocument`, and `set_overrides` folded params < user setters < mutations < overlay.)*
+- [x] Implement shell tasks with one or more pre-approved commands, a default `30s` timeout per command, typed duration overrides, rejection of `0s`, declaration-ordered stdout concatenation, and platform-neutral spawning. *(`task/shell.rs`: `SystemTaskShell` pipes stdout on a draining thread and polls `try_wait` to a deadline — no Unix-only signal or `wait4`. `timeout:` goes through `harness::parse_timeout`, which already rejects `0s` and a unitless integer.)*
+- [x] Implement side-effect tasks through the standard positional/key/value lifecycle grammar and capture their textual return value or an empty string. *(`parse_single_action` + `StackExecutionContext::dispatch_task_side_effect`; a communication or flow-control verb in `side_effect:` is a typed rejection rather than a silent no-op.)*
+- [x] Implement external `task:` as exclusive, immutable expansion of the referenced `kind: task` file; reject referencing-site patches/overrides. *(`reserved::allowed_task_options(Task)` is now empty — the last silently-discarded referencing-site field (`name`) is rejected. A sequence step is unaffected: its `name` is state, extracted before options are read.)*
+- [x] Add unit/integration tests for every task variant, params precedence, setup/teardown ordering, timeout behavior, interruption, secondary errors, and output append timing. *(38 tests in `sequence/task/tests.rs`, every one driving a node built by the real preflight walk over real files.)*
+- [x] **Validation checkpoint:** the same task fixture produces the specified outcome standalone and when embedded, and no task executes an unapproved shell byte or resolves a reference from the wrong directory. *(`a_task_behaves_identically_inline_and_as_an_external_file` compares the whole observable tuple — status, stdout, commands, timeouts, emissions, `outputs`. Byte parity is pinned from both sides by `the_preflight_approved_bytes_are_executed_verbatim` and `approved_bytes_are_never_re_interpolated`; `a_prompt_reference_resolves_from_its_authoring_directory` proves a nested task file anchors its own reference. `just test` and `just lint` pass from `claudine/`.)*
 
 ## Phase 8 — JIT serial sequence orchestration
 
