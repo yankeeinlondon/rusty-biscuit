@@ -62,3 +62,24 @@ The three required SHAs are now committed objects, so the committed-pin
 condition can be met when a quiet host is available.
 
 **Current verdict:** not established. Acceptance criteria 5 and 6 remain open.
+
+### 2026-07-17 — Review 6 implementation cycle
+
+**Declined before capture; inadmissible host.** During the review-6
+implement cycle (see [`review-6.md`](./review-6.md), *Tracked
+Production-Readiness Blocker*, and [`log.md`](./log.md) *Implementation of
+Review Findings #6*), the host reported a 1-minute load average of **30.56**
+(5-minute 49.57, 15-minute 42.72) on a 16-core machine — more than fifteen
+times the admissibility ceiling of 2.0. Admissibility condition 1 (1-minute
+load below 2.0 for the full capture) cannot be met, so no benchmark was run
+and no threshold result was claimed.
+
+Review 6 confirms this is a deferred **performance measurement**, not a code
+finding: its only actionable finding (terminal-detection test doc drift) was
+fixed in the cycle-6 implementation. The integrated compose-regression
+threshold remains blocked solely on a quiet host, not on any owner ruling or
+outstanding implementation work. The three required SHAs remain committed
+objects, so the committed-pin condition can still be met when a quiet host is
+available.
+
+**Current verdict:** not established. Acceptance criteria 5 and 6 remain open.

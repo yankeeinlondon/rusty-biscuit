@@ -3,7 +3,7 @@ status: draft
 reviewed: true
 reviewed_by: claude/default
 reviewed_on: 2026-07-15
-review_iterations: 5
+review_iterations: 6
 created: 2026-07-15
 source_review: ../../reviews/2026-07-12-perf/spec.md
 source_assessment: ../../reviews/2026-07-12-perf/review-3.md
