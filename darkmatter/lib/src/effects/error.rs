@@ -9,6 +9,9 @@ pub enum EffectError {
     #[error("invalid file path: {0}")]
     InvalidFilePath(String),
 
+    #[error("invalid state key {0:?}: keys must be a single top-level name (no empty or dotted-path keys)")]
+    InvalidKey(String),
+
     #[error("refusing to write outside the mutation root: {} (root: {})", path.display(), root.display())]
     OutsideMutationRoot { path: PathBuf, root: PathBuf },
 

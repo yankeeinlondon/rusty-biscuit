@@ -2883,6 +2883,19 @@ mod tests {
             assert!(first_fn(&v(json!("hi"))).is_err());
             assert!(last_fn(&v(json!({"a": 1}))).is_err());
         }
+
+        #[test]
+        fn last_preserves_typed_element() {
+            // The Sequence Plus `outputs` array has shape `(string | string[])[]`:
+            // a parallel group pushes a nested array. `last(outputs)` must return
+            // that element with its type intact, not a stringified form.
+            let outputs = json!(["one", ["a", "b"]]);
+            assert_eq!(last_fn(&v(outputs)).unwrap(), json!(["a", "b"]));
+
+            // An object element is likewise returned whole.
+            let mixed = json!(["x", {"k": 1}]);
+            assert_eq!(last_fn(&v(mixed)).unwrap(), json!({"k": 1}));
+        }
     }
 
     mod fn_string_predicates {
