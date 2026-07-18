@@ -274,7 +274,7 @@ impl LiveSemanticSink {
             emit_output_text: None,
             emit_event_log: None,
             live_metrics: progress::new_live_metrics(),
-            stream_output: StreamOutput::new(),
+            stream_output: StreamOutput::shared(),
             thinking_stream: ThinkingStream::new(terminal.clone()),
             terminal,
             section_tracker: Arc::new(Mutex::new(SectionTracker::new())),
@@ -320,7 +320,7 @@ impl LiveSemanticSink {
                 claudine::dispatch::DispatchRuntimeContext::default()
             }
         };
-        let stream_output = StreamOutput::new();
+        let stream_output = StreamOutput::shared();
 
         let dispatch: SemanticDispatchFn = {
             let runtime_context = runtime_context;

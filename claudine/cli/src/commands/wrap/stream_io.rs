@@ -49,6 +49,44 @@ impl StreamOutput {
         })
     }
 
+    /// The process-wide coordinator.
+    ///
+    /// `last_stdout_newline` describes the *process's* real stdout cursor, so
+    /// two independent coordinators cannot both be right about it. That was
+    /// harmless while one provider session owned the terminal; a parallel group
+    /// puts several writers on it at once, and the spec requires them to share
+    /// one synchronized sink (spec → *Reporting Concurrency*).
+    pub(crate) fn shared() -> Arc<Self> {
+        static SHARED: std::sync::OnceLock<Arc<StreamOutput>> = std::sync::OnceLock::new();
+        SHARED.get_or_init(Self::new).clone()
+    }
+
+    /// Emit already-rendered lines to stderr as one indivisible write.
+    ///
+    /// Per-line emission would let a sibling task land a line inside another's
+    /// frame; holding the coordinator across the whole group is what makes
+    /// attribution survive contention.
+    pub(crate) fn emit_stderr_frames(&self, frames: &[String]) {
+        #[cfg(test)]
+        if let Some(buf) = &self.test_recorder {
+            let mut buf = buf.lock().unwrap_or_else(|e| e.into_inner());
+            buf.extend(frames.iter().map(|line| (false, line.clone())));
+            return;
+        }
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if !inner.last_stdout_newline {
+            let mut stdout = io::stdout().lock();
+            let _ = stdout.write_all(b"\n");
+            let _ = stdout.flush();
+            inner.last_stdout_newline = true;
+        }
+        let mut stderr = io::stderr().lock();
+        for line in frames {
+            let _ = writeln!(stderr, "{line}");
+        }
+        let _ = stderr.flush();
+    }
+
     /// Construct a test-only coordinator that captures emissions into the
     /// provided buffer instead of writing to real stdout/stderr.
     #[cfg(test)]

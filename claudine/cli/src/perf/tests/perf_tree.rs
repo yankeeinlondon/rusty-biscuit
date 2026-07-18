@@ -455,6 +455,7 @@ fn step_perf(
         wall_clock,
         compose_perf: compose,
         agent_perf: agent,
+        group_tasks: Vec::new(),
     }
 }
 
@@ -528,6 +529,69 @@ fn perf_tree_sequence_builds_per_step_subtrees() {
     // per-step composition.
     let env = child(&tree, "environment setup").expect("env setup");
     assert!(child(env, "step preparation").is_none());
+}
+
+/// A step that ran a group nests one `group` Breakdown node per member task,
+/// so a parallel run is attributable in `--perf` and not just a single opaque
+/// step total.
+///
+/// The node is `Breakdown` at every level on purpose: concurrent members
+/// overlap, so their durations routinely sum past the step's own wall-clock and
+/// cannot be reconciled as a partition of it.
+#[test]
+fn perf_tree_nests_group_task_timings_under_their_step() {
+    let mut step = step_perf(0, "alpha", Duration::from_millis(900), None, None);
+    step.group_tasks = vec![
+        SequenceTaskPerf {
+            name: "fetch".to_string(),
+            duration: Duration::from_millis(800),
+        },
+        SequenceTaskPerf {
+            name: "render".to_string(),
+            duration: Duration::from_millis(750),
+        },
+    ];
+    let report = sequence_report(
+        Duration::from_secs(1),
+        Duration::from_millis(10),
+        Duration::from_millis(20),
+        vec![step],
+    );
+
+    let tree = build_perf_tree(&report, CompositionPlacement::UnderStep);
+    assert!(tree_reconciles(&tree, Duration::from_millis(1)));
+    assert_no_child_exceeds_parent(&tree);
+
+    let steps = child(&tree, "steps").expect("steps node");
+    let alpha = child(steps, "step 1: alpha").expect("step 1 subtree");
+    let group = child(alpha, "group").expect("group subtree");
+
+    // Breakdown, and totalled by the *longest* member — the shortest the group
+    // could have taken. Σ(800, 750) = 1550ms would exceed the 900ms step.
+    assert_eq!(group.role, NodeRole::Breakdown);
+    assert_eq!(group.total, Duration::from_millis(800));
+    assert_eq!(group.children.len(), 2);
+    assert_eq!(
+        child(group, "fetch").expect("fetch leaf").total,
+        Duration::from_millis(800)
+    );
+    assert_eq!(child(group, "render").expect("render leaf").role, NodeRole::Breakdown);
+}
+
+/// A step that ran no group grows no `group` node.
+#[test]
+fn perf_tree_omits_the_group_node_for_a_plain_step() {
+    let report = sequence_report(
+        Duration::from_secs(1),
+        Duration::from_millis(10),
+        Duration::from_millis(20),
+        vec![step_perf(0, "alpha", Duration::from_millis(500), None, None)],
+    );
+
+    let tree = build_perf_tree(&report, CompositionPlacement::UnderStep);
+    let steps = child(&tree, "steps").expect("steps node");
+    let alpha = child(steps, "step 1: alpha").expect("step 1 subtree");
+    assert!(child(alpha, "group").is_none());
 }
 
 /// Walk the whole tree asserting the G-2 timeline contract: no child's total

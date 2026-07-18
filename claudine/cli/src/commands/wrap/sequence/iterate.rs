@@ -189,6 +189,13 @@ pub(super) fn run_sequence_steps(
                 wall_clock: duration,
                 compose_perf,
                 agent_perf,
+                group_tasks: tasks
+                    .iter()
+                    .map(|task| crate::perf::SequenceTaskPerf {
+                        name: task.name.clone(),
+                        duration: task.duration,
+                    })
+                    .collect(),
             });
         }
 

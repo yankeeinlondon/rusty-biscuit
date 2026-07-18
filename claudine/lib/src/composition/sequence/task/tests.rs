@@ -28,6 +28,7 @@ use crate::composition::sequence::preflight::build_preflight_graph_with_context;
 use crate::composition::sequence::{build_step_overlay, resolve_sequence_plan};
 use crate::events::GlobalSettings;
 use crate::messaging::RuntimeMessagingSettings;
+use crate::render::TaskStreamSink;
 
 // -- fixtures ---------------------------------------------------------------
 
@@ -190,6 +191,7 @@ impl Fixture {
             shell: wiring.shell,
             prompt: wiring.prompt,
             interrupt: wiring.interrupt,
+            stream: wiring.stream,
         }
         .run()
     }
@@ -204,6 +206,9 @@ struct Wiring<'a> {
     runtime: Option<&'a Arc<RuntimeState>>,
     user_setters: Option<&'a Value>,
     interrupt: Option<&'a AtomicBool>,
+    /// Where group-task header/footer frames land. `None` is the `--silent`
+    /// shape: nothing is rendered at all.
+    stream: Option<&'a dyn TaskStreamSink>,
 }
 
 impl<'a> Wiring<'a> {
@@ -216,7 +221,14 @@ impl<'a> Wiring<'a> {
             runtime: None,
             user_setters: None,
             interrupt: None,
+            stream: None,
         }
+    }
+
+    /// Route this run's group-task frames into `sink`.
+    fn with_stream(mut self, sink: &'a dyn TaskStreamSink) -> Self {
+        self.stream = Some(sink);
+        self
     }
 }
 
@@ -2473,4 +2485,248 @@ mod parallel_groups {
             "the failed task keeps an (empty) slot",
         );
     }
+}
+
+/// Attribution of group-task frames, from the scheduler's side.
+///
+/// The renderer's own contract — geometry, wrapping, palette, degradation —
+/// lives in `render::task_stream::tests`. These cases prove the *scheduler*
+/// picks the right bar, opens and closes exactly one stream per member task,
+/// and never tears a sibling's frame group under real concurrency.
+mod group_framing {
+    use super::*;
+
+    /// Records whole write calls, so a torn write shows up as a split group.
+    #[derive(Default)]
+    struct FrameSink {
+        writes: Mutex<Vec<Vec<String>>>,
+    }
+
+    impl FrameSink {
+        fn writes(&self) -> Vec<Vec<String>> {
+            self.writes.lock().unwrap().clone()
+        }
+
+        /// Every rendered line, flattened.
+        fn lines(&self) -> Vec<String> {
+            self.writes().into_iter().flatten().collect()
+        }
+
+        /// [`Self::lines`] with SGR sequences removed, for content assertions.
+        fn visible_lines(&self) -> Vec<String> {
+            self.lines().iter().map(|line| strip_ansi(line)).collect()
+        }
+    }
+
+    impl TaskStreamSink for FrameSink {
+        fn write_frames(&self, frames: &[String]) {
+            self.writes.lock().unwrap().push(frames.to_vec());
+        }
+    }
+
+    /// A group of shell tasks, one per command, named after its command.
+    fn group_step(commands: &[&str], execution: &str) -> Value {
+        json!({
+            "name": "alpha",
+            "group": {
+                "name": "bundle",
+                "execution": execution,
+                "tasks": commands
+                    .iter()
+                    .map(|command| json!({ "name": command, "shell": command }))
+                    .collect::<Vec<_>>(),
+            },
+        })
+    }
+
+    fn run(commands: &[&str], execution: &str, sink: &FrameSink) -> TaskOutcome {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), group_step(commands, execution));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = commands
+            .iter()
+            .fold(FakeTaskShell::default(), |shell, command| {
+                shell.stdout_for(command, command)
+            });
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell).with_stream(sink);
+        wiring.runtime = Some(&runtime);
+        fixture.execute(&wiring)
+    }
+
+    #[test]
+    fn every_member_task_opens_and_closes_exactly_one_stream() {
+        let sink = FrameSink::default();
+        let outcome = run(&["alpha", "bravo", "charlie"], "parallel", &sink);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        let lines = sink.visible_lines();
+        for name in ["alpha", "bravo", "charlie"] {
+            let headers = lines.iter().filter(|l| l.contains(&format!("▶ {name}"))).count();
+            let footers = lines
+                .iter()
+                .filter(|l| l.contains(name) && l.contains("succeeded"))
+                .count();
+            assert_eq!(headers, 1, "task `{name}` headers in {lines:?}");
+            assert_eq!(footers, 1, "task `{name}` footers in {lines:?}");
+        }
+    }
+
+    #[test]
+    fn a_parallel_group_gives_each_task_its_own_palette_entry() {
+        let sink = FrameSink::default();
+        run(&["alpha", "bravo", "charlie"], "parallel", &sink);
+
+        let bars: Vec<String> = sink
+            .lines()
+            .iter()
+            .filter(|line| line.contains('│'))
+            .map(|line| line[..line.find('│').unwrap() + '│'.len_utf8()].to_string())
+            .collect();
+        let distinct: std::collections::HashSet<&String> = bars.iter().collect();
+        assert!(
+            !bars.is_empty(),
+            "a parallel group drew no bars: {:?}",
+            sink.lines()
+        );
+        assert_eq!(distinct.len(), 3, "three tasks shared a color: {bars:?}");
+    }
+
+    #[test]
+    fn a_serial_group_uses_the_invisible_bar_at_the_same_left_edge() {
+        let serial = FrameSink::default();
+        run(&["alpha", "bravo"], "serial", &serial);
+        let parallel = FrameSink::default();
+        run(&["alpha", "bravo"], "parallel", &parallel);
+
+        let serial_lines = serial.visible_lines();
+        assert!(
+            serial_lines.iter().all(|line| !line.contains('│')),
+            "serial work drew a visible bar: {serial_lines:?}"
+        );
+        // Same geometry: the content column is identical in both modes.
+        let column = |lines: &[String], needle: &str| -> usize {
+            let line = lines
+                .iter()
+                .find(|line| line.contains(needle))
+                .unwrap_or_else(|| panic!("no line carrying {needle:?} in {lines:?}"));
+            let byte = line.find(needle).expect("needle present");
+            line[..byte].chars().count()
+        };
+        assert_eq!(
+            column(&serial_lines, "▶"),
+            column(&parallel.visible_lines(), "▶"),
+            "serial and parallel headers start at different columns"
+        );
+    }
+
+    #[test]
+    fn a_failed_task_reports_its_own_outcome_in_its_footer() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), group_step(&["fine-task", "bad-task"], "parallel"));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default()
+            .stdout_for("fine-task", "fine")
+            .stdout_for("bad-task", "partial")
+            .failing("bad-task");
+        let runtime = Arc::new(RuntimeState::new());
+        let sink = FrameSink::default();
+        let mut wiring = Wiring::new(&recorder, &shell).with_stream(&sink);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        let lines = sink.visible_lines();
+        assert!(
+            lines.iter().any(|l| l.contains("bad-task") && l.contains("failed")),
+            "no failure footer in {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("fine-task") && l.contains("succeeded")),
+            "a sibling's success footer was lost in {lines:?}"
+        );
+    }
+
+    #[test]
+    fn concurrent_siblings_never_split_one_frame_group() {
+        let sink = FrameSink::default();
+        let dir = TempDir::new().unwrap();
+        let names = ["one", "two", "three", "four", "five", "six"];
+        let source = one_step_source(dir.path(), group_step(&names, "parallel"));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        // Inverted delays: completion order is the reverse of declaration order,
+        // so a frame group interleaving with a sibling would be visible.
+        let shell = names.iter().enumerate().fold(
+            FakeTaskShell::default(),
+            |shell, (index, command)| {
+                shell
+                    .stdout_for(command, command)
+                    .delay(command, (names.len() - index) as u64 * 10)
+            },
+        );
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell).with_stream(&sink);
+        wiring.runtime = Some(&runtime);
+
+        fixture.execute(&wiring);
+
+        for group in sink.writes() {
+            let visible: Vec<String> = group.iter().map(|line| strip_ansi(line)).collect();
+            let owners: std::collections::HashSet<&str> = names
+                .iter()
+                .filter(|name| visible.iter().any(|line| line.contains(**name)))
+                .copied()
+                .collect();
+            assert!(
+                owners.len() <= 1,
+                "a frame group mixed tasks {owners:?}: {group:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_silent_run_renders_no_frames_at_all() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), group_step(&["task-a", "task-b"], "parallel"));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default()
+            .stdout_for("task-a", "a")
+            .stdout_for("task-b", "b");
+        let runtime = Arc::new(RuntimeState::new());
+        // No sink is the `--silent` shape.
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(
+            runtime.outputs_value(),
+            json!([["a", "b"]]),
+            "silencing the frames must not change the run"
+        );
+    }
+}
+
+/// Everything visible after removing SGR/CSI sequences.
+fn strip_ansi(text: &str) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\u{1b}' {
+            out.push(ch);
+            continue;
+        }
+        for next in chars.by_ref() {
+            if ('\u{40}'..='\u{7e}').contains(&next) && next != '[' {
+                break;
+            }
+        }
+    }
+    out
 }

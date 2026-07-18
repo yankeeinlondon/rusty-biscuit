@@ -24,6 +24,7 @@ use claudine::composition::sequence::task::{
     PromptRunOutcome, PromptTaskRequest, PromptTaskRunner, SystemTaskShell, TaskExecution,
     TaskOutcome, TaskStatus,
 };
+use claudine::render::TaskStreamSink;
 use claudine::system_prompt::SystemPromptArgs;
 use darkmatter::effects::EffectEngine;
 use darkmatter::markdown::compose::EffectiveStateBuilder;
@@ -32,6 +33,7 @@ use serde_json::Value;
 use crate::commands::wrap::composition::execute_composition_request_inner;
 
 use super::iterate::{SequenceRunContext, StepOutcome};
+use super::task_frames::SequenceTaskSink;
 
 /// Run a step's explicit task and report it as a step outcome.
 #[allow(clippy::too_many_arguments)]
@@ -103,6 +105,9 @@ pub(super) fn run_step_task(
 
     let prompt_runner = WrapperPromptRunner::new(run, env_overrides, target, runtime_state);
     let shell = SystemTaskShell;
+    // `--silent` drops the sink entirely rather than rendering frames nobody
+    // reads; the library then skips the render altogether.
+    let sink = (!run.silent).then(SequenceTaskSink::new);
 
     let outcome = TaskExecution {
         task,
@@ -115,6 +120,7 @@ pub(super) fn run_step_task(
         shell: &shell,
         prompt: &prompt_runner,
         interrupt: Some(run.interrupted.as_ref()),
+        stream: sink.as_ref().map(|sink| sink as &dyn TaskStreamSink),
     }
     .run();
 

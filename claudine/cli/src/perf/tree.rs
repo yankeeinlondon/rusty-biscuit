@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use super::{CommandPerfReport, CompositionPlacement, NodeRole, PerfNode, SequenceStepPerf, SubstageTiming};
+use super::{CommandPerfReport, CompositionPlacement, NodeRole, PerfNode, SequenceStepPerf, SequenceTaskPerf, SubstageTiming};
 
 /// Project a substage's nested breakdown into a `Breakdown` [`PerfNode`]
 /// subtree, recursively. Every node is `Breakdown` so the whole subtree
@@ -207,6 +207,9 @@ fn build_steps_node(steps: &[SequenceStepPerf]) -> PerfNode {
                     agent_children,
                 ));
             }
+            if !step.group_tasks.is_empty() {
+                step_children.push(build_group_node(&step.group_tasks));
+            }
             PerfNode::branch(
                 format!("step {}: {}", step.step_index + 1, step.step_name),
                 step.wall_clock,
@@ -221,6 +224,30 @@ fn build_steps_node(steps: &[SequenceStepPerf]) -> PerfNode {
         NodeRole::Structural,
         children,
     ))
+}
+
+/// Build the `group` node holding a step's per-task timings.
+///
+/// Everything here is `Breakdown` — including the `group` node itself — because
+/// a parallel group's members overlap. Their durations sum past the step's own
+/// wall-clock whenever concurrency did its job, so they are attribution detail
+/// rather than a partition the reconciler can check. The node's own total is the
+/// longest member: the shortest the group could possibly have taken.
+fn build_group_node(tasks: &[SequenceTaskPerf]) -> PerfNode {
+    let longest = tasks
+        .iter()
+        .map(|task| task.duration)
+        .max()
+        .unwrap_or_default();
+    PerfNode::branch(
+        "group",
+        longest,
+        NodeRole::Breakdown,
+        tasks
+            .iter()
+            .map(|task| PerfNode::leaf(task.name.clone(), task.duration, NodeRole::Breakdown))
+            .collect(),
+    )
 }
 
 /// Build the `Breakdown` children of the `composition` node from the enriched

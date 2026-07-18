@@ -54,6 +54,7 @@ use super::model::RuntimeMutation;
 use super::preflight::{PreflightAction, PreflightGraph, PreflightTask};
 use super::reserved;
 use crate::harness::parse_timeout;
+use crate::render::{TaskStreamOutcome, TaskStreamSink};
 
 pub use group::GroupTaskResult;
 pub use shell::{
@@ -93,6 +94,16 @@ pub enum TaskStatus {
     /// an interruption. Distinct from failure: no work is owed a retry and the
     /// sequence exits `130`.
     Interrupted,
+}
+
+impl From<TaskStatus> for TaskStreamOutcome {
+    fn from(status: TaskStatus) -> Self {
+        match status {
+            TaskStatus::Succeeded => Self::Succeeded,
+            TaskStatus::Failed => Self::Failed,
+            TaskStatus::Interrupted => Self::Interrupted,
+        }
+    }
 }
 
 /// One stage failure, with the diagnostic snapshot the `err` global projects.
@@ -267,6 +278,13 @@ pub struct TaskExecution<'a> {
     pub prompt: &'a dyn PromptTaskRunner,
     /// Cooperative interrupt flag, checked at every stage boundary.
     pub interrupt: Option<&'a AtomicBool>,
+    /// Where a group member's attributed header/footer frames are written.
+    ///
+    /// `None` silences the framing entirely — that is what `--silent` selects,
+    /// and what a caller executing tasks outside a terminal wants. Only group
+    /// scheduling writes here: a lone sequence step already has the step
+    /// header/footer for attribution and needs no bar.
+    pub stream: Option<&'a dyn TaskStreamSink>,
 }
 
 impl TaskExecution<'_> {

@@ -265,6 +265,20 @@ pub(crate) struct SequenceStepPerf {
     pub wall_clock: Duration,
     pub compose_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
     pub agent_perf: Option<AgentExecutionPerf>,
+    /// When the step ran a group, one entry per member task in declaration
+    /// order; empty for every other step.
+    ///
+    /// These are `Breakdown` detail, never reconciling: a *parallel* group's
+    /// member durations overlap, so they routinely sum past the step's own
+    /// wall-clock and cannot be treated as a partition of it.
+    pub group_tasks: Vec<SequenceTaskPerf>,
+}
+
+/// One group member task's contribution to the `--perf` tree.
+#[derive(Debug, Clone)]
+pub(crate) struct SequenceTaskPerf {
+    pub name: String,
+    pub duration: Duration,
 }
 
 #[cfg(test)]
