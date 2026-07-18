@@ -1,7 +1,7 @@
 ---
 total_phases: 13
 created: 2026-07-12
-phase: 3
+phase: 4
 yolo: "true"
 source_files_during_phase_1:
   - claudine/lib/src/composition/sequence/tests.rs
@@ -47,6 +47,24 @@ skills_files_updated_during_phase_3: []
 packages_during_phase_3:
   - claudine
   - darkmatter
+source_files_during_phase_4:
+  - claudine/lib/src/composition/sequence/mod.rs
+  - claudine/lib/src/composition/sequence/model.rs
+  - claudine/lib/src/composition/sequence/normalize.rs
+  - claudine/lib/src/composition/sequence/source.rs
+  - claudine/lib/src/composition/sequence/grammar.rs
+  - claudine/lib/src/composition/sequence/data.rs
+  - claudine/lib/src/composition/sequence/expr.rs
+  - claudine/lib/src/composition/sequence/tests.rs
+  - claudine/lib/src/composition/error/mod.rs
+  - claudine/lib/src/composition/mod.rs
+  - claudine/cli/src/commands/sequence.rs
+  - claudine/cli/tests/sequence_cli.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+packages_during_phase_4:
+  - claudine
 packages:
   - biscuit-file
   - darkmatter
@@ -140,17 +158,17 @@ and runtime records without changing execution yet.
 **Goal:** Resolve every supported sequence source into one normalized, immutable
 preflight snapshot with provenance-aware strictness.
 
-- [ ] Parse inline arrays, whole-value typed expression arrays, shell-expansion text, raw textual lists, and file references as distinct source variants so typed arrays bypass `ListFormat` classification.
-- [ ] Implement the Claudine-only `<file-ref> [-> <offset.path>] [::<operator>(<args>)]` parser with span-aware handling of quotes and interpolation segments; reject trailing/ambiguous text and more than one operator with typed syntax errors.
-- [ ] Resolve the untouched reference prefix through `FileReference::resolve_from` using the directory of the document that authored it, including plain, `@`, `!`, `~`, `vault:`, environment-interpolated, spaced, and `@`-containing paths.
-- [ ] Load YAML, JSON, JSON5, JSONL, and NDJSON into a common value model; accept the identical top-level `sequence:` document shape for direct and referenced formal sequence files and reject the retired `list:` shape.
-- [ ] Apply dot-path offsets only to YAML/JSON/JSON5 and return typed missing-path, non-list, and unsupported-JSONL/NDJSON errors with attempted path and observed type.
-- [ ] Implement exactly one `map(from,to)`, `name(from)`, or `template(expr)` operator with item-indexed failures; evaluate templates through Darkmatter with item fields shadowing globals and require non-empty string names.
-- [ ] Apply strict normalization to inline/formal sequence lists and lenient foreign-data normalization to expression, shell, arbitrary data-file, JSONL, and NDJSON sources; coerce number/boolean scalars, generate ordinal names for nameless objects, and reject `null` items.
-- [ ] Apply formal sequence `template` values before generated fields and validate an optional `$schema` against the normalized state portion only, reporting step index/id and failing property path.
-- [ ] Distinguish a static empty list (typed authoring error) from an empty dynamic snapshot (styled `TerminalRenderable` no-op notice and exit `0`).
-- [ ] Add source tests covering every acceptance-criteria format, operator, reference family, quoted argument, newline form, strict/lenient boundary, and empty-list behavior.
-- [ ] **Validation checkpoint:** all sources resolve exactly once to equivalent normalized plans, file references are document-relative, and malformed/unsupported input produces the specified typed error rather than a generic parse string.
+- [x] Parse inline arrays, whole-value typed expression arrays, shell-expansion text, raw textual lists, and file references as distinct source variants so typed arrays bypass `ListFormat` classification.
+- [x] Implement the Claudine-only `<file-ref> [-> <offset.path>] [::<operator>(<args>)]` parser with span-aware handling of quotes and interpolation segments; reject trailing/ambiguous text and more than one operator with typed syntax errors.
+- [x] Resolve the untouched reference prefix through `FileReference::resolve_from` using the directory of the document that authored it, including plain, `@`, `!`, `~`, `vault:`, environment-interpolated, spaced, and `@`-containing paths.
+- [x] Load YAML, JSON, JSON5, JSONL, and NDJSON into a common value model; accept the identical top-level `sequence:` document shape for direct and referenced formal sequence files and reject the retired `list:` shape.
+- [x] Apply dot-path offsets only to YAML/JSON/JSON5 and return typed missing-path, non-list, and unsupported-JSONL/NDJSON errors with attempted path and observed type.
+- [x] Implement exactly one `map(from,to)`, `name(from)`, or `template(expr)` operator with item-indexed failures; evaluate templates through Darkmatter with item fields shadowing globals and require non-empty string names.
+- [x] Apply strict normalization to inline/formal sequence lists and lenient foreign-data normalization to expression, shell, arbitrary data-file, JSONL, and NDJSON sources; coerce number/boolean scalars, generate ordinal names for nameless objects, and reject `null` items.
+- [x] Apply formal sequence `template` values before generated fields and validate an optional `$schema` against the normalized state portion only, reporting step index/id and failing property path.
+- [x] Distinguish a static empty list (typed authoring error) from an empty dynamic snapshot (styled `TerminalRenderable` no-op notice and exit `0`). *(Both derive from `SequenceSource::is_dynamic()`; `normalize_plan` errors `SequenceEmpty` only for `Inline`/`External`, and `run_sequence_inner` renders the `Prose` notice and returns `0` for a zero-step plan.)*
+- [x] Add source tests covering every acceptance-criteria format, operator, reference family, quoted argument, newline form, strict/lenient boundary, and empty-list behavior. *(`sequence/tests.rs` gained `grammar_tests` (21), `source_resolution` (17), `dynamic_sources` (11), `formal_documents` (4); `cli/tests/sequence_cli.rs` gained 5 E2E cases through the real `claudine sequence` invocation path.)*
+- [x] **Validation checkpoint:** all sources resolve exactly once to equivalent normalized plans, file references are document-relative, and malformed/unsupported input produces the specified typed error rather than a generic parse string. *(YAML/JSON/JSON5 offsets proven equivalent by `yaml_json_and_json5_offsets_produce_equivalent_plans`; 12 new typed error variants replace every prose string; the `error_guards` suite forced typed `#[source]` causes — `SequenceExpressionCause`, `SequenceShellCause`, and 4 new `SequenceLoadCause` arms — rather than stringified ones. `just test` 5835 pass / exit 0; `just lint` clean.)*
 
 ## Phase 5 — Recursive task graph and static preflight
 
