@@ -1,7 +1,7 @@
 ---
 total_phases: 13
 created: 2026-07-12
-phase: 1
+phase: 2
 yolo: "true"
 source_files_during_phase_1:
   - claudine/lib/src/composition/sequence/tests.rs
@@ -9,7 +9,20 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1:
   - claudine/features/2026-07-11-sequence-plus/phase-1-baseline.md
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - biscuit-file/lib/src/list_format.rs
+  - biscuit-file/lib/src/lib.rs
+  - darkmatter/lib/src/effects/error.rs
+  - darkmatter/lib/src/effects/verbs.rs
+  - darkmatter/lib/src/effects/catalog.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+  - claudine/cli/src/commands/context/format.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 packages:
+  - biscuit-file
+  - darkmatter
   - claudine
 ---
 
@@ -70,14 +83,14 @@ HIGH-risk sequence resolver.
 **Goal:** Land reusable list parsing and runtime-mutation vocabulary before
 Claudine consumes either surface.
 
-- [ ] **[Parallelizable: biscuit-file track]** Add a public `ListFormat` enum in `biscuit-file` for Markdown ordered, Markdown unordered, line-separated, TSV, CSV, space-separated, and scalar inputs, plus an `&str` classifier using the specified precedence.
-- [ ] **[Parallelizable: biscuit-file track]** Add a delimiter-aware conversion API that turns a classified string into ordered entries, preserves quoted CSV/TSV delimiters and escaped quotes, normalizes CRLF safely, and drops whitespace-only entries without damaging meaningful Unicode or interior whitespace.
-- [ ] **[Parallelizable: biscuit-file track]** Re-export the new API from `biscuit_file`, document its ownership alongside `DataFormat`/`FileType`, and add focused unit tests for every format, ambiguous precedence, quoted fields, CRLF, Unicode, scalar, and whitespace-only input.
-- [ ] **[Parallelizable: Darkmatter track]** Add `set(key, value)` to Darkmatter's side-effect descriptor/catalog and implement a reusable top-level in-memory map mutation primitive that returns the prior value, preserves whole-value types, and performs no filesystem write.
-- [ ] **[Parallelizable: Darkmatter track]** Extend side-effect errors/tests for invalid/non-top-level keys while leaving Claudine-specific reserved-key policy to Claudine; ensure positional and key/value lifecycle grammar derives the new signature from the catalog.
-- [ ] **[Parallelizable: Darkmatter track]** Verify `last(list)` remains present in the expression catalog and evaluator, including empty-list `null` and typed array results; add only missing regression coverage.
-- [ ] Run `just test` and `just lint` in both `biscuit-file/` and `darkmatter/`; run formatting in check-only mode if needed and do not run write-mode `cargo fmt`.
-- [ ] **Validation checkpoint:** both shared packages compile independently, their focused tests pass, `claudine` can import the new public APIs, and no Claudine behavior has changed yet.
+- [x] **[Parallelizable: biscuit-file track]** Add a public `ListFormat` enum in `biscuit-file` for Markdown ordered, Markdown unordered, line-separated, TSV, CSV, space-separated, and scalar inputs, plus an `&str` classifier using the specified precedence. *(`biscuit-file/lib/src/list_format.rs`; `ListFormat::classify` follows the spec precedence markers→lines→tab→comma→space→scalar, delimiter checks are quote-aware.)*
+- [x] **[Parallelizable: biscuit-file track]** Add a delimiter-aware conversion API that turns a classified string into ordered entries, preserves quoted CSV/TSV delimiters and escaped quotes, normalizes CRLF safely, and drops whitespace-only entries without damaging meaningful Unicode or interior whitespace. *(`ListFormat::split` + `classify_list`; quote-aware splitter unwraps quotes, `""`→`"`, trims unquoted fields, `normalize_newlines` handles `\r\n`/`\r`.)*
+- [x] **[Parallelizable: biscuit-file track]** Re-export the new API from `biscuit_file`, document its ownership alongside `DataFormat`/`FileType`, and add focused unit tests for every format, ambiguous precedence, quoted fields, CRLF, Unicode, scalar, and whitespace-only input. *(Re-exported `ListFormat`/`classify_list` in `lib.rs`; module doc cites `DataFormat`/`FileType` as the sibling axes; 22 unit tests + 3 doctests.)*
+- [x] **[Parallelizable: Darkmatter track]** Add `set(key, value)` to Darkmatter's side-effect descriptor/catalog and implement a reusable top-level in-memory map mutation primitive that returns the prior value, preserves whole-value types, and performs no filesystem write. *(`EffectEngine::set(&mut FrontmatterMap, key, value)` in `verbs.rs`; descriptor + `EffectSafety::InMemoryState` in `catalog.rs`; verb-harness parity entry added.)*
+- [x] **[Parallelizable: Darkmatter track]** Extend side-effect errors/tests for invalid/non-top-level keys while leaving Claudine-specific reserved-key policy to Claudine; ensure positional and key/value lifecycle grammar derives the new signature from the catalog. *(`EffectError::InvalidKey` rejects empty/dotted keys; 4 new `set` tests; Claudine's `side_effect_signature` auto-derives `set(key, value)` from `EFFECT_DESCRIPTORS` — no Claudine grammar change needed.)*
+- [x] **[Parallelizable: Darkmatter track]** Verify `last(list)` remains present in the expression catalog and evaluator, including empty-list `null` and typed array results; add only missing regression coverage. *(`last` present in `expression-functions.yaml` and the `last_fn` binding; existing empty→null/null/type-mismatch tests retained; added `last_preserves_typed_element` for the `outputs` `(string|string[])[]` shape.)*
+- [x] Run `just test` and `just lint` in both `biscuit-file/` and `darkmatter/`; run formatting in check-only mode if needed and do not run write-mode `cargo fmt`. *(biscuit-file: 61+lib tests, lint clean. darkmatter: 5617+555+566 tests, lint clean. No `cargo fmt` run.)*
+- [x] **Validation checkpoint:** both shared packages compile independently, their focused tests pass, `claudine` can import the new public APIs, and no Claudine behavior has changed yet. *(Both packages green independently; `claudine-cli` compiles against the new APIs; only additive change to Claudine was handling the new `EffectSafety::InMemoryState` in the docs-only `context --side-effects` report. 81 L1 context tests pass. The 3 `*_at_140_fills_cap` L2 tmux tests fail identically — including the untouched default report — a pre-existing host pane-padding artifact, not a regression; L2 is out of this phase's gate.)*
 
 ## Phase 3 — Sequence Plus domain model and reserved-state contract
 
