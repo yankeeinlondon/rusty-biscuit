@@ -87,15 +87,13 @@ do not belong here.
 
 - Parallel groups must have disjoint paths. If one group introduces a module,
   dependency, or symbol consumed by another group, commit the producer first.
-- `git commit --only -- <pathspec>` resets the index for paths **not** in the
-  pathspec, un-staging them. With disjoint pathspecs across N parallel agents,
-  each commit naturally narrows the index and the final `git status` is clean —
-  this is by design, not a bug. **Risk:** if any staged path falls through the
-  cracks (assigned to no group, or its group's `--only` ran before a sibling
-  read it), `--only` drops it from the index without committing. After all
-  groups finish, scan `git status --short` for staged or modified paths and
-  reconcile against the original staged set; restore with
-  `git restore --staged -- <path>` before re-grouping.
+- `git commit --only -- <pathspec>` commits only the named paths while preserving
+  unrelated staged entries. Parallel agents still need disjoint pathspecs and
+  lock retries, but successful sibling commits do not naturally narrow the
+  remaining index.
+- After all groups finish, reconcile `git status --short` against the original
+  staged set. Any staged path left behind belongs to a failed or unassigned
+  group and must be reported before taking further action.
 - Git lock failures are transient contention. Retry the identical commit up to
 
 - Run commands from the inherited worktree root. Do not change to a guessed
