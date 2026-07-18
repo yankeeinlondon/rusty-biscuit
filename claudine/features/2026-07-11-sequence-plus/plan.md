@@ -1,7 +1,7 @@
 ---
 total_phases: 13
 created: 2026-07-12
-phase: 10
+phase: 11
 yolo: "true"
 source_files_during_phase_1:
   - claudine/lib/src/composition/sequence/tests.rs
@@ -219,6 +219,31 @@ docs_created_during_phase_10: []
 skills_files_updated_during_phase_10: []
 packages_during_phase_10:
   - claudine
+source_files_during_phase_11:
+  - claudine/lib/src/render/task_stream.rs
+  - claudine/lib/src/render/task_stream/tests.rs
+  - claudine/lib/src/render/mod.rs
+  - claudine/lib/src/composition/sequence/task/mod.rs
+  - claudine/lib/src/composition/sequence/task/group.rs
+  - claudine/lib/src/composition/sequence/task/tests.rs
+  - claudine/cli/src/commands/wrap/stream_io.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/mod.rs
+  - claudine/cli/src/commands/wrap/sequence/mod.rs
+  - claudine/cli/src/commands/wrap/sequence/task_frames.rs
+  - claudine/cli/src/commands/wrap/sequence/task_run.rs
+  - claudine/cli/src/commands/wrap/sequence/iterate.rs
+  - claudine/cli/src/perf/mod.rs
+  - claudine/cli/src/perf/tree.rs
+  - claudine/cli/src/perf/tests/perf_tree.rs
+  - claudine/cli/src/perf/tests/report.rs
+  - claudine/cli/tests/sequence_groups.rs
+  - claudine/docs/providers/dispatch-inventory.json
+docs_updated_during_phase_11: []
+docs_created_during_phase_11: []
+skills_files_updated_during_phase_11:
+  - .claude/skills/claudine/SKILL.md
+packages_during_phase_11:
+  - claudine
 packages:
   - biscuit-file
   - darkmatter
@@ -418,14 +443,14 @@ results independent of completion order.
 **Goal:** Make serial and parallel execution attributable and readable without
 breaking stdout/stderr contracts.
 
-- [ ] Add a `TerminalRenderable` task-stream component built from `biscuit-terminal` primitives (prefer `BlockQuote` if its streaming/wrapping contract holds) with header, stable textual label, vertical bar, footer outcome, and duration.
-- [ ] Use a fixed cycling palette for parallel tasks and an invisible bar with identical geometry for serial work so layout does not shift between modes.
-- [ ] Route all sibling rendering through one synchronized sink that writes complete rendered lines/frames and cannot tear ANSI sequences; preserve arrival-order display without using display order for result ordering.
-- [ ] Provide no-color and limited-glyph degradation where stable textual labels carry attribution; keep task/provider data on stdout and headers, footers, status, and warnings on stderr.
-- [ ] Extend `SequencePerfAccumulator`, sequence summaries, and per-session logging with group/task hierarchy and timings while preserving per-provider JSONL session isolation.
-- [ ] Add renderer tests for narrow widths, wrapping, Unicode, no color, palette cycling, invisible-bar alignment, stdout/stderr split, concurrent writes, and absence of torn escape sequences.
-- [ ] Add L2 real-terminal coverage only for behavior a captured/virtual terminal cannot validate; gate OS-specific signal assertions while sharing outcome assertions.
-- [ ] **Validation checkpoint:** high-contention rendering remains parseable and attributable, output capture remains undecorated, perf totals reconcile with child timings, and serial output geometry matches parallel output geometry.
+- [x] Add a `TerminalRenderable` task-stream component built from `biscuit-terminal` primitives (prefer `BlockQuote` if its streaming/wrapping contract holds) with header, stable textual label, vertical bar, footer outcome, and duration. *(`lib/src/render/task_stream.rs`: `TaskStreamFrame` is the `TerminalRenderable` unit — a `BlockQuote` with the bar as its border; `TaskStream` is the stateful driver returning complete rendered lines from `open`/`append`/`close`. `BlockQuote` has no streaming API, so the streaming contract is met by framing per chunk rather than by an incremental quote.)*
+- [x] Use a fixed cycling palette for parallel tasks and an invisible bar with identical geometry for serial work so layout does not shift between modes. *(`TASK_PALETTE` — 6 fixed Tailwind shades, `TaskBar::for_index` cycles; `TaskBar::Invisible` renders two blank columns, exactly the visible width of `│ `. `BlockQuote::default` ships a gray border color that the custom-prefix path paints unconditionally, so the invisible bar clears `style.border` — otherwise a `NO_COLOR` terminal got a truecolor escape wrapped around two spaces.)*
+- [x] Route all sibling rendering through one synchronized sink that writes complete rendered lines/frames and cannot tear ANSI sequences; preserve arrival-order display without using display order for result ordering. *(`TaskStreamSink` is the library seam; `SequenceTaskSink` (`cli/.../sequence/task_frames.rs`) is the wrapper's implementation. `StreamOutput::new()` was per-`LiveSemanticSink`, which cannot be right about a process-global `last_stdout_newline` once siblings share the terminal — added `StreamOutput::shared()` and moved both production construction sites onto it. `emit_stderr_frames` holds the coordinator across the whole frame group, so a sibling cannot land a line inside another's frames. Display stays arrival-ordered; `fold_parallel_results` still walks declaration order for every committed result.)*
+- [x] Provide no-color and limited-glyph degradation where stable textual labels carry attribution; keep task/provider data on stdout and headers, footers, status, and warnings on stderr. *(Header and footer both name the task, so `ColorDepth::None` loses the palette and keeps the meaning; `supports_unicode: false` swaps `▶` for `>`. Frames go to stderr only — provider/task data stays on stdout undecorated, which is also what keeps the `outputs` capture boundary clean.)*
+- [x] Extend `SequencePerfAccumulator`, sequence summaries, and per-session logging with group/task hierarchy and timings while preserving per-provider JSONL session isolation. *(`SequenceStepPerf::group_tasks` feeds a `group` node under each step in the `--perf` tree, `Breakdown` at every level and totalled by the longest member — concurrent members overlap, so Σ(members) routinely exceeds the step wall-clock and cannot be reconciled as a partition of it. Sequence summaries already carried the per-task `UnorderedList` from phase 9. Per-session JSONL is unchanged by design: sequence steps/groups/tasks have never been dispatch events, and each member task's provider run still writes its own session records — asserted rather than assumed by `parallel_group_members_keep_separate_provider_sessions`.)*
+- [x] Add renderer tests for narrow widths, wrapping, Unicode, no color, palette cycling, invisible-bar alignment, stdout/stderr split, concurrent writes, and absence of torn escape sequences. *(17 L1 cases in `render/task_stream/tests.rs` (`geometry` / `palette` / `degradation` / `streaming` / `sink`), 6 scheduler-side cases in `sequence/task/tests.rs::group_framing`, and 5 E2E cases in `cli/tests/sequence_groups.rs`. Column assertions count characters, not bytes — `│` is one column and three UTF-8 bytes, which is exactly the bug a byte-index assertion would have hidden.)*
+- [x] Add L2 real-terminal coverage only for behavior a captured/virtual terminal cannot validate; gate OS-specific signal assertions while sharing outcome assertions. *(None added — deliberately. The rendering contract here is a pure function of `Terminal` capability flags, and the component takes those as data, so a constructed `Terminal` exercises every branch (`ColorDepth::None`, `supports_unicode: false`, any width) more precisely than a captured pane can. Per `feedback_wezterm_capture_sgr_collapsing`, a real-terminal capture collapses SGR and would weaken the no-torn-escape assertion rather than strengthen it. No new OS-specific signal behavior landed in this phase — Ctrl+C fan-out is phase 10's, already gated there.)*
+- [x] **Validation checkpoint:** high-contention rendering remains parseable and attributable, output capture remains undecorated, perf totals reconcile with child timings, and serial output geometry matches parallel output geometry. *(`concurrent_siblings_never_split_one_frame_group` drives six members under inverted delays and asserts no write mixed two tasks; `a_silent_group_run_emits_no_task_frames` and the retained phase-10 `outputs` assertions pin that framing never enters the capture. `perf_tree_nests_group_task_timings_under_their_step` asserts both `tree_reconciles` and `assert_no_child_exceeds_parent` — the `group` node totals the longest member precisely because Σ(members) overruns the step once concurrency works. Geometry equality is pinned at both levels: `a_serial_frame_and_a_parallel_frame_share_one_left_edge` (L1, columns not bytes) and `serial_and_parallel_group_frames_share_one_left_edge` (E2E, real `claudine sequence`). `just test` — 21 + 3760 + 47 + 2062 + 152 pass, exit 0; `just lint` clean.)*
 
 ## Phase 12 — Full regression, platform, and documentation closure
 
