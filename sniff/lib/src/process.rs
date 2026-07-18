@@ -181,6 +181,7 @@ mod process_tree {
     use std::process::{Child, Command};
 
     use std::os::unix::process::CommandExt;
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 
     pub(super) struct ProcessTree {
         process_group: libc::pid_t,
@@ -199,6 +200,13 @@ mod process_tree {
         }
 
         pub(super) fn terminate(&self) -> std::io::Result<()> {
+            let descendants = descendant_pids(self.process_group);
+            for descendant in descendants.into_iter().rev() {
+                // SAFETY: each PID belonged to the supervised child's live
+                // descendant tree in the immediately preceding snapshot.
+                let _ = unsafe { libc::kill(descendant, libc::SIGKILL) };
+            }
+
             // SAFETY: `configure` creates a fresh process group whose ID is the
             // direct child's PID. A negative PID addresses that group only.
             let result = unsafe { libc::kill(-self.process_group, libc::SIGKILL) };
@@ -213,6 +221,42 @@ mod process_tree {
                 Err(error)
             }
         }
+    }
+
+    fn descendant_pids(root: libc::pid_t) -> Vec<libc::pid_t> {
+        let Ok(root) = u32::try_from(root) else {
+            return Vec::new();
+        };
+        let root = sysinfo::Pid::from_u32(root);
+        let mut system = System::new();
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::All,
+            true,
+            ProcessRefreshKind::nothing(),
+        );
+
+        let mut descendants = Vec::new();
+        loop {
+            let previous_len = descendants.len();
+            for (&pid, process) in system.processes() {
+                let Some(parent) = process.parent() else {
+                    continue;
+                };
+                if (parent == root || descendants.contains(&parent))
+                    && !descendants.contains(&pid)
+                {
+                    descendants.push(pid);
+                }
+            }
+            if descendants.len() == previous_len {
+                break;
+            }
+        }
+
+        descendants
+            .into_iter()
+            .filter_map(|pid| libc::pid_t::try_from(pid.as_u32()).ok())
+            .collect()
     }
 }
 
@@ -428,9 +472,9 @@ pub(crate) fn run_command_with_timeout(
         }
     };
 
-    // Unix pipe readers use bounded readiness polling because a descendant can
-    // leave the process group while retaining an inherited write end. Windows
-    // Job Objects provide real tree containment, so EOF remains authoritative.
+    // Unix pipe readers use bounded readiness polling because descendant
+    // discovery and signaling cannot make pipe EOF atomic. Windows Job Objects
+    // provide kernel-enforced containment, so EOF remains authoritative.
     let drain_control = pipe_reader::DrainControl::new();
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
@@ -480,8 +524,8 @@ pub(crate) fn run_command_with_timeout(
     };
 
     // The direct child may exit while a descendant still owns an inherited pipe
-    // handle. Terminate the process group or Job Object before joining readers;
-    // cancellable Unix readers cover descendants that escaped the group.
+    // handle. Terminate the observed descendants and process group, or the Job
+    // Object, before joining readers.
     let _ = process_tree.terminate();
     drain_control.finish();
 
@@ -535,6 +579,12 @@ mod tests {
     #[cfg(unix)]
     const DETACHED_PIPE_HOLDING_DESCENDANT: &str =
         "process::tests::detached_pipe_holding_descendant";
+    #[cfg(unix)]
+    const QUIET_DETACHED_CHILD: &str = "process::tests::child_spawns_quiet_detached_descendant";
+    #[cfg(unix)]
+    const QUIET_DETACHED_DESCENDANT: &str = "process::tests::quiet_detached_descendant";
+    #[cfg(unix)]
+    const DETACHED_PID_FILE: &str = "SNIFF_DETACHED_PID_FILE";
     const SLEEPING_CHILD: &str = "process::tests::child_sleeps";
 
     fn test_child_args(name: &str) -> Vec<std::ffi::OsString> {
@@ -630,6 +680,33 @@ mod tests {
                 return;
             }
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    fn child_spawns_quiet_detached_descendant() {
+        let executable = std::env::current_exe().expect("current test executable should resolve");
+        let args = test_child_args(QUIET_DETACHED_DESCENDANT);
+        std::process::Command::new(executable)
+            .args(args)
+            .spawn()
+            .expect("quiet detached descendant should spawn");
+        std::thread::sleep(Duration::from_secs(30));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    fn quiet_detached_descendant() {
+        // SAFETY: this fixture is a fresh child and is not a process-group
+        // leader, so it can establish an isolated session for the regression.
+        assert_ne!(unsafe { libc::setsid() }, -1, "setsid should succeed");
+        let pid_file = std::env::var_os(DETACHED_PID_FILE)
+            .expect("the parent fixture should provide a PID file");
+        std::fs::write(pid_file, std::process::id().to_string())
+            .expect("detached descendant PID should be reported");
+        std::thread::sleep(Duration::from_secs(30));
     }
 
     /// A child that outstrips its pipe buffer must still be captured whole.
@@ -749,6 +826,34 @@ mod tests {
         assert_eq!(
             std::io::Error::last_os_error().raw_os_error(),
             Some(libc::ECHILD)
+        );
+    }
+
+    /// Timeout cleanup must terminate a quiet descendant even after `setsid`
+    /// moves it outside the direct child's process group.
+    #[cfg(unix)]
+    #[test]
+    fn a_quiet_session_detached_descendant_is_terminated() {
+        let executable = std::env::current_exe().expect("current test executable should resolve");
+        let args = test_child_args(QUIET_DETACHED_CHILD);
+        let pid_file = tempfile::NamedTempFile::new().expect("temporary PID file should exist");
+        let mut command = Command::new(executable);
+        command.args(args).env(DETACHED_PID_FILE, pid_file.path());
+
+        let result = run_command_with_timeout(&mut command, Duration::from_secs(1));
+
+        assert!(matches!(result, Err(ProcessError::Timeout)));
+        let pid = std::fs::read_to_string(pid_file.path())
+            .expect("detached descendant should report its PID")
+            .parse::<libc::pid_t>()
+            .expect("reported descendant PID should be numeric");
+        // SAFETY: signal zero performs existence and permission checks without
+        // delivering a signal to the reported process.
+        let exists = unsafe { libc::kill(pid, 0) } == 0;
+        assert!(!exists, "quiet detached descendant {pid} survived cleanup");
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ESRCH)
         );
     }
 
