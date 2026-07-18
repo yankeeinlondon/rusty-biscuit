@@ -123,6 +123,18 @@ Parameterised by remote-tracking branch count (1, 5, 10, 25).
 | `programs_detect_all_8_categories` | `ProgramsInfo::detect()` — full 8-category fan-out using Rayon + shared `ExecutableIndex`. End-to-end parallelism test. |
 | `services_detect_init_system` | `detect_services()` — init-system detection + service listing. Platform-dependent cost (launchctl, systemctl, etc.). |
 
+## workloads_service_listing
+
+Requires `--features bench-internals`. Fixture strings and per-iteration runner
+state are prepared outside Criterion's timed section. The measured call uses the
+same systemd listing parser, running-service selection, 128-unit chunk builder,
+runner dispatch, show-block parser, and PID projection as production.
+
+| Benchmark | What it measures |
+|-----------|------------------|
+| `500` | Deterministic listing and enrichment of 500 running services. One listing plus four enrichment chunks. Throughput: 500 elements. |
+| `2000` | Deterministic listing and enrichment of 2,000 running services. One listing plus 16 enrichment chunks. Throughput: 2,000 elements. |
+
 ## executable_index
 
 | Benchmark | What it measures |
@@ -188,14 +200,8 @@ the selected benchmark and outside its timed `b.iter` loop.
 | Branch-heavy/divergent and many-tip containment | `workloads_git_branches/{branch_heavy_divergent_32_tips,deep_containment_100_remote_tips}` | `focused_ref_consumers_share_one_observation` pins one ref snapshot; containment shares the `git.commit_visits` bound used by the path-history and ref-walk tests. |
 | Sparse path history | `workloads_git_path_history/2000_commits_sparse_prefix_every_200` | `commit_visits_are_bounded_by_the_scan_limit` pins visits at the explicit scan bound. |
 | Remote provider request counts | `workloads_remote_report/github_provider_request_count_fixture` (requires `remote`) | `github_fetch_report_resolves_metadata_and_tree_once` pins one metadata and one root-tree request. |
+| Large synthetic service listing | `workloads_service_listing/{500,2000}` (requires `bench-internals`) | `large_service_workloads_preserve_cardinality_and_chunk_bounds` pins output cardinality and `1 + ceil(N / 128)` runner calls; `pid_enrichment_costs_one_subprocess_per_chunk_not_per_service` maps the same bound to `process.spawns` through the real bounded subprocess runner. |
 | Case-sensitive/case-insensitive, warm/cold-ish | `workloads_filesystem_case/{warm_case_variant_tree,coldish_fresh_case_variant_tree}` | The fixture uses native `Path` components and therefore exercises the host filesystem's actual case behavior without emulation. |
-
-The remaining service-listing row cannot currently be represented by a
-deterministic Criterion fixture: the public service API intentionally observes
-the host init system, while synthetic backend parsers and command injection are
-crate-private. Production Level-1 tests already pin chunk size, partial failure,
-timeouts, and reaping. Exposing a production injection API solely for a timing
-fixture would broaden the public contract without improving regression evidence.
 
 ---
 

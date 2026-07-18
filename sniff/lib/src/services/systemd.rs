@@ -6,26 +6,32 @@ use super::{Service, ENRICHMENT_CHUNK};
 use crate::process::{self, timeouts};
 
 pub(crate) fn list_systemd_services() -> Vec<Service> {
-    let output = match process::run_with_timeout(
-        "systemctl",
-        &[
-            "list-units",
-            "--type=service",
-            "--all",
-            "--no-pager",
-            "--plain",
-        ],
-        timeouts::SERVICE_COMMAND,
-    ) {
-        Ok(o) if o.status.success() => o,
-        Ok(_) => return Vec::new(),
-        Err(e) => {
-            warn!(error = %e, cmd = "systemctl", "service detection subprocess failed");
-            return Vec::new();
-        }
-    };
+    list_systemd_services_with(&mut run_systemctl)
+}
 
-    let stdout = output.stdout_lossy();
+fn run_systemctl(args: &[&str]) -> Option<String> {
+    match process::run_with_timeout("systemctl", args, timeouts::SERVICE_COMMAND) {
+        Ok(output) if output.status.success() => Some(output.stdout_lossy().into_owned()),
+        Ok(_) => None,
+        Err(error) => {
+            warn!(error = %error, cmd = "systemctl", "service detection subprocess failed");
+            None
+        }
+    }
+}
+
+pub(super) fn list_systemd_services_with(
+    runner: &mut impl FnMut(&[&str]) -> Option<String>,
+) -> Vec<Service> {
+    let Some(stdout) = runner(&[
+        "list-units",
+        "--type=service",
+        "--all",
+        "--no-pager",
+        "--plain",
+    ]) else {
+        return Vec::new();
+    };
     let mut services = Vec::new();
 
     for line in stdout.lines() {
@@ -49,11 +55,12 @@ pub(crate) fn list_systemd_services() -> Vec<Service> {
         }
     }
 
-    let pids = collect_systemd_pids(
+    let pids = collect_systemd_pids_with(
         services
             .iter()
             .filter(|s| s.running)
             .map(|s| s.name.as_str()),
+        runner,
     );
     for service in &mut services {
         service.pid = pids.get(&service.name).copied();
@@ -75,7 +82,10 @@ pub(crate) fn list_systemd_services() -> Vec<Service> {
 /// nonzero `MainPID`. A chunk that fails or times out contributes nothing, which
 /// leaves its services at `pid: None` — the same degradation a failed probe
 /// produced before, and the reason a timeout cannot discard a healthy chunk.
-fn collect_systemd_pids<'a>(names: impl Iterator<Item = &'a str>) -> HashMap<String, u32> {
+fn collect_systemd_pids_with<'a>(
+    names: impl Iterator<Item = &'a str>,
+    runner: &mut impl FnMut(&[&str]) -> Option<String>,
+) -> HashMap<String, u32> {
     let units: Vec<String> = names.map(|n| format!("{n}.service")).collect();
     let mut pids = HashMap::new();
 
@@ -83,16 +93,11 @@ fn collect_systemd_pids<'a>(names: impl Iterator<Item = &'a str>) -> HashMap<Str
         let mut args: Vec<&str> = vec!["show", "--property=Id", "--property=MainPID"];
         args.extend(chunk.iter().map(String::as_str));
 
-        let output = match process::run_with_timeout("systemctl", &args, timeouts::SERVICE_COMMAND) {
-            Ok(o) if o.status.success() => o,
-            Ok(_) => continue,
-            Err(e) => {
-                warn!(error = %e, cmd = "systemctl show", "systemd PID enrichment failed for a chunk");
-                continue;
-            }
+        let Some(stdout) = runner(&args) else {
+            continue;
         };
 
-        parse_systemd_show_blocks(&output.stdout_lossy(), &mut pids);
+        parse_systemd_show_blocks(&stdout, &mut pids);
     }
 
     pids
@@ -219,8 +224,16 @@ exit 1
     #[cfg(unix)]
     #[test]
     fn pid_enrichment_costs_one_subprocess_per_chunk_not_per_service() {
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        use crate::performance::{PerformanceCollector, counters, with_current_collector};
+
         let units = 300;
-        let (services, calls) = run_against_shim(units);
+        let collector = PerformanceCollector::new_shared();
+        let (services, calls) = with_current_collector(Some(Arc::clone(&collector)), || {
+            run_against_shim(units)
+        });
 
         assert_eq!(services.len(), units);
         assert!(services.iter().all(|s| s.pid == Some(100)));
@@ -233,6 +246,11 @@ exit 1
         );
         // One listing plus the enrichment chunks; nothing else.
         assert_eq!(calls.len(), 1 + expected);
+        let counters = collector.snapshot(Duration::ZERO).counters;
+        assert_eq!(
+            counters.get(counters::PROC_SPAWNS).copied().unwrap_or(0),
+            (1 + expected) as u64
+        );
     }
 
     /// Chunking exists for command-line length only, so a service count under the

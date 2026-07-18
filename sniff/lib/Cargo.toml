@@ -53,6 +53,7 @@ which = { version = "8.0.0", default-features = false, features = ["real-sys"] }
 
 [features]
 default = []
+bench-internals = []
 metrics = ["dep:metrics"]
 network = ["dep:reqwest", "dep:tokio", "dep:futures", "reqwest/rustls"]
 remote = ["network"]

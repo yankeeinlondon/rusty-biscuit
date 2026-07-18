@@ -39,6 +39,10 @@ mod runit;
 mod systemd;
 mod windows_scm;
 
+#[cfg(any(test, feature = "bench-internals"))]
+#[doc(hidden)]
+pub mod benchmark;
+
 /// Units per enrichment subprocess when a backend queries many services at once.
 ///
 /// This bounds command-line length, nothing else — a backend must not treat it as

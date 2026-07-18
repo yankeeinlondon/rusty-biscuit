@@ -100,7 +100,7 @@ jobs:
           echo "Running Criterion filter: ${pattern}"
           cargo bench \
             -p sniff \
-            --features network \
+            --features network,bench-internals \
             --bench perf \
             -- \
             --save-baseline ci-linux \

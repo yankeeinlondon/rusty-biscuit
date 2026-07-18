@@ -14,6 +14,8 @@ use sniff::filesystem::{
     detect_filesystem_with_request, detect_git_with_request, detect_repo, detect_repo_structure,
 };
 use sniff::request::{FilesystemRequest, GitRequest};
+#[cfg(feature = "bench-internals")]
+use sniff::services::benchmark::{SyntheticSystemdListing, run_systemd_listing};
 #[cfg(feature = "remote")]
 use sniff::remote::RemoteRepoProvider;
 
@@ -30,8 +32,31 @@ pub fn register(c: &mut Criterion) {
     register_inventory_and_assembly(c);
     register_git_shapes(c);
     register_case_modes(c);
+    #[cfg(feature = "bench-internals")]
+    register_service_shapes(c);
     #[cfg(feature = "remote")]
     register_remote_report(c);
+}
+
+#[cfg(feature = "bench-internals")]
+fn register_service_shapes(c: &mut Criterion) {
+    let mut group = util::configure_slow_group(c, "workloads_service_listing");
+    for service_count in [500usize, 2_000] {
+        let fixture = SyntheticSystemdListing::new(service_count);
+        group.throughput(Throughput::Elements(service_count as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(service_count),
+            &fixture,
+            |b, fixture| {
+                b.iter_batched(
+                    || fixture.iteration(),
+                    |mut iteration| black_box(run_systemd_listing(&mut iteration)),
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
+    group.finish();
 }
 
 #[cfg(feature = "remote")]
