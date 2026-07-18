@@ -18,10 +18,10 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 1372,
-    "provider_refs": 1474,
+    "sites": 1373,
+    "provider_refs": 1475,
     "by_form": {
-      "direct-ref": 1325,
+      "direct-ref": 1326,
       "eq-comparison": 18,
       "match-provider": 5,
       "matches-macro": 12,
@@ -30,7 +30,7 @@
     },
     "by_dispatch_class": {
       "conditional": 47,
-      "reference": 1325
+      "reference": 1326
     }
   },
   "sites": [
@@ -309,7 +309,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/composition/pipeline.rs",
-      "line": 206,
+      "line": 207,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -319,7 +319,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/composition/pipeline.rs",
-      "line": 345,
+      "line": 346,
       "form": "matches-macro",
       "dispatch_class": "conditional",
       "providers": [
@@ -1665,7 +1665,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/session_key/tests.rs",
-      "line": 12,
+      "line": 13,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1675,7 +1675,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/session_key/tests.rs",
-      "line": 43,
+      "line": 49,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1685,7 +1685,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/session_key/tests.rs",
-      "line": 148,
+      "line": 150,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1695,11 +1695,21 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/session_key/tests.rs",
-      "line": 149,
+      "line": 151,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
         "Codex"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/harness_orch/session_key/tests.rs",
+      "line": 286,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
       ],
       "exempt_candidate": true
     },
