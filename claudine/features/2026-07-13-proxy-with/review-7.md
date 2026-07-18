@@ -8,6 +8,7 @@ implemented: true
 description: A **feature** review of `2026-07-13-proxy-with/spec.md`
 feature: 2026-07-13-proxy-with/review-7.md
 previous: 2026-07-13-proxy-with/review-6.md
+next: 2026-07-13-proxy-with/review-8.md
 ---
 
 # Review 7: Proxy With
@@ -165,4 +166,3 @@ exceptions.
   HEAD (`just test`, `just test-l2`, and `just lint`). Those results show the
   existing suite is green; they do not close the missing/wrong-level assertions
   above.
-

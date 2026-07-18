@@ -4,7 +4,7 @@ status: draft
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-07-16
-review_iterations: 7
+review_iterations: 8
 depends_on:
     - ../_completed/2026-05-12-lifecycle/spec.md
     - ../_completed/2026-06-26-positional-and-key-value/spec.md
@@ -549,6 +549,36 @@ canonical refresh changes that key, resume fails with a typed diagnostic that
 names the incompatible facets and recommends retry; it never mixes a live
 session with a newly prepared launch plan.
 
+Two of those facets are **immutable invocation inputs**: they belong to the key
+for completeness, but no same-document resume can move them, so they are proven
+where they are computed rather than by an end-to-end refusal.
+
+- **Workspace/child CWD.** The child CWD is resolved once, from the process's
+  own launch directory (its enclosing git root, else the directory itself),
+  before any document is read. The complete set of document surfaces over launch
+  identity is `agent:`, `model:`, and `interactive:`; none of them names a
+  directory, and the resolver deliberately ignores a document's own repository
+  in favour of the launch repository, precisely so that composing or proxying to
+  a document in a sibling clone cannot move the provider into that clone. `--repo`
+  moves the metadata repo root, not the child CWD, and is invocation intent in
+  any case.
+- **System-prompt content.** Resolution — discovering the file, composing its
+  body — is provider-independent and runs once, at invocation; the composed text
+  is captured and then delivered either inline on argv or through a
+  Claudine-owned temp file written from that captured text. A document has no
+  `system_prompt:` surface, and a lifecycle stack that rewrites the discovered
+  `system-prompt.md` between attempts changes nothing the child receives, so a
+  resume would be refused for a difference that does not exist.
+
+System-prompt **delivery** is not immutable and is not projection-only: it is
+provider-shaped, so a rebuild that lands on a different provider re-applies it in
+that provider's form. Delivery therefore moves only when the provider facet
+moves, and the provider facet already refuses end-to-end; it needs no separate
+refusal of its own.
+
+Every other facet in the key is document-reachable and must drive a real
+refusal, not merely a projection.
+
 Retry and resume budgets are scoped to the active document iteration. A proxy
 target receives fresh document-attempt budgets, while the invocation-wide
 proxy hop limit and cycle chain continue. Retry, resume, proxy, and loop counts
@@ -914,7 +944,11 @@ when the universal lifecycle contract supports other runtime events.
 15. Resume canonically refreshes mutable document/lifecycle state, retains only
     a live session whose complete compatibility key still matches, and
     deliberately uses its follow-up message; incompatibility identifies changed
-    facets and recommends retry.
+    facets and recommends retry. Every document-reachable facet drives that
+    refusal end-to-end; the key's two immutable invocation inputs
+    (workspace/child CWD, system-prompt content) are proven at the layer that
+    computes them, including that the one mutation a document could attempt —
+    rewriting the discovered `system-prompt.md` — moves nothing.
 16. Retry/resume budgets persist across provider attempts within the active
     document iteration; proxy or the next loop iteration resets them while
     preserving invocation-wide hop/cycle accounting.
