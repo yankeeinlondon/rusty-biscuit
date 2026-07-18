@@ -1182,6 +1182,146 @@ pub enum CompositionError {
         executable: String,
     },
 
+    /// The `<file-ref> [-> offset] [::op(args)]` suffix could not be parsed.
+    #[error("invalid sequence source `{authored}`: {problem}")]
+    SequenceSourceSyntax {
+        /// The full authored source string.
+        authored: String,
+        /// What specifically was wrong with it.
+        problem: String,
+    },
+
+    /// An operator name is not one of `map`, `name`, or `template`.
+    #[error("unknown sequence source operator `{0}`; expected `map`, `name`, or `template`")]
+    SequenceUnknownOperator(String),
+
+    /// An operator was given the wrong number of arguments.
+    #[error("sequence source operator `{operator}` takes {expected} argument(s), got {found}")]
+    SequenceOperatorArity {
+        /// The operator name.
+        operator: String,
+        /// How many arguments the operator requires.
+        expected: usize,
+        /// How many were supplied.
+        found: usize,
+    },
+
+    /// An offset path segment does not exist in the source document.
+    #[error(
+        "sequence offset `{path}` does not exist: `{failed_at}` is not present \
+         (found {found} at that point)"
+    )]
+    SequenceOffsetMissing {
+        /// The full dot-notation path attempted.
+        path: String,
+        /// The path prefix at which traversal failed.
+        failed_at: String,
+        /// The JSON type of the value the failing segment was looked up on.
+        found: String,
+    },
+
+    /// An offset path resolved to something that is not a list.
+    #[error("sequence offset `{path}` resolved to {found}, expected a list")]
+    SequenceOffsetNotAList {
+        /// The dot-notation path (or `<root>` for the document root).
+        path: String,
+        /// The JSON type actually found.
+        found: String,
+    },
+
+    /// A `->` offset was used against a line-delimited file.
+    ///
+    /// JSONL/NDJSON documents are always a list at the root, so there is
+    /// nothing for an offset to select.
+    #[error(
+        "`->` offsets are not supported for {format} files ({path}); \
+         their root is always the list"
+    )]
+    SequenceOffsetUnsupported {
+        /// The resolved data-file path.
+        path: PathBuf,
+        /// The rejected format's display name (`JSONL`/`NDJSON`).
+        format: String,
+    },
+
+    /// An operator was applied to an item that is not an object.
+    #[error(
+        "sequence operator `{operator}` requires object items, but item {index} is {found}"
+    )]
+    SequenceOperatorItemNotObject {
+        /// The operator name.
+        operator: String,
+        /// Zero-based item index.
+        index: usize,
+        /// The JSON type actually found.
+        found: String,
+    },
+
+    /// An operator's source field is missing from an item.
+    #[error("sequence operator `{operator}` cannot read `{field}`: item {index} does not have it")]
+    SequenceOperatorMissingField {
+        /// The operator name.
+        operator: String,
+        /// The field the operator reads.
+        field: String,
+        /// Zero-based item index.
+        index: usize,
+    },
+
+    /// A `template(expr)` operator produced an empty or null name.
+    #[error(
+        "sequence operator `template({expression})` produced an empty name for item {index}; \
+         a name must be a non-empty string"
+    )]
+    SequenceOperatorEmptyName {
+        /// Zero-based item index.
+        index: usize,
+        /// The template expression source.
+        expression: String,
+    },
+
+    /// A dynamic `{{ … }}` or `template(...)` expression failed.
+    #[error("sequence expression `{expression}` failed: {source}")]
+    SequenceExpressionFailed {
+        /// The expression source.
+        expression: String,
+        /// Whether it failed to parse or to evaluate, and why.
+        #[source]
+        source: SequenceExpressionCause,
+    },
+
+    /// A `$( … )` sequence source could not be expanded.
+    #[error("sequence shell source `$({command})` failed: {source}")]
+    SequenceShellFailed {
+        /// The command inside the `$( … )` span.
+        command: String,
+        /// Where in approval or execution it failed.
+        #[source]
+        source: SequenceShellCause,
+    },
+
+    /// A lenient (foreign-data) item was `null`.
+    #[error("sequence item {index} is null; every item must be a scalar or an object")]
+    SequenceNullItem {
+        /// Zero-based item index.
+        index: usize,
+    },
+
+    /// A step's normalized state failed the sequence document's `$schema`.
+    #[error(
+        "sequence step {index} (`{id}`) failed schema validation at `{property}`: {message}"
+    )]
+    SequenceStateSchemaViolation {
+        /// Zero-based step index.
+        index: usize,
+        /// The step's generated id.
+        id: String,
+        /// The failing property path.
+        property: String,
+        /// The validation message.
+        message: String,
+    },
+
     /// One or more sequence steps failed provider/model resolution in non-TTY mode.
     #[error("sequence selection failed for {failure_count} step(s): {failures:?}")]
     SequenceSelectionFailed {
@@ -1706,12 +1846,87 @@ pub enum SequenceLoadCause {
     /// A YAML load/convert failure.
     #[error(transparent)]
     Yaml(#[from] biscuit_file::YamlError),
+    /// A JSON/JSON5 load/convert failure.
+    #[error(transparent)]
+    Json5(#[from] biscuit_file::Json5Error),
+    /// A line-delimited (JSONL/NDJSON) entry failed to parse.
+    ///
+    /// The line number is the whole point of this arm: a bare `serde_json`
+    /// error locates itself within the single line it was handed, which is
+    /// useless for finding the offending record in the file.
+    #[error("line {line}: {source}")]
+    JsonLine {
+        /// One-based line number within the file.
+        line: usize,
+        /// The underlying parse failure.
+        #[source]
+        source: serde_json::Error,
+    },
+    /// Building or running the step-state schema validator failed.
+    ///
+    /// Boxed to keep the enum small — `SchemaError` is by far its heaviest
+    /// member.
+    #[error(transparent)]
+    Schema(#[from] Box<darkmatter::markdown::schemas::SchemaError>),
+    /// A generated step-state frontmatter could not be assembled for
+    /// validation.
+    #[error(transparent)]
+    Frontmatter(#[from] Box<darkmatter::markdown::MarkdownError>),
+    /// The file could not be read from disk.
+    #[error(transparent)]
+    Read(#[from] std::io::Error),
     /// The reference resolved but no file exists at the resolved path.
     #[error("file not found")]
     NotFound,
     /// `~` expansion failed because no home directory is known.
     #[error("unable to resolve home directory")]
     HomeDir,
+}
+
+/// Which stage of a sequence-source expression failed.
+///
+/// The sequence source layer evaluates expressions at three sites (a
+/// whole-value `{{ … }}` source, a `::template(expr)` operator, and a formal
+/// document's `template:` values); all three share this cause so a handler can
+/// recover the concrete Darkmatter error by downcasting once.
+#[derive(Error, Debug)]
+pub enum SequenceExpressionCause {
+    /// The expression could not be parsed.
+    #[error(transparent)]
+    Parse(#[from] ParseError),
+    /// The expression parsed but could not be evaluated.
+    ///
+    /// Boxed to keep the enum small, matching [`LoopExpressionCause`].
+    #[error(transparent)]
+    Evaluate(#[from] Box<ExpressionError>),
+}
+
+/// Where a `$( … )` sequence source failed.
+#[derive(Error, Debug)]
+pub enum SequenceShellCause {
+    /// The command was rejected by the shell-approval gate.
+    ///
+    /// Carried unboxed on purpose: `as_diagnostic` cannot downcast through a
+    /// `Box`, so boxing this would render an approval denial as a generic
+    /// `Error:` line instead of its own diagnostic.
+    #[error(transparent)]
+    Approval(#[from] crate::harness::HarnessError),
+    /// The approved command could not be spawned.
+    #[error(transparent)]
+    Spawn(#[from] std::io::Error),
+    /// The command ran but reported failure.
+    #[error("exited with {status}: {stderr}")]
+    Exited {
+        /// The rendered exit status.
+        status: String,
+        /// The command's trimmed stderr.
+        stderr: String,
+    },
+    /// No approval-capable runner was available to expand the source.
+    ///
+    /// This arm genuinely has no lower cause: nothing was attempted.
+    #[error("shell sequence sources are not available in this context")]
+    Unavailable,
 }
 
 /// Heterogeneous lower-layer cause of a loop expression failure.

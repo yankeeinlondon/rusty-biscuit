@@ -163,18 +163,71 @@ pub enum GroupRef {
 
 /// Provenance of a resolved sequence definition — where its steps came from.
 ///
-/// The variant set is deliberately broader than phase 3 populates: dynamic,
-/// shell, and data-file sources land in phase 4, which resolves each into the
-/// same normalized [`SequencePlan`].
+/// Provenance is not just bookkeeping: it selects both the normalization
+/// strictness ([`Self::strictness`]) and whether a zero-step result is an
+/// authoring error or a graceful no-op ([`Self::is_dynamic`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SequenceSource {
     /// Defined inline in the invoking document's frontmatter.
     Inline,
-    /// Loaded from an external YAML/JSON/JSON5 sequence file.
+    /// A formal sequence document — a root `sequence:` list reached without an
+    /// offset or operator, whether referenced or invoked directly.
     External {
         /// Absolute path to the resolved source file.
         path: PathBuf,
     },
+    /// An arbitrary data file (or a sequence document reached through an
+    /// offset/operator, or any JSONL/NDJSON file) used as foreign data.
+    DataFile {
+        /// Absolute path to the resolved source file.
+        path: PathBuf,
+    },
+    /// A whole-value `{{ … }}` expression in the invoking frontmatter.
+    Expression,
+    /// A whole-value `$( … )` shell expansion in the invoking frontmatter.
+    Shell,
+}
+
+impl SequenceSource {
+    /// Which normalization contract this provenance earns.
+    ///
+    /// Lists authored *for* sequences (inline and formal sequence documents)
+    /// stay strict, so a missing `name` is caught as the typo it is. Foreign
+    /// data — arbitrary files, expressions, shell output — is normalized
+    /// leniently because its shape was never under the sequence author's
+    /// control.
+    pub fn strictness(&self) -> Strictness {
+        match self {
+            Self::Inline | Self::External { .. } => Strictness::Strict,
+            Self::DataFile { .. } | Self::Expression | Self::Shell => Strictness::Lenient,
+        }
+    }
+
+    /// `true` when a zero-step result is a legitimate runtime outcome rather
+    /// than an authoring mistake. A clean repository makes
+    /// `{{ ctx.dirty_files }}` empty; `sequence: []` is still a typo.
+    pub fn is_dynamic(&self) -> bool {
+        matches!(self, Self::DataFile { .. } | Self::Expression | Self::Shell)
+    }
+
+    /// The resolved file this source was read from, when it was a file at all.
+    pub fn path(&self) -> Option<&std::path::Path> {
+        match self {
+            Self::External { path } | Self::DataFile { path } => Some(path),
+            Self::Inline | Self::Expression | Self::Shell => None,
+        }
+    }
+}
+
+/// How strictly an item list is normalized into step states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Strictness {
+    /// Objects must carry a string `name`; scalars must be strings.
+    Strict,
+    /// Number/boolean scalars coerce to string names, objects without a `name`
+    /// receive their one-based ordinal as a name, and `null` items are still a
+    /// typed error.
+    Lenient,
 }
 
 // ---------------------------------------------------------------------------

@@ -1,30 +1,29 @@
 //! External sequence-source resolution and loading.
 //!
-//! Resolves a `sequence: <file-ref>` reference through
-//! [`biscuit_file::FileReference`] and loads the external YAML into a normalized
-//! [`SequencePlan`]. The Sequence Plus source grammar (offsets/operators,
-//! dynamic sources, `ListFormat` classification) lands in phase 4; this module
-//! carries the pre-existing plain-reference + `kind: sequence`/`list:` loading
-//! forward onto the new [`normalize_plan`] path.
+//! Resolves a `sequence: <file-ref> [-> offset] [::op(args)]` reference through
+//! [`biscuit_file::FileReference`], loads the target in any supported format,
+//! narrows it to a list, applies the operator, and normalizes the result into a
+//! [`SequencePlan`].
+//!
+//! Whether the result is normalized strictly or leniently is decided here, by
+//! [`is_formal_sequence`]: a root `sequence:` list reached without an offset or
+//! operator is a document authored *for* sequences and stays strict; everything
+//! else — an arbitrary data file, a sequence document read through an offset, or
+//! any line-delimited file — is foreign data.
 
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
 
 use biscuit_file::{FileReference, FileReferenceKind, FileResolutionContext};
-use regex::Regex;
 use serde_json::{Map, Value};
 
 use super::super::error::{CompositionError, SequenceLoadCause};
 use super::super::json_util::json_type_name;
-use super::model::SequenceSource;
+use super::data::{self, SourceFormat};
+use super::expr::{SourceExpressionLookup, render_interpolated};
+use super::grammar::{SequenceReference, SourceOperator};
+use super::model::{SequencePlan, SequenceSource};
 use super::normalize::normalize_plan;
 use super::reserved;
-
-/// Matches `{{key}}` and `{{key || default}}` placeholder patterns.
-static PLACEHOLDER_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\{\{\s*([^{}|]+?)(?:\s*\|\|\s*([^{}]*?))?\s*\}\}")
-        .expect("placeholder regex is valid")
-});
 
 /// Resolve an external sequence reference string to an absolute existing path.
 ///
@@ -98,94 +97,176 @@ fn build_sequence_resolution_context(
     ctx
 }
 
-/// Load and normalize an external YAML sequence file.
+/// Load a referenced sequence source and normalize it into a plan.
 ///
 /// `invocation_path` is the resolved path of the document that referenced this
 /// file; it seeds the `sequence_id` payload so the token stays keyed to the
-/// invocation, not the data file.
-pub fn load_external_sequence(
-    yaml_path: &Path,
+/// invocation, not the data file. `frontmatter` is that document's frontmatter,
+/// available to `template` expressions as globals.
+pub fn load_referenced_sequence(
+    reference: &SequenceReference,
+    path: &Path,
     invocation_path: &Path,
+    frontmatter: &Map<String, Value>,
     document_fail_fast: bool,
-) -> Result<super::model::SequencePlan, CompositionError> {
-    let yaml = biscuit_file::Yaml::new(yaml_path).map_err(|e| {
-        CompositionError::SequenceExternalLoad {
-            context: yaml_path.display().to_string(),
-            source: SequenceLoadCause::Yaml(e),
-        }
-    })?;
-    let json_value = yaml
-        .as_json()
-        .map_err(|e| CompositionError::SequenceExternalLoad {
-            context: yaml_path.display().to_string(),
-            source: SequenceLoadCause::Yaml(e),
-        })?;
-    let root = json_value.as_object().ok_or_else(|| {
-        CompositionError::SequenceExternalWrongType("root must be an object".to_string())
-    })?;
+) -> Result<SequencePlan, CompositionError> {
+    let format = SourceFormat::for_path(path);
+    let document = data::load_document(path)?;
 
-    let source = SequenceSource::External {
-        path: yaml_path.to_path_buf(),
+    if let Some(offset) = &reference.offset
+        && format.is_line_delimited()
+    {
+        let _ = offset;
+        return Err(CompositionError::SequenceOffsetUnsupported {
+            path: path.to_path_buf(),
+            format: line_delimited_label(path),
+        });
+    }
+
+    let formal = is_formal_sequence(&document, reference);
+    let SelectedItems { items, template } = select_items(&document, reference, formal)?;
+
+    let items = match &reference.operator {
+        Some(operator) => apply_source_operator(items, operator, frontmatter, invocation_path)?,
+        None => items,
     };
 
-    // Form 1: { sequence: [...] }
-    if let Some(list_value) = root.get("sequence") {
-        if root.contains_key("template") {
-            return Err(CompositionError::SequenceExternalWrongType(
-                "`template` is only supported alongside `list` (use `kind: sequence` + `list:` \
-                 form when you need templates)"
-                    .to_string(),
-            ));
+    // Formal `template:` values fill in before generated fields so a templated
+    // key is ordinary authored state by the time ids and positions are made.
+    let items = match template {
+        Some(template) => apply_template(&template, items, frontmatter, invocation_path)?,
+        None => items,
+    };
+
+    let source = if formal {
+        SequenceSource::External {
+            path: path.to_path_buf(),
         }
-        let items = list_value.as_array().ok_or_else(|| {
-            CompositionError::SequenceExternalWrongType("`sequence` must be a list".to_string())
-        })?;
-        return normalize_plan(items, source, invocation_path, document_fail_fast);
-    }
-
-    // Form 2: kind/list/template
-    if let Some(kind_value) = root.get("kind") {
-        let kind_str = kind_value.as_str().ok_or_else(|| {
-            CompositionError::SequenceExternalWrongType("`kind` must be a string".to_string())
-        })?;
-        if kind_str != "sequence" {
-            return Err(CompositionError::SequenceExternalWrongType(format!(
-                "`kind` must be \"sequence\", got \"{kind_str}\""
-            )));
+    } else {
+        SequenceSource::DataFile {
+            path: path.to_path_buf(),
         }
+    };
+
+    let plan = normalize_plan(&items, source, invocation_path, document_fail_fast)?;
+    if formal {
+        validate_state_schema(&plan, &document, path)?;
     }
-
-    let list_value = root.get("list").ok_or_else(|| {
-        CompositionError::SequenceExternalWrongType(
-            "external file must have `sequence` or `list` key".to_string(),
-        )
-    })?;
-    let items = list_value.as_array().ok_or_else(|| {
-        CompositionError::SequenceExternalWrongType("`list` must be a list".to_string())
-    })?;
-
-    let templated = apply_template(root.get("template"), items)?;
-    normalize_plan(&templated, source, invocation_path, document_fail_fast)
+    Ok(plan)
 }
 
-/// Validate an optional `template` object and apply it to the list items,
-/// returning the item values with template-derived fields filled in where the
-/// item did not already define them.
-fn apply_template(
-    template: Option<&Value>,
-    items: &[Value],
-) -> Result<Vec<Value>, CompositionError> {
-    let template = match template {
-        Some(Value::Object(map)) => map,
-        Some(other) => {
-            return Err(CompositionError::SequenceExternalWrongType(format!(
-                "`template` must be an object, got {}",
-                json_type_name(other)
-            )));
-        }
-        None => return Ok(items.to_vec()),
+/// `JSONL` or `NDJSON`, for the offset-unsupported error.
+fn line_delimited_label(path: &Path) -> String {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some(ext) if ext.eq_ignore_ascii_case("ndjson") => "NDJSON".to_string(),
+        _ => "JSONL".to_string(),
+    }
+}
+
+/// A document is a *formal* sequence when its root carries `sequence:` and the
+/// reference reads that root directly. Reaching into it with an offset, or
+/// reshaping it with an operator, means the caller is treating it as data.
+fn is_formal_sequence(document: &Value, reference: &SequenceReference) -> bool {
+    reference.offset.is_none()
+        && reference.operator.is_none()
+        && document
+            .as_object()
+            .is_some_and(|root| root.contains_key("sequence"))
+}
+
+/// A loaded document narrowed to the parts the plan is built from.
+struct SelectedItems {
+    /// The list the steps come from.
+    items: Vec<Value>,
+    /// The formal document's `template:` map, when it has one. Only a formal
+    /// root carries one — an offset or operator means the caller is treating
+    /// the document as data, where `template:` is just another key.
+    template: Option<Map<String, Value>>,
+}
+
+/// Narrow a loaded document to its item list, plus the formal `template:` map.
+fn select_items(
+    document: &Value,
+    reference: &SequenceReference,
+    formal: bool,
+) -> Result<SelectedItems, CompositionError> {
+    if let Some(offset) = &reference.offset {
+        let node = data::apply_offset(document, offset)?;
+        return Ok(SelectedItems {
+            items: data::expect_list(node, Some(offset))?,
+            template: None,
+        });
+    }
+
+    let Some(root) = document.as_object() else {
+        // A root array is the ordinary shape for JSON/JSONL data files.
+        return Ok(SelectedItems {
+            items: data::expect_list(document, None)?,
+            template: None,
+        });
     };
 
+    if formal {
+        let list = root.get("sequence").expect("formal implies `sequence`");
+        let template = match root.get("template") {
+            Some(Value::Object(map)) => Some(map.clone()),
+            Some(other) => {
+                return Err(CompositionError::SequenceExternalWrongType(format!(
+                    "`template` must be an object, got {}",
+                    json_type_name(other)
+                )));
+            }
+            None => None,
+        };
+        return Ok(SelectedItems {
+            items: data::expect_list(list, Some("sequence"))?,
+            template,
+        });
+    }
+
+    // Clean break (RATIFIED 2026-07-12): the external-only `kind: sequence` +
+    // `list:` form is retired. Naming it explicitly beats "must have `sequence`"
+    // for the authors who have to migrate.
+    if root.contains_key("list") {
+        return Err(CompositionError::SequenceExternalWrongType(
+            "the `list:` sequence shape has been removed; rename the property to `sequence:` \
+             (the same shape now works both when referenced and when invoked directly)"
+                .to_string(),
+        ));
+    }
+
+    Err(CompositionError::SequenceExternalWrongType(
+        "sequence file must have a root `sequence:` list, be a list at its root, or be \
+         reached with a `-> offset` path"
+            .to_string(),
+    ))
+}
+
+/// Apply a `::map`/`::name`/`::template` operator to every item.
+fn apply_source_operator(
+    items: Vec<Value>,
+    operator: &SourceOperator,
+    frontmatter: &Map<String, Value>,
+    invocation_path: &Path,
+) -> Result<Vec<Value>, CompositionError> {
+    let base_dir = invocation_path.parent().unwrap_or_else(|| Path::new("."));
+    data::apply_operator(items, operator, &|expression, item| {
+        let lookup = SourceExpressionLookup::new(frontmatter, base_dir).with_item(item);
+        super::expr::evaluate_whole(expression, &lookup)
+    })
+}
+
+/// Validate a formal document's `template` and apply it to every item.
+///
+/// A template key never overwrites a value the item already defines, and every
+/// value is rendered through the Darkmatter expression engine with the item's
+/// fields shadowing the invoking document's frontmatter.
+fn apply_template(
+    template: &Map<String, Value>,
+    items: Vec<Value>,
+    frontmatter: &Map<String, Value>,
+    invocation_path: &Path,
+) -> Result<Vec<Value>, CompositionError> {
     for (key, value) in template {
         if reserved::is_reserved_state_key(key) {
             return Err(CompositionError::SequenceReservedTemplateKey(key.clone()));
@@ -198,39 +279,87 @@ fn apply_template(
         }
     }
 
+    let base_dir = invocation_path.parent().unwrap_or_else(|| Path::new("."));
+
     items
-        .iter()
+        .into_iter()
         .map(|item| {
             let step_map = item
                 .as_object()
                 .ok_or(CompositionError::SequenceTemplateRequiresObjectItems)?;
+            let lookup = SourceExpressionLookup::new(frontmatter, base_dir).with_item(step_map);
+
             let mut new_map = step_map.clone();
-            for (tmpl_key, tmpl_value) in template {
-                let template_str = tmpl_value.as_str().expect("validated string above");
-                let rendered = render_simple_template(template_str, step_map);
-                new_map
-                    .entry(tmpl_key.clone())
-                    .or_insert(Value::String(rendered));
+            for (key, value) in template {
+                if new_map.contains_key(key) {
+                    continue;
+                }
+                let raw = value.as_str().expect("validated string above");
+                new_map.insert(key.clone(), render_interpolated(raw, &lookup)?);
             }
             Ok(Value::Object(new_map))
         })
         .collect()
 }
 
-/// Simple `{{key}}` / `{{key || default}}` renderer over an item's top-level
-/// fields. Intentionally smaller than the Darkmatter expression engine; the
-/// full engine takes over template evaluation in phase 4.
-pub(super) fn render_simple_template(template: &str, fields: &Map<String, Value>) -> String {
-    PLACEHOLDER_RE
-        .replace_all(template, |caps: &regex::Captures| {
-            let key = caps[1].trim();
-            let default = caps.get(2).map(|m| m.as_str().trim().trim_matches('\''));
+/// Validate every step's normalized state against a formal document's
+/// `$schema`.
+///
+/// Only the state portion is validated: executable and task keys are not state
+/// and were already partitioned out during normalization. The schema is applied
+/// through the ordinary Darkmatter document validator by presenting each state
+/// as a frontmatter-shaped document, so `$schema` behaves identically here and
+/// on a normal composition source.
+fn validate_state_schema(
+    plan: &SequencePlan,
+    document: &Value,
+    path: &Path,
+) -> Result<(), CompositionError> {
+    let Some(schema) = document.as_object().and_then(|root| root.get("$schema")) else {
+        return Ok(());
+    };
 
-            match fields.get(key) {
-                Some(Value::String(s)) if !s.is_empty() => s.clone(),
-                Some(Value::Null) | None => default.unwrap_or("").to_string(),
-                Some(other) => other.to_string(),
-            }
-        })
-        .into_owned()
+    let schemas = darkmatter::markdown::schemas::DarkmatterSchemas::new();
+
+    let load_failure = |source: SequenceLoadCause| CompositionError::SequenceExternalLoad {
+        context: path.display().to_string(),
+        source,
+    };
+
+    for step in &plan.steps {
+        let mut frontmatter = darkmatter::markdown::Frontmatter::new();
+        frontmatter
+            .insert("$schema", schema.clone())
+            .map_err(|e| load_failure(SequenceLoadCause::Frontmatter(Box::new(e))))?;
+        let Value::Object(state) = step.state.to_value() else {
+            unreachable!("StepState::to_value always produces an object");
+        };
+        for (key, value) in state {
+            frontmatter
+                .insert(&key, value)
+                .map_err(|e| load_failure(SequenceLoadCause::Frontmatter(Box::new(e))))?;
+        }
+
+        let markdown = darkmatter::markdown::Markdown::with_frontmatter(frontmatter, "");
+        let report = schemas
+            .validate(&markdown)
+            .map_err(|e| load_failure(SequenceLoadCause::Schema(Box::new(e))))?;
+
+        if let Some(problem) = report.problems.first() {
+            // `property` is set only for missing-required failures; every other
+            // kind locates itself with the instance pointer instead.
+            let property = problem
+                .property
+                .clone()
+                .unwrap_or_else(|| problem.path.clone());
+            return Err(CompositionError::SequenceStateSchemaViolation {
+                index: step.index,
+                id: step.state.id.clone(),
+                property,
+                message: problem.message.clone(),
+            });
+        }
+    }
+
+    Ok(())
 }

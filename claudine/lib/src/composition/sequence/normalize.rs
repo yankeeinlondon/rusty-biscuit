@@ -7,9 +7,11 @@
 //! invocation token. Executable fields are detected and validated for
 //! exclusivity; authored state colliding with a reserved key is rejected.
 //!
-//! Foreign-data leniency (numeric/boolean coercion, generated names) is a
-//! phase-4 concern; this module implements the strict path used by inline and
-//! formal `kind: sequence` lists.
+//! Both normalization contracts live here and are selected by the source's
+//! provenance ([`SequenceSource::strictness`]): lists authored *for* sequences
+//! stay strict, while foreign data (arbitrary files, expressions, shell output)
+//! coerces number/boolean scalars to string names and gives nameless objects
+//! their one-based ordinal. A `null` item is a typed error either way.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -22,6 +24,7 @@ use super::super::error::CompositionError;
 use super::super::json_util::json_type_name;
 use super::model::{
     ExecutableField, SequencePlan, SequenceSource, SequenceStep, StepExecutable, StepState,
+    Strictness,
 };
 use super::reserved;
 
@@ -42,26 +45,32 @@ struct ParsedStep {
 /// `invocation_path` is the resolved path of the document that invoked the
 /// sequence; it seeds the `sequence_id` payload.
 ///
+/// Strictness and empty-list policy are both derived from `source`: a static
+/// authored list that resolves to zero steps is a typo, while a dynamic source
+/// that does so is a legitimate no-op the caller reports and exits `0` on.
+///
 /// ## Errors
 ///
-/// Returns typed [`CompositionError`] variants for an empty list, a non-scalar
-/// non-object item, an object missing a string `name`, more than one executable
-/// field, a task option meaningless for the chosen executable, or an authored
-/// state key colliding with the reserved catalog.
+/// Returns typed [`CompositionError`] variants for a statically empty list, a
+/// non-scalar non-object item, a `null` item, an object missing a string `name`
+/// under [`Strictness::Strict`], more than one executable field, a task option
+/// meaningless for the chosen executable, or an authored state key colliding
+/// with the reserved catalog.
 pub fn normalize_plan(
     items: &[Value],
     source: SequenceSource,
     invocation_path: &Path,
     document_fail_fast: bool,
 ) -> Result<SequencePlan, CompositionError> {
-    if items.is_empty() {
+    if items.is_empty() && !source.is_dynamic() {
         return Err(CompositionError::SequenceEmpty);
     }
 
+    let strictness = source.strictness();
     let parsed: Vec<ParsedStep> = items
         .iter()
         .enumerate()
-        .map(|(index, item)| parse_item(index, item))
+        .map(|(index, item)| parse_item(index, item, strictness))
         .collect::<Result<_, _>>()?;
 
     let ids = generate_ids(parsed.iter().map(|p| p.name.as_str()));
@@ -102,7 +111,11 @@ pub fn normalize_plan(
 }
 
 /// Parse a single authored item into its name, executable, and state portion.
-fn parse_item(index: usize, item: &Value) -> Result<ParsedStep, CompositionError> {
+fn parse_item(
+    index: usize,
+    item: &Value,
+    strictness: Strictness,
+) -> Result<ParsedStep, CompositionError> {
     match item {
         Value::String(s) => Ok(ParsedStep {
             name: s.clone(),
@@ -110,11 +123,32 @@ fn parse_item(index: usize, item: &Value) -> Result<ParsedStep, CompositionError
             extra: Map::new(),
             executable: None,
         }),
-        Value::Object(map) => parse_object_step(index, map, item),
+        Value::Object(map) => parse_object_step(index, map, item, strictness),
+        // `null` is a typed error under both contracts: leniency coerces a
+        // value that *is* something into a name, it does not invent one.
+        Value::Null => Err(CompositionError::SequenceNullItem { index }),
+        Value::Number(_) | Value::Bool(_) if strictness == Strictness::Lenient => {
+            let name = scalar_name(item);
+            Ok(ParsedStep {
+                name: name.clone(),
+                raw_state: Value::String(name),
+                extra: Map::new(),
+                executable: None,
+            })
+        }
         other => Err(CompositionError::SequenceInvalid(format!(
             "step at index {index} must be a string or object, got {}",
             json_type_name(other)
         ))),
+    }
+}
+
+/// Render a scalar as its string name. Only reached under
+/// [`Strictness::Lenient`], where `[1, 2, 3]` is a valid foreign-data list.
+fn scalar_name(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
     }
 }
 
@@ -124,18 +158,26 @@ fn parse_object_step(
     index: usize,
     map: &Map<String, Value>,
     raw: &Value,
+    strictness: Strictness,
 ) -> Result<ParsedStep, CompositionError> {
-    // Strict authored objects require a string `name`.
-    let name = map
-        .get("name")
-        .ok_or(CompositionError::SequenceStepNameMissing { index })?;
-    let name = name
-        .as_str()
-        .ok_or_else(|| CompositionError::SequenceStepNameWrongType {
-            index,
-            found: json_type_name(name).to_string(),
-        })?
-        .to_string();
+    let name = match map.get("name") {
+        Some(Value::String(s)) => s.clone(),
+        // Foreign data may carry a non-string `name` (a numeric id, say); a
+        // list authored for sequences may not.
+        Some(other) if strictness == Strictness::Lenient && !other.is_null() => {
+            scalar_name(other)
+        }
+        Some(other) => {
+            return Err(CompositionError::SequenceStepNameWrongType {
+                index,
+                found: json_type_name(other).to_string(),
+            });
+        }
+        // A nameless foreign object gets its one-based ordinal, which then
+        // dasherizes into an id exactly as an authored name would.
+        None if strictness == Strictness::Lenient => (index + 1).to_string(),
+        None => return Err(CompositionError::SequenceStepNameMissing { index }),
+    };
 
     // Exactly-one executable field.
     let executable_keys: Vec<&str> = map

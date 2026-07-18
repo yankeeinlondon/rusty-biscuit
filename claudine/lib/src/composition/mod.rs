@@ -44,8 +44,8 @@ pub use error::{
     ActionExprError, CompositionError, DroppedOptional, DroppedOptionalSource, DroppedOptionalStage,
     FileReferenceContext, InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE, LoopExpressionCause,
     MarkdownLoadCause, MissingProperty,
-    SequenceLoadCause, SequenceMissingPropertiesStep, SequenceSelectionFailure,
-    ShellApprovalFailure, TextFormat,
+    SequenceExpressionCause, SequenceLoadCause, SequenceMissingPropertiesStep,
+    SequenceSelectionFailure, SequenceShellCause, ShellApprovalFailure, TextFormat,
 };
 pub use file_detail::{FileDetail, extract_markdown_detail, extract_yaml_sequence_detail};
 pub use frontmatter_excerpt::FrontmatterExcerpt;
@@ -110,8 +110,9 @@ pub use select::{
 };
 pub use sequence::{
     ExecutableField, ExternalTaskRef, GroupRef, OutputEntry, RuntimeMutation, SequencePlan,
-    SequenceSource, SequenceStep, SequenceStepOverlay, StepExecutable, StepState,
-    build_step_overlay, resolve_sequence_plan,
+    SequenceReference, SequenceSource, SequenceSourceOptions, SequenceSourceSpec, SequenceStep,
+    SequenceStepOverlay, ShellSourceRunner, SourceOperator, StepExecutable, StepState, Strictness,
+    build_step_overlay, resolve_sequence_plan, resolve_sequence_plan_with,
 };
 pub use types::{
     AgentHint, AgentResolutionState, AmbientVariable, CompositionClosurePlan,

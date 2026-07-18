@@ -1,5 +1,8 @@
 use super::*;
-use super::source::{render_simple_template, resolve_sequence_reference};
+use super::expr::{SourceExpressionLookup, render_interpolated};
+use super::grammar::{SequenceSourceSpec, SourceOperator, classify_source};
+use super::source::resolve_sequence_reference;
+use serde_json::Value;
 use crate::composition::error::SequenceLoadCause;
 use darkmatter::markdown::{Frontmatter, Markdown};
 use serde_json::json;
@@ -188,10 +191,10 @@ fn external_sequence_form_loads() {
     assert_eq!(plan.steps[0].name, "alpha");
 }
 
-// -- resolve_sequence_plan: external YAML (kind/list/template form) -------
+// -- resolve_sequence_plan: formal sequence documents + templates ---------
 
 #[test]
-fn external_kind_list_template_loads_and_applies_templates() {
+fn external_sequence_template_loads_and_applies_templates() {
     let dir = TempDir::new().unwrap();
     let yaml_path = dir.path().join("agents.yaml");
     fs::write(
@@ -199,7 +202,7 @@ fn external_kind_list_template_loads_and_applies_templates() {
         r#"kind: sequence
 template:
   desc: "{{name}} (site: {{site}})"
-list:
+sequence:
   - name: Claude Code
     site: https://code.claude.com
   - name: Codex CLI
@@ -238,7 +241,7 @@ fn external_template_with_fallback_default() {
         r#"kind: sequence
 template:
   summary: "{{name}} - repo: {{repo || 'n/a'}}"
-list:
+sequence:
   - name: Tool A
     repo: https://github.com/a
   - name: Tool B
@@ -278,7 +281,7 @@ fn external_template_reserved_key_collision_fails() {
         r#"kind: sequence
 template:
   state: "{{name}}"
-list:
+sequence:
   - name: One
 "#,
     )
@@ -298,7 +301,7 @@ fn external_template_non_object_fails() {
     let yaml_path = dir.path().join("bad.yaml");
     fs::write(
         &yaml_path,
-        "kind: sequence\ntemplate: not-an-object\nlist:\n  - name: One\n",
+        "kind: sequence\ntemplate: not-an-object\nsequence:\n  - name: One\n",
     )
     .unwrap();
 
@@ -310,26 +313,27 @@ fn external_template_non_object_fails() {
     );
 }
 
+/// The retired `list:` form paired `template:` with `kind: sequence`; the
+/// ratified single shape pairs it with `sequence:`. A `kind`-less document
+/// carrying both is the plainest expression of that — and it must now be
+/// accepted, where the pre-Sequence-Plus loader rejected it.
 #[test]
-fn external_template_rejected_in_plain_sequence_form() {
+fn template_is_supported_without_an_explicit_kind() {
     let dir = TempDir::new().unwrap();
-    let yaml_path = dir.path().join("bad.yaml");
+    let yaml_path = dir.path().join("templated.yaml");
     fs::write(
         &yaml_path,
         r#"sequence:
   - name: One
 template:
-  desc: "{{name}}"
+  desc: "{{name}}!"
 "#,
     )
     .unwrap();
 
-    let source = make_source(&dir, &[("sequence", json!("bad.yaml"))], "Prompt");
-    let err = resolve_sequence_plan(&source).unwrap_err();
-    assert!(
-        matches!(err, CompositionError::SequenceExternalWrongType(ref msg) if msg.contains("template")),
-        "got: {err}"
-    );
+    let source = make_source(&dir, &[("sequence", json!("templated.yaml"))], "Prompt");
+    let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+    assert_eq!(plan.steps[0].state.extra["desc"], json!("One!"));
 }
 
 #[test]
@@ -713,7 +717,7 @@ fn external_template_non_string_value_fails() {
     // reserved-key check first — see `external_template_reserved_key_fails`).
     fs::write(
         &yaml_path,
-        "kind: sequence\ntemplate:\n  rank: 42\nlist:\n  - name: One\n",
+        "kind: sequence\ntemplate:\n  rank: 42\nsequence:\n  - name: One\n",
     )
     .unwrap();
 
@@ -996,30 +1000,77 @@ fn single_executable_step_extracts_executable_and_options() {
     assert!(!step.state.extra.contains_key("params"));
 }
 
-// -- render_simple_template -----------------------------------------------
+// -- template rendering (Darkmatter expression engine) --------------------
+//
+// Phase 4 replaced the bespoke `{{key || default}}` placeholder renderer with
+// the real expression engine, so these pin the engine's behavior over item
+// fields rather than a private helper's.
+
+fn render_template(template: &str, fields: serde_json::Map<String, serde_json::Value>) -> Value {
+    let globals = serde_json::Map::new();
+    let lookup = SourceExpressionLookup::new(&globals, Path::new(".")).with_item(&fields);
+    render_interpolated(template, &lookup).unwrap()
+}
 
 #[test]
 fn template_replaces_known_keys() {
     let mut fields = serde_json::Map::new();
     fields.insert("name".into(), json!("Foo"));
     fields.insert("site".into(), json!("https://example.com"));
-    let result = render_simple_template("{{name}} at {{site}}", &fields);
-    assert_eq!(result, "Foo at https://example.com");
+    assert_eq!(
+        render_template("{{name}} at {{site}}", fields),
+        json!("Foo at https://example.com")
+    );
 }
 
 #[test]
 fn template_uses_fallback_for_missing_key() {
-    let fields = serde_json::Map::new();
-    let result = render_simple_template("repo: {{repo || 'n/a'}}", &fields);
-    assert_eq!(result, "repo: n/a");
+    assert_eq!(
+        render_template("repo: {{repo || 'n/a'}}", serde_json::Map::new()),
+        json!("repo: n/a")
+    );
 }
 
 #[test]
 fn template_uses_fallback_for_null_value() {
     let mut fields = serde_json::Map::new();
-    fields.insert("repo".into(), serde_json::Value::Null);
-    let result = render_simple_template("repo: {{ repo || 'none' }}", &fields);
-    assert_eq!(result, "repo: none");
+    fields.insert("repo".into(), Value::Null);
+    assert_eq!(
+        render_template("repo: {{ repo || 'none' }}", fields),
+        json!("repo: none")
+    );
+}
+
+/// A template that is exactly one span keeps its typed value — the bespoke
+/// renderer it replaced could only ever produce a string.
+#[test]
+fn whole_span_template_preserves_type() {
+    let mut fields = serde_json::Map::new();
+    fields.insert("rank".into(), json!(5));
+    assert_eq!(render_template("{{ rank }}", fields), json!(5));
+}
+
+/// Item fields shadow the invoking document's frontmatter, so an item's
+/// `color` wins over a same-named global.
+#[test]
+fn item_fields_shadow_document_globals() {
+    let mut globals = serde_json::Map::new();
+    globals.insert("color".into(), json!("global-blue"));
+    let mut item = serde_json::Map::new();
+    item.insert("color".into(), json!("item-red"));
+
+    let lookup = SourceExpressionLookup::new(&globals, Path::new(".")).with_item(&item);
+    assert_eq!(
+        render_interpolated("{{ color }}", &lookup).unwrap(),
+        json!("item-red")
+    );
+
+    // Without an item, the global is still visible.
+    let bare = SourceExpressionLookup::new(&globals, Path::new("."));
+    assert_eq!(
+        render_interpolated("{{ color }}", &bare).unwrap(),
+        json!("global-blue")
+    );
 }
 
 // -- Sequence Plus: characterization + clean-break guardrails --------------
@@ -1091,17 +1142,19 @@ mod clean_break {
     /// whether invoked directly or referenced. A file carrying only `list:`
     /// must be rejected rather than silently accepted.
     #[test]
-    #[ignore = "clean-break target: `list:` shape removed in Phase 4 (sequence-plus)"]
     fn external_list_shape_rejected() {
         let dir = TempDir::new().unwrap();
         let yaml_path = dir.path().join("legacy.yaml");
         fs::write(&yaml_path, "kind: sequence\nlist:\n  - name: one\n").unwrap();
 
         let source = make_source(&dir, &[("sequence", json!("legacy.yaml"))], "Prompt");
-        let result = resolve_sequence_plan(&source);
+        let error = resolve_sequence_plan(&source).unwrap_err();
         assert!(
-            result.is_err(),
-            "retired `kind: sequence` + `list:` shape must be rejected, got: {result:?}",
+            matches!(
+                error,
+                CompositionError::SequenceExternalWrongType(ref msg) if msg.contains("`sequence:`")
+            ),
+            "the rejection must name the replacement property, got: {error}",
         );
     }
 
@@ -1135,5 +1188,855 @@ mod clean_break {
             result.is_err(),
             "a group carrying `loop` must be rejected with a typed error, got: {result:?}",
         );
+    }
+}
+
+// -- Phase 4: source grammar ----------------------------------------------
+//
+// The suffix parser is span-aware: an `->` or `::` inside a quoted operator
+// argument or a `{{ }}` interpolation segment is literal text belonging to the
+// file reference, not a separator.
+
+mod grammar_tests {
+    use super::*;
+
+    fn reference(raw: &str) -> super::super::grammar::SequenceReference {
+        match classify_source(&json!(raw)).unwrap() {
+            SequenceSourceSpec::Reference(reference) => reference,
+            other => panic!("expected a reference for `{raw}`, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn plain_reference_has_no_suffix() {
+        let parsed = reference("steps.yaml");
+        assert_eq!(parsed.reference, "steps.yaml");
+        assert_eq!(parsed.offset, None);
+        assert_eq!(parsed.operator, None);
+    }
+
+    #[test]
+    fn offset_is_parsed_and_reference_is_left_untouched() {
+        let parsed = reference("things.yaml -> colors.data");
+        assert_eq!(parsed.reference, "things.yaml");
+        assert_eq!(parsed.offset.as_deref(), Some("colors.data"));
+    }
+
+    #[test]
+    fn every_operator_form_parses() {
+        assert_eq!(
+            reference("t.yaml -> d::map(color, name)").operator,
+            Some(SourceOperator::Map {
+                from: "color".into(),
+                to: "name".into()
+            })
+        );
+        assert_eq!(
+            reference("t.yaml::name(color)").operator,
+            Some(SourceOperator::Name {
+                from: "color".into()
+            })
+        );
+        assert_eq!(
+            reference("t.yaml::template(color + '-is-great')").operator,
+            Some(SourceOperator::Template {
+                expr: "color + '-is-great'".into()
+            })
+        );
+    }
+
+    /// Quoted arguments keep their delimiters: a `,` inside quotes is part of
+    /// the argument, not an argument boundary.
+    #[test]
+    fn quoted_operator_arguments_survive() {
+        assert_eq!(
+            reference("t.yaml::map('a,b', name)").operator,
+            Some(SourceOperator::Map {
+                from: "a,b".into(),
+                to: "name".into()
+            })
+        );
+    }
+
+    /// A `template` expression is one argument even when it contains commas —
+    /// splitting it on commas would corrupt any nested function call.
+    #[test]
+    fn template_expression_keeps_interior_commas() {
+        assert_eq!(
+            reference("t.yaml::template(join(first, last))").operator,
+            Some(SourceOperator::Template {
+                expr: "join(first, last)".into()
+            })
+        );
+    }
+
+    /// The reference families that would break a naive splitter: `@` magic,
+    /// `!` package, `~`, `vault:`, spaces, and `{{ }}` interpolation.
+    #[test]
+    fn reference_families_are_preserved_verbatim() {
+        for raw in [
+            "@prompts/steps.yaml",
+            "!lib/steps.yaml",
+            "~/steps.yaml",
+            "vault:notes/steps.yaml",
+            "./my folder/steps.yaml",
+            "steps@v2.yaml",
+        ] {
+            assert_eq!(reference(raw).reference, raw, "`{raw}` must survive intact");
+        }
+    }
+
+    /// An interpolation segment may contain the suffix delimiters; they belong
+    /// to the reference, not to the grammar.
+    #[test]
+    fn interpolation_segments_are_not_split() {
+        let parsed = reference("{{ env.ROOT }}/steps.yaml -> data");
+        assert_eq!(parsed.reference, "{{ env.ROOT }}/steps.yaml");
+        assert_eq!(parsed.offset.as_deref(), Some("data"));
+    }
+
+    #[test]
+    fn whole_value_spans_classify_as_dynamic_sources() {
+        assert!(matches!(
+            classify_source(&json!("{{ ctx.dirty_files }}")).unwrap(),
+            SequenceSourceSpec::Expression(ref e) if e == "ctx.dirty_files"
+        ));
+        assert!(matches!(
+            classify_source(&json!("$(ls -la)")).unwrap(),
+            SequenceSourceSpec::Shell(ref c) if c == "ls -la"
+        ));
+    }
+
+    /// Two adjacent spans are not a *whole-value* span, so the value stays a
+    /// file reference rather than becoming an expression source.
+    #[test]
+    fn adjacent_spans_are_not_a_whole_value_expression() {
+        assert!(matches!(
+            classify_source(&json!("{{a}}{{b}}.yaml")).unwrap(),
+            SequenceSourceSpec::Reference(_)
+        ));
+    }
+
+    #[test]
+    fn typed_arrays_classify_as_inline() {
+        assert!(matches!(
+            classify_source(&json!(["a", "b"])).unwrap(),
+            SequenceSourceSpec::Inline(ref items) if items.len() == 2
+        ));
+    }
+
+    #[test]
+    fn non_list_non_string_values_are_rejected() {
+        let error = classify_source(&json!(42)).unwrap_err();
+        assert!(matches!(error, CompositionError::SequenceInvalid(_)), "got: {error}");
+    }
+
+    // -- negative suffix syntax --------------------------------------------
+
+    #[test]
+    fn more_than_one_operator_is_rejected() {
+        let error = classify_source(&json!("t.yaml::name(a)::name(b)")).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                CompositionError::SequenceSourceSyntax { ref problem, .. }
+                    if problem.contains("only one operator")
+            ),
+            "got: {error}"
+        );
+    }
+
+    #[test]
+    fn trailing_text_after_an_operator_is_rejected() {
+        let error = classify_source(&json!("t.yaml::name(a) leftover")).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                CompositionError::SequenceSourceSyntax { ref problem, .. }
+                    if problem.contains("trailing text")
+            ),
+            "got: {error}"
+        );
+    }
+
+    #[test]
+    fn an_empty_offset_is_rejected() {
+        let error = classify_source(&json!("t.yaml ->")).unwrap_err();
+        assert!(
+            matches!(error, CompositionError::SequenceSourceSyntax { .. }),
+            "got: {error}"
+        );
+    }
+
+    #[test]
+    fn an_unclosed_operator_is_rejected() {
+        let error = classify_source(&json!("t.yaml::name(a")).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                CompositionError::SequenceSourceSyntax { ref problem, .. }
+                    if problem.contains("closing")
+            ),
+            "got: {error}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_operator_is_rejected() {
+        let error = classify_source(&json!("t.yaml::shuffle(a)")).unwrap_err();
+        assert!(
+            matches!(error, CompositionError::SequenceUnknownOperator(ref v) if v == "shuffle"),
+            "got: {error}"
+        );
+    }
+
+    #[test]
+    fn operator_arity_is_enforced() {
+        for (raw, operator, expected, found) in [
+            ("t.yaml::map(a)", "map", 2usize, 1usize),
+            ("t.yaml::map(a, b, c)", "map", 2, 3),
+            ("t.yaml::name(a, b)", "name", 1, 2),
+        ] {
+            let error = classify_source(&json!(raw)).unwrap_err();
+            assert!(
+                matches!(
+                    error,
+                    CompositionError::SequenceOperatorArity {
+                        operator: ref o, expected: e, found: f
+                    } if o == operator && e == expected && f == found
+                ),
+                "`{raw}` got: {error}"
+            );
+        }
+    }
+}
+
+// -- Phase 4: format coverage, offsets, operators, strictness -------------
+
+mod source_resolution {
+    use super::*;
+
+    /// Resolve a plan from a data file written into a temp dir, referenced by
+    /// the given `sequence:` source string.
+    fn plan_from(file: &str, contents: &str, sequence: &str) -> Result<SequencePlan, CompositionError> {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join(file), contents).unwrap();
+        let source = make_source(&dir, &[("sequence", json!(sequence))], "Prompt");
+        resolve_sequence_plan(&source).map(|plan| plan.expect("sequence key present"))
+    }
+
+    fn names(plan: &SequencePlan) -> Vec<String> {
+        plan.steps.iter().map(|s| s.name.clone()).collect()
+    }
+
+    // -- every supported format reaches the same normalized plan -----------
+
+    #[test]
+    fn yaml_json_and_json5_offsets_produce_equivalent_plans() {
+        let yaml = plan_from(
+            "d.yaml",
+            "description: x\ndata:\n  - blue\n  - green\n",
+            "d.yaml -> data",
+        )
+        .unwrap();
+        let json = plan_from(
+            "d.json",
+            r#"{"description": "x", "data": ["blue", "green"]}"#,
+            "d.json -> data",
+        )
+        .unwrap();
+        let json5 = plan_from(
+            "d.json5",
+            "{ description: 'x', data: ['blue', 'green'] } ",
+            "d.json5 -> data",
+        )
+        .unwrap();
+
+        for plan in [&yaml, &json, &json5] {
+            assert_eq!(names(plan), vec!["blue", "green"]);
+            // Reached through an offset, so this is foreign data.
+            assert!(matches!(plan.source, SequenceSource::DataFile { .. }));
+        }
+    }
+
+    #[test]
+    fn jsonl_and_ndjson_load_from_their_root() {
+        for (file, sequence) in [("d.jsonl", "d.jsonl"), ("d.ndjson", "d.ndjson")] {
+            let plan = plan_from(
+                file,
+                "{\"name\": \"one\"}\n\n{\"name\": \"two\"}\n",
+                sequence,
+            )
+            .unwrap();
+            assert_eq!(names(&plan), vec!["one", "two"], "for {file}");
+        }
+    }
+
+    /// JSONL/NDJSON roots are always the list, so an offset has nothing to
+    /// select and must be a typed error rather than a lookup miss.
+    #[test]
+    fn offsets_are_rejected_for_line_delimited_files() {
+        for (file, sequence, label) in [
+            ("d.jsonl", "d.jsonl -> data", "JSONL"),
+            ("d.ndjson", "d.ndjson -> data", "NDJSON"),
+        ] {
+            let error = plan_from(file, "{\"name\": \"one\"}\n", sequence).unwrap_err();
+            assert!(
+                matches!(
+                    error,
+                    CompositionError::SequenceOffsetUnsupported { ref format, .. }
+                        if format == label
+                ),
+                "for {file} got: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_jsonl_names_the_offending_line() {
+        let error = plan_from("d.jsonl", "{\"name\": \"ok\"}\nnot json\n", "d.jsonl").unwrap_err();
+        assert!(
+            error.to_string().contains("line 2"),
+            "the parse failure must name the line: {error}"
+        );
+    }
+
+    // -- offsets ----------------------------------------------------------
+
+    #[test]
+    fn deep_dot_paths_traverse_nested_structures() {
+        let plan = plan_from(
+            "t.yaml",
+            "colors:\n  data:\n    - color: blue\n    - color: green\n",
+            "t.yaml -> colors.data",
+        )
+        .unwrap();
+        // Nameless foreign objects take their one-based ordinal.
+        assert_eq!(names(&plan), vec!["1", "2"]);
+    }
+
+    #[test]
+    fn a_missing_offset_path_reports_where_it_failed() {
+        let error = plan_from("t.yaml", "colors:\n  data: [1]\n", "t.yaml -> colors.missing")
+            .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                CompositionError::SequenceOffsetMissing { ref path, ref failed_at, .. }
+                    if path == "colors.missing" && failed_at == "colors.missing"
+            ),
+            "got: {error}"
+        );
+    }
+
+    #[test]
+    fn an_offset_to_a_non_list_reports_the_observed_type() {
+        let error =
+            plan_from("t.yaml", "colors:\n  data: hello\n", "t.yaml -> colors.data").unwrap_err();
+        assert!(
+            matches!(
+                error,
+                CompositionError::SequenceOffsetNotAList { ref path, ref found }
+                    if path == "colors.data" && found == "string"
+            ),
+            "got: {error}"
+        );
+    }
+
+    // -- operators --------------------------------------------------------
+
+    const NESTED: &str = "colors:\n  data:\n    - color: blue\n    - color: green\n";
+
+    #[test]
+    fn map_renames_the_key_and_removes_the_original() {
+        let plan = plan_from("t.yaml", NESTED, "t.yaml -> colors.data::map(color, name)").unwrap();
+        assert_eq!(names(&plan), vec!["blue", "green"]);
+        assert!(
+            !plan.steps[0].state.extra.contains_key("color"),
+            "map removes the source key: {:?}",
+            plan.steps[0].state.extra
+        );
+    }
+
+    #[test]
+    fn name_copies_the_value_and_retains_the_original() {
+        let plan = plan_from("t.yaml", NESTED, "t.yaml -> colors.data::name(color)").unwrap();
+        assert_eq!(names(&plan), vec!["blue", "green"]);
+        assert_eq!(
+            plan.steps[0].state.extra.get("color"),
+            Some(&json!("blue")),
+            "name retains the source key"
+        );
+    }
+
+    #[test]
+    fn template_computes_a_name_from_item_fields() {
+        let plan = plan_from(
+            "t.yaml",
+            NESTED,
+            "t.yaml -> colors.data::template(color + '-is-great')",
+        )
+        .unwrap();
+        assert_eq!(names(&plan), vec!["blue-is-great", "green-is-great"]);
+    }
+
+    #[test]
+    fn operator_failures_name_the_item_index() {
+        let missing = plan_from(
+            "t.yaml",
+            "data:\n  - color: blue\n  - shade: green\n",
+            "t.yaml -> data::name(color)",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                missing,
+                CompositionError::SequenceOperatorMissingField { index: 1, ref field, .. }
+                    if field == "color"
+            ),
+            "got: {missing}"
+        );
+
+        let scalar = plan_from(
+            "t.yaml",
+            "data:\n  - color: blue\n  - just-a-string\n",
+            "t.yaml -> data::name(color)",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                scalar,
+                CompositionError::SequenceOperatorItemNotObject { index: 1, .. }
+            ),
+            "got: {scalar}"
+        );
+    }
+
+    /// A `template` that resolves to nothing is an error: a name must be a
+    /// non-empty string, and a silently-blank name would produce an unusable id.
+    #[test]
+    fn an_empty_template_name_is_rejected() {
+        let error = plan_from(
+            "t.yaml",
+            "data:\n  - color: ''\n",
+            "t.yaml -> data::template(color)",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, CompositionError::SequenceOperatorEmptyName { index: 0, .. }),
+            "got: {error}"
+        );
+    }
+
+    // -- strictness split by provenance -----------------------------------
+
+    /// Foreign data coerces number and boolean scalars into string names; the
+    /// same list authored inline stays strict and is rejected.
+    #[test]
+    fn foreign_scalars_coerce_but_inline_scalars_do_not() {
+        let lenient = plan_from("d.json", "[1, 2, true]", "d.json").unwrap();
+        assert_eq!(names(&lenient), vec!["1", "2", "true"]);
+
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("sequence", json!([1, 2]))], "Prompt");
+        let error = resolve_sequence_plan(&source).unwrap_err();
+        assert!(
+            matches!(error, CompositionError::SequenceInvalid(_)),
+            "an authored numeric step is a typo, got: {error}"
+        );
+    }
+
+    /// A formal `sequence:` document is authored *for* sequences, so it keeps
+    /// the strict contract even though it arrives from a file.
+    #[test]
+    fn formal_documents_stay_strict() {
+        let error = plan_from("s.yaml", "sequence:\n  - color: red\n", "s.yaml").unwrap_err();
+        assert!(
+            matches!(error, CompositionError::SequenceStepNameMissing { index: 0 }),
+            "got: {error}"
+        );
+    }
+
+    /// Reading the same formal document through an offset makes it data, and
+    /// the missing `name` becomes an ordinal instead of an error.
+    #[test]
+    fn an_offset_turns_a_formal_document_into_data() {
+        let plan = plan_from(
+            "s.yaml",
+            "sequence:\n  - color: red\n  - color: blue\n",
+            "s.yaml -> sequence",
+        )
+        .unwrap();
+        assert_eq!(names(&plan), vec!["1", "2"]);
+        assert!(matches!(plan.source, SequenceSource::DataFile { .. }));
+    }
+
+    /// `null` is a typed error under *both* contracts: leniency coerces a
+    /// value that is something, it does not invent one.
+    #[test]
+    fn null_items_are_rejected_even_leniently() {
+        let error = plan_from("d.json", "[\"ok\", null]", "d.json").unwrap_err();
+        assert!(
+            matches!(error, CompositionError::SequenceNullItem { index: 1 }),
+            "got: {error}"
+        );
+    }
+
+    /// Generated names still dasherize into ids exactly as authored names do.
+    #[test]
+    fn generated_ordinal_names_still_produce_ids() {
+        let plan = plan_from("d.json", "[{\"a\": 1}, {\"a\": 2}]", "d.json").unwrap();
+        assert_eq!(
+            plan.steps.iter().map(|s| s.state.id.clone()).collect::<Vec<_>>(),
+            vec!["1", "2"]
+        );
+    }
+
+    // -- the retired `list:` shape ----------------------------------------
+
+    #[test]
+    fn a_root_that_is_neither_a_list_nor_a_sequence_is_rejected() {
+        let error = plan_from("d.yaml", "description: nothing here\n", "d.yaml").unwrap_err();
+        assert!(
+            matches!(error, CompositionError::SequenceExternalWrongType(_)),
+            "got: {error}"
+        );
+    }
+}
+
+// -- Phase 4: dynamic sources, list formats, empty-list behavior ----------
+
+mod dynamic_sources {
+    use super::*;
+
+    fn plan_from_frontmatter(
+        frontmatter: &[(&str, serde_json::Value)],
+    ) -> Result<SequencePlan, CompositionError> {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, frontmatter, "Prompt");
+        resolve_sequence_plan(&source).map(|plan| plan.expect("sequence key present"))
+    }
+
+    fn names(plan: &SequencePlan) -> Vec<String> {
+        plan.steps.iter().map(|s| s.name.clone()).collect()
+    }
+
+    /// A whole-value expression yielding a typed array is already a list of
+    /// entries — it must bypass `ListFormat` entirely, so an entry containing a
+    /// comma stays one entry rather than being re-split as CSV.
+    #[test]
+    fn typed_expression_arrays_bypass_list_classification() {
+        let plan = plan_from_frontmatter(&[
+            ("items", json!(["a,b", "c"])),
+            ("sequence", json!("{{ items }}")),
+        ])
+        .unwrap();
+        assert_eq!(names(&plan), vec!["a,b", "c"]);
+        assert!(matches!(plan.source, SequenceSource::Expression));
+    }
+
+    /// An expression yielding a *string* is classified — this is what makes the
+    /// CSV-by-default `ctx.*` list variables work without asking the author to
+    /// convert them first.
+    #[test]
+    fn every_list_format_is_accepted_from_a_string_expression() {
+        for (label, text) in [
+            ("csv", "a, b, c"),
+            ("tsv", "a\tb\tc"),
+            ("space", "a b c"),
+            ("lines", "a\nb\nc"),
+            ("crlf lines", "a\r\nb\r\nc"),
+            ("markdown unordered", "- a\n- b\n- c"),
+            ("markdown ordered", "1. a\n2. b\n3. c"),
+        ] {
+            let plan = plan_from_frontmatter(&[
+                ("raw", json!(text)),
+                ("sequence", json!("{{ raw }}")),
+            ])
+            .unwrap();
+            assert_eq!(names(&plan), vec!["a", "b", "c"], "for {label}");
+        }
+    }
+
+    /// A quoted delimiter inside a CSV entry is literal, not a boundary.
+    #[test]
+    fn quoted_csv_delimiters_survive_classification() {
+        let plan = plan_from_frontmatter(&[
+            ("raw", json!("\"a,b\", c")),
+            ("sequence", json!("{{ raw }}")),
+        ])
+        .unwrap();
+        assert_eq!(names(&plan), vec!["a,b", "c"]);
+    }
+
+    /// A single scalar is a one-item list, not an error.
+    #[test]
+    fn a_scalar_expression_result_is_a_single_step() {
+        let plan =
+            plan_from_frontmatter(&[("raw", json!("solo")), ("sequence", json!("{{ raw }}"))])
+                .unwrap();
+        assert_eq!(names(&plan), vec!["solo"]);
+    }
+
+    /// Expression sources are foreign data, so numeric entries coerce.
+    #[test]
+    fn expression_sources_normalize_leniently() {
+        let plan = plan_from_frontmatter(&[
+            ("items", json!([1, 2])),
+            ("sequence", json!("{{ items }}")),
+        ])
+        .unwrap();
+        assert_eq!(names(&plan), vec!["1", "2"]);
+    }
+
+    #[test]
+    fn a_failing_expression_is_a_typed_error() {
+        let error = plan_from_frontmatter(&[("sequence", json!("{{ nope( }}"))]).unwrap_err();
+        assert!(
+            matches!(error, CompositionError::SequenceExpressionFailed { .. }),
+            "got: {error}"
+        );
+    }
+
+    // -- empty static vs empty dynamic ------------------------------------
+
+    /// The ratified split: a static empty list is an authoring error, while a
+    /// dynamic source resolving to nothing is a graceful no-op that yields a
+    /// zero-step plan for the caller to report and exit `0` on.
+    #[test]
+    fn empty_static_errors_but_empty_dynamic_is_a_no_op() {
+        let static_error = plan_from_frontmatter(&[("sequence", json!([]))]).unwrap_err();
+        assert!(
+            matches!(static_error, CompositionError::SequenceEmpty),
+            "got: {static_error}"
+        );
+
+        for (label, frontmatter) in [
+            (
+                "empty typed array",
+                vec![("items", json!([])), ("sequence", json!("{{ items }}"))],
+            ),
+            (
+                "empty string",
+                vec![("raw", json!("")), ("sequence", json!("{{ raw }}"))],
+            ),
+            (
+                "whitespace-only string",
+                vec![("raw", json!("  \n ")), ("sequence", json!("{{ raw }}"))],
+            ),
+            (
+                "null result",
+                vec![("sequence", json!("{{ missing_key }}"))],
+            ),
+        ] {
+            let plan = plan_from_frontmatter(&frontmatter).unwrap();
+            assert!(
+                plan.steps.is_empty(),
+                "{label} must resolve to zero steps, got {:?}",
+                names(&plan)
+            );
+        }
+    }
+
+    /// An empty *data file* is dynamic too — its emptiness is a runtime fact,
+    /// not an authoring mistake.
+    #[test]
+    fn an_empty_data_file_resolves_to_zero_steps() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("d.json"), "[]").unwrap();
+        let source = make_source(&dir, &[("sequence", json!("d.json"))], "Prompt");
+        let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+        assert!(plan.steps.is_empty());
+    }
+
+    /// A *formal* sequence document is authored for sequences, so an empty
+    /// `sequence:` list there is still the typo it looks like.
+    #[test]
+    fn an_empty_formal_sequence_document_is_an_error() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("s.yaml"), "sequence: []\n").unwrap();
+        let source = make_source(&dir, &[("sequence", json!("s.yaml"))], "Prompt");
+        let error = resolve_sequence_plan(&source).unwrap_err();
+        assert!(matches!(error, CompositionError::SequenceEmpty), "got: {error}");
+    }
+
+    // -- shell sources ----------------------------------------------------
+
+    /// Without an approval-capable runner a `$( … )` source is a typed error,
+    /// never a silent unapproved execution.
+    #[test]
+    fn shell_sources_require_a_runner() {
+        let error = plan_from_frontmatter(&[("sequence", json!("$(ls)"))]).unwrap_err();
+        assert!(
+            matches!(error, CompositionError::SequenceShellFailed { ref command, .. } if command == "ls"),
+            "got: {error}"
+        );
+    }
+
+    /// With a runner, the command's stdout is classified like any other
+    /// textual list and normalized leniently.
+    #[test]
+    fn shell_output_is_classified_as_a_list() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("sequence", json!("$(echo one two)"))], "Prompt");
+
+        let runner = |command: &str| {
+            assert_eq!(command, "echo one two");
+            Ok("one\ntwo\n".to_string())
+        };
+        let plan = resolve_sequence_plan_with(
+            &source,
+            SequenceSourceOptions {
+                shell_runner: Some(&runner),
+            },
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(names(&plan), vec!["one", "two"]);
+        assert!(matches!(plan.source, SequenceSource::Shell));
+    }
+
+    /// A runner failure propagates as the typed shell error rather than being
+    /// swallowed into an empty sequence.
+    #[test]
+    fn a_failing_shell_runner_propagates() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("sequence", json!("$(false)"))], "Prompt");
+        let runner = |command: &str| {
+            Err(CompositionError::SequenceShellFailed {
+                command: command.to_string(),
+                source: crate::composition::error::SequenceShellCause::Exited {
+                    status: "exit status: 1".to_string(),
+                    stderr: "boom".to_string(),
+                },
+            })
+        };
+        let error = resolve_sequence_plan_with(
+            &source,
+            SequenceSourceOptions {
+                shell_runner: Some(&runner),
+            },
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                CompositionError::SequenceShellFailed {
+                    source: crate::composition::error::SequenceShellCause::Exited { .. },
+                    ..
+                }
+            ),
+            "got: {error}"
+        );
+    }
+}
+
+// -- Phase 4: formal `template` + `$schema` on step state -----------------
+
+mod formal_documents {
+    use super::*;
+
+    fn plan_from(contents: &str) -> Result<SequencePlan, CompositionError> {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("s.yaml"), contents).unwrap();
+        let source = make_source(&dir, &[("sequence", json!("s.yaml"))], "Prompt");
+        resolve_sequence_plan(&source).map(|plan| plan.expect("sequence key present"))
+    }
+
+    /// Template values land before generated fields, so a templated key is
+    /// ordinary authored state by the time ids and positions are made — and it
+    /// can be validated by `$schema` alongside the authored keys.
+    #[test]
+    fn templates_apply_before_generated_fields_and_satisfy_the_schema() {
+        let plan = plan_from(
+            r#"kind: sequence
+sequence:
+  - name: blue
+    color: blue
+    rank: 5
+  - name: red
+    color: red
+    rank: 3
+template:
+  desc: "{{ color }}({{ rank }})"
+$schema:
+  color: string(required)
+  rank: number(required)
+  desc: string(required)
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(plan.steps[0].state.extra["desc"], json!("blue(5)"));
+        assert_eq!(plan.steps[1].state.extra["desc"], json!("red(3)"));
+        // Generated fields are present and were not displaced by the template.
+        assert_eq!(plan.steps[0].state.index, 1);
+        assert_eq!(plan.steps[0].state.count, 2);
+        assert_eq!(plan.steps[0].state.id, "blue");
+    }
+
+    /// An item that already defines a templated key keeps its own value.
+    #[test]
+    fn an_item_value_wins_over_the_template() {
+        let plan = plan_from(
+            r#"sequence:
+  - name: one
+    desc: authored
+  - name: two
+template:
+  desc: "generated-{{ name }}"
+"#,
+        )
+        .unwrap();
+        assert_eq!(plan.steps[0].state.extra["desc"], json!("authored"));
+        assert_eq!(plan.steps[1].state.extra["desc"], json!("generated-two"));
+    }
+
+    /// A schema violation names the step index, its generated id, and the
+    /// failing property.
+    #[test]
+    fn a_schema_violation_reports_the_step_and_property() {
+        let error = plan_from(
+            r#"kind: sequence
+sequence:
+  - name: blue
+    color: blue
+  - name: red
+$schema:
+  color: string(required)
+"#,
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                CompositionError::SequenceStateSchemaViolation {
+                    index: 1, ref id, ref property, ..
+                } if id == "red" && property == "color"
+            ),
+            "got: {error}"
+        );
+    }
+
+    /// The schema judges the *state* portion only: executable and task keys
+    /// are not state and must not be validated as such.
+    #[test]
+    fn executable_keys_are_excluded_from_state_validation() {
+        let plan = plan_from(
+            r#"kind: sequence
+sequence:
+  - name: one
+    color: blue
+    shell: just test
+$schema:
+  color: string(required)
+"#,
+        )
+        .unwrap();
+
+        assert!(plan.steps[0].executable.is_some());
+        assert!(!plan.steps[0].state.extra.contains_key("shell"));
     }
 }
