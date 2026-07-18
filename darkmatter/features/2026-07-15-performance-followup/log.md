@@ -2,6 +2,7 @@
 implementation_5: "2026-07-17T14:19:23-07:00"
 implementation_6: "2026-07-17T17:33:52-07:00"
 implementation_7: "2026-07-17T18:34:13-07:00"
+implementation_8: "2026-07-17T21:31:30-07:00"
 deferred_perf_measurement: true
 ---
 
@@ -107,3 +108,44 @@ The files touched by this cycle are:
 - `darkmatter/features/2026-07-15-performance-followup/performance-compliance.md` — appended the review-7 inadmissible-host attempt record for the deferred compose-regression measurement.
 - `darkmatter/features/2026-07-15-performance-followup/review-7.md` — set `log`, `implemented`, and `implemented_by` frontmatter.
 - `darkmatter/features/2026-07-15-performance-followup/log.md` — this implementation log (`deferred_perf_measurement: true` retained; `implementation_7` timestamp set).
+
+## Implementation of Review Findings #8
+
+> **started at:** 2026-07-17T21:31:30-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-15-performance-followup/review-8.md'
+- this is iteration 8 of the review-to-implement cycle
+- review-8 contains **no new implementation findings** and one tracked production-readiness blocker:
+        - **Findings section verbatim:** "No new implementation findings. The tracked release-evidence gap above remains release-blocking; per the specification's deferred-measurement contract, it is not duplicated as a new implementation finding on every review iteration."
+        - **Tracked blocker (not a new finding):** the integrated compose-regression threshold remains unestablished — acceptance criteria 5 and 6 stay open because no admissible pass/fail determination exists
+        - review-8 also records that Review 7's cycle introduced no production-code or test-code change and closed no release gate, and that no new implementation defect or verification-level mismatch was found
+        - review-8 additionally notes a **schema-infrastructure** observation that is explicitly *not* a finding against this feature: the repository's `schemas/feature-review.yaml` is rejected as a standalone tagged schema because its `$schema` and `description` keys are unsupported. The review classifies this as drift outside this feature's scope, so no change is made here.
+- starting the work on 'assess-tracked-compose-regression-threshold' at 21:31:50
+        - re-read `review-8.md` end to end and confirmed the *Findings* section requests **no** code change, test addition, or verification-level correction — there is nothing to hand to an implementation subagent, so no subagent was dispatched
+        - the single production-readiness blocker is the integrated compose-regression threshold, which `review-8.md`, `spec.md` (*Benchmark and Evidence Contract*), and `performance-compliance.md` all classify as a deferred **performance measurement** owned by `performance-compliance.md`, not a review finding
+        - checked host admissibility against the predeclared contract (`performance-compliance.md` → *Admissibility and Threshold Contract*, condition 1: the 1-minute load must remain below **2.0** for the full capture, with no retained 5-second sample at or above 2.0):
+                - at 21:31:50 the 16-core host reported 1-minute load **30.19** (5-minute 33.45, 15-minute 26.43)
+                - on recheck at 21:32:27 the 1-minute load had **risen** to **36.52** (5-minute 34.59, 15-minute 27.12)
+                - both readings exceed the 2.0 ceiling by more than 15×, and the trend is upward, so admissibility condition 1 cannot be met and no legitimate capture could take place
+                - this is consistent with the review's own pre-capture check, which recorded 12.18 / 18.46 / 26.43 and likewise declined to run
+        - verified the three required build-arm SHAs remain committed objects (so the committed-pin condition, admissibility condition 5, can still be met on a quiet host), via `git cat-file -t`:
+                - `base` `51c1f16e10ffe825b56987573ba4eabc659c768e` → commit
+                - `before` `e15b1cc22b113a9b24058207d760cd879fa62eb6` → commit
+                - `after` `92a3d502eb65c30205a9a255dd13dd8dc6d0aabf` → commit
+        - decision: **defer** the measurement (no benchmark run, no threshold verdict claimed), record the declined attempt in `performance-compliance.md`, and keep `deferred_perf_measurement: true` on this log's frontmatter (already set)
+        - no lint or test gate was run: this cycle changes no Rust source, so per the spec's targeted-gate contract there is no impacted package area to build, test, or lint. Running an unscoped gate would produce no evidence about a change that does not exist.
+- work completed for 'assess-tracked-compose-regression-threshold' at 21:33:10
+
+### Successful Completion
+
+The implementation of review cycle 8 has completed successfully in approximately 1 minute 40 seconds. During this implementation all 1 review items were evaluated to see if they could be fixed as a part of this implementation cycle — review-8 carries **no new implementation findings** and one tracked production-readiness blocker: 0 were fixed, 1 was deferred (see reason below):
+
+- **Deferred — tracked production-readiness blocker: the integrated compose-regression threshold.** This is a deferred *performance measurement*, not a code finding. `review-8.md` states under *Findings* that there are "No new implementation findings" and that the tracked release-evidence gap "is not duplicated as a new implementation finding on every review iteration." Establishing a pass/fail against the feature's 5% integrated compose threshold requires an admissible quiet-host benchmark run whose predeclared contract (`performance-compliance.md` → *Admissibility and Threshold Contract*) requires the 1-minute load average to stay below **2.0** for the full capture. At assessment time the 16-core host reported a 1-minute load average of **30.19** (5-minute 33.45, 15-minute 26.43), rising to **36.52** on recheck — more than fifteen times the admissibility ceiling — so no legitimate measurement could take place. The declined attempt is recorded under *Attempt and Result Log → 2026-07-17 — Review 8 implementation cycle* in `performance-compliance.md`, and it maps back to the *Tracked Production-Readiness Blocker* section of `review-8.md`. The three required build-arm SHAs (`51c1f16e1` base, `e15b1cc22` before, `92a3d502e` after) remain committed objects, so the measurement can be completed unchanged once a quiet host is available; no owner ruling is outstanding.
+
+The files touched by this cycle are:
+
+- `darkmatter/features/2026-07-15-performance-followup/performance-compliance.md` — appended the review-8 inadmissible-host attempt record for the deferred compose-regression measurement.
+- `darkmatter/features/2026-07-15-performance-followup/review-8.md` — set `log`, `implemented`, and `implemented_by` frontmatter.
+- `darkmatter/features/2026-07-15-performance-followup/log.md` — this implementation log (`deferred_perf_measurement: true` retained; `implementation_8` timestamp set).
+
+No Rust source or test file was changed by this cycle.

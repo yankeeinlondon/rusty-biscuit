@@ -120,3 +120,37 @@ The review found no new implementation or verification-level defect. The
 review-6 documentation finding is closed, and the focused deterministic tests
 remain green. The integrated compose-regression threshold is nevertheless
 still not established, so acceptance criteria 5 and 6 remain open.
+
+### 2026-07-17 — Review 8 assessment
+
+**Declined before capture; inadmissible host.** The review-8 assessment checked
+the host before attempting the committed three-arm harness. It reported load
+averages of **12.18** (1 minute), **18.46** (5 minutes), and **26.43**
+(15 minutes), exceeding the 2.0 ceiling by more than six times. No benchmark was
+run and no threshold verdict was claimed from an inadmissible host.
+
+### 2026-07-17 — Review 8 implementation cycle
+
+**Declined before capture; inadmissible host.** The implementation cycle
+rechecked admissibility on the 16-core host at 21:31:50 and again at 21:32:27:
+
+| Reading | 1-minute | 5-minute | 15-minute |
+| --- | ---: | ---: | ---: |
+| 21:31:50 | 30.19 | 33.45 | 26.43 |
+| 21:32:27 | 36.52 | 34.59 | 27.12 |
+
+Both readings exceed the 2.0 ceiling by more than fifteen times, and the
+1-minute figure *rose* between them, so admissibility condition 1 cannot be met
+and no capture was started. No benchmark was run and no threshold result was
+claimed.
+
+Review 8 carries **no new implementation findings**; its *Findings* section
+states so explicitly and records that the tracked release-evidence gap "is not
+duplicated as a new implementation finding on every review iteration." The three
+required build-arm SHAs (`51c1f16e10ffe825b56987573ba4eabc659c768e`,
+`e15b1cc22b113a9b24058207d760cd879fa62eb6`,
+`92a3d502eb65c30205a9a255dd13dd8dc6d0aabf`) were re-verified as committed objects
+via `git cat-file -t`, so the committed-pin condition (admissibility condition 5)
+can still be met when a quiet host is available.
+
+**Current verdict:** not established. Acceptance criteria 5 and 6 remain open.
