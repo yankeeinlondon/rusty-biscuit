@@ -771,6 +771,17 @@ pub struct CompositionExecutionRequest {
     /// The captured text still reaches the caller through
     /// `SingleCompositionOutcome::final_output`.
     pub suppress_output_commit: bool,
+    /// Frames this run's live provider stdout under one task's bar.
+    ///
+    /// Set by the sequence task executor so a group member's assistant text is
+    /// attributed line by line, the same way its shell output is. `None` — every
+    /// non-sequence run — leaves the stream undecorated.
+    ///
+    /// Owned rather than borrowed because the stdout reader runs on its own
+    /// thread; owned rather than a handle on the process-wide coordinator
+    /// because attribution is per task and several sessions share that
+    /// coordinator at once.
+    pub task_frame_writer: Option<crate::render::TaskFrameWriter>,
 }
 
 /// Options for sequence execution at the CLI level.

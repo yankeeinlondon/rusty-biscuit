@@ -214,15 +214,26 @@ mod streaming {
     }
 
     #[test]
-    fn close_flushes_a_held_fragment_before_the_footer() {
+    fn flush_emits_a_held_fragment_without_waiting_for_a_newline() {
         let mut stream = TaskStream::new("t", TaskBar::Invisible, plain_term(60));
         assert!(stream.append("trailing fragment").is_empty());
+        let flushed = stream.flush();
+        assert!(flushed[0].contains("trailing fragment"), "got {flushed:?}");
+        assert!(stream.flush().is_empty(), "flush must not repeat itself");
+    }
+
+    #[test]
+    fn close_emits_the_footer_alone() {
+        let mut stream = TaskStream::new("t", TaskBar::Invisible, plain_term(60));
+        assert!(stream.append("trailing fragment").is_empty());
+        // The fragment is task data and belongs on the data channel; letting
+        // `close` carry it would put it on stderr with the footer.
         let frames = stream.close(TaskStreamOutcome::Failed, Duration::from_secs(2));
-        assert!(frames[0].contains("trailing fragment"), "got {frames:?}");
         assert!(
-            frames.last().is_some_and(|line| line.contains("failed")),
-            "got {frames:?}"
+            !frames.iter().any(|f| f.contains("trailing fragment")),
+            "close leaked held data onto the status channel: {frames:?}"
         );
+        assert!(frames[0].contains("failed"), "got {frames:?}");
     }
 
     #[test]
@@ -267,16 +278,125 @@ mod sink {
 
     use super::*;
 
+    /// One recorded call, tagged with the channel it arrived on.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Channel {
+        Status,
+        Data,
+    }
+
     /// A sink that records whole write calls, so a torn write is visible as a
     /// split group rather than needing a timing assertion.
     #[derive(Default)]
     struct RecordingSink {
-        writes: Mutex<Vec<Vec<String>>>,
+        writes: Mutex<Vec<(Channel, Vec<String>)>>,
+    }
+
+    impl RecordingSink {
+        fn calls(&self) -> Vec<(Channel, Vec<String>)> {
+            self.writes.lock().expect("sink poisoned").clone()
+        }
+
+        /// Every line that landed on `channel`, in arrival order.
+        fn lines(&self, channel: Channel) -> Vec<String> {
+            self.calls()
+                .into_iter()
+                .filter(|(seen, _)| *seen == channel)
+                .flat_map(|(_, frames)| frames)
+                .collect()
+        }
     }
 
     impl TaskStreamSink for RecordingSink {
         fn write_frames(&self, frames: &[String]) {
-            self.writes.lock().expect("sink poisoned").push(frames.to_vec());
+            self.writes
+                .lock()
+                .expect("sink poisoned")
+                .push((Channel::Status, frames.to_vec()));
+        }
+
+        fn write_data_frames(&self, frames: &[String]) {
+            self.writes
+                .lock()
+                .expect("sink poisoned")
+                .push((Channel::Data, frames.to_vec()));
+        }
+    }
+
+    fn live<'a>(label: &str, bar: TaskBar, sink: &'a RecordingSink) -> TaskLiveOutput<'a> {
+        TaskLiveOutput::new(TaskStream::new(label, bar, plain_term(60)), sink)
+    }
+
+    #[test]
+    fn the_header_and_footer_take_the_status_channel() {
+        let sink = RecordingSink::default();
+        let stream = live("build", TaskBar::Invisible, &sink);
+        stream.open();
+        stream.close(TaskStreamOutcome::Succeeded, Duration::from_secs(1));
+
+        let status = sink.lines(Channel::Status).join("\n");
+        assert!(status.contains("▶ build"), "got {status:?}");
+        assert!(status.contains("succeeded"), "got {status:?}");
+        assert!(
+            sink.lines(Channel::Data).is_empty(),
+            "status framing leaked onto the data channel"
+        );
+    }
+
+    #[test]
+    fn body_output_takes_the_data_channel() {
+        let sink = RecordingSink::default();
+        let stream = live("build", TaskBar::Invisible, &sink);
+        stream.open();
+        stream.emit("fetched");
+        stream.close(TaskStreamOutcome::Succeeded, Duration::from_secs(1));
+
+        let data = sink.lines(Channel::Data).join("\n");
+        assert!(data.contains("fetched"), "got {data:?}");
+        let status = sink.lines(Channel::Status).join("\n");
+        assert!(
+            !status.contains("fetched"),
+            "task data leaked onto the status channel: {status:?}"
+        );
+    }
+
+    #[test]
+    fn emit_does_not_wait_for_a_newline_the_payload_will_never_carry() {
+        let sink = RecordingSink::default();
+        let stream = live("t", TaskBar::Invisible, &sink);
+        // Captured stdout arrives with its transport newline already removed, so
+        // holding the last line for a chunk that never comes would drop it.
+        stream.emit("no trailing newline");
+        assert!(
+            sink.lines(Channel::Data)
+                .iter()
+                .any(|line| line.contains("no trailing newline")),
+            "emit held a payload that will receive no further chunks"
+        );
+    }
+
+    #[test]
+    fn an_empty_payload_writes_nothing_at_all() {
+        let sink = RecordingSink::default();
+        let stream = live("t", TaskBar::Invisible, &sink);
+        stream.emit("");
+        assert!(
+            sink.calls().is_empty(),
+            "a task that produced no output still wrote a frame"
+        );
+    }
+
+    #[test]
+    fn body_frames_carry_the_same_bar_as_the_header() {
+        let sink = RecordingSink::default();
+        let stream = live("t", TaskBar::for_index(0), &sink);
+        stream.open();
+        stream.emit("body line");
+        for line in sink.calls().into_iter().flat_map(|(_, frames)| frames) {
+            assert!(
+                strip_ansi(&line).starts_with("│ "),
+                "a frame dropped its bar: {line:?}"
+            );
         }
     }
 
@@ -287,29 +407,29 @@ mod sink {
             for index in 0..8 {
                 let sink = &sink;
                 scope.spawn(move || {
-                    let mut stream =
-                        TaskStream::new(format!("task {index}"), TaskBar::for_index(index), color_term(60));
-                    sink.write_frames(&stream.open());
-                    sink.write_frames(&stream.append("line one\nline two\n"));
-                    sink.write_frames(&stream.close(
-                        TaskStreamOutcome::Succeeded,
-                        Duration::from_millis(10),
-                    ));
+                    let stream = TaskLiveOutput::new(
+                        TaskStream::new(
+                            format!("task {index}"),
+                            TaskBar::for_index(index),
+                            color_term(60),
+                        ),
+                        sink,
+                    );
+                    stream.open();
+                    stream.append("line one\nline two\n");
+                    stream.close(TaskStreamOutcome::Succeeded, Duration::from_millis(10));
                 });
             }
         });
 
-        let writes = sink.writes.into_inner().expect("sink poisoned");
+        let writes = sink.calls();
         assert_eq!(writes.len(), 24, "expected 3 writes per task");
         // Attribution is per-write, not per-position: every group of frames
         // belongs to exactly one task.
-        for group in &writes {
-            let labelled: Vec<&String> = group
+        for (_, group) in &writes {
+            let names: std::collections::HashSet<String> = group
                 .iter()
                 .filter(|line| line.contains("task "))
-                .collect();
-            let names: std::collections::HashSet<String> = labelled
-                .iter()
                 .map(|line| {
                     let stripped = strip_ansi(line);
                     let start = stripped.find("task ").expect("label present");

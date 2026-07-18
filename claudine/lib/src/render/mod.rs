@@ -24,7 +24,8 @@ pub use final_message::FinalMessage;
 pub use metrics_report::MetricsReport;
 pub use stream::StreamRenderable;
 pub use task_stream::{
-    TASK_PALETTE, TaskBar, TaskStream, TaskStreamFrame, TaskStreamOutcome, TaskStreamSink,
+    TASK_PALETTE, TaskBar, TaskFrameWriter, TaskLiveOutput, TaskStream, TaskStreamFrame,
+    TaskStreamOutcome, TaskStreamSink,
 };
 pub use thinking_stream::ThinkingStream;
 pub use prompt::{

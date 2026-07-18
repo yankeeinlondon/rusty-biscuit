@@ -192,6 +192,9 @@ impl Fixture {
             prompt: wiring.prompt,
             interrupt: wiring.interrupt,
             stream: wiring.stream,
+            // Group scheduling builds a member's live stream from `stream`; a
+            // lone task under test has no enclosing scheduler to give it one.
+            live: None,
         }
         .run()
     }
@@ -2497,30 +2500,69 @@ mod group_framing {
     use super::*;
 
     /// Records whole write calls, so a torn write shows up as a split group.
+    /// Which of the sink's two channels a write arrived on.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Channel {
+        /// Headers, footers, warnings — stderr in production.
+        Status,
+        /// Task and provider data — stdout in production.
+        Data,
+    }
+
     #[derive(Default)]
     struct FrameSink {
-        writes: Mutex<Vec<Vec<String>>>,
+        writes: Mutex<Vec<(Channel, Vec<String>)>>,
     }
 
     impl FrameSink {
-        fn writes(&self) -> Vec<Vec<String>> {
+        fn writes(&self) -> Vec<(Channel, Vec<String>)> {
             self.writes.lock().unwrap().clone()
         }
 
-        /// Every rendered line, flattened.
+        /// Every rendered line on either channel, flattened.
         fn lines(&self) -> Vec<String> {
-            self.writes().into_iter().flatten().collect()
+            self.writes()
+                .into_iter()
+                .flat_map(|(_, frames)| frames)
+                .collect()
+        }
+
+        /// Every rendered line on one channel, flattened.
+        fn channel_lines(&self, channel: Channel) -> Vec<String> {
+            self.writes()
+                .into_iter()
+                .filter(|(seen, _)| *seen == channel)
+                .flat_map(|(_, frames)| frames)
+                .collect()
         }
 
         /// [`Self::lines`] with SGR sequences removed, for content assertions.
         fn visible_lines(&self) -> Vec<String> {
             self.lines().iter().map(|line| strip_ansi(line)).collect()
         }
+
+        /// [`Self::channel_lines`] with SGR sequences removed.
+        fn visible_channel_lines(&self, channel: Channel) -> Vec<String> {
+            self.channel_lines(channel)
+                .iter()
+                .map(|line| strip_ansi(line))
+                .collect()
+        }
     }
 
     impl TaskStreamSink for FrameSink {
         fn write_frames(&self, frames: &[String]) {
-            self.writes.lock().unwrap().push(frames.to_vec());
+            self.writes
+                .lock()
+                .unwrap()
+                .push((Channel::Status, frames.to_vec()));
+        }
+
+        fn write_data_frames(&self, frames: &[String]) {
+            self.writes
+                .lock()
+                .unwrap()
+                .push((Channel::Data, frames.to_vec()));
         }
     }
 
@@ -2674,7 +2716,7 @@ mod group_framing {
 
         fixture.execute(&wiring);
 
-        for group in sink.writes() {
+        for (_, group) in sink.writes() {
             let visible: Vec<String> = group.iter().map(|line| strip_ansi(line)).collect();
             let owners: std::collections::HashSet<&str> = names
                 .iter()
@@ -2710,6 +2752,136 @@ mod group_framing {
             json!([["a", "b"]]),
             "silencing the frames must not change the run"
         );
+        assert!(
+            sink_free(&outcome),
+            "silencing must not change what the task captured"
+        );
+    }
+
+    /// A task's captured stdout is unaffected by whether frames were rendered.
+    fn sink_free(outcome: &TaskOutcome) -> bool {
+        !outcome.stdout.contains('│')
+    }
+
+    /// One framed line's payload, with the bar gutter removed.
+    fn body_text(line: &str) -> String {
+        let visible = strip_ansi(line);
+        visible
+            .split_once('│')
+            .map_or(visible.clone(), |(_, rest)| rest.to_string())
+            .trim()
+            .to_string()
+    }
+
+    #[test]
+    fn a_members_body_output_lands_on_the_data_channel_not_the_status_one() {
+        let sink = FrameSink::default();
+        let outcome = run(&["alpha", "bravo"], "parallel", &sink);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        let data = sink.visible_channel_lines(Channel::Data);
+        let status = sink.visible_channel_lines(Channel::Status);
+        for name in ["alpha", "bravo"] {
+            assert!(
+                data.iter().any(|line| body_text(line) == name),
+                "task `{name}` produced no framed body line: {data:?}"
+            );
+        }
+        // The status channel carries only the brackets, never the payload.
+        assert!(
+            status.iter().all(|line| line.contains('▶')
+                || line.contains("succeeded")
+                || line.contains("failed")
+                || line.contains("interrupted")),
+            "task data leaked onto the status channel: {status:?}"
+        );
+    }
+
+    #[test]
+    fn every_body_line_carries_its_own_tasks_bar() {
+        let sink = FrameSink::default();
+        run(&["alpha", "bravo", "charlie"], "parallel", &sink);
+
+        // The bar prefix each body line carries must be the same prefix that
+        // task's header carried — that is the whole attribution contract.
+        let prefix = |line: &String| line[..line.find('│').map_or(0, |i| i + '│'.len_utf8())].to_string();
+        for (channel, frames) in sink.writes() {
+            if channel != Channel::Data {
+                continue;
+            }
+            for frame in &frames {
+                let name = body_text(frame);
+                let header = sink
+                    .channel_lines(Channel::Status)
+                    .into_iter()
+                    .find(|line| strip_ansi(line).contains(&format!("▶ {name}")))
+                    .unwrap_or_else(|| panic!("no header for body line {frame:?}"));
+                assert_eq!(
+                    prefix(frame),
+                    prefix(&header),
+                    "body line {frame:?} does not carry its task's bar"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_serial_members_body_shares_the_invisible_bar_geometry() {
+        let sink = FrameSink::default();
+        run(&["alpha", "bravo"], "serial", &sink);
+
+        let data = sink.visible_channel_lines(Channel::Data);
+        assert!(
+            data.iter().all(|line| !line.contains('│')),
+            "serial body output drew a visible bar: {data:?}"
+        );
+        // Same left edge as a parallel body line: two columns of gutter.
+        for line in &data {
+            assert!(
+                line.starts_with("  ") && !line.starts_with("   "),
+                "serial body output shifted its left edge: {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn partial_output_from_a_failing_task_is_still_framed() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), group_step(&["bad-task"], "parallel"));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default()
+            .stdout_for("bad-task", "partial work")
+            .failing("bad-task");
+        let runtime = Arc::new(RuntimeState::new());
+        let sink = FrameSink::default();
+        let mut wiring = Wiring::new(&recorder, &shell).with_stream(&sink);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        // What the work managed to produce before failing is exactly what a
+        // reader needs; it is framed even though it never reaches `outputs`.
+        let data = sink.visible_channel_lines(Channel::Data);
+        assert!(
+            data.iter().any(|line| line.contains("partial work")),
+            "a failed task's partial output was never framed: {data:?}"
+        );
+    }
+
+    #[test]
+    fn framing_never_reaches_the_captured_payload() {
+        let sink = FrameSink::default();
+        let outcome = run(&["alpha", "bravo"], "parallel", &sink);
+
+        // The bar is display decoration; `outputs` is the undecorated stdout the
+        // frames were rendered from (spec → *Output capture boundary*).
+        assert!(
+            !sink.visible_channel_lines(Channel::Data).is_empty(),
+            "nothing was framed, so this proves nothing"
+        );
+        assert!(sink_free(&outcome), "framing leaked into {:?}", outcome.stdout);
     }
 }
 

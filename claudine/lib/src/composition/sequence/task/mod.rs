@@ -54,7 +54,7 @@ use super::model::RuntimeMutation;
 use super::preflight::{PreflightAction, PreflightGraph, PreflightTask};
 use super::reserved;
 use crate::harness::parse_timeout;
-use crate::render::{TaskStreamOutcome, TaskStreamSink};
+use crate::render::{TaskLiveOutput, TaskStreamOutcome, TaskStreamSink};
 
 pub use group::GroupTaskResult;
 pub use shell::{
@@ -194,6 +194,12 @@ pub struct PromptTaskRequest {
     /// A parallel group member passes its private buffer here, so a sibling's
     /// mutation is not observable mid-group (spec → *Snapshot Isolation*).
     pub runtime: Option<std::sync::Arc<RuntimeState>>,
+    /// Frames the launched provider's live stdout under this task's bar.
+    ///
+    /// The runner hands it to the wrapper pipeline, which carries it to the
+    /// thread draining the child's stdout. `None` leaves the stream
+    /// undecorated, which is what a `--silent` run selects.
+    pub frame_writer: Option<crate::render::TaskFrameWriter>,
 }
 
 /// What a `prompt:` task's runner reports back.
@@ -282,9 +288,17 @@ pub struct TaskExecution<'a> {
     ///
     /// `None` silences the framing entirely — that is what `--silent` selects,
     /// and what a caller executing tasks outside a terminal wants. Only group
-    /// scheduling writes here: a lone sequence step already has the step
-    /// header/footer for attribution and needs no bar.
-    pub stream: Option<&'a dyn TaskStreamSink>,
+    /// scheduling reads this: it is the sink a member's [`TaskLiveOutput`] is
+    /// bound to.
+    pub stream: Option<&'a std::sync::Arc<dyn TaskStreamSink>>,
+    /// This task's own attributed output stream.
+    ///
+    /// Everything the task's primary action produces goes through here, so a
+    /// reader can attribute a body line and not just the header and footer that
+    /// bracket it. The scheduler owns header/footer timing; this field carries
+    /// only the data channel, which is why a lone sequence step can supply one
+    /// with an invisible bar and no header at all.
+    pub live: Option<&'a TaskLiveOutput>,
 }
 
 impl TaskExecution<'_> {
@@ -479,6 +493,10 @@ impl TaskExecution<'_> {
             operation: self.task.operation.clone(),
             flow: self.task.flow.clone(),
             runtime: self.runtime.map(std::sync::Arc::clone),
+            // The provider's text is framed *live*, on its way to the terminal.
+            // The final assistant text is deliberately not re-emitted here: the
+            // wrapper already wrote it, so a second emission would double-print.
+            frame_writer: self.live.map(TaskLiveOutput::rendered_writer),
         };
 
         match self.prompt.run(&request) {
@@ -538,7 +556,12 @@ impl TaskExecution<'_> {
                     ));
                 }
             };
-            collected.push(trim_transport_newline(&output.stdout).to_string());
+            let text = trim_transport_newline(&output.stdout).to_string();
+            // Emitted per command, before the failure checks below: a command
+            // that then timed out or exited non-zero still produced this, and
+            // partial output is exactly what a reader needs to see why.
+            self.emit_live(&text);
+            collected.push(text);
 
             if output.interrupted {
                 return PrimaryOutcome::interrupted(collected.join("\n"));
@@ -607,8 +630,15 @@ impl TaskExecution<'_> {
             // A side effect that returns nothing contributes the empty string,
             // keeping one `outputs` entry per executed task.
             Ok(Value::Null) => PrimaryOutcome::succeeded(String::new()),
-            Ok(Value::String(text)) => PrimaryOutcome::succeeded(text),
-            Ok(other) => PrimaryOutcome::succeeded(other.to_string()),
+            Ok(Value::String(text)) => {
+                self.emit_live(&text);
+                PrimaryOutcome::succeeded(text)
+            }
+            Ok(other) => {
+                let text = other.to_string();
+                self.emit_live(&text);
+                PrimaryOutcome::succeeded(text)
+            }
             Err(info) => PrimaryOutcome::failed(TaskDiagnostic {
                 stage: TaskStage::Primary,
                 info,
@@ -735,6 +765,18 @@ impl TaskExecution<'_> {
                 value,
             })
             .collect()
+    }
+
+    /// Put one captured payload into this task's attributed stream.
+    ///
+    /// Called with the *undecorated* text the task produced — the same bytes
+    /// that reach `outputs`. The bar is added on the way to the terminal only,
+    /// which is what keeps the capture boundary clean (spec → *Output capture
+    /// boundary*).
+    fn emit_live(&self, text: &str) {
+        if let Some(live) = self.live {
+            live.emit(text);
+        }
     }
 
     fn interrupted(&self) -> bool {

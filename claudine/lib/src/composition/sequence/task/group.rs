@@ -54,7 +54,7 @@ use super::super::super::lifecycle::executor::StackExecutionContext;
 use super::super::super::runtime_state::{OUTPUTS_KEY, RuntimeSnapshot, RuntimeState};
 use super::super::preflight::{GroupExecution, PreflightGroup, PreflightTask};
 use super::{PrimaryOutcome, TaskDiagnostic, TaskExecution, TaskOutcome, TaskStage, TaskStatus};
-use crate::render::{TaskBar, TaskStream};
+use crate::render::{TaskBar, TaskLiveOutput, TaskStream};
 
 /// A poisoned result slot means a member task panicked; the group's result is
 /// incomplete and cannot be reported honestly.
@@ -82,25 +82,21 @@ pub struct GroupTaskResult {
 }
 
 impl TaskExecution<'_> {
-    /// The attributed stream for one member task, when a sink is wired.
+    /// The attributed live stream for one member task, when a sink is wired.
     ///
     /// `None` — the `--silent` shape — costs nothing: no frame is rendered at
     /// all, rather than rendered and dropped.
-    fn task_stream(&self, task: &PreflightTask, bar: TaskBar) -> Option<TaskStream> {
-        self.stream.map(|_| {
-            TaskStream::new(
-                task.name.clone().unwrap_or_else(|| task.label.clone()),
-                bar,
-                self.stack.term.clone(),
+    fn task_stream(&self, task: &PreflightTask, bar: TaskBar) -> Option<TaskLiveOutput> {
+        self.stream.map(|sink| {
+            TaskLiveOutput::new(
+                TaskStream::new(
+                    task.name.clone().unwrap_or_else(|| task.label.clone()),
+                    bar,
+                    self.stack.term.clone(),
+                ),
+                std::sync::Arc::clone(sink),
             )
         })
-    }
-
-    /// Hand a task's frames to the synchronized sink as one indivisible write.
-    fn write_frames(&self, frames: Option<Vec<String>>) {
-        if let (Some(sink), Some(frames)) = (self.stream, frames) {
-            sink.write_frames(&frames);
-        }
     }
 
     /// Schedule a group's tasks and report the group as one primary outcome.
@@ -145,8 +141,10 @@ impl TaskExecution<'_> {
             // Serial work shares the parallel geometry with nothing drawn in the
             // gutter, so switching between the two modes does not shift the
             // stream sideways (spec → *Reporting Concurrency*).
-            let mut stream = self.task_stream(task, TaskBar::Invisible);
-            self.write_frames(stream.as_mut().map(TaskStream::open));
+            let stream = self.task_stream(task, TaskBar::Invisible);
+            if let Some(stream) = &stream {
+                stream.open();
+            }
             // Rebuilt per task, not once per group: a serial member reads the
             // `set` writes and the `outputs` entry its predecessor produced.
             let member_state = match self.member_state(variables) {
@@ -161,15 +159,14 @@ impl TaskExecution<'_> {
                 state: &member_state,
                 stack: scope_stack,
                 overlay: Some(scope_overlay),
+                live: stream.as_ref(),
                 ..*self
             };
             let outcome = member.run();
             let duration = started.elapsed();
-            self.write_frames(
-                stream
-                    .as_mut()
-                    .map(|stream| stream.close(outcome.status.into(), duration)),
-            );
+            if let Some(stream) = &stream {
+                stream.close(outcome.status.into(), duration);
+            }
             results.push(GroupTaskResult {
                 name: task.name.clone().unwrap_or_else(|| task.label.clone()),
                 status: outcome.status,
@@ -259,8 +256,10 @@ impl TaskExecution<'_> {
                         // Each concurrent task takes its own palette entry, so
                         // interleaved frames stay attributable without relying
                         // on arrival order.
-                        let mut stream = self.task_stream(task, TaskBar::for_index(index));
-                        self.write_frames(stream.as_mut().map(TaskStream::open));
+                        let stream = self.task_stream(task, TaskBar::for_index(index));
+                        if let Some(stream) = &stream {
+                            stream.open();
+                        }
                         // The stack's cell must be the member's buffer too: a
                         // lifecycle `set` inside the task accumulates through the
                         // stack, not through `TaskExecution::runtime`.
@@ -271,6 +270,7 @@ impl TaskExecution<'_> {
                             stack: &member_stack,
                             overlay: Some(scope_overlay),
                             runtime: Some(&buffers[index]),
+                            live: stream.as_ref(),
                             ..*self
                         };
                         // A sibling's failure never cancels in-flight work:
@@ -278,11 +278,9 @@ impl TaskExecution<'_> {
                         // letting it land in its slot.
                         let outcome = member.run();
                         let duration = started.elapsed();
-                        self.write_frames(
-                            stream
-                                .as_mut()
-                                .map(|stream| stream.close(outcome.status.into(), duration)),
-                        );
+                        if let Some(stream) = &stream {
+                            stream.close(outcome.status.into(), duration);
+                        }
                         *slots[index].lock().expect(SLOT_POISONED) =
                             Some(MemberRun { duration, outcome });
                     }
