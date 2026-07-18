@@ -588,6 +588,7 @@ fn empty_materialized_prompt() -> MaterializedHarnessPrompt {
         env_overrides: Vec::new(),
         inline_closure_plan: None,
         live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&serde_json::Value::Null),
+        runtime_state: std::rc::Rc::new(claudine::composition::RuntimeState::new()),
     }
 }
 
@@ -1185,6 +1186,11 @@ fn classify_attempt_phase(
         }
         return Err(eyre!("{fail_msg}"));
     }
+
+    // The run succeeded, so its output joins `outputs` now — before the
+    // success event fires, so `success`/`finalize` observe it and a later
+    // iteration, step, or standalone `{{ last(outputs) }}` reads it back.
+    commit_run_output(&materialized, &outcome.final_response);
 
     // A successful provider run proceeds to the success lifecycle event.
     // The `success.stack` may end in a flow-control action — either a direct

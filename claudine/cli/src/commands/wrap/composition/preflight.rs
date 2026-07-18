@@ -109,6 +109,7 @@ pub(super) fn emit_preflight_blocked_and_finalize(
         frontmatter,
         // Single pre-flight `blocked` event — no later event shares this state.
         live_frontmatter: None,
+        runtime_state: None,
         err: Some(&err_info),
         timing: Some(&timing),
         current: Some(&current),

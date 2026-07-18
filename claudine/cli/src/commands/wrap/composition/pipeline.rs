@@ -206,6 +206,7 @@ fn resolve_selection_and_launch(
             agent_perf: None,
             iteration_signals: None,
             terminal_signal: None,
+            final_output: None,
         };
         if let Some(collector) = attempt.perf_collector.take() {
             crate::perf::emit_report(&collector.into_report());
@@ -1148,6 +1149,7 @@ fn route_initialize(
                             agent_perf: None,
                             iteration_signals: None,
                             terminal_signal: None,
+                            final_output: None,
                         },
                     )));
                 }
@@ -1391,6 +1393,7 @@ fn provider_run_handoff(
         // owned by the harness loop, which re-materializes frontmatter before
         // its own events fire.
         live_frontmatter: None,
+        runtime_state: None,
         err: None,
         timing: Some(&lifecycle_timing),
         current: Some(&lifecycle_current),

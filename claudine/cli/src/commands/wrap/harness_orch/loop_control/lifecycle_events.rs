@@ -356,6 +356,10 @@ pub(super) fn build_lifecycle_stack_context_for_materialized<'a>(
         // frontmatter mutation is visible to a later `success`/`finalize`
         // event-time interpolation (review-2 cross-event contract).
         live_frontmatter: Some(&materialized.live_frontmatter),
+        // Invocation-scoped, unlike the per-attempt live cell above: a `set`
+        // written here survives re-materialization and (for a sequence) the
+        // step boundary.
+        runtime_state: Some(&materialized.runtime_state),
         err,
         timing,
         current,
@@ -371,6 +375,24 @@ pub(super) fn build_lifecycle_stack_context_for_materialized<'a>(
         messaging,
         settings,
     }
+}
+
+/// Commit a completed run's captured stdout as the next `outputs` entry.
+///
+/// Called on the success path only, *before* the `success` event fires, which
+/// is what gives the lifecycle hooks their specified temporal view: `success`
+/// and `finalize` see the entry this run produced, while `initialize`/`start`
+/// (and `failure`, which never reaches here) see only prior entries.
+///
+/// The entry is published to the per-attempt live cell as well, so an
+/// event-time `{{ last(outputs) }}` resolves against the same array a later
+/// composition will be handed.
+pub(super) fn commit_run_output(materialized: &MaterializedHarnessPrompt, stdout: &str) {
+    materialized.runtime_state.append_output(stdout);
+    materialized.live_frontmatter.borrow_mut().insert(
+        claudine::composition::OUTPUTS_KEY.to_string(),
+        materialized.runtime_state.outputs_value(),
+    );
 }
 
 /// Capture the lifecycle stack-only `timing`/`current` globals for an event.

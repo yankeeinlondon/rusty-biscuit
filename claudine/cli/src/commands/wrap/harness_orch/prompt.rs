@@ -13,6 +13,7 @@ use super::{HarnessPromptMode, HarnessPromptState, MaterializedHarnessPrompt};
 
 pub(crate) fn materialized_harness_prompt_from_prepared(
     prepared: &claudine::composition::PreparedComposition,
+    runtime_state: std::rc::Rc<claudine::composition::RuntimeState>,
 ) -> MaterializedHarnessPrompt {
     let inline_closure_plan = match &prepared.closure {
         claudine::composition::CompositionClosurePlan::Inline(plan) => Some(plan.clone()),
@@ -27,6 +28,7 @@ pub(crate) fn materialized_harness_prompt_from_prepared(
         env_overrides: Vec::new(),
         inline_closure_plan,
         live_frontmatter,
+        runtime_state,
     }
 }
 
@@ -34,8 +36,14 @@ pub(crate) fn materialize_passthrough_harness_seed(
     source_path: &Path,
     prompt: String,
     shell_cwd: Option<&Path>,
+    runtime_state: std::rc::Rc<claudine::composition::RuntimeState>,
 ) -> Result<MaterializedHarnessPrompt> {
-    super::super::overlay::materialize_passthrough_harness_seed(source_path, prompt, shell_cwd)
+    super::super::overlay::materialize_passthrough_harness_seed(
+        source_path,
+        prompt,
+        shell_cwd,
+        runtime_state,
+    )
 }
 
 pub(crate) fn find_wrapper_harness_source(
@@ -204,11 +212,23 @@ pub(crate) fn materialize_harness_prompt(
         &state.overlay,
     );
 
+    // Re-materialization re-reads the document from disk, so the accumulated
+    // runtime layer has to be re-applied on top of the caller's setters or a
+    // loop iteration would silently roll back every `set` and lose `outputs`.
+    let rematerialize = claudine::composition::RematerializeInputs {
+        set_overrides: Some(claudine::composition::layered_set_overrides(
+            state.rematerialize.set_overrides.as_ref(),
+            Some(&state.runtime_state.snapshot()),
+            None,
+        )),
+        ..state.rematerialize.clone()
+    };
+
     let (mut prompt, frontmatter, env_overrides, inline_closure_plan) = match state.mode {
         HarnessPromptMode::Passthrough => {
             let options = apply_rematerialize_inputs(
                 claudine::composition::bind_agent_workspace(
-                    rematerialize_compose_options(&state.rematerialize),
+                    rematerialize_compose_options(&rematerialize),
                     &state.source_path,
                     Some(child_cwd),
                 )
@@ -217,7 +237,7 @@ pub(crate) fn materialize_harness_prompt(
                         .iter()
                         .copied(),
                 ),
-                &state.rematerialize,
+                &rematerialize,
             );
             let (composed, _report) = effective_markdown.compose_with(options)?;
             let prompt = state.base_prompt.clone().ok_or_else(|| {
@@ -242,7 +262,7 @@ pub(crate) fn materialize_harness_prompt(
             // spans resolve here, before the run, and bake to empty.
             let options = apply_rematerialize_inputs(
                 claudine::composition::bind_agent_workspace(
-                    rematerialize_compose_options(&state.rematerialize),
+                    rematerialize_compose_options(&rematerialize),
                     &state.source_path,
                     Some(child_cwd),
                 )
@@ -259,7 +279,7 @@ pub(crate) fn materialize_harness_prompt(
                 .with_incidental_newline_mode(
                     darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve,
                 ),
-                &state.rematerialize,
+                &rematerialize,
             );
             let (composed, _report) = effective_markdown.compose_with(options)?;
             let body = composed.content().to_string();
@@ -284,13 +304,13 @@ pub(crate) fn materialize_harness_prompt(
             let prepared = claudine::composition::prepare_inline(
                 &source,
                 claudine::composition::PrepareOptions {
-                    set_overrides: state.rematerialize.set_overrides.clone(),
-                    pre_approved_commands: state.rematerialize.pre_approved_commands.clone(),
-                    file_ref_fallback_dir: state.rematerialize.file_ref_fallback_dir.clone(),
+                    set_overrides: rematerialize.set_overrides.clone(),
+                    pre_approved_commands: rematerialize.pre_approved_commands.clone(),
+                    file_ref_fallback_dir: rematerialize.file_ref_fallback_dir.clone(),
                     // Carry the resolved `AGENT`/`MODEL` env so `ctx.agent`/
                     // `ctx.model` in the re-materialized body resolve to the run's
                     // provider instead of the `unknown`/`default` fallbacks.
-                    env_overrides: state.rematerialize.env_overrides.clone(),
+                    env_overrides: rematerialize.env_overrides.clone(),
                     ..claudine::composition::PrepareOptions::default()
                 },
             )?;
@@ -322,6 +342,7 @@ pub(crate) fn materialize_harness_prompt(
         env_overrides,
         inline_closure_plan,
         live_frontmatter,
+        runtime_state: std::rc::Rc::clone(&state.runtime_state),
     })
 }
 
@@ -342,6 +363,7 @@ mod tests {
             next_prompt_override: None,
             next_resume_session_id: None,
             rematerialize,
+            runtime_state: std::rc::Rc::new(claudine::composition::RuntimeState::new()),
         }
     }
 

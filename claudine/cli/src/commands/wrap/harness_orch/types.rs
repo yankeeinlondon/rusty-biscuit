@@ -35,6 +35,14 @@ pub(crate) struct HarnessPromptState {
     /// [`PreparedComposition::rematerialize`][claudine::composition::PreparedComposition].
     /// Empty for direct-wrapper passthrough runs, which have no compose params.
     pub(crate) rematerialize: claudine::composition::RematerializeInputs,
+    /// The invocation-local runtime state cell.
+    ///
+    /// Lives here rather than on [`MaterializedHarnessPrompt`] because it must
+    /// outlive every re-materialization: a `set` written in iteration 1 is
+    /// still visible in iteration 5, and the `outputs` accumulator grows across
+    /// the whole invocation. Each materialization clones the handle so the
+    /// lifecycle executor writes through to this one cell.
+    pub(crate) runtime_state: std::rc::Rc<claudine::composition::RuntimeState>,
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +62,10 @@ pub(crate) struct MaterializedHarnessPrompt {
     /// event fires" contract. Re-created each loop iteration (a retry
     /// re-materializes from disk), giving the correct per-attempt lifetime.
     pub(crate) live_frontmatter: std::cell::RefCell<serde_json::Map<String, serde_json::Value>>,
+    /// Handle to the invocation-local runtime cell owned by
+    /// [`HarnessPromptState`]. Threaded into every lifecycle event so a `set`
+    /// accumulates across attempts instead of dying with `live_frontmatter`.
+    pub(crate) runtime_state: std::rc::Rc<claudine::composition::RuntimeState>,
 }
 
 impl MaterializedHarnessPrompt {

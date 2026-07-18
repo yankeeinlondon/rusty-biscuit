@@ -82,7 +82,12 @@ pub(crate) fn build_loop_iteration_output(
     let model_id = signals.model_id.clone();
 
     if outcome.exit_code == 0 {
-        claudine::composition::LoopIterationOutput::success("")
+        // The captured entry this iteration committed to `outputs` is the same
+        // text `_loop_last_output` names, so the two agree by construction
+        // rather than the ambient reporting a placeholder empty string.
+        claudine::composition::LoopIterationOutput::success(
+            outcome.final_output.unwrap_or_default(),
+        )
             .with_rate_limit(rate_limit)
             .with_exit_reason(exit_reason)
             .with_attribution(provider_id, model_id)

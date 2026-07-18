@@ -522,6 +522,9 @@ fn build_and_run_loop(
         .build();
     let shell_runner = SystemShellRunner;
     let emitter = DefaultLifecycleEmitter;
+    // One cell for the whole `--loop` run: a `set` written in iteration 1 and
+    // every committed `outputs` entry stay visible to later iterations.
+    let runtime_state = std::rc::Rc::new(claudine::composition::RuntimeState::new());
 
     run_loop_with_overrides(
         source,
@@ -547,7 +550,13 @@ fn build_and_run_loop(
                 // skip schema validation and shell pre-flight because the
                 // seed/frontmatter state was already judged on iteration 1.
                 let mut iteration_options = loop_prepare_options.clone();
-                iteration_options.set_overrides = Some(ctx.as_set_overrides());
+                iteration_options.set_overrides = Some(
+                    claudine::composition::layered_set_overrides(
+                        Some(&ctx.as_set_overrides()),
+                        Some(&runtime_state.snapshot()),
+                        None,
+                    ),
+                );
                 if ctx.iteration == 1 {
                     kind.prepare_with_schema(source, iteration_options)?
                 } else {
@@ -579,6 +588,7 @@ fn build_and_run_loop(
                 header_emitted,
                 kind.mode(),
                 prep_context,
+                std::rc::Rc::clone(&runtime_state),
             );
 
             let outcome = execute_composition_attempt(
@@ -627,6 +637,7 @@ fn build_execution_request(
     header_emitted: bool,
     mode: CompositionMode,
     prep_context: &CompositionPrepContext,
+    runtime_state: std::rc::Rc<claudine::composition::RuntimeState>,
 ) -> CompositionExecutionRequest {
     let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
     CompositionExecutionRequest {
@@ -666,6 +677,7 @@ fn build_execution_request(
         header_emitted,
         provider_args: shared.provider_args.clone(),
         provider_args_explicit: shared.provider_args_explicit,
+        runtime_state: Some(runtime_state),
     }
 }
 
@@ -828,6 +840,7 @@ fn execute_loop_or_single(
         header_emitted,
         kind.mode(),
         &prep_context,
+        std::rc::Rc::new(claudine::composition::RuntimeState::new()),
     );
 
     if let Some(ref mut timings) = startup_timings {

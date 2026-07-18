@@ -58,6 +58,10 @@ pub(super) fn run_sequence_steps(
         steps: Vec::with_capacity(total_steps),
     };
 
+    // One cell for the whole sequence: `outputs` accumulates across steps and a
+    // `set` from step 1 is still visible in step 5.
+    let runtime_state = std::rc::Rc::new(claudine::composition::RuntimeState::new());
+
     let mut interrupt_observed = false;
     for (step_index, step_ctx) in step_contexts.iter().enumerate() {
         if interrupted.load(Ordering::SeqCst) {
@@ -166,6 +170,7 @@ pub(super) fn run_sequence_steps(
                 // regardless of the provider each step resolves to.
                 provider_args: shared.provider_args.clone(),
                 provider_args_explicit: shared.provider_args_explicit,
+                runtime_state: Some(std::rc::Rc::clone(&runtime_state)),
             }
         };
 
