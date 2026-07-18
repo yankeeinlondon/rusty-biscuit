@@ -19,10 +19,13 @@ use crate::commands::compose::SharedComposeArgs;
 use crate::log;
 
 mod iterate;
+mod jit;
 mod phase1c;
 mod report;
 mod resolve;
+mod task_run;
 
+use jit::StepComposeContext;
 use phase1c::run_phase_1c_with_schema;
 use resolve::{apply_user_set_to_hints, dry_run_sequence_target, is_auto_selectable_state};
 #[cfg(test)]
@@ -461,40 +464,42 @@ pub(crate) fn execute_sequence(
         live_targets.into_iter().map(Some).collect()
     };
 
-    // ── Phase 1c: per-step compose with resolved AGENT in env_overrides ─
+    // ── Phase 1c: sequence-wide validation and shell approval ──────────
     //
-    // Phase 5 schema validation: each step is run through
-    // `prepare_direct_with_schema`, which surfaces `MissingProperties`
-    // when the prompt's `$schema` declares required fields that the
-    // (post-override) frontmatter does not satisfy. Missing-property
-    // failures are aggregated across all steps so the user can fix the
-    // full sequence in one edit. Invalid-required failures
-    // (`SchemaValidation`) abort the sequence before any provider
-    // session is launched.
-    let (step_contexts, _cumulative_approved) = run_phase_1c_with_schema(
+    // Every step is validated against its `$schema` and every reachable shell
+    // command is approved, before any provider session launches.
+    // Missing-property failures are aggregated across all steps so the user
+    // fixes the full sequence in one edit; invalid-required failures abort.
+    // No composition is *retained* here — execution re-composes each step at
+    // its turn, and this context is what makes the two passes identical.
+    let compose_ctx = StepComposeContext {
+        source_repo_root: source_repo_root.as_deref(),
+        child_cwd: &prep_context.launch_workspace.child_cwd,
+        launch_area: Some(prep_context.launch_workspace.launch_cwd.as_path()),
+        shared,
+        approval_cache: Arc::clone(&shared_approval_cache),
+        inline_mode,
+    };
+
+    let Some(validated) = run_phase_1c_with_schema(
         source,
         &plan,
         &resolved_targets,
         &user_set_overrides,
-        source_repo_root.as_deref(),
-        &prep_context.launch_workspace.child_cwd,
-        Some(prep_context.launch_workspace.launch_cwd.as_path()),
-        shared,
+        &compose_ctx,
         effective_fail_fast,
-        inline_mode,
-        Arc::clone(&shared_approval_cache),
         preflight_approved,
         &interrupted,
         silent,
-    )?;
-    if step_contexts.is_empty() && total_steps > 0 {
+    )?
+    else {
         if let Some(mut acc) = perf_accumulator {
             acc.mark_env_setup_complete();
             acc.set_partial();
             crate::perf::emit_report(&acc.into_report());
         }
         return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
-    }
+    };
 
     if !silent {
         let term = log::terminal();
@@ -504,9 +509,7 @@ pub(crate) fn execute_sequence(
         log::message(&status.render(&term));
     }
 
-    // ── Phase 1d: shell pre-flight for finalized steps ─────────────────
     let _preflight_span = info_span!("sequence_preflight", total_steps).entered();
-    // (Shell approvals were already collected during Phase 1c)
 
     if let Some(ref mut acc) = perf_accumulator {
         acc.mark_env_setup_complete();
@@ -522,25 +525,27 @@ pub(crate) fn execute_sequence(
         log::message(&status.render(&log::terminal()));
     }
 
-    // ── Phase 2: execute each step ─────────────────────────────────────
+    // ── Phase 2: compose and execute each step, at its turn ────────────
     drop(_preflight_span);
 
-    let (summary, interrupt_observed) = iterate::run_sequence_steps(
-        &plan,
-        &step_contexts,
-        &resolved_targets,
+    let run_context = iterate::SequenceRunContext {
+        plan: &plan,
+        graph: &graph,
+        resolved_targets: &resolved_targets,
         source,
-        &prep_context,
+        prep_context: &prep_context,
         shared,
-        &shared_approval_cache,
-        &interrupted,
-        inline_mode,
+        compose: &compose_ctx,
+        approved: validated.approved_commands,
+        user_set_overrides: validated.resolved_overrides,
+        interrupted: &interrupted,
         effective_fail_fast,
         silent,
         verbose,
         perf_enabled,
-        &mut perf_accumulator,
-    )?;
+    };
+    let (summary, interrupt_observed) =
+        iterate::run_sequence_steps(&run_context, &mut perf_accumulator)?;
 
     report::emit_sequence_summary(
         &summary,

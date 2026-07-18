@@ -903,9 +903,10 @@ fn overlay_as_set_overrides_emits_new_root_keys_and_reserves_them() {
     assert!(map["state"].is_object());
     assert_eq!(map["state"]["name"], json!("a"));
     assert_eq!(map["state"]["index"], json!(1));
-    assert!(map["outputs"].is_array());
-    assert_eq!(map["outputs"], json!([]));
     assert!(map["sequence_id"].is_string());
+    // `outputs` is NOT an overlay key: the runtime layer below owns the
+    // accumulator, and an overlay copy would reset it at every step boundary.
+    assert!(!map.contains_key("outputs"), "overlay must not emit `outputs`");
     // First step: previous is null, next is the second state object.
     assert!(map["previous"].is_null());
     assert_eq!(map["next"]["name"], json!("b"));
@@ -1101,13 +1102,17 @@ mod clean_break {
         let overrides = build_step_overlay(&plan, 0).as_set_overrides(None);
         let map = overrides.as_object().expect("overlay is a JSON object");
 
-        for key in ["state", "previous", "next", "sequence_id", "outputs"] {
+        for key in ["state", "previous", "next", "sequence_id"] {
             assert!(map.contains_key(key), "overlay must emit `{key}`");
         }
+        assert!(
+            !map.contains_key("outputs"),
+            "`outputs` belongs to the runtime layer, not the overlay: {map:?}"
+        );
         assert_eq!(
             map.len(),
-            5,
-            "overlay emits exactly five reserved root keys: {map:?}"
+            4,
+            "overlay emits exactly four reserved root keys: {map:?}"
         );
         // The generated position fields live inside each state, not at the root.
         let state = map["state"].as_object().unwrap();

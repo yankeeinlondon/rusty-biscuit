@@ -1369,6 +1369,40 @@ pub enum CompositionError {
         detail: String,
     },
 
+    /// A `prompt:` task's document could not be launched at all.
+    ///
+    /// Distinct from [`Self::SequenceTaskPromptFailed`], which reports a
+    /// provider that ran and exited non-zero: this is the wrapper failing before
+    /// or around the run, so the message is the wrapper's, not the agent's.
+    #[error("task `{task}` could not run prompt `{path}`: {message}")]
+    SequenceTaskPromptLaunch {
+        /// The task's name or generated label.
+        task: String,
+        /// The resolved document path.
+        path: PathBuf,
+        /// What the wrapper reported.
+        message: String,
+    },
+
+    /// A step has neither an executable nor a body to run.
+    ///
+    /// A step without an executable field runs the sequence document's own
+    /// body. When that body composes to nothing there is no work to send, and
+    /// silently launching a provider with an empty prompt is worse than saying
+    /// so — the author either meant to write a body or to declare a task.
+    #[error(
+        "step {step} (`{name}`) has nothing to run: `{path}` composed to an empty body and the \
+         step declares no `prompt`, `shell`, `side_effect`, `task`, or `group`"
+    )]
+    SequenceStepNotExecutable {
+        /// One-based step position.
+        step: usize,
+        /// The step's display name.
+        name: String,
+        /// The sequence document whose body composed empty.
+        path: PathBuf,
+    },
+
     /// A `{group}@{file-ref}` catalog reference did not resolve to one group.
     #[error(
         "group `{name}` {problem} in catalog `{path}`{}",

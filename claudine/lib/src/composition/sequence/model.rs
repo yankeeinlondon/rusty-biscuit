@@ -273,7 +273,7 @@ pub struct SequencePlan {
 
 /// The reserved per-step overlay injected into each composition run.
 ///
-/// Always present: `state`, `sequence_id`, `outputs`. Present-as-`null` on the
+/// Always present: `state`, `sequence_id`. Present-as-`null` on the
 /// boundaries: `previous` on the first step, `next` on the last step — an
 /// absent neighbor never coerces to an empty-named state. The retired root keys
 /// (`previous_state`, `next_state`, `step`, `total_steps`, `is_first`,
@@ -288,9 +288,6 @@ pub struct SequenceStepOverlay {
     pub next: Option<StepState>,
     /// The sequence invocation token (also present inside every state).
     pub sequence_id: String,
-    /// The accumulating output array. Empty at overlay-build time; the executor
-    /// appends entries as tasks complete (phase 6).
-    pub outputs: Vec<OutputEntry>,
 }
 
 impl SequenceStepOverlay {
@@ -319,10 +316,10 @@ impl SequenceStepOverlay {
             self.next.as_ref().map_or(Value::Null, StepState::to_value),
         );
         map.insert("sequence_id".into(), Value::String(self.sequence_id.clone()));
-        map.insert(
-            "outputs".into(),
-            Value::Array(self.outputs.iter().map(OutputEntry::to_value).collect()),
-        );
+        // `outputs` is deliberately absent: it lives in the runtime layer,
+        // which sits *below* this overlay. Emitting the (always-empty) overlay
+        // copy would clobber the accumulator every step, so a later step would
+        // read `[]` instead of what earlier steps produced.
 
         Value::Object(map)
     }

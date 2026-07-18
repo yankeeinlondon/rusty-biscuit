@@ -762,6 +762,15 @@ pub struct CompositionExecutionRequest {
     /// executor mint a fresh cell, which is the correct lifetime for a
     /// standalone `compose` / `inline-compose`.
     pub runtime_state: Option<std::rc::Rc<super::runtime_state::RuntimeState>>,
+
+    /// Suppress this execution's own commit to `outputs`.
+    ///
+    /// Set by a caller that owns output timing itself — the sequence task
+    /// executor, which must not publish an entry until `teardown` has completed
+    /// (a failing teardown converts the task to failure and owes no output).
+    /// The captured text still reaches the caller through
+    /// `SingleCompositionOutcome::final_output`.
+    pub suppress_output_commit: bool,
 }
 
 /// Options for sequence execution at the CLI level.

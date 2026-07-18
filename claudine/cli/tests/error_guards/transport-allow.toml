@@ -238,12 +238,20 @@ reason = """
 The sink is `SyncAction::Error(String)`, a per-provider display record rendered as a table row by `prose_error`; the conversion is the final render. The typed error is rendered here and never returned; this line is the final render. The enclosing function's `Ok(())`-on-failure is a separate exit-status defect, recorded as follow-up 1 in `features/2026-07-13-error-propogation/burndown-triage.md` — spec D10 forbids changing exit status in the transport migration."""
 
 [[allow]]
-shape = "to_string_collapse"
+shape = "error_text_field"
 file = "cli/src/commands/wrap/sequence/iterate.rs"
-symbol = "run_sequence_steps"
+symbol = "run_one_step"
 tag = "retained"
 reason = """
 The value in hand is a `color_eyre::eyre::Report` returned by `execute_composition_request_inner` (the wrapper-grade exec-wiring boundary). `Report` does not implement `std::error::Error`, so it cannot be a `#[source]`, and the typed provenance was already erased upstream where that function returns `Result<_, Report>`. Retyping the exec-wiring boundary to a concrete error is a separate workstream; this site only records the flattened text into `SequenceStepResult.error` for the run summary, and fail-fast keys on step counts, never on this text."""
+
+[[allow]]
+shape = "error_text_field"
+file = "cli/src/commands/wrap/sequence/task_run.rs"
+symbol = "WrapperPromptRunner::run"
+tag = "retained"
+reason = """
+Same exec-wiring boundary as `run_one_step` above, reached from the other side: `execute_composition_request_inner` returns `Result<_, Report>`, and `Report` cannot be a `#[source]`. The text lands in `SequenceTaskPromptLaunch.message`, which exists to name *which* task and *which* document failed to launch; the task's continuation is decided by `TaskStatus`, never by this string."""
 
 [[allow]]
 shape = "to_string_collapse"

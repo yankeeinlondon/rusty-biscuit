@@ -458,6 +458,8 @@ pub(super) fn run_composition_body(
         // the same inputs the original document was prepared with).
         rematerialize: request.prepared.rematerialize.clone(),
         runtime_state: std::rc::Rc::clone(&runtime_state),
+        suppress_output_commit: request.suppress_output_commit,
+        last_final_output: None,
     };
 
     let mut harness_base_args = args_before_prompt.clone();
@@ -512,11 +514,14 @@ pub(super) fn run_composition_body(
         // exit_reason pickup for every composition document.
         iteration_signals: harness_signals,
         terminal_signal,
-        // The harness loop commits the entry on the success path only, so a
-        // grown array is exactly "this execution produced an output".
-        final_output: (runtime_state.output_count() > outputs_before)
-            .then(|| runtime_state.last_output_text())
-            .flatten(),
+        // The harness loop records the captured text on the success path only.
+        // `outputs_before` still gates it so a suppressed *and* a committed run
+        // report identically, and a skipped or failed run reports `None`.
+        final_output: prompt_state.last_final_output.clone().or_else(|| {
+            (runtime_state.output_count() > outputs_before)
+                .then(|| runtime_state.last_output_text())
+                .flatten()
+        }),
     };
     // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
     // The perf report is always emitted to stderr when requested.

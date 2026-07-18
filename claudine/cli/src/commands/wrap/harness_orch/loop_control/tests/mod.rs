@@ -203,6 +203,8 @@ fn prompt_state(source: &Path) -> HarnessPromptState {
         next_resume_session_id: None,
         rematerialize: Default::default(),
         runtime_state: std::rc::Rc::new(claudine::composition::RuntimeState::new()),
+        suppress_output_commit: false,
+        last_final_output: None,
     }
 }
 

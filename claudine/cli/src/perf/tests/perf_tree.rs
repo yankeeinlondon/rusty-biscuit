@@ -437,7 +437,7 @@ fn sequence_report(
         composition: None,
         agent: None,
         notes: vec![],
-        placement: CompositionPlacement::UnderEnvSetup,
+        placement: CompositionPlacement::UnderStep,
         sequence_steps: steps,
     }
 }
@@ -499,7 +499,7 @@ fn perf_tree_sequence_builds_per_step_subtrees() {
         ],
     );
 
-    let tree = build_perf_tree(&report, CompositionPlacement::UnderEnvSetup);
+    let tree = build_perf_tree(&report, CompositionPlacement::UnderStep);
     assert!(tree_reconciles(&tree, Duration::from_millis(1)));
 
     // No top-level merged composition or aggregate agent node.
@@ -513,26 +513,21 @@ fn perf_tree_sequence_builds_per_step_subtrees() {
     assert_eq!(steps.role, NodeRole::Structural);
     assert_eq!(steps.total, Duration::from_millis(1750));
 
-    // step N → agent (Breakdown); composition is NOT nested here.
+    // step N → composition + agent, both Breakdown detail on the step's own
+    // window: just-in-time orchestration composes the step inside it.
     let alpha = child(steps, "step 1: alpha").expect("step 1 subtree");
     assert_eq!(alpha.role, NodeRole::Structural);
     assert_eq!(alpha.total, Duration::from_millis(950));
-    assert!(
-        child(alpha, "composition").is_none(),
-        "composition must not nest under the execution window"
-    );
+    let alpha_compose = child(alpha, "composition").expect("step 1 composition");
+    assert_eq!(alpha_compose.role, NodeRole::Breakdown);
+    assert_eq!(alpha_compose.total, Duration::from_millis(40));
     assert_eq!(child(alpha, "agent").unwrap().role, NodeRole::Breakdown);
     assert!(child(steps, "step 2: beta").is_some());
 
-    // Per-step composition lives under environment setup → step preparation.
+    // Nothing hangs off environment setup any more: it no longer contains
+    // per-step composition.
     let env = child(&tree, "environment setup").expect("env setup");
-    let step_prep = child(env, "step preparation").expect("step preparation node");
-    assert_eq!(step_prep.role, NodeRole::Breakdown);
-    assert_eq!(step_prep.total, Duration::from_millis(80));
-    let prep_alpha = child(step_prep, "step 1: alpha").expect("prepared step 1");
-    assert_eq!(prep_alpha.role, NodeRole::Breakdown);
-    assert_eq!(prep_alpha.total, Duration::from_millis(40));
-    assert!(child(step_prep, "step 2: beta").is_some());
+    assert!(child(env, "step preparation").is_none());
 }
 
 /// Walk the whole tree asserting the G-2 timeline contract: no child's total
@@ -555,17 +550,16 @@ fn assert_no_child_exceeds_parent(node: &PerfNode) {
 }
 
 /// Regression (review-2): a slow per-step composition must never exceed its
-/// displayed parent. Composition is metered during environment setup, not
-/// the per-step execution window, so nesting it under `steps → step N`
-/// (whose total is the tiny execution wall-clock) let a 900ms compose render
-/// beneath a 5ms step — child larger than parent. It now attaches under
-/// `environment setup → step preparation`, whose window genuinely contains
-/// it, so every child fits its parent (G-2).
+/// displayed parent (G-2).
+///
+/// The shape that used to break this — a 900ms compose under a 5ms step — is
+/// unreachable once composition happens *at the step's turn*: the step's
+/// wall-clock brackets its own compose, so a compose-dominated step is simply a
+/// long step. This asserts that on the same pathological ratio.
 #[test]
 fn perf_tree_sequence_slow_compose_never_exceeds_parent() {
-    // The pathological shape: compose dominates (900ms) while execution is
-    // trivial (5ms) — a dry-run or cache-fast agent after a slow shell
-    // expansion.
+    // Compose dominates (900ms) while execution is trivial — a dry-run or
+    // cache-fast agent after a slow shell expansion.
     let slow_compose = darkmatter::markdown::compose::ComposePerfReport {
         total: Duration::from_millis(900),
         metrics: vec![darkmatter::markdown::compose::ComposePerfMetric {
@@ -575,39 +569,31 @@ fn perf_tree_sequence_slow_compose_never_exceeds_parent() {
         }],
         ..Default::default()
     };
-    // env setup (950ms) contains the Phase-1 compose work, so it is ≥ the
-    // 900ms compose, exactly as in a real run.
+    // The step's wall-clock (905ms) brackets its own compose (900ms), exactly
+    // as in a real just-in-time run; env setup no longer holds compose work.
     let report = sequence_report(
         Duration::from_millis(1000),
         Duration::from_millis(10),
-        Duration::from_millis(950),
+        Duration::from_millis(50),
         vec![step_perf(
             0,
             "alpha",
-            Duration::from_millis(5),
+            Duration::from_millis(905),
             Some(slow_compose),
             None,
         )],
     );
-    let tree = build_perf_tree(&report, CompositionPlacement::UnderEnvSetup);
+    let tree = build_perf_tree(&report, CompositionPlacement::UnderStep);
     assert!(tree_reconciles(&tree, Duration::from_millis(1)));
 
-    // The step's execution node carries only the 5ms wall-clock — no
-    // composition child it could be dwarfed by.
+    // The compose nests under the step whose window contains it.
     let steps = child(&tree, "steps").expect("steps node");
     let alpha = child(steps, "step 1: alpha").expect("step 1 execution node");
-    assert_eq!(alpha.total, Duration::from_millis(5));
-    assert!(
-        child(alpha, "composition").is_none(),
-        "composition must not nest under the execution window it would exceed"
+    assert_eq!(alpha.total, Duration::from_millis(905));
+    assert_eq!(
+        child(alpha, "composition").expect("step composition").total,
+        Duration::from_millis(900)
     );
-
-    // It attaches under environment setup → step preparation, whose window
-    // contains it (900ms ≤ 950ms env setup).
-    let env = child(&tree, "environment setup").expect("env setup");
-    let step_prep = child(env, "step preparation").expect("step preparation node");
-    let prep_alpha = child(step_prep, "step 1: alpha").expect("prepared step 1");
-    assert_eq!(prep_alpha.total, Duration::from_millis(900));
 
     // The core invariant: no node's child exceeds it anywhere in the tree.
     assert_no_child_exceeds_parent(&tree);
@@ -624,7 +610,7 @@ fn perf_tree_sequence_partial_reconciles() {
         Duration::from_millis(50),
         vec![step_perf(0, "alpha", Duration::from_millis(400), None, None)],
     );
-    let tree = build_perf_tree(&report, CompositionPlacement::UnderEnvSetup);
+    let tree = build_perf_tree(&report, CompositionPlacement::UnderStep);
     assert!(tree_reconciles(&tree, Duration::from_millis(1)));
 
     let steps = child(&tree, "steps").expect("steps node");

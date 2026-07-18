@@ -86,6 +86,37 @@ pub fn resolve_composition_source(
     })
 }
 
+/// Re-read an already-resolved source from disk.
+///
+/// Sequence steps compose just in time, so each step reads the file as it
+/// stands at its turn — an earlier step's inline-compose write-back or an
+/// agent's mid-run frontmatter edit is visible to every later step. The
+/// reference is *not* re-resolved: the path was decided once, and re-running
+/// magic-root discovery mid-sequence could silently retarget the run.
+///
+/// ## Errors
+///
+/// Returns [`CompositionError::MarkdownLoad`] when the file has become
+/// unreadable or its frontmatter no longer parses.
+pub fn reload_composition_source(
+    source: &ResolvedCompositionSource,
+) -> Result<ResolvedCompositionSource, CompositionError> {
+    let original_text =
+        fs::read_to_string(&source.resolved_path).map_err(|e| CompositionError::MarkdownLoad {
+            path: source.resolved_path.clone(),
+            source: MarkdownLoadCause::Read(e),
+        })?;
+    let markdown = Markdown::try_from(source.resolved_path.as_path())
+        .map_err(|e| map_load_error(&source.resolved_path, e))?;
+
+    Ok(ResolvedCompositionSource {
+        original_ref: source.original_ref.clone(),
+        resolved_path: source.resolved_path.clone(),
+        original_text,
+        markdown,
+    })
+}
+
 /// Build a [`FileReference`] for a top-level Claudine prompt argument with the
 /// convention prompt directories registered as magic (`@`) search roots.
 ///

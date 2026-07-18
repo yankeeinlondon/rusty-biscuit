@@ -43,6 +43,15 @@ pub(crate) struct HarnessPromptState {
     /// the whole invocation. Each materialization clones the handle so the
     /// lifecycle executor writes through to this one cell.
     pub(crate) runtime_state: std::rc::Rc<claudine::composition::RuntimeState>,
+    /// Withhold this run's `outputs` commit because the caller owns output
+    /// timing (the sequence task executor appends only after `teardown`).
+    /// [`Self::last_final_output`] still carries the captured text out.
+    pub(crate) suppress_output_commit: bool,
+    /// The most recent successful run's captured final text.
+    ///
+    /// Recorded whether or not the commit was suppressed, so a caller that
+    /// withheld the commit can still read what the run produced.
+    pub(crate) last_final_output: Option<String>,
 }
 
 #[derive(Debug, Clone)]

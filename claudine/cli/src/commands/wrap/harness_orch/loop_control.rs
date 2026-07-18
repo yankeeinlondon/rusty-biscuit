@@ -1190,7 +1190,16 @@ fn classify_attempt_phase(
     // The run succeeded, so its output joins `outputs` now — before the
     // success event fires, so `success`/`finalize` observe it and a later
     // iteration, step, or standalone `{{ last(outputs) }}` reads it back.
-    commit_run_output(&materialized, &outcome.final_response);
+    //
+    // A task-driven run withholds the commit: its executor publishes the entry
+    // only after `teardown`, because a failing teardown owes no output. The
+    // captured text still travels out through `last_final_output`.
+    prompt_state.last_final_output = Some(
+        claudine::composition::trim_transport_newline(&outcome.final_response).to_string(),
+    );
+    if !prompt_state.suppress_output_commit {
+        commit_run_output(&materialized, &outcome.final_response);
+    }
 
     // A successful provider run proceeds to the success lifecycle event.
     // The `success.stack` may end in a flow-control action — either a direct

@@ -111,25 +111,12 @@ pub(super) fn build_perf_tree(
             )
         })
         .collect();
-    let mut env_setup_node = PerfNode::branch(
+    let env_setup_node = PerfNode::branch(
         "environment setup",
         cli.environment_setup,
         NodeRole::Structural,
         env_children,
     );
-    // A sequence composes every step up front, during this env-setup window
-    // (Phase 1c), so each step's composition cost lives here — not in the
-    // per-step execution window the `steps` node measures. Attaching it under
-    // env setup as a `step preparation` Breakdown keeps the timeline honest: a
-    // slow per-step compose can never exceed its displayed parent (G-2), the bug
-    // a `steps → step N → composition` nesting reintroduced. Breakdown, so it is
-    // displayed and percentaged without entering reconciliation — the env-setup
-    // remainder keeps the authoritative total.
-    if is_sequence
-        && let Some(step_prep) = build_step_preparation_node(&report.sequence_steps)
-    {
-        env_setup_node.children.push(step_prep);
-    }
     let env_setup = finalize_reconciling(env_setup_node);
 
     let mut top = vec![pre_dispatch, prep, env_setup];
@@ -138,9 +125,9 @@ pub(super) fn build_perf_tree(
         // Sequence: a `steps` Structural node whose per-step children carry the
         // step's execution wall-clock and reconcile to the sequence headline,
         // leaving inter-step orchestration in the root remainder (TM-3). Per-step
-        // composition is shown under `environment setup → step preparation` (it
-        // was metered there), and the merged `composition` / aggregated `agent`
-        // views on the report are not emitted as separate nodes.
+        // composition nests under its own step, because that is where it now
+        // runs; the merged `composition` / aggregated `agent` views on the report
+        // are not emitted as separate nodes.
         top.push(build_steps_node(&report.sequence_steps));
     } else if let Some(agent) = &report.agent {
         // agent execution — Structural when the agent ran (omitted on dry runs;
@@ -179,18 +166,27 @@ pub(super) fn build_perf_tree(
 /// `steps` total and, with `pre-dispatch` / `environment setup`, reconcile to
 /// the sequence headline plus an orchestration remainder. The agent breakdown
 /// hangs off each step as `Breakdown` detail on the execution the step total
-/// already counts. Per-step composition is **not** nested here: it was metered
-/// during environment setup (Phase 1c), not inside the execution window, so it
-/// is rendered under `environment setup → step preparation`
-/// ([`build_step_preparation_node`]). Nesting it under a step's execution total
-/// — which does not contain it — would let a slow compose appear larger than its
-/// parent (G-2), the exact contradiction this split removes.
+/// already counts.
+///
+/// Per-step composition nests here too, as a `composition` Breakdown child. Under
+/// just-in-time orchestration a step is composed *at its turn*, inside the window
+/// `wall_clock` measures, so the nesting is arithmetically sound: the G-2 hazard
+/// — a compose rendered larger than the node it hangs under — only existed while
+/// composition ran up front, outside every step's window.
 fn build_steps_node(steps: &[SequenceStepPerf]) -> PerfNode {
     let total: Duration = steps.iter().map(|s| s.wall_clock).sum();
     let children = steps
         .iter()
         .map(|step| {
             let mut step_children = Vec::new();
+            if let Some(compose) = &step.compose_perf {
+                step_children.push(PerfNode::branch(
+                    "composition",
+                    compose.total,
+                    NodeRole::Breakdown,
+                    build_composition_children(compose),
+                ));
+            }
             if let Some(agent) = &step.agent_perf {
                 let mut agent_children = Vec::new();
                 if let Some(latency) = agent.first_response_latency {
@@ -224,48 +220,6 @@ fn build_steps_node(steps: &[SequenceStepPerf]) -> PerfNode {
         total,
         NodeRole::Structural,
         children,
-    ))
-}
-
-/// Build the `step preparation` Breakdown subtree for a sequence run (TM-3).
-///
-/// A sequence composes every step up front, during the shared environment-setup
-/// phase (Phase 1c), so each step's composition cost lives inside the
-/// `environment setup` window — not the per-step execution window the `steps`
-/// node measures. Each step that recorded composition perf becomes a
-/// `step N: <name>` child whose total is `compose_perf.total` and whose children
-/// are the phase-grouped compose stages ([`build_composition_children`]).
-///
-/// Every node is `Breakdown`: composition itemizes part of the env-setup window
-/// but does not carve it (other Phase-1 work — target resolution, shell
-/// approval — shares the window), so it is displayed and percentaged without
-/// entering reconciliation. Because env setup genuinely contains all per-step
-/// compose work (`Σ compose ≤ environment setup`), `step preparation` never
-/// exceeds its parent, so a slow compose can no longer be rendered larger than
-/// the node it hangs under (G-2). Returns `None` when no step recorded
-/// composition perf.
-fn build_step_preparation_node(steps: &[SequenceStepPerf]) -> Option<PerfNode> {
-    let step_nodes: Vec<PerfNode> = steps
-        .iter()
-        .filter_map(|step| {
-            let compose = step.compose_perf.as_ref()?;
-            Some(PerfNode::branch(
-                format!("step {}: {}", step.step_index + 1, step.step_name),
-                compose.total,
-                NodeRole::Breakdown,
-                build_composition_children(compose),
-            ))
-        })
-        .collect();
-    if step_nodes.is_empty() {
-        return None;
-    }
-    let total: Duration = step_nodes.iter().map(|n| n.total).sum();
-    Some(PerfNode::branch(
-        "step preparation",
-        total,
-        NodeRole::Breakdown,
-        step_nodes,
     ))
 }
 

@@ -364,6 +364,8 @@ mod tests {
             next_resume_session_id: None,
             rematerialize,
             runtime_state: std::rc::Rc::new(claudine::composition::RuntimeState::new()),
+            suppress_output_commit: false,
+            last_final_output: None,
         }
     }
 

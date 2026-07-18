@@ -457,6 +457,8 @@ pub(crate) fn run_execution_stage(
             // A direct wrapper run is one invocation with no caller-owned
             // accumulator, so it owns its own cell.
             runtime_state: std::rc::Rc::clone(&initial_materialized.runtime_state),
+            suppress_output_commit: false,
+            last_final_output: None,
         };
 
         let mut harness_base_args = child_args.to_vec();

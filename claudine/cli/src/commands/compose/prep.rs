@@ -678,6 +678,7 @@ fn build_execution_request(
         provider_args: shared.provider_args.clone(),
         provider_args_explicit: shared.provider_args_explicit,
         runtime_state: Some(runtime_state),
+        suppress_output_commit: false,
     }
 }
 

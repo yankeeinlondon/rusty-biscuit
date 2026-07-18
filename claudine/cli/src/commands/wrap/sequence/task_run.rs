@@ -1,0 +1,284 @@
+//! Wrapper-side execution of a step's explicit task.
+//!
+//! The library owns the task stage contract ([`TaskExecution`]) but never
+//! launches a provider. This module supplies the two seams it needs — a system
+//! shell and a [`PromptTaskRunner`] that composes and runs a referenced document
+//! through the wrapper pipeline — and translates the resulting [`TaskOutcome`]
+//! into the same step outcome a default-body step produces.
+//!
+//! A prompt task's provider run **withholds** its own `outputs` commit
+//! (`suppress_output_commit`). The task executor publishes the entry only after
+//! `teardown` completes, because a teardown that fails converts an otherwise
+//! successful task to failure and owes no output.
+
+use std::cell::RefCell;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use claudine::composition::lifecycle_executor::{StackExecutionContext, SystemShellRunner};
+use claudine::composition::{
+    self, CompositionError, CompositionExecutionRequest, CompositionMode, DefaultLifecycleEmitter,
+    PreparedComposition, ResolvedExecutionTarget, RuntimeState,
+};
+use claudine::composition::sequence::preflight::PreflightTask;
+use claudine::composition::sequence::task::{
+    PromptRunOutcome, PromptTaskRequest, PromptTaskRunner, SystemTaskShell, TaskExecution,
+    TaskStatus,
+};
+use claudine::system_prompt::SystemPromptArgs;
+use darkmatter::effects::EffectEngine;
+use darkmatter::markdown::compose::EffectiveStateBuilder;
+use serde_json::Value;
+
+use crate::commands::wrap::composition::execute_composition_request_inner;
+
+use super::iterate::{SequenceRunContext, StepOutcome};
+
+/// Run a step's explicit task and report it as a step outcome.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run_step_task(
+    run: &SequenceRunContext<'_>,
+    task: &PreflightTask,
+    prepared: &PreparedComposition,
+    overlay: &Value,
+    env_overrides: &BTreeMap<String, String>,
+    target: Option<&ResolvedExecutionTarget>,
+    runtime_state: &std::rc::Rc<RuntimeState>,
+    compose_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
+) -> StepOutcome {
+    let frontmatter = effective_frontmatter(prepared);
+    let state = match EffectiveStateBuilder::new()
+        .with_frontmatter(frontmatter.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        .with_allow_ctx_override(true)
+        .build()
+    {
+        Ok(state) => state,
+        Err(source) => {
+            return StepOutcome::Failed {
+                message: CompositionError::PreFlightStateBuildFailed { source }.to_string(),
+                agent_perf: None,
+                compose_perf,
+            };
+        }
+    };
+
+    // The engine's mutation root is the document's directory: a `set_frontmatter`
+    // in a task stack targets files next to the document that authored it.
+    let mutation_root = prepared
+        .resolved_path
+        .parent()
+        .unwrap_or(&prepared.resolved_path)
+        .to_path_buf();
+    let engine = EffectEngine::builder().mutation_root(&mutation_root).build();
+    let emitter = DefaultLifecycleEmitter;
+    let settings = claudine::events::GlobalSettings::default();
+    let messaging = claudine::messaging::RuntimeMessagingSettings {
+        user: None,
+        repo: None,
+    };
+    let term = crate::log::terminal();
+    let live = RefCell::new(frontmatter.clone());
+
+    let stack = StackExecutionContext {
+        signal: claudine::composition::LifecycleSignal::Start,
+        frontmatter: &frontmatter,
+        live_frontmatter: Some(&live),
+        runtime_state: Some(runtime_state),
+        err: None,
+        timing: None,
+        current: None,
+        base_dir: prepared.resolved_path.parent(),
+        ctx_base_dir: Some(run.prep_context.launch_workspace.launch_cwd.as_path()),
+        prepared_context: None,
+        effect_engine: &engine,
+        shell_runner: &SystemShellRunner,
+        emitter: &emitter,
+        term: &term,
+        source_path: &prepared.resolved_path,
+        repo_root: run.prep_context.source_repo_root.as_deref(),
+        messaging: &messaging,
+        settings: &settings,
+    };
+
+    let prompt_runner = WrapperPromptRunner {
+        run,
+        env_overrides,
+        target,
+        runtime_state,
+    };
+    let shell = SystemTaskShell;
+
+    let outcome = TaskExecution {
+        task,
+        graph: run.graph,
+        stack: &stack,
+        state: &state,
+        runtime: Some(runtime_state),
+        user_setters: run.user_set_overrides.as_ref(),
+        overlay: Some(overlay),
+        shell: &shell,
+        prompt: &prompt_runner,
+        interrupt: Some(run.interrupted.as_ref()),
+    }
+    .run();
+
+    let agent_perf = prompt_runner.take_perf();
+    match outcome.status {
+        TaskStatus::Succeeded => StepOutcome::Succeeded {
+            provider: prompt_runner.take_provider(),
+            agent_perf,
+            compose_perf,
+        },
+        TaskStatus::Interrupted => StepOutcome::Interrupted {
+            agent_perf,
+            compose_perf,
+        },
+        TaskStatus::Failed => StepOutcome::Failed {
+            message: outcome
+                .error
+                .as_ref()
+                .map_or_else(|| "task failed".to_string(), |d| d.message().to_string()),
+            agent_perf,
+            compose_perf,
+        },
+    }
+}
+
+/// The effective (composed) frontmatter a task's stacks and `params` read.
+fn effective_frontmatter(prepared: &PreparedComposition) -> serde_json::Map<String, Value> {
+    prepared
+        .effective_frontmatter
+        .as_object()
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Composes and launches a `prompt:` task's document through the wrapper.
+struct WrapperPromptRunner<'a> {
+    run: &'a SequenceRunContext<'a>,
+    env_overrides: &'a BTreeMap<String, String>,
+    target: Option<&'a ResolvedExecutionTarget>,
+    runtime_state: &'a std::rc::Rc<RuntimeState>,
+}
+
+impl WrapperPromptRunner<'_> {
+    fn take_perf(&self) -> Option<crate::perf::AgentExecutionPerf> {
+        PROMPT_RUN_PERF.with(|cell| cell.borrow_mut().take())
+    }
+
+    fn take_provider(&self) -> Option<claudine::provider::Provider> {
+        PROMPT_RUN_PROVIDER.with(|cell| *cell.borrow())
+    }
+}
+
+thread_local! {
+    /// The last prompt task's perf record, handed back to the step summary.
+    ///
+    /// A thread-local rather than a field because [`PromptTaskRunner::run`]
+    /// takes `&self`: the trait is deliberately immutable so the library can
+    /// hold it behind a shared reference while the task executor runs stages.
+    static PROMPT_RUN_PERF: RefCell<Option<crate::perf::AgentExecutionPerf>> =
+        const { RefCell::new(None) };
+    /// The provider that ran the last prompt task, for the step status line.
+    static PROMPT_RUN_PROVIDER: RefCell<Option<claudine::provider::Provider>> =
+        const { RefCell::new(None) };
+}
+
+impl PromptTaskRunner for WrapperPromptRunner<'_> {
+    fn run(&self, request: &PromptTaskRequest) -> Result<PromptRunOutcome, CompositionError> {
+        PROMPT_RUN_PERF.with(|cell| *cell.borrow_mut() = None);
+        PROMPT_RUN_PROVIDER.with(|cell| *cell.borrow_mut() = None);
+
+        // Just-in-time, like the step itself: the referenced document is read
+        // now, so a document an earlier step rewrote is composed as it stands.
+        let source = composition::resolve_composition_source(&request.path.display().to_string())?;
+        let composed = super::jit::compose_step(
+            &source,
+            &self
+                .run
+                .compose
+                .for_referenced_document(request.inline_compose),
+            &request.set_overrides,
+            self.env_overrides,
+            self.run.approved.clone(),
+        )?;
+
+        let shared = self.run.shared;
+        let resolved =
+            shared.resolve_session_interactivity(composed.prepared.selection_hints.interactive);
+        let mut env_overrides = self.env_overrides.clone();
+        if let Some(operation) = &request.operation {
+            env_overrides.insert("OPERATION".to_string(), operation.clone());
+        }
+
+        let execution = CompositionExecutionRequest {
+            mode: if request.inline_compose {
+                CompositionMode::InlineFrontmatterPrompt
+            } else {
+                CompositionMode::ChainedDocument
+            },
+            file_ref: request.reference.clone(),
+            prepared: composed.prepared,
+            resolved_target: self.target.cloned(),
+            explicit_provider: shared.explicit_provider(),
+            excluded: shared.excluded(),
+            sequence: true,
+            yolo: shared.yolo,
+            include: shared.include.clone(),
+            model: shared.model.clone(),
+            output: shared.output,
+            system_prompt_args: SystemPromptArgs {
+                append_file: shared.append_system_prompt.clone(),
+                replace_file: shared.replace_system_prompt.clone(),
+            },
+            timeout: shared.timeout.clone(),
+            step_timeout: shared.step_timeout.clone(),
+            stall_timeout: shared.stall_timeout.clone(),
+            operation: request.operation.clone().or_else(|| shared.operation.clone()),
+            sandbox: shared.sandbox,
+            repo: shared.repo,
+            dry_run: shared.dry_run,
+            mcp: shared.mcp,
+            mcp_use: shared.mcp_use.clone(),
+            strict: shared.strict,
+            session_interactive: resolved.value,
+            session_interactive_source: resolved.source,
+            quiet: shared.quiet,
+            silent: shared.silent,
+            env_overrides,
+            shared_approval_cache: Some(Arc::clone(&self.run.compose.approval_cache)),
+            installed_snapshot: Some(self.run.prep_context.installed_snapshot.clone()),
+            prep_launch_workspace: Some(self.run.prep_context.launch_workspace.clone()),
+            prep_launch_context: Some(self.run.prep_context.launch_context.clone()),
+            prep_env_context: Some(self.run.prep_context.env_context.clone()),
+            prep_launch_detection_error: self.run.prep_context.launch_detection_error.clone(),
+            header_emitted: false,
+            provider_args: shared.provider_args.clone(),
+            provider_args_explicit: shared.provider_args_explicit,
+            runtime_state: Some(std::rc::Rc::clone(self.runtime_state)),
+            // The task executor publishes the entry after `teardown`, not here.
+            suppress_output_commit: true,
+        };
+
+        let outcome = execute_composition_request_inner(
+            execution,
+            self.run.verbose,
+            None,
+            self.run.perf_enabled,
+        )
+        .map_err(|error| CompositionError::SequenceTaskPromptLaunch {
+            task: request.reference.clone(),
+            path: request.path.clone(),
+            message: error.to_string(),
+        })?;
+
+        PROMPT_RUN_PERF.with(|cell| *cell.borrow_mut() = outcome.agent_perf);
+        PROMPT_RUN_PROVIDER.with(|cell| *cell.borrow_mut() = Some(outcome.provider));
+
+        Ok(PromptRunOutcome {
+            stdout: outcome.final_output.unwrap_or_default(),
+            exit_code: outcome.exit_code,
+            interrupted: outcome.exit_code == super::SEQUENCE_INTERRUPT_EXIT_CODE,
+        })
+    }
+}

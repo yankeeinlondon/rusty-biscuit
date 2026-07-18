@@ -3,7 +3,7 @@
 //! [`resolve_sequence_plan`] detects whether a resolved composition source
 //! defines a `sequence`, and if so normalizes it into a typed [`SequencePlan`]
 //! of generated [`StepState`]s. [`build_step_overlay`] constructs the reserved
-//! per-step overlay (`state`/`previous`/`next`/`sequence_id`/`outputs`) injected
+//! per-step overlay (`state`/`previous`/`next`/`sequence_id`) injected
 //! into each composition run.
 //!
 //! The module is split by responsibility:
@@ -213,8 +213,8 @@ fn classify_string_items(text: &str) -> Vec<Value> {
 ///
 /// `state` is always the current step's [`StepState`]; `previous`/`next` are the
 /// neighboring states, or `None` on the boundaries (they render as `null`, never
-/// an empty-named state). `outputs` is empty here — the executor appends entries
-/// as tasks complete.
+/// an empty-named state). `outputs` is *not* part of this overlay: it belongs to
+/// the runtime layer beneath it, so the accumulator survives from step to step.
 pub fn build_step_overlay(plan: &SequencePlan, step_index: usize) -> SequenceStepOverlay {
     let total = plan.steps.len();
     SequenceStepOverlay {
@@ -222,7 +222,6 @@ pub fn build_step_overlay(plan: &SequencePlan, step_index: usize) -> SequenceSte
         previous: (step_index > 0).then(|| plan.steps[step_index - 1].state.clone()),
         next: (step_index + 1 < total).then(|| plan.steps[step_index + 1].state.clone()),
         sequence_id: plan.sequence_id.clone(),
-        outputs: Vec::new(),
     }
 }
 
