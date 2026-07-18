@@ -111,3 +111,47 @@ jobs:
       - name: Run Claudine tests
         working-directory: claudine
         run: just ${{ matrix.recipe }}
+
+  # Continuous Level-2 (real-terminal) gate. Kept as a dedicated job — not a row
+  # in the L1 matrix above — so a tmux/harness failure is distinguishable from an
+  # ordinary L1 regression. The claudine L2 suite self-spawns tmux panes, so the
+  # runner must actually have tmux (ubuntu-latest does not guarantee it).
+  # BISCUIT_TEST_LEVEL_REQUIRED=2 turns a genuinely missing harness into a hard
+  # failure instead of a silent skip, so a typed-channel regression (e.g. an
+  # unreachable proxy handoff) cannot slip through as "0 tests run".
+  test-l2:
+    name: Claudine CLI (L2 real terminal)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BISCUIT_TEST_LEVEL_REQUIRED: "2"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: claudine-tests-l2
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Run Claudine L2 tests
+        working-directory: claudine
+        run: just test-l2
