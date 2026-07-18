@@ -1,7 +1,7 @@
 ---
 total_phases: 13
 created: 2026-07-12
-phase: 8
+phase: 9
 yolo: "true"
 source_files_during_phase_1:
   - claudine/lib/src/composition/sequence/tests.rs
@@ -165,6 +165,29 @@ docs_updated_during_phase_8: []
 docs_created_during_phase_8: []
 skills_files_updated_during_phase_8: []
 packages_during_phase_8:
+  - claudine
+source_files_during_phase_9:
+  - claudine/lib/src/composition/sequence/task/group.rs
+  - claudine/lib/src/composition/sequence/task/mod.rs
+  - claudine/lib/src/composition/sequence/task/tests.rs
+  - claudine/lib/src/composition/lifecycle/executor.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+  - claudine/lib/src/composition/lifecycle/tests/guard_runtime.rs
+  - claudine/lib/src/composition/looping/engine.rs
+  - claudine/lib/src/composition/types.rs
+  - claudine/lib/src/composition/mod.rs
+  - claudine/lib/tests/agent_errors_fleet.rs
+  - claudine/cli/src/commands/wrap/sequence/task_run.rs
+  - claudine/cli/src/commands/wrap/sequence/iterate.rs
+  - claudine/cli/src/commands/wrap/composition/preflight.rs
+  - claudine/cli/src/commands/wrap/composition/pipeline.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+  - claudine/cli/tests/sequence_groups.rs
+docs_updated_during_phase_9: []
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9: []
+packages_during_phase_9:
   - claudine
 packages:
   - biscuit-file
@@ -337,13 +360,13 @@ live-disk, turn-by-turn composition and execution.
 
 **Goal:** Add reusable group/task bundles without introducing concurrency yet.
 
-- [ ] Resolve and execute inline groups, `kind: group` files, and named group-catalog entries as sequence tasks with `tasks.len() >= 1`.
-- [ ] Enter an invocation-local `group.*` variable scope for group variables and remove it when the group completes; prevent group variables from leaking to later sequence steps.
-- [ ] Execute serial group tasks in declaration order against the shared live runtime layers so each task sees prior task mutations and `last(outputs)`.
-- [ ] Stop a serial group at its first failed/interrupted task, mark the owning sequence step failed, leave remaining tasks unexecuted, and delegate continuation solely to sequence-level `fail_fast`.
-- [ ] Aggregate group/task timings and names into sequence summaries without reintroducing the removed group `output` or task `passthrough` fields.
-- [ ] Add group schema/error tests for invalid execution mode, empty tasks, illegal `max_parallel` on serial groups, nested groups, unsupported group `loop`, default/override precedence, and direct group execution.
-- [ ] **Validation checkpoint:** inline/file/catalog serial groups are behaviorally equivalent, state/output chaining is declaration ordered, scope is cleaned up, and all blocked constructs fail during preflight.
+- [x] Resolve and execute inline groups, `kind: group` files, and named group-catalog entries as sequence tasks with `tasks.len() >= 1`. *(`sequence/task/group.rs`: `PreflightAction::Group` now routes to `TaskExecution::run_group` instead of the phase-7 refusal. The three definition sites converge in preflight, so execution never learns which one it came from — pinned by `inline_file_and_catalog_groups_are_behaviorally_equivalent`.)*
+- [x] Enter an invocation-local `group.*` variable scope for group variables and remove it when the group completes; prevent group variables from leaking to later sequence steps. *(`group` is a real injected global on `StackExecutionContext` — alongside `err`/`timing`/`current` — plus a member-state and overlay key so a prompt document composes against it. All three are derived per group and dropped with it; a later step's `{{ group.* }}` gets the strict unknown-root refusal.)*
+- [x] Execute serial group tasks in declaration order against the shared live runtime layers so each task sees prior task mutations and `last(outputs)`. *(`member_state` is rebuilt per task — base state < accumulated mutations < live `outputs` < reserved overlay < `group` — and every member shares the sequence's one `RuntimeState`.)*
+- [x] Stop a serial group at its first failed/interrupted task, mark the owning sequence step failed, leave remaining tasks unexecuted, and delegate continuation solely to sequence-level `fail_fast`. *(The loop breaks on the first non-success; the group has no `fail_fast` of its own, so `run_sequence_steps` decides continuation exactly as it does for any other failed step.)*
+- [x] Aggregate group/task timings and names into sequence summaries without reintroducing the removed group `output` or task `passthrough` fields. *(`TaskOutcome::group_tasks` → `SequenceStepResult::tasks`, rendered as an `UnorderedList` under the step status. Name, outcome, and duration only — no task output is echoed, because `outputs` is the sole accumulator. The `--perf` group/task hierarchy is phase 11's bullet.)*
+- [x] Add group schema/error tests for invalid execution mode, empty tasks, illegal `max_parallel` on serial groups, nested groups, unsupported group `loop`, default/override precedence, and direct group execution. *(All seven land in `preflight/tests.rs` — `mod group_schema` and `mod blocked` — from phase 5, since each is a preflight rejection. Phase 9 adds the execution-side counterparts and an end-to-end `a_group_loop_is_rejected_before_anything_runs` proving nothing runs before the rejection.)*
+- [x] **Validation checkpoint:** inline/file/catalog serial groups are behaviorally equivalent, state/output chaining is declaration ordered, scope is cleaned up, and all blocked constructs fail during preflight. *(9 L1 tests in `sequence/task/tests.rs::serial_groups` + 8 E2E cases in `cli/tests/sequence_groups.rs` through the real `claudine sequence` invocation path. Equivalence compares the whole observable tuple — commands, member results, `outputs`. `execution: parallel` is a typed refusal until phase 10 rather than a silent degrade to serial.)*
 
 ## Phase 10 — Parallel groups and deterministic merge
 
