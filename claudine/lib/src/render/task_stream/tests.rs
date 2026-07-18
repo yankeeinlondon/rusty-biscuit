@@ -102,6 +102,33 @@ mod geometry {
         }
     }
 
+    /// The invisible bar must fold at the same edge the colored one does.
+    ///
+    /// Regression: the custom-prefix `BlockQuote` path folds nothing on its own
+    /// and `Layout::default()` ships `word_wrap: None`, so a serial body line
+    /// used to run past the pane edge and let the *terminal* wrap it — dropping
+    /// the two-column gutter and restarting the continuation at column 0. That
+    /// is the sideways lurch `TaskBar::Invisible` exists to prevent, and only a
+    /// multi-line assertion catches it.
+    #[test]
+    fn long_content_wraps_inside_the_invisible_bar_too() {
+        let text = "alpha bravo charlie delta echo foxtrot golf hotel india juliett";
+        let rendered = TaskStreamFrame::new(TaskBar::Invisible, text).render(&color_term(30));
+        let lines: Vec<&str> = rendered.lines().collect();
+        assert!(lines.len() > 1, "expected a wrap at width 30: {rendered:?}");
+        for line in &lines {
+            let visible = strip_ansi(line);
+            assert!(
+                visible.starts_with("  "),
+                "every wrapped line keeps the invisible gutter: {visible:?}"
+            );
+            assert!(
+                visible.chars().count() <= 30,
+                "line overflows the terminal: {visible:?}"
+            );
+        }
+    }
+
     #[test]
     fn a_narrow_terminal_still_renders_a_barred_line() {
         let rendered = TaskStreamFrame::new(TaskBar::for_index(0), "abcdefghij").render(&color_term(8));
@@ -274,7 +301,7 @@ mod streaming {
 }
 
 mod sink {
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
 
@@ -323,14 +350,22 @@ mod sink {
         }
     }
 
-    fn live<'a>(label: &str, bar: TaskBar, sink: &'a RecordingSink) -> TaskLiveOutput<'a> {
-        TaskLiveOutput::new(TaskStream::new(label, bar, plain_term(60)), sink)
+    /// A fresh recording sink plus a [`TaskLiveOutput`] bound to it.
+    ///
+    /// Returned as a pair because the sink outlives the stream in every test —
+    /// the assertions read it after the stream has closed.
+    fn live(label: &str, bar: TaskBar) -> (Arc<RecordingSink>, TaskLiveOutput) {
+        let sink = Arc::new(RecordingSink::default());
+        let stream = TaskLiveOutput::new(
+            TaskStream::new(label, bar, plain_term(60)),
+            Arc::clone(&sink) as Arc<dyn TaskStreamSink>,
+        );
+        (sink, stream)
     }
 
     #[test]
     fn the_header_and_footer_take_the_status_channel() {
-        let sink = RecordingSink::default();
-        let stream = live("build", TaskBar::Invisible, &sink);
+        let (sink, stream) = live("build", TaskBar::Invisible);
         stream.open();
         stream.close(TaskStreamOutcome::Succeeded, Duration::from_secs(1));
 
@@ -345,8 +380,7 @@ mod sink {
 
     #[test]
     fn body_output_takes_the_data_channel() {
-        let sink = RecordingSink::default();
-        let stream = live("build", TaskBar::Invisible, &sink);
+        let (sink, stream) = live("build", TaskBar::Invisible);
         stream.open();
         stream.emit("fetched");
         stream.close(TaskStreamOutcome::Succeeded, Duration::from_secs(1));
@@ -362,8 +396,7 @@ mod sink {
 
     #[test]
     fn emit_does_not_wait_for_a_newline_the_payload_will_never_carry() {
-        let sink = RecordingSink::default();
-        let stream = live("t", TaskBar::Invisible, &sink);
+        let (sink, stream) = live("t", TaskBar::Invisible);
         // Captured stdout arrives with its transport newline already removed, so
         // holding the last line for a chunk that never comes would drop it.
         stream.emit("no trailing newline");
@@ -377,8 +410,7 @@ mod sink {
 
     #[test]
     fn an_empty_payload_writes_nothing_at_all() {
-        let sink = RecordingSink::default();
-        let stream = live("t", TaskBar::Invisible, &sink);
+        let (sink, stream) = live("t", TaskBar::Invisible);
         stream.emit("");
         assert!(
             sink.calls().is_empty(),
@@ -388,8 +420,7 @@ mod sink {
 
     #[test]
     fn body_frames_carry_the_same_bar_as_the_header() {
-        let sink = RecordingSink::default();
-        let stream = live("t", TaskBar::for_index(0), &sink);
+        let (sink, stream) = live("t", TaskBar::for_index(0));
         stream.open();
         stream.emit("body line");
         for line in sink.calls().into_iter().flat_map(|(_, frames)| frames) {
@@ -402,10 +433,10 @@ mod sink {
 
     #[test]
     fn concurrent_writers_never_interleave_within_one_frame_group() {
-        let sink = RecordingSink::default();
+        let sink = Arc::new(RecordingSink::default());
         std::thread::scope(|scope| {
             for index in 0..8 {
-                let sink = &sink;
+                let sink = Arc::clone(&sink) as Arc<dyn TaskStreamSink>;
                 scope.spawn(move || {
                     let stream = TaskLiveOutput::new(
                         TaskStream::new(

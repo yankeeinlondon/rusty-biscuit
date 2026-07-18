@@ -191,7 +191,7 @@ impl Fixture {
             shell: wiring.shell,
             prompt: wiring.prompt,
             interrupt: wiring.interrupt,
-            stream: wiring.stream,
+            stream: wiring.stream.as_ref(),
             // Group scheduling builds a member's live stream from `stream`; a
             // lone task under test has no enclosing scheduler to give it one.
             live: None,
@@ -210,8 +210,9 @@ struct Wiring<'a> {
     user_setters: Option<&'a Value>,
     interrupt: Option<&'a AtomicBool>,
     /// Where group-task header/footer frames land. `None` is the `--silent`
-    /// shape: nothing is rendered at all.
-    stream: Option<&'a dyn TaskStreamSink>,
+    /// shape: nothing is rendered at all. Owned rather than borrowed because
+    /// the executor shares the sink with per-member live streams.
+    stream: Option<Arc<dyn TaskStreamSink>>,
 }
 
 impl<'a> Wiring<'a> {
@@ -229,7 +230,7 @@ impl<'a> Wiring<'a> {
     }
 
     /// Route this run's group-task frames into `sink`.
-    fn with_stream(mut self, sink: &'a dyn TaskStreamSink) -> Self {
+    fn with_stream(mut self, sink: Arc<dyn TaskStreamSink>) -> Self {
         self.stream = Some(sink);
         self
     }
@@ -2581,7 +2582,7 @@ mod group_framing {
         })
     }
 
-    fn run(commands: &[&str], execution: &str, sink: &FrameSink) -> TaskOutcome {
+    fn run(commands: &[&str], execution: &str, sink: &Arc<FrameSink>) -> TaskOutcome {
         let dir = TempDir::new().unwrap();
         let source = one_step_source(dir.path(), group_step(commands, execution));
         let fixture = Fixture::build(dir, &source).unwrap();
@@ -2592,14 +2593,14 @@ mod group_framing {
                 shell.stdout_for(command, command)
             });
         let runtime = Arc::new(RuntimeState::new());
-        let mut wiring = Wiring::new(&recorder, &shell).with_stream(sink);
+        let mut wiring = Wiring::new(&recorder, &shell).with_stream(Arc::clone(sink) as Arc<dyn TaskStreamSink>);
         wiring.runtime = Some(&runtime);
         fixture.execute(&wiring)
     }
 
     #[test]
     fn every_member_task_opens_and_closes_exactly_one_stream() {
-        let sink = FrameSink::default();
+        let sink = Arc::new(FrameSink::default());
         let outcome = run(&["alpha", "bravo", "charlie"], "parallel", &sink);
 
         assert!(outcome.succeeded(), "{}", failure_message(&outcome));
@@ -2617,7 +2618,7 @@ mod group_framing {
 
     #[test]
     fn a_parallel_group_gives_each_task_its_own_palette_entry() {
-        let sink = FrameSink::default();
+        let sink = Arc::new(FrameSink::default());
         run(&["alpha", "bravo", "charlie"], "parallel", &sink);
 
         let bars: Vec<String> = sink
@@ -2637,9 +2638,9 @@ mod group_framing {
 
     #[test]
     fn a_serial_group_uses_the_invisible_bar_at_the_same_left_edge() {
-        let serial = FrameSink::default();
+        let serial = Arc::new(FrameSink::default());
         run(&["alpha", "bravo"], "serial", &serial);
-        let parallel = FrameSink::default();
+        let parallel = Arc::new(FrameSink::default());
         run(&["alpha", "bravo"], "parallel", &parallel);
 
         let serial_lines = serial.visible_lines();
@@ -2674,8 +2675,8 @@ mod group_framing {
             .stdout_for("bad-task", "partial")
             .failing("bad-task");
         let runtime = Arc::new(RuntimeState::new());
-        let sink = FrameSink::default();
-        let mut wiring = Wiring::new(&recorder, &shell).with_stream(&sink);
+        let sink = Arc::new(FrameSink::default());
+        let mut wiring = Wiring::new(&recorder, &shell).with_stream(Arc::clone(&sink) as Arc<dyn TaskStreamSink>);
         wiring.runtime = Some(&runtime);
 
         let outcome = fixture.execute(&wiring);
@@ -2694,7 +2695,7 @@ mod group_framing {
 
     #[test]
     fn concurrent_siblings_never_split_one_frame_group() {
-        let sink = FrameSink::default();
+        let sink = Arc::new(FrameSink::default());
         let dir = TempDir::new().unwrap();
         let names = ["one", "two", "three", "four", "five", "six"];
         let source = one_step_source(dir.path(), group_step(&names, "parallel"));
@@ -2711,7 +2712,7 @@ mod group_framing {
             },
         );
         let runtime = Arc::new(RuntimeState::new());
-        let mut wiring = Wiring::new(&recorder, &shell).with_stream(&sink);
+        let mut wiring = Wiring::new(&recorder, &shell).with_stream(Arc::clone(&sink) as Arc<dyn TaskStreamSink>);
         wiring.runtime = Some(&runtime);
 
         fixture.execute(&wiring);
@@ -2775,7 +2776,7 @@ mod group_framing {
 
     #[test]
     fn a_members_body_output_lands_on_the_data_channel_not_the_status_one() {
-        let sink = FrameSink::default();
+        let sink = Arc::new(FrameSink::default());
         let outcome = run(&["alpha", "bravo"], "parallel", &sink);
 
         assert!(outcome.succeeded(), "{}", failure_message(&outcome));
@@ -2799,7 +2800,7 @@ mod group_framing {
 
     #[test]
     fn every_body_line_carries_its_own_tasks_bar() {
-        let sink = FrameSink::default();
+        let sink = Arc::new(FrameSink::default());
         run(&["alpha", "bravo", "charlie"], "parallel", &sink);
 
         // The bar prefix each body line carries must be the same prefix that
@@ -2827,7 +2828,7 @@ mod group_framing {
 
     #[test]
     fn a_serial_members_body_shares_the_invisible_bar_geometry() {
-        let sink = FrameSink::default();
+        let sink = Arc::new(FrameSink::default());
         run(&["alpha", "bravo"], "serial", &sink);
 
         let data = sink.visible_channel_lines(Channel::Data);
@@ -2854,8 +2855,8 @@ mod group_framing {
             .stdout_for("bad-task", "partial work")
             .failing("bad-task");
         let runtime = Arc::new(RuntimeState::new());
-        let sink = FrameSink::default();
-        let mut wiring = Wiring::new(&recorder, &shell).with_stream(&sink);
+        let sink = Arc::new(FrameSink::default());
+        let mut wiring = Wiring::new(&recorder, &shell).with_stream(Arc::clone(&sink) as Arc<dyn TaskStreamSink>);
         wiring.runtime = Some(&runtime);
 
         let outcome = fixture.execute(&wiring);
@@ -2872,7 +2873,7 @@ mod group_framing {
 
     #[test]
     fn framing_never_reaches_the_captured_payload() {
-        let sink = FrameSink::default();
+        let sink = Arc::new(FrameSink::default());
         let outcome = run(&["alpha", "bravo"], "parallel", &sink);
 
         // The bar is display decoration; `outputs` is the undecorated stdout the
