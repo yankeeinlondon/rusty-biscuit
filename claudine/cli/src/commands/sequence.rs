@@ -107,39 +107,13 @@ fn resolve_sequence_source(file_ref: &str) -> Result<ResolvedCompositionSource, 
         })?
         .ok_or_else(|| CompositionError::FileNotFound(file_ref.to_string()))?;
 
-    let ext = resolved_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
-    if !matches!(ext.to_ascii_lowercase().as_str(), "yaml" | "yml") {
+    if !composition::is_yaml_source(&resolved_path) {
         return Err(CompositionError::NotMarkdown(resolved_path.display().to_string()));
     }
 
-    let yaml = biscuit_file::Yaml::new(&resolved_path).map_err(|e| {
-        CompositionError::MarkdownLoad {
-            path: resolved_path.clone(),
-            source: MarkdownLoadCause::Yaml(e),
-        }
-    })?;
-    let json_value = yaml.as_json().map_err(|e| CompositionError::MarkdownLoad {
-        path: resolved_path.clone(),
-        source: MarkdownLoadCause::Yaml(e),
-    })?;
-    let root = json_value.as_object().ok_or_else(|| {
-        CompositionError::SequenceExternalWrongType(
-            "YAML sequence file root must be an object".to_string(),
-        )
-    })?;
-
-    let mut frontmatter = darkmatter::markdown::Frontmatter::new();
-    for (key, value) in root {
-        frontmatter.insert(key, value.clone()).map_err(|e| {
-            CompositionError::MarkdownLoad {
-                path: resolved_path.clone(),
-                source: MarkdownLoadCause::Parse(Box::new(e)),
-            }
-        })?;
-    }
+    // The same conversion the just-in-time re-read performs, so a step composes
+    // against the document its preflight validated.
+    let markdown = composition::load_yaml_document(&resolved_path)?;
 
     let original_text = std::fs::read_to_string(&resolved_path).map_err(|e| {
         CompositionError::MarkdownLoad {
@@ -147,7 +121,6 @@ fn resolve_sequence_source(file_ref: &str) -> Result<ResolvedCompositionSource, 
             source: MarkdownLoadCause::Read(e),
         }
     })?;
-    let markdown = darkmatter::markdown::Markdown::with_frontmatter(frontmatter, "");
 
     Ok(ResolvedCompositionSource {
         original_ref: file_ref.to_string(),

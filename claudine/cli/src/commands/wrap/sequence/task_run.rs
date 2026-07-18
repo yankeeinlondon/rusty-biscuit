@@ -242,6 +242,9 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             &request.set_overrides,
             self.env_overrides,
             self.run.approved.clone(),
+            // A referenced prompt document *is* its body; composing it to
+            // nothing is the error the empty-body guard exists to name.
+            false,
         )?;
 
         let shared = self.run.shared;

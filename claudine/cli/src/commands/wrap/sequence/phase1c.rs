@@ -232,6 +232,7 @@ fn run_phase_1c_attempt(
             &step_set_overrides,
             &env_overrides,
             std::mem::take(&mut cumulative_approved),
+            plan.steps[step_index].executable.is_some(),
         ) {
             Ok(composed) => {
                 cumulative_approved = composed.approved;

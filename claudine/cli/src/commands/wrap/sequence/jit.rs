@@ -126,12 +126,18 @@ pub(super) fn step_env_overrides(
 /// else, while execution treats *any* failure here as a failure of that step,
 /// governed by `fail_fast` (spec → *Mid-run failure policy*).
 #[allow(clippy::result_large_err)]
+///
+/// `allow_empty_body` is set by a step that declares an executable: it runs its
+/// task instead of the document body, so a bodyless source — the shape a
+/// directly invoked `kind: sequence` YAML file always has — is legal there and
+/// only there.
 pub(super) fn compose_step(
     source: &ResolvedCompositionSource,
     ctx: &StepComposeContext<'_>,
     set_overrides: &Value,
     env_overrides: &BTreeMap<String, String>,
     approved: HashSet<String>,
+    allow_empty_body: bool,
 ) -> Result<StepComposition, CompositionError> {
     // Schema pre-validation before the shell pass. A step whose effective
     // frontmatter is missing required values must report that rather than let
@@ -188,6 +194,7 @@ pub(super) fn compose_step(
             .iter()
             .map(|s| (*s).to_string())
             .collect(),
+        allow_empty_body,
     };
 
     // Inline steps prepare via `prepare_inline_with_schema` so the composed

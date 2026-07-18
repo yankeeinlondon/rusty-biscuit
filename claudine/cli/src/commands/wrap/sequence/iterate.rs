@@ -267,11 +267,20 @@ fn run_one_step(
         snapshot.as_ref(),
     );
 
+    // A step declaring an executable never sends the document body, so a
+    // bodyless source is legal for it — that is the shape a directly invoked
+    // `kind: sequence` YAML file always has.
+    let has_executable = run
+        .graph
+        .steps
+        .get(step_index)
+        .is_some_and(|step| step.task.is_some());
     let composed = match compose_with_late_collection(
         run,
         &live,
         &set_overrides,
         &env_overrides,
+        has_executable,
     ) {
         Ok(composed) => composed,
         Err(error) => return StepOutcome::failed(&error),
@@ -356,6 +365,7 @@ fn compose_with_late_collection(
     live: &ResolvedCompositionSource,
     set_overrides: &Value,
     env_overrides: &std::collections::BTreeMap<String, String>,
+    allow_empty_body: bool,
 ) -> Result<jit::StepComposition, CompositionError> {
     let first = jit::compose_step(
         live,
@@ -363,6 +373,7 @@ fn compose_with_late_collection(
         set_overrides,
         env_overrides,
         run.approved.clone(),
+        allow_empty_body,
     );
     let Err(CompositionError::MissingProperties { ref missing, .. }) = first else {
         return first;
@@ -390,6 +401,7 @@ fn compose_with_late_collection(
         &Value::Object(merged),
         env_overrides,
         run.approved.clone(),
+        allow_empty_body,
     )
 }
 

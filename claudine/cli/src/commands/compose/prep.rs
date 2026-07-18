@@ -748,6 +748,7 @@ fn execute_loop_or_single(
         // Name coercion is a sequence-only concern; standalone compose/loop
         // prep injects no `state` object, so there is nothing to coerce.
         name_coercion_keys: Vec::new(),
+        allow_empty_body: false,
     };
 
     if !shared.dry_run {
@@ -823,6 +824,7 @@ fn execute_loop_or_single(
                 prepared_context: Some(prepared_context.clone()),
                 file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
                 name_coercion_keys: Vec::new(),
+                allow_empty_body: false,
             },
         )
         .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?
