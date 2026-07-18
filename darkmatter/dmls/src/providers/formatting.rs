@@ -113,6 +113,25 @@ mod tests {
     }
 
     #[test]
+    fn test_format_text_reflows_complete_list_paragraph_like_library_cleanup() {
+        let source = "- Alpha beta gamma delta\n    epsilon zeta eta theta.\n";
+        let mut config = DmlsConfig::default();
+        config.formatting.fixed_width = Some(24);
+
+        let mut md: Markdown = source.into();
+        md.cleanup();
+        let reflowed = reflow_to_width(md.content(), 24);
+        *md.content_mut() = reflowed;
+        let expected = md.as_string();
+
+        assert_eq!(format_text(source, &config), expected);
+        assert_eq!(
+            expected,
+            "- Alpha beta gamma delta\n  epsilon zeta eta\n  theta.\n"
+        );
+    }
+
+    #[test]
     fn test_format_text_preserves_frontmatter_and_directive_lines() {
         let source = "---\ntitle: Doc\n---\n\n# Body\n\n::file ./intro.md\n";
         let config = DmlsConfig::default();
