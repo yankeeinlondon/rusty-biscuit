@@ -43,6 +43,11 @@ do not belong here.
 - Feed commit messages through `-F -` with a single-quoted heredoc, or through a
   checked temp file for long bodies. A bare `git commit -- <paths> <<EOF` can
   open the configured editor and block.
+- `--` between `-F -` and the pathspec list is mandatory, even with `--only`.
+  Without it, git parses the first path as a subcommand (e.g. `git commit
+  --only -F - claudine/lib/...` tries to invoke `git-claudine`) and may also
+  re-enter the working directory as a relative path, triggering a permission
+  denied error. Always: `git commit --only -F - -- path1 path2 … <<'MSG' …`.
 - Do not place messages containing backticks, dollar signs, or other shell
   metacharacters in a double-quoted `-m` argument.
 
