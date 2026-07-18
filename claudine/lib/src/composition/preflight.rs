@@ -101,7 +101,57 @@ pub fn resolve_shell_approvals(
         }
     }
 
-    // -- Deduplicate -----------------------------------------------------------
+    approve_commands(all_commands, approval_options)
+}
+
+/// Approve every shell command a sequence's preflight graph can reach.
+///
+/// Two sources feed the gate, and both are condition-blind:
+///
+/// 1. the graph's own already-resolved bytes — task `shell:` commands and
+///    `setup:`/`teardown:` shell actions, which preflight resolved once so that
+///    what is approved is exactly what runs;
+/// 2. every referenced prompt document's template `::shell` directives, so a
+///    document composed at its turn can never stop mid-sequence for approval.
+///
+/// ## Errors
+///
+/// As [`resolve_shell_approvals`]: denial, a missing handler, a blacklisted
+/// command, or a document-graph walk failure.
+pub fn resolve_graph_shell_approvals(
+    graph: &crate::composition::sequence::preflight::PreflightGraph,
+    approval_options: &ShellApprovalOptions,
+    prompt_compose_options: &dyn Fn(&Path) -> ComposeOptions,
+) -> Result<PreFlightResult, CompositionError> {
+    let mut all_commands: Vec<(String, std::path::PathBuf, usize)> = Vec::new();
+
+    for command in &graph.shell_commands {
+        all_commands.push((command.command.clone(), command.source_file.clone(), 0));
+    }
+
+    for document in &graph.prompt_documents {
+        let options = prompt_compose_options(&document.path);
+        let preflight = document
+            .markdown
+            .compose_preflight(&options)
+            .map_err(CompositionError::PreFlightDiscoveryFailed)?;
+        for entry in &preflight.entries {
+            all_commands.push((
+                entry.normalized.clone(),
+                entry.source_file.clone(),
+                entry.origin.line_number(),
+            ));
+        }
+    }
+
+    approve_commands(all_commands, approval_options)
+}
+
+/// Deduplicate discovered commands and run each through the approval gate.
+fn approve_commands(
+    all_commands: Vec<(String, std::path::PathBuf, usize)>,
+    approval_options: &ShellApprovalOptions,
+) -> Result<PreFlightResult, CompositionError> {
     let unique: Vec<(String, std::path::PathBuf, usize)> = {
         let mut seen = HashSet::new();
         all_commands

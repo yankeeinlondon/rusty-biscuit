@@ -16,6 +16,8 @@
 //! - [`expr`] — expression evaluation for dynamic sources and templates;
 //! - [`normalize`] — strict/lenient state normalization, id suffixing, and the
 //!   `sequence_id` invocation token;
+//! - [`preflight`] — the recursive task graph: external task/group/catalog/
+//!   prompt loading, cycle detection, and early-binding shell resolution;
 //! - [`source`] — file-reference resolution and referenced-source loading;
 //! - [`reserved`] — the canonical reserved-key catalog shared by every layer.
 //!
@@ -26,6 +28,7 @@ pub mod expr;
 pub mod grammar;
 pub mod model;
 pub mod normalize;
+pub mod preflight;
 pub mod reserved;
 pub mod source;
 

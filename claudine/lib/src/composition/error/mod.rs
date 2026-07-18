@@ -1322,6 +1322,130 @@ pub enum CompositionError {
         message: String,
     },
 
+    // -- Sequence preflight graph (phase 5) ------------------------------------
+    /// A task/group/prompt reference chain returned to a document already on the
+    /// ancestry stack. The chain is reported whole so the author can see which
+    /// hop closed the loop rather than only the repeated file.
+    #[error("sequence reference cycle: {}", render_reference_chain(chain))]
+    SequenceReferenceCycle {
+        /// The full canonical chain, from the entry document to the repeat.
+        chain: Vec<PathBuf>,
+    },
+
+    /// A referenced document could not be loaded or is not the expected `kind`.
+    #[error("{context} ({path}): {problem}")]
+    SequenceReferenceInvalid {
+        /// What the reference was being loaded as (`task file`, `group file`, …).
+        context: String,
+        /// The resolved path.
+        path: PathBuf,
+        /// What was wrong with it.
+        problem: String,
+    },
+
+    /// A `prompt:` task referenced a document that itself declares `sequence:`.
+    ///
+    /// Nested sequences are out of scope in v1 (spec → *Static Preflight*).
+    #[error(
+        "nested sequences are not supported: `{path}` declares `sequence:` but is \
+         referenced as a prompt task from `{referenced_from}`"
+    )]
+    SequenceNestedSequence {
+        /// The referenced prompt document.
+        path: PathBuf,
+        /// The document that referenced it.
+        referenced_from: PathBuf,
+    },
+
+    /// A construct that preflight recognizes but v1 deliberately does not run.
+    ///
+    /// Covers nested groups, group `loop` (commit semantics unratified — spec →
+    /// *Open Questions*), and direct execution of a `kind: group` document.
+    #[error("{construct} is not supported: {detail}")]
+    SequenceUnsupportedConstruct {
+        /// The rejected construct, named as the author wrote it.
+        construct: String,
+        /// Why it is rejected and what to do instead.
+        detail: String,
+    },
+
+    /// A `{group}@{file-ref}` catalog reference did not resolve to one group.
+    #[error(
+        "group `{name}` {problem} in catalog `{path}`{}",
+        render_available_groups(available)
+    )]
+    SequenceGroupCatalogLookup {
+        /// The requested group name.
+        name: String,
+        /// The resolved catalog path.
+        path: PathBuf,
+        /// `is not defined` or `is defined more than once`.
+        problem: String,
+        /// The names the catalog does define, for a did-you-mean list.
+        available: Vec<String>,
+    },
+
+    /// A group definition violates the group schema.
+    #[error("group `{group}` ({origin}) is invalid: {problem}")]
+    SequenceGroupInvalid {
+        /// The group's name, or `<inline>` when it has none yet.
+        group: String,
+        /// The document the group was authored in.
+        origin: PathBuf,
+        /// The specific schema violation.
+        problem: String,
+    },
+
+    /// Two tasks in the same parallel group write back to the same document.
+    ///
+    /// Racing inline-compose write-backs are never legal, and preflight holds
+    /// the whole graph, so the collision is caught before anything launches.
+    #[error(
+        "parallel group `{group}` would write back to `{target}` from more than one task \
+         (`{first}` and `{second}`); inline-compose targets must be distinct"
+    )]
+    SequenceWriteBackCollision {
+        /// The owning parallel group.
+        group: String,
+        /// The canonical target path both tasks would rewrite.
+        target: PathBuf,
+        /// The first task's label.
+        first: String,
+        /// The second task's label.
+        second: String,
+    },
+
+    /// A task's shell command references a value that does not exist at
+    /// preflight, so its approved bytes could never equal its executed bytes.
+    #[error(
+        "shell command `{command}` in {task} references `{root}`, which is not available at \
+         preflight; shell commands are approved before the sequence starts, so only \
+         early-binding values (`state`, `params`, `doc.*`, `ctx.*`, `env.*`) may be used. \
+         Route work that consumes prior output through a `prompt` or `side_effect` task"
+    )]
+    SequenceShellLateBinding {
+        /// The authored command.
+        command: String,
+        /// The offending root (`outputs`, `err`, `timing`, `current`).
+        root: String,
+        /// A label locating the task.
+        task: String,
+    },
+
+    /// A task's shell command failed early-binding resolution at preflight.
+    #[error("shell command `{command}` in {task} could not be resolved at preflight: {message}")]
+    SequenceShellResolution {
+        /// The authored command.
+        command: String,
+        /// A label locating the task.
+        task: String,
+        /// The underlying resolution failure.
+        message: String,
+        /// The typed lower-layer failure, when one was raised.
+        #[source]
+        source: Option<Box<MarkdownError>>,
+    },
+
     /// One or more sequence steps failed provider/model resolution in non-TTY mode.
     #[error("sequence selection failed for {failure_count} step(s): {failures:?}")]
     SequenceSelectionFailed {
@@ -2188,6 +2312,25 @@ impl DroppedOptionalSource {
             DroppedOptionalSource::Override => "override",
             DroppedOptionalSource::Composed => "composed",
         }
+    }
+}
+
+/// Render a reference-cycle chain as `a.md → b.yaml → a.md`.
+fn render_reference_chain(chain: &[PathBuf]) -> String {
+    chain
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join(" → ")
+}
+
+/// Render the "; catalog defines: …" tail of a catalog-lookup failure, or an
+/// empty string when the catalog defines nothing to suggest.
+fn render_available_groups(available: &[String]) -> String {
+    if available.is_empty() {
+        String::new()
+    } else {
+        format!("; catalog defines: {}", available.join(", "))
     }
 }
 

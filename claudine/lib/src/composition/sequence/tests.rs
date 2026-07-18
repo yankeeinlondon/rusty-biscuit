@@ -1161,10 +1161,10 @@ mod clean_break {
     /// Group execution without `loop` is in scope, but group-loop commit
     /// semantics remain unratified (spec Open Questions), so a group carrying
     /// `loop` must be rejected with a typed, actionable error rather than
-    /// executed. Blocked until group parsing exists; un-ignore when a step's
-    /// `group.loop` is recognized so no implementer invents commit semantics.
+    /// executed. Groups are parsed by the Phase 5 preflight walk, which is
+    /// where the rejection lands — plan resolution stays shape-agnostic about
+    /// a step's executable value.
     #[test]
-    #[ignore = "blocked: group `loop` rejected once groups parse in Phase 9 (sequence-plus)"]
     fn group_loop_rejected() {
         let dir = TempDir::new().unwrap();
         let source = make_source(
@@ -1183,10 +1183,18 @@ mod clean_break {
             )],
             "Prompt",
         );
-        let result = resolve_sequence_plan(&source);
+        let plan = resolve_sequence_plan(&source)
+            .expect("the plan itself is well-formed")
+            .expect("the fixture declares a sequence");
+        let error = super::preflight::build_preflight_graph(&plan, &source)
+            .expect_err("a group carrying `loop` must be rejected");
         assert!(
-            result.is_err(),
-            "a group carrying `loop` must be rejected with a typed error, got: {result:?}",
+            matches!(
+                &error,
+                CompositionError::SequenceUnsupportedConstruct { construct, .. }
+                    if construct.contains("group `loop`")
+            ),
+            "the rejection must be typed and name the construct, got: {error}",
         );
     }
 }
