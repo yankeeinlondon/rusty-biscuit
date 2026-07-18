@@ -707,15 +707,22 @@ fn build_loop_options(shared: &SharedComposeArgs) -> LoopExecutionOptions {
 
 /// Build the loop seed, lifecycle runtime context, and run the loop engine.
 ///
-/// Iteration 1 uses full schema-aware prepare + shell pre-flight. Later
-/// iterations skip schema validation and shell approval; the loop engine
-/// emits `initialize` once and delegates `start`/terminal/`finalize` to the
-/// shared [`claudine::composition::LifecycleRunGuard`].
+/// Iteration 1 prepares at `schema_stage`; later iterations skip schema
+/// validation and shell approval; the loop engine emits `initialize` once and
+/// delegates `start`/terminal/`finalize` to the shared
+/// [`claudine::composition::LifecycleRunGuard`].
 #[allow(clippy::too_many_arguments)]
 fn build_and_run_loop(
     source: &ResolvedCompositionSource,
     loop_prepare_options: &PrepareOptions,
     loop_options: LoopExecutionOptions,
+    // Whether iteration 1 owns this document's schema verdict, or owes it to the
+    // post-`initialize` stabilized reread. Threaded from the coordinator so a
+    // looping document is judged at the same lifecycle point as a single one.
+    schema_stage: claudine::composition::SchemaStage,
+    // Whether this document arrived through a committed proxy handoff, which is
+    // the entry reason iteration 1 records on its prepared composition.
+    is_proxy_target: bool,
     kind: CompositionKind,
     file_for_loop: &str,
     resolved_target: Option<ResolvedExecutionTarget>,
@@ -814,13 +821,34 @@ fn build_and_run_loop(
                         info_span!("compose_prep.prepare_inline").entered()
                     }
                 };
-                // Iteration 1 validates against `$schema`; re-entry passes
-                // skip schema validation and shell pre-flight because the
-                // seed/frontmatter state was already judged on iteration 1.
+                // Iteration 1 prepares at the stage the coordinator selected;
+                // re-entry passes skip schema validation and shell pre-flight
+                // because the seed/frontmatter state was already judged on
+                // iteration 1.
+                //
+                // At the deferred stage iteration 1 is still a pre-`initialize`
+                // read of the document *body* — the engine emitted `initialize`
+                // just above, but this compose runs against the source snapshot
+                // taken before it. Recording the deferral on the prepared
+                // composition is what hands the verdict to the harness's
+                // stabilized reread (`stabilize_after_initialize` in
+                // `wrap::composition::runner`), which re-reads from disk, re-runs
+                // the full audit, and judges the document `initialize` left
+                // behind. Reaching the verdict here instead would put the schema
+                // ahead of `initialize` for every looping document (R4).
                 let mut iteration_options = loop_prepare_options.clone();
                 iteration_options.set_overrides = Some(ctx.as_set_overrides());
                 if ctx.iteration == 1 {
-                    kind.prepare_with_schema(source, iteration_options)?
+                    kind.prepare_staged(
+                        source,
+                        iteration_options,
+                        if is_proxy_target {
+                            claudine::composition::DocumentEntryReason::ProxyTarget
+                        } else {
+                            claudine::composition::DocumentEntryReason::Direct
+                        },
+                        schema_stage,
+                    )?
                 } else {
                     kind.prepare_without_schema(source, iteration_options)?
                 }
@@ -865,15 +893,26 @@ fn build_and_run_loop(
                 ctx.iteration > 1,
             )
             .map_err(|e| {
-                // Pre-spawn execution wiring failed (binary lookup, env
-                // build, etc.). Surface as an iteration failure — these are
-                // runtime problems, not malformed loop frontmatter.
-                CompositionError::LoopIterationFailed {
-                    iteration: ctx.iteration,
-                    prompt_path: source.resolved_path.clone(),
-                    exit_code: 1,
-                    reason: e.to_string(),
-                    exit_reason: None,
+                // A concrete `CompositionError` keeps its own identity. Since
+                // iteration 1 may defer its verdict, the attempt itself now
+                // carries preparation failures the closure used to raise
+                // directly — a schema verdict from the staged boot's stabilized
+                // reread above all. Flattening those into `LoopIterationFailed`
+                // would make a looping document render a different diagnostic
+                // than the identical document without `loop:`.
+                //
+                // Everything else is pre-spawn execution wiring (binary lookup,
+                // env build). Those are runtime problems, not malformed loop
+                // frontmatter, and stay an iteration failure.
+                match e.downcast::<CompositionError>() {
+                    Ok(typed) => typed,
+                    Err(other) => CompositionError::LoopIterationFailed {
+                        iteration: ctx.iteration,
+                        prompt_path: source.resolved_path.clone(),
+                        exit_code: 1,
+                        reason: other.to_string(),
+                        exit_reason: None,
+                    },
                 }
             })?;
 
@@ -1047,7 +1086,16 @@ fn execute_loop_or_single(
         shell_working_directory: Some(prep_context.launch_workspace.child_cwd.clone()),
         prepared_context: Some(prepared_context.clone()),
         file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
-        defer_schema_verdict: false,
+        // R4 applies to a looping document exactly as it does to a single one.
+        // Every read the loop route takes *before* the engine emits `initialize`
+        // — the seed compose here and the iteration-1 compose below — must
+        // withhold the verdict when the coordinator selected the deferred stage,
+        // or a document whose own `initialize` supplies a required property is
+        // rejected before the event that would have supplied it. Hard-coding
+        // `false` here is what made a looping target fail where the identical
+        // document invoked without `loop:` succeeded.
+        defer_schema_verdict: schema_stage
+            == claudine::composition::SchemaStage::DeferToStabilizedReread,
     };
 
     if !shared.dry_run {
@@ -1055,6 +1103,8 @@ fn execute_loop_or_single(
             &source,
             &loop_prepare_options,
             loop_options,
+            schema_stage,
+            adopted_handoff.is_some(),
             kind,
             &file_for_loop,
             resolved_target.clone(),

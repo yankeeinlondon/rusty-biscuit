@@ -375,30 +375,18 @@ impl CompositionKind {
         }
     }
 
-    /// Schema-aware prepare function for this command.
-    pub(crate) fn prepare_with_schema(
-        self,
-        source: &ResolvedCompositionSource,
-        options: PrepareOptions,
-    ) -> Result<PreparedComposition, CompositionError> {
-        match self {
-            Self::Direct => claudine::composition::prepare_direct_with_schema(source, options),
-            Self::Inline => claudine::composition::prepare_inline_with_schema(source, options),
-        }
-    }
-
     /// Prepare through the canonical document service at an explicit schema
     /// stage.
     ///
-    /// Preferred over [`prepare_with_schema`](Self::prepare_with_schema) on the
-    /// single-execution path: a document whose own `initialize` may add or repair
-    /// a schema property must not be judged before that event runs (R4), and the
-    /// canonical service records the deferral on the prepared composition so the
-    /// harness knows a stabilized reread is still owed.
+    /// The only schema-aware prepare on either execution path. A document whose
+    /// own `initialize` may add or repair a schema property must not be judged
+    /// before that event runs (R4), and the canonical service records the
+    /// deferral on the prepared composition so the harness knows a stabilized
+    /// reread is still owed.
     ///
     /// ## Errors
     ///
-    /// See [`prepare_with_schema`](Self::prepare_with_schema). A deferred stage
+    /// Propagates the composer's typed [`CompositionError`]. A deferred stage
     /// surfaces every non-schema preparation failure and no schema verdict.
     pub(crate) fn prepare_staged(
         self,
@@ -419,9 +407,10 @@ impl CompositionKind {
 
     /// Schema-agnostic prepare function for this command.
     ///
-    /// Used on loop iterations after the first, where the seed pass has
-    /// already validated the frontmatter against `$schema` and we only need
-    /// to re-compose with the current override state.
+    /// Used on loop iterations after the first, where the verdict has already
+    /// been reached — by iteration 1 itself, or by the harness's stabilized
+    /// reread when iteration 1 deferred — and we only need to re-compose with
+    /// the current override state.
     pub(crate) fn prepare_without_schema(
         self,
         source: &ResolvedCompositionSource,
