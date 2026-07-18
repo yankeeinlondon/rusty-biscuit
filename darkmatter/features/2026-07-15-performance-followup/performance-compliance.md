@@ -83,3 +83,17 @@ objects, so the committed-pin condition can still be met when a quiet host is
 available.
 
 **Current verdict:** not established. Acceptance criteria 5 and 6 remain open.
+
+### 2026-07-17 — Review 7 assessment
+
+**Declined before capture; inadmissible host.** The review-7 assessment checked
+the host before attempting the committed three-arm harness. The host reported
+load averages of **8.84** (1 minute), **19.21** (5 minutes), and **30.74**
+(15 minutes), so admissibility condition 1 was already violated by more than
+four times the 1-minute ceiling. No benchmark was run and no threshold result
+was claimed.
+
+The review found no new implementation or verification-level defect. The
+review-6 documentation finding is closed, and the focused deterministic tests
+remain green. The integrated compose-regression threshold is nevertheless
+still not established, so acceptance criteria 5 and 6 remain open.
