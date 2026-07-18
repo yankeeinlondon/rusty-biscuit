@@ -1,6 +1,6 @@
 ## Overview
 
-The `clean` command normalizes markdown formatting by parsing the input and re-emitting consistent markdown.
+The `clean` command normalizes markdown formatting by parsing the input and re-emitting consistent markdown. Prose includes paragraphs inside ordered, unordered, and task-list items, including nested items and lists inside blockquotes.
 
 It is useful when you want to:
 
@@ -42,7 +42,7 @@ md README.md --save
 - `[INPUT]`: Markdown file path (supports `@` file references). Use `-` for stdin. If omitted, reads from stdin.
 - `--save`: Clean in place and print a delta-style change report (same report format used by `md delta`).
 - `--indent <#>`: Normalize nested list indentation width to a consistent number of spaces (`2`, `4`, or `8`).
-- `--fixed-width <#>`: Collapse incidental single newlines, then re-wrap prose to the target display width.
+- `--fixed-width <#>`: Collapse incidental single newlines, then re-wrap prose, including list-item paragraphs, to the target display width.
 - `--ignore-incidental-newlines`: Preserve source single newlines instead of collapsing fixed-column wrapping.
 
 `--fixed-width` and `--ignore-incidental-newlines` cannot be used together.
@@ -127,6 +127,22 @@ Output:
 This paragraph was wrapped by an editor at a fixed column even though Markdown treats it as one paragraph.
 ```
 
+List-item paragraphs follow the same rule. Continuation indentation used only
+for source layout is removed with the soft break:
+
+Input:
+
+```markdown
+- Ratified design: `claudine/features/2026-07-12-rendezvous-dashboard/spec.md`
+    (see the "Decisions" section, especially the implementation stamps).
+```
+
+Output:
+
+```markdown
+- Ratified design: `claudine/features/2026-07-12-rendezvous-dashboard/spec.md` (see the "Decisions" section, especially the implementation stamps).
+```
+
 ### Fixed Width
 
 Input:
@@ -147,6 +163,31 @@ Output:
 ```markdown
 This paragraph was wrapped by an editor at a fixed column and should be collapsed
 before being wrapped to the requested display width.
+```
+
+For list-item paragraphs, the width includes the complete list and blockquote
+container prefix. Newly wrapped continuation lines use a hanging prefix aligned
+with the first body character:
+
+Input:
+
+```markdown
+- Alpha beta gamma delta
+    epsilon zeta eta theta.
+```
+
+Command:
+
+```bash
+md clean --fixed-width 24 -
+```
+
+Output:
+
+```markdown
+- Alpha beta gamma delta
+  epsilon zeta eta
+  theta.
 ```
 
 ### Preserve Incidental Newlines

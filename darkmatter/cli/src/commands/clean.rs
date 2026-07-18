@@ -43,7 +43,7 @@ pub fn run_clean(
             fixed_width,
             ignore_incidental_newlines,
         );
-        println!("{}", md.as_string());
+        print!("{}", md.as_string());
         return Ok(());
     }
 

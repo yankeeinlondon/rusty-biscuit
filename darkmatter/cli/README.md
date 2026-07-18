@@ -236,8 +236,13 @@ md README.md --save
 By default, `md clean` collapses incidental single newlines in prose before
 running the rest of cleanup. Blank lines, fenced and indented code blocks,
 tables, HTML blocks, transclusion directives, list markers, and blockquote
-prefixes are preserved. Use `--fixed-width <#>` when you want canonical cleanup
-followed by prose wrapping to a target display width, or
+prefixes are preserved. Prose includes paragraphs inside ordered, unordered,
+and task-list items at every nesting depth: default cleanup removes source-only
+continuation indentation, while `--fixed-width <#>` unwraps the complete item
+paragraph and emits list-aware hanging continuation prefixes. For lists inside
+blockquotes, those prefixes retain both the quote and list containers. Use
+`--fixed-width <#>` when you want canonical cleanup followed by prose wrapping
+to a target display width, or
 `--ignore-incidental-newlines` when source line breaks must remain unchanged.
 `--fixed-width` and `--ignore-incidental-newlines` conflict because fixed-width
 reflow first needs the incidental source wrapping removed.

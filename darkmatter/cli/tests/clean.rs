@@ -87,6 +87,51 @@ fn test_clean_subcommand_ignore_incidental_newlines_preserves_source_wrapping() 
 }
 
 #[test]
+fn test_clean_subcommand_list_modes_match_library_contract() {
+    let source = "- Alpha beta gamma delta\n    epsilon zeta eta theta.\n";
+
+    let stripped = md_cmd()
+        .args(["clean", "-"])
+        .write_stdin(source)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(
+        String::from_utf8(stripped).unwrap(),
+        "- Alpha beta gamma delta epsilon zeta eta theta.\n"
+    );
+
+    let fixed = md_cmd()
+        .args(["clean", "--fixed-width", "24", "-"])
+        .write_stdin(source)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let fixed = String::from_utf8(fixed).unwrap();
+    assert_eq!(
+        fixed,
+        "- Alpha beta gamma delta\n  epsilon zeta eta\n  theta.\n"
+    );
+    for line in fixed.lines() {
+        assert!(UnicodeWidthStr::width(line) <= 24, "line exceeded width: {line:?}");
+    }
+
+    let preserved = md_cmd()
+        .args(["clean", "--ignore-incidental-newlines", "-"])
+        .write_stdin(source)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(String::from_utf8(preserved).unwrap(), source);
+}
+
+#[test]
 fn test_clean_subcommand_rejects_fixed_width_with_ignore_incidental_newlines() {
     md_cmd()
         .args([
@@ -138,6 +183,38 @@ fn test_clean_subcommand_save_fixed_width_reports_delta() {
     );
     let longest = updated.lines().map(UnicodeWidthStr::width).max().unwrap_or(0);
     assert!(longest <= 40, "longest line was {longest}:\n{updated}");
+}
+
+#[test]
+fn test_clean_subcommand_save_reflows_list_and_is_stable_on_repeated_read() {
+    let source = "# Title\n\n- Alpha beta gamma delta\n    epsilon zeta eta theta.\n";
+    let expected = "# Title\n\n- Alpha beta gamma delta\n  epsilon zeta eta\n  theta.\n";
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    write!(tmp, "{source}").unwrap();
+    tmp.flush().unwrap();
+
+    md_cmd()
+        .args(["clean", "--fixed-width", "24"])
+        .arg(tmp.path())
+        .arg("--save")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("changed"));
+
+    let first_read = std::fs::read_to_string(tmp.path()).unwrap();
+    assert_eq!(first_read, expected);
+    for line in first_read.lines() {
+        assert!(UnicodeWidthStr::width(line) <= 24, "line exceeded width: {line:?}");
+    }
+
+    md_cmd()
+        .args(["clean", "--fixed-width", "24"])
+        .arg(tmp.path())
+        .arg("--save")
+        .assert()
+        .success();
+    let second_read = std::fs::read_to_string(tmp.path()).unwrap();
+    assert_eq!(second_read, first_read);
 }
 
 #[test]
