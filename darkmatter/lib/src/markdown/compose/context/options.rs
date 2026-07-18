@@ -272,6 +272,18 @@ pub struct ComposeOptions {
     /// required string) must still fail fast here. Default: `false`.
     pub(crate) defer_shell_pending_schema_problems: bool,
 
+    /// When `true`, the schema-validation stage still coerces frontmatter to
+    /// the declared types but reports no problems: this pass is not the one
+    /// that owns the document's schema verdict.
+    ///
+    /// Two callers need it. A shell-discovery pass composes only to find
+    /// commands. And a pre-`initialize` bootstrap read composes a document whose
+    /// own `initialize` may still add or repair a schema property — judging it
+    /// here would fail the document for a violation the very next stage is about
+    /// to fix. In both cases a later terminal pass composes the settled document
+    /// and reports the verdict. Default: `false`.
+    pub(crate) defer_schema_verdict: bool,
+
     // ── Deferred frontmatter keys (DM1) ────────────────────────────
     /// Top-level frontmatter keys deferred from every compose-time value
     /// resolution pass (`{{ }}` interpolation, whole-value expansion,
@@ -466,6 +478,7 @@ impl ComposeOptions {
             trigger_schemas: false,
             remote_read_config: RemoteReadConfig::default(),
             defer_shell_pending_schema_problems: false,
+            defer_schema_verdict: false,
             preflight_graph: None,
             remote_fetch: None,
             exclude_keys: std::collections::HashSet::new(),
@@ -1136,6 +1149,26 @@ impl ComposeOptions {
     /// compose-time resolution.
     pub fn exclude_keys(&self) -> &std::collections::HashSet<String> {
         &self.exclude_keys
+    }
+
+    /// Composes without owning the document's schema verdict: frontmatter is
+    /// still coerced to the declared types, but no schema problem is reported.
+    ///
+    /// Set it only when a later terminal pass composes the settled document and
+    /// reports the verdict — a shell-discovery pass, or a read taken before an
+    /// `initialize` stage that may still add or repair the offending property.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::compose::ComposeOptions;
+    ///
+    /// let options = ComposeOptions::new().with_deferred_schema_verdict(true);
+    /// ```
+    #[must_use]
+    pub fn with_deferred_schema_verdict(mut self, deferred: bool) -> Self {
+        self.defer_schema_verdict = deferred;
+        self
     }
 
     /// Sets the explicit fallback directory for caller-supplied file references

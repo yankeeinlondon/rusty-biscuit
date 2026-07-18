@@ -109,15 +109,22 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
     // eager-`file` rewrite pass after validation accepts the instance.
     // `effective_for` returns an owned schema (no borrow of `markdown`), so it
     // can outlive the frontmatter mutations below.
-    let effective = schemas.effective_for(markdown).map_err(|err| {
-        MarkdownError::SchemaValidationFailed {
-            path: path.clone(),
-            problems: Vec::new(),
-            summary: format!("schema could not be prepared: {err}"),
-            description: description.clone(),
-            source: Some(Box::new(err)),
+    let effective = match schemas.effective_for(markdown) {
+        Ok(effective) => effective,
+        // A schema that cannot even be prepared is still not this pass's verdict
+        // to report when the caller deferred it; coercion simply has nothing to
+        // work from.
+        Err(_) if options.defer_schema_verdict => return Ok(()),
+        Err(err) => {
+            return Err(MarkdownError::SchemaValidationFailed {
+                path: path.clone(),
+                problems: Vec::new(),
+                summary: format!("schema could not be prepared: {err}"),
+                description: description.clone(),
+                source: Some(Box::new(err)),
+            });
         }
-    })?;
+    };
 
     if let Some(effective) = effective.as_ref() {
         // Coerce schema-recognized scalars to their declared types and write the
@@ -141,6 +148,13 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
                 fm_map.insert(key, value);
             }
         }
+    }
+
+    // Coercion above is unconditional; the verdict is not. A pass that does not
+    // own the verdict stops here, before a validator is even built: a schema
+    // that cannot be *prepared* is likewise not this pass's failure to report.
+    if options.defer_schema_verdict {
+        return Ok(());
     }
 
     let report = schemas.validate(markdown).map_err(|err| {
@@ -385,6 +399,30 @@ mod tests {
         assert_eq!(
             md.frontmatter().as_map().get("title"),
             Some(&serde_json::json!("Hello"))
+        );
+    }
+
+    // ── Deferred verdict ──────────────────────────────────────────────
+
+    #[test]
+    fn deferred_verdict_reports_no_problem() {
+        let mut md = md_with_schema("$schema:\n  title: 'string(required)'\nother: stuff\n");
+        let options = ComposeOptions::new().with_deferred_schema_verdict(true);
+        assert!(
+            run(&mut md, &options).is_ok(),
+            "a pass that does not own the verdict reports no violation"
+        );
+    }
+
+    #[test]
+    fn deferred_verdict_still_coerces() {
+        let mut md = md_with_schema("$schema:\n  enabled: boolean\nenabled: \"true\"\n");
+        let options = ComposeOptions::new().with_deferred_schema_verdict(true);
+        assert!(run(&mut md, &options).is_ok());
+        assert_eq!(
+            md.frontmatter().as_map().get("enabled"),
+            Some(&serde_json::json!(true)),
+            "coercion is unconditional; only the verdict is withheld"
         );
     }
 
