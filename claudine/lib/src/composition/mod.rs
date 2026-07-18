@@ -98,7 +98,8 @@ pub use runtime_state::{
     trim_transport_newline, with_initialized_outputs,
 };
 pub use resolve::{
-    build_prompt_reference, enrich_composition_source_load_error, reload_composition_source,
+    build_prompt_reference, enrich_composition_source_load_error, is_yaml_source,
+    load_yaml_document, reload_composition_source,
     resolve_composition_source,
     validate_file_permissions,
 };

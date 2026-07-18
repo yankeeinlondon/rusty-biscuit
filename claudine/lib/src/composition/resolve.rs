@@ -86,6 +86,63 @@ pub fn resolve_composition_source(
     })
 }
 
+/// Whether `path` is a YAML file, which composition loads as frontmatter with
+/// an empty body rather than as Markdown.
+pub fn is_yaml_source(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "yaml" | "yml"))
+}
+
+/// Load a YAML file as a frontmatter-only document with an empty body.
+///
+/// This is the second composition entry mode: a `kind: sequence` YAML file
+/// invoked directly is one document whose *root mapping is its frontmatter*, so
+/// `sequence`, `prompt`, `$schema`, and every other key behave exactly as they
+/// would inside a Markdown frontmatter block.
+///
+/// It lives here rather than beside the CLI's sequence command because the
+/// just-in-time re-read ([`reload_composition_source`]) must reach the identical
+/// document the initial resolution produced. Loading a YAML source as plain
+/// Markdown yields an empty frontmatter, which downstream is indistinguishable
+/// from a document that simply declared nothing.
+///
+/// ## Errors
+///
+/// Returns [`CompositionError::MarkdownLoad`] when the file cannot be read or
+/// parsed as YAML, and [`CompositionError::SequenceExternalWrongType`] when its
+/// root is not a mapping.
+pub fn load_yaml_document(path: &Path) -> Result<Markdown, CompositionError> {
+    let yaml = biscuit_file::Yaml::new(path).map_err(|e| CompositionError::MarkdownLoad {
+        path: path.to_path_buf(),
+        source: MarkdownLoadCause::Yaml(e),
+    })?;
+    let json_value = yaml.as_json().map_err(|e| CompositionError::MarkdownLoad {
+        path: path.to_path_buf(),
+        source: MarkdownLoadCause::Yaml(e),
+    })?;
+    let root = json_value.as_object().ok_or_else(|| {
+        CompositionError::SequenceExternalWrongType(
+            "YAML sequence file root must be an object".to_string(),
+        )
+    })?;
+
+    let mut frontmatter = darkmatter::markdown::Frontmatter::new();
+    for (key, value) in root {
+        frontmatter
+            .insert(key, value.clone())
+            .map_err(|e| CompositionError::MarkdownLoad {
+                path: path.to_path_buf(),
+                source: MarkdownLoadCause::Parse(Box::new(e)),
+            })?;
+    }
+
+    Ok(darkmatter::markdown::Markdown::with_frontmatter(
+        frontmatter,
+        "",
+    ))
+}
+
 /// Re-read an already-resolved source from disk.
 ///
 /// Sequence steps compose just in time, so each step reads the file as it
@@ -93,6 +150,9 @@ pub fn resolve_composition_source(
 /// agent's mid-run frontmatter edit is visible to every later step. The
 /// reference is *not* re-resolved: the path was decided once, and re-running
 /// magic-root discovery mid-sequence could silently retarget the run.
+///
+/// A YAML source reloads through [`load_yaml_document`], the same conversion
+/// its initial resolution used.
 ///
 /// ## Errors
 ///
@@ -106,8 +166,12 @@ pub fn reload_composition_source(
             path: source.resolved_path.clone(),
             source: MarkdownLoadCause::Read(e),
         })?;
-    let markdown = Markdown::try_from(source.resolved_path.as_path())
-        .map_err(|e| map_load_error(&source.resolved_path, e))?;
+    let markdown = if is_yaml_source(&source.resolved_path) {
+        load_yaml_document(&source.resolved_path)?
+    } else {
+        Markdown::try_from(source.resolved_path.as_path())
+            .map_err(|e| map_load_error(&source.resolved_path, e))?
+    };
 
     Ok(ResolvedCompositionSource {
         original_ref: source.original_ref.clone(),

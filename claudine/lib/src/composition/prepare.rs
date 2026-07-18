@@ -104,6 +104,15 @@ pub struct PrepareOptions {
     /// to the reserved overlay keys (`state`/`previous`/`next`); every other
     /// caller leaves it empty, so this is a no-op for `compose`/`inline-compose`.
     pub name_coercion_keys: Vec<String>,
+    /// Accept a composition whose body is empty instead of raising
+    /// [`CompositionError::ComposedBodyEmpty`].
+    ///
+    /// Set only by a sequence step that declares an executable field: such a
+    /// step runs its task *instead of* the document body, and a directly
+    /// invoked `kind: sequence` YAML file has no body at all. Every other
+    /// caller leaves this `false`, because an empty prompt reaching a provider
+    /// is otherwise a bug the provider would report far less usefully.
+    pub allow_empty_body: bool,
 }
 
 /// Walk up from a file path to find the nearest `.git` directory.
@@ -209,7 +218,7 @@ pub fn prepare_direct(
         .map_err(|e| map_compose_error(&source.resolved_path, e))?;
 
     let prompt = composed.content().to_string();
-    if prompt.trim().is_empty() {
+    if prompt.trim().is_empty() && !options.allow_empty_body {
         return Err(CompositionError::ComposedBodyEmpty {
             source_path: source.resolved_path.clone(),
             mode: CompositionMode::ChainedDocument,
@@ -436,7 +445,7 @@ pub fn prepare_inline(
     validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
 
     let mut prompt = composed.content().to_string();
-    if prompt.trim().is_empty() {
+    if prompt.trim().is_empty() && !options.allow_empty_body {
         return Err(CompositionError::ComposedBodyEmpty {
             source_path: source.resolved_path.clone(),
             mode: CompositionMode::InlineFrontmatterPrompt,
