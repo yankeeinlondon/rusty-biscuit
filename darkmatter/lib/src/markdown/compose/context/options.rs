@@ -283,6 +283,14 @@ pub struct ComposeOptions {
     /// of these subtrees. Default: empty (no behavior change for any caller).
     pub(crate) exclude_keys: std::collections::HashSet<String>,
 
+    // ── Named-object string coercion (Sequence Plus) ───────────────
+    /// Frontmatter keys whose OBJECT values render their `name` string field
+    /// when interpolated in inline string context (`{{key}}`). Whole-value
+    /// spans, dotted paths (`{{key.x}}`), and typed `get()` lookups are
+    /// unaffected. Empty by default; Claudine sets `["state","previous","next"]`
+    /// for sequence steps.
+    pub(crate) name_coercion_keys: Vec<String>,
+
     // ── Link normalization ────────────────────────────────────────
     /// Environment variables that may be used as path-prefix abstractions
     /// during the Finalization stage's Link Normalization operation.
@@ -405,6 +413,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("context", &self.context)
             .field("remote_read_config", &self.remote_read_config)
             .field("exclude_keys", &self.exclude_keys)
+            .field("name_coercion_keys", &self.name_coercion_keys)
             .field("file_ref_fallback_dir", &self.file_ref_fallback_dir)
             .finish()
     }
@@ -471,6 +480,7 @@ impl ComposeOptions {
             preflight_graph: None,
             remote_fetch: None,
             exclude_keys: std::collections::HashSet::new(),
+            name_coercion_keys: Vec::new(),
             file_ref_fallback_dir: None,
         }
     }
@@ -1142,6 +1152,18 @@ impl ComposeOptions {
     /// compose-time resolution.
     pub fn exclude_keys(&self) -> &std::collections::HashSet<String> {
         &self.exclude_keys
+    }
+
+    /// Sets the frontmatter keys whose OBJECT values render their `name` string
+    /// field when interpolated in inline string context (`{{key}}`).
+    ///
+    /// Whole-value spans, dotted paths (`{{key.x}}`), and typed `get()` lookups
+    /// are unaffected. Empty by default; Claudine sets
+    /// `["state","previous","next"]` for sequence steps.
+    #[must_use]
+    pub fn with_name_coercion_keys(mut self, keys: Vec<String>) -> Self {
+        self.name_coercion_keys = keys;
+        self
     }
 
     /// Sets the explicit fallback directory for caller-supplied file references

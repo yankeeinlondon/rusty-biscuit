@@ -534,6 +534,7 @@ fn scan_one_frontmatter(
             true,
             Some(options.frontmatter_resolution_context()),
             &preflight_exclude_keys,
+            &options.name_coercion_keys,
         );
     }
 
