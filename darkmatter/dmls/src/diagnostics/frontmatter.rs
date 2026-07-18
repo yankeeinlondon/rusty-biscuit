@@ -13,7 +13,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::schemas::{
     PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason,
     ValidationOptions, ValidationProblem, ValidationProblemCode, ValidationReport,
-    parse_property_definition,
+    parse_property_definition, parse_schema_declaration,
 };
 use darkmatter::style::{self, StyleWarningKind};
 use lsp_types::{
@@ -21,7 +21,10 @@ use lsp_types::{
 };
 
 use crate::diagnostics::codes::{code, source};
-use crate::overlay::{FrontmatterAst, SchemaBundle, SchemaOutcome, SuggestionState};
+use crate::overlay::{
+    FrontmatterAst, SchemaAuthoringState, SchemaBundle, SchemaOutcome, SuggestionState,
+};
+use crate::overlay::schema::MetaSchemaKind;
 use crate::providers::DocumentContext;
 use crate::source_map::SourceMap;
 use crate::workspace::file_path_to_uri;
@@ -155,7 +158,7 @@ fn schema_problem_diagnostics(
         .map(|value| value.entry.pointer.as_str())
         .collect();
 
-    let mut specialized_paths = std::collections::HashSet::new();
+    let mut specialized_paths = semantic_authored_diagnostics(ctx, ast, bundle, report, out);
     for problem in &report.problems {
         let Some(kind) = semantic_problem_kind(problem) else {
             continue;
@@ -213,6 +216,241 @@ fn schema_problem_diagnostics(
     // pure noise. The passive "never executed" guarantee is surfaced on hover
     // (schema description for the key; policy verdict for `$()` shell), not as a
     // per-value diagnostic. `report.pending` stays populated but unconsumed.
+}
+
+fn semantic_authored_diagnostics(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    bundle: &SchemaBundle,
+    report: &ValidationReport,
+    out: &mut Vec<Diagnostic>,
+) -> std::collections::HashSet<String> {
+    let mut diagnosed = std::collections::HashSet::new();
+    let Some(overlay) = ctx.overlay else {
+        return diagnosed;
+    };
+    if overlay.stale {
+        return diagnosed;
+    }
+    let SchemaAuthoringState::Frontmatter(values) = &overlay.schema_authoring else {
+        return diagnosed;
+    };
+
+    for value in values {
+        if value.pointer == "/$schema" {
+            continue;
+        }
+        let Some(entry) = ast.entry_by_pointer(&value.pointer) else {
+            continue;
+        };
+        let value_span = complete_flow_value_span(ctx.text, entry.value_span.clone());
+        let Some(raw) = ctx.text.get(value_span.clone()) else {
+            continue;
+        };
+        let raw = dedent_entry_yaml(raw, source_column(ctx.text, value_span.start));
+        let Ok(yaml) = serde_yaml_ng::from_str(&raw) else {
+            continue;
+        };
+
+        let mut failures = Vec::new();
+        let mut accepted = false;
+        for kind in &value.kinds {
+            let result = match kind {
+                MetaSchemaKind::TypeDefinition => {
+                    parse_property_definition(&entry.key, &yaml).map(|_| ())
+                }
+                MetaSchemaKind::Schema => parse_schema_declaration(&yaml).map(|_| ()),
+            };
+            match result {
+                Ok(()) => {
+                    accepted = true;
+                    break;
+                }
+                Err(error) => failures.push((*kind, error)),
+            }
+        }
+        if accepted {
+            continue;
+        }
+        let Some((kind, error)) = failures.into_iter().next() else {
+            continue;
+        };
+        let fallback_span = match &error {
+            SchemaError::Grammar { property, .. }
+                if property != "<root>" && property != &entry.key =>
+            {
+                nested_property_value_span(ast, ctx.text, entry, property)
+                    .unwrap_or_else(|| value_span.clone())
+            }
+            _ => value_span.clone(),
+        };
+        let span = if kind == MetaSchemaKind::TypeDefinition {
+            smallest_invalid_definition_span(ast, ctx.text, entry).unwrap_or(fallback_span)
+        } else {
+            fallback_span
+        };
+        let Some(range) = ctx.source_map.byte_range_to_lsp(span) else {
+            continue;
+        };
+        let mut specialized = diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            source::SCHEMA,
+            match kind {
+                MetaSchemaKind::TypeDefinition => code::SCHEMA_INVALID_TYPE_DEFINITION,
+                MetaSchemaKind::Schema => code::SCHEMA_INVALID_SHAPE,
+            },
+            error.to_string(),
+        );
+        if let Some(problem) = report.problems.iter().find(|problem| problem.path == value.pointer) {
+            specialized.related_information = schema_origin_related(ctx, bundle, problem);
+        }
+        out.push(specialized);
+        diagnosed.insert(value.pointer.clone());
+    }
+    diagnosed
+}
+
+fn smallest_invalid_definition_span(
+    ast: &FrontmatterAst,
+    text: &str,
+    parent: &crate::overlay::FmEntry,
+) -> Option<std::ops::Range<usize>> {
+    if let Some(span) = empty_flow_sequence_span(text, parent.value_span.clone()) {
+        return Some(span);
+    }
+    let mut descendants: Vec<&crate::overlay::FmEntry> = ast
+        .entries()
+        .iter()
+        .filter(|entry| {
+            entry.key_span.start >= parent.value_span.start
+                && entry.key_span.end <= parent.value_span.end
+        })
+        .collect();
+    descendants.sort_by_key(|entry| std::cmp::Reverse(entry.depth));
+    descendants.into_iter().find_map(|entry| {
+        let span = complete_flow_value_span(text, entry.value_span.clone());
+        let raw = text.get(span.clone())?;
+        let raw = dedent_entry_yaml(raw, source_column(text, span.start));
+        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&raw).ok()?;
+        parse_property_definition(&entry.key, &yaml).is_err().then_some(span)
+    })
+}
+
+fn empty_flow_sequence_span(
+    text: &str,
+    parent: std::ops::Range<usize>,
+) -> Option<std::ops::Range<usize>> {
+    let source = text.get(parent.clone())?;
+    let bytes = source.as_bytes();
+    let mut quote = None;
+    let mut escaped = false;
+    for index in 0..bytes.len().saturating_sub(1) {
+        let byte = bytes[index];
+        if let Some(active) = quote {
+            if active == b'"' && byte == b'\\' && !escaped {
+                escaped = true;
+                continue;
+            }
+            if byte == active && !escaped {
+                quote = None;
+            }
+            escaped = false;
+            continue;
+        }
+        if matches!(byte, b'\'' | b'"') {
+            quote = Some(byte);
+            continue;
+        }
+        if byte == b'['
+            && bytes[index + 1] == b']'
+            && index.checked_sub(1).is_none_or(|before| {
+                !matches!(bytes[before], b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-')
+            })
+        {
+            let start = parent.start + index;
+            return Some(start..start + 2);
+        }
+    }
+    None
+}
+
+fn nested_property_value_span(
+    ast: &FrontmatterAst,
+    text: &str,
+    parent: &crate::overlay::FmEntry,
+    property: &str,
+) -> Option<std::ops::Range<usize>> {
+    ast.entries()
+        .iter()
+        .filter(|entry| {
+            entry.key == property
+                && entry.key_span.start >= parent.value_span.start
+                && entry.key_span.end <= parent.value_span.end
+        })
+        .max_by_key(|entry| entry.depth)
+        .map(|entry| complete_flow_value_span(text, entry.value_span.clone()))
+}
+
+fn complete_flow_value_span(text: &str, span: std::ops::Range<usize>) -> std::ops::Range<usize> {
+    let Some(open) = text.as_bytes().get(span.start).copied() else {
+        return span;
+    };
+    let close = match open {
+        b'[' => b']',
+        b'{' => b'}',
+        _ => return span,
+    };
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for (relative, byte) in text.as_bytes()[span.start..].iter().copied().enumerate() {
+        if let Some(active) = quote {
+            if active == b'"' && byte == b'\\' && !escaped {
+                escaped = true;
+                continue;
+            }
+            if byte == active && !escaped {
+                quote = None;
+            }
+            escaped = false;
+            continue;
+        }
+        if matches!(byte, b'\'' | b'"') {
+            quote = Some(byte);
+        } else if byte == open {
+            depth += 1;
+        } else if byte == close {
+            depth -= 1;
+            if depth == 0 {
+                return span.start..span.start + relative + 1;
+            }
+        }
+    }
+    span
+}
+
+fn source_column(text: &str, offset: usize) -> usize {
+    text[..offset].rsplit_once('\n').map_or(offset, |(_, line)| line.len())
+}
+
+fn dedent_entry_yaml(source: &str, indent: usize) -> String {
+    let padding = " ".repeat(indent);
+    let mut normalized = String::with_capacity(source.len());
+    for (index, line) in source.lines().enumerate() {
+        if index > 0 {
+            normalized.push('\n');
+        }
+        normalized.push_str(if index == 0 {
+            line
+        } else {
+            line.strip_prefix(&padding).unwrap_or(line)
+        });
+    }
+    if source.ends_with('\n') {
+        normalized.push('\n');
+    }
+    normalized
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -995,9 +1233,34 @@ mod tests {
                 "string(nope)",
             ),
             (
+                "---\n$schema:\n  definition: type-definition\ndefinition: 'string(nope)'\n---\n\nbody\n",
+                "dm.schema.invalid_type_definition",
+                "'string(nope)'",
+            ),
+            (
+                "---\n$schema:\n  definition: type-definition\ndefinition: 42\n---\n\nbody\n",
+                "dm.schema.invalid_type_definition",
+                "42",
+            ),
+            (
+                "---\n$schema:\n  definition: type-definition\ndefinition: []\n---\n\nbody\n",
+                "dm.schema.invalid_type_definition",
+                "[]",
+            ),
+            (
+                "---\n$schema:\n  definition: type-definition\ndefinition:\n  - nested: []\n---\n\nbody\n",
+                "dm.schema.invalid_type_definition",
+                "[]",
+            ),
+            (
                 "---\n$schema:\n  declaration: schema\ndeclaration: https://example.com/schema.yaml\n---\n\nbody\n",
                 code::SCHEMA_INVALID_SHAPE,
                 "https://example.com/schema.yaml",
+            ),
+            (
+                "---\n$schema:\n  declaration: schema\ndeclaration: ''\n---\n\nbody\n",
+                code::SCHEMA_INVALID_SHAPE,
+                "''",
             ),
         ];
 
@@ -1007,7 +1270,11 @@ mod tests {
                     .iter()
                     .filter(|diagnostic| code_of(diagnostic) == Some(expected_code))
                     .collect();
-                assert_eq!(specialized.len(), 1, "one specialized diagnostic: {diagnostics:#?}");
+                assert_eq!(
+                    specialized.len(),
+                    1,
+                    "one specialized diagnostic for `{authored_value}`: {diagnostics:#?}"
+                );
                 assert!(
                     diagnostics
                         .iter()
@@ -1037,6 +1304,22 @@ mod tests {
                         && code_of(diagnostic) != Some("dm.schema.invalid_type_definition")
                 }),
                 "a syntactically valid local schema reference is not a semantic-shape error: {diagnostics:#?}"
+            );
+        });
+
+        let unresolved = "---\n$schema: ./missing.yaml\n---\n\nbody\n";
+        diagnostics_for(unresolved, |diagnostics| {
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| code_of(diagnostic) == Some(code::SCHEMA_PREPARE)),
+                "an unresolved control reference remains a preparation failure: {diagnostics:#?}"
+            );
+            assert!(
+                diagnostics
+                    .iter()
+                    .all(|diagnostic| code_of(diagnostic) != Some(code::SCHEMA_INVALID_SHAPE)),
+                "resolution is distinct from semantic reference syntax: {diagnostics:#?}"
             );
         });
     }

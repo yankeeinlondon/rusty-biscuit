@@ -11,13 +11,15 @@
 //! `textEdit` and no snippets (Zed-safe).
 
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::schemas::{
     Constraint, DecodedScalar, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration,
     SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr, darkmatter_base_schema, decode_scalar,
-    parse_property_definition, parse_schema_declaration_with_source, schema_constraint_descriptors,
-    schema_type_descriptors, select_literal_discriminant_arm, suggestions_for_def,
+    parse_property_definition, parse_schema_declaration, parse_schema_declaration_with_source,
+    schema_constraint_descriptors, schema_type_descriptors, select_literal_discriminant_arm,
+    suggestions_for_def,
 };
 use serde_json::Value;
 use darkmatter::markdown::span::SourceSpan;
@@ -114,8 +116,8 @@ fn meta_schema_completion(ctx: &DocumentContext, offset: usize) -> Option<Vec<Co
     Some(dedup_completions(items))
 }
 
-fn meta_schema_kinds_for_line<'a>(
-    overlay: &'a crate::overlay::DocumentOverlay,
+fn meta_schema_kinds_for_line(
+    overlay: &crate::overlay::DocumentOverlay,
     ancestors: &[String],
     key: &str,
     sequence_item: bool,
@@ -147,14 +149,18 @@ fn meta_schema_kinds_for_line<'a>(
                 };
             }
 
-            let owner = ancestors.first()?;
+            let owner = ancestors
+                .first()
+                .map(String::as_str)
+                .or_else(|| (!key.is_empty()).then_some(key))?;
             let value = values.iter().find(|value| {
-                value.pointer.strip_prefix('/') == Some(owner.as_str())
+                value.pointer.strip_prefix('/') == Some(owner)
             })?;
-            if ancestors.len() > 1 || (!sequence_item && !key.is_empty() && key != owner) {
-                if value.kinds.contains(&MetaSchemaKind::Schema) {
-                    return Some(vec![MetaSchemaKind::TypeDefinition]);
-                }
+            if (ancestors.len() > 1
+                || (!ancestors.is_empty() && !sequence_item && !key.is_empty() && key != owner))
+                && value.kinds.contains(&MetaSchemaKind::Schema)
+            {
+                return Some(vec![MetaSchemaKind::TypeDefinition]);
             }
             Some(value.kinds.clone())
         }
@@ -168,7 +174,11 @@ fn semantic_value_token(value: &str, value_start: usize) -> (&str, usize) {
     let candidate = separator.map_or(value, |index| &value[index + 1..]);
     let token = candidate.trim_start();
     let skipped = value.len() - candidate.len() + candidate.len() - token.len();
-    (token, value_start + skipped)
+    let start = value_start + skipped;
+    match token.as_bytes().first() {
+        Some(b'\'' | b'"') => (&token[1..], start + 1),
+        _ => (token, start),
+    }
 }
 
 fn type_definition_completions(
@@ -215,8 +225,8 @@ fn type_definition_completions(
 
     let mut items = Vec::new();
     for descriptor in schema_type_descriptors() {
-        if descriptor.keyword.starts_with(partial) {
-            if let Some(completion) = item(
+        if descriptor.keyword.starts_with(partial)
+            && let Some(completion) = item(
                 ctx,
                 start,
                 offset,
@@ -224,9 +234,9 @@ fn type_definition_completions(
                 descriptor.keyword,
                 CompletionItemKind::TYPE_PARAMETER,
                 Some(descriptor.description.to_string()),
-            ) {
-                items.push(completion);
-            }
+            )
+        {
+            items.push(completion);
         }
         let array = format!("{}[]", descriptor.keyword);
         if array.starts_with(partial)
@@ -258,7 +268,77 @@ fn type_definition_completions(
             items.push(completion);
         }
     }
+    for name in passive_namespace_names(ctx) {
+        let imported = format!("{name}@this");
+        if imported.starts_with(partial)
+            && let Some(completion) = item(
+                ctx,
+                start,
+                offset,
+                &imported,
+                &imported,
+                CompletionItemKind::REFERENCE,
+                Some("Named type from the current passive schema namespace".to_string()),
+            )
+        {
+            items.push(completion);
+        }
+    }
     items
+}
+
+fn passive_namespace_names(ctx: &DocumentContext) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    let Some(overlay) = ctx.overlay else {
+        return names;
+    };
+    let schema = match &overlay.schema_authoring {
+        SchemaAuthoringState::Standalone { model: Some(model), .. } => Some(&model.schema),
+        SchemaAuthoringState::Frontmatter(_) => None,
+        _ => None,
+    };
+    if let Some(schema) = schema {
+        collect_schema_property_names(schema, &mut names);
+        return names;
+    }
+
+    let Some(schema_entry) = overlay.ast.as_deref().and_then(FrontmatterAst::schema_entry) else {
+        return names;
+    };
+    if let Some(ast) = overlay.ast.as_deref() {
+        for entry in ast.entries() {
+            if entry.depth == 1 && entry.pointer.starts_with("/$schema/") {
+                names.insert(entry.key.clone());
+            }
+        }
+        if !names.is_empty() {
+            return names;
+        }
+    }
+    let Some(source) = ctx.text.get(schema_entry.value_span.clone()) else {
+        return names;
+    };
+    let source = dedent_spanned_yaml(source, source_column(ctx.text, schema_entry.value_span.start));
+    let Ok(yaml) = serde_yaml_ng::from_str(&source) else {
+        return names;
+    };
+    if let Ok(SchemaDeclaration::Schema(schema)) = parse_schema_declaration(&yaml) {
+        collect_schema_property_names(&schema, &mut names);
+    }
+    names
+}
+
+fn collect_schema_property_names(schema: &SimplifiedSchema, names: &mut BTreeSet<String>) {
+    match schema {
+        SimplifiedSchema::Single(shape) => names.extend(shape.properties.keys().cloned()),
+        SimplifiedSchema::Union(arms) => {
+            for arm in arms {
+                if let SchemaArm::Inline(shape) = arm {
+                    names.extend(shape.properties.keys().cloned());
+                }
+            }
+        }
+    }
 }
 
 fn schema_value_completions(
@@ -844,19 +924,17 @@ fn meta_schema_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
 
     if let SchemaAuthoringState::Standalone { model: Some(model), .. } =
         &overlay.schema_authoring
-    {
-        if let Some(region) = semantic_type_regions(&model.schema, &model.source_map)
+        && let Some(region) = semantic_type_regions(&model.schema, &model.source_map)
             .into_iter()
             .find(|region| {
                 region.key_span.contains(&offset) || region.definition_span.contains(&offset)
             })
-        {
-            return markup_hover(
-                ctx,
-                region.key_span,
-                meta_schema_definition_hover_body(&region.name, &region.definition),
-            );
-        }
+    {
+        return markup_hover(
+            ctx,
+            region.key_span,
+            meta_schema_definition_hover_body(&region.name, &region.definition),
+        );
     }
 
     let ast = overlay.ast.as_deref()?;
@@ -2874,6 +2952,23 @@ mod tests {
 
     #[test]
     fn meta_schema_completion_catalog_is_descriptor_driven() {
+        let text = "---\n$schema:\n  title: type-definition\ntitle: \n---\n\nbody\n";
+        with_ctx(text, |ctx| {
+            let offset = text.find("title: \n").unwrap() + "title: ".len();
+            let items = completion(ctx, offset);
+            let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+            for descriptor in schema_type_descriptors() {
+                assert!(
+                    labels.contains(&descriptor.keyword),
+                    "descriptor `{}` is offered: {items:#?}",
+                    descriptor.keyword
+                );
+            }
+            for scaffold in ["{}", "[]", "Name@./types.yaml"] {
+                assert!(labels.contains(&scaffold), "scaffold `{scaffold}` is offered: {items:#?}");
+            }
+        });
+
         let text = "---\n$schema:\n  title: str\n---\n\nbody\n";
         with_ctx(text, |ctx| {
             let offset = text.find("str").unwrap() + "str".len();
@@ -2904,6 +2999,58 @@ mod tests {
             assert!(
                 items.iter().any(|item| item.label == "schema"),
                 "an outer semantic-array item delegates to scalar definition completion: {items:#?}"
+            );
+        });
+
+        let text = "---\n$schema:\n  title: type-definition\ntitle: 'str'\n---\n\nbody\n";
+        with_ctx(text, |ctx| {
+            let offset = text.find("'str").unwrap() + "'str".len();
+            let items = completion(ctx, offset);
+            let string = items
+                .iter()
+                .find(|item| item.label == "string")
+                .expect("quoted scalar completion");
+            let Some(CompletionTextEdit::Edit(edit)) = &string.text_edit else {
+                panic!("quoted completion has eager edit");
+            };
+            assert_eq!(edit.new_text, "string");
+            assert_eq!(edit.range.start.character, 8, "the opening quote is preserved");
+        });
+
+        let text = "---\n$schema: \n---\n\nbody\n";
+        with_ctx(text, |ctx| {
+            let offset = text.find("$schema: ").unwrap() + "$schema: ".len();
+            let labels: Vec<String> = completion(ctx, offset)
+                .into_iter()
+                .map(|item| item.label)
+                .collect();
+            for scaffold in ["{}", "[]", "./schema.yaml"] {
+                assert!(labels.iter().any(|label| label == scaffold), "outer `{scaffold}` scaffold: {labels:?}");
+            }
+        });
+
+        let text = "---\n$schema:\n  Base: string\n  alias: Ba\n---\n\nbody\n";
+        with_ctx(text, |ctx| {
+            let offset = text.find("alias: Ba").unwrap() + "alias: Ba".len();
+            let labels: Vec<String> = completion(ctx, offset)
+                .into_iter()
+                .map(|item| item.label)
+                .collect();
+            assert!(
+                labels.iter().any(|label| label == "Base@this"),
+                "the current parsed schema is a passive named-type namespace: {labels:?}"
+            );
+        });
+
+        let text = "---\n$schema:\n  declarations: schema[]\ndeclarations:\n  - cus\n---\n\nbody\n";
+        with_ctx_docs(text, &[("/w/custom.yaml", "$schema:\n  title: string\n")], |ctx| {
+            let offset = text.find("- cus").unwrap() + "- cus".len();
+            let items = completion(ctx, offset);
+            assert!(
+                items.iter().any(|item| {
+                    item.label == "custom.yaml" && item.kind == Some(CompletionItemKind::FILE)
+                }),
+                "a schema-array item reuses passive file-path completion: {items:#?}"
             );
         });
     }

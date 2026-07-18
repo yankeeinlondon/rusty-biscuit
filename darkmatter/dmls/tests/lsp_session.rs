@@ -3284,6 +3284,10 @@ fn meta_schema_phase1_schema_hover_uses_nominal_type() {
     println!("{markup}");
     assert!(markup.contains("Type: **schema**"), "schema hover: {markup}");
     assert!(!markup.contains("Type: **any**"), "schema hover: {markup}");
+    assert!(
+        markup.contains("Declares an inline SimplifiedSchema mapping"),
+        "schema control hover includes the base description: {markup}"
+    );
 
     fixture.shutdown();
 }
@@ -3295,9 +3299,11 @@ fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
         "---\n",
         "$schema:\n",
         "  definition: type-definition\n",
+        "  quoted_definition: type-definition\n",
         "definition:\n",
         "  - string(required)\n",
         "  - nested: number\n",
+        "quoted_definition: 'number(required)'\n",
         "---\n\nbody\n",
     );
     let valid_path = workspace.path().join("valid.md");
@@ -3322,10 +3328,13 @@ fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
 
     let valid_uri = url::Url::from_file_path(valid_path).unwrap();
     open(&fixture, valid_uri.as_str(), valid);
-    let hover = hover_markup(&mut fixture, valid_uri.as_str(), 3, 3);
+    let hover = hover_markup(&mut fixture, valid_uri.as_str(), 4, 3);
     assert!(hover.contains("Type: **type-definition**"), "{hover}");
     assert!(hover.contains("Declares: **string | object**"), "{hover}");
     assert!(hover.contains("Required"), "{hover}");
+    let quoted_hover = hover_markup(&mut fixture, valid_uri.as_str(), 7, 3);
+    assert!(quoted_hover.contains("Declares: **number**"), "{quoted_hover}");
+    assert!(quoted_hover.contains("Required"), "{quoted_hover}");
 
     let partial_uri = url::Url::from_file_path(partial_path).unwrap();
     open(&fixture, partial_uri.as_str(), partial);
@@ -3374,18 +3383,26 @@ fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
 fn meta_schema_phase7_standalone_pure_and_tagged_completion() {
     let workspace = tempfile::tempdir().unwrap();
     let cases = [
-        ("pure.yaml", "$schema:\n  title: str\n", 1u32, 12u32),
+        ("pure.yaml", "$schema:\n  title: str\n", 1u32, 12u32, "string"),
+        (
+            "pure-union.yaml",
+            "$schema:\n  - ./sch\n",
+            1u32,
+            9u32,
+            "./schema.yaml",
+        ),
         (
             "tagged.yaml",
             "kind: schema\ntypes:\n  title: str\n",
             2u32,
             12u32,
+            "string",
         ),
     ];
 
     let mut fixture = ClientFixture::start();
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
-    for (name, text, line, character) in cases {
+    for (name, text, line, character, expected) in cases {
         let path = workspace.path().join(name);
         std::fs::write(&path, text).unwrap();
         let uri = url::Url::from_file_path(path).unwrap();
@@ -3405,7 +3422,7 @@ fn meta_schema_phase7_standalone_pure_and_tagged_completion() {
                 .as_array()
                 .expect("completion array")
                 .iter()
-                .any(|item| item["label"] == json!("string")),
+                .any(|item| item["label"] == json!(expected)),
             "{name} must activate by content: {completion:?}"
         );
     }
