@@ -1,10 +1,10 @@
 //! Atomic task execution: one outcome contract for every task variant.
 //!
 //! A [`PreflightTask`] describes *what could run*; [`TaskExecution`] runs it.
-//! Every variant — `prompt`, `shell`, `side_effect` — passes through the same
-//! three stages and reports the same [`TaskOutcome`], so a scheduler (serial
-//! steps in phase 8, groups in phases 9–10) never learns what kind of work it
-//! just ran.
+//! Every variant — `prompt`, `shell`, `side_effect`, `group` — passes through
+//! the same three stages and reports the same [`TaskOutcome`], so a scheduler
+//! never learns what kind of work it just ran. A `group` is the one variant
+//! that is itself a scheduler: see [`group`].
 //!
 //! ## Stage contract
 //!
@@ -30,6 +30,7 @@
 //! [`TaskShellRunner`]. Both are injected, which is what lets the whole stage
 //! contract be tested without a provider or a process.
 
+mod group;
 mod shell;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -54,6 +55,7 @@ use super::preflight::{PreflightAction, PreflightGraph, PreflightTask};
 use super::reserved;
 use crate::harness::parse_timeout;
 
+pub use group::GroupTaskResult;
 pub use shell::{
     DEFAULT_COMMAND_TIMEOUT, ShellCommandOutput, SystemTaskShell, TaskShellRunner,
 };
@@ -141,6 +143,9 @@ pub struct TaskOutcome {
     /// Failures that did not decide the outcome — a teardown error behind a
     /// primary error, most often.
     pub secondary_errors: Vec<TaskDiagnostic>,
+    /// For a `group:` task, one entry per member task that *ran*, in
+    /// declaration order. Empty for every other task variant.
+    pub group_tasks: Vec<GroupTaskResult>,
 }
 
 impl TaskOutcome {
@@ -222,6 +227,11 @@ impl PromptTaskRunner for UnavailablePromptRunner {
 }
 
 /// Everything one task needs to run.
+///
+/// Every field is a borrow, so the whole wiring is `Copy`: a group scheduler
+/// derives a member task's execution by replacing the few fields that differ
+/// (`..*self`) rather than re-threading the seams by hand.
+#[derive(Clone, Copy)]
 pub struct TaskExecution<'a> {
     /// The immutable preflight description of the work.
     pub task: &'a PreflightTask,
@@ -258,11 +268,20 @@ impl TaskExecution<'_> {
         let started = Instant::now();
         let mutations_before = self.mutation_snapshot();
 
-        let outcome = self.run_stages();
-        let (status, stdout, error, secondary_errors) = outcome;
+        let StageOutcome {
+            status,
+            stdout,
+            error,
+            secondary_errors,
+            group_tasks,
+        } = self.run_stages();
 
+        // A group's members each committed their own entry as they ran, so the
+        // group must not add a wrapper entry on top of them.
+        let commits_output = !matches!(self.task.action, PreflightAction::Group(_));
         let mut output_committed = false;
         if status == TaskStatus::Succeeded
+            && commits_output
             && let Some(runtime) = self.runtime
         {
             // The transport newline was already removed where the text was
@@ -280,36 +299,34 @@ impl TaskExecution<'_> {
             duration: started.elapsed(),
             error,
             secondary_errors,
+            group_tasks,
         }
     }
 
     /// The stage machine, without output commit or timing bookkeeping.
-    fn run_stages(
-        &self,
-    ) -> (TaskStatus, String, Option<TaskDiagnostic>, Vec<TaskDiagnostic>) {
+    fn run_stages(&self) -> StageOutcome {
         // Parsing precedes setup deliberately: a stack that will not parse is an
         // authoring error, and running teardown for a task that never started is
         // worse than not running it.
         let stacks = match self.parse_stacks() {
             Ok(stacks) => stacks,
             Err(error) => {
-                return (
+                return StageOutcome::terminal(
                     TaskStatus::Failed,
-                    String::new(),
                     Some(TaskDiagnostic::from_composition(TaskStage::Setup, &error)),
-                    Vec::new(),
                 );
             }
         };
 
         if self.interrupted() {
-            return (TaskStatus::Interrupted, String::new(), None, Vec::new());
+            return StageOutcome::terminal(TaskStatus::Interrupted, None);
         }
 
         let mut primary_error: Option<TaskDiagnostic> = None;
         let mut secondary: Vec<TaskDiagnostic> = Vec::new();
         let mut status = TaskStatus::Succeeded;
         let mut stdout = String::new();
+        let mut group_tasks: Vec<GroupTaskResult> = Vec::new();
 
         if let Some(items) = &stacks.setup
             && let Some(diagnostic) = self.run_stack(TaskStage::Setup, items, None)
@@ -324,6 +341,8 @@ impl TaskExecution<'_> {
             } else {
                 let primary = self.run_primary();
                 stdout = primary.stdout;
+                group_tasks = primary.group_tasks;
+                secondary.extend(primary.secondary);
                 match primary.result {
                     PrimaryResult::Succeeded => {}
                     PrimaryResult::Failed(diagnostic) => {
@@ -352,7 +371,13 @@ impl TaskExecution<'_> {
             }
         }
 
-        (status, stdout, primary_error, secondary)
+        StageOutcome {
+            status,
+            stdout,
+            error: primary_error,
+            secondary_errors: secondary,
+            group_tasks,
+        }
     }
 
     /// Run one action stack, returning its failure when it had one.
@@ -383,18 +408,7 @@ impl TaskExecution<'_> {
             PreflightAction::Prompt { path, reference } => self.run_prompt(path, reference),
             PreflightAction::Shell { commands } => self.run_shell(commands),
             PreflightAction::SideEffect { action } => self.run_side_effect(action),
-            PreflightAction::Group(group) => {
-                PrimaryOutcome::failed(TaskDiagnostic::from_composition(
-                    TaskStage::Primary,
-                    &CompositionError::SequenceTaskUnsupported {
-                        task: self.label(),
-                        construct: format!("group `{}`", group.name),
-                        detail: "a group is scheduled by the sequence orchestrator, \
-                                 not executed as an atomic task"
-                            .to_string(),
-                    },
-                ))
-            }
+            PreflightAction::Group(group) => self.run_group(group),
         }
     }
 
@@ -699,6 +713,29 @@ struct ParsedStacks {
     teardown: Option<Vec<LifecycleStackItem>>,
 }
 
+/// Everything the stage machine decided, before output commit and timing.
+struct StageOutcome {
+    status: TaskStatus,
+    stdout: String,
+    error: Option<TaskDiagnostic>,
+    secondary_errors: Vec<TaskDiagnostic>,
+    group_tasks: Vec<GroupTaskResult>,
+}
+
+impl StageOutcome {
+    /// An outcome decided before the primary action ran: no output, no group
+    /// members, no secondary diagnostics.
+    fn terminal(status: TaskStatus, error: Option<TaskDiagnostic>) -> Self {
+        Self {
+            status,
+            stdout: String::new(),
+            error,
+            secondary_errors: Vec::new(),
+            group_tasks: Vec::new(),
+        }
+    }
+}
+
 /// What the primary action did, plus whatever it produced before finishing.
 ///
 /// Partial output survives a failure or interruption: it is never *committed*
@@ -707,14 +744,16 @@ struct ParsedStacks {
 struct PrimaryOutcome {
     stdout: String,
     result: PrimaryResult,
+    /// Populated only by a group: one entry per member task that ran.
+    group_tasks: Vec<GroupTaskResult>,
+    /// Diagnostics a member task raised that did not decide the group's
+    /// outcome.
+    secondary: Vec<TaskDiagnostic>,
 }
 
 impl PrimaryOutcome {
     fn succeeded(stdout: String) -> Self {
-        Self {
-            stdout,
-            result: PrimaryResult::Succeeded,
-        }
+        Self::new(stdout, PrimaryResult::Succeeded)
     }
 
     fn failed(diagnostic: TaskDiagnostic) -> Self {
@@ -722,17 +761,30 @@ impl PrimaryOutcome {
     }
 
     fn failed_with(stdout: String, diagnostic: TaskDiagnostic) -> Self {
-        Self {
-            stdout,
-            result: PrimaryResult::Failed(diagnostic),
-        }
+        Self::new(stdout, PrimaryResult::Failed(diagnostic))
     }
 
     fn interrupted(stdout: String) -> Self {
+        Self::new(stdout, PrimaryResult::Interrupted)
+    }
+
+    fn new(stdout: String, result: PrimaryResult) -> Self {
         Self {
             stdout,
-            result: PrimaryResult::Interrupted,
+            result,
+            group_tasks: Vec::new(),
+            secondary: Vec::new(),
         }
+    }
+
+    fn with_group_tasks(mut self, tasks: Vec<GroupTaskResult>) -> Self {
+        self.group_tasks = tasks;
+        self
+    }
+
+    fn with_secondary(mut self, diagnostics: Vec<TaskDiagnostic>) -> Self {
+        self.secondary = diagnostics;
+        self
     }
 }
 

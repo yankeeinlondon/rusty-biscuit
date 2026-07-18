@@ -1,7 +1,7 @@
 //! Preflight node shapes and the raw-value traversals that feed them.
 //!
 //! The node types here are deliberately inert: they describe *what could run*,
-//! not how. Execution (phases 6–8) consumes them; preflight only fills them in.
+//! not how. Execution consumes them; preflight only fills them in.
 
 use std::path::PathBuf;
 

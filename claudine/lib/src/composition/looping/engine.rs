@@ -981,6 +981,9 @@ fn build_loop_stack_context<'a>(
         err: None,
         timing,
         current,
+        // A loop gate is not inside a sequence group; `group.*` has no scope
+        // here.
+        group: None,
         base_dir,
         ctx_base_dir: lifecycle_ctx.launch_area,
         prepared_context: lifecycle_ctx.context,

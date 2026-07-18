@@ -139,5 +139,6 @@ pub use types::{
     ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
     ResolvedCompositionSource, ResolvedExecutionTarget, ResolvedSessionInteractivity,
     SelectedProvider, SelectionReason, SessionInteractivitySource, SequenceExecutionOptions,
-    SequenceRunSummary, SequenceStepDraft, SequenceStepResult, SharedApprovalCache,
+    SequenceRunSummary, SequenceStepDraft, SequenceStepResult, SequenceTaskResult,
+    SharedApprovalCache,
 };

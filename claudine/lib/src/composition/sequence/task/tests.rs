@@ -142,8 +142,21 @@ impl Fixture {
             .expect("fixture's step declares an executable")
     }
 
+    /// The task declared by step `index`.
+    fn task_at(&self, index: usize) -> &PreflightTask {
+        self.graph.steps[index]
+            .task
+            .as_ref()
+            .expect("fixture's step declares an executable")
+    }
+
     /// Run the fixture's task with the given doubles.
     fn execute(&self, wiring: &Wiring<'_>) -> TaskOutcome {
+        self.execute_step(0, wiring)
+    }
+
+    /// Run one specific step's task with the given doubles.
+    fn execute_step(&self, index: usize, wiring: &Wiring<'_>) -> TaskOutcome {
         let live = RefCell::new(self.frontmatter.clone());
         let stack = StackExecutionContext {
             signal: LifecycleSignal::Start,
@@ -153,6 +166,7 @@ impl Fixture {
             err: None,
             timing: None,
             current: None,
+            group: None,
             base_dir: None,
             ctx_base_dir: None,
             prepared_context: None,
@@ -166,7 +180,7 @@ impl Fixture {
             settings: &self.settings,
         };
         TaskExecution {
-            task: self.task(),
+            task: self.task_at(index),
             graph: &self.graph,
             stack: &stack,
             state: &self.state,
@@ -1404,17 +1418,22 @@ mod outcome_contract {
         );
     }
 
-    /// A group reaching the atomic executor is a scheduling mistake, not work:
-    /// group execution lands with its own scheduler.
+    /// A parallel group is scheduled in phase 10; until then it must refuse
+    /// rather than silently degrade to serial execution.
     #[test]
-    fn a_group_action_is_not_executable_as_an_atomic_task() {
+    fn a_parallel_group_is_refused_rather_than_run_serially() {
         let dir = TempDir::new().unwrap();
-        write_yaml(
+        let source = one_step_source(
             dir.path(),
-            "group.yaml",
-            &json!({ "kind": "group", "name": "bundle", "tasks": [{ "shell": "work" }] }),
+            json!({
+                "name": "alpha",
+                "group": {
+                    "name": "bundle",
+                    "execution": "parallel",
+                    "tasks": [{ "shell": "work" }],
+                },
+            }),
         );
-        let source = one_step_source(dir.path(), json!({ "name": "alpha", "group": "group.yaml" }));
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
         let shell = FakeTaskShell::default();
@@ -1423,10 +1442,431 @@ mod outcome_contract {
 
         assert_eq!(outcome.status, TaskStatus::Failed);
         assert!(
-            failure_message(&outcome).contains("is not executable yet"),
+            failure_message(&outcome).contains("parallel group `bundle`"),
             "{}",
             failure_message(&outcome),
         );
         assert!(shell.commands().is_empty());
+        assert!(outcome.group_tasks.is_empty());
+    }
+}
+
+// -- serial groups (phase 9) ------------------------------------------------
+
+mod serial_groups {
+    use super::*;
+
+    /// The two-task bundle every definition site defines.
+    fn bundle_tasks() -> Value {
+        json!([
+            { "name": "first", "shell": "one" },
+            { "name": "second", "shell": "two" },
+        ])
+    }
+
+    /// Write the group's file-backed definition sites into `root` and return
+    /// the sequence step that reaches the bundle through `site`.
+    fn step_for_site(root: &Path, site: &str) -> Value {
+        let tasks = bundle_tasks();
+        write_yaml(
+            root,
+            "group.yaml",
+            &json!({ "kind": "group", "name": "bundle", "tasks": tasks }),
+        );
+        write_yaml(
+            root,
+            "catalog.yaml",
+            &json!({
+                "kind": "group-catalog",
+                "groups": [
+                    { "name": "other", "tasks": [{ "shell": "unused" }] },
+                    { "name": "bundle", "tasks": tasks },
+                ],
+            }),
+        );
+        match site {
+            "inline" => json!({ "name": "alpha", "group": { "name": "bundle", "tasks": tasks } }),
+            "file" => json!({ "name": "alpha", "group": "group.yaml" }),
+            "catalog" => json!({ "name": "alpha", "group": "bundle@catalog.yaml" }),
+            other => panic!("unknown definition site `{other}`"),
+        }
+    }
+
+    /// Inline, `kind: group`, and `{name}@{catalog}` are three spellings of one
+    /// bundle — they must be indistinguishable once executed.
+    #[test]
+    fn inline_file_and_catalog_groups_are_behaviorally_equivalent() {
+        let mut observed = Vec::new();
+        for site in ["inline", "file", "catalog"] {
+            // Each site gets its own directory so a stale write cannot leak
+            // between the three runs.
+            let dir = TempDir::new().unwrap();
+            let source = one_step_source(dir.path(), step_for_site(dir.path(), site));
+            let fixture = Fixture::build(dir, &source).unwrap();
+            let recorder = Recorder::default();
+            let shell = FakeTaskShell::with_stdout(&["out one", "out two"]);
+            let runtime = RuntimeState::new();
+            let mut wiring = Wiring::new(&recorder, &shell);
+            wiring.runtime = Some(&runtime);
+
+            let outcome = fixture.execute(&wiring);
+
+            assert!(outcome.succeeded(), "{site}: {}", failure_message(&outcome));
+            observed.push((
+                site,
+                shell.commands(),
+                outcome
+                    .group_tasks
+                    .iter()
+                    .map(|task| (task.name.clone(), task.status))
+                    .collect::<Vec<_>>(),
+                runtime.outputs_value(),
+            ));
+        }
+
+        let (_, commands, tasks, outputs) = observed[0].clone();
+        assert_eq!(commands, vec!["one".to_string(), "two".to_string()]);
+        assert_eq!(
+            tasks,
+            vec![
+                ("first".to_string(), TaskStatus::Succeeded),
+                ("second".to_string(), TaskStatus::Succeeded),
+            ],
+        );
+        assert_eq!(outputs, json!(["out one", "out two"]));
+        for (label, other_commands, other_tasks, other_outputs) in &observed[1..] {
+            assert_eq!(*other_commands, commands, "{label} commands diverged");
+            assert_eq!(*other_tasks, tasks, "{label} task results diverged");
+            assert_eq!(*other_outputs, outputs, "{label} outputs diverged");
+        }
+    }
+
+    /// A serial group grows `outputs` entry by entry. It never adds a wrapper
+    /// entry of its own on top of its members'.
+    #[test]
+    fn a_serial_group_appends_one_entry_per_task_and_none_of_its_own() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(
+            dir.path(),
+            json!({
+                "name": "alpha",
+                "group": {
+                    "name": "bundle",
+                    "tasks": [{ "shell": "one" }, { "shell": "two" }],
+                },
+            }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_stdout(&["alpha out", "beta out"]);
+        let runtime = RuntimeState::new();
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(runtime.output_count(), 2);
+        assert_eq!(runtime.outputs_value(), json!(["alpha out", "beta out"]));
+        assert!(
+            !outcome.output_committed,
+            "the group itself must not commit an entry",
+        );
+    }
+
+    /// Declaration order is the contract: task 2 reads what task 1 wrote and
+    /// what task 1 produced.
+    #[test]
+    fn a_later_task_sees_the_earlier_task_mutation_and_output() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("target.md"), "---\ntitle: t\n---\n\nBody.\n").unwrap();
+        let source = one_step_source(
+            dir.path(),
+            json!({
+                "name": "alpha",
+                "group": {
+                    "name": "bundle",
+                    "tasks": [
+                        {
+                            "name": "writer",
+                            "shell": "one",
+                            "teardown": [{ "action": { "set": ["marker", "written"] } }],
+                        },
+                        {
+                            "name": "reader",
+                            "prompt": "target.md",
+                            "params": {
+                                "seen": "{{ marker }}",
+                                "prior": "{{ last(outputs) }}",
+                            },
+                        },
+                    ],
+                },
+            }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_stdout(&["writer said this"]);
+        let prompt = FakePrompt::succeeding("reader said that");
+        let runtime = RuntimeState::new();
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+        wiring.prompt = &prompt;
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        let request = prompt.last();
+        assert_eq!(request.params["seen"], json!("written"));
+        assert_eq!(request.params["prior"], json!("writer said this"));
+        assert_eq!(
+            runtime.outputs_value(),
+            json!(["writer said this", "reader said that"]),
+        );
+    }
+
+    /// Group variables are a scope: readable by member tasks, gone afterwards.
+    #[test]
+    fn group_variables_are_in_scope_for_members() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("target.md"), "---\ntitle: t\n---\n\nBody.\n").unwrap();
+        let source = one_step_source(
+            dir.path(),
+            json!({
+                "name": "alpha",
+                "group": {
+                    "name": "bundle",
+                    "variables": { "label": "release", "attempt": 2 },
+                    "tasks": [{
+                        "name": "member",
+                        "prompt": "target.md",
+                        "params": { "which": "{{ group.label }}", "attempt": "{{ group.attempt }}" },
+                        "setup": [{ "action": { "info": "starting {{ group.label }}" } }],
+                    }],
+                },
+            }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let prompt = FakePrompt::succeeding("done");
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.prompt = &prompt;
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        let request = prompt.last();
+        assert_eq!(request.params["which"], json!("release"));
+        // Whole-value typing survives the scope: `attempt` stays a number.
+        assert_eq!(request.params["attempt"], json!(2));
+        assert_eq!(recorder.events(), vec!["info:starting release".to_string()]);
+        assert_eq!(request.set_overrides["group"]["label"], json!("release"));
+    }
+
+    /// The scope ends with the group: a later sequence step referencing
+    /// `group.*` gets the unknown-root refusal, not a stale value.
+    #[test]
+    fn group_variables_do_not_leak_to_a_later_step() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("target.md"), "---\ntitle: t\n---\n\nBody.\n").unwrap();
+        let source = write_source(
+            dir.path(),
+            "seq.md",
+            &[(
+                "sequence",
+                json!([
+                    {
+                        "name": "alpha",
+                        "group": {
+                            "name": "bundle",
+                            "variables": { "label": "release" },
+                            "tasks": [{ "shell": "one" }],
+                        },
+                    },
+                    {
+                        "name": "beta",
+                        "prompt": "target.md",
+                        "params": { "which": "{{ group.label }}" },
+                    },
+                ]),
+            )],
+            "Body.\n",
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_stdout(&["one out"]);
+        let prompt = FakePrompt::succeeding("done");
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.prompt = &prompt;
+
+        let group_outcome = fixture.execute_step(0, &wiring);
+        assert!(
+            group_outcome.succeeded(),
+            "{}",
+            failure_message(&group_outcome),
+        );
+
+        let later = fixture.execute_step(1, &wiring);
+
+        assert_eq!(later.status, TaskStatus::Failed);
+        assert!(
+            failure_message(&later).contains("params.which"),
+            "{}",
+            failure_message(&later),
+        );
+        assert!(
+            prompt.requests.lock().unwrap().is_empty(),
+            "the later step must not have launched with a leaked scope",
+        );
+    }
+
+    /// The first failure stops the group; the rest of the bundle is left
+    /// unexecuted and the owning step is failed.
+    #[test]
+    fn the_first_failed_task_stops_the_group() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(
+            dir.path(),
+            json!({
+                "name": "alpha",
+                "group": {
+                    "name": "bundle",
+                    "tasks": [
+                        { "name": "ok", "shell": "one" },
+                        { "name": "boom", "shell": "two" },
+                        { "name": "never", "shell": "three" },
+                    ],
+                },
+            }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_results(vec![
+            ShellCommandOutput {
+                stdout: "one out\n".to_string(),
+                exit_code: 0,
+                timed_out: false,
+            },
+            ShellCommandOutput {
+                stdout: String::new(),
+                exit_code: 3,
+                timed_out: false,
+            },
+        ]);
+        let runtime = RuntimeState::new();
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert_eq!(shell.commands(), vec!["one".to_string(), "two".to_string()]);
+        assert_eq!(
+            outcome
+                .group_tasks
+                .iter()
+                .map(|task| (task.name.as_str(), task.status))
+                .collect::<Vec<_>>(),
+            vec![("ok", TaskStatus::Succeeded), ("boom", TaskStatus::Failed)],
+        );
+        // Only the successful member committed an entry.
+        assert_eq!(runtime.outputs_value(), json!(["one out"]));
+        assert!(failure_message(&outcome).contains("exited with code 3"));
+    }
+
+    /// An interrupt inside a group stops it as an interruption, not a failure,
+    /// so the sequence exits `130` rather than consulting `fail_fast`.
+    #[test]
+    fn an_interrupt_stops_the_group_as_an_interruption() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(
+            dir.path(),
+            json!({
+                "name": "alpha",
+                "group": {
+                    "name": "bundle",
+                    "tasks": [{ "shell": "one" }, { "shell": "two" }],
+                },
+            }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_stdout(&["one out"]);
+        let interrupt = AtomicBool::new(true);
+        let runtime = RuntimeState::new();
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+        wiring.interrupt = Some(&interrupt);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert_eq!(outcome.status, TaskStatus::Interrupted);
+        assert!(shell.commands().is_empty());
+        assert_eq!(runtime.output_count(), 0);
+    }
+
+    /// A single-task group is legal (`min(1)`) and behaves like the task alone,
+    /// except that the group reports it as a member.
+    #[test]
+    fn a_single_task_group_runs_that_task() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(
+            dir.path(),
+            json!({
+                "name": "alpha",
+                "group": { "name": "bundle", "tasks": [{ "name": "only", "shell": "solo" }] },
+            }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_stdout(&["solo out"]);
+        let runtime = RuntimeState::new();
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(shell.commands(), vec!["solo".to_string()]);
+        assert_eq!(outcome.group_tasks.len(), 1);
+        assert_eq!(outcome.group_tasks[0].name, "only");
+        assert_eq!(runtime.outputs_value(), json!(["solo out"]));
+    }
+
+    /// A group task may itself be an external `kind: task` file; the reference
+    /// resolves from the directory of the group document that authored it.
+    #[test]
+    fn an_external_task_inside_a_group_resolves_from_the_group_document() {
+        let dir = TempDir::new().unwrap();
+        let nested = dir.path().join("bundle");
+        fs::create_dir(&nested).unwrap();
+        write_yaml(
+            &nested,
+            "task.yaml",
+            &json!({ "kind": "task", "name": "external", "shell": "nested-command" }),
+        );
+        write_yaml(
+            &nested,
+            "group.yaml",
+            &json!({
+                "kind": "group",
+                "name": "bundle",
+                "tasks": [{ "task": "task.yaml" }],
+            }),
+        );
+        let source = one_step_source(
+            dir.path(),
+            json!({ "name": "alpha", "group": "bundle/group.yaml" }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_stdout(&["nested out"]);
+
+        let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(shell.commands(), vec!["nested-command".to_string()]);
+        assert_eq!(outcome.group_tasks[0].name, "external");
     }
 }

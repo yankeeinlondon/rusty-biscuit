@@ -806,5 +806,25 @@ pub struct SequenceStepResult {
     pub error: Option<String>,
     /// Wall-clock duration of the step.
     pub duration: std::time::Duration,
+    /// When the step ran a group, one entry per member task that ran, in
+    /// declaration order. Empty for every other step.
+    pub tasks: Vec<SequenceTaskResult>,
+}
+
+/// One group member task's contribution to a step summary.
+///
+/// Deliberately name + outcome + timing only: the removed group `output` and
+/// task `passthrough` fields are not reintroduced here — `outputs` is the only
+/// output accumulator.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SequenceTaskResult {
+    /// The task's authored `name:`, or its generated label.
+    pub name: String,
+    /// Whether the task succeeded.
+    pub success: bool,
+    /// Whether the task was interrupted rather than failed.
+    pub interrupted: bool,
+    /// Wall-clock duration of the task.
+    pub duration: std::time::Duration,
 }
 

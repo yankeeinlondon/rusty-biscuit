@@ -257,6 +257,7 @@ fn exhausted_remediation_fails_finalize_and_preserves_findings() {
         err: None,
         timing: None,
         current: None,
+        group: None,
         base_dir: Some(dir.path()),
         ctx_base_dir: Some(dir.path()),
         prepared_context: None,

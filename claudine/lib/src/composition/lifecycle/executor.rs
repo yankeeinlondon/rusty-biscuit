@@ -313,6 +313,13 @@ pub struct StackExecutionContext<'a> {
     pub timing: Option<&'a LifecycleTiming>,
     /// The `current` global snapshot (lazy `ctx`/`env` capture).
     pub current: Option<&'a LifecycleCurrent>,
+    /// The `group` global: a sequence group's variables, in scope only while
+    /// that group's tasks run.
+    ///
+    /// Unlike `err`/`timing`/`current`, this is not event-derived — it is a
+    /// lexical scope the group scheduler enters and leaves, which is why it
+    /// arrives as a borrowed map rather than a snapshot type.
+    pub group: Option<&'a Map<String, Value>>,
     /// Base directory for read-side expression functions and file references.
     pub base_dir: Option<&'a Path>,
     /// Base directory for `ctx.*` capture only (the launch area); when `None`,
@@ -558,6 +565,7 @@ impl StackExecutionContext<'_> {
             err: self.err,
             timing: self.timing,
             current: self.current,
+            group: self.group,
             base_dir: self.base_dir,
             ctx_base_dir: self.ctx_base_dir,
             prepared_context: self.prepared_context,
@@ -589,6 +597,7 @@ impl StackExecutionContext<'_> {
             err: Some(err),
             timing: self.timing,
             current: self.current,
+            group: self.group,
             base_dir: self.base_dir,
             ctx_base_dir: self.ctx_base_dir,
             prepared_context: self.prepared_context,
@@ -603,10 +612,33 @@ impl StackExecutionContext<'_> {
         }
     }
 
-    /// Build the event-time injected-globals layer (`err`/`timing`/`current`)
-    /// handed to Darkmatter's subtree compose and layered lookup.
+    /// Return a copy of this context with a group's variables in scope.
+    ///
+    /// The scope lives exactly as long as the returned context: a group's
+    /// tasks read `group.*`, and the sequence step after it cannot, because it
+    /// runs against the original context.
+    pub fn with_group<'a>(
+        &'a self,
+        variables: &'a Map<String, Value>,
+    ) -> StackExecutionContext<'a> {
+        StackExecutionContext {
+            group: Some(variables),
+            ..self.with_signal(self.signal)
+        }
+    }
+
+    /// Build the event-time injected-globals layer (`err`/`timing`/`current`,
+    /// plus `group` inside a sequence group) handed to Darkmatter's subtree
+    /// compose and layered lookup.
     fn injected_globals(&self) -> HashMap<String, InjectedGlobal> {
-        lifecycle_injected_globals(self.err, self.timing, self.current)
+        let mut globals = lifecycle_injected_globals(self.err, self.timing, self.current);
+        if let Some(variables) = self.group {
+            globals.insert(
+                "group".to_string(),
+                InjectedGlobal::eager(Value::Object(variables.clone())),
+            );
+        }
+        globals
     }
 
     /// Resolution context for read-side expression functions.

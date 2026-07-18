@@ -43,6 +43,7 @@ fn ctx_capture_follows_ctx_base_dir_not_base_dir() {
         err: None,
         timing: None,
         current: None,
+        group: None,
         // `base_dir` deliberately differs from `ctx_base_dir` so a leak back
         // to `base_dir` would resolve to `base_root` and fail the assert.
         base_dir: Some(base_root.as_path()),
@@ -135,6 +136,7 @@ fn lifecycle_reuses_prepared_snapshot_for_prompt_outside_launch_area() {
         err: None,
         timing: None,
         current: None,
+        group: None,
         // The prompt's parent — inside a different repo, no area.
         base_dir: Some(prompts_dir.as_path()),
         ctx_base_dir: Some(launch_root.as_path()),
@@ -207,6 +209,7 @@ fn file_exists_resolves_against_base_dir_after_chdir() {
         err: None,
         timing: None,
         current: None,
+        group: None,
         // The prompt's parent — the document base holding spec.md.
         base_dir: Some(prompt_dir.path()),
         // The launch area — carried for diagnostics only, never a candidate.
@@ -283,6 +286,7 @@ fn prepare_time_and_event_time_agree_on_file_reference() {
         err: None,
         timing: None,
         current: None,
+        group: None,
         base_dir: Some(prompt_dir.path()),
         ctx_base_dir: Some(launch_dir.path()),
         prepared_context: None,
@@ -350,6 +354,7 @@ fn frontmatter_reads_resolve_against_base_dir() {
         err: None,
         timing: None,
         current: None,
+        group: None,
         base_dir: Some(prompt_dir.path()),
         ctx_base_dir: Some(launch_dir.path()),
         prepared_context: None,
@@ -423,6 +428,7 @@ fn regression_path_only_under_launch_area_does_not_resolve() {
         err: None,
         timing: None,
         current: None,
+        group: None,
         base_dir: Some(prompt_dir.path()),
         ctx_base_dir: Some(launch_dir.path()),
         prepared_context: None,
@@ -493,6 +499,7 @@ fn regression_conflicting_filename_prompt_dir_wins() {
         err: None,
         timing: None,
         current: None,
+        group: None,
         base_dir: Some(prompt_dir.path()),
         ctx_base_dir: Some(launch_dir.path()),
         prepared_context: None,
