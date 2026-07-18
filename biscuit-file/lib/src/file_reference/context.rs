@@ -13,10 +13,26 @@ pub(crate) struct ResolutionContext {
     pub home_dir: Option<PathBuf>,
     pub env: HashMap<String, String>,
     /// Caller-supplied repository root. When `Some`, resolution anchors the
-    /// implicit/magic/package roots on it instead of discovering the git root
-    /// from `cwd`; when `None`, the ambient compatibility methods fall back to
-    /// live `gix` discovery.
+    /// implicit/magic/package roots on it. When `None`, the ambient
+    /// compatibility methods fall back to live `gix` discovery (see
+    /// `allow_ambient_discovery`); the explicit document-backed context does
+    /// not, so `None` means "no repository root" rather than "discover one".
     pub repository_root: Option<PathBuf>,
+    /// Caller-supplied package area. Authoritative for `!` references on the
+    /// explicit path; the ambient path leaves this `None` and discovers the
+    /// area via `cargo metadata` instead.
+    pub package_area: Option<PathBuf>,
+    /// Whether the resolver may fall back to live, ambient discovery (a `gix`
+    /// git-root walk or a `cargo metadata` package-area probe) when an anchor
+    /// was not supplied.
+    ///
+    /// `true` for the `resolve()`/`resolve_from()` compatibility methods, which
+    /// resolve against live process state. `false` for the explicit,
+    /// request-scoped [`FileResolutionContext`] path
+    /// (`resolve_detailed`/`candidate_plan`/`resolve_in_context`): that context
+    /// is authoritative (D2/D10), so a missing anchor is consumed as absent
+    /// rather than re-probed from the filesystem after construction.
+    pub allow_ambient_discovery: bool,
 }
 
 impl ResolutionContext {
@@ -38,6 +54,8 @@ impl ResolutionContext {
             home_dir,
             env,
             repository_root: None,
+            package_area: None,
+            allow_ambient_discovery: true,
         })
     }
 
@@ -63,17 +81,25 @@ impl ResolutionContext {
             home_dir,
             env,
             repository_root: None,
+            package_area: None,
+            allow_ambient_discovery: true,
         })
     }
 
     /// Build the internal resolution context from an explicit, caller-owned
     /// [`FileResolutionContext`], reading no ambient process state.
+    ///
+    /// The context is authoritative: `allow_ambient_discovery` is `false`, so
+    /// resolution consumes only the anchors the caller supplied and never falls
+    /// back to a live git-root walk or `cargo metadata` probe (D2/D10).
     pub fn from_context(ctx: &FileResolutionContext) -> Self {
         Self {
             cwd: ctx.base_dir.clone(),
             home_dir: ctx.home_dir.clone(),
             env: ctx.env.clone(),
             repository_root: ctx.repository_root.clone(),
+            package_area: ctx.package_area.clone(),
+            allow_ambient_discovery: false,
         }
     }
 }
@@ -349,9 +375,14 @@ pub fn find_package_area(
     Ok(None)
 }
 
-/// Get the user's home directory.
+/// Get the user's home directory from the cross-platform provider.
+///
+/// On POSIX this honors `$HOME` (with a passwd fallback); on native Windows it
+/// resolves the profile directory through the OS known-folder API rather than
+/// the frequently-unset `HOME` variable, so `~` and the HOME leg of magic
+/// search stay valid there (D11).
 pub fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    dirs::home_dir()
 }
 
 #[cfg(test)]

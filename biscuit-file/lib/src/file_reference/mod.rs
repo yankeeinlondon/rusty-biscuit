@@ -58,7 +58,8 @@ pub enum FileReferenceKind {
     Magic,
     /// `!foo` -- package-area resolution.
     Package,
-    /// `~foo` / `~/foo` -- pinned to the user's home directory.
+    /// `~`, `~/foo` (and the Windows `~\foo` spelling) -- pinned to the user's
+    /// home directory. `~user` is unsupported.
     Home,
     /// `vault:foo` -- configured-vault resolution.
     Vault,
@@ -320,8 +321,8 @@ pub enum CompletionEntryForm {
     /// `@`-prefixed magic path. Roots are the enclosing git root and the
     /// user's home directory.
     Magic,
-    /// Bare implicit-relative path. Roots are the caller-provided base
-    /// directory and its enclosing git root (when distinct).
+    /// Bare implicit-relative path. Roots are the enclosing git root and the
+    /// caller-provided base directory (in that order, when distinct).
     ImplicitRelative,
 }
 
@@ -709,7 +710,7 @@ impl FileReference {
     ///   "scope", which is appended to each implied root.
     /// - Magic form: roots are `{git_root, home_dir}` (in that order),
     ///   each with the scope appended.
-    /// - Implicit relative: roots are `{base, git_root}` (distinct), each
+    /// - Implicit relative: roots are `{git_root, base}` (distinct), each
     ///   with the scope appended.
     ///
     /// Markdown filtering, ranking, and typed-length policy are not
@@ -730,6 +731,40 @@ impl FileReference {
         base: &Path,
     ) -> Result<Option<PartialCompletion>, FileReferenceError> {
         resolve::complete_partial(token, base)
+    }
+
+    /// Expand a partial completion token against an explicit
+    /// [`FileResolutionContext`], reading no ambient process state.
+    ///
+    /// This is the document-backed counterpart to [`complete_partial`]: instead
+    /// of discovering the repository root and home directory live from `base`,
+    /// it consumes the captured repository root, home directory, and configured
+    /// magic roots the context supplies. Completion and execution therefore
+    /// share one candidate builder and one context, so a value emitted here
+    /// enumerates from the same roots [`resolve_detailed`] probes (D9). The
+    /// `Magic` form in particular now surfaces the context's configured magic
+    /// roots, which the ambient [`complete_partial`] cannot see.
+    ///
+    /// The two supported entry forms and the returned shape are identical to
+    /// [`complete_partial`].
+    ///
+    /// ## Returns
+    ///
+    /// - `Ok(Some(completion))` -- the token is completable
+    /// - `Ok(None)` -- the token uses an unsupported entry form
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`FileReferenceError::RepositoryRootNotContainingSource`] when the
+    /// context's repository root does not contain its base directory.
+    ///
+    /// [`complete_partial`]: Self::complete_partial
+    /// [`resolve_detailed`]: Self::resolve_detailed
+    pub fn complete_partial_in_context(
+        token: &str,
+        ctx: &FileResolutionContext,
+    ) -> Result<Option<PartialCompletion>, FileReferenceError> {
+        resolve::complete_partial_in_context(token, ctx)
     }
 
     /// Resolve the reference and return a path relative to `base`.

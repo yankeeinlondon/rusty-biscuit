@@ -25,6 +25,7 @@ access occurs until `resolve()` is called.
 | `./` or `../`         | **Explicit Relative** | Current working directory (or `base`); no fallback       | `./src/main.rs`, `../a.md`   |
 | _(none)_              | **Implicit Relative** | Git repository root, then CWD (or `base`)                | `README.md`, `docs/spec.md`  |
 | `/`                   | **Absolute**          | Used verbatim                                            | `/etc/config.toml`           |
+| `~` or `~/`           | **Home**              | The user's home directory only (`~user` unsupported)     | `~/.config/app.toml`         |
 | `@`                   | **Magic**             | Configurable search roots (git root, HOME, custom paths) | `@docs/spec.md`              |
 | `!`                   | **Package**           | Cargo workspace package area (or git root fallback)      | `!README.md`                 |
 | `vault:` or `vault::` | **Vault**             | Configured vault root directories                        | `vault:notes/today.md`       |
@@ -89,6 +90,31 @@ let file_ref = FileReference::new("/etc/hosts")?;
 let path = file_ref.resolve()?;        // checks /etc/hosts directly
 # Ok::<(), biscuit_file::FileReferenceError>(())
 ```
+
+## Home References (`~`)
+
+`~` and `~/...` (plus the Windows `~\...` spelling) pin resolution to the
+current user's home directory only -- there is no repository or search-root
+fallback. Unlike a shell, `~user` expansion is **not** portable and is rejected
+at parse time with `FileReferenceError::UnsupportedUserHome`.
+
+```text
+~                   → <home>
+~/.config/app.toml  → <home>/.config/app.toml
+```
+
+```rust,no_run
+use biscuit_file::FileReference;
+
+let file_ref = FileReference::new("~/.bashrc")?;
+let path = file_ref.resolve()?;        // checks <home>/.bashrc directly
+# Ok::<(), biscuit_file::FileReferenceError>(())
+```
+
+The home directory is supplied through the resolution context; missing home
+context is a typed missing-context failure rather than a silent no-match. Magic
+(`@`) references also include HOME in their ordered search, but `~` is distinct:
+it is home-pinned with no other candidate.
 
 ## Magic References (`@`)
 
@@ -399,7 +425,9 @@ Purely syntactic. The raw string is decomposed into:
 2. **Kind prefix** -- determines the reference kind
 3. **Path template** -- a sequence of `Literal` and `EnvVar` segments
 
-Detection order: `vault::` > `vault:` > `@` > `!` > `/` > relative (default).
+Detection order: URL scheme (`http(s)://`) > `vault::` > `vault:` > `@` > `!` >
+`~` > absolute (`/`, Windows drive/UNC) > explicit relative (`./`, `../`) >
+implicit relative (default).
 
 No filesystem or environment access occurs during parsing.
 
@@ -428,6 +456,7 @@ constructed by joining each search root with the interpolated path:
 | Explicit Relative | `[CWD]` (no fallback)                                              |
 | Implicit Relative | `[git_root, CWD]` (CWD omitted when equal to git_root; git_root omitted when absent) |
 | Absolute          | `[interpolated path directly]`                                     |
+| Home              | `[home_dir]` (no fallback; `~user` rejected at parse time)         |
 | Magic             | `magic_paths.prepend` → `git_root` → `HOME` → `magic_paths.append` |
 | Package           | `[package_area or git_root]`                                       |
 | Vault             | `vault_roots` → `$VAULT` env var split paths                       |

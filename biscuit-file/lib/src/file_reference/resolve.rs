@@ -4,7 +4,7 @@ use tracing::{debug, trace};
 use walkdir::WalkDir;
 
 use crate::file_reference::context::{
-    ResolutionContext, find_git_root, find_package_area, home_dir,
+    FileResolutionContext, ResolutionContext, find_git_root, find_package_area, home_dir,
 };
 use crate::file_reference::error::FileReferenceError;
 use crate::file_reference::parse;
@@ -281,6 +281,7 @@ fn classify_error(error: &FileReferenceError) -> ResolutionFailure {
         E::MissingEnvironmentVariable { .. }
         | E::VaultNotConfigured
         | E::MissingHomeContext
+        | E::MissingPackageContext
         | E::UnsupportedUserHome(_)
         | E::RepositoryRootNotContainingSource { .. }
         | E::BareRepository
@@ -570,15 +571,19 @@ fn resolve_recursive_core(
 
 /// Resolve the repository root for a resolution context.
 ///
-/// A caller-supplied `repository_root` wins; otherwise the root is discovered
-/// live from `cwd` via `gix`. This is the single seam that makes the root
+/// A caller-supplied `repository_root` always wins. When none was supplied, the
+/// ambient compatibility methods (`allow_ambient_discovery`) discover it live
+/// from `cwd` via `gix`; the explicit document-backed context does not, so its
+/// absent root stays `None` (D2/D10) rather than being re-probed after the
+/// context was captured. This is the single seam that makes the root
 /// caller-suppliable without `biscuit-file` depending on `sniff`.
 fn resolve_repository_root(
     ctx: &ResolutionContext,
 ) -> Result<Option<PathBuf>, FileReferenceError> {
     match &ctx.repository_root {
         Some(root) => Ok(Some(root.clone())),
-        None => find_git_root(&ctx.cwd),
+        None if ctx.allow_ambient_discovery => find_git_root(&ctx.cwd),
+        None => Ok(None),
     }
 }
 
@@ -641,15 +646,38 @@ fn collect_roots(
             Ok(roots)
         }
         ReferenceKind::Package(_) => {
-            let git_root = match repository_root {
-                Some(root) => root,
-                None => return Ok(vec![]),
-            };
-            let area = find_package_area(git_root, &ctx.cwd)?;
-            Ok(vec![RootEntry {
-                path: area.unwrap_or_else(|| git_root.to_path_buf()),
-                provenance: RootProvenance::Package,
-            }])
+            // The explicit context's package area is authoritative.
+            if let Some(area) = &ctx.package_area {
+                return Ok(vec![RootEntry {
+                    path: area.clone(),
+                    provenance: RootProvenance::Package,
+                }]);
+            }
+            // Ambient compatibility path: discover the area via `cargo metadata`.
+            // The explicit document-backed context never reaches this branch --
+            // it consumes the supplied package area (above) or the repository
+            // root (below), so candidate building performs no Cargo probe.
+            if ctx.allow_ambient_discovery {
+                let git_root = match repository_root {
+                    Some(root) => root,
+                    None => return Ok(vec![]),
+                };
+                let area = find_package_area(git_root, &ctx.cwd)?;
+                return Ok(vec![RootEntry {
+                    path: area.unwrap_or_else(|| git_root.to_path_buf()),
+                    provenance: RootProvenance::Package,
+                }]);
+            }
+            // Explicit path with no package area: D3 permits a repository-root
+            // fallback; a package reference with neither anchor is a typed
+            // missing context, not a live discovery.
+            match repository_root {
+                Some(root) => Ok(vec![RootEntry {
+                    path: root.to_path_buf(),
+                    provenance: RootProvenance::Package,
+                }]),
+                None => Err(FileReferenceError::MissingPackageContext),
+            }
         }
         ReferenceKind::Home(_) => match &ctx.home_dir {
             Some(home) => Ok(vec![RootEntry {
@@ -928,7 +956,8 @@ pub(crate) fn diff_paths(target: &Path, base: &Path) -> Option<PathBuf> {
     }
 }
 
-/// Expand a partial completion token into its implied roots and segments.
+/// Expand a partial completion token into its implied roots and segments,
+/// discovering the repository root and home directory from live process state.
 ///
 /// See [`FileReference::complete_partial`] for the public contract.
 pub(crate) fn complete_partial(
@@ -939,8 +968,6 @@ pub(crate) fn complete_partial(
         return Ok(None);
     };
 
-    let (scope, active) = split_scope_and_active(path_part);
-
     let base_abs = if base.is_absolute() {
         base.to_path_buf()
     } else {
@@ -949,27 +976,120 @@ pub(crate) fn complete_partial(
     };
 
     // Capture home once (via the cross-platform provider) rather than reading
-    // it deep inside the magic-root helper.
+    // it deep inside the root builder.
     let home = home_dir();
-
-    let roots = match form {
-        CompletionEntryForm::Magic => magic_completion_roots(scope, &base_abs, home.as_deref())?,
-        CompletionEntryForm::ImplicitRelative => {
-            implicit_relative_completion_roots(scope, &base_abs)?
-        }
+    let repository_root = find_git_root(&base_abs)?;
+    // The ambient completer has no request-configured magic roots; they only
+    // reach completion through the context-aware entry point.
+    let magic_paths = MagicPathList::default();
+    let anchors = CompletionAnchors {
+        base: &base_abs,
+        repository_root: repository_root.as_deref(),
+        home: home.as_deref(),
+        magic_paths: &magic_paths,
     };
 
+    Ok(Some(expand_completion(form, path_part, &anchors)))
+}
+
+/// Expand a partial completion token against an explicit resolution context,
+/// reading no ambient process state.
+///
+/// See [`FileReference::complete_partial_in_context`] for the public contract.
+pub(crate) fn complete_partial_in_context(
+    token: &str,
+    ctx: &FileResolutionContext,
+) -> Result<Option<PartialCompletion>, FileReferenceError> {
+    let Some((form, path_part)) = classify_token(token) else {
+        return Ok(None);
+    };
+    ctx.validate()?;
+
+    let anchors = CompletionAnchors {
+        base: ctx.base_dir(),
+        repository_root: ctx.repository_root(),
+        home: ctx.home_dir(),
+        magic_paths: ctx.magic_paths(),
+    };
+
+    Ok(Some(expand_completion(form, path_part, &anchors)))
+}
+
+/// The captured anchors a completion expansion enumerates from.
+///
+/// Independent of whether they were discovered live (ambient `complete_partial`)
+/// or supplied by a request-scoped [`FileResolutionContext`]
+/// (`complete_partial_in_context`), so both entry points share one root builder.
+/// This is the D9 seam: a value completion emits enumerates from the same roots
+/// execution's candidate builder probes, so the two cannot teach different
+/// precedence.
+struct CompletionAnchors<'a> {
+    base: &'a Path,
+    repository_root: Option<&'a Path>,
+    home: Option<&'a Path>,
+    magic_paths: &'a MagicPathList,
+}
+
+/// Split a token's path portion, build its roots from the shared anchors, and
+/// assemble the [`PartialCompletion`].
+fn expand_completion(
+    form: CompletionEntryForm,
+    path_part: &str,
+    anchors: &CompletionAnchors,
+) -> PartialCompletion {
+    let (scope, active) = split_scope_and_active(path_part);
+    let roots = completion_roots(form, scope, anchors);
     let rendered_prefix = match form {
         CompletionEntryForm::Magic => format!("@{scope}"),
         CompletionEntryForm::ImplicitRelative => scope.to_string(),
     };
+    make_partial_completion(form, roots, active.to_string(), rendered_prefix)
+}
 
-    Ok(Some(make_partial_completion(
-        form,
-        roots,
-        active.to_string(),
-        rendered_prefix,
-    )))
+/// Build the ordered completion roots for an entry form, each with the scope
+/// appended.
+///
+/// Mirrors the execution candidate builder ([`collect_roots`]): `Magic` walks
+/// configured prepend roots, the repository root, home, then configured append
+/// roots; `ImplicitRelative` walks the repository root then the base directory
+/// (Phase 4 precedence). Lexically duplicate roots collapse, keeping first-seen
+/// order.
+fn completion_roots(
+    form: CompletionEntryForm,
+    scope: &str,
+    anchors: &CompletionAnchors,
+) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    match form {
+        CompletionEntryForm::Magic => {
+            for prepend in &anchors.magic_paths.prepend {
+                push_unique(&mut roots, append_scope(prepend, scope));
+            }
+            if let Some(repo) = anchors.repository_root {
+                push_unique(&mut roots, append_scope(repo, scope));
+            }
+            if let Some(home) = anchors.home {
+                push_unique(&mut roots, append_scope(home, scope));
+            }
+            for append in &anchors.magic_paths.append {
+                push_unique(&mut roots, append_scope(append, scope));
+            }
+        }
+        CompletionEntryForm::ImplicitRelative => {
+            if let Some(repo) = anchors.repository_root {
+                push_unique(&mut roots, append_scope(repo, scope));
+            }
+            push_unique(&mut roots, append_scope(anchors.base, scope));
+        }
+    }
+    roots
+}
+
+/// Push a root only if an equal one is not already present, preserving order.
+fn push_unique(roots: &mut Vec<PathBuf>, root: PathBuf) {
+    if !roots.iter().any(|r| r == &root) {
+        roots.push(root);
+    }
 }
 
 /// Classify a raw token into an entry form plus the path portion following
@@ -1017,52 +1137,6 @@ fn split_scope_and_active(path: &str) -> (&str, &str) {
         Some(idx) => (&path[..=idx], &path[idx + 1..]),
         None => ("", path),
     }
-}
-
-/// Compute the absolute roots implied by a `@`-prefixed token at the given
-/// scope. `home` is captured once by the caller so this helper performs no
-/// ambient home read of its own.
-fn magic_completion_roots(
-    scope: &str,
-    base: &Path,
-    home: Option<&Path>,
-) -> Result<Vec<PathBuf>, FileReferenceError> {
-    let mut roots: Vec<PathBuf> = Vec::new();
-
-    if let Some(git_root) = find_git_root(base)? {
-        roots.push(append_scope(&git_root, scope));
-    }
-    if let Some(home) = home {
-        let rooted = append_scope(home, scope);
-        if !roots.iter().any(|r| r == &rooted) {
-            roots.push(rooted);
-        }
-    }
-
-    Ok(roots)
-}
-
-/// Compute the absolute roots implied by an implicit-relative token at the
-/// given scope.
-///
-/// Mirrors execution precedence (Phase 4): repository root first, then the base
-/// directory. Completion must teach the same order execution uses, so a value it
-/// emits resolves to the same candidate it displayed.
-fn implicit_relative_completion_roots(
-    scope: &str,
-    base: &Path,
-) -> Result<Vec<PathBuf>, FileReferenceError> {
-    let mut roots: Vec<PathBuf> = Vec::new();
-
-    if let Some(git_root) = find_git_root(base)? {
-        roots.push(append_scope(&git_root, scope));
-    }
-    let base_root = append_scope(base, scope);
-    if !roots.iter().any(|r| r == &base_root) {
-        roots.push(base_root);
-    }
-
-    Ok(roots)
 }
 
 /// Append a scope string to a root directory.
@@ -1119,6 +1193,8 @@ mod tests {
             home_dir: Some(PathBuf::from("/home/test")),
             env: std::collections::HashMap::new(),
             repository_root: None,
+            package_area: None,
+            allow_ambient_discovery: true,
         };
         let template = PathTemplate {
             segments: vec![TemplateSegment::Literal("foo/bar.md".to_string())],
@@ -1136,6 +1212,8 @@ mod tests {
             home_dir: None,
             env,
             repository_root: None,
+            package_area: None,
+            allow_ambient_discovery: true,
         };
         let template = PathTemplate {
             segments: vec![
@@ -1154,6 +1232,8 @@ mod tests {
             home_dir: None,
             env: std::collections::HashMap::new(),
             repository_root: None,
+            package_area: None,
+            allow_ambient_discovery: true,
         };
         let template = PathTemplate {
             segments: vec![TemplateSegment::EnvVar("MISSING".to_string())],
@@ -1196,6 +1276,8 @@ mod tests {
             home_dir: None,
             env: std::collections::HashMap::new(),
             repository_root: None,
+            package_area: None,
+            allow_ambient_discovery: true,
         };
         let roots =
             collect_roots(&parsed.kind, &MagicPathList::default(), &[], &ctx, None).unwrap();
@@ -1213,6 +1295,8 @@ mod tests {
             home_dir: Some(PathBuf::from("/home/test")),
             env: std::collections::HashMap::new(),
             repository_root: None,
+            package_area: None,
+            allow_ambient_discovery: true,
         };
         let roots = collect_roots(&parsed, &MagicPathList::default(), &[], &ctx, None).unwrap();
         assert_eq!(root_paths(&roots), vec![PathBuf::from("/home/test")]);
@@ -1229,6 +1313,8 @@ mod tests {
             home_dir: None,
             env: std::collections::HashMap::new(),
             repository_root: None,
+            package_area: None,
+            allow_ambient_discovery: true,
         };
         let err = collect_roots(&parsed, &MagicPathList::default(), &[], &ctx, None).unwrap_err();
         assert!(
@@ -1250,6 +1336,8 @@ mod tests {
             home_dir: None,
             env: std::collections::HashMap::new(),
             repository_root: Some(PathBuf::from("/tmp/repo")),
+            package_area: None,
+            allow_ambient_discovery: true,
         };
         let roots = collect_roots(
             &parsed,

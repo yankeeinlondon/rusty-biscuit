@@ -30,6 +30,11 @@ pub enum FileReferenceError {
     MissingHomeContext,
 
     #[error(
+        "package reference used but no package area or repository root is available in the resolution context"
+    )]
+    MissingPackageContext,
+
+    #[error(
         "repository root `{repository_root}` does not contain the resolution source `{source_path}`"
     )]
     RepositoryRootNotContainingSource {
