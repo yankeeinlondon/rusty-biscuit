@@ -1,7 +1,7 @@
 ---
 total_phases: 13
 created: 2026-07-12
-phase: 9
+phase: 10
 yolo: "true"
 source_files_during_phase_1:
   - claudine/lib/src/composition/sequence/tests.rs
@@ -189,6 +189,36 @@ docs_created_during_phase_9: []
 skills_files_updated_during_phase_9: []
 packages_during_phase_9:
   - claudine
+source_files_during_phase_10:
+  - claudine/lib/src/composition/runtime_state.rs
+  - claudine/lib/src/composition/sequence/task/group.rs
+  - claudine/lib/src/composition/sequence/task/mod.rs
+  - claudine/lib/src/composition/sequence/task/shell.rs
+  - claudine/lib/src/composition/sequence/task/tests.rs
+  - claudine/lib/src/composition/lifecycle/executor.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/mutation_visibility.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+  - claudine/lib/src/composition/lifecycle/mod.rs
+  - claudine/lib/src/composition/types.rs
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/cli/src/commands/wrap/overlay.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/src/commands/wrap/harness_orch/types.rs
+  - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+  - claudine/cli/src/commands/wrap/composition/runner.rs
+  - claudine/cli/src/commands/wrap/sequence/iterate.rs
+  - claudine/cli/src/commands/wrap/sequence/task_run.rs
+  - claudine/cli/tests/sequence_groups.rs
+docs_updated_during_phase_10: []
+docs_created_during_phase_10: []
+skills_files_updated_during_phase_10: []
+packages_during_phase_10:
+  - claudine
 packages:
   - biscuit-file
   - darkmatter
@@ -373,15 +403,15 @@ live-disk, turn-by-turn composition and execution.
 **Goal:** Add bounded concurrency with snapshot isolation and deterministic
 results independent of completion order.
 
-- [ ] Implement `execution: parallel` scheduling with declaration-order admission and optional `max_parallel >= 1`; absent caps launch all tasks without mutating process-global environment or CWD.
-- [ ] Snapshot effective state and prior `outputs` once at group start and give each task an independent runtime mutation/output buffer; do not re-read live files between sibling tasks.
-- [ ] Wait for all siblings even after failures, preserve each task's partial stdout slot, and make the group fail if any task fails without canceling successful work.
-- [ ] Commit one nested output entry in declaration order after all siblings finish, regardless of stream/completion order; retain a slot for every task.
-- [ ] Merge mutation deltas in task declaration order, make later-declared values win on duplicate keys, and emit one warning naming each conflicting key and both tasks.
-- [ ] Disable late interactive prompting inside parallel tasks so unresolved required properties become task failures; keep serial interaction unchanged.
-- [ ] Fan Ctrl+C out through the existing cross-platform unified wait machinery to all running children, record interrupted outcomes, skip normal mutation/output commit as specified, and return sequence exit `130`.
-- [ ] Add deterministic tests using inverted completion delays for scheduling caps, snapshot isolation, mutation merge/conflicts, nested output ordering, all-child completion after failure, no interactivity, and signal fan-out.
-- [ ] **Validation checkpoint:** repeated parallel fixtures produce byte-identical summaries/state regardless of completion order, collision checks prevent racing write-backs, and concurrency never changes process-global env/CWD.
+- [x] Implement `execution: parallel` scheduling with declaration-order admission and optional `max_parallel >= 1`; absent caps launch all tasks without mutating process-global environment or CWD. *(`sequence/task/group.rs::run_parallel`: `std::thread::scope` plus one shared `AtomicUsize` cursor — declaration-order admission falls out of the cursor, and a freed slot always takes the next task. Reaching real threads required making the runtime cell and the live-frontmatter cell `Sync` (`RefCell`→`Mutex`, `Rc`→`Arc`) and adding `: Sync` to the four runner traits; every CLI-side context type was already `Sync`.)*
+- [x] Snapshot effective state and prior `outputs` once at group start and give each task an independent runtime mutation/output buffer; do not re-read live files between sibling tasks. *(One `member_state_from(base)` shared by every member; per-member `Arc<RuntimeState>` seeded via `RuntimeState::from_snapshot`. The buffer is threaded three ways so nothing escapes it — `TaskExecution::runtime`, the new `StackExecutionContext::with_runtime_state` (a lifecycle `set` accumulates through the *stack*, which a first cut missed), and `PromptTaskRequest::runtime` so a launched document's own `set` lands in the member's buffer.)*
+- [x] Wait for all siblings even after failures, preserve each task's partial stdout slot, and make the group fail if any task fails without canceling successful work. *(`thread::scope` joins every worker before the fold; no cancellation path exists to take. `PrimaryOutcome` already carried partial stdout across a failure, so a failed member's slot is its captured text.)*
+- [x] Commit one nested output entry in declaration order after all siblings finish, regardless of stream/completion order; retain a slot for every task. *(`PrimaryOutcome::group_output` carries the array up to `TaskExecution::run`, which commits it **after teardown** — the same rule every other variant obeys. A serial group still commits none.)*
+- [x] Merge mutation deltas in task declaration order, make later-declared values win on duplicate keys, and emit one warning naming each conflicting key and both tasks. *(`merge_parallel_mutations` walks `group.tasks.zip(runs)`. A refused merge returns a typed `TaskDiagnostic` built from the `RuntimeMutationError` rather than a formatted string — the `error_guards` collapse guard caught the first cut doing the latter.)*
+- [x] Disable late interactive prompting inside parallel tasks so unresolved required properties become task failures; keep serial interaction unchanged. *(Interactive collection lives only in `compose_with_late_collection` on the **step** path; the task path composes through `jit::compose_step` directly, so no task — parallel or serial — has ever had an interactive surface. Pinned rather than added: `an_unresolvable_task_value_fails_the_task_rather_than_prompting`.)*
+- [x] Fan Ctrl+C out through the existing cross-platform unified wait machinery to all running children, record interrupted outcomes, skip normal mutation/output commit as specified, and return sequence exit `130`. *(Every member shares the one `AtomicBool` through `..*self`. `TaskShellRunner::run` now takes it, so the poll loop kills a *running* child instead of only checking between commands — `kill` rather than a signal, the one primitive with identical semantics on all three platforms. An interrupted group commits neither the nested entry nor the mutation merge.)*
+- [x] Add deterministic tests using inverted completion delays for scheduling caps, snapshot isolation, mutation merge/conflicts, nested output ordering, all-child completion after failure, no interactivity, and signal fan-out. *(14 L1 cases in `sequence/task/tests.rs::parallel_groups`; `FakeTaskShell` gained per-command delays, per-command stdout, and an in-flight high-water mark so a cap is asserted rather than assumed. Every case either inverts completion order against declaration order or asserts an isolation property a shared-cell serial run would violate — none can pass by accident.)*
+- [x] **Validation checkpoint:** repeated parallel fixtures produce byte-identical summaries/state regardless of completion order, collision checks prevent racing write-backs, and concurrency never changes process-global env/CWD. *(`repeated_runs_produce_identical_results_regardless_of_completion_order` runs the same fixture under two inverted delay orderings and compares the whole tuple — nested entry, merged mutations, member statuses. `parallel_execution_leaves_process_env_and_cwd_untouched` snapshots `current_dir` and every env var around the run. Write-back collisions were already a phase-5 preflight rejection and stay green. 5 E2E cases in `cli/tests/sequence_groups.rs` prove real overlap through the real `claudine sequence` path: three 1s tasks finish in under 2.5s, and four capped at 2 take at least 1.9s.)*
 
 ## Phase 11 — Concurrent terminal rendering, perf, and logging
 
