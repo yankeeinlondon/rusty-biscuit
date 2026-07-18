@@ -5,7 +5,7 @@ use std::io::IsTerminal;
 use clap::Args;
 use claudine::composition::{
     self, CompositionError, MarkdownLoadCause, ResolvedCompositionSource, SequenceExecutionOptions,
-    parse_interactive_hint,
+    SequenceShellCause, parse_interactive_hint,
 };
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use tracing::info_span;
@@ -157,6 +157,65 @@ fn resolve_sequence_source(file_ref: &str) -> Result<ResolvedCompositionSource, 
     })
 }
 
+/// Report that a dynamic source resolved to no steps.
+///
+/// This is the success path, so it is a notice rather than a warning — but it
+/// goes to stderr like every other status line, leaving stdout clean for the
+/// (empty) run.
+fn emit_empty_sequence_notice(path: &std::path::Path) {
+    use biscuit_terminal::prelude::TerminalRenderable;
+
+    crate::log::message(
+        &biscuit_terminal::components::prose::Prose::new(format!(
+            "<dim>sequence</dim> <bold>{}</bold> resolved to <bold>0 steps</bold>; \
+             nothing to run.",
+            path.display()
+        ))
+        .render(&crate::log::terminal()),
+    );
+}
+
+/// Approve and execute one `$( … )` sequence source, returning its stdout.
+///
+/// The command is validated and approved through the same harness gate as
+/// every other composition shell command, so a sequence source can never reach
+/// a shell the user has not cleared.
+#[allow(clippy::result_large_err)]
+fn expand_shell_source(
+    command: &str,
+    options: &claudine::harness::ShellApprovalOptions,
+) -> std::result::Result<String, CompositionError> {
+    let approved = claudine::harness::shell::validate_and_approve_command(command, options)
+        .map_err(|e| CompositionError::SequenceShellFailed {
+            command: command.to_string(),
+            source: SequenceShellCause::Approval(e),
+        })?;
+
+    let output = std::process::Command::new(&approved.executable)
+        .args(&approved.args)
+        .output()
+        .map_err(|e| CompositionError::SequenceShellFailed {
+            command: command.to_string(),
+            source: SequenceShellCause::Spawn(e),
+        })?;
+
+    if !output.status.success() {
+        return Err(CompositionError::SequenceShellFailed {
+            command: command.to_string(),
+            source: SequenceShellCause::Exited {
+                status: output.status.to_string(),
+                stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            },
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+// The shell-source runner returns `CompositionError` by value to satisfy the
+// library's runner signature; that enum is intentionally large and is boxed at
+// the reporting boundary, not here.
+#[allow(clippy::result_large_err)]
 fn run_sequence_inner(
     args: SequenceArgs,
     verbose: u8,
@@ -222,12 +281,32 @@ fn run_sequence_inner(
     )
     .entered();
 
-    let plan = composition::resolve_sequence_plan(&source)?.ok_or_else(|| {
-        eyre!(
-            "file '{}' does not define a `sequence` frontmatter property",
-            file
-        )
-    })?;
+    let shell_options = super::wrap::apply_composition_shell_overrides(
+        super::wrap::build_harness_shell_options(&source.resolved_path, None),
+        false,
+        shared.yolo,
+    );
+    let shell_runner = |command: &str| expand_shell_source(command, &shell_options);
+    let source_options = composition::SequenceSourceOptions {
+        shell_runner: Some(&shell_runner),
+    };
+
+    let plan = composition::resolve_sequence_plan_with(&source, source_options)?.ok_or_else(
+        || {
+            eyre!(
+                "file '{}' does not define a `sequence` frontmatter property",
+                file
+            )
+        },
+    )?;
+
+    // A dynamic source legitimately resolves to nothing — a clean repository
+    // makes `{{ ctx.dirty_files }}` empty. That is a no-op, not a failure; a
+    // static `sequence: []` is still rejected during normalization.
+    if plan.steps.is_empty() {
+        emit_empty_sequence_notice(&source.resolved_path);
+        return Ok(0);
+    }
 
     let set_overrides =
         super::compose::merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;

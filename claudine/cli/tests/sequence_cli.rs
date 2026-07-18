@@ -721,3 +721,226 @@ fn sequence_summary_emits_final_line() {
         .success()
         .stderr(contains("Sequence finished"));
 }
+
+// ============================================================================
+// Sequence Plus: dynamic and file-backed sources (Phase 4)
+// ============================================================================
+
+/// A referenced data file drives the sequence end to end: the offset selects
+/// the nested list, the operator supplies each step's name, and every step
+/// composes with that state through the normal invocation path.
+#[test]
+fn sequence_resolves_a_data_file_with_offset_and_operator() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let prompts_path = workspace.path().join("all-prompts.txt");
+
+    fs::write(
+        workspace.path().join("things.yaml"),
+        r#"description: research into things
+colors:
+    description: the best colors in the spectrum
+    data:
+        - color: blue
+        - color: green
+"#,
+    )
+    .unwrap();
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        r#"---
+sequence: things.yaml -> colors.data::map(color, name)
+---
+COLOR={{state}} STEP={{state.index}}/{{state.count}}
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        r#"#!/bin/sh
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-t" ]; then
+    printf '%s\n' "$arg" >> "$CLAUDINE_PROMPTS_FILE"
+  fi
+  prev="$arg"
+done
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("CLAUDINE_PROMPTS_FILE", &prompts_path)
+        .current_dir(workspace.path())
+        .args(["sequence", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let captured = fs::read_to_string(&prompts_path).unwrap();
+    assert!(
+        captured.contains("COLOR=blue STEP=1/2"),
+        "first step should carry the mapped name; captured: {captured}"
+    );
+    assert!(
+        captured.contains("COLOR=green STEP=2/2"),
+        "second step should carry the mapped name; captured: {captured}"
+    );
+}
+
+/// A dynamic source that resolves to nothing is a graceful no-op: a styled
+/// notice on stderr, exit `0`, and no provider launched.
+#[test]
+fn sequence_with_an_empty_dynamic_source_is_a_no_op() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let launched_path = workspace.path().join("launched.txt");
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        r#"---
+items: []
+sequence: "{{ items }}"
+---
+Work on {{state}}.
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        r#"#!/bin/sh
+printf 'launched\n' >> "$CLAUDINE_LAUNCHED_FILE"
+exit 0
+"#,
+    );
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("CLAUDINE_LAUNCHED_FILE", &launched_path)
+        .current_dir(workspace.path())
+        .args(["sequence", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        stderr.contains("0 steps"),
+        "an empty dynamic source must report itself; stderr: {stderr}"
+    );
+    assert!(
+        !launched_path.exists(),
+        "no provider may be launched for a zero-step sequence"
+    );
+}
+
+/// A statically empty list keeps its authoring error and a non-zero exit —
+/// the graceful no-op is for *dynamic* emptiness only.
+#[test]
+fn sequence_with_a_static_empty_list_still_fails() {
+    let workspace = tempdir().unwrap();
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        "---\nsequence: []\n---\nWork on {{state}}.\n",
+    )
+    .unwrap();
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .current_dir(workspace.path())
+        .args(["sequence", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(contains("empty"));
+}
+
+/// The retired `list:` document shape is rejected with a message that names
+/// the property authors must migrate to.
+#[test]
+fn sequence_rejects_the_retired_list_shape() {
+    let workspace = tempdir().unwrap();
+    fs::write(
+        workspace.path().join("legacy.yaml"),
+        "kind: sequence\nlist:\n  - name: one\n",
+    )
+    .unwrap();
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        "---\nsequence: legacy.yaml\n---\nWork on {{state}}.\n",
+    )
+    .unwrap();
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .current_dir(workspace.path())
+        .args(["sequence", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(contains("sequence:"));
+}
+
+/// A formal sequence YAML invoked *directly* accepts the identical document
+/// shape it does when referenced — the asymmetry the retired `list:` form
+/// carried is gone.
+#[test]
+fn sequence_yaml_invoked_directly_uses_the_same_shape() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let prompts_path = workspace.path().join("all-prompts.txt");
+
+    let yaml_file = workspace.path().join("steps.yaml");
+    fs::write(
+        &yaml_file,
+        r#"kind: sequence
+sequence:
+    - name: alpha
+      shell: echo alpha
+    - name: beta
+      shell: echo beta
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\nprintf 'launched\\n' >> \"$CLAUDINE_PROMPTS_FILE\"\nexit 0\n",
+    );
+
+    // Every step carries an executable, so a bodyless YAML source is valid.
+    // Phase 4 only has to resolve the plan; execution of `shell:` steps lands
+    // in phase 7, so this asserts the shape is *accepted*, not that it runs.
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("CLAUDINE_PROMPTS_FILE", &prompts_path)
+        .current_dir(workspace.path())
+        .args(["sequence", "--goose", yaml_file.to_str().unwrap()])
+        .assert()
+        .get_output()
+        .clone();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        !stderr.contains("must have") && !stderr.contains("wrong structure"),
+        "the direct-invocation shape must be accepted; stderr: {stderr}"
+    );
+}
