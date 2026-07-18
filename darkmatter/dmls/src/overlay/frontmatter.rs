@@ -127,6 +127,24 @@ impl FrontmatterAst {
         }
     }
 
+    /// Parses a standalone YAML source into the same position-aware mapping view.
+    pub fn parse_yaml(source: &str) -> FrontmatterParse {
+        let block_span = 0..source.len();
+        match loader::load(source) {
+            Ok(documents) => {
+                let root = documents.into_iter().next().map(|document| document.root);
+                FrontmatterParse {
+                    ast: Some(lower(root.as_ref(), 0, block_span)),
+                    error: None,
+                }
+            }
+            Err(error) => FrontmatterParse {
+                ast: None,
+                error: Some(load_error_to_diagnostic(&error, 0, &block_span)),
+            },
+        }
+    }
+
     /// All authored entries, in document order.
     pub fn entries(&self) -> &[FmEntry] {
         &self.entries

@@ -129,14 +129,15 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
     let sentinel = workspace.path().join("SENTINEL_SHOULD_NOT_EXIST");
     let sentinel_display = sentinel.to_string_lossy().replace('\\', "/");
 
-    // Frontmatter `$()` + inline `$schema` Expression-typed values + body
+    // Frontmatter `$()` + inline `$schema` Expression/meta-schema-typed values + body
     // `::shell` (dangerous + sentinel), a Git conflict prediction, a remote
     // `::url`, and a remote image link — every construct that could touch a
     // process, repository, or socket if the analyzer were not passive. The
     // Expression values exercise frontmatter completion/hover/diagnostics,
-    // which parse but never evaluate.
+    // while the semantic schema values carry nonexistent imports and a remote
+    // declaration. All parse, diagnose, or complete without resolving.
     let text = format!(
-        "---\ntitle: Passive\ncommand: $(echo pwned)\n$schema:\n  when: expression\n  conflicts: expression\nwhen: length(title)\nconflicts: predict_conflicts(\"feature/example\")\n---\n\n\
+        "---\ntitle: Passive\ncommand: $(echo pwned)\n$schema:\n  when: expression\n  conflicts: expression\n  definition: type-definition\n  declaration: schema\ndefinition: 'Imported@./missing-types.yaml'\ndeclaration: https://example.com/schema.yaml\nwhen: length(title)\nconflicts: predict_conflicts(\"feature/example\")\n---\n\n\
          # Heading\n\n\
          ::shell rm -rf /tmp/dmls-should-not-run\n\n\
          ::shell touch {sentinel_display}\n\n\
@@ -173,18 +174,20 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
 
     // Drive every read-side request across the shell/remote spans and the
     // Expression-typed frontmatter values. Each must return promptly (no Git or
-    // network hang) and never execute anything. `(7, 15)` lands inside the Git
-    // function and `(20, 18)` lands inside the body invocation.
+    // network hang) and never execute anything. `(11, 15)` lands inside the Git
+    // function and `(24, 18)` lands inside the body invocation.
     let positions = [
-        (12u32, 8u32),
-        (14, 8),
-        (16, 8),
+        (16u32, 8u32),
         (18, 8),
-        (20, 18),
+        (20, 8),
         (22, 8),
+        (24, 18),
+        (26, 8),
         (2, 12),
-        (6, 8),
-        (7, 15),
+        (8, 18),
+        (9, 18),
+        (10, 8),
+        (11, 15),
     ];
     for (line, character) in positions {
         for method in [
@@ -228,11 +231,40 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
             "textDocument": { "uri": doc_uri.as_str() },
             "range": {
                 "start": { "line": 0, "character": 0 },
-                "end": { "line": 24, "character": 0 }
+                "end": { "line": 28, "character": 0 }
             }
         }),
     );
     assert!(range.error.is_none(), "semanticTokens/range errored: {:?}", range.error);
+
+    // The standalone content-activation path must be equally passive. Neither
+    // the named import nor the example reference is opened on a keystroke.
+    let standalone = "$schema:\n  payload: 'Imported@./missing-types.yaml'\n  sample: 'string(example(./missing-example.md))'\n";
+    let standalone_path = workspace.path().join("standalone.yaml");
+    std::fs::write(&standalone_path, standalone).unwrap();
+    let standalone_uri = url::Url::from_file_path(&standalone_path).unwrap();
+    fixture.notify(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": standalone_uri.as_str(),
+                "languageId": "yaml",
+                "version": 1,
+                "text": standalone
+            }
+        }),
+    );
+    let _ = fixture.wait_for_diagnostics(standalone_uri.as_str());
+    for method in ["textDocument/hover", "textDocument/completion"] {
+        let response = fixture.request(
+            method,
+            json!({
+                "textDocument": { "uri": standalone_uri.as_str() },
+                "position": { "line": 1, "character": 16 }
+            }),
+        );
+        assert!(response.error.is_none(), "{method} errored: {:?}", response.error);
+    }
 
     fixture.shutdown();
 

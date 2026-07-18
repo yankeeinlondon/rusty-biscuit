@@ -20,9 +20,9 @@ use darkmatter::markdown::compose::find_git_root_from;
 use darkmatter::markdown::schemas::resolve::{merge_baseline, resolve_schema};
 use darkmatter::markdown::schemas::{
     DarkmatterSchemas, EffectiveSchema, PropertyAtom, PropertyDef, SchemaArm, SchemaError,
-    SchemaShape, SimplifiedSchema, SimplifiedType, StandaloneSchemaDocument,
-    StandaloneSchemaEnvelope, TypeExpr, darkmatter_base_json_schema_ref, darkmatter_base_schema,
-    triggers::TriggerRegistry,
+    SchemaShape, SchemaSourceMap, SchemaSourcePath, SchemaSpanKind, SimplifiedSchema,
+    SimplifiedType, StandaloneSchemaDocument, StandaloneSchemaEnvelope, TypeExpr,
+    darkmatter_base_json_schema_ref, darkmatter_base_schema, triggers::TriggerRegistry,
 };
 use globset::{Glob, GlobSetBuilder};
 use serde_json::Value;
@@ -50,6 +50,90 @@ pub struct FrontmatterSchemaValue {
     pub kinds: Vec<MetaSchemaKind>,
     /// Document-relative span of the complete authored value.
     pub value_span: Range<usize>,
+}
+
+/// One complete property definition classified for future semantic consumers.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SemanticTypeRegion {
+    /// The semantic role of the complete authored value.
+    pub kind: MetaSchemaKind,
+    /// Authored property name.
+    pub name: String,
+    /// Structural path shared with the passive schema source map.
+    pub path: SchemaSourcePath,
+    /// Exact authored mapping-key span.
+    pub key_span: Range<usize>,
+    /// Exact authored complete-definition span.
+    pub definition_span: Range<usize>,
+    /// Parsed definition denoted by the authored value.
+    pub definition: PropertyDef,
+}
+
+/// Projects every complete definition in a parsed schema as a semantic region.
+pub fn semantic_type_regions(
+    schema: &SimplifiedSchema,
+    source_map: &SchemaSourceMap,
+) -> Vec<SemanticTypeRegion> {
+    let mut regions = Vec::new();
+    match schema {
+        SimplifiedSchema::Single(shape) => {
+            collect_semantic_type_regions(
+                shape,
+                &SchemaSourcePath::root(),
+                source_map,
+                &mut regions,
+            );
+        }
+        SimplifiedSchema::Union(arms) => {
+            for (index, arm) in arms.iter().enumerate() {
+                if let SchemaArm::Inline(shape) = arm {
+                    collect_semantic_type_regions(
+                        shape,
+                        &SchemaSourcePath::root().union_arm(index),
+                        source_map,
+                        &mut regions,
+                    );
+                }
+            }
+        }
+    }
+    regions
+}
+
+fn collect_semantic_type_regions(
+    shape: &SchemaShape,
+    parent: &SchemaSourcePath,
+    source_map: &SchemaSourceMap,
+    regions: &mut Vec<SemanticTypeRegion>,
+) {
+    for (name, definition) in &shape.properties {
+        let path = parent.property(name);
+        if let (Some(key_span), Some(definition_span)) = (
+            source_map.spans(&path, SchemaSpanKind::MappingKey).first(),
+            source_map.spans(&path, SchemaSpanKind::Definition).first(),
+        ) {
+            regions.push(SemanticTypeRegion {
+                kind: MetaSchemaKind::TypeDefinition,
+                name: name.clone(),
+                path: path.clone(),
+                key_span: key_span.clone(),
+                definition_span: definition_span.clone(),
+                definition: definition.clone(),
+            });
+        }
+
+        for (index, atom) in atoms(definition).iter().enumerate() {
+            let TypeExpr::InlineObject(nested) = &atom.ty else {
+                continue;
+            };
+            let nested_path = if matches!(definition, PropertyDef::Union(_)) {
+                path.union_arm(index)
+            } else {
+                path.clone()
+            };
+            collect_semantic_type_regions(nested, &nested_path, source_map, regions);
+        }
+    }
 }
 
 /// Parsed schema-authoring state attached to a [`super::DocumentOverlay`].
@@ -561,5 +645,38 @@ mod tests {
             globs: Vec::new(),
         };
         assert!(!extension_matches(Path::new("/w/.claude/p.md"), &no_globs, &roots));
+    }
+
+    #[test]
+    fn semantic_type_regions_project_existing_activation_state() {
+        let source = concat!(
+            "$schema:\n",
+            "  scalar: 'string(required)'\n",
+            "  native:\n",
+            "    nested: number\n",
+            "  union:\n",
+            "    - string\n",
+            "    - item: boolean\n",
+        );
+        let model = darkmatter::markdown::schemas::parse_standalone_schema_document(
+            source,
+            Path::new("/w/schema.yaml"),
+        )
+        .expect("classification")
+        .expect("standalone schema");
+
+        let regions = semantic_type_regions(&model.schema, &model.source_map);
+        let names: Vec<&str> = regions.iter().map(|region| region.name.as_str()).collect();
+        assert!(names.contains(&"scalar"), "{regions:#?}");
+        assert!(names.contains(&"native"), "{regions:#?}");
+        assert!(names.contains(&"union"), "{regions:#?}");
+        assert!(names.contains(&"nested"), "{regions:#?}");
+        assert!(names.contains(&"item"), "{regions:#?}");
+        assert!(regions.iter().all(|region| region.kind == MetaSchemaKind::TypeDefinition));
+        for region in regions {
+            assert!(!region.definition_span.is_empty(), "{region:#?}");
+            assert!(!region.key_span.is_empty(), "{region:#?}");
+            assert_eq!(&source[region.key_span.clone()], region.name);
+        }
     }
 }

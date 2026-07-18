@@ -3269,7 +3269,6 @@ fn semantic_tokens_wiki_enable_suppresses_only_f4() {
 }
 
 #[test]
-#[ignore = "Phase 1 contract; enable after the meta-schema production phase lands"]
 fn meta_schema_phase1_schema_hover_uses_nominal_type() {
     let workspace = tempfile::tempdir().unwrap();
     let text = "---\n$schema:\n  title: string\ntitle: Hello\n---\nBody\n";
@@ -3285,6 +3284,216 @@ fn meta_schema_phase1_schema_hover_uses_nominal_type() {
     println!("{markup}");
     assert!(markup.contains("Type: **schema**"), "schema hover: {markup}");
     assert!(!markup.contains("Type: **any**"), "schema hover: {markup}");
+
+    fixture.shutdown();
+}
+
+#[test]
+fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
+    let workspace = tempfile::tempdir().unwrap();
+    let valid = concat!(
+        "---\n",
+        "$schema:\n",
+        "  definition: type-definition\n",
+        "definition:\n",
+        "  - string(required)\n",
+        "  - nested: number\n",
+        "---\n\nbody\n",
+    );
+    let valid_path = workspace.path().join("valid.md");
+    std::fs::write(&valid_path, valid).unwrap();
+
+    let partial = "---\n$schema:\n  title: str\n---\n\nbody\n";
+    let partial_path = workspace.path().join("partial.md");
+    std::fs::write(&partial_path, partial).unwrap();
+
+    let invalid = concat!(
+        "---\n",
+        "$schema:\n",
+        "  definition: type-definition\n",
+        "definition: string(nope)\n",
+        "---\n\nbody\n",
+    );
+    let invalid_path = workspace.path().join("invalid.md");
+    std::fs::write(&invalid_path, invalid).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let valid_uri = url::Url::from_file_path(valid_path).unwrap();
+    open(&fixture, valid_uri.as_str(), valid);
+    let hover = hover_markup(&mut fixture, valid_uri.as_str(), 3, 3);
+    assert!(hover.contains("Type: **type-definition**"), "{hover}");
+    assert!(hover.contains("Declares: **string | object**"), "{hover}");
+    assert!(hover.contains("Required"), "{hover}");
+
+    let partial_uri = url::Url::from_file_path(partial_path).unwrap();
+    open(&fixture, partial_uri.as_str(), partial);
+    let completion = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": partial_uri.as_str() },
+                "position": { "line": 2, "character": 12 }
+            }),
+        )
+        .result
+        .expect("inline schema completion");
+    assert!(
+        completion
+            .as_array()
+            .expect("completion array")
+            .iter()
+            .any(|item| item["label"] == json!("string")),
+        "inline schema completion is descriptor-driven: {completion:?}"
+    );
+
+    let invalid_uri = url::Url::from_file_path(invalid_path).unwrap();
+    open(&fixture, invalid_uri.as_str(), invalid);
+    let diagnostics = fixture.wait_for_diagnostics(invalid_uri.as_str());
+    let specialized: Vec<&Value> = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.invalid_type_definition")
+        })
+        .collect();
+    assert_eq!(specialized.len(), 1, "{diagnostics:?}");
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic["code"] != json!("dm.schema.constraint")),
+        "the generic keyword failure is replaced: {diagnostics:?}"
+    );
+    assert_eq!(specialized[0]["range"]["start"], json!({ "line": 3, "character": 12 }));
+    assert_eq!(specialized[0]["range"]["end"], json!({ "line": 3, "character": 24 }));
+
+    fixture.shutdown();
+}
+
+#[test]
+fn meta_schema_phase7_standalone_pure_and_tagged_completion() {
+    let workspace = tempfile::tempdir().unwrap();
+    let cases = [
+        ("pure.yaml", "$schema:\n  title: str\n", 1u32, 12u32),
+        (
+            "tagged.yaml",
+            "kind: schema\ntypes:\n  title: str\n",
+            2u32,
+            12u32,
+        ),
+    ];
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    for (name, text, line, character) in cases {
+        let path = workspace.path().join(name);
+        std::fs::write(&path, text).unwrap();
+        let uri = url::Url::from_file_path(path).unwrap();
+        open(&fixture, uri.as_str(), text);
+        let completion = fixture
+            .request(
+                "textDocument/completion",
+                json!({
+                    "textDocument": { "uri": uri.as_str() },
+                    "position": { "line": line, "character": character }
+                }),
+            )
+            .result
+            .expect("standalone completion");
+        assert!(
+            completion
+                .as_array()
+                .expect("completion array")
+                .iter()
+                .any(|item| item["label"] == json!("string")),
+            "{name} must activate by content: {completion:?}"
+        );
+    }
+    fixture.shutdown();
+}
+
+#[test]
+fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnostic() {
+    let workspace = tempfile::tempdir().unwrap();
+    let valid = "$schema:\n  title: string\n";
+    let malformed = "$schema:\n  title: str\n";
+    let path = workspace.path().join("schema.yaml");
+    std::fs::write(&path, valid).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), valid);
+    assert!(fixture.wait_for_diagnostics(uri.as_str()).is_empty());
+
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": malformed } ]
+        }),
+    );
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.invalid_type_definition")
+        }),
+        "the current malformed definition owns diagnostics: {diagnostics:?}"
+    );
+
+    let completion = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 1, "character": 12 }
+            }),
+        )
+        .result
+        .expect("last-good completion");
+    assert!(
+        completion
+            .as_array()
+            .expect("completion array")
+            .iter()
+            .any(|item| item["label"] == json!("string")),
+        "last-good schema state keeps completion alive: {completion:?}"
+    );
+    let hover = hover_markup(&mut fixture, uri.as_str(), 1, 3);
+    assert!(hover.contains("Type: **type-definition**"), "{hover}");
+    assert!(hover.contains("Declares: **string**"), "{hover}");
+
+    fixture.shutdown();
+}
+
+#[test]
+fn meta_schema_phase7_shipped_schema_provider_path() {
+    let workspace = tempfile::tempdir().unwrap();
+    let shipped = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../docs/schemas/darkmatter.yaml");
+    let text = std::fs::read_to_string(&shipped).expect("read shipped Darkmatter schema");
+    let path = workspace.path().join("darkmatter.yaml");
+    std::fs::write(&path, &text).unwrap();
+
+    let schema_line = text
+        .lines()
+        .position(|line| line.trim_start().starts_with("\"$schema\":"))
+        .expect("shipped $schema definition") as u32;
+    let schema_column = text
+        .lines()
+        .nth(schema_line as usize)
+        .and_then(|line| line.find("$schema"))
+        .expect("shipped $schema column") as u32;
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), &text);
+    assert!(fixture.wait_for_diagnostics(uri.as_str()).is_empty());
+
+    let hover = hover_markup(&mut fixture, uri.as_str(), schema_line, schema_column);
+    assert!(hover.contains("Type: **type-definition**"), "{hover}");
+    assert!(hover.contains("Declares: **schema**"), "{hover}");
 
     fixture.shutdown();
 }

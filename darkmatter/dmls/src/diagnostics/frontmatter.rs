@@ -13,6 +13,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::schemas::{
     PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason,
     ValidationOptions, ValidationProblem, ValidationProblemCode, ValidationReport,
+    parse_property_definition,
 };
 use darkmatter::style::{self, StyleWarningKind};
 use lsp_types::{
@@ -105,16 +106,31 @@ fn schema_prepare_diagnostic(
     error: &SchemaError,
     out: &mut Vec<Diagnostic>,
 ) {
-    let span = ast
+    let fallback_span = ast
         .and_then(|ast| ast.schema_entry().map(|entry| entry.value_span.clone()))
         .or_else(|| ast.map(FrontmatterAst::block_span));
+    let (code_value, message, span) = match error {
+        SchemaError::Grammar { property, .. } if property != "<root>" => {
+            let span = ast
+                .and_then(|ast| ast.entry_by_dotted(&format!("$schema.{property}")))
+                .map(|entry| entry.value_span.clone())
+                .or_else(|| fallback_span.clone());
+            (code::SCHEMA_INVALID_TYPE_DEFINITION, error.to_string(), span)
+        }
+        SchemaError::FrontmatterShape { message } => {
+            (code::SCHEMA_INVALID_SHAPE, message.clone(), fallback_span.clone())
+        }
+        SchemaError::RemoteUnsupported { .. } => {
+            (code::SCHEMA_INVALID_SHAPE, error.to_string(), fallback_span.clone())
+        }
+        SchemaError::Grammar { .. } => {
+            (code::SCHEMA_INVALID_SHAPE, error.to_string(), fallback_span.clone())
+        }
+        other => (code::SCHEMA_PREPARE, other.to_string(), fallback_span.clone()),
+    };
     let range = span
         .and_then(|span| ctx.source_map.byte_range_to_lsp(span))
         .unwrap_or_else(zero_range);
-    let (code_value, message) = match error {
-        SchemaError::FrontmatterShape { message } => (code::SCHEMA_INVALID_SHAPE, message.clone()),
-        other => (code::SCHEMA_PREPARE, other.to_string()),
-    };
     out.push(diagnostic(range, DiagnosticSeverity::ERROR, source::SCHEMA, code_value, message));
 }
 
@@ -139,7 +155,35 @@ fn schema_problem_diagnostics(
         .map(|value| value.entry.pointer.as_str())
         .collect();
 
+    let mut specialized_paths = std::collections::HashSet::new();
     for problem in &report.problems {
+        let Some(kind) = semantic_problem_kind(problem) else {
+            continue;
+        };
+        if !specialized_paths.insert(problem.path.clone()) {
+            continue;
+        }
+        let Some(range) = semantic_problem_range(ctx, ast, problem, kind) else {
+            continue;
+        };
+        let mut specialized = diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            source::SCHEMA,
+            match kind {
+                SemanticProblemKind::TypeDefinition => code::SCHEMA_INVALID_TYPE_DEFINITION,
+                SemanticProblemKind::Schema => code::SCHEMA_INVALID_SHAPE,
+            },
+            problem.message.clone(),
+        );
+        specialized.related_information = schema_origin_related(ctx, bundle, problem);
+        out.push(specialized);
+    }
+
+    for problem in &report.problems {
+        if specialized_paths.contains(&problem.path) {
+            continue;
+        }
         let Some((code_value, severity)) = classify(problem.code, ctx.config.schema.strict) else {
             continue;
         };
@@ -169,6 +213,46 @@ fn schema_problem_diagnostics(
     // pure noise. The passive "never executed" guarantee is surfaced on hover
     // (schema description for the key; policy verdict for `$()` shell), not as a
     // per-value diagnostic. `report.pending` stays populated but unconsumed.
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SemanticProblemKind {
+    TypeDefinition,
+    Schema,
+}
+
+fn semantic_problem_kind(problem: &ValidationProblem) -> Option<SemanticProblemKind> {
+    let segments = problem.schema_path.as_ref()?.segments();
+    if segments.iter().any(|segment| segment == "x-darkmatter-type-definition") {
+        Some(SemanticProblemKind::TypeDefinition)
+    } else if segments.iter().any(|segment| segment == "x-darkmatter-schema") {
+        Some(SemanticProblemKind::Schema)
+    } else {
+        None
+    }
+}
+
+fn semantic_problem_range(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    problem: &ValidationProblem,
+    kind: SemanticProblemKind,
+) -> Option<Range> {
+    let entry = ast.entry_or_ancestor(&problem.path)?;
+    let span = if kind == SemanticProblemKind::TypeDefinition {
+        let raw = ctx.text.get(entry.value_span.clone())?;
+        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(raw).ok()?;
+        match parse_property_definition(&entry.key, &yaml) {
+            Err(SchemaError::Grammar { property, .. }) if property != entry.key => ast
+                .entry_by_dotted(&format!("{}.{}", entry.dotted, property))
+                .map(|nested| nested.value_span.clone())
+                .unwrap_or_else(|| entry.value_span.clone()),
+            _ => entry.value_span.clone(),
+        }
+    } else {
+        entry.value_span.clone()
+    };
+    ctx.source_map.byte_range_to_lsp(span)
 }
 
 /// The concrete range for one validation problem (R-5 ranging rules).
@@ -417,6 +501,9 @@ fn suggestion_message(problem: &SuggestionLintProblem) -> String {
 
 /// A malformed recognized standalone envelope, ranged at the whole buffer.
 fn standalone_error_diagnostic(ctx: &DocumentContext, error: &SchemaError) -> Diagnostic {
+    if let Some(diagnostic) = standalone_type_definition_diagnostic(ctx) {
+        return diagnostic;
+    }
     let span = 0..ctx.text.len();
     let range = ctx
         .source_map
@@ -429,6 +516,44 @@ fn standalone_error_diagnostic(ctx: &DocumentContext, error: &SchemaError) -> Di
         code::SCHEMA_DOCUMENT_MALFORMED,
         error.to_string(),
     )
+}
+
+fn standalone_type_definition_diagnostic(ctx: &DocumentContext) -> Option<Diagnostic> {
+    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(ctx.text).ok()?;
+    let mapping = yaml.as_mapping()?;
+    let tagged = mapping
+        .get(serde_yaml_ng::Value::String("kind".to_string()))
+        .and_then(serde_yaml_ng::Value::as_str)
+        == Some("schema");
+    let payload_key = if tagged { "types" } else { "$schema" };
+    let payload = mapping.get(serde_yaml_ng::Value::String(payload_key.to_string()))?;
+    let payload = payload.as_mapping()?;
+    let parsed = FrontmatterAst::parse_yaml(ctx.text);
+    let ast = parsed.ast?;
+
+    for (key, value) in payload {
+        let key = key.as_str()?;
+        let Err(error) = parse_property_definition(key, value) else {
+            continue;
+        };
+        let entry = ast.entry_by_dotted(&format!("{payload_key}.{key}"))?;
+        let span = match &error {
+            SchemaError::Grammar { property, .. } if property != key => ast
+                .entry_by_dotted(&format!("{payload_key}.{key}.{property}"))
+                .map(|nested| nested.value_span.clone())
+                .unwrap_or_else(|| entry.value_span.clone()),
+            _ => entry.value_span.clone(),
+        };
+        let range = ctx.source_map.byte_range_to_lsp(span)?;
+        return Some(diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            source::SCHEMA,
+            code::SCHEMA_INVALID_TYPE_DEFINITION,
+            error.to_string(),
+        ));
+    }
+    None
 }
 
 /// The `(code, severity)` for a validation-problem category.
@@ -859,6 +984,61 @@ mod tests {
                 );
             });
         }
+    }
+
+    #[test]
+    fn meta_schema_diagnostics_replace_generic_keyword_failures() {
+        let cases = [
+            (
+                "---\n$schema:\n  definition: type-definition\ndefinition: string(nope)\n---\n\nbody\n",
+                "dm.schema.invalid_type_definition",
+                "string(nope)",
+            ),
+            (
+                "---\n$schema:\n  declaration: schema\ndeclaration: https://example.com/schema.yaml\n---\n\nbody\n",
+                code::SCHEMA_INVALID_SHAPE,
+                "https://example.com/schema.yaml",
+            ),
+        ];
+
+        for (text, expected_code, authored_value) in cases {
+            diagnostics_for(text, |diagnostics| {
+                let specialized: Vec<&Diagnostic> = diagnostics
+                    .iter()
+                    .filter(|diagnostic| code_of(diagnostic) == Some(expected_code))
+                    .collect();
+                assert_eq!(specialized.len(), 1, "one specialized diagnostic: {diagnostics:#?}");
+                assert!(
+                    diagnostics
+                        .iter()
+                        .all(|diagnostic| code_of(diagnostic) != Some(code::SCHEMA_CONSTRAINT)),
+                    "the generic custom-keyword diagnostic must be replaced: {diagnostics:#?}"
+                );
+
+                let source_map = SourceMap::new(
+                    "file:///w/doc.md".parse().unwrap(),
+                    1,
+                    PositionEncoding::Utf16,
+                    Arc::from(text),
+                );
+                let start = text.find(authored_value).unwrap();
+                let expected = source_map
+                    .byte_range_to_lsp(start..start + authored_value.len())
+                    .expect("authored value range");
+                assert_eq!(specialized[0].range, expected, "smallest authored value range");
+            });
+        }
+
+        let local = "---\n$schema:\n  declaration: schema\ndeclaration: ./missing.yaml\n---\n\nbody\n";
+        diagnostics_for(local, |diagnostics| {
+            assert!(
+                diagnostics.iter().all(|diagnostic| {
+                    code_of(diagnostic) != Some(code::SCHEMA_INVALID_SHAPE)
+                        && code_of(diagnostic) != Some("dm.schema.invalid_type_definition")
+                }),
+                "a syntactically valid local schema reference is not a semantic-shape error: {diagnostics:#?}"
+            );
+        });
     }
 
     #[test]
