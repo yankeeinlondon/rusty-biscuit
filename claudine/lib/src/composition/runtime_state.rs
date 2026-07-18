@@ -25,7 +25,7 @@
 //!
 //! [`layered_set_overrides`] is the single place that ordering is encoded.
 
-use std::cell::RefCell;
+use std::sync::Mutex;
 
 use darkmatter::effects::{EffectEngine, EffectError};
 use darkmatter::markdown::FrontmatterMap;
@@ -35,6 +35,10 @@ use super::sequence::reserved::ROOT_OVERLAY_KEYS;
 
 /// The reserved frontmatter key holding the accumulating output array.
 pub const OUTPUTS_KEY: &str = "outputs";
+
+/// A poisoned cell means a task panicked mid-write; there is no partial state
+/// worth recovering, so every accessor treats it as unrecoverable.
+const POISONED: &str = "runtime state mutex poisoned by a panicking task";
 
 /// Why a runtime `set` was refused.
 #[derive(Debug, thiserror::Error)]
@@ -68,9 +72,16 @@ pub struct RuntimeSnapshot {
 }
 
 /// The shared runtime cell. See the [module docs](self).
+///
+/// Interior mutability is a `Mutex` rather than a `RefCell` because a parallel
+/// group's member tasks each hold their *own* cell but share the seams around
+/// them; `Sync` is what lets one live behind a borrow that crosses a scoped
+/// thread. It is never a contention point: a parallel member writes only to its
+/// private buffer, and the merge back into the sequence cell happens on one
+/// thread after every sibling has finished.
 #[derive(Debug, Default)]
 pub struct RuntimeState {
-    inner: RefCell<RuntimeSnapshot>,
+    inner: Mutex<RuntimeSnapshot>,
 }
 
 impl RuntimeState {
@@ -79,9 +90,21 @@ impl RuntimeState {
         Self::default()
     }
 
+    /// Create a cell pre-loaded with an existing snapshot.
+    ///
+    /// This is how a parallel group gives each member a private buffer that
+    /// *starts* from the group's shared view: the member reads
+    /// `{{ last(outputs) }}` as it stood at group start and its own writes land
+    /// where only the post-group merge can see them.
+    pub fn from_snapshot(snapshot: RuntimeSnapshot) -> Self {
+        Self {
+            inner: Mutex::new(snapshot),
+        }
+    }
+
     /// Copy the current layers out of the cell.
     pub fn snapshot(&self) -> RuntimeSnapshot {
-        self.inner.borrow().clone()
+        self.inner.lock().expect(POISONED).clone()
     }
 
     /// Apply one `set` write and return the value it replaced.
@@ -104,7 +127,7 @@ impl RuntimeState {
         if ROOT_OVERLAY_KEYS.contains(&key) {
             return Err(RuntimeMutationError::ReservedKey { key: key.to_string() });
         }
-        let mut inner = self.inner.borrow_mut();
+        let mut inner = self.inner.lock().expect(POISONED);
         // Darkmatter owns the mutation primitive (and the key-shape rule); this
         // layer owns only Claudine's reserved-key policy.
         let prior_mutation = engine.set(&mut inner.mutations, key, value)?;
@@ -125,17 +148,17 @@ impl RuntimeState {
     /// Commit an already-shaped entry — a string for an atomic task, an array
     /// of strings for a completed parallel group.
     pub fn append_output_entry(&self, entry: Value) {
-        self.inner.borrow_mut().outputs.push(entry);
+        self.inner.lock().expect(POISONED).outputs.push(entry);
     }
 
     /// The committed entries as the `outputs` frontmatter value.
     pub fn outputs_value(&self) -> Value {
-        Value::Array(self.inner.borrow().outputs.clone())
+        Value::Array(self.inner.lock().expect(POISONED).outputs.clone())
     }
 
     /// How many entries have been committed.
     pub fn output_count(&self) -> usize {
-        self.inner.borrow().outputs.len()
+        self.inner.lock().expect(POISONED).outputs.len()
     }
 
     /// The most recent entry, when it is a plain string.
@@ -143,7 +166,7 @@ impl RuntimeState {
     /// A completed parallel group commits an array entry; there is no single
     /// text for it, so this yields `None` rather than a flattened join.
     pub fn last_output_text(&self) -> Option<String> {
-        match self.inner.borrow().outputs.last() {
+        match self.inner.lock().expect(POISONED).outputs.last() {
             Some(Value::String(text)) => Some(text.clone()),
             _ => None,
         }

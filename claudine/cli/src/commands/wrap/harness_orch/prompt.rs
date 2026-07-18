@@ -13,7 +13,7 @@ use super::{HarnessPromptMode, HarnessPromptState, MaterializedHarnessPrompt};
 
 pub(crate) fn materialized_harness_prompt_from_prepared(
     prepared: &claudine::composition::PreparedComposition,
-    runtime_state: std::rc::Rc<claudine::composition::RuntimeState>,
+    runtime_state: std::sync::Arc<claudine::composition::RuntimeState>,
 ) -> MaterializedHarnessPrompt {
     let inline_closure_plan = match &prepared.closure {
         claudine::composition::CompositionClosurePlan::Inline(plan) => Some(plan.clone()),
@@ -36,7 +36,7 @@ pub(crate) fn materialize_passthrough_harness_seed(
     source_path: &Path,
     prompt: String,
     shell_cwd: Option<&Path>,
-    runtime_state: std::rc::Rc<claudine::composition::RuntimeState>,
+    runtime_state: std::sync::Arc<claudine::composition::RuntimeState>,
 ) -> Result<MaterializedHarnessPrompt> {
     super::super::overlay::materialize_passthrough_harness_seed(
         source_path,
@@ -342,7 +342,7 @@ pub(crate) fn materialize_harness_prompt(
         env_overrides,
         inline_closure_plan,
         live_frontmatter,
-        runtime_state: std::rc::Rc::clone(&state.runtime_state),
+        runtime_state: std::sync::Arc::clone(&state.runtime_state),
     })
 }
 
@@ -363,7 +363,7 @@ mod tests {
             next_prompt_override: None,
             next_resume_session_id: None,
             rematerialize,
-            runtime_state: std::rc::Rc::new(claudine::composition::RuntimeState::new()),
+            runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
             suppress_output_commit: false,
             last_final_output: None,
         }

@@ -42,7 +42,7 @@ pub(crate) struct HarnessPromptState {
     /// still visible in iteration 5, and the `outputs` accumulator grows across
     /// the whole invocation. Each materialization clones the handle so the
     /// lifecycle executor writes through to this one cell.
-    pub(crate) runtime_state: std::rc::Rc<claudine::composition::RuntimeState>,
+    pub(crate) runtime_state: std::sync::Arc<claudine::composition::RuntimeState>,
     /// Withhold this run's `outputs` commit because the caller owns output
     /// timing (the sequence task executor appends only after `teardown`).
     /// [`Self::last_final_output`] still carries the captured text out.
@@ -54,7 +54,7 @@ pub(crate) struct HarnessPromptState {
     pub(crate) last_final_output: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct MaterializedHarnessPrompt {
     pub(crate) frontmatter: serde_json::Value,
     pub(crate) prompt: String,
@@ -70,11 +70,11 @@ pub(crate) struct MaterializedHarnessPrompt {
     /// late-binding spec's "current effective document state at the moment the
     /// event fires" contract. Re-created each loop iteration (a retry
     /// re-materializes from disk), giving the correct per-attempt lifetime.
-    pub(crate) live_frontmatter: std::cell::RefCell<serde_json::Map<String, serde_json::Value>>,
+    pub(crate) live_frontmatter: std::sync::Mutex<serde_json::Map<String, serde_json::Value>>,
     /// Handle to the invocation-local runtime cell owned by
     /// [`HarnessPromptState`]. Threaded into every lifecycle event so a `set`
     /// accumulates across attempts instead of dying with `live_frontmatter`.
-    pub(crate) runtime_state: std::rc::Rc<claudine::composition::RuntimeState>,
+    pub(crate) runtime_state: std::sync::Arc<claudine::composition::RuntimeState>,
 }
 
 impl MaterializedHarnessPrompt {
@@ -85,8 +85,8 @@ impl MaterializedHarnessPrompt {
     /// builder's empty-frontmatter fallback.
     pub(crate) fn live_cell_from(
         frontmatter: &serde_json::Value,
-    ) -> std::cell::RefCell<serde_json::Map<String, serde_json::Value>> {
-        std::cell::RefCell::new(frontmatter.as_object().cloned().unwrap_or_default())
+    ) -> std::sync::Mutex<serde_json::Map<String, serde_json::Value>> {
+        std::sync::Mutex::new(frontmatter.as_object().cloned().unwrap_or_default())
     }
 }
 

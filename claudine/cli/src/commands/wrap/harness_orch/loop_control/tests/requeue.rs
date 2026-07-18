@@ -19,7 +19,7 @@ fn requeue_prompt_state(source: &Path) -> HarnessPromptState {
         next_prompt_override: None,
         next_resume_session_id: None,
         rematerialize: Default::default(),
-        runtime_state: std::rc::Rc::new(claudine::composition::RuntimeState::new()),
+        runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         suppress_output_commit: false,
         last_final_output: None,
     }
@@ -36,7 +36,7 @@ fn requeue_materialized(prompt: &str) -> MaterializedHarnessPrompt {
         env_overrides: Vec::new(),
         inline_closure_plan: None,
         live_frontmatter,
-        runtime_state: std::rc::Rc::new(claudine::composition::RuntimeState::new()),
+        runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
     }
 }
 

@@ -178,6 +178,11 @@ pub struct PromptTaskRequest {
     pub operation: Option<String>,
     /// Effective flow after group defaults and task overrides.
     pub flow: Option<String>,
+    /// The cell the launched document's own lifecycle `set` accumulates into.
+    ///
+    /// A parallel group member passes its private buffer here, so a sibling's
+    /// mutation is not observable mid-group (spec → *Snapshot Isolation*).
+    pub runtime: Option<std::sync::Arc<RuntimeState>>,
 }
 
 /// What a `prompt:` task's runner reports back.
@@ -198,7 +203,7 @@ pub struct PromptRunOutcome {
 /// Composes and launches a `prompt:` task's document.
 ///
 /// The wrapper implements this; the library never owns provider launch.
-pub trait PromptTaskRunner {
+pub trait PromptTaskRunner: Sync {
     /// Run one prompt task.
     ///
     /// ## Errors
@@ -243,9 +248,15 @@ pub struct TaskExecution<'a> {
     pub stack: &'a StackExecutionContext<'a>,
     /// The state `params` and `timeout` evaluate against.
     pub state: &'a EffectiveState,
-    /// The invocation runtime cell. `None` runs the task without accumulating
-    /// mutations or outputs.
-    pub runtime: Option<&'a RuntimeState>,
+    /// The runtime cell this task accumulates mutations and outputs into.
+    ///
+    /// For a sequence step or a serial group member this is the one invocation
+    /// cell; a parallel group member gets a private buffer instead, which is what
+    /// makes sibling mutations invisible to each other until the merge. Shared as
+    /// an `Arc` because a `prompt:` task's runner must hand the *same* cell to the
+    /// wrapper pipeline, so the document's own lifecycle `set` lands in the
+    /// task's buffer rather than in the sequence's.
+    pub runtime: Option<&'a std::sync::Arc<RuntimeState>>,
     /// Sequence user setters (`--set` / `key=value`), which outrank `params`.
     pub user_setters: Option<&'a Value>,
     /// The reserved per-step overlay, which outranks everything.
@@ -274,21 +285,29 @@ impl TaskExecution<'_> {
             error,
             secondary_errors,
             group_tasks,
+            group_output,
         } = self.run_stages();
 
-        // A group's members each committed their own entry as they ran, so the
-        // group must not add a wrapper entry on top of them.
+        // A serial group's members each committed their own entry as they ran, so
+        // the group must not add a wrapper entry on top of them. A *parallel*
+        // group is the opposite: its members wrote into private buffers that were
+        // discarded, and the group owes one nested entry with a slot per member —
+        // including for members that failed.
         let commits_output = !matches!(self.task.action, PreflightAction::Group(_));
         let mut output_committed = false;
-        if status == TaskStatus::Succeeded
-            && commits_output
-            && let Some(runtime) = self.runtime
-        {
-            // The transport newline was already removed where the text was
-            // produced — per command for a shell task, once for a provider —
-            // so this appends the entry as-is rather than trimming again.
-            runtime.append_output_entry(Value::String(stdout.clone()));
-            output_committed = true;
+        if let Some(runtime) = self.runtime {
+            // Either way the commit happens here, after `teardown`: a teardown
+            // that failed an otherwise successful task owes no output.
+            if let Some(entry) = group_output {
+                runtime.append_output_entry(entry);
+                output_committed = true;
+            } else if status == TaskStatus::Succeeded && commits_output {
+                // The transport newline was already removed where the text was
+                // produced — per command for a shell task, once for a provider —
+                // so this appends the entry as-is rather than trimming again.
+                runtime.append_output_entry(Value::String(stdout.clone()));
+                output_committed = true;
+            }
         }
 
         TaskOutcome {
@@ -327,6 +346,7 @@ impl TaskExecution<'_> {
         let mut status = TaskStatus::Succeeded;
         let mut stdout = String::new();
         let mut group_tasks: Vec<GroupTaskResult> = Vec::new();
+        let mut group_output: Option<Value> = None;
 
         if let Some(items) = &stacks.setup
             && let Some(diagnostic) = self.run_stack(TaskStage::Setup, items, None)
@@ -342,6 +362,7 @@ impl TaskExecution<'_> {
                 let primary = self.run_primary();
                 stdout = primary.stdout;
                 group_tasks = primary.group_tasks;
+                group_output = primary.group_output;
                 secondary.extend(primary.secondary);
                 match primary.result {
                     PrimaryResult::Succeeded => {}
@@ -377,6 +398,7 @@ impl TaskExecution<'_> {
             error: primary_error,
             secondary_errors: secondary,
             group_tasks,
+            group_output,
         }
     }
 
@@ -438,6 +460,7 @@ impl TaskExecution<'_> {
             params,
             operation: self.task.operation.clone(),
             flow: self.task.flow.clone(),
+            runtime: self.runtime.map(std::sync::Arc::clone),
         };
 
         match self.prompt.run(&request) {
@@ -484,7 +507,7 @@ impl TaskExecution<'_> {
             if self.interrupted() {
                 return PrimaryOutcome::interrupted(collected.join("\n"));
             }
-            let output = match self.shell.run(command, timeout) {
+            let output = match self.shell.run(command, timeout, self.interrupt) {
                 Ok(output) => output,
                 Err(source) => {
                     return PrimaryOutcome::failed(TaskDiagnostic::from_composition(
@@ -499,6 +522,9 @@ impl TaskExecution<'_> {
             };
             collected.push(trim_transport_newline(&output.stdout).to_string());
 
+            if output.interrupted {
+                return PrimaryOutcome::interrupted(collected.join("\n"));
+            }
             if output.timed_out {
                 return PrimaryOutcome::failed_with(
                     collected.join("\n"),
@@ -621,7 +647,7 @@ impl TaskExecution<'_> {
                 base.insert(key.clone(), value.clone());
             }
         }
-        let snapshot = self.runtime.map(RuntimeState::snapshot);
+        let snapshot = self.runtime.map(|runtime| runtime.snapshot());
         layered_set_overrides(
             Some(&Value::Object(base)),
             snapshot.as_ref(),
@@ -720,6 +746,7 @@ struct StageOutcome {
     error: Option<TaskDiagnostic>,
     secondary_errors: Vec<TaskDiagnostic>,
     group_tasks: Vec<GroupTaskResult>,
+    group_output: Option<Value>,
 }
 
 impl StageOutcome {
@@ -732,6 +759,7 @@ impl StageOutcome {
             error,
             secondary_errors: Vec::new(),
             group_tasks: Vec::new(),
+            group_output: None,
         }
     }
 }
@@ -746,6 +774,10 @@ struct PrimaryOutcome {
     result: PrimaryResult,
     /// Populated only by a group: one entry per member task that ran.
     group_tasks: Vec<GroupTaskResult>,
+    /// The nested `outputs` entry a completed parallel group owes — one string
+    /// per member in declaration order. `None` for every other task variant,
+    /// including a serial group, whose members each committed their own entry.
+    group_output: Option<Value>,
     /// Diagnostics a member task raised that did not decide the group's
     /// outcome.
     secondary: Vec<TaskDiagnostic>,
@@ -774,7 +806,13 @@ impl PrimaryOutcome {
             result,
             group_tasks: Vec::new(),
             secondary: Vec::new(),
+            group_output: None,
         }
+    }
+
+    fn with_group_output(mut self, entry: Value) -> Self {
+        self.group_output = Some(entry);
+        self
     }
 
     fn with_group_tasks(mut self, tasks: Vec<GroupTaskResult>) -> Self {

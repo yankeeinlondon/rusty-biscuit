@@ -1,6 +1,6 @@
-//! End-to-end coverage for serial group execution.
+//! End-to-end coverage for group execution, serial and parallel.
 //!
-//! Sequence Plus phase 9 (`claudine/features/2026-07-11-sequence-plus/`).
+//! Sequence Plus phases 9 and 10 (`claudine/features/2026-07-11-sequence-plus/`).
 //!
 //! A group is only observable end to end through its members' side effects:
 //! which shell commands ran, in which order, whether the ones after a failure
@@ -382,5 +382,268 @@ Body.
     assert!(
         trace(workspace.path()).is_empty(),
         "preflight rejection means nothing ran; stderr:\n{stderr}"
+    );
+}
+
+/// A parallel group really overlaps its members: two tasks that each sleep
+/// longer than half the group's wall clock cannot both finish in time under
+/// serial execution.
+///
+/// The margin is generous — this asserts "concurrent", not a latency budget.
+#[test]
+fn a_parallel_group_overlaps_its_members() {
+    let workspace = tempdir().unwrap();
+    let path_dir = fake_goose(workspace.path());
+    let md = workspace.path().join("seq.md");
+    fs::write(
+        &md,
+        r#"---
+sequence:
+  - name: alpha
+    group:
+      name: bundle
+      execution: parallel
+      tasks:
+        - name: slow-one
+          shell: "sleep 1 && printf 'one\n' >> trace.txt"
+        - name: slow-two
+          shell: "sleep 1 && printf 'two\n' >> trace.txt"
+        - name: slow-three
+          shell: "sleep 1 && printf 'three\n' >> trace.txt"
+---
+
+Body.
+"#,
+    )
+    .unwrap();
+
+    let started = std::time::Instant::now();
+    let (_, stderr, code) = run(
+        workspace.path(),
+        &path_dir,
+        &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
+    );
+    let elapsed = started.elapsed();
+
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    let mut lines = trace(workspace.path());
+    lines.sort();
+    assert_eq!(lines, vec!["one", "three", "two"], "every member must run");
+    assert!(
+        elapsed < std::time::Duration::from_millis(2500),
+        "three 1s tasks took {elapsed:?}; serial execution would need ~3s",
+    );
+}
+
+/// `max_parallel` bounds the overlap: four 1-second tasks capped at two take
+/// about two seconds, not one and not four.
+#[test]
+fn max_parallel_bounds_the_overlap() {
+    let workspace = tempdir().unwrap();
+    let path_dir = fake_goose(workspace.path());
+    let md = workspace.path().join("seq.md");
+    fs::write(
+        &md,
+        r#"---
+sequence:
+  - name: alpha
+    group:
+      name: bundle
+      execution: parallel
+      max_parallel: 2
+      tasks:
+        - name: a
+          shell: "sleep 1 && printf 'a\n' >> trace.txt"
+        - name: b
+          shell: "sleep 1 && printf 'b\n' >> trace.txt"
+        - name: c
+          shell: "sleep 1 && printf 'c\n' >> trace.txt"
+        - name: d
+          shell: "sleep 1 && printf 'd\n' >> trace.txt"
+---
+
+Body.
+"#,
+    )
+    .unwrap();
+
+    let started = std::time::Instant::now();
+    let (_, stderr, code) = run(
+        workspace.path(),
+        &path_dir,
+        &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
+    );
+    let elapsed = started.elapsed();
+
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(trace(workspace.path()).len(), 4);
+    assert!(
+        elapsed >= std::time::Duration::from_millis(1900),
+        "four 1s tasks capped at 2 cannot finish in {elapsed:?}; the cap was exceeded",
+    );
+    assert!(
+        elapsed < std::time::Duration::from_millis(3500),
+        "four 1s tasks capped at 2 took {elapsed:?}; nothing overlapped",
+    );
+}
+
+/// A parallel group commits one nested `outputs` entry in declaration order,
+/// even when the members finish in the opposite order.
+#[test]
+fn a_parallel_group_commits_a_declaration_ordered_nested_entry() {
+    let workspace = tempdir().unwrap();
+    let path_dir = fake_goose(workspace.path());
+    fs::write(
+        workspace.path().join("reader.md"),
+        "---\nstart:\n  info: 'entry is {{ doc.entry }}'\n---\n\nReader body.\n",
+    )
+    .unwrap();
+    let md = workspace.path().join("seq.md");
+    // `first` sleeps the longest, so completion order is the reverse of
+    // declaration order. Indexing the nested entry positionally is what proves
+    // the slots follow declaration order rather than arrival order.
+    fs::write(
+        &md,
+        r#"---
+sequence:
+  - name: alpha
+    group:
+      name: bundle
+      execution: parallel
+      tasks:
+        - name: first
+          shell: "sleep 1; printf 'from-first\n'"
+        - name: second
+          shell: "printf 'from-second\n'"
+  - name: beta
+    prompt: reader.md
+    params:
+      entry: "slot0={{ last(outputs)[0] }} slot1={{ last(outputs)[1] }}"
+---
+
+Body.
+"#,
+    )
+    .unwrap();
+
+    let (_, stderr, code) = run(
+        workspace.path(),
+        &path_dir,
+        &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
+    );
+
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert!(
+        stderr.contains("entry is slot0=from-first slot1=from-second"),
+        "the nested entry's slots must follow declaration order, not the \
+         reversed completion order; stderr:\n{stderr}"
+    );
+}
+
+/// A failing member does not cancel its siblings, and the group's failure is
+/// governed by sequence-level `fail_fast` exactly as a serial group's is.
+#[test]
+fn a_failed_parallel_member_lets_its_siblings_finish() {
+    let workspace = tempdir().unwrap();
+    let path_dir = fake_goose(workspace.path());
+    let md = workspace.path().join("seq.md");
+    fs::write(
+        &md,
+        r#"---
+fail_fast: false
+sequence:
+  - name: alpha
+    group:
+      name: bundle
+      execution: parallel
+      tasks:
+        - name: boom
+          shell: "printf 'boom\n' >> trace.txt; exit 3"
+        - name: survivor
+          shell: "sleep 1 && printf 'survivor\n' >> trace.txt"
+  - name: beta
+    shell: "printf 'later-step\n' >> trace.txt"
+---
+
+Body.
+"#,
+    )
+    .unwrap();
+
+    let (_, stderr, code) = run(
+        workspace.path(),
+        &path_dir,
+        &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
+    );
+
+    assert_ne!(code, 0, "a failed member fails the group; stderr:\n{stderr}");
+    let lines = trace(workspace.path());
+    assert!(
+        lines.contains(&"survivor".to_string()),
+        "the sibling must run to completion after the failure; trace: {lines:?}",
+    );
+    assert!(
+        lines.contains(&"later-step".to_string()),
+        "`fail_fast: false` continues the sequence past a failed group; trace: {lines:?}",
+    );
+}
+
+/// Two parallel members writing the same key resolve to the later-declared one
+/// and warn on stderr naming the key and both tasks.
+#[test]
+fn a_contested_key_in_a_parallel_group_warns_and_resolves_by_declaration_order() {
+    let workspace = tempdir().unwrap();
+    let path_dir = fake_goose(workspace.path());
+    fs::write(
+        workspace.path().join("reader.md"),
+        "---\nstart:\n  info: 'shared is {{ shared }}'\n---\n\nReader body.\n",
+    )
+    .unwrap();
+    let md = workspace.path().join("seq.md");
+    // The later-declared task finishes first, so a completion-order merge would
+    // leave `from-early` behind.
+    fs::write(
+        &md,
+        r#"---
+shared: initial
+sequence:
+  - name: alpha
+    group:
+      name: bundle
+      execution: parallel
+      tasks:
+        - name: early
+          shell: "sleep 1; printf 'e\n'"
+          setup:
+            - action:
+                - set: [shared, from-early]
+        - name: late
+          shell: "printf 'l\n'"
+          setup:
+            - action:
+                - set: [shared, from-late]
+  - name: beta
+    prompt: reader.md
+---
+
+Body.
+"#,
+    )
+    .unwrap();
+
+    let (_, stderr, code) = run(
+        workspace.path(),
+        &path_dir,
+        &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
+    );
+
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert!(
+        stderr.contains("shared is from-late"),
+        "the later-declared task must win regardless of completion order; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("shared") && stderr.contains("early") && stderr.contains("late"),
+        "the collision must warn naming the key and both tasks; stderr:\n{stderr}"
     );
 }

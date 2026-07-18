@@ -588,7 +588,7 @@ fn empty_materialized_prompt() -> MaterializedHarnessPrompt {
         env_overrides: Vec::new(),
         inline_closure_plan: None,
         live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&serde_json::Value::Null),
-        runtime_state: std::rc::Rc::new(claudine::composition::RuntimeState::new()),
+        runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
     }
 }
 

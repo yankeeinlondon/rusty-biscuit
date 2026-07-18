@@ -106,7 +106,7 @@ pub(super) fn run_sequence_steps(
 
     // One cell for the whole sequence: `outputs` accumulates across steps and a
     // `set` from step 1 is still visible in step 5.
-    let runtime_state = std::rc::Rc::new(RuntimeState::new());
+    let runtime_state = std::sync::Arc::new(RuntimeState::new());
 
     let mut interrupt_observed = false;
     for step_index in 0..total_steps {
@@ -238,7 +238,7 @@ pub(super) fn run_sequence_steps(
 fn run_one_step(
     run: &SequenceRunContext<'_>,
     step_index: usize,
-    runtime_state: &std::rc::Rc<RuntimeState>,
+    runtime_state: &std::sync::Arc<RuntimeState>,
 ) -> StepOutcome {
     // The live re-read is the boundary the spec ratifies: everything an earlier
     // step wrote to this file is visible from here on.
@@ -399,7 +399,7 @@ fn build_body_request(
     prepared: claudine::composition::PreparedComposition,
     resolved_target: Option<claudine::composition::ResolvedExecutionTarget>,
     env_overrides: std::collections::BTreeMap<String, String>,
-    runtime_state: &std::rc::Rc<RuntimeState>,
+    runtime_state: &std::sync::Arc<RuntimeState>,
 ) -> CompositionExecutionRequest {
     let shared = run.shared;
     let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
@@ -449,7 +449,7 @@ fn build_body_request(
         header_emitted: false,
         provider_args: shared.provider_args.clone(),
         provider_args_explicit: shared.provider_args_explicit,
-        runtime_state: Some(std::rc::Rc::clone(runtime_state)),
+        runtime_state: Some(std::sync::Arc::clone(runtime_state)),
         // The default body *is* the step: the executor owns its output commit.
         suppress_output_commit: false,
     }

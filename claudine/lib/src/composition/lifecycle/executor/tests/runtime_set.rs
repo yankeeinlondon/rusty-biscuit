@@ -11,7 +11,7 @@ fn run_event(
     config: &LifecycleConfig,
     signal: LifecycleSignal,
     base: &Map<String, Value>,
-    live: &std::cell::RefCell<Map<String, Value>>,
+    live: &std::sync::Mutex<Map<String, Value>>,
     runtime: &RuntimeState,
     engine: &EffectEngine,
 ) -> (LifecycleEventOutcome, Vec<Emitted>) {
@@ -46,7 +46,7 @@ fn set_is_visible_to_a_later_action_in_the_same_stack() {
         {"message": "phase={{phase}}"}
     ]}]}}));
     let base = map(json!({"phase": "plan"}));
-    let live = std::cell::RefCell::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone());
     let runtime = RuntimeState::new();
     let (_dir, engine) = temp_engine();
 
@@ -72,7 +72,7 @@ fn the_key_value_form_writes_the_same_runtime_layer() {
         {"message": "phase={{phase}}"}
     ]}]}}));
     let base = map(json!({"phase": "plan"}));
-    let live = std::cell::RefCell::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone());
     let runtime = RuntimeState::new();
     let (_dir, engine) = temp_engine();
 
@@ -100,7 +100,7 @@ fn a_whole_value_span_keeps_its_type() {
         {"set": ["items", "{{ tags }}"]}
     ]}]}}));
     let base = map(json!({"tags": ["a", "b"]}));
-    let live = std::cell::RefCell::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone());
     let runtime = RuntimeState::new();
     let (_dir, engine) = temp_engine();
 
@@ -129,7 +129,7 @@ fn a_mutation_in_start_is_visible_to_a_later_event() {
         "success": {"message": "phase={{phase}}"}
     }));
     let base = map(json!({"phase": "pending"}));
-    let live = std::cell::RefCell::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone());
     let runtime = RuntimeState::new();
     let (_dir, engine) = temp_engine();
 
@@ -162,7 +162,7 @@ fn set_writes_no_file() {
         {"action": {"set": ["phase", "build"]}}
     ]}}));
     let base = map(json!({"phase": "plan"}));
-    let live = std::cell::RefCell::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone());
     let runtime = RuntimeState::new();
     let (dir, engine) = temp_engine();
     let source = dir.path().join("t.md");
@@ -194,7 +194,7 @@ fn set_refuses_every_reserved_root_key() {
             {"action": {"set": [key, "hijacked"]}}
         ]}}));
         let base = map(json!({}));
-        let live = std::cell::RefCell::new(base.clone());
+        let live = std::sync::Mutex::new(base.clone());
         let runtime = RuntimeState::new();
         let (_dir, engine) = temp_engine();
 
@@ -216,7 +216,7 @@ fn set_refuses_every_reserved_root_key() {
             error.msg
         );
         assert!(runtime.snapshot().mutations.is_empty());
-        assert!(live.borrow().get(key).is_none(), "{key} must not leak into live state");
+        assert!(live.lock().unwrap().get(key).is_none(), "{key} must not leak into live state");
     }
 }
 
@@ -227,7 +227,7 @@ fn set_refuses_a_dotted_key() {
         {"action": {"set": ["a.b", "x"]}}
     ]}}));
     let base = map(json!({}));
-    let live = std::cell::RefCell::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone());
     let runtime = RuntimeState::new();
     let (_dir, engine) = temp_engine();
 
@@ -305,7 +305,7 @@ fn last_outputs_reads_the_committed_accumulator() {
     let base = map(json!({}));
     let mut seeded = base.clone();
     seeded.insert("outputs".into(), runtime.outputs_value());
-    let live = std::cell::RefCell::new(seeded);
+    let live = std::sync::Mutex::new(seeded);
     let (_dir, engine) = temp_engine();
 
     let (_, events) = run_event(

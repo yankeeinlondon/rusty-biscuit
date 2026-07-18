@@ -7,11 +7,11 @@
 //! referenced document are all decided before execution and must survive it
 //! unchanged.
 
-use std::cell::RefCell;
-use std::collections::HashMap;
+
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicBool;
 
 use biscuit_terminal::terminal::Terminal;
@@ -157,12 +157,12 @@ impl Fixture {
 
     /// Run one specific step's task with the given doubles.
     fn execute_step(&self, index: usize, wiring: &Wiring<'_>) -> TaskOutcome {
-        let live = RefCell::new(self.frontmatter.clone());
+        let live = std::sync::Mutex::new(self.frontmatter.clone());
         let stack = StackExecutionContext {
             signal: LifecycleSignal::Start,
             frontmatter: &self.frontmatter,
             live_frontmatter: Some(&live),
-            runtime_state: wiring.runtime,
+            runtime_state: wiring.runtime.map(Arc::as_ref),
             err: None,
             timing: None,
             current: None,
@@ -201,7 +201,7 @@ struct Wiring<'a> {
     lifecycle_shell: &'a dyn ShellRunner,
     shell: &'a dyn TaskShellRunner,
     prompt: &'a dyn PromptTaskRunner,
-    runtime: Option<&'a RuntimeState>,
+    runtime: Option<&'a Arc<RuntimeState>>,
     user_setters: Option<&'a Value>,
     interrupt: Option<&'a AtomicBool>,
 }
@@ -291,6 +291,17 @@ struct FakeTaskShell {
     seen: Mutex<Vec<(String, Duration)>>,
     results: Mutex<Vec<ShellCommandOutput>>,
     spawn_failure: Mutex<bool>,
+    /// How long a given command blocks before reporting, so a test can decide
+    /// completion order independently of declaration order.
+    delays: Mutex<HashMap<String, Duration>>,
+    /// Per-command stdout. A shared FIFO of results is order-dependent, which a
+    /// concurrent group has no ordering guarantee for.
+    by_command: Mutex<HashMap<String, String>>,
+    /// Commands whose exit code is non-zero.
+    failing: Mutex<HashSet<String>>,
+    /// `(currently in flight, high-water mark)`. A parallel test asserts the
+    /// high-water mark against `max_parallel`.
+    in_flight: Mutex<(usize, usize)>,
 }
 
 impl FakeTaskShell {
@@ -302,6 +313,7 @@ impl FakeTaskShell {
                 stdout: format!("{line}\n"),
                 exit_code: 0,
                 timed_out: false,
+                interrupted: false,
             })
             .collect();
         shell
@@ -310,6 +322,32 @@ impl FakeTaskShell {
         let shell = Self::default();
         *shell.results.lock().unwrap() = results;
         shell
+    }
+    /// Give `command` its own stdout, so a concurrent run's ordering cannot
+    /// decide which result a task receives.
+    fn stdout_for(self, command: &str, stdout: &str) -> Self {
+        self.by_command
+            .lock()
+            .unwrap()
+            .insert(command.to_string(), stdout.to_string());
+        self
+    }
+    /// Make `command` exit non-zero.
+    fn failing(self, command: &str) -> Self {
+        self.failing.lock().unwrap().insert(command.to_string());
+        self
+    }
+    /// The most commands that were ever running at the same time.
+    fn peak_in_flight(&self) -> usize {
+        self.in_flight.lock().unwrap().1
+    }
+    /// Make `command` block for `millis` before it reports.
+    fn delay(self, command: &str, millis: u64) -> Self {
+        self.delays
+            .lock()
+            .unwrap()
+            .insert(command.to_string(), Duration::from_millis(millis));
+        self
     }
     fn failing_to_spawn() -> Self {
         let shell = Self::default();
@@ -335,11 +373,44 @@ impl FakeTaskShell {
 }
 
 impl TaskShellRunner for FakeTaskShell {
-    fn run(&self, command: &str, timeout: Duration) -> Result<ShellCommandOutput, std::io::Error> {
+    fn run(
+        &self,
+        command: &str,
+        timeout: Duration,
+        interrupt: Option<&AtomicBool>,
+    ) -> Result<ShellCommandOutput, std::io::Error> {
+        {
+            let mut gauge = self.in_flight.lock().unwrap();
+            gauge.0 += 1;
+            gauge.1 = gauge.1.max(gauge.0);
+        }
+        // Per-command delays let a parallel test invert completion order
+        // without a real process: the *last*-declared task can finish first.
+        if let Some(delay) = self.delays.lock().unwrap().get(command).copied() {
+            std::thread::sleep(delay);
+        }
+        self.in_flight.lock().unwrap().0 -= 1;
+        if interrupt.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::SeqCst)) {
+            return Ok(ShellCommandOutput {
+                stdout: String::new(),
+                exit_code: -1,
+                timed_out: false,
+                interrupted: true,
+            });
+        }
         self.seen
             .lock()
             .unwrap()
             .push((command.to_string(), timeout));
+        if let Some(stdout) = self.by_command.lock().unwrap().get(command).cloned() {
+            let failing = self.failing.lock().unwrap().contains(command);
+            return Ok(ShellCommandOutput {
+                stdout,
+                exit_code: i32::from(failing),
+                timed_out: false,
+                interrupted: false,
+            });
+        }
         if *self.spawn_failure.lock().unwrap() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
@@ -352,6 +423,7 @@ impl TaskShellRunner for FakeTaskShell {
                 stdout: String::new(),
                 exit_code: 0,
                 timed_out: false,
+                interrupted: false,
             });
         }
         Ok(results.remove(0))
@@ -484,6 +556,7 @@ mod stages {
             stdout: String::new(),
             exit_code: 3,
             timed_out: false,
+            interrupted: false,
         }]);
 
         let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
@@ -512,7 +585,7 @@ mod stages {
         let recorder = Recorder::default();
         recorder.fail_stack_shell();
         let shell = FakeTaskShell::with_stdout(&["primary out"]);
-        let runtime = RuntimeState::new();
+        let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
         wiring.runtime = Some(&runtime);
 
@@ -545,6 +618,7 @@ mod stages {
             stdout: String::new(),
             exit_code: 7,
             timed_out: false,
+            interrupted: false,
         }]);
 
         let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
@@ -649,7 +723,7 @@ mod shell_tasks {
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
         let shell = FakeTaskShell::with_stdout(&["one", "two", "three"]);
-        let runtime = RuntimeState::new();
+        let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
         wiring.runtime = Some(&runtime);
 
@@ -800,6 +874,7 @@ mod shell_tasks {
             stdout: "partial\n".to_string(),
             exit_code: 143,
             timed_out: true,
+            interrupted: false,
         }]);
 
         let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
@@ -826,6 +901,7 @@ mod shell_tasks {
             stdout: String::new(),
             exit_code: 2,
             timed_out: false,
+            interrupted: false,
         }]);
 
         let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
@@ -857,7 +933,7 @@ mod shell_tasks {
     #[test]
     fn the_system_shell_captures_stdout_on_this_platform() {
         let output = SystemTaskShell
-            .run("echo task-shell-ok", Duration::from_secs(30))
+            .run("echo task-shell-ok", Duration::from_secs(30), None)
             .unwrap();
         assert_eq!(output.exit_code, 0);
         assert!(!output.timed_out);
@@ -870,7 +946,7 @@ mod shell_tasks {
     #[test]
     fn the_system_shell_kills_a_command_that_overruns_its_budget() {
         let output = SystemTaskShell
-            .run("sleep 5", Duration::from_millis(150))
+            .run("sleep 5", Duration::from_millis(150), None)
             .unwrap();
         assert!(output.timed_out, "the child must be killed, not awaited");
     }
@@ -891,7 +967,7 @@ mod side_effect_tasks {
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
         let shell = FakeTaskShell::default();
-        let runtime = RuntimeState::new();
+        let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
         wiring.runtime = Some(&runtime);
 
@@ -918,7 +994,7 @@ mod side_effect_tasks {
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
         let shell = FakeTaskShell::default();
-        let runtime = RuntimeState::new();
+        let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
         wiring.runtime = Some(&runtime);
 
@@ -948,7 +1024,7 @@ mod side_effect_tasks {
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
         let shell = FakeTaskShell::default();
-        let runtime = RuntimeState::new();
+        let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
         wiring.runtime = Some(&runtime);
 
@@ -1005,7 +1081,7 @@ mod side_effect_tasks {
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
         let shell = FakeTaskShell::default();
-        let runtime = RuntimeState::new();
+        let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
         wiring.runtime = Some(&runtime);
 
@@ -1080,7 +1156,7 @@ mod prompt_tasks {
         let recorder = Recorder::default();
         let shell = FakeTaskShell::default();
         let prompt = FakePrompt::succeeding("done");
-        let runtime = RuntimeState::new();
+        let runtime = Arc::new(RuntimeState::new());
         let engine = EffectEngine::builder().auto_rehash(false).build();
         runtime
             .set(&engine, "mutated", json!("from-mutation"), &Map::new())
@@ -1173,7 +1249,7 @@ mod prompt_tasks {
             exit_code: 4,
             interrupted: false,
         });
-        let runtime = RuntimeState::new();
+        let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
         wiring.prompt = &prompt;
         wiring.runtime = Some(&runtime);
@@ -1200,7 +1276,7 @@ mod prompt_tasks {
             exit_code: 130,
             interrupted: true,
         });
-        let runtime = RuntimeState::new();
+        let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
         wiring.prompt = &prompt;
         wiring.runtime = Some(&runtime);
@@ -1268,8 +1344,9 @@ mod outcome_contract {
             stdout: String::new(),
             exit_code: 0,
             timed_out: false,
+            interrupted: false,
         }]);
-        let runtime = RuntimeState::new();
+        let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
         wiring.runtime = Some(&runtime);
 
@@ -1295,8 +1372,9 @@ mod outcome_contract {
             stdout: "  leading and\n\ntrailing blank line\n\n".to_string(),
             exit_code: 0,
             timed_out: false,
+            interrupted: false,
         }]);
-        let runtime = RuntimeState::new();
+        let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
         wiring.runtime = Some(&runtime);
 
@@ -1367,7 +1445,7 @@ mod outcome_contract {
             let fixture = Fixture::build(dir, &source).unwrap();
             let recorder = Recorder::default();
             let shell = FakeTaskShell::with_stdout(&["one", "two"]);
-            let runtime = RuntimeState::new();
+            let runtime = Arc::new(RuntimeState::new());
             let mut wiring = Wiring::new(&recorder, &shell);
             wiring.runtime = Some(&runtime);
 
@@ -1418,37 +1496,6 @@ mod outcome_contract {
         );
     }
 
-    /// A parallel group is scheduled in phase 10; until then it must refuse
-    /// rather than silently degrade to serial execution.
-    #[test]
-    fn a_parallel_group_is_refused_rather_than_run_serially() {
-        let dir = TempDir::new().unwrap();
-        let source = one_step_source(
-            dir.path(),
-            json!({
-                "name": "alpha",
-                "group": {
-                    "name": "bundle",
-                    "execution": "parallel",
-                    "tasks": [{ "shell": "work" }],
-                },
-            }),
-        );
-        let fixture = Fixture::build(dir, &source).unwrap();
-        let recorder = Recorder::default();
-        let shell = FakeTaskShell::default();
-
-        let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
-
-        assert_eq!(outcome.status, TaskStatus::Failed);
-        assert!(
-            failure_message(&outcome).contains("parallel group `bundle`"),
-            "{}",
-            failure_message(&outcome),
-        );
-        assert!(shell.commands().is_empty());
-        assert!(outcome.group_tasks.is_empty());
-    }
 }
 
 // -- serial groups (phase 9) ------------------------------------------------
@@ -1505,7 +1552,7 @@ mod serial_groups {
             let fixture = Fixture::build(dir, &source).unwrap();
             let recorder = Recorder::default();
             let shell = FakeTaskShell::with_stdout(&["out one", "out two"]);
-            let runtime = RuntimeState::new();
+            let runtime = Arc::new(RuntimeState::new());
             let mut wiring = Wiring::new(&recorder, &shell);
             wiring.runtime = Some(&runtime);
 
@@ -1559,7 +1606,7 @@ mod serial_groups {
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
         let shell = FakeTaskShell::with_stdout(&["alpha out", "beta out"]);
-        let runtime = RuntimeState::new();
+        let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
         wiring.runtime = Some(&runtime);
 
@@ -1608,7 +1655,7 @@ mod serial_groups {
         let recorder = Recorder::default();
         let shell = FakeTaskShell::with_stdout(&["writer said this"]);
         let prompt = FakePrompt::succeeding("reader said that");
-        let runtime = RuntimeState::new();
+        let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
         wiring.runtime = Some(&runtime);
         wiring.prompt = &prompt;
@@ -1747,14 +1794,16 @@ mod serial_groups {
                 stdout: "one out\n".to_string(),
                 exit_code: 0,
                 timed_out: false,
+                interrupted: false,
             },
             ShellCommandOutput {
                 stdout: String::new(),
                 exit_code: 3,
                 timed_out: false,
+                interrupted: false,
             },
         ]);
-        let runtime = RuntimeState::new();
+        let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
         wiring.runtime = Some(&runtime);
 
@@ -1794,7 +1843,7 @@ mod serial_groups {
         let recorder = Recorder::default();
         let shell = FakeTaskShell::with_stdout(&["one out"]);
         let interrupt = AtomicBool::new(true);
-        let runtime = RuntimeState::new();
+        let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
         wiring.runtime = Some(&runtime);
         wiring.interrupt = Some(&interrupt);
@@ -1821,7 +1870,7 @@ mod serial_groups {
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
         let shell = FakeTaskShell::with_stdout(&["solo out"]);
-        let runtime = RuntimeState::new();
+        let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
         wiring.runtime = Some(&runtime);
 
@@ -1868,5 +1917,560 @@ mod serial_groups {
         assert!(outcome.succeeded(), "{}", failure_message(&outcome));
         assert_eq!(shell.commands(), vec!["nested-command".to_string()]);
         assert_eq!(outcome.group_tasks[0].name, "external");
+    }
+}
+
+// -- parallel groups (phase 10) ---------------------------------------------
+
+/// Concurrency is only worth testing if the tests cannot pass by accident under
+/// serial execution. Every case here therefore either inverts completion order
+/// against declaration order, observes the in-flight high-water mark, or asserts
+/// an isolation property a shared-cell serial run would violate.
+mod parallel_groups {
+    use super::*;
+
+    /// A parallel group of `commands`, each task named after its command.
+    fn parallel_step(commands: &[&str], max_parallel: Option<usize>) -> Value {
+        let mut group = serde_json::Map::new();
+        group.insert("name".to_string(), json!("bundle"));
+        group.insert("execution".to_string(), json!("parallel"));
+        group.insert(
+            "tasks".to_string(),
+            Value::Array(
+                commands
+                    .iter()
+                    .map(|command| json!({ "name": command, "shell": command }))
+                    .collect(),
+            ),
+        );
+        if let Some(cap) = max_parallel {
+            group.insert("max_parallel".to_string(), json!(cap));
+        }
+        json!({ "name": "alpha", "group": Value::Object(group) })
+    }
+
+    /// `max_parallel` is a hard ceiling on simultaneous tasks, not a hint.
+    #[test]
+    fn max_parallel_caps_the_number_of_tasks_in_flight() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), parallel_step(&["a", "b", "c", "d"], Some(2)));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        // Every task blocks, so all four would overlap without the cap.
+        let shell = ["a", "b", "c", "d"]
+            .iter()
+            .fold(FakeTaskShell::default(), |shell, command| {
+                shell.stdout_for(command, command).delay(command, 40)
+            });
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(shell.peak_in_flight(), 2, "`max_parallel: 2` was exceeded");
+        assert_eq!(runtime.outputs_value(), json!([["a", "b", "c", "d"]]));
+    }
+
+    /// Absent `max_parallel` means "launch them all".
+    #[test]
+    fn an_absent_cap_launches_every_task_at_once() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), parallel_step(&["a", "b", "c"], None));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = ["a", "b", "c"]
+            .iter()
+            .fold(FakeTaskShell::default(), |shell, command| {
+                shell.stdout_for(command, command).delay(command, 60)
+            });
+        let mut wiring = Wiring::new(&recorder, &shell);
+        let runtime = Arc::new(RuntimeState::new());
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(shell.peak_in_flight(), 3);
+    }
+
+    /// A cap of one is still concurrency machinery, but nothing ever overlaps.
+    #[test]
+    fn a_cap_of_one_never_overlaps() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), parallel_step(&["a", "b"], Some(1)));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default()
+            .stdout_for("a", "a")
+            .stdout_for("b", "b")
+            .delay("a", 30)
+            .delay("b", 30);
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(shell.peak_in_flight(), 1);
+        assert_eq!(runtime.outputs_value(), json!([["a", "b"]]));
+    }
+
+    /// The nested entry is positional, so inverting completion order against
+    /// declaration order must not move a single string.
+    #[test]
+    fn the_nested_entry_is_declaration_ordered_under_inverted_completion() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), parallel_step(&["first", "second", "third"], None));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        // Declaration order is first→third; completion order is third→first.
+        let shell = FakeTaskShell::default()
+            .stdout_for("first", "out first")
+            .stdout_for("second", "out second")
+            .stdout_for("third", "out third")
+            .delay("first", 90)
+            .delay("second", 45)
+            .delay("third", 0);
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(
+            runtime.outputs_value(),
+            json!([["out first", "out second", "out third"]]),
+            "the entry must follow declaration order, not completion order",
+        );
+        assert_eq!(
+            outcome
+                .group_tasks
+                .iter()
+                .map(|task| task.name.clone())
+                .collect::<Vec<_>>(),
+            vec!["first", "second", "third"],
+        );
+    }
+
+    /// One nested entry, not one per member — that is what distinguishes a
+    /// parallel group from a serial one in `outputs`.
+    #[test]
+    fn a_parallel_group_commits_exactly_one_nested_entry() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), parallel_step(&["a", "b"], None));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default()
+            .stdout_for("a", "one")
+            .stdout_for("b", "two");
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(runtime.output_count(), 1);
+        assert_eq!(runtime.outputs_value(), json!([["one", "two"]]));
+        assert!(
+            outcome.output_committed,
+            "the group owns the entry its members do not commit",
+        );
+    }
+
+    /// Snapshot isolation: a sibling's `set` is not observable mid-group, so a
+    /// task interpolating the key reads the value from *before* the group.
+    #[test]
+    fn a_sibling_mutation_is_invisible_until_the_group_completes() {
+        let dir = TempDir::new().unwrap();
+        let source = write_source(
+            dir.path(),
+            "seq.md",
+            &[
+                ("marker", json!("initial")),
+                ("sequence", json!([{
+                "name": "alpha",
+                "group": {
+                    "name": "bundle",
+                    "execution": "parallel",
+                    "tasks": [
+                        { "name": "writer", "shell": "write", "setup": [{ "action": [{ "set": ["marker", "written"] }] }] },
+                        { "name": "reader", "shell": "read", "setup": [{ "action": [{ "set": ["observed", "{{ marker }}"] }] }] },
+                    ],
+                },
+            }])),
+            ],
+            "Document body.\n",
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        // The writer finishes first in wall-clock terms; a shared cell would let
+        // the reader observe it.
+        let shell = FakeTaskShell::default()
+            .stdout_for("write", "w")
+            .stdout_for("read", "r")
+            .delay("read", 60);
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        let merged = runtime.snapshot().mutations;
+        assert_eq!(
+            merged.get("observed"),
+            Some(&json!("initial")),
+            "the reader must see the group-start value, not the sibling's write",
+        );
+        assert_eq!(
+            merged.get("marker"),
+            Some(&json!("written")),
+            "the write must still land once the group completes",
+        );
+    }
+
+    /// Snapshot isolation for `outputs`: a member commits into its own buffer,
+    /// so the sequence's accumulator does not grow task by task the way a serial
+    /// group's does — it gains exactly one nested entry when the group finishes.
+    #[test]
+    fn member_entries_land_in_private_buffers_not_the_sequence_accumulator() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), parallel_step(&["p", "k", "z"], None));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = ["p", "k", "z"]
+            .iter()
+            .fold(FakeTaskShell::default(), |shell, command| {
+                shell.stdout_for(command, command)
+            });
+        let runtime = Arc::new(RuntimeState::new());
+        runtime.append_output("before the group");
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(
+            runtime.output_count(),
+            2,
+            "three members must add one nested entry, not three flat ones",
+        );
+        assert_eq!(
+            runtime.outputs_value(),
+            json!(["before the group", ["p", "k", "z"]]),
+        );
+    }
+
+    /// A failure never cancels a sibling: canceling a mid-flight agent run
+    /// discards useful work.
+    #[test]
+    fn every_sibling_runs_to_completion_after_one_fails() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), parallel_step(&["boom", "slow"], None));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        // The failure lands first; the survivor is still running when it does.
+        let shell = FakeTaskShell::default()
+            .stdout_for("boom", "partial output")
+            .failing("boom")
+            .stdout_for("slow", "finished anyway")
+            .delay("slow", 60);
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert_eq!(outcome.status, TaskStatus::Failed, "any failure fails the group");
+        assert_eq!(
+            outcome
+                .group_tasks
+                .iter()
+                .map(|task| (task.name.clone(), task.status))
+                .collect::<Vec<_>>(),
+            vec![
+                ("boom".to_string(), TaskStatus::Failed),
+                ("slow".to_string(), TaskStatus::Succeeded),
+            ],
+        );
+        assert_eq!(
+            runtime.outputs_value(),
+            json!([["partial output", "finished anyway"]]),
+            "a failed task keeps its slot and its partial stdout",
+        );
+    }
+
+    /// Disjoint keys — the expected case — all survive, and nothing warns.
+    #[test]
+    fn disjoint_mutations_all_merge_without_a_warning() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(
+            dir.path(),
+            json!({
+                "name": "alpha",
+                "group": {
+                    "name": "bundle",
+                    "execution": "parallel",
+                    "tasks": [
+                        { "name": "left", "shell": "l", "setup": [{ "action": [{ "set": ["left_key", "L"] }] }] },
+                        { "name": "right", "shell": "r", "setup": [{ "action": [{ "set": ["right_key", "R"] }] }] },
+                    ],
+                },
+            }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default()
+            .stdout_for("l", "l")
+            .stdout_for("r", "r");
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        let mutations = runtime.snapshot().mutations;
+        assert_eq!(mutations.get("left_key"), Some(&json!("L")));
+        assert_eq!(mutations.get("right_key"), Some(&json!("R")));
+        assert!(
+            !recorder.events().iter().any(|event| event.starts_with("warn:")),
+            "disjoint writes are the expected case: {:?}",
+            recorder.events(),
+        );
+    }
+
+    /// A contested key resolves by declaration order, not completion order, and
+    /// says so on stderr.
+    #[test]
+    fn a_contested_key_resolves_to_the_later_declared_task_and_warns() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(
+            dir.path(),
+            json!({
+                "name": "alpha",
+                "group": {
+                    "name": "bundle",
+                    "execution": "parallel",
+                    "tasks": [
+                        { "name": "early", "shell": "e", "setup": [{ "action": [{ "set": ["shared", "from-early"] }] }] },
+                        { "name": "late", "shell": "l", "setup": [{ "action": [{ "set": ["shared", "from-late"] }] }] },
+                    ],
+                },
+            }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        // The later-declared task finishes *first*, so a completion-order merge
+        // would leave `from-early` behind.
+        let shell = FakeTaskShell::default()
+            .stdout_for("e", "e")
+            .stdout_for("l", "l")
+            .delay("e", 60);
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(
+            runtime.snapshot().mutations.get("shared"),
+            Some(&json!("from-late")),
+            "the later-declared task wins regardless of who finished first",
+        );
+        let warning = recorder
+            .events()
+            .into_iter()
+            .find(|event| event.starts_with("warn:"))
+            .expect("a contested key must warn");
+        for fragment in ["shared", "early", "late"] {
+            assert!(
+                warning.contains(fragment),
+                "the warning must name the key and both tasks: {warning}",
+            );
+        }
+    }
+
+    /// Ctrl+C fans out: every member observes the shared flag, the group reports
+    /// interruption, and nothing is committed.
+    #[test]
+    fn an_interrupt_fans_out_and_commits_neither_outputs_nor_mutations() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(
+            dir.path(),
+            json!({
+                "name": "alpha",
+                "group": {
+                    "name": "bundle",
+                    "execution": "parallel",
+                    "tasks": [
+                        { "name": "a", "shell": "a", "setup": [{ "action": [{ "set": ["touched", "yes"] }] }] },
+                        { "name": "b", "shell": "b" },
+                    ],
+                },
+            }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default()
+            .stdout_for("a", "a")
+            .stdout_for("b", "b");
+        let runtime = Arc::new(RuntimeState::new());
+        let interrupt = AtomicBool::new(true);
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+        wiring.interrupt = Some(&interrupt);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert_eq!(outcome.status, TaskStatus::Interrupted);
+        assert_eq!(
+            runtime.output_count(),
+            0,
+            "an interrupted group commits no nested entry",
+        );
+        assert!(
+            runtime.snapshot().mutations.is_empty(),
+            "an interrupted group merges no mutations",
+        );
+    }
+
+    /// The whole observable tuple must be byte-identical across runs whose
+    /// completion order differs.
+    #[test]
+    fn repeated_runs_produce_identical_results_regardless_of_completion_order() {
+        // Two orderings of the same delays: first-slowest, then last-slowest.
+        let orderings = [[80_u64, 40, 0], [0, 40, 80]];
+        let mut observed = Vec::new();
+        for delays in orderings {
+            let dir = TempDir::new().unwrap();
+            let source = one_step_source(
+                dir.path(),
+                json!({
+                    "name": "alpha",
+                    "group": {
+                        "name": "bundle",
+                        "execution": "parallel",
+                        "tasks": [
+                            { "name": "one", "shell": "one", "setup": [{ "action": [{ "set": ["k1", 1] }] }] },
+                            { "name": "two", "shell": "two", "setup": [{ "action": [{ "set": ["k2", 2] }] }] },
+                            { "name": "three", "shell": "three", "setup": [{ "action": [{ "set": ["k3", 3] }] }] },
+                        ],
+                    },
+                }),
+            );
+            let fixture = Fixture::build(dir, &source).unwrap();
+            let recorder = Recorder::default();
+            let mut shell = FakeTaskShell::default();
+            for (command, delay) in ["one", "two", "three"].iter().zip(delays) {
+                shell = shell.stdout_for(command, command).delay(command, delay);
+            }
+            let runtime = Arc::new(RuntimeState::new());
+            let mut wiring = Wiring::new(&recorder, &shell);
+            wiring.runtime = Some(&runtime);
+
+            let outcome = fixture.execute(&wiring);
+
+            assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+            observed.push((
+                runtime.outputs_value(),
+                Value::Object(runtime.snapshot().mutations.into_iter().collect()),
+                outcome
+                    .group_tasks
+                    .iter()
+                    .map(|task| (task.name.clone(), task.status))
+                    .collect::<Vec<_>>(),
+            ));
+        }
+
+        assert_eq!(
+            observed[0], observed[1],
+            "completion order must not reach any observable result",
+        );
+        assert_eq!(observed[0].0, json!([["one", "two", "three"]]));
+    }
+
+    /// Concurrency must never reach process-global state: `setenv` is not
+    /// thread-safe and a shared CWD cannot describe two tasks at once.
+    #[test]
+    fn parallel_execution_leaves_process_env_and_cwd_untouched() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), parallel_step(&["a", "b", "c"], None));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = ["a", "b", "c"]
+            .iter()
+            .fold(FakeTaskShell::default(), |shell, command| {
+                shell.stdout_for(command, command)
+            });
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let cwd_before = std::env::current_dir().unwrap();
+        let env_before: Vec<(String, String)> = std::env::vars().collect();
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(std::env::current_dir().unwrap(), cwd_before);
+        assert_eq!(std::env::vars().collect::<Vec<_>>(), env_before);
+    }
+
+    /// A parallel group has no interactive surface: a task's own value
+    /// resolution failing is a task failure, never a prompt. N concurrent tasks
+    /// cannot share one terminal.
+    #[test]
+    fn an_unresolvable_task_value_fails_the_task_rather_than_prompting() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(
+            dir.path(),
+            json!({
+                "name": "alpha",
+                "group": {
+                    "name": "bundle",
+                    "execution": "parallel",
+                    "tasks": [
+                        { "name": "ok", "shell": "fine" },
+                        { "name": "broken", "shell": "x", "timeout": "{{ nope.missing }}" },
+                    ],
+                },
+            }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default()
+            .stdout_for("fine", "fine")
+            .stdout_for("x", "x");
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert_eq!(
+            outcome
+                .group_tasks
+                .iter()
+                .map(|task| (task.name.clone(), task.status))
+                .collect::<Vec<_>>(),
+            vec![
+                ("ok".to_string(), TaskStatus::Succeeded),
+                ("broken".to_string(), TaskStatus::Failed),
+            ],
+        );
+        assert_eq!(
+            runtime.outputs_value(),
+            json!([["fine", ""]]),
+            "the failed task keeps an (empty) slot",
+        );
     }
 }

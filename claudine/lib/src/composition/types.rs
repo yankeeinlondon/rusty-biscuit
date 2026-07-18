@@ -761,7 +761,7 @@ pub struct CompositionExecutionRequest {
     /// `outputs` array survive from one execution to the next. `None` makes the
     /// executor mint a fresh cell, which is the correct lifetime for a
     /// standalone `compose` / `inline-compose`.
-    pub runtime_state: Option<std::rc::Rc<super::runtime_state::RuntimeState>>,
+    pub runtime_state: Option<std::sync::Arc<super::runtime_state::RuntimeState>>,
 
     /// Suppress this execution's own commit to `outputs`.
     ///

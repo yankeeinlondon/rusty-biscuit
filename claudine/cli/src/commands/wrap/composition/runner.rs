@@ -415,7 +415,7 @@ pub(super) fn run_composition_body(
     let runtime_state = request
         .runtime_state
         .clone()
-        .unwrap_or_else(|| std::rc::Rc::new(claudine::composition::RuntimeState::new()));
+        .unwrap_or_else(|| std::sync::Arc::new(claudine::composition::RuntimeState::new()));
     // Baseline for "did *this* execution commit an entry": a caller-supplied
     // cell may already hold prior loop iterations' or sequence steps' outputs.
     let outputs_before = runtime_state.output_count();
@@ -438,7 +438,7 @@ pub(super) fn run_composition_body(
             request.file_ref.clone(),
             Some(materialized_harness_prompt_from_prepared(
                 &request.prepared,
-                std::rc::Rc::clone(&runtime_state),
+                std::sync::Arc::clone(&runtime_state),
             )),
         ),
     };
@@ -457,7 +457,7 @@ pub(super) fn run_composition_body(
         // pre-approved shell commands (a proxy target with a `$schema` needs
         // the same inputs the original document was prepared with).
         rematerialize: request.prepared.rematerialize.clone(),
-        runtime_state: std::rc::Rc::clone(&runtime_state),
+        runtime_state: std::sync::Arc::clone(&runtime_state),
         suppress_output_commit: request.suppress_output_commit,
         last_final_output: None,
     };

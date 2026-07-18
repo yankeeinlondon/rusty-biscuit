@@ -191,7 +191,7 @@ fn map(value: Value) -> Map<String, Value> {
 fn ctx_with_runtime<'a>(
     signal: LifecycleSignal,
     base: &'a Map<String, Value>,
-    live: &'a std::cell::RefCell<Map<String, Value>>,
+    live: &'a std::sync::Mutex<Map<String, Value>>,
     runtime: &'a crate::composition::RuntimeState,
     engine: &'a EffectEngine,
     shell: &'a dyn ShellRunner,
@@ -213,7 +213,7 @@ fn ctx_with_runtime<'a>(
 fn ctx_with_live<'a>(
     signal: LifecycleSignal,
     base: &'a Map<String, Value>,
-    live: &'a std::cell::RefCell<Map<String, Value>>,
+    live: &'a std::sync::Mutex<Map<String, Value>>,
     engine: &'a EffectEngine,
     shell: &'a dyn ShellRunner,
     recorder: &'a Recorder,

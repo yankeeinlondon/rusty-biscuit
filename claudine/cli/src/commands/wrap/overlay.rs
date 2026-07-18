@@ -31,7 +31,7 @@ pub(crate) fn materialize_passthrough_harness_seed(
     source_path: &Path,
     prompt: String,
     shell_cwd: Option<&Path>,
-    runtime_state: std::rc::Rc<claudine::composition::RuntimeState>,
+    runtime_state: std::sync::Arc<claudine::composition::RuntimeState>,
 ) -> Result<super::harness_orch::MaterializedHarnessPrompt> {
     let source_text = fs::read_to_string(source_path).map_err(|e| {
         claudine::composition::CompositionError::MarkdownLoad {

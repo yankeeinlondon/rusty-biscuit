@@ -70,6 +70,10 @@ use super::context::{
 use crate::events::GlobalSettings;
 use crate::messaging::RuntimeMessagingSettings;
 
+/// A poisoned live-frontmatter cell means a task panicked mid-stack; there is
+/// no partial document state worth recovering.
+const LIVE_POISONED: &str = "live frontmatter mutex poisoned by a panicking task";
+
 /// A resolved lifecycle control action — the runtime-flow effect a stack item
 /// requested, with every expression argument already evaluated.
 ///
@@ -242,7 +246,7 @@ pub enum ShellRunError {
 /// Lifecycle shell actions are audited against Claudine's command whitelist
 /// during pre-flight; this trait runs an already-approved command. Injectable
 /// so tests can assert command dispatch without spawning real processes.
-pub trait ShellRunner {
+pub trait ShellRunner: Sync {
     /// Run `command`. Returns the process exit code, or [`ShellRunError`] when
     /// the process could not be spawned at all.
     fn run(&self, command: &str) -> Result<i32, ShellRunError>;
@@ -298,7 +302,7 @@ pub struct StackExecutionContext<'a> {
     /// fires" contract across events. When `None`, behavior is exactly as for a
     /// single-event caller: `frontmatter` is the only base state and stack
     /// mutations are visible intra-stack only.
-    pub live_frontmatter: Option<&'a std::cell::RefCell<Map<String, Value>>>,
+    pub live_frontmatter: Option<&'a std::sync::Mutex<Map<String, Value>>>,
     /// The invocation-local runtime state cell.
     ///
     /// `live_frontmatter` is per-*attempt*; this cell spans the whole
@@ -502,12 +506,12 @@ impl StackExecutionContext<'_> {
         action: &LifecycleAction,
     ) -> Result<Value, LifecycleErrorInfo> {
         let mut working: Map<String, Value> = match self.live_frontmatter {
-            Some(cell) => cell.borrow().clone(),
+            Some(cell) => cell.lock().expect(LIVE_POISONED).clone(),
             None => self.frontmatter.clone(),
         };
         let result = self.dispatch_task_side_effect_inner(action, &mut working);
         if let Some(cell) = self.live_frontmatter {
-            *cell.borrow_mut() = working;
+            *cell.lock().expect(LIVE_POISONED) = working;
         }
         result
     }
@@ -623,6 +627,22 @@ impl StackExecutionContext<'_> {
     ) -> StackExecutionContext<'a> {
         StackExecutionContext {
             group: Some(variables),
+            ..self.with_signal(self.signal)
+        }
+    }
+
+    /// Redirect this context's runtime accumulation to a different cell.
+    ///
+    /// A parallel group member runs against a private buffer, so its lifecycle
+    /// `set` must land there rather than in the sequence's cell — otherwise the
+    /// write is visible to a sibling mid-group and the deterministic
+    /// declaration-order merge has nothing left to merge.
+    pub fn with_runtime_state<'a>(
+        &'a self,
+        runtime_state: &'a super::super::runtime_state::RuntimeState,
+    ) -> StackExecutionContext<'a> {
+        StackExecutionContext {
+            runtime_state: Some(runtime_state),
             ..self.with_signal(self.signal)
         }
     }
@@ -839,7 +859,9 @@ impl StackExecutionContext<'_> {
         // Top-level fields read the live cross-event document state when present
         // so they observe frontmatter mutations made by *earlier* events in the
         // same attempt; otherwise the composed base frontmatter is used.
-        let borrowed = self.live_frontmatter.map(std::cell::RefCell::borrow);
+        let borrowed = self
+            .live_frontmatter
+            .map(|cell| cell.lock().expect(LIVE_POISONED));
         let fm = borrowed.as_deref().unwrap_or(self.frontmatter);
         self.resolve_string_value(text, fm)
             .map(|value| Some(scalar_string(&value)))
@@ -866,12 +888,12 @@ impl StackExecutionContext<'_> {
     /// already hit disk).
     fn execute_stack(&self, items: &[super::actions::LifecycleStackItem]) -> LifecycleEventOutcome {
         let mut working: Map<String, Value> = match self.live_frontmatter {
-            Some(cell) => cell.borrow().clone(),
+            Some(cell) => cell.lock().expect(LIVE_POISONED).clone(),
             None => self.frontmatter.clone(),
         };
         let outcome = self.execute_stack_inner(items, &mut working);
         if let Some(cell) = self.live_frontmatter {
-            *cell.borrow_mut() = working;
+            *cell.lock().expect(LIVE_POISONED) = working;
         }
         outcome
     }

@@ -392,7 +392,7 @@ pub(crate) fn detect_wrapper_harness(
             &source_path,
             base_prompt.clone(),
             Some(child_cwd),
-            std::rc::Rc::new(claudine::composition::RuntimeState::new()),
+            std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         )?;
         let harness_enabled = claudine::harness::has_harness_properties(&seed.frontmatter);
         if harness_enabled {
@@ -456,7 +456,7 @@ pub(crate) fn run_execution_stage(
             rematerialize: Default::default(),
             // A direct wrapper run is one invocation with no caller-owned
             // accumulator, so it owns its own cell.
-            runtime_state: std::rc::Rc::clone(&initial_materialized.runtime_state),
+            runtime_state: std::sync::Arc::clone(&initial_materialized.runtime_state),
             suppress_output_commit: false,
             last_final_output: None,
         };

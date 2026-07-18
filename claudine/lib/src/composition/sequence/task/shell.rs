@@ -8,6 +8,7 @@
 
 use std::io::Read;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// The default per-command budget when a task authors no `timeout:`.
@@ -26,21 +27,33 @@ pub struct ShellCommandOutput {
     /// `true` when the command was killed for exceeding its budget. `exit_code`
     /// is then the kill's code and carries no information about the work.
     pub timed_out: bool,
+    /// `true` when the command was killed because the user interrupted the run.
+    ///
+    /// This is how Ctrl+C reaches a *running* child rather than only the gap
+    /// between commands: every sibling in a parallel group watches the same flag,
+    /// so one press fans out to all of them.
+    pub interrupted: bool,
 }
 
 /// Runs one approved command under a deadline, capturing stdout.
 ///
 /// Injectable so task tests assert dispatch, byte parity, and ordering without
 /// spawning processes.
-pub trait TaskShellRunner {
-    /// Run `command`, killing it after `timeout`.
+pub trait TaskShellRunner: Sync {
+    /// Run `command`, killing it after `timeout` or as soon as `interrupt` is
+    /// set.
     ///
     /// ## Errors
     ///
     /// Returns the underlying [`std::io::Error`] only when the process could
     /// not be spawned or waited on. A command that ran and failed reports its
     /// code through [`ShellCommandOutput::exit_code`].
-    fn run(&self, command: &str, timeout: Duration) -> Result<ShellCommandOutput, std::io::Error>;
+    fn run(
+        &self,
+        command: &str,
+        timeout: Duration,
+        interrupt: Option<&AtomicBool>,
+    ) -> Result<ShellCommandOutput, std::io::Error>;
 }
 
 /// Production [`TaskShellRunner`]: the platform's system shell, stdout piped,
@@ -49,7 +62,12 @@ pub trait TaskShellRunner {
 pub struct SystemTaskShell;
 
 impl TaskShellRunner for SystemTaskShell {
-    fn run(&self, command: &str, timeout: Duration) -> Result<ShellCommandOutput, std::io::Error> {
+    fn run(
+        &self,
+        command: &str,
+        timeout: Duration,
+        interrupt: Option<&AtomicBool>,
+    ) -> Result<ShellCommandOutput, std::io::Error> {
         let mut child = system_shell_command(command)
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -68,9 +86,17 @@ impl TaskShellRunner for SystemTaskShell {
 
         let start = Instant::now();
         let mut timed_out = false;
+        let mut interrupted = false;
         let status = loop {
             if let Some(status) = child.try_wait()? {
                 break status;
+            }
+            // `kill` rather than a signal: it is the one termination primitive
+            // with identical semantics on macOS, Linux, and Windows.
+            if interrupt.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
+                interrupted = true;
+                let _ = child.kill();
+                break child.wait()?;
             }
             if start.elapsed() >= timeout {
                 timed_out = true;
@@ -85,6 +111,7 @@ impl TaskShellRunner for SystemTaskShell {
             stdout: String::from_utf8_lossy(&bytes).into_owned(),
             exit_code: status.code().unwrap_or(-1),
             timed_out,
+            interrupted,
         })
     }
 }

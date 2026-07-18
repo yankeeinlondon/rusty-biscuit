@@ -11,7 +11,6 @@
 //! `teardown` completes, because a teardown that fails converts an otherwise
 //! successful task to failure and owes no output.
 
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -43,7 +42,7 @@ pub(super) fn run_step_task(
     overlay: &Value,
     env_overrides: &BTreeMap<String, String>,
     target: Option<&ResolvedExecutionTarget>,
-    runtime_state: &std::rc::Rc<RuntimeState>,
+    runtime_state: &std::sync::Arc<RuntimeState>,
     compose_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
 ) -> StepOutcome {
     let frontmatter = effective_frontmatter(prepared);
@@ -78,7 +77,7 @@ pub(super) fn run_step_task(
         repo: None,
     };
     let term = crate::log::terminal();
-    let live = RefCell::new(frontmatter.clone());
+    let live = std::sync::Mutex::new(frontmatter.clone());
 
     let stack = StackExecutionContext {
         signal: claudine::composition::LifecycleSignal::Start,
@@ -102,12 +101,7 @@ pub(super) fn run_step_task(
         settings: &settings,
     };
 
-    let prompt_runner = WrapperPromptRunner {
-        run,
-        env_overrides,
-        target,
-        runtime_state,
-    };
+    let prompt_runner = WrapperPromptRunner::new(run, env_overrides, target, runtime_state);
     let shell = SystemTaskShell;
 
     let outcome = TaskExecution {
@@ -178,36 +172,57 @@ struct WrapperPromptRunner<'a> {
     run: &'a SequenceRunContext<'a>,
     env_overrides: &'a BTreeMap<String, String>,
     target: Option<&'a ResolvedExecutionTarget>,
-    runtime_state: &'a std::rc::Rc<RuntimeState>,
+    runtime_state: &'a std::sync::Arc<RuntimeState>,
+    /// The most recent prompt run's perf record and provider.
+    ///
+    /// Interior mutability because [`PromptTaskRunner::run`] takes `&self` — the
+    /// trait is deliberately immutable so the library can hold the runner behind
+    /// a shared reference while the task executor runs stages. A `Mutex` rather
+    /// than a `RefCell` because a parallel group's members call `run` from
+    /// sibling threads; the step summary carries one record, so the last writer
+    /// wins exactly as it did when only one task could run at a time.
+    last_run: std::sync::Mutex<PromptRunRecord>,
 }
 
-impl WrapperPromptRunner<'_> {
+/// What a prompt run reports back out of band, for the step status line.
+#[derive(Debug, Default)]
+struct PromptRunRecord {
+    perf: Option<crate::perf::AgentExecutionPerf>,
+    provider: Option<claudine::provider::Provider>,
+}
+
+impl<'a> WrapperPromptRunner<'a> {
+    fn new(
+        run: &'a SequenceRunContext<'a>,
+        env_overrides: &'a BTreeMap<String, String>,
+        target: Option<&'a ResolvedExecutionTarget>,
+        runtime_state: &'a std::sync::Arc<RuntimeState>,
+    ) -> Self {
+        Self {
+            run,
+            env_overrides,
+            target,
+            runtime_state,
+            last_run: std::sync::Mutex::new(PromptRunRecord::default()),
+        }
+    }
+
+    fn record(&self) -> std::sync::MutexGuard<'_, PromptRunRecord> {
+        self.last_run.lock().expect("prompt run record poisoned")
+    }
+
     fn take_perf(&self) -> Option<crate::perf::AgentExecutionPerf> {
-        PROMPT_RUN_PERF.with(|cell| cell.borrow_mut().take())
+        self.record().perf.take()
     }
 
     fn take_provider(&self) -> Option<claudine::provider::Provider> {
-        PROMPT_RUN_PROVIDER.with(|cell| *cell.borrow())
+        self.record().provider
     }
-}
-
-thread_local! {
-    /// The last prompt task's perf record, handed back to the step summary.
-    ///
-    /// A thread-local rather than a field because [`PromptTaskRunner::run`]
-    /// takes `&self`: the trait is deliberately immutable so the library can
-    /// hold it behind a shared reference while the task executor runs stages.
-    static PROMPT_RUN_PERF: RefCell<Option<crate::perf::AgentExecutionPerf>> =
-        const { RefCell::new(None) };
-    /// The provider that ran the last prompt task, for the step status line.
-    static PROMPT_RUN_PROVIDER: RefCell<Option<claudine::provider::Provider>> =
-        const { RefCell::new(None) };
 }
 
 impl PromptTaskRunner for WrapperPromptRunner<'_> {
     fn run(&self, request: &PromptTaskRequest) -> Result<PromptRunOutcome, CompositionError> {
-        PROMPT_RUN_PERF.with(|cell| *cell.borrow_mut() = None);
-        PROMPT_RUN_PROVIDER.with(|cell| *cell.borrow_mut() = None);
+        *self.record() = PromptRunRecord::default();
 
         // Just-in-time, like the step itself: the referenced document is read
         // now, so a document an earlier step rewrote is composed as it stands.
@@ -275,7 +290,13 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             header_emitted: false,
             provider_args: shared.provider_args.clone(),
             provider_args_explicit: shared.provider_args_explicit,
-            runtime_state: Some(std::rc::Rc::clone(self.runtime_state)),
+            // The task executor's cell, not the sequence's: a parallel group
+            // member hands over its private buffer, so the launched document's
+            // own lifecycle `set` stays invisible to its siblings.
+            runtime_state: request
+                .runtime
+                .clone()
+                .or_else(|| Some(std::sync::Arc::clone(self.runtime_state))),
             // The task executor publishes the entry after `teardown`, not here.
             suppress_output_commit: true,
         };
@@ -292,8 +313,10 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             message: error.to_string(),
         })?;
 
-        PROMPT_RUN_PERF.with(|cell| *cell.borrow_mut() = outcome.agent_perf);
-        PROMPT_RUN_PROVIDER.with(|cell| *cell.borrow_mut() = Some(outcome.provider));
+        *self.record() = PromptRunRecord {
+            perf: outcome.agent_perf,
+            provider: Some(outcome.provider),
+        };
 
         Ok(PromptRunOutcome {
             stdout: outcome.final_output.unwrap_or_default(),

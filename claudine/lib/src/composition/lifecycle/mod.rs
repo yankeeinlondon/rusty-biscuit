@@ -335,7 +335,7 @@ pub struct LifecycleRuntimeState {
 ///
 /// Injectable to allow test doubles that capture emissions without hitting
 /// real stderr, messaging, TTS, or sound playback.
-pub trait LifecycleEmitter {
+pub trait LifecycleEmitter: Sync {
     /// Write a plain prose line (no status glyph) to stderr.
     ///
     /// `stderr` is the statusless channel: rich text and links are honored, but

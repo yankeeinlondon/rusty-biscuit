@@ -390,7 +390,11 @@ pub(super) fn build_lifecycle_stack_context_for_materialized<'a>(
 /// composition will be handed.
 pub(super) fn commit_run_output(materialized: &MaterializedHarnessPrompt, stdout: &str) {
     materialized.runtime_state.append_output(stdout);
-    materialized.live_frontmatter.borrow_mut().insert(
+    materialized
+        .live_frontmatter
+        .lock()
+        .expect("live frontmatter mutex poisoned")
+        .insert(
         claudine::composition::OUTPUTS_KEY.to_string(),
         materialized.runtime_state.outputs_value(),
     );

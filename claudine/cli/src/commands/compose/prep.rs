@@ -524,7 +524,7 @@ fn build_and_run_loop(
     let emitter = DefaultLifecycleEmitter;
     // One cell for the whole `--loop` run: a `set` written in iteration 1 and
     // every committed `outputs` entry stay visible to later iterations.
-    let runtime_state = std::rc::Rc::new(claudine::composition::RuntimeState::new());
+    let runtime_state = std::sync::Arc::new(claudine::composition::RuntimeState::new());
 
     run_loop_with_overrides(
         source,
@@ -588,7 +588,7 @@ fn build_and_run_loop(
                 header_emitted,
                 kind.mode(),
                 prep_context,
-                std::rc::Rc::clone(&runtime_state),
+                std::sync::Arc::clone(&runtime_state),
             );
 
             let outcome = execute_composition_attempt(
@@ -637,7 +637,7 @@ fn build_execution_request(
     header_emitted: bool,
     mode: CompositionMode,
     prep_context: &CompositionPrepContext,
-    runtime_state: std::rc::Rc<claudine::composition::RuntimeState>,
+    runtime_state: std::sync::Arc<claudine::composition::RuntimeState>,
 ) -> CompositionExecutionRequest {
     let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
     CompositionExecutionRequest {
@@ -841,7 +841,7 @@ fn execute_loop_or_single(
         header_emitted,
         kind.mode(),
         &prep_context,
-        std::rc::Rc::new(claudine::composition::RuntimeState::new()),
+        std::sync::Arc::new(claudine::composition::RuntimeState::new()),
     );
 
     if let Some(ref mut timings) = startup_timings {
