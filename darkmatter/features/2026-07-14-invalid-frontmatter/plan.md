@@ -2,7 +2,7 @@
 agent: codex/
 total_phases: 8
 created: 2026-07-14
-phase: 2
+phase: 4
 yolo: "true"
 source_files_during_phase_1:
   - darkmatter/lib/benches/clean_hot_paths.rs
@@ -43,6 +43,43 @@ docs_updated_during_phase_2:
   - darkmatter/features/2026-07-14-invalid-frontmatter/plan.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - biscuit-file/lib/src/lib.rs
+  - biscuit-file/lib/src/yaml/mod.rs
+  - biscuit-file/lib/src/yaml/types.rs
+  - biscuit-file/lib/src/yaml/analyze/mod.rs
+  - biscuit-file/lib/src/yaml/analyze/scan.rs
+  - biscuit-file/lib/src/yaml/analyze/engine.rs
+  - biscuit-file/lib/src/yaml/analyze/recover.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/mod.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/scan.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/normalization.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/whitespace.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/reserved_indicator.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/line_endings.rs
+  - biscuit-file/lib/src/yaml/tests/mod.rs
+  - biscuit-file/lib/src/yaml/tests/diagnose.rs
+  - biscuit-file/lib/tests/parse_count.rs
+  - biscuit-file/lib/tests/yaml_safety.rs
+docs_updated_during_phase_3:
+  - darkmatter/features/2026-07-14-invalid-frontmatter/plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - biscuit-file/lib/src/yaml/analyze/mod.rs
+  - biscuit-file/lib/src/yaml/analyze/engine.rs
+  - biscuit-file/lib/src/yaml/analyze/scan.rs
+  - biscuit-file/lib/src/yaml/analyze/report.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/mod.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/duplicate_keys.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/anchors.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/multi_document.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/lints.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/classification_gate.rs
+docs_updated_during_phase_4:
+  - darkmatter/features/2026-07-14-invalid-frontmatter/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
   - biscuit-file
   - darkmatter
@@ -199,74 +236,74 @@ into `md clean` without inspecting YAML fences in the Markdown body.
 
 ## Phase 3: Schema-Agnostic Analyzer and Deterministic Repairs
 
-- [ ] Implement the ratified source-first analyzer entry point so invalid YAML
+- [x] Implement the ratified source-first analyzer entry point so invalid YAML
   returns structured diagnostics instead of failing construction; make
   `Yaml::diagnose()` and repair-candidate convenience methods delegate to the
   same engine for parseable, source-backed `Yaml` values.
-- [ ] Build a context-aware lexical/source map that records mappings,
+- [x] Build a context-aware lexical/source map that records mappings,
   sequences, flow collections, scalar styles, comments, block scalars,
   anchors/aliases, document markers, and exact UTF-8 byte spans without
   reserializing the document.
-- [ ] Parse at most once on the clean-input path, retain the structured parse
+- [x] Parse at most once on the clean-input path, retain the structured parse
   outcome, and generate bounded/local candidates only for a matching
   diagnostic; do not reparse documents that have no candidate edits.
-- [ ] Implement source normalization for the ratified YAML source scope: BOM,
+- [x] Implement source normalization for the ratified YAML source scope: BOM,
   CRLF/CR to LF, trailing whitespace outside scalar content, and final-newline
   handling, with each candidate evaluated under the Phase 1 safety matrix.
-- [ ] Implement parse-equivalent whitespace candidates around flow delimiters
+- [x] Implement parse-equivalent whitespace candidates around flow delimiters
   and commas, mapping colons, and sequence markers; accept only candidates
   whose reparsed `serde_yaml_ng::Value` exactly equals the original value.
-- [ ] Implement the ratified no-schema reserved-indicator quoting algorithm,
+- [x] Implement the ratified no-schema reserved-indicator quoting algorithm,
   quoting the exact authored lexeme and accepting only candidates that satisfy
   the dedicated parse-recovery proof. Keep indentation, delimiter, comment,
   quote, escape, and multi-edit ambiguity outside auto-apply.
-- [ ] Apply multiple deterministic repairs only after checking their combined
+- [x] Apply multiple deterministic repairs only after checking their combined
   non-overlap and final safety result; return diagnostics and candidate/applied
   repair records in stable source order.
-- [ ] Add table-driven tests for every accepted normalization/whitespace/
+- [x] Add table-driven tests for every accepted normalization/whitespace/
   reserved-indicator case and every refusal boundary, including
   `host:localhost`, negative numbers, comments, URLs, Windows paths, block
   scalars, flow nesting, anchors, multibyte text, BOM, LF, CRLF, and lone CR.
-- [ ] Add source-preservation assertions that reconstruct the expected output
+- [x] Add source-preservation assertions that reconstruct the expected output
   solely from accepted spans and prove every untouched byte is unchanged.
 
 ### Validation Checkpoint
 
-- [ ] From `biscuit-file`, run the focused analyzer tests, `just test`, and
+- [x] From `biscuit-file`, run the focused analyzer tests, `just test`, and
   `just lint`; confirm clean input parses once, candidate-free input reparses
   zero times, and all auto-applied edits satisfy the ratified safety proof.
 
 ## Phase 4: Schema-Agnostic Report-Only Diagnostics
 
-- [ ] Detect duplicate mapping keys at every nesting level with source spans
+- [x] Detect duplicate mapping keys at every nesting level with source spans
   for the conflicting entries even though `serde_yaml_ng` rejects the final
   document; offer only the candidate information ratified in Phase 1 and never
   select a repair automatically.
-- [ ] Detect undeclared, forward, misspelled, duplicate, and unused
+- [x] Detect undeclared, forward, misspelled, duplicate, and unused
   anchor/alias conditions that the v1 contract retains; classify every result
   as report-only and preserve graph-sensitive source.
-- [ ] Detect multiple YAML documents for single-document analysis and report
+- [x] Detect multiple YAML documents for single-document analysis and report
   the incompatibility without selecting, splitting, or rewriting a document.
-- [ ] Implement the schema-free `non-deterministic-find` lints named by the
+- [x] Implement the schema-free `non-deterministic-find` lints named by the
   spec: ambiguous scalars, suspicious empty values, block-scalar smells,
   comment-truncation/indicator smells, style/indentation inconsistency, and
   similar/misplaced keys.
-- [ ] Add suppression and confidence boundaries that keep common intentional
+- [x] Add suppression and confidence boundaries that keep common intentional
   YAML quiet; record the reason for every heuristic threshold in tests rather
   than promoting a smell to an error.
-- [ ] Add a single auto-apply filter keyed on classification and prove with
+- [x] Add a single auto-apply filter keyed on classification and prove with
   exhaustive enum tests that neither report-only classification can reach edit
   application, even if a diagnostic carries candidate repairs.
-- [ ] Add positive, negative, nested, comment-preservation, and ordering tests
+- [x] Add positive, negative, nested, comment-preservation, and ordering tests
   for each detector, plus a mixed document proving deterministic repairs can
   coexist with report-only findings without applying the latter.
-- [ ] Parallelizable after Phase 3: Phase 4 can proceed independently of the
+- [x] Parallelizable after Phase 3: Phase 4 can proceed independently of the
   Darkmatter schema-aware work in Phase 5 because both consume the frozen
   shared diagnostic and repair contracts.
 
 ### Validation Checkpoint
 
-- [ ] From `biscuit-file`, run focused detector tests, `just test`, and
+- [x] From `biscuit-file`, run focused detector tests, `just test`, and
   `just lint`; assert report-only diagnostics never change source and remain
   deterministically ordered across runs.
 
