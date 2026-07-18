@@ -17,7 +17,8 @@
 //!
 //! Both cases are **piped / redirected** and spawn an ordinary child process,
 //! so they are L1 (no PTY). The interactive (PTY) OSC evidence lives in
-//! biscuit-terminal's `level2_terminal_osc_cache.rs`.
+//! biscuit-terminal's Level-2 `level2_terminal_osc_wezterm.rs`; the
+//! Level-1 OSC-cache query-count test is `level1_terminal_osc_cache.rs`.
 
 mod common;
 
