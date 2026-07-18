@@ -818,6 +818,18 @@ pub struct CompositionExecutionRequest {
     /// `None` for callers with no active-document coordinator (the direct
     /// wrapper passthrough, whose empty lifecycle can never select a proxy).
     pub handoff_ledger: Option<crate::composition::SharedRunLedger>,
+
+    /// The already-committed proxy handoff this request re-prepares, when the
+    /// document was reached through a proxy. `Some` marks an *adopted target*:
+    /// the command coordinator has already committed the hop against the shared
+    /// [`handoff_ledger`][Self::handoff_ledger], so the executor must **not**
+    /// route the target's `initialize` a second time through the setup pipeline.
+    /// Instead the harness loop's staged bootstrap (narrow initialize-shell gate
+    /// → the target's own `initialize` → stabilized reread → full audit) owns the
+    /// target's `initialize`, exactly as an in-harness adoption does — the one
+    /// canonical R4 staging for every route. `None` for a directly-invoked
+    /// document and for the caller's first document.
+    pub adopted_handoff: Option<Box<crate::composition::ProxyHandoff>>,
 }
 
 /// Describes where the sequence definition was found.
