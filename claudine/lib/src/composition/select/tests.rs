@@ -13,6 +13,7 @@ fn make_prepared_composition(
     use super::super::types::CompositionClosurePlan;
     super::super::types::PreparedComposition {
         mode: CompositionMode::ChainedDocument,
+        schema_verdict_deferred: false,
         resolved_path: PathBuf::from("/tmp/test.md"),
         source_repo_root: None,
         prompt: "test prompt".to_string(),

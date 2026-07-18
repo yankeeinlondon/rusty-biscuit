@@ -641,6 +641,7 @@ fn prepared_composition() -> crate::composition::types::PreparedComposition {
     };
 
     PreparedComposition {
+        schema_verdict_deferred: false,
         mode: CompositionMode::ChainedDocument,
         resolved_path: doc("target"),
         source_repo_root: None,

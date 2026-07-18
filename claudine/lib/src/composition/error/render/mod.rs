@@ -55,6 +55,7 @@ impl BlockError for CompositionError {
             | CompositionError::LifecycleProxyOnlyParameter { .. }
             | CompositionError::LifecycleProxyCycle { .. }
             | CompositionError::LifecycleProxyTargetBootstrapFailed { .. }
+            | CompositionError::LifecycleProxyWithoutOwningCoordinator { .. }
             | CompositionError::LifecycleResumeIncompatible { .. }
             | CompositionError::LifecycleTransitionUnownedAtStage { .. } => {
                 lifecycle::status_block(self)

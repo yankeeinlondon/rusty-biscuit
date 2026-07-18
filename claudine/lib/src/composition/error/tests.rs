@@ -938,6 +938,7 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
     let mut approved = HashSet::new();
     approved.insert("rustc --edition=invalid".to_string());
     let options = PrepareOptions {
+        defer_schema_verdict: false,
         set_overrides: None,
         pre_approved_commands: Some(approved),
         env_overrides: BTreeMap::new(),
@@ -1285,6 +1286,45 @@ fn autocomplete_over_cap_status_block_names_query() {
     assert!(rendered.contains("plan"), "got: {rendered}");
     assert!(rendered.contains("500"), "got: {rendered}");
     assert!(rendered.contains("narrow"), "got: {rendered}");
+}
+
+/// A hand-off refused for want of a coordinator must tell the user *both*
+/// halves: which command cannot host it, and which command can.
+///
+/// Naming only the failure would leave the operator with a correct diagnostic
+/// and no next step — the direct provider wrappers give no hint that `compose`
+/// is the command that owns an active-document coordinator (R10 / AC30).
+#[test]
+fn proxy_without_owning_coordinator_names_the_command_that_can_host_it() {
+    use biscuit_terminal::prelude::TerminalRenderable;
+    use biscuit_terminal::terminal::Terminal;
+
+    let err = CompositionError::LifecycleProxyWithoutOwningCoordinator {
+        source_path: PathBuf::from("/repo/CLAUDE.md"),
+        property: "failure.stack[0].action[1]".to_string(),
+        target: "prompts/next.md".to_string(),
+        command: "claudine claude".to_string(),
+    };
+    let rendered = err
+        .status_block(&Terminal::default())
+        .render(&Terminal::default());
+
+    assert!(
+        rendered.contains("prompts/next.md"),
+        "the refused target is named, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("claudine claude"),
+        "the command that cannot host it is named, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("claudine compose"),
+        "a command that can host it is named, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("failure.stack[0].action[1]"),
+        "the authored `proxy` action is located, got: {rendered}"
+    );
 }
 
 /// Wrap a [`FileReferenceDiagnostic`] in the same `ComposeFailed` /

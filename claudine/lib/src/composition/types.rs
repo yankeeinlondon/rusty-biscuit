@@ -568,6 +568,12 @@ pub struct PreparedComposition {
     /// Preparing a document outside the service leaves this
     /// [`Direct`][super::DocumentEntryReason::Direct].
     pub entry: super::DocumentEntryReason,
+    /// Whether this preparation withheld the document's schema verdict.
+    ///
+    /// `true` means the read ran before the document's own `initialize` (R4),
+    /// so someone downstream still owes the stabilized reread that judges it.
+    /// Nothing may treat such a preparation as validated.
+    pub schema_verdict_deferred: bool,
     /// Resolved absolute path to the source file.
     pub resolved_path: PathBuf,
     /// Git repo root derived from the source document's location.

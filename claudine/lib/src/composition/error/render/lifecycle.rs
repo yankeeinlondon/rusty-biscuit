@@ -477,6 +477,37 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                      decision made before the provider launches.",
                 )
         }
+        CompositionError::LifecycleProxyWithoutOwningCoordinator {
+            source_path,
+            property,
+            target,
+            command,
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = format!(
+                "A lifecycle <cyan>`proxy`</cyan> in <cyan>`{property}`</cyan> in \
+                 {file_link} hands off to <cyan>`{}`</cyan>, but <cyan>`{command}`</cyan> \
+                 runs a provider memory file with a prompt supplied on the command \
+                 line — it prepares no active document, so it owns no coordinator that \
+                 can bring the target up.\n\nRunning the target from here would launch \
+                 it with this invocation's own profile, argv, and MCP servers instead \
+                 of the ones the target's own frontmatter selects, so the hand-off is \
+                 refused rather than run against the wrong launch configuration.",
+                escape_prose_path(target)
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "proxy has no owning coordinator",
+                ))
+                .body(body)
+                .hint(
+                    "Run the target through a composition command, which does own a \
+                     coordinator: `claudine compose <target>` (or `inline-compose` / a \
+                     `sequence` step). To keep using the provider wrapper, remove the \
+                     `proxy` from the memory file's lifecycle.",
+                )
+        }
         CompositionError::LifecycleProxyCycle {
             source_path,
             target,

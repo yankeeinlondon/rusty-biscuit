@@ -929,6 +929,36 @@ pub enum CompositionError {
         reason: String,
     },
 
+    /// A lifecycle `proxy` hand-off is well-formed, but the command that
+    /// launched this run owns no active-document coordinator able to consume
+    /// it.
+    ///
+    /// The direct provider wrappers (`claudine claude`, `claudine goose`, …)
+    /// run a provider memory file as their harness document and take the prompt
+    /// from argv or stdin. They carry no run ledger and no composition
+    /// coordinator, so there is nothing to re-enter the canonical
+    /// selection/MCP/argv pipeline with. Adopting the target in place instead
+    /// would run it against the *invocation's* launch bundle — the reduced path
+    /// R3 forbids and R6/AC10 require rebuilt — so the hand-off is refused
+    /// rather than silently mis-run. The composition commands (`compose`,
+    /// `inline-compose`, `sequence`) do own a coordinator and consume the same
+    /// hand-off normally.
+    #[error(
+        "lifecycle `proxy` hand-off to `{target}` has no owning coordinator: \
+         `{command}` prepares no active document to hand off to ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleProxyWithoutOwningCoordinator {
+        /// The document whose stack authored the proxy.
+        source_path: PathBuf,
+        /// The dotted `"{event}.stack[{i}].action[{j}]"` location.
+        property: String,
+        /// The proxy target, as the source authored it.
+        target: String,
+        /// The invoked command that owns no coordinator (e.g. `claudine claude`).
+        command: String,
+    },
+
     /// A proxy target could not be brought up far enough to run: the
     /// coordinator committed the hand-off, but the target's staged boot could
     /// not produce the surface the next stage requires.
@@ -1882,6 +1912,7 @@ impl CompositionError {
             // The target failed, but the `proxy` that named it is the line the
             // user can act on — and the only one in a document they authored.
             | CompositionError::LifecycleProxyTargetBootstrapFailed { property, .. }
+            | CompositionError::LifecycleProxyWithoutOwningCoordinator { property, .. }
             | CompositionError::LifecycleTransitionUnownedAtStage { property, .. } => {
                 Some(FrontmatterHighlight::Property(property.clone()))
             }

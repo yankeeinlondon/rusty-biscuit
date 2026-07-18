@@ -99,7 +99,8 @@ pub use preflight::{PreFlightResult, resolve_lifecycle_shell_approvals, resolve_
 pub use hints::{parse_interactive_hint, parse_selection_hints_from_frontmatter};
 pub use prepare::{
     DocumentEntryReason, DocumentPreparation, LoopOwnership, PrepareOptions, PreparationStages,
-    PromptSource, SourceBasis, bind_agent_workspace, prepare_direct, prepare_document,
+    PromptSource, SchemaStage, SourceBasis, bind_agent_workspace, prepare_direct,
+    prepare_document,
     prepare_inline, preflight_document_shell,
 };
 pub use resolve::{

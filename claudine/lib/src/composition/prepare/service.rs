@@ -36,6 +36,25 @@ pub enum PromptSource {
     Supplied(String),
 }
 
+/// Whether this preparation owns the document's schema verdict.
+///
+/// The verdict is a *stage*, not a property of the entry reason: a proxied
+/// target is prepared twice — once before its `initialize` (which may add or
+/// repair a schema property) and once after — and only the second read judges
+/// it. R4 fixes that order; putting the choice here is what keeps it out of the
+/// callers' hands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SchemaStage {
+    /// Reach the verdict: validate, categorize typed schema errors, and apply
+    /// the invalid-optional drop-and-retry.
+    Validate,
+    /// Withhold the verdict for the post-`initialize` stabilized reread.
+    ///
+    /// Frontmatter is still coerced to its declared types; a violation is
+    /// simply not this read's failure to report.
+    DeferToStabilizedReread,
+}
+
 /// One request to prepare one document.
 #[derive(Debug)]
 pub struct DocumentPreparation<'a> {
@@ -48,6 +67,8 @@ pub struct DocumentPreparation<'a> {
     pub source: &'a ResolvedCompositionSource,
     /// Where the prompt text comes from.
     pub prompt_source: PromptSource,
+    /// Whether this read owns the document's schema verdict.
+    pub schema: SchemaStage,
     /// The assembled input layers plus this document's target-specific context.
     pub options: PrepareOptions,
 }
@@ -84,15 +105,31 @@ pub fn prepare_document(
         mode,
         source,
         prompt_source,
-        options,
+        schema,
+        mut options,
     } = request;
 
-    let mut prepared = match mode {
-        CompositionMode::ChainedDocument => {
+    // A deferred read withholds the verdict at both layers that can reach one:
+    // Darkmatter's compose-time stage (via the option) and this crate's
+    // post-shell re-validation (by taking the schema-free composer). Skipping
+    // only one of the two would still fail the document before its `initialize`.
+    let mut prepared = match (schema, mode) {
+        (SchemaStage::Validate, CompositionMode::ChainedDocument) => {
             prepare_direct_with_schema_and_prompt(source, options, prompt_source)?
         }
-        CompositionMode::InlineFrontmatterPrompt => prepare_inline_with_schema(source, options)?,
+        (SchemaStage::Validate, CompositionMode::InlineFrontmatterPrompt) => {
+            prepare_inline_with_schema(source, options)?
+        }
+        (SchemaStage::DeferToStabilizedReread, CompositionMode::ChainedDocument) => {
+            options.defer_schema_verdict = true;
+            super::prepare_direct_with_prompt(source, options, prompt_source)?
+        }
+        (SchemaStage::DeferToStabilizedReread, CompositionMode::InlineFrontmatterPrompt) => {
+            options.defer_schema_verdict = true;
+            super::prepare_inline(source, options)?
+        }
     };
     prepared.entry = entry;
+    prepared.schema_verdict_deferred = schema == SchemaStage::DeferToStabilizedReread;
     Ok(prepared)
 }

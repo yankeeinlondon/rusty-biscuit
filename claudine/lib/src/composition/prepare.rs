@@ -53,7 +53,7 @@ mod entry;
 mod service;
 
 pub use entry::{DocumentEntryReason, LoopOwnership, PreparationStages, SourceBasis};
-pub use service::{DocumentPreparation, PromptSource, prepare_document};
+pub use service::{DocumentPreparation, PromptSource, SchemaStage, prepare_document};
 
 /// Options for composition preparation.
 #[derive(Debug, Default, Clone)]
@@ -110,6 +110,16 @@ pub struct PrepareOptions {
     /// default) preserves the legacy ambient-CWD behavior for library-only
     /// callers and tests.
     pub file_ref_fallback_dir: Option<PathBuf>,
+    /// Compose without reaching this document's schema verdict.
+    ///
+    /// Set by the stages that read a document they do not judge: the
+    /// shell-discovery pre-flight, and the bootstrap read taken *before* a
+    /// document's own `initialize` runs. `initialize` may add or repair a
+    /// schema property, so a verdict reached before it would fail the document
+    /// for a violation the next stage is about to fix (R4). Frontmatter is
+    /// still coerced to the declared types; only the verdict is withheld, and
+    /// the post-`initialize` stabilized reread reports it.
+    pub defer_schema_verdict: bool,
 }
 
 /// The early-binding snapshot a canonical preparation composes against.
@@ -182,7 +192,7 @@ fn canonical_compose_options(
     if let Some(fallback) = options.file_ref_fallback_dir.clone() {
         compose_opts = compose_opts.with_file_ref_fallback_dir(fallback);
     }
-    compose_opts
+    compose_opts.with_deferred_schema_verdict(options.defer_schema_verdict)
 }
 
 /// Discover and approve one document's own compose-time shell surfaces, ahead
@@ -381,6 +391,7 @@ pub(super) fn prepare_direct_with_prompt(
     Ok(PreparedComposition {
         mode: CompositionMode::ChainedDocument,
         entry: DocumentEntryReason::Direct,
+        schema_verdict_deferred: options.defer_schema_verdict,
         resolved_path: source.resolved_path.clone(),
         source_repo_root,
         prompt,
@@ -524,6 +535,7 @@ pub fn prepare_inline(
     Ok(PreparedComposition {
         mode: CompositionMode::InlineFrontmatterPrompt,
         entry: DocumentEntryReason::Direct,
+        schema_verdict_deferred: options.defer_schema_verdict,
         resolved_path: source.resolved_path.clone(),
         source_repo_root,
         prompt,

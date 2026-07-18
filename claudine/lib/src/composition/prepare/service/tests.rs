@@ -34,6 +34,7 @@ fn prepare(
         mode: CompositionMode::ChainedDocument,
         source,
         prompt_source: PromptSource::ComposedBody,
+        schema: SchemaStage::Validate,
         options,
     })
     .expect("canonical preparation succeeds")
@@ -180,6 +181,7 @@ fn a_supplied_prompt_is_delivered_and_an_empty_body_is_not_an_error() {
         entry: DocumentEntryReason::Direct,
         mode: CompositionMode::ChainedDocument,
         source: &source,
+        schema: SchemaStage::Validate,
         prompt_source: PromptSource::Supplied("fix the build".to_string()),
         options: PrepareOptions::default(),
     })
@@ -205,6 +207,7 @@ fn an_empty_composed_body_still_fails_when_it_is_the_prompt() {
         mode: CompositionMode::ChainedDocument,
         source: &source,
         prompt_source: PromptSource::ComposedBody,
+        schema: SchemaStage::Validate,
         options: PrepareOptions::default(),
     })
     .expect_err("an empty composed body is an empty prompt");
@@ -430,6 +433,7 @@ fn a_schema_failure_has_one_typed_identity_across_every_entry() {
             mode: CompositionMode::ChainedDocument,
             source: &source,
             prompt_source: PromptSource::ComposedBody,
+        schema: SchemaStage::Validate,
             options: options_in(dir.path()),
         })
         .expect_err("an invalid required value fails on every entry");
@@ -463,6 +467,7 @@ fn a_missing_required_property_is_typed_on_the_harness_route() {
         mode: CompositionMode::ChainedDocument,
         source: &source,
         prompt_source: PromptSource::ComposedBody,
+        schema: SchemaStage::Validate,
         options: options_in(dir.path()),
     })
     .expect_err("a missing required value fails");
@@ -494,6 +499,7 @@ fn an_invalid_optional_is_dropped_and_recorded_on_the_harness_route() {
         mode: CompositionMode::ChainedDocument,
         source: &source,
         prompt_source: PromptSource::ComposedBody,
+        schema: SchemaStage::Validate,
         options: options_in(dir.path()),
     })
     .expect("an invalid optional is dropped rather than fatal");
@@ -535,6 +541,7 @@ fn a_supplied_prompt_survives_the_schema_layer_with_an_empty_body() {
         entry: DocumentEntryReason::Direct,
         mode: CompositionMode::ChainedDocument,
         source: &source,
+        schema: SchemaStage::Validate,
         prompt_source: PromptSource::Supplied("the caller's prompt".to_string()),
         options: options_in(dir.path()),
     })
@@ -547,11 +554,88 @@ fn a_supplied_prompt_survives_the_schema_layer_with_an_empty_body() {
         mode: CompositionMode::ChainedDocument,
         source: &source,
         prompt_source: PromptSource::ComposedBody,
+        schema: SchemaStage::Validate,
         options: options_in(dir.path()),
     });
     assert!(
         composed.is_err(),
         "the same document with a composed-body prompt must still fail the \
          emptiness check — threading `PromptSource` must not disable it"
+    );
+}
+
+/// R4: the read taken before a document's own `initialize` must not reach a
+/// schema verdict — `initialize` is exactly the stage that can still supply the
+/// missing value.
+///
+/// The same source, judged, is the control: without it this test would pass on a
+/// document that simply satisfies its schema.
+#[test]
+fn a_deferred_read_withholds_the_verdict_the_validating_read_reaches() {
+    let dir = TempDir::new().unwrap();
+    let source = source_at(
+        dir.path(),
+        "doc.md",
+        "---\n$schema:\n    count: 'number(required)'\n---\nbody\n",
+    );
+
+    let deferred = prepare_document(DocumentPreparation {
+        entry: DocumentEntryReason::ProxyTarget,
+        mode: CompositionMode::ChainedDocument,
+        source: &source,
+        prompt_source: PromptSource::ComposedBody,
+        schema: SchemaStage::DeferToStabilizedReread,
+        options: PrepareOptions::default(),
+    })
+    .expect("a pre-`initialize` read does not judge the document");
+
+    assert!(
+        deferred.schema_verdict_deferred,
+        "the deferral must be recorded on the prepared document: a downstream \
+         stage still owes the stabilized reread that judges it"
+    );
+
+    let err = prepare_document(DocumentPreparation {
+        entry: DocumentEntryReason::ProxyTarget,
+        mode: CompositionMode::ChainedDocument,
+        source: &source,
+        prompt_source: PromptSource::ComposedBody,
+        schema: SchemaStage::Validate,
+        options: PrepareOptions::default(),
+    })
+    .expect_err("the validating read reaches the verdict");
+
+    assert!(
+        matches!(err, CompositionError::MissingProperties { .. }),
+        "and reaches it as the typed variant, not a raw Darkmatter error; got {err:?}"
+    );
+}
+
+/// A deferred read still *coerces* frontmatter to the declared types. Only the
+/// verdict is withheld, so a value the schema recognizes reaches `initialize`
+/// with its real type rather than as the authored string.
+#[test]
+fn a_deferred_read_still_coerces_declared_types() {
+    let dir = TempDir::new().unwrap();
+    let source = source_at(
+        dir.path(),
+        "doc.md",
+        "---\n$schema:\n    enabled: boolean\n    count: 'number(required)'\nenabled: \"true\"\n---\nbody\n",
+    );
+
+    let prepared = prepare_document(DocumentPreparation {
+        entry: DocumentEntryReason::ProxyTarget,
+        mode: CompositionMode::ChainedDocument,
+        source: &source,
+        prompt_source: PromptSource::ComposedBody,
+        schema: SchemaStage::DeferToStabilizedReread,
+        options: PrepareOptions::default(),
+    })
+    .expect("the missing required `count` is not this read's verdict to reach");
+
+    assert_eq!(
+        prepared.effective_frontmatter.get("enabled"),
+        Some(&serde_json::json!(true)),
+        "a lifecycle condition reading `enabled` must see a real boolean"
     );
 }
