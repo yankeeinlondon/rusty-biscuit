@@ -1,6 +1,7 @@
 ---
 implementation_5: "2026-07-17T14:19:23-07:00"
 implementation_6: "2026-07-17T17:33:52-07:00"
+implementation_7: "2026-07-17T18:34:13-07:00"
 deferred_perf_measurement: true
 ---
 
@@ -69,3 +70,40 @@ The files touched by this cycle are:
 - `darkmatter/cli/tests/compose_terminal_detection.rs` — the comment-only fix for the one actionable finding (module `//!` doc now points to the real Level-2 evidence `level2_terminal_osc_wezterm.rs` and separately names the Level-1 cache test `level1_terminal_osc_cache.rs`).
 - `darkmatter/features/2026-07-15-performance-followup/performance-compliance.md` — appended the review-6 inadmissible-host attempt record for the deferred compose-regression measurement.
 - `darkmatter/features/2026-07-15-performance-followup/log.md` — this implementation log.
+
+## Implementation of Review Findings #7
+
+> **started at:** 2026-07-17T18:34:13-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-15-performance-followup/review-7.md'
+- this is iteration 7 of the review-to-implement cycle
+- review-7 contains **no new implementation findings** and one tracked production-readiness blocker:
+        - **Findings section verbatim:** "No new implementation findings. The current blocker is the tracked release evidence gap above; it remains release-blocking even though it is not duplicated as a new finding in each review iteration."
+        - **Tracked blocker (not a new finding):** the integrated compose-regression threshold remains unestablished — review-7 explicitly states this is "the existing deferred measurement owned by `performance-compliance.md`, not a new implementation finding" and directs that it stay deferred there rather than be carried forward as a review finding
+        - the review also records that Review 6's only implementation finding (terminal-detection test doc drift) is closed, and no new implementation defect or verification-level mismatch was found
+- starting the work on 'assess-tracked-compose-regression-threshold' at 18:34:45
+        - confirmed by re-reading `review-7.md` that the Findings section contains **no new implementation findings** — there is no code change, test addition, or verification-level correction requested by this review; nothing to hand to an implementation subagent
+        - the single production-readiness blocker is the integrated compose-regression threshold, which `review-7.md` and `performance-compliance.md` both classify as a deferred **performance measurement** owned by `performance-compliance.md`, not a review finding
+        - checked host admissibility against the predeclared contract (`performance-compliance.md` → *Admissibility and Threshold Contract*, condition 1: 1-minute load must remain below **2.0** for the full capture):
+                - at start of assessment (18:34:31) the 16-core host reported 1-minute load **23.64** (5-minute 41.89, 15-minute 36.61)
+                - on recheck (18:35) the 1-minute load was **16.75** (5-minute 38.49, 15-minute 35.56)
+                - both readings exceed the 2.0 ceiling by more than 8×, so admissibility condition 1 cannot be met and no legitimate capture could take place
+        - verified the three required build-arm SHAs remain committed objects (so the committed-pin condition, admissibility condition 5, can still be met on a quiet host), via `git cat-file -t`:
+                - `base` `51c1f16e10ffe825b56987573ba4eabc659c768e` → commit
+                - `before` `e15b1cc22b113a9b24058207d760cd879fa62eb6` → commit
+                - `after` `92a3d502eb65c30205a9a255dd13dd8dc6d0aabf` → commit
+        - decision: **defer** the measurement (no benchmark run, no threshold verdict claimed), record the declined attempt in `performance-compliance.md`, and keep `deferred_perf_measurement: true` on this log's frontmatter (already set)
+        - no lint or test gate was run: this cycle changes no Rust source (the only actionable review finding is absent), so there is no impacted package area to build/test/lint per the spec's targeted-gate contract
+- work completed for 'assess-tracked-compose-regression-threshold' at 18:35:20
+
+### Successful Completion
+
+The implementation of review cycle 7 has completed successfully in approximately 1 minute 20 seconds. During this implementation all 1 review items were evaluated to see if they could be fixed as a part of this implementation cycle — review-7 carries **no new implementation findings** and one tracked production-readiness blocker: 0 were fixed, 1 was deferred (see reason below):
+
+- **Deferred — tracked production-readiness blocker: the integrated compose-regression threshold.** This is a deferred *performance measurement*, not a code finding. `review-7.md` states plainly under *Findings* that there are "No new implementation findings" and describes the blocker as "the existing deferred measurement owned by `performance-compliance.md`, not a new implementation finding." Establishing a pass/fail against the feature's 5% integrated compose threshold requires an admissible quiet-host benchmark run whose predeclared contract (in `performance-compliance.md` → *Admissibility and Threshold Contract*) requires the 1-minute load average to stay below **2.0** for the full capture. At assessment time the 16-core host reported a 1-minute load average of **23.64** (5-minute 41.89, 15-minute 36.61), recheck **16.75** — more than eight times the admissibility ceiling — so no legitimate measurement could take place. The declined attempt is recorded under *Attempt and Result Log → 2026-07-17 — Review 7 implementation cycle* in `performance-compliance.md`, and it maps back to the *Tracked Production-Readiness Blocker* section of `review-7.md`. The three required build-arm SHAs (`51c1f16e1` base, `e15b1cc22` before, `92a3d502e` after) remain committed objects, so the measurement can be completed unchanged once a quiet host is available; no owner ruling is outstanding.
+
+The files touched by this cycle are:
+
+- `darkmatter/features/2026-07-15-performance-followup/performance-compliance.md` — appended the review-7 inadmissible-host attempt record for the deferred compose-regression measurement.
+- `darkmatter/features/2026-07-15-performance-followup/review-7.md` — set `log`, `implemented`, and `implemented_by` frontmatter.
+- `darkmatter/features/2026-07-15-performance-followup/log.md` — this implementation log (`deferred_perf_measurement: true` retained; `implementation_7` timestamp set).

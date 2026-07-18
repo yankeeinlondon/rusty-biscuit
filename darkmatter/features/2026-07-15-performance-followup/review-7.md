@@ -4,7 +4,9 @@ ready: false
 agent: codex/default
 created: 2026-07-17T17:46:03-07:00
 spec: 2026-07-15-performance-followup/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/default
+log: darkmatter/features/2026-07-15-performance-followup/log.md
 description: "A **feature** review of `2026-07-15-performance-followup/spec.md`"
 feature: 2026-07-15-performance-followup/review-7.md
 previous: 2026-07-15-performance-followup/review-6.md
