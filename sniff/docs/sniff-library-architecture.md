@@ -353,6 +353,23 @@ extend the helper's deadline. **Never poll `try_wait()` over a piped stdout you 
 the child blocks in `write()` past one pipe buffer (64 KiB Linux, ~16 KiB macOS), never exits, and
 gets killed at its deadline with its output lost.
 
+**Tree termination is total on Windows and best-effort on Unix.** Job Object membership is inherited
+and kernel-enforced, so nothing escapes. Unix has no equivalent primitive, so the guarantee is
+layered: the process-group kill is absolute for anything still in the group, while a descendant that
+calls `setsid()` is handled best-effort. Such a descendant is kept addressable by sampling the
+child's descendant tree every `DESCENDANT_SAMPLE_INTERVAL` (250ms) *while the child is alive*, so its
+PID survives the reparenting that follows the child's exit; recorded PIDs are re-validated against
+process start time before signaling, so a recycled PID is never hit. The residual gap — a descendant
+that forks *and* `setsid()`s entirely between two samples, whose parent then exits — is not portably
+closable without Linux cgroups or a supervising process. No sniff probe daemonizes, so no caller
+reaches it; do not route a deliberately-detaching command through this boundary and expect cleanup.
+
+Sampling is deferred by a full interval, so a probe that completes within 250ms — nearly all of them
+— performs **zero** process-table scans. This matters: one `sysinfo` all-process refresh measured
+16–33ms on a 1,518-process macOS host, so scanning on the success path would have dwarfed the probes
+themselves. Cleanup scans only when descendants were actually recorded, or on a failure path where
+the deadline has already elapsed.
+
 Deadlines are policy and live in `process::timeouts`: 3s for service, Windows locale, BurntToast,
 program-schema, and NTP commands; 5s for `diskutil`; 2s for host-capability probes; and 30s for
 explicit remote refresh. Installation commands use the caller's `InstallOptions::timeout_secs`
