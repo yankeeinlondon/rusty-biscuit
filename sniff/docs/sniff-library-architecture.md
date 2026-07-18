@@ -85,7 +85,7 @@ Every subsection has a real-world cost. The table below captures approximate lat
 | **Filesystem** | File inventory (classification + languages) | 50-500ms | Yes |
 | **Filesystem** | EditorConfig | <10ms | Yes |
 | **Filesystem** | Markdown documents | 50-200ms | Yes |
-| **Programs** | All 9 categories (parallel, shared executable index) | 200-800ms | Separate API |
+| **Programs** | All 10 categories (parallel, shared executable index) | 200-800ms | Separate API |
 | **Services** | Init system detection + service list | 50-200ms | Separate API |
 
 Programs and Services are not part of `DetectionPlan` because they have no dependency on the filesystem base directory and their results are system-global rather than project-scoped. They are accessed through `ProgramsInfo::detect()` and `ServiceManager::detect()` respectively.

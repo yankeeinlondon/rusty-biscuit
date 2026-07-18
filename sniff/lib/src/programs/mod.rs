@@ -206,7 +206,7 @@ impl ProgramsInfo {
     /// Detect all installed programs across all categories.
     ///
     /// Builds a shared executable index once (scanning all PATH dirs and macOS app bundles),
-    /// then detects all 9 categories in parallel using Rayon's `join` API. Each category
+    /// then detects all 10 categories in parallel using Rayon's `join` API. Each category
     /// uses the shared index for O(1) lookups instead of repeated filesystem traversal.
     /// The test-runner category additionally probes project-local bin directories via
     /// [`LocalBinIndex`] (cwd-sensitive) before falling back to PATH and parent-binary
@@ -215,8 +215,8 @@ impl ProgramsInfo {
     /// ## Performance
     ///
     /// The shared index eliminates redundant filesystem scans:
-    /// - PATH scan: once (instead of 9x per category)
-    /// - macOS bundle check: once (instead of 9x per category)
+    /// - PATH scan: once (instead of 10x per category)
+    /// - macOS bundle check: once (instead of 10x per category)
     /// - Subsequent lookups: O(1) HashMap access
     #[instrument(skip_all)]
     pub fn detect() -> Self {

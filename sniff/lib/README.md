@@ -9,7 +9,7 @@
 - **Network Detection**: Interface enumeration with IPv4/IPv6 addresses, flags, and WAN IP lookup
 - **Filesystem Analysis**: Git repositories, monorepo tools, structured language detection, broad file associations, EditorConfig, blast radius, justfile detection, recent commits
 - **Package Management**: Unified abstraction for 110+ OS and language package managers
-- **Programs Detection**: 9 categories (editors, utilities, package managers, TTS, terminals, AI tools, test runners)
+- **Programs Detection**: 10 categories (editors, utilities, package managers, TTS, terminals, headless audio, AI tools, notification helpers, test runners)
 - **Services Detection**: Init system detection and service listing across systemd, launchd, OpenRC, etc.
 - **Dependency Enrichment**: Network-based registry queries for latest versions
 - **Type-Safe Errors**: Structured error types with `thiserror`
@@ -144,7 +144,7 @@ sniff/
 ├── network/        # Network interfaces
 ├── filesystem/     # Git, monorepo, languages, file types, docs, blast radius, just
 ├── package/        # Package manager abstraction (110+)
-├── programs/       # Installed program detection and install (9 categories)
+├── programs/       # Installed program detection and install (10 categories)
 ├── remote/         # Remote repo inspection (GitHub, GitLab, Gitea, Bitbucket)
 ├── services/       # System service and init system detection
 ├── request         # Fine-grained detection control (DetectionPlan, request types)
@@ -619,7 +619,7 @@ for dep in &enriched {
 
 ### Programs Module
 
-Detects installed programs across 9 categories with parallel execution, macOS app bundle support, and cwd-aware test-runner availability.
+Detects installed programs across 10 categories with parallel execution, macOS app bundle support, and cwd-aware test-runner availability.
 
 **Key Types:**
 
@@ -627,6 +627,17 @@ Detects installed programs across 9 categories with parallel execution, macOS ap
 - `ProgramMetadata` - Trait for program metadata (display name, description, website)
 - `ExecutableSource` - How program was discovered (PATH, project-local bin, macOS bundle, or not found)
 - `InstallOptions`, `InstallResult` - Installation infrastructure types
+- `InstallCapturedResult` - Captured install run; `timed_out` marks a command killed at its deadline
+- `SniffInstallationError::InstallationTimedOut { pkg, manager, timeout_secs }` - Returned by `execute_install` / `execute_versioned_install` on deadline kill, never conflated with `PackageManagerFailed`
+- `InstallInterviewEvent::TimeoutWarning` - Emitted after the failure status and before any retry prompt
+- `InstallInterviewOutcome::TimedOut` - Every attempt failed and the last was killed at its deadline
+
+Installation timeout is a first-class outcome, not an ordinary failure. On Unix a
+timed-out install may leave a **partial install** behind: process-tree
+termination is best-effort there, so a descendant that forks and calls
+`setsid()` between sniff's samples can survive and keep modifying the host.
+Windows containment is kernel-enforced via Job Objects and total. See the
+`process` module documentation for the exact per-platform guarantee.
 
 **Categories:**
 
@@ -640,11 +651,12 @@ Detects installed programs across 9 categories with parallel execution, macOS ap
 | Terminal Apps | alacritty, wezterm, kitty | PATH + macOS bundles |
 | Headless Audio | afplay, pacat, aplay | PATH lookup |
 | AI CLI | claude, aider, goose | PATH lookup |
+| Notification Helpers | notify-send, terminal-notifier | PATH lookup |
 | Test Runners | cargo test, vitest, pytest, go test | project-local bins + PATH + parent binaries |
 
 **Performance notes:**
 
-`ProgramsInfo::detect()` builds a single shared `ExecutableIndex` by scanning every `PATH` directory and macOS app bundle location once, then runs all 9 categories in parallel. Per-program lookups are O(1) HashMap hits rather than repeated filesystem traversals, so the total cost is dominated by the one-time index build. Test runners also consult project-local bin directories and parent binaries, reporting whether each runner is installed, local, available via a parent, or not found.
+`ProgramsInfo::detect()` builds a single shared `ExecutableIndex` by scanning every `PATH` directory and macOS app bundle location once, then runs all 10 categories in parallel. Per-program lookups are O(1) HashMap hits rather than repeated filesystem traversals, so the total cost is dominated by the one-time index build. Test runners also consult project-local bin directories and parent binaries, reporting whether each runner is installed, local, available via a parent, or not found.
 
 **Example:**
 
@@ -696,7 +708,7 @@ GUI apps and traditional installers:
    user-scope installers that never register with App Paths.
 
 The combined Windows scan costs 40–80 ms on a warm filesystem. It runs once
-inside `ExecutableIndex::build()`, so the eight program-detection categories
+inside `ExecutableIndex::build()`, so the ten program-detection categories
 amortize the cost.
 
 ### Services Module
