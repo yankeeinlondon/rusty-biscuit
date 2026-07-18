@@ -2,7 +2,7 @@
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Kilo, Pi, Antigravity), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
 last_updated: 2026-07-17
-hash: 65dc854540ca152c-a8b9ac173a6161a0
+hash: 65dc854540ca152c-1083e38adfa76a8f
 ---
 
 ## Overview
@@ -44,7 +44,7 @@ Nineteen modules plus the shared error type and the flat `provider_id` leaf (the
 | `model_catalog` | Model validation against the generated expected-offerings baseline (+ user overrides), `family_latest` alias resolution, and the dynamic-listing drift channel |
 | `permissions` | Provider-agnostic policy engine (`PolicyEngine`) |
 | `protect` | Standalone regex deny catalog (bash commands, write/edit paths, MCP responses) |
-| `render` | Functional render components — `FinalMessage`, `AgentPrompt`/`SystemPrompt` (under `render/prompt/`, absorbed the former `prompt_reporting` module), `EventRenderer` + the exhaustive `DISPATCH` table (live-sink stderr status dispatch), the dual-target `MetricsReport` (`TerminalRenderable` + `BrowserRenderable`), and the `StreamRenderable` span contract (`open`/`append`/`flush_idle`/`close`) with its `AssistantStream` streaming-markdown component, and `TaskStream`/`TaskStreamFrame` + the `TaskStreamSink` seam (attributed color-bar framing for concurrent group tasks; `TaskBar::Invisible` gives serial work the same geometry); all consume data + policy (`DisplayPolicy`), never `match provider` |
+| `render` | Functional render components — `FinalMessage`, `AgentPrompt`/`SystemPrompt` (under `render/prompt/`, absorbed the former `prompt_reporting` module), `EventRenderer` + the exhaustive `DISPATCH` table (live-sink stderr status dispatch), the dual-target `MetricsReport` (`TerminalRenderable` + `BrowserRenderable`), and the `StreamRenderable` span contract (`open`/`append`/`flush_idle`/`close`) with its `AssistantStream` streaming-markdown component, and `TaskStream`/`TaskStreamFrame` + the two-channel `TaskStreamSink` seam and its `TaskLiveOutput` binding (attributed color-bar framing for group tasks — headers/footers on the status channel, task body data on the data channel; `TaskBar::Invisible` gives serial work the same geometry); all consume data + policy (`DisplayPolicy`), never `match provider` |
 | `reporting` | JSONL-to-SQLite metrics index |
 | `runaway` | Pure content-guard detector (exit-expressions, group-cycle repetition, volume cap) + per-layer config; trips map to `ProcessTermination::Aborted` |
 | `stream` | Structured stream parsing for 8 providers (typed models in `stream::protocol`; Kilo reuses OpenCode's parser) |
