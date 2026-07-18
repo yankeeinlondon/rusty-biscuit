@@ -582,7 +582,7 @@ The composition completion engine consults `$schema` when the cursor sits on a s
 
 ## Migrating from the Retired Harness DSL
 
-Earlier Claudine releases let composed documents declare `pre_checks`, `post_checks`, `handle_*` handlers, a programmatic `handle`, and `deviate` recovery commands in their frontmatter. That validation-and-handler DSL has been **removed**. Its gating, verification, and recovery roles are now expressed through the [lifecycle stack](lifecycle.md): `when:` guards plus the `Error` / `Skip` / `Proxy` / `Retry` / `Resume` / `Requeue` lifecycle actions and `shell` actions.
+Earlier Claudine releases let composed documents declare `pre_checks`, `post_checks`, `handle_*` handlers, a programmatic `handle`, and `deviate` recovery commands in their frontmatter. That validation-and-handler DSL has been **removed**. Its gating, verification, and recovery roles are now expressed through the [lifecycle stack](lifecycle.md): `when:` guards plus the `error` / `skip` / `proxy` / `retry` / `resume` / `defer` lifecycle actions and `shell` actions.
 
 A document that still declares any of these keys fails composition with a typed `RemovedValidationKey` diagnostic that names the offending key and points at its replacement surface:
 
@@ -596,7 +596,7 @@ A document that still declares any of these keys fails composition with a typed 
 
 The scan runs before lifecycle event blocks are parsed, so the diagnostic names the removed DSL key rather than falling through to generic unknown-field handling. Like every frontmatter-rooted composition error, it appends the authored frontmatter as a syntax-highlighted YAML block under a TTY.
 
-**Verification** that the agentic loop actually did the work it claimed (the old `post_checks` role) now belongs in the `success` or `finalize` stack: guard a `when:` clause and raise an `Error` lifecycle action when the contract is unmet. **Recovery** (the old `handle_*` role) belongs in the `failure`/`blocked` stack via `Retry`, `Resume`, `Requeue`, or `Proxy`. See [lifecycle.md](lifecycle.md) for the full action catalog.
+**Verification** that the agentic loop actually did the work it claimed (the old `post_checks` role) now belongs in the `success` or `finalize` stack: guard a `when:` clause and raise an `Error` lifecycle action when the contract is unmet. **Recovery** (the old `handle_*` role) belongs in a `failure`/`blocked` stack — or any other event's, since flow control is universal — via `retry`, `resume`, or `proxy`. See [lifecycle.md](lifecycle.md) for the full action catalog.
 
 ## Timeouts
 
@@ -871,7 +871,7 @@ When `fail_fast` is `true` (the default), Claudine stops immediately after the f
 
 When `fail_fast` is `false`, Claudine records each step's result and continues through all steps regardless of failures. After the last step, Claudine exits with `0` if all steps succeeded, or `1` if one or more steps failed.
 
-Lifecycle recovery actions (`Retry`, `Resume`, `Requeue`, `Proxy`) apply within a single step only. There is no cross-step recovery mechanism.
+Lifecycle recovery actions (`retry`, `resume`, `proxy`) apply within a single step only. A `proxy` stays inside its current step: no step advance, no restart, and the step keeps its scoped inputs and timing identity. There is no cross-step recovery mechanism.
 
 > **Note:** The `fail_fast` frontmatter key is reserved for sequence control. It is not passed to Darkmatter's internal compose options.
 

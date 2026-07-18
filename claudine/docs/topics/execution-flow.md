@@ -881,7 +881,7 @@ the provider or affects hard-timeout behavior.
 
 ### Recovery
 
-Recovery from a failed run is expressed through the `failure` and `blocked` lifecycle stacks. The available lifecycle recovery actions are `Retry`, `Resume`, `Proxy`, and `Requeue`. See [lifecycle.md](lifecycle.md) for the full reference and the [migration table](#migrating-from-the-retired-harness-dsl) for the mapping from the removed `handle_*` keys.
+Recovery is expressed through the lifecycle stacks — `failure` and `blocked` are its natural homes, but flow control is universal and every event may recover. The available lifecycle recovery actions are `retry`, `resume`, `proxy`, and `defer` (`defer` is parse-valid but not yet implemented). See [lifecycle.md](lifecycle.md) for the full reference and the [migration table](#migrating-from-the-retired-harness-dsl) for the mapping from the removed `handle_*` keys.
 
 ### Shell Policy
 
