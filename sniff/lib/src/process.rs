@@ -44,7 +44,9 @@
 //!
 //! `tests::a_descendant_that_detaches_between_samples_escapes_containment` is
 //! the executable record of this residual: it is the assertion that flips if a
-//! future change ever closes the gap.
+//! future change ever closes the gap. It manufactures the escape through
+//! [`sample_hook`], a test-only callback on the sampler, so the window it
+//! exploits is an interval boundary by construction and not by timing estimate.
 
 use std::ffi::OsStr;
 use std::process::{Command, ExitStatus, Stdio};
@@ -114,6 +116,58 @@ const POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// completes inside one interval never scans the process table at all.
 #[cfg_attr(target_os = "windows", allow(dead_code))]
 const DESCENDANT_SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
+
+/// Test-only observation point, invoked after every completed descendant sample.
+///
+/// Sampling is the only thing standing between a `setsid` descendant and the
+/// containment gap this module documents, so a test that pins that gap has to
+/// know precisely when a sample finished. A hook installed here runs
+/// synchronously on the supervising thread, which means a test that *blocks*
+/// inside it holds the sampler still for exactly as long as it blocks — the
+/// escape it manufactures then lands strictly between two samples on any host
+/// at any load, with no timing estimate involved.
+///
+/// The slot is thread-local rather than global because [`ProcessTree::sample`]
+/// always runs on the thread that called [`run_command_with_timeout`]; an
+/// installed hook therefore cannot leak into a concurrently running test.
+#[cfg(all(unix, test))]
+mod sample_hook {
+    use std::cell::RefCell;
+
+    thread_local! {
+        static HOOK: RefCell<Option<Box<dyn FnMut()>>> = const { RefCell::new(None) };
+    }
+
+    /// Uninstalls the hook when dropped, so a panicking test cannot leave one
+    /// armed for whatever runs next on this thread.
+    pub(super) struct HookGuard(());
+
+    impl Drop for HookGuard {
+        fn drop(&mut self) {
+            HOOK.with(|slot| *slot.borrow_mut() = None);
+        }
+    }
+
+    pub(super) fn install(hook: impl FnMut() + 'static) -> HookGuard {
+        HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+        HookGuard(())
+    }
+
+    pub(super) fn after_sample() {
+        // Moved out of the slot for the duration of the call so that a hook
+        // which touches the slot itself cannot trip a re-entrant borrow panic.
+        let Some(mut hook) = HOOK.with(|slot| slot.borrow_mut().take()) else {
+            return;
+        };
+        hook();
+        HOOK.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            if slot.is_none() {
+                *slot = Some(hook);
+            }
+        });
+    }
+}
 
 #[cfg(unix)]
 mod pipe_reader {
@@ -271,6 +325,10 @@ mod process_tree {
             for (pid, start_time) in descendants(system, &roots) {
                 self.observed.insert(pid, start_time);
             }
+            // Compiled out of every non-test build, so the production sampler
+            // is unchanged. See `super::sample_hook`.
+            #[cfg(test)]
+            super::sample_hook::after_sample();
         }
 
         /// Kills the supervised tree.
@@ -731,6 +789,18 @@ mod tests {
     const BETWEEN_SAMPLES_DESCENDANT: &str = "process::tests::between_samples_descendant";
     #[cfg(unix)]
     const DETACHED_PID_FILE: &str = "SNIFF_DETACHED_PID_FILE";
+    /// Written by the supervising thread's post-sample hook; releases the
+    /// between-samples fixture to fork.
+    #[cfg(unix)]
+    const BETWEEN_SAMPLES_GO_FILE: &str = "SNIFF_BETWEEN_SAMPLES_GO_FILE";
+    /// Written by the between-samples fixture the instant it has a descendant
+    /// PID, so the test's cleanup guard is armed before anything can panic.
+    #[cfg(unix)]
+    const BETWEEN_SAMPLES_PID_FILE: &str = "SNIFF_BETWEEN_SAMPLES_PID_FILE";
+    /// Written by the escaped descendant once it observes that it has been
+    /// reparented — proof that its direct parent has already exited.
+    #[cfg(unix)]
+    const BETWEEN_SAMPLES_REPARENT_FILE: &str = "SNIFF_BETWEEN_SAMPLES_REPARENT_FILE";
     const SLEEPING_CHILD: &str = "process::tests::child_sleeps";
 
     fn test_child_args(name: &str) -> Vec<std::ffi::OsString> {
@@ -890,18 +960,29 @@ mod tests {
     /// created *and* detached entirely between two of sniff's samples, whose
     /// parent then exits at once.
     ///
-    /// The parent first outlives two samples, so the sampler is provably
-    /// running and has already recorded this process; only then does it fork,
-    /// at the mid-interval point furthest from either neighbouring sample. It
-    /// reports its own fork and exit offsets so the test can distinguish a
-    /// genuine escape from a host too loaded to land inside the window.
+    /// This fixture does not time itself. It waits for the supervising thread
+    /// to release it from inside that thread's post-sample hook, which is what
+    /// makes the window it forks in an interval boundary by construction rather
+    /// than by estimate.
     #[cfg(unix)]
     #[test]
     #[ignore = "subprocess fixture invoked by the process behavior tests"]
     fn child_detaches_between_samples() {
-        let start = Instant::now();
-        std::thread::sleep(DESCENDANT_SAMPLE_INTERVAL * 5 / 2);
-        let fork_offset = start.elapsed();
+        let go_file = std::path::PathBuf::from(
+            std::env::var_os(BETWEEN_SAMPLES_GO_FILE)
+                .expect("the test should provide a release marker path"),
+        );
+        let pid_file = std::env::var_os(BETWEEN_SAMPLES_PID_FILE)
+            .expect("the test should provide a PID file path");
+
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !go_file.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "the sampler hook never released this fixture"
+            );
+            std::thread::sleep(POLL_INTERVAL);
+        }
 
         let executable = std::env::current_exe().expect("current test executable should resolve");
         let args = test_child_args(BETWEEN_SAMPLES_DESCENDANT);
@@ -911,6 +992,8 @@ mod tests {
             .expect("between-samples descendant should spawn");
         let descendant_pid = libc::pid_t::try_from(descendant.id())
             .expect("descendant process ID should fit pid_t");
+        std::fs::write(pid_file, descendant_pid.to_string())
+            .expect("between-samples descendant PID should be reported");
 
         // Exiting before `setsid` returns would reproduce nothing: until then
         // the descendant is still in the supervised process group, where the
@@ -920,12 +1003,6 @@ mod tests {
             // SAFETY: `descendant_pid` names the child spawned above. A session
             // leader's process-group ID equals its PID.
             if unsafe { libc::getpgid(descendant_pid) } == descendant_pid {
-                println!(
-                    "escape|{}|{}|{}",
-                    descendant_pid,
-                    fork_offset.as_millis(),
-                    start.elapsed().as_millis()
-                );
                 return;
             }
             std::thread::sleep(POLL_INTERVAL);
@@ -937,26 +1014,77 @@ mod tests {
     #[test]
     #[ignore = "subprocess fixture invoked by the process behavior tests"]
     fn between_samples_descendant() {
+        let reparent_file = std::env::var_os(BETWEEN_SAMPLES_REPARENT_FILE)
+            .expect("the test should provide a reparent marker path");
+
         // SAFETY: this fixture is a fresh child and is not a process-group
         // leader, so it can establish an isolated session for the regression.
         assert_ne!(unsafe { libc::setsid() }, -1, "setsid should succeed");
+
+        // `setsid` leaves the parent relation intact, and that relation is what
+        // the sampler walks. The escape is only complete once the direct child
+        // has exited and the kernel has reparented this process, so publish the
+        // marker then and not a moment earlier — the supervising thread blocks
+        // on it, and releasing early would let a sample observe this process
+        // while it is still reachable.
+        // SAFETY: `getppid` takes no arguments and cannot fail.
+        let original_parent = unsafe { libc::getppid() };
+        let deadline = Instant::now() + Duration::from_secs(20);
+        // SAFETY: as above.
+        while unsafe { libc::getppid() } == original_parent {
+            assert!(
+                Instant::now() < deadline,
+                "the direct child never exited, so no reparenting occurred"
+            );
+            std::thread::sleep(POLL_INTERVAL);
+        }
+        std::fs::write(reparent_file, std::process::id().to_string())
+            .expect("reparented descendant should publish its marker");
+
         std::thread::sleep(Duration::from_secs(30));
+    }
+
+    #[cfg(unix)]
+    fn read_pid(path: &std::path::Path) -> Option<libc::pid_t> {
+        std::fs::read_to_string(path).ok()?.trim().parse().ok()
     }
 
     /// SIGKILLs an escaped descendant on every exit path, including panics.
     ///
-    /// The escapee is reparented to init, so it is not ours to `wait` on — but
-    /// leaving a 30s sleeper behind on a developer's or CI host is not
-    /// acceptable either.
+    /// The PID slot is shared with the sampler hook, which fills it as soon as
+    /// the fixture publishes one — so the guard is armed before any assertion
+    /// runs, not after. The escapee is reparented to init, so it is not ours to
+    /// `wait` on, but leaving a 30s sleeper behind on a developer's or CI host
+    /// is not acceptable either.
     #[cfg(unix)]
-    struct EscapedDescendant(libc::pid_t);
+    struct EscapedDescendant(std::sync::Arc<std::sync::atomic::AtomicI32>);
+
+    #[cfg(unix)]
+    impl EscapedDescendant {
+        fn new() -> Self {
+            Self(std::sync::Arc::new(std::sync::atomic::AtomicI32::new(0)))
+        }
+
+        fn slot(&self) -> std::sync::Arc<std::sync::atomic::AtomicI32> {
+            std::sync::Arc::clone(&self.0)
+        }
+
+        fn pid(&self) -> Option<libc::pid_t> {
+            match self.0.load(std::sync::atomic::Ordering::SeqCst) {
+                0 => None,
+                pid => Some(pid),
+            }
+        }
+    }
 
     #[cfg(unix)]
     impl Drop for EscapedDescendant {
         fn drop(&mut self) {
-            // SAFETY: the PID was reported by a fixture this test spawned and is
-            // signaled at most once, immediately after the assertions read it.
-            unsafe { libc::kill(self.0, libc::SIGKILL) };
+            let Some(pid) = self.pid() else {
+                return;
+            };
+            // SAFETY: the PID was reported by a fixture this test spawned.
+            unsafe { libc::kill(pid, libc::SIGKILL) };
         }
     }
 
@@ -973,52 +1101,75 @@ mod tests {
     ///
     /// If Unix containment is ever made total, this assertion is what flips —
     /// invert it and update the module documentation together.
+    ///
+    /// The window is closed on the sampler's own terms rather than guessed at:
+    /// the post-sample hook releases the fixture and then blocks until the
+    /// escaped descendant reports that it has been reparented, which cannot
+    /// happen before the direct child has exited. No sample can run while the
+    /// hook is blocked, and the loop's next `try_wait` observes an
+    /// already-exited child, so no sample can run afterwards either. The test
+    /// therefore reaches a verdict on every run at any host load; there is no
+    /// path that reports success without asserting the residual.
     #[cfg(unix)]
     #[test]
     fn a_descendant_that_detaches_between_samples_escapes_containment() {
+        let scratch = tempfile::tempdir().expect("temporary marker directory should exist");
+        let go_file = scratch.path().join("go");
+        let pid_file = scratch.path().join("descendant-pid");
+        let reparent_file = scratch.path().join("reparented");
+
+        let escapee = EscapedDescendant::new();
+
+        let pid_slot = escapee.slot();
+        let hook_go_file = go_file.clone();
+        let hook_pid_file = pid_file.clone();
+        let hook_reparent_file = reparent_file.clone();
+        let mut released = false;
+        let _hook = sample_hook::install(move || {
+            if released {
+                return;
+            }
+            released = true;
+            std::fs::write(&hook_go_file, b"go").expect("release marker should be writable");
+
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while Instant::now() < deadline {
+                if let Some(pid) = read_pid(&hook_pid_file) {
+                    pid_slot.store(pid, std::sync::atomic::Ordering::SeqCst);
+                }
+                if hook_reparent_file.exists() {
+                    return;
+                }
+                std::thread::sleep(POLL_INTERVAL);
+            }
+        });
+
         let executable = std::env::current_exe().expect("current test executable should resolve");
-        let args = test_child_args(BETWEEN_SAMPLES_CHILD);
         let mut command = Command::new(executable);
-        command.args(args);
+        command
+            .args(test_child_args(BETWEEN_SAMPLES_CHILD))
+            .env(BETWEEN_SAMPLES_GO_FILE, &go_file)
+            .env(BETWEEN_SAMPLES_PID_FILE, &pid_file)
+            .env(BETWEEN_SAMPLES_REPARENT_FILE, &reparent_file);
 
         let start = Instant::now();
-        let out = run_command_with_timeout(&mut command, Duration::from_secs(30))
+        let out = run_command_with_timeout(&mut command, Duration::from_secs(60))
             .expect("the direct child exits successfully, it does not time out");
         let returned_after = start.elapsed();
 
         assert!(out.status.success(), "the direct child should exit cleanly");
         assert!(
-            returned_after < Duration::from_secs(10),
+            returned_after < Duration::from_secs(15),
             "an escaped descendant must not delay the helper's return"
         );
+        assert!(
+            reparent_file.exists(),
+            "the descendant should have been reparented before the helper returned"
+        );
 
-        let report = out.stdout_lossy();
-        let fields = report
-            .lines()
-            .find_map(|line| line.strip_prefix("escape|"))
-            .expect("the fixture should report its escaped descendant")
-            .split('|')
-            .map(|field| field.parse::<u128>().expect("report fields are numeric"))
-            .collect::<Vec<_>>();
-        let [pid, fork_ms, exit_ms] = fields[..] else {
-            panic!("the fixture report should carry a PID and two offsets");
-        };
-        let pid = libc::pid_t::try_from(pid).expect("reported PID should fit pid_t");
-        let _escapee = EscapedDescendant(pid);
-
-        // The fixture times itself from its own start, which trails the helper's
-        // by the spawn cost. Charging the whole unaccounted span to that skew
-        // over-estimates it, which is the safe direction: a host loaded enough
-        // to straddle a sample boundary gets no verdict rather than a false one.
-        let skew_ms = returned_after.as_millis().saturating_sub(exit_ms);
-        let interval_ms = DESCENDANT_SAMPLE_INTERVAL.as_millis();
-        if fork_ms / interval_ms != (exit_ms + skew_ms) / interval_ms {
-            eprintln!(
-                "host too loaded to fork between samples (fork {fork_ms}ms, exit {exit_ms}ms, \
-                 skew <={skew_ms}ms, interval {interval_ms}ms); residual assertion skipped"
-            );
-            return;
-        }
+        let pid = escapee
+            .pid()
+            .expect("the fixture should report its escaped descendant");
 
         // SAFETY: signal zero performs existence and permission checks without
         // delivering a signal to the reported process.
