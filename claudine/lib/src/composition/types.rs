@@ -827,4 +827,3 @@ pub struct SequenceTaskResult {
     /// Wall-clock duration of the task.
     pub duration: std::time::Duration,
 }
-
