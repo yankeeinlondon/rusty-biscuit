@@ -28,6 +28,9 @@ do not belong here.
   result means the working tree differs from the staged snapshot.
 - Do not commit unresolved conflict markers. If staged content contains them,
   leave that group staged and report it.
+- Conflict-marker checks must inspect the full staged blob (`git show :<path>`),
+  not only staged diff hunks or `git diff --check`; malformed or pre-existing
+  marker fragments outside the changed hunk can otherwise pass unnoticed.
 - Use `git log` for commit-history examples. `sniff git commits` is not valid.
 
 ## Path-Limited Commits
