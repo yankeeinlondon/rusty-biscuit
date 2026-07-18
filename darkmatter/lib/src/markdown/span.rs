@@ -3,11 +3,12 @@
 //! Spans are byte-offset ranges into the exact source text handed to the
 //! parser — no line-ending normalization is applied, so offsets remain valid
 //! against the caller's original document (including CRLF content).
+//!
+//! [`SourceSpan`] itself is owned by `biscuit-file` (the shared span
+//! vocabulary for the workspace) and re-exported here unchanged; both paths
+//! name the same `Range<usize>`.
 
-use std::ops::Range;
-
-/// Byte-offset range into a source document.
-pub type SourceSpan = Range<usize>;
+pub use biscuit_file::SourceSpan;
 
 /// A value paired with the source span it was parsed from.
 #[derive(Debug, Clone, PartialEq, Eq)]
