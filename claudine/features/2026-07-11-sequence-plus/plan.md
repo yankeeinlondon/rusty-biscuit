@@ -1,7 +1,7 @@
 ---
 total_phases: 13
 created: 2026-07-12
-phase: 7
+phase: 8
 yolo: "true"
 source_files_during_phase_1:
   - claudine/lib/src/composition/sequence/tests.rs
@@ -135,6 +135,36 @@ docs_updated_during_phase_7: []
 docs_created_during_phase_7: []
 skills_files_updated_during_phase_7: []
 packages_during_phase_7:
+  - claudine
+source_files_during_phase_8:
+  - claudine/lib/src/composition/resolve.rs
+  - claudine/lib/src/composition/mod.rs
+  - claudine/lib/src/composition/types.rs
+  - claudine/lib/src/composition/error/mod.rs
+  - claudine/lib/src/composition/sequence/mod.rs
+  - claudine/lib/src/composition/sequence/model.rs
+  - claudine/lib/src/composition/sequence/tests.rs
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/cli/src/commands/wrap/composition/runner.rs
+  - claudine/cli/src/commands/wrap/harness_orch/types.rs
+  - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/src/commands/wrap/sequence/mod.rs
+  - claudine/cli/src/commands/wrap/sequence/jit.rs
+  - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+  - claudine/cli/src/commands/wrap/sequence/iterate.rs
+  - claudine/cli/src/commands/wrap/sequence/task_run.rs
+  - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+  - claudine/cli/tests/sequence_jit.rs
+  - claudine/cli/tests/error_guards/transport-allow.toml
+  - claudine/docs/providers/dispatch-inventory.json
+docs_updated_during_phase_8: []
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8: []
+packages_during_phase_8:
   - claudine
 packages:
   - biscuit-file
@@ -293,15 +323,15 @@ group or sequence scheduling.
 **Goal:** Replace eager all-step preparation with static preflight followed by
 live-disk, turn-by-turn composition and execution.
 
-- [ ] Retire `phase1c`'s stored `PreparedComposition` vector and replace it with immutable preflight nodes plus the invocation runtime cell.
-- [ ] At each step boundary, check interruption, re-read the live source, rebuild effective layers, validate, compose, execute the default body or explicit task, append output, and merge runtime mutations.
-- [ ] Preserve default-body execution for steps without executable fields and explicit-task replacement semantics for steps with one; require an executable on every bodyless step.
-- [ ] Re-read inline-compose/body/frontmatter changes between sequence steps but never re-resolve the snapshotted step list; demonstrate that live edits affect later composition only at allowed boundaries.
-- [ ] Treat JIT composition/late-required failures as step failures governed by sequence `fail_fast`; retain interactive collection in serial TTY contexts and typed errors otherwise.
-- [ ] Implement dry-run as full preflight followed by JIT composition of every task against initial state, empty outputs, and no runtime mutations, with no provider launch or write-back.
-- [ ] Preserve provider/model selection, shared approval cache, timeouts/guards, lifecycle behavior, exit codes, summary counts, performance collection, and Ctrl+C checks from the existing orchestrator.
-- [ ] Add end-to-end tests proving serial visibility of `set`, prior outputs, reserved-overlay precedence, live-disk chaining, continued execution with `fail_fast: false`, and immediate stop with `fail_fast: true`.
-- [ ] **Validation checkpoint:** no step is fully composed before its turn, retained sequence CLI tests pass under the new architecture, and interruptions between or during steps return `130` with a partial summary.
+- [x] Retire `phase1c`'s stored `PreparedComposition` vector and replace it with immutable preflight nodes plus the invocation runtime cell.
+- [x] At each step boundary, check interruption, re-read the live source, rebuild effective layers, validate, compose, execute the default body or explicit task, append output, and merge runtime mutations.
+- [x] Preserve default-body execution for steps without executable fields and explicit-task replacement semantics for steps with one; require an executable on every bodyless step.
+- [x] Re-read inline-compose/body/frontmatter changes between sequence steps but never re-resolve the snapshotted step list; demonstrate that live edits affect later composition only at allowed boundaries.
+- [x] Treat JIT composition/late-required failures as step failures governed by sequence `fail_fast`; retain interactive collection in serial TTY contexts and typed errors otherwise.
+- [x] Implement dry-run as full preflight followed by JIT composition of every task against initial state, empty outputs, and no runtime mutations, with no provider launch or write-back.
+- [x] Preserve provider/model selection, shared approval cache, timeouts/guards, lifecycle behavior, exit codes, summary counts, performance collection, and Ctrl+C checks from the existing orchestrator.
+- [x] Add end-to-end tests proving serial visibility of `set`, prior outputs, reserved-overlay precedence, live-disk chaining, continued execution with `fail_fast: false`, and immediate stop with `fail_fast: true`.
+- [x] **Validation checkpoint:** no step is fully composed before its turn, retained sequence CLI tests pass under the new architecture, and interruptions between or during steps return `130` with a partial summary. *(`phase1c` no longer stores a `PreparedComposition`; its validation compose is discarded and execution re-composes through the same `jit::compose_step`. "Composed at its turn" is witnessed behaviorally by `a_later_step_composes_against_the_edit_an_earlier_step_made` and `a_set_from_an_earlier_step_is_composed_into_a_later_step` — an eagerly-composed step cannot see either. `an_interrupt_between_steps_exits_130_with_a_partial_summary` pins the exit code and the partial summary. 13 new E2E cases in `cli/tests/sequence_jit.rs` + 4 layering unit tests in `wrap/sequence/jit/tests.rs`; the retained `sequence_cli`, `composition_outputs`, and `sequence_perf` suites pass unchanged except for the perf-tree placement, which moved with the composition it describes. `just test` — 5976 pass; `just lint` clean.)*
 
 ## Phase 9 — Serial groups
 
