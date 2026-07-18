@@ -1,7 +1,7 @@
 ---
 total_phases: 13
 created: 2026-07-12
-phase: 11
+phase: 12
 yolo: "true"
 source_files_during_phase_1:
   - claudine/lib/src/composition/sequence/tests.rs
@@ -244,6 +244,31 @@ skills_files_updated_during_phase_11:
   - .claude/skills/claudine/SKILL.md
 packages_during_phase_11:
   - claudine
+source_files_during_phase_12:
+  - claudine/lib/src/composition/resolve.rs
+  - claudine/lib/src/composition/prepare.rs
+  - claudine/lib/src/composition/mod.rs
+  - claudine/lib/src/composition/error/tests.rs
+  - claudine/cli/src/commands/sequence.rs
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/cli/src/commands/wrap/sequence/jit.rs
+  - claudine/cli/src/commands/wrap/sequence/iterate.rs
+  - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+  - claudine/cli/src/commands/wrap/sequence/task_run.rs
+  - claudine/cli/tests/sequence_errors_cli.rs
+  - claudine/cli/tests/sequence_sources_cli.rs
+  - claudine/cli/tests/sequence_cli.rs
+  - claudine/cli/tests/level2_sequence_overlay_pty.rs
+docs_updated_during_phase_12:
+  - claudine/docs/topics/flow-control/sequences.md
+docs_created_during_phase_12: []
+skills_files_updated_during_phase_12:
+  - .claude/skills/claudine/SKILL.md
+  - .claude/skills/claudine/architecture.md
+  - .claude/skills/claudine/cli-reference.md
+  - .claude/skills/claudine/timeline.md
+packages_during_phase_12:
+  - claudine
 packages:
   - biscuit-file
   - darkmatter
@@ -457,15 +482,21 @@ breaking stdout/stderr contracts.
 **Goal:** Prove the complete feature contract and publish the new clean-break
 behavior.
 
-- [ ] Expand CLI integration coverage for all acceptance-criteria errors: executable exclusivity, reserved writes, invalid formal states, empty static lists, suffix syntax, offsets/operators, cycles, nesting, write-back collisions, `max_parallel`, timeout, and group-loop rejection.
-- [ ] Add cross-package fixtures covering YAML/JSON/JSON5/JSONL/NDJSON, all `ListFormat` forms, expression/shell dynamics, `FileReference` families, schemas/templates, external tasks/groups/catalogs, direct YAML invocation, and document-level versus task-level `prompt`.
-- [ ] Audit process spawning, path syntax, CRLF/newline trimming, env/CWD handling, duration parsing, and interruption code for macOS, Windows, and Linux; use platform gates only around genuinely OS-specific assertions.
-- [ ] Update `claudine/docs/topics/flow-control/sequences.md` as the primary user contract, prominently documenting the two meanings of `prompt`, reserved keys, source grammar, JIT/live-disk semantics, outputs, groups, concurrency, and the group-loop deferral.
-- [ ] Update the Claudine CLI reference, composition docs/examples, README surfaces, `.claude/skills/claudine/architecture.md`, `timeline.md`, and `SKILL.md`; update package dependency docs only if dependencies changed.
-- [ ] Review all touched rustdoc/module docs/inline comments for behavior drift, delete the stale eager/live-file comment identified in `current-state.md`, and avoid HOW-narration or literal rendering narration.
-- [ ] Run `just test` in `biscuit-file/`, `darkmatter/`, and `claudine/`; run `just test-l2` in `claudine/` for terminal/concurrency behavior and `just lint` in every touched package area.
-- [ ] Run read-only formatting checks; do not run `cargo fmt` or `rustfmt` in write mode.
-- [ ] **Validation checkpoint:** every acceptance criterion maps to a passing test or updated document, all touched package-area suites/lints pass, and no test relies on Unix-only behavior without an explicit gate.
+- [x] Expand CLI integration coverage for all acceptance-criteria errors: executable exclusivity, reserved writes, invalid formal states, empty static lists, suffix syntax, offsets/operators, cycles, nesting, write-back collisions, `max_parallel`, timeout, and group-loop rejection. *(New `cli/tests/sequence_errors_cli.rs` — 23 cross-platform cases; every one is rejected before a provider launches, so the binary needs no `#!/bin/sh` stub and therefore no `unix` gate. Cycles, nesting, direct group execution, group `loop`, write-back collisions, late-binding shell, and static empty lists were already covered in `sequence_cli.rs`, and reserved-key **writes** in `composition_outputs.rs`; those are mapped rather than duplicated.)*
+- [x] Add cross-package fixtures covering YAML/JSON/JSON5/JSONL/NDJSON, all `ListFormat` forms, expression/shell dynamics, `FileReference` families, schemas/templates, external tasks/groups/catalogs, direct YAML invocation, and document-level versus task-level `prompt`. *(New `cli/tests/sequence_sources_cli.rs` — 22 cross-platform cases driven through `--dry-run`, which runs the full preflight and composes every step without launching a provider. The five data formats assert **equality with each other** rather than five independent expectations, so a future format-specific divergence cannot hide. Direct YAML invocation was found completely broken and is fixed — see the regression note below.)*
+- [x] Audit process spawning, path syntax, CRLF/newline trimming, env/CWD handling, duration parsing, and interruption code for macOS, Windows, and Linux; use platform gates only around genuinely OS-specific assertions. *(Source audit clean: `task/shell.rs` is the only spawner and is `cfg(windows)`-gated `cmd /C` vs `sh -c`, waits via `try_wait` polling — no `wait4`/signals — and terminates with `child.kill()`, the one primitive with identical semantics on all three platforms. CRLF is handled twice and independently: `ListFormat::normalize_newlines` on the way in, `trim_transport_newline` on the way out. Durations go through `harness::parse_timeout`; paths go through `FileReference` (new tests cover a path with a space and one with an `@`); env/CWD immutability is pinned by phase 10's `parallel_execution_leaves_process_env_and_cwd_untouched`. **Test-gating fixed:** the nine witness-based preflight tests in `sequence_cli.rs` were ungated despite depending on a `#!/bin/sh` provider stub — they are now `#[cfg(unix)]`, and the six blocked-construct message contracts they assert gained ungated counterparts in `sequence_errors_cli.rs`. Windows keeps the message contract; only the zero-launch witness, a genuinely OS-specific assertion, is gated. Note: Windows cross-compilation from this host is blocked upstream (`duckdb-sys` + mingw), so Windows behavior is argued from source and gating, not from a compiled run.)*
+- [x] Update `claudine/docs/topics/flow-control/sequences.md` as the primary user contract, prominently documenting the two meanings of `prompt`, reserved keys, source grammar, JIT/live-disk semantics, outputs, groups, concurrency, and the group-loop deferral. *(Full rewrite. The prior document was largely aspirational — it described `groups:`/`members:`, `command:`, `variables:`, `until`/`while`, a list-shaped `template`, and a `parameters:` block, none of which were ever implemented. The two meanings of `prompt` now lead the document, immediately after the invocation line.)*
+- [x] Update the Claudine CLI reference, composition docs/examples, README surfaces, `.claude/skills/claudine/architecture.md`, `timeline.md`, and `SKILL.md`; update package dependency docs only if dependencies changed. *(`cli-reference.md` §`claudine sequence` rewritten plus the `sequence --dry-run` bullet; `architecture.md` gained a §Sequences under Composition naming the two seams worth knowing before editing; `timeline.md` gained the `sequence-plus` entry; `SKILL.md` composition rows updated. No dependency changes, so no `docs/dependencies.md` edit.)*
+- [x] Review all touched rustdoc/module docs/inline comments for behavior drift, delete the stale eager/live-file comment identified in `current-state.md`, and avoid HOW-narration or literal rendering narration. *(The `current-state.md` comment at `wrap/sequence/mod.rs:110` — "Each step reads the live file at run time, so it sees the prior step's rewritten body" — is **no longer stale**: phase 8 made it true. Per the repo's drift rule the code is authoritative, and here the code caught up to the comment, so it is retained rather than deleted. Drift resolution recorded rather than silently applied.)*
+- [x] Run `just test` in `biscuit-file/`, `darkmatter/`, and `claudine/`; run `just test-l2` in `claudine/` for terminal/concurrency behavior and `just lint` in every touched package area. *(`just test`: biscuit-file 367+61, darkmatter 5630+555+566, claudine 21+3760+47+2106+152 — all exit 0. `just lint` in all three areas: clean. `just test-l2 --no-fail-fast` (the bare recipe fail-fasts at 34/144, so it is re-run with the flag for real coverage): **144 run, 141 passed, 3 failed**. The 3 are `level2_context_{default,values,side_effects}_at_140_fills_cap_in_tmux` — `claudine context` table width on this host renders 140 visible cells where the contract wants 138–139. Unrelated to sequences and **pre-existing**: phase 2's checkpoint recorded the identical 3 failures on this host, including the untouched default report. **L2 also caught a real stale test** that no L1 gate could see, because phases 3–11 ran `just test` only: `level2_pty_sequence_step_overlay_satisfies_required_property` still encoded the retired pre-clean-break contract in its own comment — "`state` is set to each step's **raw value**" — and declared `$schema: state: string(required)`. Under the ratified break `state` is always a `step_state` object and string coercion is a *render*-context rule, so the schema correctly rejected it. Updated to `object(required)` with the comment corrected; the body's `Step {{state}}` → `Step alpha` render assertions were already right and still pass.)*
+- [x] Run read-only formatting checks; do not run `cargo fmt` or `rustfmt` in write mode. *(`cargo fmt --check -p claudine -p claudine-cli` only. It reports **397 drifting files workspace-wide** — the ambient local-rustfmt-vs-`main` divergence `CLAUDE.md` describes, not something this phase produced. Each flagged hunk in a file this phase touched was checked against `git diff` line ranges: `jit.rs` clean; `sequence.rs:108` is a line preserved **verbatim** from `HEAD` (confirmed via `git show HEAD:…`) so it is pre-existing; `resolve.rs:113` was genuinely mine and was **hand-corrected**, not formatted. The two new test binaries carry local-rustfmt drift that is left alone deliberately: local rustfmt disagrees with `main` on 397 other files, so conforming new files to it would make them *less* consistent with the repo, not more. No write-mode `cargo fmt`/`rustfmt` was run.)*
+- [x] **Validation checkpoint:** every acceptance criterion maps to a passing test or updated document, all touched package-area suites/lints pass, and no test relies on Unix-only behavior without an explicit gate. *(45 new cross-platform CLI cases across two ungated binaries, plus six ungated counterparts for the blocked constructs whose zero-launch witnesses stay `unix`-gated. Every `#[cfg(unix)]` in the sequence suites now exists for one reason only — a `#!/bin/sh` provider stub — and the nine that were missing it were added. **Two defects surfaced and were fixed rather than documented around:** direct YAML sequence invocation was **entirely broken** by phase 8's live re-read (`reload_composition_source` parsed a `.yaml` source as plain Markdown, yielding an empty frontmatter indistinguishable downstream from a document declaring nothing) — both load paths now share `composition::load_yaml_document`; and the empty-body guard rejected the bodyless shape that a direct YAML sequence always has, now gated by `PrepareOptions::allow_empty_body`, set only by a step that declares an executable. **Three items are deferred to Ken rather than decided here** — see the Phase 12 findings note below.)*
+
+> **Phase 12 findings requiring a decision (not resolved in this phase):**
+>
+> 1. **Formal `$schema` asymmetry.** A formal sequence document's `$schema` validates step *state* when the file is referenced, but the *document's own frontmatter* when the same file is invoked directly — contradicting spec line 223 ("both entry modes accept the identical document shape"). Reconciling it changes user-facing semantics either way: making direct invocation validate state would remove the only way a headless sequence declares caller parameters. **Current behavior is pinned by tests on both sides** (`sequence_sources_cli.rs`) and documented as a known asymmetry, deliberately not changed in a closure phase.
+> 2. **`--dry-run` executes shell work.** `$( … )` expansions *and* `shell:` tasks run for real under `--dry-run`, so a dry run of a sequence containing `shell: just commit` will commit. The `$( … )` half is inherited pre-existing behavior (`current-state.md` records it); `shell:` **tasks** are new in this feature and inherited the same path. The spec only says dry-run launches no provider and performs no write-back. Pinned and called out with a warning in both `sequences.md` and the CLI reference; a semantic change was judged out of scope for phase 12.
+> 3. **Windows is argued, not executed.** Cross-compilation from this host is blocked upstream (`duckdb-sys` + mingw), so Windows correctness rests on source audit and test gating rather than a compiled run.
 
 ## Phase 13 — Change-scope audit and handoff
 

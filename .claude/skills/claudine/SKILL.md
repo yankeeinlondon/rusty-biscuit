@@ -88,7 +88,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 |---------|-------------|
 | `claudine compose <file> [key=value ...]` | Compose a Markdown file and send the result as a prompt (no file mutation) |
 | `claudine inline-compose <file> [key=value ...]` | Use frontmatter `prompt` to generate content and replace the body; preserves frontmatter, updates `last_updated`, stamps a Darkmatter `Simple` `hash:` |
-| `claudine sequence <file> [key=value ...]` | Run a serial sequence of composition steps with shared shell approval cache and `FAIL_FAST` propagation |
+| `claudine sequence <file> [key=value ...]` | Run an ordered list of steps — static preflight over the whole task graph, then just-in-time composition at each step's turn; tasks, groups (serial/parallel), and the `outputs` accumulator |
 
 **Administration**
 
@@ -122,6 +122,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | Error architecture | One discovery seam (`as_diagnostic`) + one role-based selection walk; rendering, `err.*`, and machine output all project the **same** effective diagnostic. Read before adding an error type or a catalog code | [Error Architecture](error-architecture.md) |
 | Composition diagnostics | Prepare-time did-you-mean warnings (unknown function / `ctx.*`, `--silent`-suppressed); frontmatter-rooted errors append a highlighted, line-numbered YAML block (TTY-gated) | [Composition](composition.md#prepare-time-warnings) |
 | Whole-value frontmatter | A value that is *exactly one* `{{ … }}` / `$(…)` span is executable state — it must resolve and must never leak as raw syntax | [Composition § Whole-value](composition.md#whole-value-frontmatter-expansion-is-executable-state) |
+| Sequences | Two phases: static preflight over the whole task graph (dynamic sources snapshot once, shell approved byte-for-byte, no exceptions), then just-in-time composition at each step's turn against the live file. One executable per task; `outputs` is the sole accumulator; groups run serial or parallel | [Sequences](../../../claudine/docs/topics/flow-control/sequences.md) · [architecture.md § Sequences](architecture.md#sequences) |
 | Lifecycle stacks | Seven flow-control verbs (`stop`/`skip`/`error`/`proxy`/`retry`/`resume`/`defer`; `defer` unimplemented), two action forms, early/late binding via Darkmatter DM1/DM2 (strict, fail-closed), leak & err-placement guards, `no_error`, the `stdout` channel | [Lifecycle](lifecycle.md) |
 | Protect | `protect::observe` classifies bash- and write-shaped tools; best-effort defense-in-depth, not a security boundary | [Protect Service](protect-service.md) |
 

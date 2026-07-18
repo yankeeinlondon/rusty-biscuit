@@ -435,6 +435,46 @@ Other concerns remain split by responsibility:
 Composition execution headers are shared output helpers in
 `cli/src/output/mod.rs`; they do not live in the executor pipeline.
 
+### Sequences
+
+`lib/src/composition/sequence/` owns the normalized plan; `cli/src/commands/wrap/sequence/`
+owns orchestration. The split follows the two execution phases:
+
+- `sequence/{model,normalize,reserved,source,grammar,data,expr}.rs` — typed step
+  state, id/`sequence_id` generation, the reserved-key catalog, and the
+  `<file-ref> [-> offset] [::op(args)]` source grammar. Data files load through
+  `biscuit_file` and resolve through `FileReference::resolve_from(authoring_dir)`;
+  string sources classify through `biscuit_file::ListFormat`.
+- `sequence/preflight/` — the recursive task-graph loader. Walks inline tasks,
+  `kind: task` / `kind: group` / `kind: group-catalog` files, and every `prompt:`
+  document, keeping a canonical-path ancestry stack so a cycle reports its whole
+  chain. Resolves shell bytes under an early-binding-only lookup so
+  approved == executed.
+- `sequence/task/` — `TaskExecution::run` → `TaskOutcome`. `run()` never returns
+  `Err`: continuation is the scheduler's `fail_fast` decision, not an error
+  escaping one task. `group.rs` adds serial and (via `std::thread::scope` plus a
+  shared cursor) parallel groups.
+- `composition/runtime_state.rs` — `RuntimeState`, the invocation-local cell
+  holding accumulated `set` mutations and the `outputs` accumulator.
+  `layered_set_overrides` is the single place the four-layer precedence
+  (live frontmatter < user setters < mutations < reserved overlay) is encoded.
+- `wrap/sequence/{jit,iterate,phase1c,task_run,task_frames}.rs` — just-in-time
+  composition at each step's turn. `phase1c`'s validation compose and execution
+  both route through `jit::compose_step`, so "validated == executed" holds
+  without a second prepare implementation.
+
+Two seams are worth knowing before editing:
+
+- **YAML sources load through `composition::load_yaml_document`.** A `.yaml`
+  sequence file is one document whose *root mapping is its frontmatter*. Both the
+  initial resolution and the just-in-time re-read
+  (`reload_composition_source`) must use that conversion; parsing a YAML source
+  as plain Markdown yields an empty frontmatter that is indistinguishable
+  downstream from a document declaring nothing.
+- **`PrepareOptions::allow_empty_body`** is set only by a step that declares an
+  executable. Such a step runs its task instead of the body, and a directly
+  invoked `kind: sequence` YAML file has no body at all.
+
 `LifecycleCatchProtocol` in `lib/src/composition/lifecycle/runtime.rs` is the
 single provider-neutral owner of setup catch routing, terminal-slot
 redesignation, finalize eligibility, active-error threading, and evaluation
