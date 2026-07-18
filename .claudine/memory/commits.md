@@ -87,7 +87,9 @@ do not belong here.
   groups finish, scan `git status --short` for staged or modified paths and
   reconcile against the original staged set; restore with
   `git restore --staged -- <path>` before re-grouping.
-- Git lock failures are transient contention. Retry the identical commit up to
+- Git lock failures are transient contention. On index/ref lock contention, do
+  not remove the lockfile; wait 1–3 seconds and retry the identical commit up
+  to five times. A concurrent worker may own the lock.
 
 - Run commands from the inherited worktree root. Do not change to a guessed
   repository path, and do not push commits.
