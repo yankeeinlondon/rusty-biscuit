@@ -1,7 +1,7 @@
 ---
 total_phases: 13
 created: 2026-07-12
-phase: 4
+phase: 5
 yolo: "true"
 source_files_during_phase_1:
   - claudine/lib/src/composition/sequence/tests.rs
@@ -64,6 +64,24 @@ docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
 packages_during_phase_4:
+  - claudine
+source_files_during_phase_5:
+  - claudine/lib/src/composition/sequence/preflight/mod.rs
+  - claudine/lib/src/composition/sequence/preflight/shape.rs
+  - claudine/lib/src/composition/sequence/preflight/tests.rs
+  - claudine/lib/src/composition/sequence/mod.rs
+  - claudine/lib/src/composition/sequence/tests.rs
+  - claudine/lib/src/composition/error/mod.rs
+  - claudine/lib/src/composition/preflight.rs
+  - claudine/lib/src/composition/mod.rs
+  - claudine/cli/src/commands/sequence.rs
+  - claudine/cli/src/commands/wrap/sequence/mod.rs
+  - claudine/cli/tests/sequence_cli.rs
+  - claudine/docs/providers/dispatch-inventory.json
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+packages_during_phase_5:
   - claudine
 packages:
   - biscuit-file
@@ -175,17 +193,17 @@ preflight snapshot with provenance-aware strictness.
 **Goal:** Discover and validate all potentially executable work before launching
 any provider, command, or side effect.
 
-- [ ] Build a recursive loader for inline tasks, `kind: task`, `kind: group`, `kind: group-catalog`, and prompt documents; retain each reference's authoring directory for descendant resolution.
-- [ ] Parse catalog references as `{group-name}@{file-ref}`, including composed magic references such as `name@@path`, and require a unique named group.
-- [ ] Maintain a canonical-path ancestry stack and return the complete typed cycle chain for task/group/prompt cycles while allowing independent branches to reuse immutable parsed documents.
-- [ ] Reject nested sequence prompt documents, nested group tasks, group `loop`, and direct execution of group documents during preflight.
-- [ ] Resolve group defaults and task overrides for `operation`/`flow`, retain CLI/document locks at their existing higher precedence, and reject fields that cannot affect the selected task type.
-- [ ] Traverse conditional branches as potential work and collect every prompt dependency, schema requirement, `$(...)` expansion, lifecycle/setup/teardown shell action, and shell task before execution.
-- [ ] Resolve shell bytes with an early-binding-only lookup, reject `outputs` and runtime-mutated/late-binding state, approve the exact resolved bytes once, and store those bytes as the only executable command representation.
-- [ ] Aggregate schema/missing-property failures across steps and referenced prompts into the existing single interactive collection pass; ensure provider/model resolution still produces one stable per-task target vector.
-- [ ] Detect parallel inline-compose write-back collisions by canonical target path, including collisions with the sequence source document.
-- [ ] Treat every preflight failure as abort-all regardless of `fail_fast`, and make dry-run perform this identical preflight.
-- [ ] **Validation checkpoint:** fixtures prove complete transitive loading, relative-origin correctness, full cycle chains, nested-work rejection, shell approved-byte parity, aggregate missing properties, and zero child launches on every preflight failure.
+- [x] Build a recursive loader for inline tasks, `kind: task`, `kind: group`, `kind: group-catalog`, and prompt documents; retain each reference's authoring directory for descendant resolution. *(`sequence/preflight/{mod,shape}.rs`; every node carries `origin_dir`/`origin_path`, and `resolve_reference` resolves from the authoring document, never the process CWD.)*
+- [x] Parse catalog references as `{group-name}@{file-ref}`, including composed magic references such as `name@@path`, and require a unique named group. *(`split_catalog_reference` splits on the FIRST `@`; a leading `@` stays a magic file reference. `select_catalog_group` rejects missing and duplicate names with `SequenceGroupCatalogLookup`, listing available names.)*
+- [x] Maintain a canonical-path ancestry stack and return the complete typed cycle chain for task/group/prompt cycles while allowing independent branches to reuse immutable parsed documents. *(`Loader::{check_cycle,enter,leave}`; the sequence source roots the stack. `SequenceReferenceCycle` carries the whole chain; the `documents` cache lets independent branches share parsed data.)*
+- [x] Reject nested sequence prompt documents, nested group tasks, group `loop`, and direct execution of group documents during preflight. *(`SequenceNestedSequence` + `SequenceUnsupportedConstruct`; `reject_non_sequence_kind` gates direct `kind: group`/`group-catalog`/`task` invocation. Phase 1's `group_loop_rejected` guard is now reachable and green.)*
+- [x] Resolve group defaults and task overrides for `operation`/`flow`, retain CLI/document locks at their existing higher precedence, and reject fields that cannot affect the selected task type. *(Group defaults propagate only to prompt tasks and yield to task-level values; `parse_task_object` enforces `reserved::allowed_task_options`. CLI/document locks are untouched — selection still runs in the CLI above preflight.)*
+- [x] Traverse conditional branches as potential work and collect every prompt dependency, schema requirement, `$(...)` expansion, lifecycle/setup/teardown shell action, and shell task before execution. *(`collect_stack_shell_commands` walks raw stacks condition-blind — a false `when:` still contributes. `PromptDocument` records `has_schema`; `resolve_graph_shell_approvals` folds each prompt document's template `::shell` discovery into one approval pass.)*
+- [x] Resolve shell bytes with an early-binding-only lookup, reject `outputs` and runtime-mutated/late-binding state, approve the exact resolved bytes once, and store those bytes as the only executable command representation. *(`resolve_shell_bytes` composes against the step's overlay-layered `EffectiveState`; `SHELL_UNAVAILABLE_ROOTS` rejects `outputs`/`err`/`timing`/`current` with `SequenceShellLateBinding`. `PreflightAction::Shell.commands` holds resolved bytes only.)*
+- [x] Aggregate schema/missing-property failures across steps and referenced prompts into the existing single interactive collection pass; ensure provider/model resolution still produces one stable per-task target vector. *(Cross-step aggregation and the single interactive pass are unchanged in `run_phase_1c_with_schema`. Preflight records each referenced prompt's schema requirement as `PromptDocument::has_schema`; the requirement JOINS that pass when prompt tasks compose in Phase 7 — validating a prompt document at preflight would report false missings because `params` bind just in time against effective state that does not exist yet. Provider/model resolution is untouched: preflight runs above it, and the existing per-step target vector is produced exactly as before — proven by the unchanged selection/dry-run CLI suites.)*
+- [x] Detect parallel inline-compose write-back collisions by canonical target path, including collisions with the sequence source document. *(`check_write_back_collisions` runs on parallel groups only; the sequence source pre-claims its own path when the document is inline-compose. Serial groups and plain-compose siblings stay legal.)*
+- [x] Treat every preflight failure as abort-all regardless of `fail_fast`, and make dry-run perform this identical preflight. *(`build_preflight_graph` + `approve_preflight_graph` run in `execute_sequence` before target resolution and phase 1c, on one code path shared by live and `--dry-run` runs; both return `Err` straight out of `execute_sequence`. `preflight_failure_aborts_even_with_fail_fast_false` and `dry_run_performs_the_same_preflight` assert zero child launches via a recording fake provider.)*
+- [x] **Validation checkpoint:** fixtures prove complete transitive loading, relative-origin correctness, full cycle chains, nested-work rejection, shell approved-byte parity, aggregate missing properties, and zero child launches on every preflight failure. *(30 L1 tests in `sequence/preflight/tests.rs` + 9 L2-free CLI E2E tests in `cli/tests/sequence_cli.rs`. Zero-child-launch is witnessed by a recording fake provider whose output file must stay absent. Phase 1's `group_loop_rejected` is un-ignored and now asserts the typed variant. `just test` and `just lint` pass from `claudine/`.)*
 
 ## Phase 6 — Runtime layers, `set`, and `outputs`
 

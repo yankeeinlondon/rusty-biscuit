@@ -3241,7 +3241,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/sequence/mod.rs",
-      "line": 376,
+      "line": 444,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
