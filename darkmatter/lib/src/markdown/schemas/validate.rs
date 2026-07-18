@@ -846,7 +846,7 @@ fn type_label(arm: &Value) -> Option<&'static str> {
 /// unchanged. A union with two or more non-null arms is ambiguous to descend
 /// into, so it is left as-is (the subsequent `properties`/`items` lookup will
 /// fail and resolution degrades to `None`).
-fn unwrap_nullable_arm(node: &Value) -> &Value {
+pub(super) fn unwrap_nullable_arm(node: &Value) -> &Value {
     let Some(arms) = node.get("anyOf").and_then(Value::as_array) else {
         return node;
     };
@@ -859,7 +859,7 @@ fn unwrap_nullable_arm(node: &Value) -> &Value {
 
 /// Whether `arm` is the `{ "type": "null" }` sentinel emitted for optional
 /// (nullable) properties.
-fn is_null_schema(arm: &Value) -> bool {
+pub(super) fn is_null_schema(arm: &Value) -> bool {
     arm.get("type").and_then(Value::as_str) == Some("null")
 }
 
