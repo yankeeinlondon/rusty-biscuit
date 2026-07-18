@@ -154,3 +154,20 @@ via `git cat-file -t`, so the committed-pin condition (admissibility condition 5
 can still be met when a quiet host is available.
 
 **Current verdict:** not established. Acceptance criteria 5 and 6 remain open.
+
+### 2026-07-17 — Review 9 assessment
+
+**Declined before capture; inadmissible host.** The review-9 assessment checked
+the host before attempting the committed three-arm harness. It reported load
+averages of **55.05** (1 minute), **70.90** (5 minutes), and **56.41**
+(15 minutes), exceeding the 2.0 ceiling by more than 27 times. No benchmark was
+run and no threshold verdict was claimed from an inadmissible host.
+
+The three required build-arm SHAs
+(`51c1f16e10ffe825b56987573ba4eabc659c768e`,
+`e15b1cc22b113a9b24058207d760cd879fa62eb6`, and
+`92a3d502eb65c30205a9a255dd13dd8dc6d0aabf`) were re-verified as committed
+objects. The threshold remains blocked solely on an admissible quiet-host
+capture.
+
+**Current verdict:** not established. Acceptance criteria 5 and 6 remain open.
