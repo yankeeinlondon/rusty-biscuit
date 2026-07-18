@@ -293,3 +293,46 @@ close without external execution or unrelated public API expansion.
   and retain all three tables plus the test and lint run links under that same
   identifier. Cross-compilation, Docker, WSL, or results from a different tree do not
   close this finding.
+
+## Review 9 deferred items
+
+### Finding 1 (High) — native Linux and Windows execution and matched work-count artifacts
+
+- **Maps back to:** [review-9.md](review-9.md), first finding; umbrella
+  [spec.md:397](spec.md#L397) acceptance criterion "Cross-platform tests pass on macOS,
+  Linux, and Windows, and the scheduled benchmark matrix emits comparable work-count
+  artifacts."
+- **Requirement:** one immutable final implementation identifier, retained green native
+  `just test` and `just lint` runs on all three operating systems, and three matched
+  `work_counts` artifacts published under that identifier.
+- **Host evidence:** `uname -a` reports native arm64 macOS (Darwin 25.5.0,
+  `xnu-12377.121.10~1/RELEASE_ARM64_T6041`). `rustup target list --installed` reports
+  `aarch64-apple-darwin`, `wasm32-wasip1`, `wasm32-wasip2`, `x86_64-pc-windows-gnu`, and
+  `x86_64-pc-windows-msvc` — **no Linux target at all**, and neither Windows target can
+  execute on macOS.
+- **Publication evidence:** `git branch -r --contains af4751810e9bc66f3e3dbe5b883c864ce76c77a0`
+  returned no remote branch. That is the exact commit review-9 named, so the review's own
+  observation is confirmed rather than merely repeated: no hosted matrix can have run for it.
+- **Why deferred:** an execution-authority and platform constraint, not a CPU-load
+  deferral. It is structurally unchanged from cycles 5 through 8. This session is
+  prohibited from committing, pushing, invoking credential helpers, starting VMs, and
+  triggering external workflows, so no authorized path to native Linux or Windows
+  execution exists from this workspace. Cross-compilation proves compilation only; Docker
+  was ruled inadmissible for this finding by review-7; a workflow definition is not an
+  execution record.
+- **Cycle-9 relevance note:** this cycle changed no Unix or Windows process code. The two
+  implemented findings were a `playa/cli` outcome-matching fix and documentation
+  corrections, so the specific native-platform risk surface is unchanged from cycle 8 —
+  the deterministic between-samples sampler hook and its `getppid()` portability claim
+  still have been exercised natively on **macOS only** and still need a native Linux run
+  where descendant discovery goes through `/proc`.
+- **New this cycle:** the identifier to publish will be a **new** SHA, not
+  `af4751810`, because cycle 9 changed `playa/cli/src/main.rs`,
+  `playa/cli/src/install_ui.rs`, `sniff/lib/CHANGELOG.md`, `sniff/lib/README.md`,
+  `sniff/cli/README.md`, and `sniff/lib/src/programs/mod.rs`. The three-OS evidence must
+  be gathered against that final tree, not against any earlier reviewed commit.
+- **To close:** commit and push one immutable cycle-9 implementation identifier to
+  `origin`; obtain green native `cd sniff && just test` and `cd sniff && just lint` runs on
+  macOS, Linux, and Windows; run the `work_counts` example natively on each; and retain all
+  three tables plus the test and lint run links under that same identifier. Cross-compilation,
+  Docker, WSL, or results from a different tree do not close this finding.

@@ -7,6 +7,7 @@ implementation_5: "2026-07-17T22:33:06-07:00"
 implementation_6: "2026-07-18T05:34:55-07:00"
 implementation_7: "2026-07-18T08:12:07-07:00"
 implementation_8: "2026-07-18T09:46:42-07:00"
+implementation_9: "2026-07-18T11:40:37-07:00"
 deferred_perf_measurement: true
 ---
 
@@ -650,4 +651,82 @@ The files changed cover the end-to-end installer timeout contract (a distinct er
 - the between-samples test's silent no-verdict path is structurally gone rather than merely unlikely: the skip branch is deleted, and 20/20 consecutive focused runs produced a real verdict
 - the review-6 fast-path guarantee is preserved — production process code gained only one doc paragraph and one `#[cfg(test)]` call, so a probe completing inside one 250 ms sample interval still performs zero `sysinfo` scans
 - two pre-existing issues were flagged rather than fixed, both out of scope: `cargo clippy --all-targets --features remote -- -D warnings` reports 5 `zombie_processes` and 1 `items_after_test_module` in `process.rs` (verified identical against `HEAD`, and invisible to both canonical `just lint` and CI's `cargo check`-based job), and `cargo fmt --check` reports 235 crate-wide diffs consistent with the known local-rustfmt-versus-`main` drift
+- no commit, push, external workflow trigger, VM startup, package installation, or write-mode formatting command was run
+
+## Implementation of Review Findings #9
+
+> **started at:** 2026-07-18T11:40:37-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'sniff/features/2026-07-16-performance/review-9.md'
+- this is iteration 9 of the review-to-implement cycle
+- review-9 contains 3 findings (2 High, 1 Medium):
+        1. High: native Linux and Windows execution and matched work-count artifacts are still absent
+        2. High: Playa renders a timeout warning but discards the first-class timeout outcome
+        3. Medium: the public migration is recorded only in the feature spec
+- starting the work on 'Playa discards the first-class installer timeout outcome (review-9 High)' at 11:41:16
+        - surveyed both existing in-repo idioms before writing anything: `sniff/cli/src/install_plan_cmd.rs:152` (`execute_install_flow` → `Result<(), Box<dyn Error>>`, exhaustive match, `TimedOut` gets its own message) and `biscuit-speaks/cli/src/main.rs:1111` (exhaustive match → `std::process::exit(1)` per arm); followed sniff's shape because it is the testable one
+        - root cause confirmed: `playa/cli/src/main.rs:1009` was `if let Err(e) = run_install_interview(...)`, so every `Ok(outcome)` — `TimedOut`, `Failed`, `NotInstallable` — was dropped and the selected-install loop continued to a zero exit
+        - added `install_outcome_verdict(program, &outcome, timeout_secs) -> Result<(), String>` immediately after `install_players`; exhaustive with **no wildcard arm**, so a future variant is a compile error rather than a silent success
+        - verdict policy, documented at each arm:
+                - `Installed` / `DryRun` → `Ok`
+                - `TimedOut` → `Err` naming the deadline, kept textually distinct from `Failed`
+                - `Failed` → `Err` "installation failed"
+                - `NotInstallable` → `Err` "cannot be installed on this host" (unexpected, since the list is pre-filtered by `ProgramDetector::installable`)
+                - `AbortedByUser` → `Ok`; the two idioms disagree here (sniff returns `Ok`, so-you-say exits 1) and sniff was followed deliberately, because Playa's boundary sits inside a multi-select loop over several players where declining one should not kill the others
+        - the caller now matches `Ok(outcome)` / `Err(e)` and routes the verdict message through the existing `error_exit`, which already renders via `Prose` + `Terminal` (`playa/cli/src/main.rs:32`); no new rendering path was introduced
+        - extracted `CliInstallUi::render_prose_line` in `playa/cli/src/install_ui.rs` and collapsed the three byte-identical `Announcement` / `ConsentWarning` / `TimeoutWarning` arms into one or-pattern — done because `emit` wrote straight to stdout with no seam, so the review's "assert the warning" half was otherwise untestable; behavior-preserving, net -30 lines
+        - tests added (all Level 1): 5 verdict tests covering `TimedOut`, `Failed`, `NotInstallable`, `Installed`+`DryRun`, and `AbortedByUser`, plus `timeout_warning_prose_reaches_the_rendered_line` asserting the warning body survives to the emitted newline-terminated line; playa-cli 13 → 19 tests, area total 69
+        - **proven to bite**: reverting the `TimedOut` arm to `Ok(())` made `just test` exit 1 with `install_verdict_timeout_fails_and_names_the_deadline` failing all 4 nextest retries at `main.rs:1832` ("a timed-out installer must not be a success"); restored, suite back to 69/69
+        - verification in the **playa** area (the area changed): `just test` exit 0 (50 lib+bin, 19 cli, 0 skipped), `just lint` exit 0, `cargo check -p playa-cli --all-targets` exit 0
+        - the downstream migration of the `TimedOut`/`Failed` split is now complete across all three consumers; `grep -rn InstallInterviewOutcome --include=*.rs` returns only `sniff/lib`, `sniff/cli`, `biscuit-speaks/cli`, and `playa/cli`, so there is no fourth consumer
+- work completed for 'Playa discards the first-class installer timeout outcome (review-9 High)' at 11:57:19
+- starting the work on 'public migration recorded only in the feature spec (review-9 Medium)' at 11:57:19
+        - documentation-only; no source behavior was changed by this finding
+        - `sniff/lib/CHANGELOG.md:5` — the Unreleased section gained four `**Breaking (source):**` Added entries (`InstallCapturedResult::timed_out`, `SniffInstallationError::InstallationTimedOut { pkg, manager, timeout_secs }`, `InstallInterviewEvent::TimeoutWarning { prose }`, `InstallInterviewOutcome::TimedOut { attempted }`), a Changed entry recording that `PackageManagerFailed` / `Failed` narrow to non-timeout failures, and a new `### Migration` subsection with a match-arm example; no version or date was invented
+        - `sniff/lib/README.md:629` — the "program key types" list was extended past `InstallOptions` / `InstallResult` with the four timeout-contract types, plus a paragraph stating the Unix best-effort/partial-install caveat against total Windows Job Object containment
+        - `sniff/cli/README.md:227` — the installation section gained two paragraphs: the timeout warning renders after the failure status and before any retry prompt, and Unix termination is best-effort so a timed-out install may leave a partial install (with advice to re-check via `sniff software <category>`), while Windows containment is kernel-enforced; sourced from `sniff/lib/src/process.rs:10-48` module docs so the guarantee is not overstated
+        - **the category-count drift was worse than review-9 reported.** The review asserts "the authoritative count is nine"; nine was itself a stale intermediate value. The code says **ten**, confirmed three independent ways: 10 `ProgramsInfo` fields (`sniff/lib/src/programs/mod.rs:170`), 5 `rayon::join` pairs = 10 detectors (`mod.rs:233`), and the CLI subcommand list already exposing `notification-helpers` (`sniff/cli/src/args/mod.rs:313`)
+                - per repo convention the code is authoritative, so **ten** was written rather than the number the finding asked for; this is a deliberate deviation from the review text and is flagged here for the next reviewer
+                - corrected at three README sites (`sniff/lib/README.md` lines 622, 647, and 699 — the last being the `eight` the finding named) and the category table at `README.md:633` gained its missing `Notification Helpers` row, verified against the `NotificationHelper` enum at `sniff/lib/src/programs/enums/categories.rs:371` and ordered to match struct field order
+                - the same stale fact in rustdoc (`sniff/lib/src/programs/mod.rs:209, 219, 220`: "all 9 categories", "instead of 9x per category" ×2) was initially left out of scope by the subagent and then **fixed on orchestrator instruction**, because the repo's drift convention requires the comment to be corrected in the same change as its detection
+        - no edited file carries `hash:` frontmatter, so no Darkmatter rehash was required
+- work completed for 'public migration recorded only in the feature spec (review-9 Medium)' at 12:06:51
+- starting the work on 'native Linux and Windows execution and matched work-count artifacts (review-9 High)' at 12:02:11
+        - re-verified the constraint rather than inheriting cycle 8's conclusion:
+                - `uname -a` → native arm64 macOS (Darwin 25.5.0, `xnu-12377.121.10~1/RELEASE_ARM64_T6041`)
+                - `rustup target list --installed` → `aarch64-apple-darwin`, `wasm32-wasip1`, `wasm32-wasip2`, `x86_64-pc-windows-gnu`, `x86_64-pc-windows-msvc`; **no Linux target at all**, and neither Windows target can execute on macOS
+                - `git branch -r --contains af4751810e9bc66f3e3dbe5b883c864ce76c77a0` → no remote branch, confirming review-9's own observation for the exact commit it named
+        - **deferred** as a platform and execution-authority constraint, not a CPU-load deferral; structurally unchanged from cycles 5 through 8. This session is prohibited from committing, pushing, invoking credential helpers, starting VMs, and triggering external workflows, so no authorized native Linux or Windows execution path exists from this workspace
+        - cross-compilation proves compilation only, Docker was ruled inadmissible for this finding by review-7, and a workflow definition is not an execution record
+        - relevance note for this cycle: **no Unix or Windows process code was changed**, so the native-platform risk surface is unchanged from cycle 8 — the deterministic between-samples sampler hook and its `getppid()` portability claim have still been exercised natively on macOS only
+        - **new this cycle:** the identifier to publish will be a *new* SHA, not `af4751810`, because cycle 9 changed six files across the playa and sniff areas; the three-OS evidence must be gathered against that final tree rather than any earlier reviewed commit
+        - full detail and the closure procedure appended to `sniff/features/2026-07-16-performance/deferred-perf-tests.md` under "Review 9 deferred items"; `deferred_perf_measurement: true` remains set in this log's frontmatter
+- work completed for 'native Linux and Windows execution and matched work-count artifacts (review-9 High)' at 12:02:21
+- addendum to 'public migration recorded only in the feature spec (review-9 Medium)' — the stale-count sweep
+        - the initial pass corrected only the sites review-9 named; a follow-up sweep found **eight more live instances of the same stale fact**, all corrected on orchestrator instruction: `sniff/README.md:34,47,138`, `sniff/lib/README.md:12,147`, `sniff/cli/README.md:606,855`, and `sniff/docs/sniff-library-architecture.md:88`; `sniff/cli/README.md:616` also gained the missing **Notification Helpers** bullet so the list and its count agree
+        - one of those was **not** the same quantity and was fixed differently rather than bumped: `sniff/README.md:47` read "List and install programs across 9 categories", conflating listing (10 categories) with installing (8). Exactly eight `*Action::Install(` enums exist — Agent, Audio, Editor, LangPkgMgr, OsPkgMgr, TerminalApp, TtsClient, Utility — and `NotificationHelperAction` does not exist at all, with test runners a deliberate report-only leaf. The claim was split instead of renumbered, because writing "10" would have been wrong in the other direction
+        - four sites were **verified and deliberately left unchanged**:
+                - `sniff/cli/src/output/programs.rs:612,629` ("the eight categories" / "all 8 categories") looks like the same stale count but is not — `build_programs_json`'s `OutputFilter::Programs` arm genuinely joins exactly eight JSON builders, with notification helpers and test runners routed separately upstream in `commands/mod.rs`. Changing it would have *introduced* drift; this is the case for verifying each site rather than running a blanket find-and-replace
+                - `review-9.md:58` is the review record itself, and editing it would rewrite the finding this cycle is evidence for
+                - `features/_completed/2026-06-14-more-repo/test-runner-strategy.md:89` is archived, and its "the other eight categories" refers to *installable* categories and is still accurate
+                - an archived `baseline-repo.json` fixture's "9 ecosystems" is an unrelated quantity
+- **process defect caught and corrected during this cycle (orchestrator error).** After running the sniff gates via `cd <repo-root>/sniff`, the shell's working directory persisted into the next command, so the finding-3 log block was appended to a relative path that resolved to `<repo-root>/sniff/sniff/features/2026-07-16-performance/log.md` — a stray 10-line tree one level too deep, invisible to the real log
+        - it was found by the finding-3 subagent during its sweep, which checked before acting: it confirmed the stray content was **absent** from the real log rather than a duplicate, and so declined to delete it
+        - the content was merged back into the real log immediately after the finding-3 start line, and `sniff/sniff/` was removed; `git status` confirms no untracked tree remains
+        - the lesson is the known relative-`cd` hazard in this worktree layout — subsequent appends now use repo-root-anchored invocations
+
+### Successful Completion
+
+The implementation of review cycle 9 has completed successfully in 30 minutes and 12 seconds (11:40:37–12:10:49 local time). During this implementation all 3 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 1 was deferred (see reasons below):
+
+- **Finding 1, native Linux and Windows execution and matched work-count artifacts** — deferred because this native arm64 macOS host has no authorized native Linux or Windows execution path. The constraint was re-verified rather than inherited from cycle 8: `rustup target list --installed` carries no Linux target at all, neither installed Windows target can execute on macOS, and `git branch -r --contains af4751810e9bc66f3e3dbe5b883c864ce76c77a0` returns no remote branch for the exact commit review-9 named. This session is prohibited from committing, pushing, invoking credential helpers, starting VMs, and triggering external workflows. Cross-compilation proves compilation only, Docker was ruled inadmissible for this finding by review-7, and a workflow definition is not an execution record. This is a platform and execution-authority constraint, not a CPU-load deferral. Full detail and the closure procedure are recorded in `sniff/features/2026-07-16-performance/deferred-perf-tests.md` under "Review 9 deferred items".
+
+The files changed cover the Playa command-boundary migration of the installer timeout contract (an exhaustive `InstallInterviewOutcome` match with a documented verdict per variant, plus a rendering seam that makes the timeout warning assertable), and the public documentation migration of that same contract into the library changelog, both public READMEs, the CLI installation section, the library architecture doc, and the `ProgramsInfo::detect` rustdoc.
+
+- final verification passed with exit code 0 in both affected areas: **sniff** — 1,677 `sniff-lib` tests passed (19 skipped) and 782 `sniff-cli` tests passed (3 skipped), `just lint` exit 0, `git diff --check` clean; **playa** — 50 lib/bin and 19 cli tests passed (0 skipped), `just lint` exit 0, `cargo check -p playa-cli --all-targets` exit 0
+- the finding-2 fix was **proven to bite**: reverting the `TimedOut` arm to `Ok(())` made `just test` exit 1 with `install_verdict_timeout_fails_and_names_the_deadline` failing all 4 nextest retries; restored, suite back to 69/69 green
+- **the review's own stated fact was wrong and the code was followed instead.** Review-9 asserts the authoritative executable-index category count is nine; nine was itself a stale intermediate value. The code says **ten**, confirmed three independent ways (10 `ProgramsInfo` fields, 5 `rayon::join` pairs, and the CLI already exposing `notification-helpers`). Per the repo convention that code is authoritative when drift is detected, ten was written. This is a deliberate deviation from the review text and is flagged for the next reviewer
+- the drift was also **wider than the finding reported**: eleven live sites in total across five files, not the one the finding named. Each site was verified individually rather than swept with find-and-replace, which is what caught `sniff/README.md:47` (listing 10 vs installing 8 — two different quantities in one sentence) and `sniff/cli/src/output/programs.rs:612` (a correct "eight" that a blanket replace would have broken)
+- the downstream migration of the cycle-8 `TimedOut`/`Failed` split is now **complete across all four consumers** — `sniff/lib`, `sniff/cli`, `biscuit-speaks/cli`, and `playa/cli` — confirmed by `grep -rn InstallInterviewOutcome --include=*.rs` returning no fifth site
+- one orchestrator process defect occurred and was corrected in-cycle: a persisted working directory sent the finding-3 log block to a stray path one level too deep. The subagent found it, verified the content was absent from the real log rather than duplicated, and declined to delete it; the content was merged back and the stray tree removed
 - no commit, push, external workflow trigger, VM startup, package installation, or write-mode formatting command was run
