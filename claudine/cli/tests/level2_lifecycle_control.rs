@@ -525,6 +525,19 @@ fn run_proxy_in_tmux_with_set(staged: &Staged, setters: &str, done_marker: &str)
 /// then returns the pane. Used to assert on error output that writes nothing to
 /// `events.log`.
 fn run_compose_await_exit(staged: &Staged) -> String {
+    run_provider_await_exit(staged, "--goose")
+}
+
+/// Like [`run_compose_await_exit`] but for an arbitrary provider flag, and with
+/// `MODEL` explicitly emptied.
+///
+/// Emptying `MODEL` matters for the resume-compatibility rows: model resolution
+/// consults the generic `MODEL` environment variable *before* frontmatter
+/// (`select.rs` precedence step 3), so an ambient `MODEL` in the developer's
+/// shell would outrank the document's `model:` and silently neutralize a test
+/// that refreshes it. The resolver skips empty values, so `MODEL=''` restores
+/// frontmatter precedence without needing `env -u`.
+fn run_provider_await_exit(staged: &Staged, provider_flag: &str) -> String {
     static SEQ: AtomicU32 = AtomicU32::new(0);
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
 
@@ -546,12 +559,12 @@ fn run_compose_await_exit(staged: &Staged) -> String {
     let claudine = env!("CARGO_BIN_EXE_claudine");
     let sentinel = format!("L2_CTL_EXIT_{seq}");
     let env_prefix = format!(
-        "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
+        "NO_COLOR='1' MODEL='' HOME='{home}' PATH='{path}' ",
         home = staged.workspace.path().display(),
         path = augmented_path(&staged.bin_dir).to_string_lossy(),
     );
     let cmd = format!(
-        "cd {ws} && {env_prefix}{claudine} compose --goose {md} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} compose {provider_flag} {md} ; echo {sentinel}",
         ws = staged.workspace.path().display(),
         md = staged.md_file.display(),
     );
@@ -888,20 +901,10 @@ Original body
 /// real run: two provider invocations, the resume branch reached, and no
 /// `resume incompatible after refresh` diagnostic.
 ///
-/// ## Why there is no facet-mutating refusal row
-///
-/// The refusal branch (`CompositionError::LifecycleResumeIncompatible`) fires
-/// only when a canonical refresh changes a launch facet the key covers. Under the
-/// current pipeline no same-document resume can do that: every key facet is fixed
-/// by the invocation (provider, profile/binary, resume protocol, workspace CWD,
-/// permission mode, interactivity, structured mode) or resolved once and reused —
-/// the model/MCP env is frozen in the base child environment for a directly
-/// invoked document (`harness_orch/prompt.rs` sets `env_overrides` empty) and
-/// rebuilt a single time at proxy adoption for a target
-/// (`loop_control/target_launch.rs`), then re-applied identically to every
-/// attempt. Per-attempt launch-plan rebuild is deferred work (review-5 Finding 6),
-/// so the refusal is a latent guard with no reachable trigger to drive here; the
-/// facet projection is covered at Level 1 in `session_key/tests.rs`.
+/// The refusal counterpart is
+/// [`level2_lifecycle_resume_refuses_when_refresh_changes_model`]; together they
+/// pin both directions of the AC15 comparison, so neither an over-eager nor an
+/// absent guard can pass.
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_resume_with_dropped_launch_flag_stays_compatible() {
@@ -989,6 +992,149 @@ Original body
         ],
         "the resumed attempt must run start→success→finalize with no incompatibility refusal; \
          pane:\n{pane}"
+    );
+}
+
+/// Collapse a captured pane into one whitespace-normalized line.
+///
+/// Rendered `StatusBlock` prose is hard-wrapped to the pane width, so a phrase
+/// the test cares about ("resume incompatible after refresh") is routinely split
+/// across two lines. Normalizing first lets the assertions name the phrase the
+/// operator reads instead of whichever fragment happened to fit.
+fn flattened(pane: &str) -> String {
+    pane.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Resume incompatibility (AC15), end to end: when the canonical refresh that
+/// precedes a `resume` changes a launch facet the provider fixed when it opened
+/// the session, the resume must be **refused** — no second provider launch, a
+/// diagnostic naming the changed facet, and a recommendation to retry.
+///
+/// The refusal is driven through the one facet a same-document refresh can
+/// actually move. The document opens pinned to one `model:`; its `failure` stack
+/// rewrites that frontmatter with `set_frontmatter` and *then* asks to `resume`.
+/// The resume's fresh-read boundary re-reads the mutated document and rebuilds
+/// the launch identity from that read (`target_launch::rebuild_launch_env`), so
+/// the refreshed `MODEL` reaches the child environment the session-compatibility
+/// key is computed from — and no longer matches the key the opening attempt
+/// stored. Before the per-attempt rebuild landed, the launch identity was frozen
+/// at invocation and this refusal had no reachable trigger at all.
+///
+/// Both models are `llamacpp/`-namespaced, which `matches_offering_source`
+/// accepts for Claude by construction, so the row does not depend on the host's
+/// live model listings.
+///
+/// ## Facets without a refusal row
+///
+/// Only `model` is reachable from a same-document refresh today. The remaining
+/// key facets are fixed for the whole invocation and no document mutation can
+/// move them, so there is no honest L2 row to write for them yet:
+///
+/// - `provider`, `profile/binary`, `resume protocol` — the provider is pinned by
+///   the invocation; a target-frontmatter-driven provider *switch* still needs
+///   the launch bundle to become loop-owned (see `target_launch.rs` → Scope).
+/// - `system prompt`, `MCP server set` — argv-derived, and argv is rebuilt only
+///   at invocation, so their content cannot change across a refresh.
+/// - `workspace CWD`, `permission mode`, `interactivity`, `structured-output
+///   mode` — resolved once from CLI flags with no frontmatter surface at all.
+///
+/// The per-facet projection those facets *do* have is covered at Level 1 in
+/// `session_key/tests.rs`, and the comparison that turns a projected difference
+/// into a named facet is covered in `coordinator/tests.rs`.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_resume_refuses_when_refresh_changes_model() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let follow_up = "please finish the resumed work";
+    let doc = format!(
+        r#"---
+title: resume refused after model refresh
+model: llamacpp/opener-model
+start:
+  stack:
+    - action: {{append_line: ["events.log", "start"]}}
+failure:
+  stack:
+    - action: {{append_line: ["events.log", "failure"]}}
+    - action: {{set_frontmatter: ["doc.md", "model", "llamacpp/refreshed-model"]}}
+    - action: {{resume: "{follow_up}"}}
+success:
+  stack:
+    - action: {{append_line: ["events.log", "success"]}}
+finalize:
+  stack:
+    - action: {{append_line: ["events.log", "finalize"]}}
+---
+Original body
+"#
+    );
+    let workspace = tempdir().unwrap();
+    let bin_dir = workspace.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    assert!(init_git_repo(workspace.path()), "git init failed");
+
+    let events_log = workspace.path().join("events.log");
+    let session_id = "refused-session-abc";
+    write_resumable_claude(&bin_dir, &events_log, session_id, follow_up);
+
+    let md_file = workspace.path().join("doc.md");
+    fs::write(&md_file, doc).unwrap();
+    let staged = Staged {
+        workspace,
+        bin_dir,
+        md_file,
+        events_log,
+        rendezvous_endpoint: None,
+    };
+
+    let pane = run_provider_await_exit(&staged, "--claude");
+    let flat = flattened(&pane);
+
+    // The mutation must actually have landed; otherwise a green refusal
+    // assertion below would be proving nothing about a *changed* facet.
+    let refreshed = fs::read_to_string(&staged.md_file).unwrap();
+    assert!(
+        refreshed.contains("llamacpp/refreshed-model"),
+        "the failure stack must have rewritten the document's model before the resume; \
+         document:\n{refreshed}"
+    );
+
+    let lines = event_lines(&staged);
+    assert_eq!(
+        lines.iter().filter(|l| **l == "provider-ran").count(),
+        1,
+        "a refused resume must not launch the provider a second time; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        !lines.iter().any(|l| l == "resume-session-ok"),
+        "the live session must never be handed the newly prepared launch plan; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    // The resumed attempt re-enters at `start` before the launch bundle is
+    // rebuilt, so that marker is expected; the refusal lands between `start` and
+    // the spawn. What must be absent is everything downstream of the spawn —
+    // `success` and `finalize` never fire, because the refusal propagates as a
+    // hard error rather than routing through the recovery stacks.
+    assert_eq!(
+        lines,
+        ["start", "provider-ran", "initial-prompt-ok", "failure", "start"],
+        "the refusal must land after the resumed attempt's `start` and before any \
+         second provider spawn; pane:\n{pane}"
+    );
+    assert!(
+        flat.contains("resume incompatible after refresh"),
+        "the refusal must surface the typed diagnostic header; pane:\n{pane}"
+    );
+    assert!(
+        flat.contains("`model`"),
+        "the diagnostic must name the changed facet; pane:\n{pane}"
+    );
+    assert!(
+        flat.contains("Use `retry` to start a fresh session with the new plan"),
+        "the diagnostic must recommend retry as the way forward; pane:\n{pane}"
     );
 }
 
@@ -2251,6 +2397,16 @@ Body
 /// than expected, which is what makes an equivalence mismatch observable rather
 /// than a timeout.
 fn run_until_settled(staged: &Staged, expected_lines: usize) -> String {
+    run_until_settled_with_flags(staged, "--goose", expected_lines)
+}
+
+/// [`run_until_settled`] with the claudine flags spelled out.
+///
+/// Rows whose purpose is to prove *target-owned* selection must pass an empty
+/// `flags` string: a pinned `--goose` is explicit invocation intent that
+/// outranks the target's authored `agent:`, which would make the assertion
+/// vacuous.
+fn run_until_settled_with_flags(staged: &Staged, flags: &str, expected_lines: usize) -> String {
     static SEQ: AtomicU32 = AtomicU32::new(0);
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
 
@@ -2284,7 +2440,7 @@ fn run_until_settled(staged: &Staged, expected_lines: usize) -> String {
         path = augmented_path(&staged.bin_dir).to_string_lossy(),
     );
     let cmd = format!(
-        "cd {ws} && {env_prefix}{claudine} compose --goose {md} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} compose {flags} {md} ; echo {sentinel}",
         ws = staged.workspace.path().display(),
         md = staged.md_file.display(),
     );
@@ -2755,22 +2911,6 @@ struct EquivalenceArms {
     routed_pane: String,
 }
 
-/// Stage one arm of the matrix.
-///
-/// Both arms execute the **same file** — `target.md` — and differ only in how
-/// execution reaches it: the direct arm invokes it, the routed arm invokes
-/// `doc.md` ([`EQUIV_ROUTER`]) and is handed off at `initialize`. Pointing the
-/// direct arm at the target file itself, rather than at a copy under a second
-/// name, is what keeps document-path-derived facets comparable — a copy would
-/// differ for reasons that are not routing.
-fn stage_equivalence_arm(target_doc: &str, routed: bool) -> Staged {
-    let mut staged = stage_proxy_pair(EQUIV_ROUTER, target_doc, true);
-    if !routed {
-        staged.md_file = staged.workspace.path().join("target.md");
-    }
-    staged
-}
-
 /// Rewrite the values that legitimately differ between arms into stable
 /// placeholders.
 ///
@@ -2794,13 +2934,45 @@ fn normalize_arm(lines: &[String], staged: &Staged) -> Vec<String> {
 
 /// Run `target_doc` directly and through the router, returning both arms'
 /// normalized event logs and panes.
+///
+/// Both arms execute the **same file** — `target.md` — and differ only in how
+/// execution reaches it: the direct arm invokes it, the routed arm invokes
+/// `doc.md` (the router) and is handed off at `initialize`. Pointing the direct
+/// arm at the target file itself, rather than at a copy under a second name, is
+/// what keeps document-path-derived facets comparable — a copy would differ for
+/// reasons that are not routing.
 fn equivalence_arms(target_doc: &str, expected_markers: usize) -> EquivalenceArms {
-    let direct = stage_equivalence_arm(target_doc, false);
-    let direct_pane = run_until_settled(&direct, expected_markers);
+    equivalence_arms_configured(EQUIV_ROUTER, target_doc, "--goose", expected_markers, |_| {})
+}
+
+/// [`equivalence_arms`] with the router, the claudine flags, and a per-arm
+/// staging hook spelled out.
+///
+/// `prepare` runs against each freshly staged arm before it is executed — the
+/// seam rows use to install a recording provider stub, seed an MCP catalog, or
+/// write any other fixture the arm needs.
+fn equivalence_arms_configured(
+    router_doc: &str,
+    target_doc: &str,
+    flags: &str,
+    expected_markers: usize,
+    prepare: impl Fn(&Staged),
+) -> EquivalenceArms {
+    let stage = |routed: bool| {
+        let mut staged = stage_proxy_pair(router_doc, target_doc, true);
+        if !routed {
+            staged.md_file = staged.workspace.path().join("target.md");
+        }
+        prepare(&staged);
+        staged
+    };
+
+    let direct = stage(false);
+    let direct_pane = run_until_settled_with_flags(&direct, flags, expected_markers);
     let direct_lines = normalize_arm(&event_lines(&direct), &direct);
 
-    let routed = stage_equivalence_arm(target_doc, true);
-    let routed_pane = run_until_settled(&routed, expected_markers);
+    let routed = stage(true);
+    let routed_pane = run_until_settled_with_flags(&routed, flags, expected_markers);
     let routed_lines = normalize_arm(&event_lines(&routed), &routed);
 
     EquivalenceArms {
@@ -2979,6 +3151,206 @@ fn level2_lifecycle_equivalence_target_pinned_model_matches_direct_run() {
     assert_eq!(
         arms.routed_lines, arms.direct_lines,
         "a proxied target must resolve its own launch state; pane:\n{}",
+        arms.routed_pane
+    );
+}
+
+// ── review-6 finding 3: the complete AC9 context matrix ──────────────────────
+//
+// AC9 names five facets — `ctx.area`, `ctx.agent`, `ctx.model`, `env.AGENT`,
+// `env.MODEL` — and three surfaces they must agree on: the prompt body, the
+// effective frontmatter, and the lifecycle events. The row below is the
+// principal probe for all fifteen cells; the older
+// `level2_lifecycle_equivalence_probe_matches_direct_run` remains as the
+// signal-order/computed-property row.
+
+/// A router with no launch identity of its own beyond the provider it needs to
+/// resolve before proxying. It authors **no** `model:`, so every model-derived
+/// value the target observes can only have come from the target.
+const AC9_ROUTER: &str = r#"---
+title: ac9 router
+agent: goose
+initialize:
+  stack:
+    - action: {proxy: "@target.md"}
+---
+router body
+"#;
+
+/// The AC9 probe: it stamps all five named facets from all three required
+/// surfaces.
+///
+/// - **Body** — `body.<facet>=[…]` spans, recovered from the prompt the fake
+///   provider records, so the assertion is over what actually reached the agent.
+/// - **Effective frontmatter** — `fm_*` whole-value properties resolved during
+///   composition, read back by a lifecycle action so their *effective* (not
+///   authored) values are what land in the log.
+/// - **Lifecycle** — `lc.*` stamps evaluated inside the `success` stack.
+///
+/// The target authors its own `agent:` and `model:`, and both arms run with **no
+/// CLI provider flag**, so every stamped value is target-owned. `llamacpp/…`
+/// rides Goose's declared local-runner namespace: frontmatter models are
+/// catalog-validated and an invalid one is dropped silently, which would empty
+/// the model facets for a reason that has nothing to do with routing.
+const AC9_PROBE_TARGET: &str = r#"---
+title: ac9 probe target
+agent: goose
+model: llamacpp/ac9-probe-model
+fm_area: "{{ ctx.area }}"
+fm_agent: "{{ ctx.agent }}"
+fm_model: "{{ ctx.model }}"
+fm_env_agent: "{{ env.AGENT }}"
+fm_env_model: "{{ env.MODEL }}"
+initialize:
+  stack:
+    - action: {append_line: ["events.log", "sig=initialize"]}
+success:
+  stack:
+    - action:
+        - {append_line: ["events.log", "sig=success"]}
+        - {append_line: ["events.log", "lc.ctx.area={{ ctx.area }}"]}
+        - {append_line: ["events.log", "lc.ctx.agent={{ ctx.agent }}"]}
+        - {append_line: ["events.log", "lc.ctx.model={{ ctx.model }}"]}
+        - {append_line: ["events.log", "lc.env.AGENT={{ env.AGENT }}"]}
+        - {append_line: ["events.log", "lc.env.MODEL={{ env.MODEL }}"]}
+        - {append_line: ["events.log", "fm.ctx.area={{ fm_area }}"]}
+        - {append_line: ["events.log", "fm.ctx.agent={{ fm_agent }}"]}
+        - {append_line: ["events.log", "fm.ctx.model={{ fm_model }}"]}
+        - {append_line: ["events.log", "fm.env.AGENT={{ fm_env_agent }}"]}
+        - {append_line: ["events.log", "fm.env.MODEL={{ fm_env_model }}"]}
+finalize:
+  stack:
+    - action: {append_line: ["events.log", "sig=finalize"]}
+---
+probe body.ctx.area=[{{ ctx.area }}] body.ctx.agent=[{{ ctx.agent }}] body.ctx.model=[{{ ctx.model }}] body.env.AGENT=[{{ env.AGENT }}] body.env.MODEL=[{{ env.MODEL }}]
+"#;
+
+/// Recover the `body.<facet>=[<value>]` spans from the recorded prompt line.
+///
+/// The recorded line is the whole stdin+argv the provider was handed, which
+/// carries absolute temporary paths that legitimately differ between arms.
+/// Extracting the spans — rather than comparing the raw line — compares exactly
+/// the body-surface facets the row asserts on and nothing else.
+fn body_facets(lines: &[String]) -> Vec<String> {
+    let prompt = lines
+        .iter()
+        .find(|line| line.starts_with("prompt:"))
+        .cloned()
+        .unwrap_or_default();
+    let mut facets = Vec::new();
+    let mut rest = prompt.as_str();
+    while let Some(start) = rest.find("body.") {
+        rest = &rest[start + "body.".len()..];
+        let Some(open) = rest.find("=[") else { break };
+        let key = rest[..open].to_string();
+        rest = &rest[open + 2..];
+        let Some(close) = rest.find(']') else { break };
+        facets.push(format!("{key}={}", &rest[..close]));
+        rest = &rest[close + 1..];
+    }
+    facets
+}
+
+/// **Acceptance criterion 9, complete.** `ctx.area`, `ctx.agent`, `ctx.model`,
+/// `env.AGENT`, and `env.MODEL` resolve identically whether the target is
+/// invoked directly or reached through an `initialize` proxy — in the prompt
+/// body, in the effective frontmatter, and in the lifecycle events.
+///
+/// Neither arm pins a provider on the CLI, so the agent and model facets are
+/// resolved from the *target's* authored frontmatter on both routes. That is
+/// what makes the row non-vacuous: the router authors no `model:` at all, so a
+/// routed arm that reused the router's frozen launch state would stamp the
+/// empty/default model rather than `llamacpp/ac9-probe-model`, and the exact
+/// fixture assertions below would fail before the arms were ever compared.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_equivalence_ac9_context_facets_match_direct_run() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    // sig=initialize, prompt, provider-ran, sig=success, 10 stamps, sig=finalize.
+    const EXPECTED_MARKERS: usize = 15;
+    const MODEL: &str = "llamacpp/ac9-probe-model";
+
+    let arms = equivalence_arms_configured(
+        AC9_ROUTER,
+        AC9_PROBE_TARGET,
+        "",
+        EXPECTED_MARKERS,
+        |staged| write_prompt_recording_goose(&staged.bin_dir, &staged.events_log),
+    );
+
+    let direct_body = body_facets(&arms.direct_lines);
+    let routed_body = body_facets(&arms.routed_lines);
+
+    // Fixture check: the direct arm is the contract. Asserting its exact values
+    // first means a broken probe is not misread as a routing bug — and pins the
+    // body surface to the five named facets rather than "some spans were found".
+    assert_eq!(
+        direct_body,
+        vec![
+            // A bare temporary git repo sits in no package area, so `ctx.area`
+            // resolves empty. It is stamped anyway: an empty value that stays
+            // empty on both arms is still the facet agreeing.
+            "ctx.area=".to_string(),
+            "ctx.agent=goose".to_string(),
+            format!("ctx.model={MODEL}"),
+            "env.AGENT=goose".to_string(),
+            format!("env.MODEL={MODEL}"),
+        ],
+        "fixture check: invoked directly, the prompt body carries all five AC9 \
+         facets resolved from the target's own frontmatter; pane:\n{}",
+        arms.direct_pane
+    );
+
+    // The frontmatter and lifecycle surfaces, in the order the probe stamps them.
+    let stamped: Vec<String> = arms
+        .direct_lines
+        .iter()
+        .filter(|line| line.starts_with("lc.") || line.starts_with("fm."))
+        .cloned()
+        .collect();
+    assert_eq!(
+        stamped,
+        vec![
+            "lc.ctx.area=".to_string(),
+            "lc.ctx.agent=goose".to_string(),
+            format!("lc.ctx.model={MODEL}"),
+            "lc.env.AGENT=goose".to_string(),
+            format!("lc.env.MODEL={MODEL}"),
+            "fm.ctx.area=".to_string(),
+            "fm.ctx.agent=goose".to_string(),
+            format!("fm.ctx.model={MODEL}"),
+            "fm.env.AGENT=goose".to_string(),
+            format!("fm.env.MODEL={MODEL}"),
+        ],
+        "fixture check: invoked directly, the lifecycle and effective-frontmatter \
+         surfaces carry all five AC9 facets; got {:?}; pane:\n{}",
+        arms.direct_lines,
+        arms.direct_pane
+    );
+
+    assert_eq!(
+        routed_body, direct_body,
+        "the prompt body a proxied target delivers must resolve every AC9 facet \
+         exactly as the same target invoked directly does; pane:\n{}",
+        arms.routed_pane
+    );
+    // The recorded `prompt:` line is compared through `body_facets` above; the
+    // raw line also carries the provider's argv, whose temporary paths differ
+    // per arm for reasons that are not routing.
+    let without_prompt = |lines: &[String]| -> Vec<String> {
+        lines
+            .iter()
+            .filter(|line| !line.starts_with("prompt:"))
+            .cloned()
+            .collect()
+    };
+    assert_eq!(
+        without_prompt(&arms.routed_lines),
+        without_prompt(&arms.direct_lines),
+        "the effective frontmatter and lifecycle surfaces of a proxied target \
+         must resolve every AC9 facet exactly as the same target invoked \
+         directly does; pane:\n{}",
         arms.routed_pane
     );
 }
@@ -3982,16 +4354,17 @@ fn level2_lifecycle_proxy_with_overlay_survives_a_resume() {
     );
 }
 
-// ── AC10: additional target launch facets (child CWD, system-prompt delivery) ─
+// ── AC10: target launch facets ───────────────────────────────────────────────
 //
-// Findings 2/3 compared loop ownership and the `model:` launch facet. These two
-// rows add invocation-level launch facets whose equivalence is route-independent
-// by construction: the child provider's effective CWD (the launch area, borrowed
-// into every launch bundle) and a CLI-supplied system prompt (immutable
-// invocation intent the proxy hand-off must not drop). See the report for why
-// the target-frontmatter-driven facets (provider/profile/binary, MCP runtime
-// injection, argv entrypoint) are not addable as passing equivalence rows on the
-// current tree — `target_launch.rs` documents them as borrowed-not-rebuilt.
+// Two kinds of facet live here. The first is invocation-level and
+// route-independent by construction: the child provider's effective CWD (the
+// launch area) and a CLI-supplied system prompt (immutable invocation intent the
+// hand-off must not drop). The second is *target-driven* and is what the R6
+// launch rebuild exists for — profile/binary and entrypoint, argv, the effective
+// child environment, interactivity, structured-output mode, dispatch
+// configuration, and MCP injection. Those rows run with **no CLI provider flag**
+// so the selection they assert on can only have come from the target's own
+// authored frontmatter; pinning a provider would make them vacuous.
 
 /// A fake `goose` that records its effective working directory (the child
 /// process CWD the provider is spawned in) to `events.log`.
@@ -4215,4 +4588,768 @@ fn level2_lifecycle_equivalence_target_authored_provider_matches_direct_run() {
         "the target's authored provider must not override an explicit CLI flag; \
          got {pinned_lines:?}; pane:\n{pinned_pane}"
     );
+}
+
+/// A fake provider that records the whole launch bundle it was handed: which
+/// binary and entrypoint were selected, the flag-shaped argv, and the effective
+/// child environment Claudine built for it.
+///
+/// Only flag-shaped argv tokens are recorded. The positional prompt and every
+/// temporary-file argument carry per-arm paths that legitimately differ, whereas
+/// the flags are exactly the profile/structured-mode/dispatch decisions the row
+/// asserts on. `CLAUDINE_SESSION_ID` is a fresh UUID per launch, so only its
+/// presence is recorded, never its value.
+fn write_launch_bundle_recorder(bin_dir: &Path, slug: &str, events_log: &Path) {
+    write_executable(
+        &bin_dir.join(slug),
+        &format!(
+            "#!/bin/sh\ncat > /dev/null 2>&1\n\
+             printf 'launched-binary=%s\\n' \"$(basename \"$0\")\" >> {log}\n\
+             printf 'entrypoint=%s\\n' \"$1\" >> {log}\n\
+             printf 'argv-flags=%s\\n' \"$(for a in \"$@\"; do case \"$a\" in -*) printf '%s ' \"$a\" ;; esac; done)\" >> {log}\n\
+             printf 'child.AGENT=%s\\n' \"$AGENT\" >> {log}\n\
+             printf 'child.MODEL=%s\\n' \"$MODEL\" >> {log}\n\
+             printf 'child.INTERACTIVE=%s\\n' \"$INTERACTIVE\" >> {log}\n\
+             printf 'child.YOLO=%s\\n' \"$YOLO\" >> {log}\n\
+             printf 'child.CLAUDINE_INTERACTIVE=%s\\n' \"$CLAUDINE_INTERACTIVE\" >> {log}\n\
+             if [ -n \"$CLAUDINE_SESSION_ID\" ]; then printf 'child.session-id=present\\n' >> {log}; \
+             else printf 'child.session-id=absent\\n' >> {log}; fi\n\
+             if [ -n \"$AGENT_PARAMS\" ]; then printf 'child.agent-params=present\\n' >> {log}; \
+             else printf 'child.agent-params=absent\\n' >> {log}; fi\n\
+             printf 'provider-ran\\n' >> {log}\nexit 0\n",
+            log = events_log.display(),
+        ),
+    );
+}
+
+/// A router that resolves `goose` for its own pre-proxy selection and hands off
+/// at `initialize`. It authors no `model:` and no `interactive:`, so anything the
+/// target observes for those facets is target-owned by construction.
+const LAUNCH_BUNDLE_ROUTER: &str = r#"---
+title: launch bundle router
+agent: goose
+initialize:
+  stack:
+    - action: {proxy: "@target.md"}
+---
+router body
+"#;
+
+/// The launch-bundle probe: it authors a **different** provider than its router
+/// plus an explicit `interactive:` so the recorded bundle can only match a
+/// bundle rebuilt for this document.
+const LAUNCH_BUNDLE_TARGET: &str = r#"---
+title: launch bundle target
+agent: codex
+interactive: false
+success:
+  stack:
+    - action: {append_line: ["events.log", "sig=success"]}
+---
+launch bundle target body
+"#;
+
+/// **Acceptance criterion 10, target-driven launch bundle.** A proxied target's
+/// profile/binary, entrypoint, argv, effective child environment, interactivity,
+/// structured-output mode, and dispatch configuration are all rebuilt for the
+/// *target* and match the same target invoked directly.
+///
+/// Neither arm passes a provider flag, so the whole bundle follows the target's
+/// authored `agent: codex` — not the router's `goose`. That is the row's
+/// anti-vacuity property, and it is asserted directly: the routed arm must record
+/// `launched-binary=codex`, and the router's `goose` stub (which is on `PATH` and
+/// would happily record itself) must never run.
+///
+/// The recorded facets stand in for the bundle as follows: `launched-binary` and
+/// `entrypoint` are the profile/binary decision; `argv-flags` carries the
+/// structured-output-mode and provider-profile flags; `child.INTERACTIVE` /
+/// `child.CLAUDINE_INTERACTIVE` are the resolved interactivity as delivered to
+/// the child and to the hook subprocess respectively; `child.session-id` and
+/// `child.agent-params` are the dispatch/correlation configuration.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_equivalence_target_launch_bundle_matches_direct_run() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    // 10 recorder lines + provider-ran + sig=success.
+    const EXPECTED_MARKERS: usize = 12;
+
+    let arms = equivalence_arms_configured(
+        LAUNCH_BUNDLE_ROUTER,
+        LAUNCH_BUNDLE_TARGET,
+        "",
+        EXPECTED_MARKERS,
+        |staged| {
+            write_launch_bundle_recorder(&staged.bin_dir, "codex", &staged.events_log);
+            write_launch_bundle_recorder(&staged.bin_dir, "goose", &staged.events_log);
+        },
+    );
+
+    let bundle = |lines: &[String]| -> Vec<String> {
+        lines
+            .iter()
+            .filter(|line| {
+                line.starts_with("launched-binary=")
+                    || line.starts_with("entrypoint=")
+                    || line.starts_with("argv-flags=")
+                    || line.starts_with("child.")
+            })
+            .cloned()
+            .collect()
+    };
+    let direct_bundle = bundle(&arms.direct_lines);
+    let routed_bundle = bundle(&arms.routed_lines);
+
+    // Fixture check: the direct arm resolved the target's own provider and its
+    // authored non-interactive mode, and Claudine handed the child a full
+    // dispatch/correlation environment.
+    for expected in [
+        "launched-binary=codex",
+        "child.AGENT=codex",
+        "child.INTERACTIVE=false",
+        "child.CLAUDINE_INTERACTIVE=0",
+        "child.session-id=present",
+        "child.agent-params=present",
+    ] {
+        assert!(
+            direct_bundle.iter().any(|line| line == expected),
+            "fixture check: invoked directly, the target's launch bundle must \
+             carry `{expected}`; got {direct_bundle:?}; pane:\n{}",
+            arms.direct_pane
+        );
+    }
+    assert!(
+        direct_bundle
+            .iter()
+            .any(|line| line.starts_with("entrypoint=") && line.len() > "entrypoint=".len()),
+        "fixture check: the selected profile must contribute an entrypoint \
+         subcommand; got {direct_bundle:?}; pane:\n{}",
+        arms.direct_pane
+    );
+
+    // The router's provider must never launch on the routed arm: the hand-off
+    // precedes `start`, and the bundle is rebuilt for the adopted target.
+    assert!(
+        !arms
+            .routed_lines
+            .iter()
+            .any(|line| line == "launched-binary=goose"),
+        "the router's `goose` must not launch for the proxied target; got {:?}; \
+         pane:\n{}",
+        arms.routed_lines,
+        arms.routed_pane
+    );
+
+    assert_eq!(
+        routed_bundle, direct_bundle,
+        "a proxied target's profile/binary, entrypoint, argv, effective child \
+         environment, interactivity, structured-output mode, and dispatch \
+         configuration must all be rebuilt for the target and match the same \
+         target invoked directly; pane:\n{}",
+        arms.routed_pane
+    );
+}
+
+/// The catalog id the MCP row's target activates through a prompt tag.
+const MCP_PROBE_SERVER: &str = "proxyprobeserver";
+
+/// Seed a hermetic MCP catalog under the arm's `HOME` containing exactly one
+/// server, with both the user-scope and repo-scope default lists empty.
+///
+/// Empty defaults are what make the row's tag assertion meaningful: the only way
+/// `proxyprobeserver` can enter a session set is the `#proxyprobeserver` tag in
+/// the *target's* body. Seeding all three state files also short-circuits
+/// `bootstrap_mcp_state`, so no native provider config on the host machine can
+/// leak into the fixture.
+fn seed_mcp_catalog(workspace: &Path) {
+    let mcp_dir = workspace.join(".claudine").join("mcp");
+    fs::create_dir_all(&mcp_dir).unwrap();
+    // Runtime MCP injection for Codex and Gemini runs through a shadow HOME,
+    // and the shadow-home builder mirrors the *original* provider config
+    // directory — it refuses to run when that directory is missing. `HOME` is
+    // the arm's temporary workspace, so both must be materialized here.
+    fs::create_dir_all(workspace.join(".gemini")).unwrap();
+    fs::create_dir_all(workspace.join(".codex")).unwrap();
+    fs::write(
+        mcp_dir.join("catalog.json"),
+        format!(
+            r#"{{"version":1,"servers":{{"{id}":{{"id":"{id}","transport":"stdio",
+               "command":"/bin/true","args":["--probe"],"metadata":{{
+               "fingerprint":"probe","created_at":"2026-01-01T00:00:00Z",
+               "updated_at":"2026-01-01T00:00:00Z"}}}}}}}}"#,
+            id = MCP_PROBE_SERVER,
+        ),
+    )
+    .unwrap();
+    fs::write(mcp_dir.join("defaults.json"), r#"{"version":1,"defaults":[]}"#).unwrap();
+    fs::write(
+        mcp_dir.join("provider-state.json"),
+        r#"{"version":1,"providers":{},"repos":{}}"#,
+    )
+    .unwrap();
+    // Repo-scope defaults replace user-scope defaults; seed them empty too so
+    // the repo scope cannot reintroduce a default server.
+    fs::write(
+        workspace.join(".claudine").join("mcp.json"),
+        r#"{"version":1,"defaults":[]}"#,
+    )
+    .unwrap();
+}
+
+/// A fake provider that records the MCP state its launch actually received.
+///
+/// `--allowed-mcp-server-names` is contributed by the Gemini injector alone —
+/// no other provider's injector produces argv at all — so both the flag's
+/// presence and its value are evidence that MCP was composed for *this*
+/// provider, with the server set the target's own prompt tag selected.
+fn write_mcp_recording_gemini(bin_dir: &Path, events_log: &Path) {
+    write_executable(
+        &bin_dir.join("gemini"),
+        &format!(
+            "#!/bin/sh\ncat > /dev/null 2>&1\n\
+             printf 'launched-binary=%s\\n' \"$(basename \"$0\")\" >> {log}\n\
+             allowed=none\nprev=\n\
+             for a in \"$@\"; do\n  \
+             if [ \"$prev\" = '--allowed-mcp-server-names' ]; then allowed=\"$a\"; fi\n  \
+             prev=\"$a\"\ndone\n\
+             printf 'mcp-allowed=%s\\n' \"$allowed\" >> {log}\n\
+             printf 'provider-ran\\n' >> {log}\nexit 0\n",
+            log = events_log.display(),
+        ),
+    );
+}
+
+/// A router on an MCP-capable provider that is **not** the target's. Its own body
+/// carries no tag, so its session set is empty; a routed arm that reused the
+/// router's MCP plan would inject nothing at all.
+const MCP_ROUTER: &str = r#"---
+title: mcp router
+agent: codex
+initialize:
+  stack:
+    - action: {proxy: "@target.md"}
+---
+router body with no tag
+"#;
+
+/// The MCP probe: it authors its own provider and carries the activating tag in
+/// its body. The tag is lexed out of the prompt before delivery, so the only way
+/// the server id can reach the child's argv is Gemini's own MCP injection.
+const MCP_PROBE_TARGET: &str = r#"---
+title: mcp target
+agent: gemini
+success:
+  stack:
+    - action: {append_line: ["events.log", "sig=success"]}
+---
+mcp target body #proxyprobeserver
+"#;
+
+/// **Acceptance criterion 10, target-specific MCP tags and injection.** A proxied
+/// target's MCP plan is rebuilt from the *target's* provider and the *target's*
+/// prompt tags, and matches the same target invoked directly.
+///
+/// This is the provider-switch case: the router authors `codex` (whose injector
+/// writes a shadow-home TOML and contributes no argv), the target authors
+/// `gemini` (whose injector contributes `--allowed-mcp-server-names`). No
+/// provider flag is passed, so the injector actually used can only have been
+/// chosen from the target's own frontmatter.
+///
+/// Non-vacuity comes from three directions: the seeded catalog has empty
+/// defaults, so the server can only enter a session set through the target's
+/// tag; the tag is lexed out of the prompt before delivery, so the id appearing
+/// in argv cannot be the prompt echoing itself; and the direct arm's exact
+/// `launched-binary`/`mcp-allowed` values must hold before the arms are compared
+/// at all.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_equivalence_target_mcp_injection_matches_direct_run() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    // launched-binary, mcp-allowed, provider-ran, sig=success.
+    const EXPECTED_MARKERS: usize = 4;
+
+    let arms = equivalence_arms_configured(
+        MCP_ROUTER,
+        MCP_PROBE_TARGET,
+        "--mcp",
+        EXPECTED_MARKERS,
+        |staged| {
+            seed_mcp_catalog(staged.workspace.path());
+            write_mcp_recording_gemini(&staged.bin_dir, &staged.events_log);
+            write_named_provider(&staged.bin_dir, "codex", &staged.events_log);
+        },
+    );
+
+    for expected in [
+        "launched-binary=gemini".to_string(),
+        format!("mcp-allowed={MCP_PROBE_SERVER}"),
+    ] {
+        assert!(
+            arms.direct_lines.contains(&expected),
+            "fixture check: invoked directly, the target's own provider is \
+             selected and its tagged MCP server is injected (`{expected}`); got \
+             {:?}; pane:\n{}",
+            arms.direct_lines,
+            arms.direct_pane
+        );
+    }
+    assert!(
+        !arms.routed_lines.iter().any(|line| line == "launched=codex"),
+        "the router's `codex` must not launch for the proxied target; got {:?}; \
+         pane:\n{}",
+        arms.routed_lines,
+        arms.routed_pane
+    );
+
+    assert_eq!(
+        arms.routed_lines, arms.direct_lines,
+        "a proxied target's MCP plan must be rebuilt from the target's provider \
+         and the target's prompt tags, matching the same target invoked \
+         directly; pane:\n{}",
+        arms.routed_pane
+    );
+}
+
+// ── Acceptance criterion 28 — three-route typed-diagnostic matrix ───────────
+//
+// AC28 requires that the *same target failure* keeps the same typed diagnostic
+// identity and the same actionable rendering whether the target was invoked
+// directly, reached by a proxy from `initialize`, or reached by a proxy from
+// terminal recovery. The Level 1 preparation-service tests
+// (`prepare::service::tests::a_schema_failure_has_one_typed_identity_across_every_entry`)
+// compare Rust variants at one layer; they cannot show that the shipped binary
+// carries that variant out through each coordinator/harness boundary and renders
+// the same block on a real terminal. These rows do.
+//
+// Each row runs one failure fixture through all three routes and compares the
+// rendered diagnostic. The only difference the contract permits between routes
+// is proxy provenance — the `flow control redirected` line — which is asserted
+// present on the two proxy routes and absent on the direct one.
+//
+// ## The divergence these rows caught
+//
+// `prepare_and_run_active_document` had no schema pre-validation in front of its
+// pre-flight compose, while the invocation boundary (`run_composition_inner`)
+// did. A proxied target therefore reached Darkmatter's built-in schema
+// validation first and failed with the raw `MarkdownError: schema validation
+// failed` — different variant, different remediation text, and no frontmatter
+// excerpt — where the identical document invoked directly produced the typed
+// `CompositionError: schema validation`. Both schema rows below fail against
+// that ordering, which is what makes them non-vacuous as regression cover.
+
+/// Which entry reason drives one cell of the matrix.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DiagnosticRoute {
+    /// The target document is named on the command line.
+    Direct,
+    /// A router hands off at `initialize`, before its own `start`.
+    InitializeProxy,
+    /// A router's provider fails and its `failure` stack hands off.
+    TerminalRecoveryProxy,
+}
+
+impl DiagnosticRoute {
+    const ALL: [Self; 3] = [
+        Self::Direct,
+        Self::InitializeProxy,
+        Self::TerminalRecoveryProxy,
+    ];
+
+    fn is_proxy(self) -> bool {
+        self != Self::Direct
+    }
+
+    /// The router that reaches the target, or `None` for the direct route.
+    ///
+    /// The terminal-recovery router stamps `source-failure` so the row can prove
+    /// the provider really failed and the *terminal* stack really ran, rather
+    /// than the run having taken some earlier exit that happens to render the
+    /// same text.
+    fn router_doc(self, overlay: &str) -> Option<String> {
+        match self {
+            Self::Direct => None,
+            Self::InitializeProxy => Some(format!(
+                "---\ntitle: initialize router\ninitialize:\n  stack:\n    \
+                 - action: {{action: proxy, target: '@target.md', with: {overlay}}}\n\
+                 ---\nrouter body\n"
+            )),
+            Self::TerminalRecoveryProxy => Some(format!(
+                "---\ntitle: terminal recovery router\nfailure:\n  stack:\n    \
+                 - action: {{append_line: ['events.log', 'source-failure']}}\n    \
+                 - action: {{action: proxy, target: '@target.md', with: {overlay}}}\n\
+                 ---\nrouter body\n"
+            )),
+        }
+    }
+}
+
+/// One failure class, expressed so all three routes can reproduce it.
+struct DiagnosticFixture {
+    /// The target document. Written to `target.md` on every route, so all three
+    /// arms fail on the *same file* and source attribution is comparable.
+    target_doc: &'static str,
+    /// Caller `key=value` positionals that supply, on the direct route, the same
+    /// invalid value an overlay supplies on the proxy routes. Empty when the
+    /// failure is authored into the target itself.
+    direct_setters: &'static str,
+    /// The `with:` mapping each router carries. `{}` when the failure needs no
+    /// overlay.
+    overlay: &'static str,
+    /// The rendered typed identity: error-family name plus variant label, as the
+    /// `ErrorHeader` renders it. This is the identity AC28 is about — not a
+    /// substring of the human-readable prose underneath it.
+    identity: &'static str,
+    /// What the diagnostic must name so the operator lands on the right file.
+    ///
+    /// Which *thing* carries the attribution is a property of the error family,
+    /// not of the route: a schema verdict names the document it validated, while
+    /// a transclusion failure names the reference it could not resolve (anchored,
+    /// as the resolved path in the body shows, on the target's own directory).
+    /// Both are target-owned; neither may name the router.
+    attribution: &'static str,
+}
+
+/// A schema-invalid value authored into the target's own frontmatter.
+const DIAG_SCHEMA_FAILURE: DiagnosticFixture = DiagnosticFixture {
+    target_doc: "---\n$schema:\n    count: 'number(required)'\ncount: not-a-number\n\
+                 ---\ntarget body\n",
+    direct_setters: "",
+    overlay: "{}",
+    identity: "CompositionError: schema validation",
+    attribution: "target.md",
+};
+
+/// An invalid `proxy.with` overlay (acceptance criterion 24): the target
+/// declares a required `count` it does not author, and the overlay supplies a
+/// value of the wrong type.
+///
+/// The direct arm supplies the identical bad value through the caller's own
+/// `key=value` mechanism, which is the honest comparison — "an invalid overlay
+/// produces the *normal* typed target schema error" is precisely the claim.
+const DIAG_INVALID_OVERLAY: DiagnosticFixture = DiagnosticFixture {
+    target_doc: "---\n$schema:\n    count: 'number(required)'\n---\ntarget body\n",
+    direct_setters: "count=not-a-number",
+    overlay: "{count: 'not-a-number'}",
+    identity: "CompositionError: schema validation",
+    attribution: "target.md",
+};
+
+/// A typed target-*preparation* failure that is not a schema verdict: the
+/// target's body transcludes a partial that does not exist, so preparation fails
+/// inside Darkmatter's compose pipeline and the typed cause has to survive out
+/// through the walker on every route.
+const DIAG_PREPARATION_FAILURE: DiagnosticFixture = DiagnosticFixture {
+    target_doc: "---\ntitle: preparation failure target\n---\n::file _no_such_partial.md\n",
+    direct_setters: "",
+    overlay: "{}",
+    identity: "TransclusionError: I/O failure",
+    attribution: "no_such_partial.md",
+};
+
+/// One cell's observable outcome.
+struct RouteDiagnostic {
+    pane: String,
+    exit_code: Option<i32>,
+    lines: Vec<String>,
+    /// The rendered diagnostic, from its identity header to the end of the
+    /// output, with workspace-specific paths normalized.
+    tail: Vec<String>,
+}
+
+/// Run one (route × failure) cell and capture its pane, exit status, side-effect
+/// log, and normalized diagnostic tail.
+fn run_diagnostic_route(route: DiagnosticRoute, fixture: &DiagnosticFixture) -> RouteDiagnostic {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+
+    // The failing provider serves both purposes: it drives the terminal-recovery
+    // router's `failure` event, and on the other two routes it is the stub that
+    // must never be reached (the target fails before any launch).
+    let router = route.router_doc(fixture.overlay);
+    let mut staged = stage_proxy_pair(
+        router.as_deref().unwrap_or("---\ntitle: unused\n---\nunused\n"),
+        fixture.target_doc,
+        false,
+    );
+    if router.is_none() {
+        staged.md_file = staged.workspace.path().join("target.md");
+    }
+    let setters = if route.is_proxy() {
+        ""
+    } else {
+        fixture.direct_setters
+    };
+
+    let session = format!("biscuit_l2_lcdiag_{}_{seq}", std::process::id());
+    let shell = biscuit_test_harness::detect_shell();
+    let spawned = std::process::Command::new("tmux")
+        .args([
+            "new-session",
+            "-d",
+            "-s",
+            &session,
+            "-x",
+            "200",
+            // Taller than the other runners: the terminal-recovery route renders
+            // the router's whole launch surface (system prompt, agent prompt,
+            // provider failure) above the diagnostic, and `capture()` has no
+            // scrollback — a 60-row pane would scroll the provenance line off.
+            "-y",
+            "120",
+            &format!("{shell} -l"),
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(spawned, "failed to spawn tmux session");
+
+    let mut harness = TmuxHarness::attach(&session);
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+
+    let claudine = env!("CARGO_BIN_EXE_claudine");
+    // `%s` keeps the literal token off the echoed command line's own `=<digits>`
+    // shape, so the parse below cannot mistake the command for its output.
+    let exit_token = format!("L2DIAGEXIT_{seq}");
+    let cmd = format!(
+        "cd {ws} && NO_COLOR='1' MODEL='' HOME='{home}' PATH='{path}' \
+         {claudine} compose --goose {md} {setters} ; printf '{exit_token}=%s\\n' $?",
+        ws = staged.workspace.path().display(),
+        home = staged.workspace.path().display(),
+        path = augmented_path(&staged.bin_dir).to_string_lossy(),
+        md = staged.md_file.display(),
+    );
+    harness
+        .send_command_with_env(&cmd, &[])
+        .expect("send compose command");
+
+    let deadline = Instant::now() + Duration::from_secs(40);
+    let mut pane = String::new();
+    let mut exit_code = None;
+    while Instant::now() < deadline {
+        pane = harness.capture().map(|f| f.plain).unwrap_or_default();
+        if let Some(code) = parse_exit_token(&pane, &exit_token) {
+            exit_code = Some(code);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    kill_session_by_name(&session);
+
+    let tail = diagnostic_tail(&pane, fixture.identity, &exit_token, &staged);
+    RouteDiagnostic {
+        lines: event_lines(&staged),
+        tail,
+        pane,
+        exit_code,
+    }
+}
+
+/// Read the shell's reported exit status back off the pane.
+fn parse_exit_token(pane: &str, token: &str) -> Option<i32> {
+    pane.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix(token)
+            .and_then(|rest| rest.strip_prefix('='))
+            .filter(|code| !code.is_empty() && code.chars().all(|c| c.is_ascii_digit()))
+            .and_then(|code| code.parse().ok())
+    })
+}
+
+/// The rendered diagnostic: every line from the identity header down to the exit
+/// token, with the arm's temporary workspace path replaced by a placeholder.
+///
+/// Starting at the identity header is what scopes the comparison to the
+/// diagnostic itself. Everything a route legitimately renders *before* it — the
+/// execution header, the router's own launch surface, and the proxy provenance
+/// line — is route-specific by design and is asserted separately.
+fn diagnostic_tail(
+    pane: &str,
+    identity: &str,
+    exit_token: &str,
+    staged: &Staged,
+) -> Vec<String> {
+    let workspace = staged.workspace.path().display().to_string();
+    pane.lines()
+        .skip_while(|line| !line.contains(identity))
+        .take_while(|line| !line.trim().starts_with(exit_token))
+        .map(|line| line.trim().replace(&workspace, "<WS>"))
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+/// Assert everything one cell owes on its own, before any cross-route
+/// comparison: exit status, typed identity, styled rendering, source
+/// attribution, single rendering, proxy provenance, and the anti-vacuity
+/// evidence that the route actually ran the way it claims.
+fn assert_diagnostic_cell(
+    route: DiagnosticRoute,
+    fixture: &DiagnosticFixture,
+    diag: &RouteDiagnostic,
+) {
+    let pane = &diag.pane;
+
+    assert_eq!(
+        diag.exit_code,
+        Some(1),
+        "{route:?}: a failed target must exit non-zero with the composition \
+         failure status; pane:\n{pane}"
+    );
+
+    // The typed identity — error family plus variant label — rendered exactly
+    // once. Counting is the duplicate-rendering assertion: a diagnostic caught
+    // and re-rendered at two boundaries (the historical failure mode on the
+    // proxy routes) shows up here as two.
+    let renderings = pane.matches(fixture.identity).count();
+    assert_eq!(
+        renderings,
+        1,
+        "{route:?}: the typed diagnostic `{}` must be rendered exactly once, \
+         got {renderings}; pane:\n{pane}",
+        fixture.identity,
+    );
+
+    assert!(
+        diag.tail.iter().any(|line| line.starts_with('┃')),
+        "{route:?}: the diagnostic must render as a styled bordered block, not a \
+         crude single-line `Error: …`; tail {:?}; pane:\n{pane}",
+        diag.tail,
+    );
+
+    // Source attribution: the failure is attributed to the target's own
+    // document or reference on every route. A router that put its own name here
+    // would send the operator to the wrong file.
+    assert!(
+        diag.tail.iter().any(|line| line.contains(fixture.attribution)),
+        "{route:?}: the diagnostic must attribute the failure to `{}`; \
+         tail {:?}; pane:\n{pane}",
+        fixture.attribution,
+        diag.tail,
+    );
+    assert!(
+        !diag.tail.iter().any(|line| line.contains("<WS>/doc.md")),
+        "{route:?}: the diagnostic must not attribute the target's failure to the \
+         router; tail {:?}; pane:\n{pane}",
+        diag.tail,
+    );
+
+    // Proxy provenance is the one intentional difference between the routes.
+    let provenance = pane.contains("flow control redirected to target.md");
+    assert_eq!(
+        provenance,
+        route.is_proxy(),
+        "{route:?}: the proxy provenance line must be present on proxy routes and \
+         absent on the direct route; pane:\n{pane}"
+    );
+
+    // Anti-vacuity. Without these an early abort — a router that never resolved,
+    // a provider that never launched, a run that died before the hand-off —
+    // would leave the assertions above trivially satisfiable by a pane that
+    // never exercised the route at all.
+    assert!(
+        diag.tail.len() >= 2,
+        "{route:?}: the captured diagnostic must carry a header and a body; \
+         tail {:?}; pane:\n{pane}",
+        diag.tail,
+    );
+    let provider_runs = diag.lines.iter().filter(|l| **l == "provider-ran").count();
+    match route {
+        DiagnosticRoute::TerminalRecoveryProxy => {
+            assert_eq!(
+                provider_runs, 1,
+                "{route:?}: the router's provider must launch exactly once — the \
+                 terminal-recovery route is only reached through a real provider \
+                 failure; got {:?}; pane:\n{pane}",
+                diag.lines,
+            );
+            assert!(
+                diag.lines.iter().any(|l| l == "source-failure"),
+                "{route:?}: the router's terminal `failure` stack must have run, \
+                 which is what makes this the recovery route rather than an \
+                 earlier exit; got {:?}; pane:\n{pane}",
+                diag.lines,
+            );
+        }
+        _ => assert_eq!(
+            provider_runs, 0,
+            "{route:?}: no provider may launch — the target fails during \
+             preparation, before any launch; got {:?}; pane:\n{pane}",
+            diag.lines,
+        ),
+    }
+}
+
+/// Run one fixture through all three routes and assert both halves of AC28: each
+/// cell is individually sound, and the three rendered diagnostics are identical.
+fn assert_route_equivalent_diagnostic(fixture: &DiagnosticFixture) {
+    let cells: Vec<(DiagnosticRoute, RouteDiagnostic)> = DiagnosticRoute::ALL
+        .iter()
+        .map(|route| (*route, run_diagnostic_route(*route, fixture)))
+        .collect();
+
+    for (route, diag) in &cells {
+        assert_diagnostic_cell(*route, fixture, diag);
+    }
+
+    // The direct arm is the contract; the proxy arms must match it exactly.
+    // Everything route-specific was rendered above the identity header and is
+    // excluded by construction, so what is compared here is the diagnostic and
+    // nothing else.
+    let (_, direct) = &cells[0];
+    for (route, diag) in &cells[1..] {
+        assert_eq!(
+            diag.tail, direct.tail,
+            "{route:?}: the same target failing the same way must produce the \
+             same typed identity and the same actionable rendering as the direct \
+             route (acceptance criterion 28); direct pane:\n{}\n\nrouted pane:\n{}",
+            direct.pane, diag.pane,
+        );
+    }
+}
+
+/// **Acceptance criterion 28, schema failure.** A target whose own frontmatter
+/// violates its `$schema` renders one typed `CompositionError: schema
+/// validation` on all three routes.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_diagnostic_matrix_schema_failure_is_route_equivalent() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    assert_route_equivalent_diagnostic(&DIAG_SCHEMA_FAILURE);
+}
+
+/// **Acceptance criteria 24 and 28, invalid overlay.** An invalid `proxy.with`
+/// value produces the target's *normal* typed schema error — the same one the
+/// caller's own `key=value` produces on the direct route — on all three routes,
+/// and no provider is launched.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_diagnostic_matrix_invalid_overlay_is_route_equivalent() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    assert_route_equivalent_diagnostic(&DIAG_INVALID_OVERLAY);
+
+    // Anti-vacuity for this fixture specifically: the target authors no `count`,
+    // so a run that never applied the overlay would fail as *missing* rather
+    // than *invalid* — a different typed identity. Reaching the validation
+    // verdict is therefore proof the overlay landed in the target's frontmatter.
+    let routed = run_diagnostic_route(DiagnosticRoute::InitializeProxy, &DIAG_INVALID_OVERLAY);
+    assert!(
+        !routed.pane.contains("Required propert"),
+        "the overlay must have supplied `count` — a missing-property diagnostic \
+         would mean the row never exercised overlay validation at all; pane:\n{}",
+        routed.pane
+    );
+}
+
+/// **Acceptance criterion 28, typed target-preparation failure.** A failure that
+/// is not a schema verdict — an unresolvable `::file` transclusion — keeps its
+/// typed `TransclusionError` identity and its actionable rendering across all
+/// three routes.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_diagnostic_matrix_preparation_failure_is_route_equivalent() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    assert_route_equivalent_diagnostic(&DIAG_PREPARATION_FAILURE);
 }
