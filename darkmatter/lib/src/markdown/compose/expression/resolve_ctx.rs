@@ -241,6 +241,60 @@ pub(crate) fn resolve_document_file_ref(
     file_ref.resolve_in_context(&ctx)
 }
 
+/// Resolves a document-backed reference to an absolute path **shape**: the
+/// matched file when one exists, or — after a miss — the FIRST candidate from
+/// the shared [`FileReference::candidate_plan`].
+///
+/// Path-component expression functions (`basename`, `dirname`, `join`, the
+/// file-index family) operate on references whose target need not exist. The
+/// missing-target shape comes from the same repository-first candidate order
+/// execution probes (D1/D3) — never a private prefix branch plus
+/// `base_dir.join`. An implicit bare miss therefore yields the repository-root
+/// candidate, identical to how an existing implicit reference resolves; a shape
+/// and an existing file can never disagree on anchoring.
+///
+/// ## Returns
+///
+/// - `Ok(path)` — the matched file, or the first candidate's path shape.
+///
+/// ## Errors
+///
+/// Propagates the typed [`FileReferenceError`] for any non-`NoMatch` failure
+/// (invalid context, a missing home/vault anchor, or a candidate probe I/O
+/// failure) and when the reference has no local candidate at all (a remote URL,
+/// which callers reject up front).
+pub(crate) fn resolve_document_file_ref_shape(
+    file_ref: &FileReference,
+    base_dir: &Path,
+    repository_root: Option<&Path>,
+    magic_paths: &[(PathBuf, PathPosition)],
+) -> Result<PathBuf, FileReferenceError> {
+    let ctx = crate::markdown::compose::util::document_resolution_context(
+        base_dir,
+        None,
+        magic_paths,
+        repository_root,
+    );
+    if let Some(path) = file_ref.resolve_in_context(&ctx)? {
+        return Ok(path);
+    }
+    // Clean miss: the path shape is the first candidate the shared plan would
+    // have probed (repository-first for an implicit bare path), taken from
+    // `FileReference` itself rather than re-deriving the grammar from the raw
+    // string.
+    file_ref
+        .candidate_plan(&ctx)?
+        .into_iter()
+        .next()
+        .map(|candidate| candidate.path().to_path_buf())
+        .ok_or_else(|| {
+            FileReferenceError::InvalidSyntax(format!(
+                "reference `{}` has no local filesystem candidate",
+                file_ref.raw()
+            ))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

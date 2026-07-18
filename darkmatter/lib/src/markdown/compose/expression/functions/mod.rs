@@ -24,6 +24,7 @@ use super::{
 };
 use super::resolve_ctx::{
     ResolutionContext, is_remote_url, normalize_path_arg, resolve_document_file_ref,
+    resolve_document_file_ref_shape,
 };
 use crate::markdown::Markdown;
 use crate::markdown::schemas::DarkmatterSchemas;
@@ -1609,12 +1610,12 @@ pub fn relative_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Exp
 
 /// Resolves a filepath argument through the shared FS-path rules.
 ///
-/// Rejects HTTP(S) URLs. First tries the standard `FileReference` resolution
-/// (which requires the file to exist so magic paths and git-root fallbacks
-/// work); if that yields no match, falls back to a path shape computed from
-/// the reference kind and the base directory. This lets path-component
-/// functions operate on missing files and directories without checking
-/// `Path::exists()`.
+/// Rejects HTTP(S) URLs. Otherwise delegates entirely to `FileReference`
+/// classification and its ordered candidate plan (D1/D3): an existing target
+/// resolves to its matched path, and a missing target takes the plan's first
+/// candidate as its shape. Path-component functions thus operate on missing
+/// files and directories without a private prefix grammar or an existence
+/// probe.
 fn resolve_path_arg(
     name: &'static str,
     value: &Value,
@@ -1627,7 +1628,11 @@ fn resolve_path_arg(
 /// Resolves a raw path string to an absolute path shape.
 ///
 /// See [`resolve_path_arg`]. Exposed separately so `join()` can validate its
-/// computed result without constructing a temporary [`Value`].
+/// computed result without constructing a temporary [`Value`]. Both existing
+/// and missing targets are shaped by the shared
+/// [`resolve_document_file_ref_shape`], so a shape can never disagree with an
+/// execution-time resolution on classification, candidate order, or
+/// repository-first anchoring.
 fn resolve_path_shape(
     name: &'static str,
     raw: &str,
@@ -1639,44 +1644,21 @@ fn resolve_path_shape(
             format!("{name}() does not accept HTTP(S) URLs"),
         ));
     }
-    // Existing `FileReference` resolution handles existing files, magic paths,
-    // package paths, git-root fallbacks, and absolute references.
-    if let Ok(Some(p)) = resolve_arg(name, raw, ctx) {
-        return Ok(p);
-    }
-    // No existing match: build a deterministic path shape without touching
-    // `Path::exists()`.
     let normalized = normalize_path_arg(raw);
-    let path = PathBuf::from(&normalized);
-    if path.is_absolute() {
-        return Ok(path);
-    }
-    if normalized.starts_with("./")
-        || normalized.starts_with("../")
-        || normalized == "."
-        || normalized == ".."
-    {
-        return Ok(ctx.base_dir.join(path));
-    }
-    if let Some(rest) = normalized.strip_prefix('@') {
-        for (magic, _position) in &ctx.magic_paths {
-            let candidate = magic.join(rest);
-            if candidate.exists() {
-                return Ok(candidate);
-            }
-        }
-        return Ok(ctx.base_dir.join(rest));
-    }
-    if let Some(rest) = normalized.strip_prefix('!') {
-        return Ok(ctx.base_dir.join(rest));
-    }
-    if normalized.starts_with("vault:") {
-        return Err(expression_other(
-            name,
-            format!("{name}() vault references require an existing file"),
-        ));
-    }
-    Ok(ctx.base_dir.join(path))
+    let file_ref = biscuit_file::FileReference::new(&normalized).map_err(|e| {
+        file_reference_error(name, raw, ctx, FileRefFailure::classify(&e), Some(e))
+    })?;
+    // Magic (`@`) roots and the pass's cached repository root live on the
+    // context; the shared shaper builds the same candidate plan execution
+    // probes (repository-first for implicit references), so a missing target's
+    // shape is the first shared candidate rather than a source-first join.
+    resolve_document_file_ref_shape(
+        &file_ref,
+        &ctx.base_dir,
+        ctx.repository_root.as_deref(),
+        &ctx.magic_paths,
+    )
+    .map_err(|e| file_reference_error(name, raw, ctx, FileRefFailure::classify(&e), Some(e)))
 }
 
 /// Parses a stem against the indexed grammar, returning the base name, parsed
@@ -4193,6 +4175,28 @@ mod tests {
             assert!(join_fn(&[json!("a")], &ctx).is_err());
             assert!(join_fn(&[json!(123), json!("b")], &ctx).is_err());
             assert!(join_fn(&[json!("a"), json!([])], &ctx).is_err());
+        }
+
+        /// A missing implicit bare reference is shaped **repository-first**
+        /// (D3), matching how an existing implicit reference resolves — not the
+        /// removed private `ctx.base_dir.join` source-first fallback. The
+        /// explicit `./` form still pins to the source directory only.
+        #[test]
+        fn missing_implicit_path_shape_is_repository_first() {
+            let repo = tempfile::TempDir::new().unwrap();
+            std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+            let base = repo.path().join("prompts");
+            std::fs::create_dir_all(&base).unwrap();
+            let ctx = ResolutionContext::new(base.clone())
+                .with_repository_root(repo.path().to_path_buf());
+
+            // Implicit bare miss → repository-root candidate, not `prompts/…`.
+            let implicit = resolve_path_shape("dirname", "sub/missing.md", &ctx).unwrap();
+            assert_eq!(implicit, repo.path().join("sub/missing.md"));
+
+            // Explicit `./` miss → source-directory candidate only.
+            let explicit = resolve_path_shape("dirname", "./sub/missing.md", &ctx).unwrap();
+            assert_eq!(explicit, base.join("./sub/missing.md"));
         }
 
         #[test]

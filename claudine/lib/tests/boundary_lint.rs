@@ -15,14 +15,21 @@
 //! the executable guardrail that those two specific conversions cannot silently
 //! regress.
 //!
+//! It also guards the **file-reference grammar** boundary: the file-resolution
+//! feature (spec D1/D3, AC1/AC6) makes `biscuit_file::FileReference` the single
+//! syntax authority across Claudine-executed Darkmatter compose surfaces. The
+//! `darkmatter_*` tests below broaden coverage from the three CLI proxy routes
+//! to the Darkmatter modules Claudine composition drives, so a reintroduced
+//! private prefix classifier or source-first `join` fallback fails loudly.
+//!
 //! ## Notes
 //!
-//! Scope is deliberately limited to these two named sites. The feature spec
-//! permits some legacy `String` error variants during migration, and other
-//! sites (e.g. `lifecycle/executor.rs`) still legitimately use
-//! `map_err(|e| e.to_string())` and are out of scope for this finding. A
-//! repo-wide ban would false-positive on those, so the guard matches the exact
-//! converted constructions only.
+//! Scope is deliberately limited to the named sites and the exact removed
+//! constructions. The feature spec permits some legacy `String` error variants
+//! during migration, and other sites (e.g. `lifecycle/executor.rs`) still
+//! legitimately use `map_err(|e| e.to_string())` and are out of scope for this
+//! finding. A repo-wide ban would false-positive on those, so the guard matches
+//! the exact converted constructions only.
 
 use std::path::Path;
 
@@ -114,5 +121,80 @@ fn control_dispatch_does_not_bypass_the_existence_check() {
         !src.contains("resolve_harness_path(&target"),
         "control_dispatch.rs reintroduced the direct `resolve_harness_path` call \
          that bypasses `resolve_proxy_target`'s existence check"
+    );
+}
+
+/// `CARGO_MANIFEST_DIR` for the lib crate is `claudine/lib`; the
+/// Claudine-executed Darkmatter compose surfaces live two directories over,
+/// under `darkmatter/lib`.
+fn read_darkmatter_source(relative: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../darkmatter/lib")
+        .join(relative);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
+}
+
+/// Every Claudine-executed Darkmatter compose surface must parse document
+/// references through `biscuit_file::FileReference` — the single grammar
+/// authority (spec D1, AC1/AC6) — rather than a bespoke prefix classifier. This
+/// broadens the proxy-route boundary above from the three CLI routes to the
+/// Darkmatter modules Claudine composition actually drives, so a new private
+/// grammar cannot land silently on one of them.
+#[test]
+fn darkmatter_compose_surfaces_route_through_file_reference() {
+    for module in [
+        "src/markdown/compose/expression/functions/mod.rs",
+        "src/markdown/compose/expression/resolve_ctx.rs",
+        "src/markdown/compose/link_resolve.rs",
+        "src/markdown/compose/transclusion/resolver.rs",
+        "src/markdown/schemas/resolve.rs",
+    ] {
+        let src = read_darkmatter_source(module);
+        assert!(
+            src.contains("FileReference"),
+            "{module} no longer routes references through the shared \
+             `FileReference` grammar authority (spec D1)"
+        );
+    }
+}
+
+/// Path-shape expression functions must take a missing target's shape from the
+/// shared candidate plan, never a re-parsed prefix branch plus a source-first
+/// `ctx.base_dir.join` (spec Current Drift #5, D3). Guards the exact private
+/// fallback this finding removed.
+#[test]
+fn darkmatter_path_shape_functions_do_not_source_join_a_missing_reference() {
+    let src = read_darkmatter_source("src/markdown/compose/expression/functions/mod.rs");
+    assert!(
+        src.contains("resolve_document_file_ref_shape"),
+        "expression functions no longer shape missing paths through the shared \
+         candidate plan (spec D3)"
+    );
+    for removed in ["ctx.base_dir.join(rest)", "ctx.base_dir.join(path)"] {
+        assert!(
+            !src.contains(removed),
+            "expression functions reintroduced the private source-first path \
+             fallback `{removed}` (spec Current Drift #5)"
+        );
+    }
+}
+
+/// Local Markdown link resolution must absolutize a missing reference through
+/// the shared candidate plan (repository-first for implicit), never a
+/// source-first `dir.join(raw)` that bypasses classification (spec Current
+/// Drift #8, D2). Guards the exact fallback this finding removed.
+#[test]
+fn darkmatter_link_resolve_does_not_source_join_after_a_miss() {
+    let src = read_darkmatter_source("src/markdown/compose/link_resolve.rs");
+    assert!(
+        src.contains("candidate_plan"),
+        "link_resolve no longer absolutizes a missing reference through the \
+         shared candidate plan (spec Current Drift #8)"
+    );
+    assert!(
+        !src.contains("let joined = dir.join(raw)"),
+        "link_resolve reintroduced the source-first `dir.join(raw)` fallback \
+         that bypasses shared classification (spec Current Drift #8)"
     );
 }

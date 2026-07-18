@@ -263,3 +263,69 @@ pub(crate) fn prepare_frontmatter_for_compose(
             .collect()
     })
 }
+
+#[cfg(test)]
+mod resolution_context_tests {
+    //! Shared-fixture parity for the single seam every document-backed
+    //! Darkmatter surface routes through.
+    //!
+    //! Transclusion, expression `file(...)`, schema `file(...)`, and local link
+    //! resolution all build their [`FileResolutionContext`] from
+    //! [`document_resolution_context`] and resolve through
+    //! [`FileReference::resolve_in_context`]. Cross-surface parity is therefore a
+    //! property of this one helper: given the same base/source/repository inputs,
+    //! every surface produces the identical context and the identical resolution.
+    //! Proving the seam repository-first on a real collision fixture proves the
+    //! shared contract for all of them at Level 1, where the resolution semantics
+    //! live; only the terminal *rendering* of a failure needs Level 2.
+
+    use super::{FileResolutionContext, document_resolution_context};
+    use biscuit_file::FileReference;
+    use std::fs;
+
+    #[test]
+    fn seam_resolves_implicit_repository_first_and_explicit_source_only() {
+        let repo = tempfile::TempDir::new().unwrap();
+        let root = repo.path();
+        // `find_git_root_from` only needs a `.git` marker, matching the other
+        // in-crate resolution tests.
+        fs::create_dir_all(root.join(".git")).unwrap();
+
+        // A name-collision: the same file exists at the repository root and under
+        // the authoring document's directory, so precedence is observable.
+        fs::write(root.join("notes.md"), b"repo").unwrap();
+        let base = root.join("prompts");
+        fs::create_dir_all(&base).unwrap();
+        fs::write(base.join("notes.md"), b"source decoy").unwrap();
+
+        let ctx: FileResolutionContext =
+            document_resolution_context(&base, Some(&base.join("router.md")), &[], Some(root));
+
+        // Implicit bare reference: repository candidate wins over the source
+        // twin. Canonicalize both sides so an explicit `.` path component or a
+        // `/var`->`/private/var` tempdir symlink cannot mask the anchor identity.
+        let implicit = FileReference::new("notes.md")
+            .unwrap()
+            .resolve_in_context(&ctx)
+            .unwrap()
+            .map(|p| p.canonicalize().unwrap());
+        assert_eq!(
+            implicit,
+            Some(root.join("notes.md").canonicalize().unwrap()),
+            "every surface sharing this seam resolves implicit references \
+             repository-first",
+        );
+
+        // Explicit `./` reference: pinned to the source directory, no fallback.
+        let explicit = FileReference::new("./notes.md")
+            .unwrap()
+            .resolve_in_context(&ctx)
+            .unwrap()
+            .map(|p| p.canonicalize().unwrap());
+        assert_eq!(
+            explicit,
+            Some(base.join("notes.md").canonicalize().unwrap()),
+            "the explicit form stays source-relative across every surface",
+        );
+    }
+}

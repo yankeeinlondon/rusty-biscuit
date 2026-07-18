@@ -279,13 +279,25 @@ fn is_bare_name(reference: &str) -> bool {
 
 /// Tries a bare name against each schema root, nearest first. Returns the
 /// resolved path of the first root that contains a file matching `name`, or
-/// `None` when no root has it. `FileReference::resolve_from` is the authority
-/// that turns the name into a filesystem path within each root.
+/// `None` when no root has it.
+///
+/// Each root is probed with explicit-relative (`./name`) semantics, which pins
+/// the probe to exactly that root. An implicit-relative probe would instead
+/// search the root's enclosing repository root first (the feature's new
+/// repository-first policy), letting a repository-root file shadow a nearer
+/// configured schema root and silently load the wrong schema. Explicit-relative
+/// resolution never falls back off the given root, so the loop's advertised
+/// nearest-first ordering is what actually decides the winner.
 fn try_bare_name_in_roots(
     name: &str,
     schema_roots: &[PathBuf],
 ) -> Result<Option<PathBuf>, SchemaError> {
-    let file_ref = FileReference::new(name).map_err(|source| SchemaError::Unresolved {
+    // `name` is a bare name here (guaranteed by the `is_bare_name` guard at every
+    // call site): no path separator and no sigil. Prefixing `./` therefore yields
+    // a well-formed explicit-relative reference pinned to the root it resolves
+    // from — `FileReference` stays the sole authority that turns it into a path.
+    let pinned = format!("./{name}");
+    let file_ref = FileReference::new(&pinned).map_err(|source| SchemaError::Unresolved {
         reference: name.to_string(),
         source,
     })?;
@@ -2557,6 +2569,107 @@ mod bare_name_phase3 {
             resolve_yaml_schema_with_roots(&v, &root.join("pkg/docs"), &roots).expect("resolves");
         let required = resolved.json_schema["required"].as_array().unwrap();
         assert!(required.iter().any(|v| v == "title"));
+    }
+
+    #[test]
+    fn bare_name_pins_to_schema_root_not_repository_root() {
+        // The precedence flip made implicit resolution repository-first. A
+        // schema-root probe must stay pinned to its root: with a collision
+        // between the repository root and a nearer configured schema root, the
+        // schema root wins (feature review-1 Finding 4). An unpinned
+        // (implicit) probe would let `<repo>/schema.yaml` shadow
+        // `<repo>/schemas/schema.yaml` and silently validate the wrong schema.
+        let tmp = tempfile::tempdir().unwrap();
+        // Canonicalize so macOS `/var` -> `/private/var` matches the workdir
+        // `gix` reports for repository discovery.
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        // A real git repo so `resolve_from`'s repository discovery has a root
+        // to (wrongly) prefer if the probe were not pinned.
+        gix::init(&root).unwrap();
+
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        fs::create_dir_all(root.join("docs")).unwrap();
+
+        // Collision: same bare name at the repository root and the configured
+        // schema root, each with a distinguishing required field.
+        write(
+            &root,
+            "schema.yaml",
+            "$schema:\n  repo_wins: 'string(required)'\n",
+        );
+        write(
+            &root.join("schemas"),
+            "schema.yaml",
+            "$schema:\n  schema_root_wins: 'string(required)'\n",
+        );
+
+        let roots = vec![root.join("schemas")];
+        let v = yaml_value("schema.yaml");
+        let resolved =
+            resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots).expect("resolves");
+
+        let required = resolved.json_schema["required"].as_array().unwrap();
+        assert!(
+            required.iter().any(|v| v == "schema_root_wins"),
+            "configured schema root must win over the repository root: {required:?}"
+        );
+        assert!(
+            !required.iter().any(|v| v == "repo_wins"),
+            "repository-root file must not be selected: {required:?}"
+        );
+        assert_eq!(resolved.referenced_files.len(), 1);
+        assert!(
+            resolved.referenced_files[0]
+                .to_string_lossy()
+                .contains("schemas"),
+            "referenced file must come from the configured schema root: {:?}",
+            resolved.referenced_files[0]
+        );
+    }
+
+    #[test]
+    fn bare_name_ordering_survives_repository_root_collision() {
+        // Nearest-first ordering across multiple configured roots must hold even
+        // when the repository root also carries the colliding name. The near
+        // root wins; neither the far root nor the repository root shadows it.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        gix::init(&root).unwrap();
+
+        fs::create_dir_all(root.join("near")).unwrap();
+        fs::create_dir_all(root.join("far")).unwrap();
+        fs::create_dir_all(root.join("docs")).unwrap();
+
+        write(
+            &root,
+            "schema.yaml",
+            "$schema:\n  repo_wins: 'string(required)'\n",
+        );
+        write(
+            &root.join("near"),
+            "schema.yaml",
+            "$schema:\n  near_wins: 'string(required)'\n",
+        );
+        write(
+            &root.join("far"),
+            "schema.yaml",
+            "$schema:\n  far_wins: 'string(required)'\n",
+        );
+
+        let roots = vec![root.join("near"), root.join("far")];
+        let v = yaml_value("schema.yaml");
+        let resolved =
+            resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots).expect("resolves");
+
+        let required = resolved.json_schema["required"].as_array().unwrap();
+        assert!(
+            required.iter().any(|v| v == "near_wins"),
+            "nearest configured root must win: {required:?}"
+        );
+        assert!(
+            !required.iter().any(|v| v == "far_wins" || v == "repo_wins"),
+            "neither the far root nor the repository root may shadow the near root: {required:?}"
+        );
     }
 
     #[test]

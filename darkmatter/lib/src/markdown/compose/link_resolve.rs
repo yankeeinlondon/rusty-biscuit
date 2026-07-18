@@ -130,44 +130,48 @@ fn resolve_absolute(
     }
 
     trace!("resolve_absolute called with raw: '{}'", raw);
-    if let Ok(file_ref) = biscuit_file::FileReference::new(raw) {
-        // Resolve through the shared document-backed context so relative and
-        // `@` references anchor on the document directory (implicit paths
-        // repository-first then source), never the ambient process CWD. When no
-        // document base is known (bare-API path), fall back to ambient
-        // resolution. Magic roots live on the context, not on the reference. We
-        // intentionally do NOT use resolve_relative here — link resolve's job is
-        // to produce absolute paths, not make them relative again.
-        let resolved = if let Some(dir) = base_dir {
-            let repo_root = find_git_root_from(dir);
-            let resolution_ctx =
-                document_resolution_context(dir, None, &options.magic_paths, repo_root.as_deref());
-            file_ref.resolve_in_context(&resolution_ctx).ok().flatten()
-        } else {
-            file_ref.resolve().ok().flatten()
-        };
+    // A value that does not parse as a `FileReference` is not a resolvable
+    // local path; leave the link untouched rather than fabricating a path.
+    let file_ref = biscuit_file::FileReference::new(raw).ok()?;
 
-        if let Some(resolved) = resolved {
-            // `canonicalize` can fail on a resolved-but-since-removed path; the
-            // resolved absolute path is a correct fallback in that case.
-            let result = std::fs::canonicalize(&resolved).ok().or(Some(resolved));
-            trace!("resolve_absolute FileReference success: {:?}", result);
-            return result;
+    // Resolve through the shared document-backed context so relative and `@`
+    // references anchor on the document directory (implicit paths
+    // repository-first then source), never the ambient process CWD. Magic roots
+    // live on the context, not on the reference. We intentionally do NOT use
+    // resolve_relative here — link resolve's job is to produce absolute paths,
+    // not make them relative again.
+    let resolved = if let Some(dir) = base_dir {
+        let repo_root = find_git_root_from(dir);
+        let resolution_ctx =
+            document_resolution_context(dir, None, &options.magic_paths, repo_root.as_deref());
+        // An existing target resolves to its matched path; a clean miss (a link
+        // to a not-yet-created file) is absolutized to the FIRST shared
+        // candidate — repository-first for an implicit bare path — via the same
+        // `FileReference` grammar execution uses, never a source-first
+        // `dir.join(raw)` that would bypass shared classification. A hard
+        // resolver failure (invalid context, missing anchor) leaves the link
+        // untouched.
+        match file_ref.resolve_in_context(&resolution_ctx) {
+            Ok(Some(path)) => Some(path),
+            Ok(None) => file_ref
+                .candidate_plan(&resolution_ctx)
+                .ok()
+                .and_then(|plan| plan.into_iter().next())
+                .map(|candidate| candidate.path().to_path_buf()),
+            Err(_) => None,
         }
-    }
+    } else {
+        // Bare-API path with no document base: only an existing target can be
+        // absolutized; a miss has no candidate anchor without a base.
+        file_ref.resolve().ok().flatten()
+    };
 
-    // Missing target: link resolve still absolutizes it (a link to a not-yet-
-    // created file must become absolute). `canonicalize` silently degrades to
-    // the joined path when the target does not exist.
-    if let Some(dir) = base_dir {
-        let joined = dir.join(raw);
-        let result = std::fs::canonicalize(&joined).ok().or(Some(joined));
-        trace!("resolve_absolute Fallback success: {:?}", result);
-        return result;
-    }
-
-    trace!("resolve_absolute failed");
-    None
+    let resolved = resolved?;
+    // `canonicalize` can fail on a resolved-but-since-removed (or not-yet-
+    // created) path; the resolved absolute path is a correct fallback then.
+    let result = std::fs::canonicalize(&resolved).ok().or(Some(resolved));
+    trace!("resolve_absolute success: {:?}", result);
+    result
 }
 
 #[cfg(test)]
@@ -383,13 +387,55 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        // The target b.md doesn't exist, but it should still be resolved to an absolute path via simple join
+        // `./b.md` is an EXPLICIT-relative reference: even missing, it is pinned
+        // to the source directory (its sole shared candidate), so the absolute
+        // shape is `<source_dir>/./b.md`. This flows through `FileReference`'s
+        // candidate plan, not a private `dir.join(raw)` fallback.
         let joined = dir.path().join("./b.md");
         let resolved_path = joined.to_string_lossy().to_string();
 
         assert!(
             md.content().contains(&format!("({})", resolved_path)),
             "Non-existent failed. Content: {}",
+            md.content()
+        );
+        assert_eq!(report.link_resolves_applied, 1);
+    }
+
+    /// A missing IMPLICIT bare reference is absolutized repository-first — the
+    /// same anchoring an existing implicit reference resolves with — rather than
+    /// source-joined. This is the D2/D3 precedence: `link_resolve` no longer
+    /// falls back to `source_dir.join(raw)` after a miss.
+    #[test]
+    fn test_link_resolve_non_existent_implicit_is_repository_first() {
+        let dir = tempdir().unwrap();
+        // Plant a `.git` marker so the tempdir is a repository root distinct
+        // from the nested document directory.
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let nested = dir.path().join("prompts");
+        std::fs::create_dir_all(&nested).unwrap();
+        let source = nested.join("a.md");
+        std::fs::write(&source, "source").unwrap();
+
+        // `missing.md` exists nowhere; as an implicit bare reference its shape
+        // anchors on the repository root, not the source directory.
+        let content = "[link](missing.md)";
+        let mut md = Markdown::new(content);
+        let options = ComposeOptions::new().with_source_file(&source);
+        let mut report = ComposeReport::new();
+
+        link_resolve(&mut md, &options, &mut report).unwrap();
+
+        let repo_first = dir.path().join("missing.md").to_string_lossy().to_string();
+        let source_first = nested.join("missing.md").to_string_lossy().to_string();
+        assert!(
+            md.content().contains(&format!("({repo_first})")),
+            "expected repository-first shape {repo_first}. Content: {}",
+            md.content()
+        );
+        assert!(
+            !md.content().contains(&format!("({source_first})")),
+            "must not source-join a missing implicit reference. Content: {}",
             md.content()
         );
         assert_eq!(report.link_resolves_applied, 1);
