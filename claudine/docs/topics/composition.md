@@ -552,6 +552,14 @@ The `match(...)` glob is consulted **only after** literal path resolution fails,
 
 The decision to prompt for missing required values depends **only** on the six signals listed under [Interactive Mode](#interactive-mode) above and **must not** depend on the resolved `session_interactive` value. Collection completes during the pre-flight schema-validation stage, before the provider child process is ever spawned. This means an `interactive: true` document with missing required properties still collects them interactively under a TTY, and a `--no-interactive` invocation of an `interactive: true` document still emits a typed `MissingProperties` error rather than launching a non-interactive session.
 
+### Documents That Declare `initialize`
+
+A document declaring an `initialize` lifecycle stack is exempt from both the invocation-boundary verdict and the collection prompt above. `initialize` runs before schema validation (R4), and it can add or repair the very property a verdict would reject — writing frontmatter with `set_frontmatter`, or producing a file a `file`-typed property points at. Judging first would fail the document for a violation the next stage is about to fix, and prompting the caller would ask a question the document is about to answer itself.
+
+The verdict is instead reached by the **stabilized reread**: canonical preparation re-reads the document after `initialize` returns and validates that read. A violation that survives `initialize` is therefore reported *after* the document's own `initialize` has run and *through* its own `blocked`/`finalize` stacks, as the same typed `CompositionError` a directly-invoked document reports. A proxied target follows the identical order through its staged bootstrap, which is what makes the diagnostic route-independent.
+
+Documents without an `initialize` are unaffected: nothing can change their frontmatter between the read and the verdict, so they are judged where they are read.
+
 ### User Config
 
 The user-scoped Claudine config (`~/.claudine/config.json` or `.json5`) exposes a single switch:
