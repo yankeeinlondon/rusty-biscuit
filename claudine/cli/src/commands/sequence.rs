@@ -273,6 +273,10 @@ fn run_sequence_inner(
     };
 
     reject_sequence_interactive(&source)?;
+    // A `kind: group`/`group-catalog`/`task` document is never directly
+    // executable — it runs only as (or inside) a sequence task. Catching it
+    // here names the construct instead of reporting a missing `sequence:` key.
+    composition::reject_non_sequence_kind(&source)?;
 
     let _sequence_span = info_span!(
         "sequence",

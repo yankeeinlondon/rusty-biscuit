@@ -32,6 +32,55 @@ use phase1c::find_first_unsupported;
 /// Matches the standard `128 + SIGINT(2)` convention used by shells.
 pub(super) const SEQUENCE_INTERRUPT_EXIT_CODE: i32 = 130;
 
+/// Approve every shell command the preflight graph can reach.
+///
+/// The graph's own commands arrive already resolved, so what the gate approves
+/// is byte-identical to what execution runs. Referenced prompt documents
+/// contribute their template `::shell` directives through the same pass, which
+/// is what makes "no approval prompts once the sequence starts" honest for work
+/// several hops from the sequence document.
+fn approve_preflight_graph(
+    graph: &composition::PreflightGraph,
+    source: &ResolvedCompositionSource,
+    source_repo_root: Option<&std::path::Path>,
+    approval_cache: composition::SharedApprovalCache,
+    shared: &SharedComposeArgs,
+    launch_area: Option<&std::path::Path>,
+) -> Result<HashSet<String>> {
+    if graph.shell_commands.is_empty() && graph.prompt_documents.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    let approval_options = super::apply_composition_shell_overrides(
+        super::build_harness_shell_options_with_cache(
+            &source.resolved_path,
+            source_repo_root,
+            Some(approval_cache),
+        ),
+        shared.dry_run,
+        shared.yolo,
+    );
+
+    let compose_options = |path: &std::path::Path| {
+        let mut opts = darkmatter::markdown::compose::ComposeOptions::new()
+            .with_source_file(path)
+            // Defer the lifecycle subtree exactly as the per-step template
+            // preflight does: this pass exists to discover `::shell`
+            // directives, and resolving a deferred `success:`/`failure:` read
+            // -side file reference here would trip on a file that event has
+            // not created yet.
+            .with_exclude_keys(claudine::composition::LIFECYCLE_EVENT_KEYS.iter().copied());
+        if let Some(area) = launch_area {
+            opts = opts.with_file_ref_fallback_dir(area.to_path_buf());
+        }
+        opts
+    };
+
+    let result =
+        composition::resolve_graph_shell_approvals(graph, &approval_options, &compose_options)?;
+    Ok(result.approved_commands)
+}
+
 /// Execute a full sequence: iterate steps, compose each, and report results.
 #[allow(deprecated)]
 #[allow(clippy::too_many_arguments)]
@@ -144,6 +193,25 @@ pub(crate) fn execute_sequence(
     )?;
     let snapshot = &prep_context.installed_snapshot;
     let source_repo_root = prep_context.source_repo_root.clone();
+
+    // ── Static preflight: the recursive task graph ──────────────────────
+    //
+    // Everything statically knowable is settled here, before a target is
+    // resolved or a provider is launched: every referenced task, group,
+    // catalog entry, and prompt document is loaded transitively; blocked
+    // constructs are rejected; and every reachable shell command — including
+    // ones behind `when:` guards that read false today — is resolved to bytes
+    // and approved. A failure at this point is abort-all regardless of
+    // `fail_fast`, and `--dry-run` performs this identical walk.
+    let graph = composition::build_preflight_graph(&plan, source)?;
+    let preflight_approved = approve_preflight_graph(
+        &graph,
+        source,
+        source_repo_root.as_deref(),
+        Arc::clone(&shared_approval_cache),
+        shared,
+        Some(prep_context.launch_workspace.launch_cwd.as_path()),
+    )?;
     let catalog = match prep_context.selection_config.as_ref() {
         Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
             cfg.model_overrides.clone(),
@@ -415,7 +483,7 @@ pub(crate) fn execute_sequence(
         effective_fail_fast,
         inline_mode,
         Arc::clone(&shared_approval_cache),
-        HashSet::new(),
+        preflight_approved,
         &interrupted,
         silent,
     )?;

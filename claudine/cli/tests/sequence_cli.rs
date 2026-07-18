@@ -944,3 +944,285 @@ sequence:
         "the direct-invocation shape must be accepted; stderr: {stderr}"
     );
 }
+
+// ============================================================================
+// Phase 5 — static preflight
+//
+// Every rejection below must land *before* a provider is launched, so each
+// test installs a fake `goose` that appends to `CLAUDINE_PROMPTS_FILE` and
+// asserts the file never appears. That file is the zero-child-launch witness.
+// ============================================================================
+
+/// Install a fake provider that records every launch, and return the witness
+/// path that must stay absent when preflight aborts.
+fn preflight_witness(workspace: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    let path_dir = workspace.join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\nprintf 'launched\\n' >> \"$CLAUDINE_PROMPTS_FILE\"\nexit 0\n",
+    );
+    (path_dir, workspace.join("launches.txt"))
+}
+
+/// Run `claudine sequence` against `file`, returning `(stderr, launched)`.
+fn run_preflight(
+    workspace: &std::path::Path,
+    file: &std::path::Path,
+    extra_args: &[&str],
+) -> (String, bool) {
+    let (path_dir, witness) = preflight_witness(workspace);
+    let mut args: Vec<&str> = vec!["sequence", "--goose"];
+    args.extend_from_slice(extra_args);
+    let file_arg = file.to_str().unwrap();
+    args.push(file_arg);
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace)
+        .env("PATH", augmented_path(&path_dir))
+        .env("CLAUDINE_PROMPTS_FILE", &witness)
+        .current_dir(workspace)
+        .args(&args)
+        .assert()
+        .get_output()
+        .clone();
+
+    (
+        strip_ansi(&String::from_utf8_lossy(&output.stderr)),
+        witness.exists(),
+    )
+}
+
+/// A `kind: group` document is never directly executable; the rejection names
+/// the construct rather than reporting a missing `sequence:` property.
+#[test]
+fn sequence_rejects_direct_group_execution() {
+    let workspace = tempdir().unwrap();
+    let group = workspace.path().join("group.yaml");
+    fs::write(
+        &group,
+        "kind: group\nname: bundle\ntasks:\n    - shell: echo x\n",
+    )
+    .unwrap();
+
+    let (stderr, launched) = run_preflight(workspace.path(), &group, &[]);
+    assert!(
+        stderr.contains("kind: group") && stderr.contains("sequence task"),
+        "the rejection must name the construct and the fix; stderr: {stderr}"
+    );
+    assert!(!launched, "no provider may launch for a rejected document");
+}
+
+/// A `prompt:` task pointing at a document that itself declares `sequence:` is
+/// a nested sequence, which v1 rejects during preflight.
+#[test]
+fn sequence_rejects_a_nested_sequence_prompt_document() {
+    let workspace = tempdir().unwrap();
+    fs::write(
+        workspace.path().join("inner.md"),
+        "---\nsequence:\n    - one\n---\nInner.\n",
+    )
+    .unwrap();
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        "---\nsequence:\n    - name: one\n      prompt: inner.md\n---\nBody.\n",
+    )
+    .unwrap();
+
+    let (stderr, launched) = run_preflight(workspace.path(), &md_file, &[]);
+    assert!(
+        stderr.contains("nested sequences are not supported"),
+        "stderr: {stderr}"
+    );
+    assert!(!launched, "preflight must abort before any launch");
+}
+
+/// A task reference cycle reports the whole chain, not just the repeated file.
+#[test]
+fn sequence_rejects_a_reference_cycle_with_the_full_chain() {
+    let workspace = tempdir().unwrap();
+    fs::write(
+        workspace.path().join("a.yaml"),
+        "kind: task\ntask: b.yaml\n",
+    )
+    .unwrap();
+    fs::write(
+        workspace.path().join("b.yaml"),
+        "kind: task\ntask: a.yaml\n",
+    )
+    .unwrap();
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        "---\nsequence:\n    - name: one\n      task: a.yaml\n---\nBody.\n",
+    )
+    .unwrap();
+
+    let (stderr, launched) = run_preflight(workspace.path(), &md_file, &[]);
+    assert!(stderr.contains("reference cycle"), "stderr: {stderr}");
+    // Long absolute paths are hyphen-wrapped by the terminal renderer, so the
+    // chain is asserted by its arrow count (entry → a → b → a) rather than by
+    // matching path substrings that a line break may have split.
+    assert_eq!(
+        stderr.matches('\u{2192}').count(),
+        3,
+        "the chain must name every hop; stderr: {stderr}"
+    );
+    assert!(!launched);
+}
+
+/// Group `loop` commit semantics are unratified, so a group carrying `loop`
+/// is blocked with an actionable error instead of invented semantics.
+#[test]
+fn sequence_rejects_group_loop() {
+    let workspace = tempdir().unwrap();
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        "---\nsequence:\n    - name: one\n      group:\n          name: looper\n          loop:\n              while: \"true\"\n          tasks:\n              - shell: echo x\n---\nBody.\n",
+    )
+    .unwrap();
+
+    let (stderr, launched) = run_preflight(workspace.path(), &md_file, &[]);
+    assert!(stderr.contains("group `loop`"), "stderr: {stderr}");
+    assert!(!launched);
+}
+
+/// A shell task that depends on `outputs` could never be approved byte-for-byte
+/// up front, so preflight rejects it and points at the alternative.
+#[test]
+fn sequence_rejects_a_shell_command_depending_on_outputs() {
+    let workspace = tempdir().unwrap();
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        "---\nsequence:\n    - name: one\n      shell: \"echo {{ last(outputs) }}\"\n---\nBody.\n",
+    )
+    .unwrap();
+
+    let (stderr, launched) = run_preflight(workspace.path(), &md_file, &[]);
+    assert!(
+        stderr.contains("outputs") && stderr.contains("preflight"),
+        "stderr: {stderr}"
+    );
+    assert!(!launched);
+}
+
+/// Two tasks in one parallel group rewriting the same inline-compose document
+/// would race; preflight holds the whole graph and catches it statically.
+#[test]
+fn sequence_rejects_a_parallel_write_back_collision() {
+    let workspace = tempdir().unwrap();
+    fs::write(
+        workspace.path().join("target.md"),
+        "---\nprompt: Write something.\n---\nold\n",
+    )
+    .unwrap();
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        "---\nsequence:\n    - name: one\n      group:\n          name: racers\n          execution: parallel\n          tasks:\n              - prompt: target.md\n                name: first\n              - prompt: target.md\n                name: second\n---\nBody.\n",
+    )
+    .unwrap();
+
+    let (stderr, launched) = run_preflight(workspace.path(), &md_file, &[]);
+    assert!(
+        stderr.contains("write back")
+            && stderr.contains("racers")
+            && stderr.contains("(`first` and `second`)"),
+        "stderr: {stderr}"
+    );
+    assert!(!launched);
+}
+
+/// Preflight failures are abort-all: `fail_fast: false` governs *execution*
+/// outcomes and cannot degrade preparation to best-effort. The later, valid
+/// step must never run.
+#[test]
+fn preflight_failure_aborts_even_with_fail_fast_false() {
+    let workspace = tempdir().unwrap();
+    fs::write(
+        workspace.path().join("inner.md"),
+        "---\nsequence:\n    - one\n---\nInner.\n",
+    )
+    .unwrap();
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        "---\nfail_fast: false\nsequence:\n    - name: bad\n      prompt: inner.md\n    - name: good\n---\nBody.\n",
+    )
+    .unwrap();
+
+    let (stderr, launched) = run_preflight(workspace.path(), &md_file, &["--fail-fast", "false"]);
+    assert!(
+        stderr.contains("nested sequences are not supported"),
+        "stderr: {stderr}"
+    );
+    assert!(
+        !launched,
+        "`fail_fast: false` must not let the valid step run past a preflight failure"
+    );
+}
+
+/// `--dry-run` performs the identical preflight walk, so a graph that cannot
+/// be prepared is reported rather than rendered as a runnable plan.
+#[test]
+fn dry_run_performs_the_same_preflight() {
+    let workspace = tempdir().unwrap();
+    fs::write(
+        workspace.path().join("inner.md"),
+        "---\nsequence:\n    - one\n---\nInner.\n",
+    )
+    .unwrap();
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        "---\nsequence:\n    - name: one\n      prompt: inner.md\n---\nBody.\n",
+    )
+    .unwrap();
+
+    let (stderr, launched) = run_preflight(workspace.path(), &md_file, &["--dry-run"]);
+    assert!(
+        stderr.contains("nested sequences are not supported"),
+        "--dry-run must run the same preflight; stderr: {stderr}"
+    );
+    assert!(!launched);
+}
+
+/// A well-formed graph passes preflight: a `kind: task` file, a serial group,
+/// and a whitelisted shell command all resolve without a rejection.
+#[test]
+fn well_formed_graph_passes_preflight() {
+    let workspace = tempdir().unwrap();
+    fs::write(
+        workspace.path().join(".darkmatter-shell-whitelist"),
+        "prefix echo\n",
+    )
+    .unwrap();
+    fs::write(
+        workspace.path().join("task.yaml"),
+        "kind: task\nshell: echo from-task\n",
+    )
+    .unwrap();
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        "---\nsequence:\n    - name: one\n      task: task.yaml\n    - name: two\n      group:\n          name: bundle\n          tasks:\n              - shell: echo grouped\n---\nBody.\n",
+    )
+    .unwrap();
+
+    let (stderr, _) = run_preflight(workspace.path(), &md_file, &["--dry-run"]);
+    for rejection in [
+        "reference cycle",
+        "not supported",
+        "is invalid",
+        "could not be resolved",
+    ] {
+        assert!(
+            !stderr.contains(rejection),
+            "a well-formed graph must not be rejected (`{rejection}`); stderr: {stderr}"
+        );
+    }
+}
