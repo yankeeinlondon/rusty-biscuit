@@ -123,3 +123,41 @@ close without external execution or unrelated public API expansion.
   each OS; collect the work-count table on each OS; and retain the green run plus all
   three per-OS artifacts under one implementation identifier. Cross-compilation does
   not substitute for any native leg.
+
+## Review 5 deferred items
+
+### Finding 1: native Linux and Windows Level-1 execution remains absent
+
+- **Review mapping:** "High: native Linux and Windows Level-1 execution remains absent"
+  in [review-5.md](review-5.md).
+- **Exact implementation evaluated:** the dirty worktree rooted at
+  `03b03ea5a85d6f26fa6c257f254943983e99b72c` during the 2026-07-17 review-cycle-5
+  implementation. Final closure must use one identifier for the completed cycle-5
+  tree because the other serial findings can change that tree after this assessment.
+- **Host evidence:** `sniff os --json` reported native arm64 macOS 26.5.2 (Darwin
+  25.5.0), and `sniff cpu --json` reported an Apple M4 Max with 16 physical and logical
+  cores. This host cannot execute native Linux or Windows binaries or reproduce their
+  path, process, registry, Job Object, filesystem, and case behavior.
+- **Evidence boundary:** cross-compilation can prove only that a target compiles. WSL
+  follows Sniff's Linux runtime path, Docker is not native Windows evidence, and neither
+  a workflow definition nor an untriggered scheduled job is execution evidence for this
+  implementation. Work-count tables are comparable only within one OS and runner class,
+  so a macOS table cannot stand in for Linux or Windows.
+- **Why deferred:** the session is non-interactive and explicitly prohibits VM startup,
+  external workflow triggers, tool installation, commits, and pushes. Consequently,
+  there is no authorized path from this macOS workspace to run the exact implementation
+  natively on Linux and Windows or to retain a matched three-OS work-count artifact set.
+  This is a platform and execution-authority constraint, not a CPU-load deferral.
+- **Existing execution definitions:** `.github/workflows/test.yml` defines the
+  `sniff-cross-platform` matrix on `macos-latest`, `ubuntu-latest`, and
+  `windows-latest`, including `cd sniff && just test`. The scheduled
+  `.github/workflows/sniff-performance.yml` matrix runs
+  `cargo run -q -p sniff --release --example work_counts` on the same three OS classes
+  and retains each `sniff-work-counts-{os}` artifact for 90 days. These definitions were
+  inspected but are not claimed as completed runs.
+- **To close:** publish one immutable completed cycle-5 implementation identifier to an
+  authorized runner source; obtain green native `cd sniff && just test` and
+  `cd sniff && just lint` runs on macOS, Linux, and Windows; run the `work_counts`
+  example on each native OS; and retain all three tables plus the test/lint run links
+  under that same identifier. Cross-compilation, Docker, WSL, or results from a
+  different tree do not close this finding.

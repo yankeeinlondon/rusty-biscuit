@@ -3,6 +3,7 @@ implementation_1: "2026-07-17T10:46:27-07:00"
 implementation_2: "2026-07-17T11:40:50-07:00"
 implementation_3: "2026-07-17T14:36:02-07:00"
 implementation_4: "2026-07-17T17:09:45-07:00"
+implementation_5: "2026-07-17T22:33:06-07:00"
 deferred_perf_measurement: true
 ---
 
@@ -357,4 +358,63 @@ The files changed cover aggregate Git evidence and end-to-end performance report
         - the two aggregate performance-output traces are expected review-cycle-4 behavior
         - the three benchmark fixture registration traces are expected performance-benchmark flows
         - the three collector-propagation traces belong to the broader feature's shared performance-accounting boundary; no unexpected review-cycle-4 flow was identified
+- no commit, push, external workflow trigger, VM startup, package installation, or write-mode formatting command was run
+
+## Implementation of Review Findings #5
+
+> **started at:** 2026-07-17T22:33:06-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'sniff/features/2026-07-16-performance/review-5.md'
+- this is iteration 5 of the review-to-implement cycle
+- review-5 contains 3 High findings:
+        1. native Linux and Windows Level-1 execution remains absent
+        2. a quiet session-detached Unix descendant survives timeout cleanup
+        3. aggregate reuse introduces an unapproved public Rust result contract
+- starting the work on 'native Linux and Windows Level-1 execution' at 22:34:46
+        - `sniff os --json` identified the execution host as native arm64 macOS 26.5.2 (Darwin 25.5.0); `sniff cpu --json` identified an Apple M4 Max with 16 physical and logical cores
+        - evaluated the exact review boundary: native Level-1 execution must exercise macOS, Linux, and Windows host behavior, and the work-count tables must be retained for the same implementation on all three OSes
+        - cross-compilation, WSL, Docker, and workflow inspection do not supply native Windows evidence; this task also explicitly prohibits VM startup, external workflow triggers, installs, commits, and pushes, so no authorized Linux or Windows execution path exists from this macOS workspace
+        - confirmed the existing `sniff-cross-platform` workflow defines native `just test` legs for macOS, Ubuntu, and Windows, while `sniff-work-counts` defines separately retained 90-day artifacts for the same three-OS matrix; neither workflow definition is claimed as execution evidence
+        - deferred native Linux and Windows Level-1 execution and the retained three-OS work-count set for the dirty implementation rooted at HEAD `03b03ea5a85d6f26fa6c257f254943983e99b72c`; this is a platform and execution-authority constraint, not a CPU-load deferral
+        - recorded the exact review-5 mapping, evidence boundary, and closure procedure in `sniff/features/2026-07-16-performance/deferred-perf-tests.md`; `deferred_perf_measurement: true` remains set in the implementation log frontmatter
+        - native macOS package-area verification passed all 1,665 `sniff-lib` tests and all 779 `sniff-cli` tests (14 and 3 skipped, respectively); canonical `just lint` and the finding-scoped `git diff --check` passed
+- work completed for 'native Linux and Windows Level-1 execution' at 22:38:58
+- starting the work on 'quiet session-detached Unix descendant cleanup' at 22:39:48
+        - read the required Sniff, Rust, Rust-testing, and GitNexus impact-analysis guidance and traced the timeout runner, Unix process-group cleanup, Windows Job Object containment, and current detached fixture
+        - GitNexus was 13 commits stale and its prescribed refresh was stopped inside the non-interactive 60-second ceiling; the indexed `run_with_timeout` boundary is HIGH impact (8 direct callers, 30 total affected symbols across network, OS, programs, and tests), while the newer builder and process-tree symbols are absent from the stale index
+        - reviewed the indexed process catalog and direct call sites; no execution flow is attributed to the subprocess boundary, so stale graph output is not being treated as authoritative process evidence
+        - proceeding with Unix-only cleanup that snapshots live descendants immediately before termination, kills escaped descendants individually, and then kills the original process group; successful probes pay no process-table scan, and Windows remains on its existing kill-on-close Job Object path
+        - adding a portable `cfg(unix)` Level-1 fixture that reports a quiet `setsid()` descendant PID through a unique file channel and verifies that PID no longer exists after the bounded runner returns
+        - implemented descendant discovery with the existing `sysinfo` dependency on the Unix termination path; descendants are signaled deepest-first before the original process group, closing the `setsid()` escape without changing the Windows Job Object implementation or the successful subprocess hot path
+        - the new fixture passes its PID-file location through the command environment, establishes a new session, writes only its PID to that separate file channel, and then remains quiet; the regression observed `ESRCH` immediately after timeout return
+        - focused verification passed the new regression and all 11 subprocess tests, including large dual-pipe output, inherited-pipe cleanup, direct-child reaping, builder preservation, and shell-safety coverage
+        - canonical Sniff-area targets passed independently: 1,666 `sniff-lib` tests and 779 `sniff-cli` tests passed (16 and 3 skipped, respectively), and `just lint` passed in 57.17 seconds; two combined `just test` attempts were stopped after crossing the non-interactive ceiling during recompilation, after their library legs passed, rather than waiting beyond the required bound
+        - the exact dirty tree passed the Windows GNU all-target remote-feature compile guard with four existing target-gated test warnings; no Linux Rust target is installed on this macOS host, while all Unix-only imports and fixtures are `cfg(unix)`-gated and the shared APIs are supported on macOS and Linux
+        - final `git diff --check` passed; GitNexus `detect_changes(all)` reported LOW risk across the concurrent tracked changes (4 files, 8 stale-index symbols, and no affected execution flows), with this finding confined to `sniff/lib/src/process.rs` plus its implementation log
+        - no implementation or performance measurement was deferred for this finding
+- work completed for 'quiet session-detached Unix descendant cleanup' at 22:53:39
+- starting the work on 'remove unapproved public aggregate Git contract' at 22:54:40
+        - read the required Sniff, Rust, Rust-testing, and GitNexus impact-analysis guidance before tracing the aggregate request, observation, and projection boundaries
+        - GitNexus was 13 commits stale and its prescribed refresh was stopped by the 55-second non-interactive ceiling; the stale graph reported HIGH impact for `GitInfo` (3 direct, 18 total) and `GitRepo::detect_with_request` (13 direct), plus CRITICAL impact for `detect_filesystem_with_request` (10 direct, 69 total across four process families), so direct callers and both affected CLI performance-output traces were reviewed before editing
+        - removed the public, Serde-skipped `GitInfo::aggregate` field, the public `GitAggregateEvidence` export, and the serializable `GitMetadataRequest::aggregate` flag/builder/accessor; `GitMetadataRequest::all()` now consistently enables every one of its eight approved metadata controls
+        - added the dedicated `detect_repo_aggregate` library boundary, returning an opaque `RepoAggregateObservation` that splits into the stable `FilesystemInfo` plus `RepoAggregate`; crate-private aggregate evidence is collected while the original `GitRepo` handle is still available
+        - preserved aggregate behavior with one repository discovery, one status walk, one ref walk, zero redundant worktree opens, one file-aware history observation, an offline path, and a pure `build_aggregate_value` projection; the aggregate snapshot and JSON schema remain unchanged
+        - added compatibility coverage that pins the exact eight-key `GitMetadataRequest` serialization contract and compiles a downstream `GitInfo` literal without aggregate-only evidence, while asserting that neither wire shape contains an `aggregate` key
+        - focused verification passed all 20 library aggregate-view tests and all 31 CLI aggregate tests, including schema, snapshot, stdout/stderr, offline, work-counter, and pure-projection coverage
+        - canonical `just test` passed all 1,667 `sniff-lib` tests and all 780 `sniff-cli` tests (16 and 3 skipped, respectively); canonical `just lint`, focused Rust/CLI compilation, the Sniff skill Darkmatter hash update, and `git diff --check` passed
+        - the optional combined Windows GNU cross-check reached both changed crates without a source diagnostic but was stopped at the 55-second ceiling before Cargo reported success, so it is not claimed as a pass; native cross-platform evidence remains owned by finding 1 and no implementation or performance measurement was deferred for this finding
+        - final GitNexus `detect_changes(all)` reported MEDIUM risk across the concurrent review-cycle worktree (15 files, 36 stale-index symbols, and 2 affected CLI performance-output traces); both traces were reviewed and are covered by the green complete-command performance and clean-JSON output tests
+- work completed for 'remove unapproved public aggregate Git contract' at 23:15:41
+
+### Successful Completion
+
+The implementation of review cycle 5 has completed successfully in 44 minutes and 1 second (22:33:06–23:17:07 local time). During this implementation all 3 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 1 was deferred (see reasons below):
+
+- **Finding 1, native Linux and Windows Level-1 execution and retained work-count artifacts** — deferred because this native macOS host has no authorized native Linux or Windows execution path. Cross-compilation, Docker, WSL, workflow definitions, and results from another tree do not satisfy the finding. Closure requires the immutable final cycle-5 implementation to pass the canonical Level-1 suite natively on macOS, Linux, and Windows, with the matched three-OS work-count artifacts retained under one identifier; full details are recorded in `sniff/features/2026-07-16-performance/deferred-perf-tests.md`.
+
+The files changed cover Unix process-tree cleanup and its quiet detached-descendant regression, the dedicated opaque aggregate observation boundary, removal of the unapproved public Git request/result additions, aggregate compatibility and work-count coverage, Sniff skill/spec maintenance, the deferred cross-platform evidence record, and review-cycle metadata.
+
+- final Sniff-area verification passed all 1,667 `sniff-lib` tests and all 780 `sniff-cli` tests (16 and 3 skipped), `just lint`, focused aggregate and subprocess suites, focused Rust/CLI compilation, and `git diff --check`
+- the Windows GNU all-target check for the subprocess change passed; the later optional aggregate cross-check reached the changed crates without diagnostics but was stopped before Cargo reported success, so it is not claimed as a pass
+- final GitNexus `detect_changes(all)` reported MEDIUM risk across the concurrent review-cycle delta, with both affected aggregate performance-output traces reviewed and covered by green complete-command performance and valid-JSON output tests
 - no commit, push, external workflow trigger, VM startup, package installation, or write-mode formatting command was run
