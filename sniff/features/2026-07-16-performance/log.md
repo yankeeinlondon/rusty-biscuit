@@ -5,8 +5,20 @@ implementation_3: "2026-07-17T14:36:02-07:00"
 implementation_4: "2026-07-17T17:09:45-07:00"
 implementation_5: "2026-07-17T22:33:06-07:00"
 implementation_6: "2026-07-18T05:34:55-07:00"
+implementation_7: "2026-07-18T08:12:07-07:00"
 deferred_perf_measurement: true
 ---
+
+## Implementation of Review Findings #7
+
+> **started at:** 2026-07-18T08:12:07-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'sniff/features/2026-07-16-performance/review-7.md'
+- this is iteration 7 of the review-to-implement cycle
+- review-7 contains 2 findings (1 High, 1 Medium):
+        1. High: native Linux and Windows Level-1 execution and matched work-count artifacts are still absent
+        2. Medium: the claimed-unreachable Unix process escape is reachable through installer call sites
+- starting the work on 'installer-reachable Unix containment claim (review-7 Medium)' at 08:14:20
 
 ## Implementation of Review Findings #3
 

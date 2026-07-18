@@ -199,3 +199,50 @@ close without external execution or unrelated public API expansion.
   example on each native OS; and retain all three tables plus the test and lint run
   links under that same identifier. Cross-compilation, Docker, WSL, or results from a
   different tree do not close this finding.
+
+## Review 7 deferred items
+
+### Finding 1: native Linux and Windows Level-1 execution and matched work-count artifacts are still absent
+
+- **Review mapping:** "High: native Linux and Windows Level-1 execution and matched
+  work-count artifacts are still absent" in [review-7.md](review-7.md).
+- **Exact implementation evaluated:** the working tree rooted at
+  `c32f78e43139868cf5831905e891c388d5fa3e74`, plus the cycle-7 changes to
+  `sniff/lib/src/process.rs`, `sniff/lib/src/programs/install/`, and the
+  process-containment documentation. Final closure must use one identifier for the
+  completed cycle-7 tree.
+- **Host evidence:** `uname -a` reported native arm64 macOS
+  (Darwin 25.5.0, `xnu-12377.121.10`, `RELEASE_ARM64_T6041`).
+  `rustup target list --installed` reported `aarch64-apple-darwin`, `wasm32-wasip1`,
+  `wasm32-wasip2`, and `x86_64-pc-windows-gnu` — no Linux target, and the Windows
+  target cannot execute on this host.
+- **Publication evidence:** `git branch -r --contains c32f78e43139868cf5831905e891c388d5fa3e74`
+  returned no remote branch, so the reviewed commit exists only in this local
+  worktree. No hosted CI run for that SHA can exist, which is consistent with the
+  review's observation that no retained run is publicly discoverable.
+- **Why deferred:** this is an execution-authority constraint, not a CPU-load
+  deferral, and it is structurally unchanged from cycles 5 and 6. Closing the
+  finding requires the reviewed tree to be committed and pushed so the scheduled
+  `sniff-cross-platform` and `sniff-performance` matrices can execute it natively.
+  This session is explicitly prohibited from committing, from pushing, and from
+  invoking credential helpers such as `ssh`/`gpg`, so no authorized path exists from
+  this workspace to produce native Linux and Windows Level-1 runs or a matched
+  three-OS `work_counts` artifact set.
+- **Docker explicitly not attempted:** a Linux container on this host provides a real
+  Linux kernel and would exercise `/proc` descendant discovery, but the review states
+  that Docker results do not close this finding. Running a cold container build of the
+  workspace would consume a large budget for evidence the reviewer has already ruled
+  inadmissible, so it was not attempted.
+- **Cycle-7 relevance note:** this cycle again changed Unix-specific process-tree
+  behavior — `sniff/lib/src/process.rs` gained a Level-1 fixture that reproduces the
+  documented between-samples `setsid()` escape. That fixture depends on Unix
+  `fork`/`setsid` semantics and on descendant sampling, so it has been exercised
+  natively on macOS only. It must be run natively on Linux, where descendant
+  discovery goes through `/proc`, before this finding closes. The Windows Job Object
+  path was not changed this cycle.
+- **To close:** commit and push one immutable cycle-7 implementation identifier to
+  `origin`; obtain green native `cd sniff && just test` and `cd sniff && just lint`
+  runs on macOS, Linux, and Windows; run the `work_counts` example on each native OS;
+  and retain all three tables plus the test and lint run links under that same
+  identifier. Cross-compilation, Docker, WSL, or results from a different tree do not
+  close this finding.
