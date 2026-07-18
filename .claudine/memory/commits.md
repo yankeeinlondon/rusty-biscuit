@@ -81,6 +81,15 @@ do not belong here.
 
 - Parallel groups must have disjoint paths. If one group introduces a module,
   dependency, or symbol consumed by another group, commit the producer first.
+- Adding new variants to a non-`non_exhaustive` enum couples the producer and
+  every consumer whose match must update. Producer-first leaves consumers with
+  non-exhaustive matches; consumer-first references variants that do not yet
+  exist. Combine producer and all matching consumers into a single semantic
+  group, even if the commit crosses package boundaries; drop the scope in the
+  message (`perf:` instead of `perf(sniff):`) to acknowledge the cross-area
+  span. The producer-first rule above assumes the additions are
+  backward-compatible (e.g., new items behind `#[non_exhaustive]`, trait
+  methods, struct fields with defaults).
 
 - Git lock failures are transient contention. Retry the identical commit up to
 
