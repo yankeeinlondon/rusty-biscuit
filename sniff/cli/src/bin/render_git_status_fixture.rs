@@ -67,7 +67,6 @@ fn main() {
         config: GitConfig::default(),
         tracking: vec![],
         file_changes: vec![],
-        aggregate: None,
     };
 
     // `render_git_section` constructs its own `Terminal::default()` internally,

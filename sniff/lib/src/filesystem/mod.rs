@@ -184,6 +184,31 @@ pub fn detect_filesystem_with_request(
     root: &Path,
     request: &FilesystemRequest,
 ) -> Result<FilesystemInfo> {
+    Ok(detect_filesystem_with_request_inner(root, request, false)?.filesystem)
+}
+
+pub(crate) struct AggregateFilesystemDetection {
+    pub(crate) filesystem: FilesystemInfo,
+    pub(crate) git: Option<git::types::GitAggregateEvidence>,
+}
+
+/// Run filesystem detection with the private repository-aggregate companion.
+///
+/// This is reserved for library projections that need shapes outside the
+/// stable [`GitInfo`] contract. Ordinary callers use
+/// [`detect_filesystem_with_request`] and never observe the companion.
+pub(crate) fn detect_filesystem_for_aggregate(
+    root: &Path,
+    request: &FilesystemRequest,
+) -> Result<AggregateFilesystemDetection> {
+    detect_filesystem_with_request_inner(root, request, true)
+}
+
+fn detect_filesystem_with_request_inner(
+    root: &Path,
+    request: &FilesystemRequest,
+    collect_aggregate: bool,
+) -> Result<AggregateFilesystemDetection> {
     let collector = performance::current_collector();
     let need_repo_context = request.repo.is_some() || request.include_docs;
     let consumers = WalkConsumers::of(request);
@@ -211,16 +236,25 @@ pub fn detect_filesystem_with_request(
             scope.spawn(move || {
                 performance::with_current_collector(collector, || {
                     let git_started = Instant::now();
-                    let git = match discovered {
-                        Some(repo) => repo.detect_with_request(git_request).map(Some),
-                        None => Ok(None),
+                    let detected: Result<(
+                        Option<GitInfo>,
+                        Option<git::types::GitAggregateEvidence>,
+                    )> = match discovered {
+                        Some(repo) => {
+                            let info = repo.detect_with_request(git_request)?;
+                            let aggregate = collect_aggregate
+                                .then(|| repo.observe_aggregate_evidence())
+                                .transpose()?;
+                            Ok((Some(info), aggregate))
+                        }
+                        None => Ok((None, None)),
                     };
                     performance::record_logged_stage(
                         "filesystem.git",
                         git_started.elapsed(),
                         Level::DEBUG,
                     );
-                    git
+                    detected
                 })
             })
         });
@@ -294,9 +328,9 @@ pub fn detect_filesystem_with_request(
         };
         performance::record_logged_stage("filesystem.repo", repo_started.elapsed(), Level::DEBUG);
 
-        let git = match git_handle {
+        let (git, aggregate_git) = match git_handle {
             Some(handle) => handle.join().unwrap()?,
-            None => None,
+            None => (None, None),
         };
         let formatting = formatting_handle.and_then(|handle| handle.join().unwrap());
 
@@ -401,13 +435,16 @@ pub fn detect_filesystem_with_request(
             false => None,
         };
 
-        Ok(FilesystemInfo {
-            languages,
-            files,
-            git,
-            repo,
-            formatting,
-            docs,
+        Ok(AggregateFilesystemDetection {
+            filesystem: FilesystemInfo {
+                languages,
+                files,
+                git,
+                repo,
+                formatting,
+                docs,
+            },
+            git: aggregate_git,
         })
     })
 }

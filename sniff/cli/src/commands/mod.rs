@@ -1333,7 +1333,21 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     .performance(cli.perf);
 
-    let mut result = perf.collect(|| detect_with_plan(plan))?;
+    let mut detected_aggregate = None;
+    let mut result = if bare_repo_aggregate {
+        let dir = base_dir
+            .as_deref()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let observation = perf.collect(|| sniff::filesystem::repo::detect_repo_aggregate(dir))?;
+        let (filesystem, aggregate) = observation.into_parts();
+        detected_aggregate = Some(aggregate);
+        SniffResult {
+            filesystem: Some(filesystem),
+            ..SniffResult::default()
+        }
+    } else {
+        perf.collect(|| detect_with_plan(plan))?
+    };
 
     // Handle package scoping for git actions. Both `--package` and
     // `--package-area` are honored; when both are passed, the resolved package
@@ -1668,21 +1682,16 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         result = enrich_result_dependencies(result).await;
     }
 
-    // Bare `sniff repo --json` assembles the scope-complete aggregate of its
-    // participating children. It must run after the full detection pass so the
-    // library completion can reuse the aggregate evidence collected inside the
-    // original Git detection plus the shared `RepoInfo`, and so the builder
-    // stays a pure projection (umbrella spec R2) — the cwd-relative `context`
-    // facts are resolved by `observe_repo_aggregate`, not by the builder.
+    // Bare `sniff repo --json` renders the scope-complete observation returned
+    // by the dedicated library boundary. The ordinary `SniffResult` carries no
+    // CLI-only evidence, and this builder remains a pure projection.
     if bare_repo_aggregate {
-        let dir = base_dir
-            .as_deref()
-            .unwrap_or_else(|| std::path::Path::new("."));
         let value = perf.collect(|| {
             let timer = sniff::performance::StageTimer::start("cli.repo.aggregate_projection");
-            let aggregate =
-                sniff::filesystem::repo::observe_repo_aggregate(dir, result.filesystem.as_ref())?;
-            let value = output::repo_json::build_aggregate_value(&result, &aggregate);
+            let aggregate = detected_aggregate
+                .as_ref()
+                .expect("bare aggregate detection returns its projection");
+            let value = output::repo_json::build_aggregate_value(&result, aggregate);
             timer.finish();
             Ok::<_, sniff::SniffError>(value)
         })?;
@@ -2145,8 +2154,7 @@ fn select_git_request(
             .metadata(
                 GitMetadataRequest::none()
                     .remotes(true)
-                    .config(true)
-                    .aggregate(true),
+                    .config(true),
             )
     } else if lightweight {
         GitRequest::summary()
@@ -2212,7 +2220,11 @@ mod tests {
         assert!(!req.wants_commits());
         assert!(!req.wants_branches());
         assert!(!req.wants_worktrees());
-        assert!(req.wants_aggregate());
+        let metadata = serde_json::to_value(req.metadata.unwrap()).unwrap();
+        assert!(
+            metadata.get("aggregate").is_none(),
+            "aggregate evidence must not become a serializable request flag"
+        );
     }
 
     #[test]
@@ -2238,23 +2250,10 @@ mod tests {
         }
         std::fs::write(dir.path().join("tracked.rs"), "fn changed() {}\n").unwrap();
 
-        let request = FilesystemRequest::new()
-            .git(select_git_request(false, false, false, true, 10))
-            .repo(RepoRequest::focused(RepoDetailRequest::all()))
-            .without_file_inventory();
         let collector = sniff::performance::PerformanceCollector::new_shared();
         let aggregate = sniff::performance::with_current_collector(
             Some(collector.clone()),
-            || {
-                let filesystem = sniff::filesystem::detect_filesystem_with_request(
-                    dir.path(),
-                    &request,
-                )?;
-                sniff::filesystem::repo::observe_repo_aggregate(
-                    dir.path(),
-                    Some(&filesystem),
-                )
-            },
+            || sniff::filesystem::repo::detect_repo_aggregate(dir.path()),
         )
         .expect("aggregate command path succeeds");
         let counters = collector.snapshot(std::time::Duration::ZERO).counters;
@@ -2291,6 +2290,7 @@ mod tests {
             0,
             "aggregate worktree projection must not independently open checkouts: {counters:?}"
         );
+        let (_, aggregate) = aggregate.into_parts();
         assert_eq!(aggregate.identity.name, "aggregate-fixture");
         assert!(!aggregate.branches.is_empty());
         assert_eq!(aggregate.worktrees.len(), 1);

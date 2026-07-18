@@ -26,9 +26,8 @@ pub use recent_commits::{
 pub use status::detect_merge_conflicts;
 pub use types::{
     BehindStatus, BranchInfo, CommitInfo, ConventionalCommit, FileAction, FileChange, FileStatus,
-    GitAggregateEvidence, GitConfig, GitHostingProvider, GitHostingProviderMetadata, GitInfo,
-    GitRepo, LocalBranchInfo, RefDecoration, RefKind, RemoteInfo, RemoteTrackingStatus, RepoStatus,
-    UntrackedFile, WorktreeInfo,
+    GitConfig, GitHostingProvider, GitHostingProviderMetadata, GitInfo, GitRepo, LocalBranchInfo,
+    RefDecoration, RefKind, RemoteInfo, RemoteTrackingStatus, RepoStatus, UntrackedFile, WorktreeInfo,
 };
 pub use worktree::{
     WorktreeEntry, current_worktree_name_with_repo, get_current_worktree_info,

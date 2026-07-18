@@ -14,21 +14,27 @@
 //! a single package ownership index (R2.7).
 
 use std::path::Path;
+use std::time::Instant;
 
 use crate::filesystem::FilesystemInfo;
 use crate::filesystem::git::recent_commits::CommitDescSet;
+use crate::filesystem::git::types::GitAggregateEvidence;
 use crate::filesystem::git::{BranchInfo, FileStatus, GitInfo, WorktreeEntry};
 use crate::filesystem::path_kind::is_source_code_path;
 use crate::filesystem::repo::detection::canonicalize_path;
 use crate::filesystem::repo::ownership::PackageOwnershipIndex;
 use crate::filesystem::repo::types::RepoInfo;
 use crate::filesystem::repo::RepoIdentity;
+use crate::performance;
+use crate::request::{
+    FilesystemRequest, GitMetadataRequest, GitRequest, RepoDetailRequest, RepoRequest,
+};
 use crate::{Result, SniffError};
 
 /// Every repository fact the bare `sniff repo --json` aggregate needs that is
 /// not already present on the detection pass's `FilesystemInfo`.
 ///
-/// Produced by [`observe_repo_aggregate`], consumed as a pure projection.
+/// Produced by [`detect_repo_aggregate`], consumed as a pure projection.
 #[derive(Debug, Clone)]
 pub struct RepoAggregate {
     pub identity: RepoIdentity,
@@ -60,6 +66,24 @@ pub struct RepoAggregate {
     pub context: AggregateCwdContext,
 }
 
+/// Opaque result of the dedicated repository-aggregate detection boundary.
+///
+/// The ordinary filesystem result retains its stable public shapes. The
+/// aggregate projection travels beside it, so CLI-specific evidence never
+/// becomes a field downstream callers must initialize or serialize.
+pub struct RepoAggregateObservation {
+    filesystem: FilesystemInfo,
+    aggregate: RepoAggregate,
+}
+
+impl RepoAggregateObservation {
+    /// Split the observation into the ordinary filesystem result and its
+    /// repository-aggregate projection.
+    pub fn into_parts(self) -> (FilesystemInfo, RepoAggregate) {
+        (self.filesystem, self.aggregate)
+    }
+}
+
 /// The cwd-relative facts behind the aggregate's `context` block.
 ///
 /// Unresolvable facts carry the focused commands' "empty" rendering: an empty
@@ -85,32 +109,55 @@ pub struct AggregateCwdContext {
     pub package_area_has_source_code_changes: bool,
 }
 
-/// Complete the bare `sniff repo --json` facts from its detection pass.
-///
-/// `filesystem` is the already-detected result for `dir`. Passing it is what
-/// makes this cheap: the `GitInfo` supplies working-tree scope and conflict
-/// state, and the `RepoInfo` supplies the package catalog that commit
-/// attribution would otherwise re-detect.
+/// Detect every fact needed by bare `sniff repo --json` through one repository
+/// discovery and return the aggregate beside the stable filesystem result.
 ///
 /// ## Errors
 ///
-/// Returns [`SniffError::NotARepository`] when `filesystem` has no Git result,
-/// and [`SniffError::SystemInfo`] when its request omitted per-file changes or
-/// aggregate repository evidence — see Notes.
+/// Returns [`SniffError::NotARepository`] when `dir` is outside a Git
+/// repository, and propagates Git or repository-detection failures.
 ///
 /// ## Notes
 ///
-/// **Precondition:** the caller's detection request must opt into aggregate
-/// evidence and be at or above `GitRequest::full()`, the floor at which
-/// `include_file_changes` is set. A request below that leaves
-/// `GitInfo.file_changes` empty, which is
-/// indistinguishable from a clean tree by inspection alone. Rather than
-/// silently emit empty scope buckets for a dirty repository, this rejects the
-/// combination it *can* detect: a status that reports dirty while carrying no
-/// file changes.
-pub fn observe_repo_aggregate(
+/// The request intentionally uses only approved public metadata controls.
+/// Branch, worktree, and file-aware history shapes are collected through a
+/// crate-private companion while the original Git handle is still available.
+pub fn detect_repo_aggregate(dir: &Path) -> Result<RepoAggregateObservation> {
+    let started = Instant::now();
+    let request = FilesystemRequest::new()
+        .git(
+            GitRequest::full().commit_count(10).metadata(
+                GitMetadataRequest::none()
+                    .remotes(true)
+                    .config(true),
+            ),
+        )
+        .repo(RepoRequest::focused(RepoDetailRequest::all()))
+        .without_file_inventory();
+    let filesystem_started = Instant::now();
+    let detected = crate::filesystem::detect_filesystem_for_aggregate(dir, &request)?;
+    performance::record_logged_stage(
+        "detect.filesystem",
+        filesystem_started.elapsed(),
+        tracing::Level::INFO,
+    );
+    performance::record_logged_stage("detect.total", started.elapsed(), tracing::Level::INFO);
+    let evidence = detected
+        .git
+        .as_ref()
+        .ok_or_else(|| SniffError::NotARepository(dir.to_path_buf()))?;
+    let aggregate = project_repo_aggregate(dir, Some(&detected.filesystem), evidence)?;
+
+    Ok(RepoAggregateObservation {
+        filesystem: detected.filesystem,
+        aggregate,
+    })
+}
+
+fn project_repo_aggregate(
     dir: &Path,
     filesystem: Option<&FilesystemInfo>,
+    evidence: &GitAggregateEvidence,
 ) -> Result<RepoAggregate> {
     // Absolutize before discovery: gix reports a workdir relative to the
     // discovery path, so discovering from the CLI's default "." would yield a
@@ -123,10 +170,6 @@ pub fn observe_repo_aggregate(
         .and_then(|fs| fs.git.as_ref())
         .ok_or_else(|| SniffError::NotARepository(dir.to_path_buf()))?;
     ensure_detailed_status(detected_git)?;
-    let evidence = detected_git.aggregate.as_ref().ok_or_else(|| SniffError::SystemInfo {
-        domain: "filesystem.repo.aggregate",
-        message: "the detection request did not collect aggregate repository evidence".to_string(),
-    })?;
 
     let repo = filesystem.and_then(|fs| fs.repo.clone());
     let version = collapse_detected_repo_version(repo.as_ref());
@@ -393,7 +436,20 @@ mod tests {
             config: GitConfig::default(),
             tracking: Vec::new(),
             file_changes,
-            aggregate: None,
+        }
+    }
+
+    fn empty_evidence() -> GitAggregateEvidence {
+        GitAggregateEvidence {
+            branches: Vec::new(),
+            worktrees: Vec::new(),
+            current_worktree: None,
+            commits: CommitDescSet {
+                commits: Vec::new(),
+                period_label: "last 3d".to_string(),
+                repo_root: PathBuf::new(),
+                packages: None,
+            },
         }
     }
 
@@ -554,24 +610,6 @@ mod tests {
             dir
         }
 
-        /// The focused request bare `sniff repo --json` builds. Detailed status
-        /// and config come from detection; aggregate observation supplies the
-        /// branches, worktrees, and history without repeating them here.
-        fn aggregate_request() -> FilesystemRequest {
-            FilesystemRequest::new()
-                .git(
-                    GitRequest::full()
-                        .commit_count(10)
-                        .metadata(
-                            GitMetadataRequest::none()
-                                .remotes(true)
-                                .config(true)
-                                .aggregate(true),
-                        ),
-                )
-                .without_file_inventory()
-        }
-
         /// Add a real linked checkout using libgit2's portable fixture API.
         fn linked_fixture() -> (TempDir, PathBuf) {
             let dir = fixture();
@@ -613,7 +651,7 @@ mod tests {
         fn linked_worktree_aggregate_walks_status_and_discovers_once() {
             let (_dir, linked_path) = linked_fixture();
             let (_, counts) = measure(|| {
-                detect_filesystem_with_request(&linked_path, &aggregate_request())
+                detect_repo_aggregate(&linked_path)
                     .expect("aggregate detection succeeds")
             });
 
@@ -631,16 +669,13 @@ mod tests {
             );
         }
 
-        /// Aggregate completion performs no repository or status observation.
+        /// Splitting the opaque result performs no repository observation.
         #[test]
-        fn observation_adds_no_status_walk_or_discovery() {
+        fn opaque_result_projection_adds_no_status_walk_or_discovery() {
             let dir = fixture();
-            let fs = detect_filesystem_with_request(dir.path(), &aggregate_request())
-                .expect("detection succeeds");
+            let observation = detect_repo_aggregate(dir.path()).expect("detection succeeds");
 
-            let (aggregate, counts) = measure(|| {
-                observe_repo_aggregate(dir.path(), Some(&fs)).expect("aggregate observation")
-            });
+            let ((_, aggregate), counts) = measure(|| observation.into_parts());
 
             assert_eq!(
                 counts.get(counters::GIT_STATUS_WALKS),
@@ -675,8 +710,9 @@ mod tests {
             use crate::filesystem::blast_radius::ChangeScope;
 
             let dir = fixture();
-            let fs = detect_filesystem_with_request(dir.path(), &aggregate_request())
-                .expect("detection succeeds");
+            let (fs, _) = detect_repo_aggregate(dir.path())
+                .expect("detection succeeds")
+                .into_parts();
             let changes = &fs.git.as_ref().expect("fixture is a repository").file_changes;
 
             let names = |scope| -> Vec<String> {
@@ -713,7 +749,8 @@ mod tests {
                 "precondition of this test: summary() collects no file changes"
             );
 
-            let result = observe_repo_aggregate(dir.path(), Some(&fs));
+            let evidence = empty_evidence();
+            let result = project_repo_aggregate(dir.path(), Some(&fs), &evidence);
             assert!(
                 result.is_err(),
                 "a dirty tree with no file changes must not yield empty buckets"
@@ -770,27 +807,16 @@ mod tests {
             (dir, root)
         }
 
-        fn detect(root: &Path) -> FilesystemInfo {
-            let request = FilesystemRequest::new()
-                .git(
-                    GitRequest::full().commit_count(10).metadata(
-                        GitMetadataRequest::none()
-                            .remotes(true)
-                            .config(true)
-                            .aggregate(true),
-                    ),
-                )
-                .without_file_inventory();
-            detect_filesystem_with_request(root, &request).expect("detection succeeds")
+        fn detect(root: &Path) -> (FilesystemInfo, RepoAggregate) {
+            detect_repo_aggregate(root)
+                .expect("detection succeeds")
+                .into_parts()
         }
 
         #[test]
         fn observation_resolves_context_facts_for_the_invoking_directory() {
             let (_temp, root) = workspace_fixture();
-            let fs = detect(&root);
-
-            let aggregate = observe_repo_aggregate(&root.join("alpha/pkg-a"), Some(&fs))
-                .expect("observation succeeds");
+            let (_, aggregate) = detect(&root.join("alpha/pkg-a"));
             let context = &aggregate.context;
 
             assert_eq!(context.package, "pkg-a");
@@ -820,15 +846,11 @@ mod tests {
         fn area_changes_attribute_to_the_owning_area() {
             let (_temp, root) = workspace_fixture();
             std::fs::write(root.join("alpha/pkg-a/src/lib.rs"), "pub fn f() { }\n").unwrap();
-            let fs = detect(&root);
-
-            let in_a = observe_repo_aggregate(&root.join("alpha/pkg-a"), Some(&fs))
-                .expect("observation succeeds");
+            let (_, in_a) = detect(&root.join("alpha/pkg-a"));
             assert!(in_a.context.is_current_package_area_dirty);
             assert!(in_a.context.package_area_has_source_code_changes);
 
-            let in_b = observe_repo_aggregate(&root.join("beta/pkg-b"), Some(&fs))
-                .expect("observation succeeds");
+            let (_, in_b) = detect(&root.join("beta/pkg-b"));
             assert!(!in_b.context.is_current_package_area_dirty);
             assert!(!in_b.context.package_area_has_source_code_changes);
         }
@@ -837,10 +859,7 @@ mod tests {
         fn documentation_changes_are_not_source_changes() {
             let (_temp, root) = workspace_fixture();
             std::fs::write(root.join("alpha/pkg-a/notes.md"), "# notes\n").unwrap();
-            let fs = detect(&root);
-
-            let in_a = observe_repo_aggregate(&root.join("alpha/pkg-a"), Some(&fs))
-                .expect("observation succeeds");
+            let (_, in_a) = detect(&root.join("alpha/pkg-a"));
             assert!(in_a.context.is_current_package_area_dirty);
             assert!(!in_a.context.package_area_has_source_code_changes);
         }
@@ -849,10 +868,7 @@ mod tests {
         fn root_area_excludes_paths_under_named_areas() {
             let (_temp, root) = workspace_fixture();
             std::fs::write(root.join("alpha/pkg-a/src/lib.rs"), "pub fn f() { }\n").unwrap();
-            let fs = detect(&root);
-
-            let at_root_pkg = observe_repo_aggregate(&root.join("rootpkg"), Some(&fs))
-                .expect("observation succeeds");
+            let (_, at_root_pkg) = detect(&root.join("rootpkg"));
             assert_eq!(at_root_pkg.context.package, "rootpkg");
             assert_eq!(at_root_pkg.context.package_area, "root");
             assert!(!at_root_pkg.context.is_current_package_area_dirty);
@@ -862,10 +878,7 @@ mod tests {
         fn root_area_counts_paths_outside_named_areas() {
             let (_temp, root) = workspace_fixture();
             std::fs::write(root.join("rootpkg/src/lib.rs"), "pub fn f() { }\n").unwrap();
-            let fs = detect(&root);
-
-            let at_root_pkg = observe_repo_aggregate(&root.join("rootpkg"), Some(&fs))
-                .expect("observation succeeds");
+            let (_, at_root_pkg) = detect(&root.join("rootpkg"));
             assert!(at_root_pkg.context.is_current_package_area_dirty);
             assert!(at_root_pkg.context.package_area_has_source_code_changes);
             assert_eq!(at_root_pkg.context.package_area_root, "");
@@ -877,15 +890,11 @@ mod tests {
             std::fs::create_dir_all(root.join("alpha2")).unwrap();
             std::fs::write(root.join("alpha2/collision.rs"), "pub fn collision() {}\n")
                 .unwrap();
-            let fs = detect(&root);
-
-            let in_alpha = observe_repo_aggregate(&root.join("alpha/pkg-a"), Some(&fs))
-                .expect("observation succeeds");
+            let (_, in_alpha) = detect(&root.join("alpha/pkg-a"));
             assert!(!in_alpha.context.is_current_package_area_dirty);
             assert!(!in_alpha.context.package_area_has_source_code_changes);
 
-            let at_root_pkg = observe_repo_aggregate(&root.join("rootpkg"), Some(&fs))
-                .expect("observation succeeds");
+            let (_, at_root_pkg) = detect(&root.join("rootpkg"));
             assert!(at_root_pkg.context.is_current_package_area_dirty);
             assert!(at_root_pkg.context.package_area_has_source_code_changes);
         }
@@ -898,8 +907,7 @@ mod tests {
                     GitRequest::full().metadata(
                         GitMetadataRequest::none()
                             .remotes(true)
-                            .config(true)
-                            .aggregate(true),
+                            .config(true),
                     ),
                 )
                 .without_repo()
@@ -909,7 +917,8 @@ mod tests {
             let filesystem = detect_filesystem_with_request(&root, &request)
                 .expect("detection succeeds");
 
-            let aggregate = observe_repo_aggregate(&root, Some(&filesystem))
+            let evidence = empty_evidence();
+            let aggregate = project_repo_aggregate(&root, Some(&filesystem), &evidence)
                 .expect("observation succeeds");
 
             assert_eq!(aggregate.context, AggregateCwdContext::default());
@@ -928,7 +937,7 @@ mod tests {
                     .unwrap();
             }
 
-            let mut fs = detect(root);
+            let (mut fs, _) = detect(root);
             fs.repo = Some(RepoInfo {
                 is_monorepo: false,
                 root: root.to_path_buf(),
@@ -942,7 +951,9 @@ mod tests {
                 ..RepoInfo::default()
             });
 
-            let aggregate = observe_repo_aggregate(root, Some(&fs)).expect("observation succeeds");
+            let evidence = empty_evidence();
+            let aggregate = project_repo_aggregate(root, Some(&fs), &evidence)
+                .expect("observation succeeds");
             let context = &aggregate.context;
 
             assert_eq!(context.package, "solo");

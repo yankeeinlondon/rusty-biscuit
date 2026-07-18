@@ -342,9 +342,6 @@ pub struct GitMetadataRequest {
     pub config: bool,
     /// Enumerate linked worktrees.
     pub worktrees: bool,
-    /// Collect the library-owned evidence for bare aggregate projection.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub aggregate: bool,
 }
 
 impl GitMetadataRequest {
@@ -364,7 +361,6 @@ impl GitMetadataRequest {
             tracking: true,
             config: true,
             worktrees: true,
-            aggregate: false,
         }
     }
 
@@ -413,12 +409,6 @@ impl GitMetadataRequest {
     /// Enumerate linked worktrees.
     pub fn worktrees(mut self, include: bool) -> Self {
         self.worktrees = include;
-        self
-    }
-
-    /// Collect aggregate-only branch, worktree, and file-aware history shapes.
-    pub fn aggregate(mut self, include: bool) -> Self {
-        self.aggregate = include;
         self
     }
 }
@@ -730,10 +720,6 @@ impl GitRequest {
         }
     }
 
-    /// Collect the library-owned bare aggregate evidence?
-    pub fn wants_aggregate(&self) -> bool {
-        self.metadata.is_some_and(|metadata| metadata.aggregate)
-    }
 }
 
 /// Focused package details that can be added to a shallow repository request.
@@ -994,6 +980,33 @@ mod tests {
         assert!(round_tripped.wants_ref_decorations());
         assert!(!round_tripped.wants_branches());
         assert!(!round_tripped.wants_config());
+    }
+
+    #[test]
+    fn metadata_wire_contract_contains_only_approved_controls() {
+        let value = serde_json::to_value(GitMetadataRequest::all()).unwrap();
+        let object = value.as_object().unwrap();
+        let mut keys = object.keys().map(String::as_str).collect::<Vec<_>>();
+        keys.sort_unstable();
+
+        assert_eq!(
+            keys,
+            [
+                "branch_divergence",
+                "branches",
+                "commits",
+                "config",
+                "ref_decorations",
+                "remotes",
+                "tracking",
+                "worktrees",
+            ]
+        );
+        assert!(object.values().all(|value| value.as_bool() == Some(true)));
+        assert!(
+            !object.contains_key("aggregate"),
+            "CLI projection evidence is not part of the serialized request contract"
+        );
     }
 
     /// R9.2: asking for commits must not drag in branch, remote, tracking,

@@ -695,7 +695,7 @@ struct ScopeBucket {
 /// ## Notes
 ///
 /// A **pure projection** over facts already observed by the detection pass and
-/// by [`observe_repo_aggregate`]: it performs no filesystem read, repository
+/// by [`detect_repo_aggregate`]: it performs no filesystem read, repository
 /// open, subprocess spawn, or network request (umbrella spec R2.7). The four
 /// scope buckets are derived from the one `GitInfo.file_changes` collection via
 /// [`scope_paths`], which is what removed this builder's eight post-detection
@@ -703,7 +703,7 @@ struct ScopeBucket {
 /// observation over a single package ownership index. Keep it that way — an
 /// observation added here is paid on every bare `sniff repo --json`.
 ///
-/// [`observe_repo_aggregate`]: sniff::filesystem::repo::observe_repo_aggregate
+/// [`detect_repo_aggregate`]: sniff::filesystem::repo::detect_repo_aggregate
 pub(crate) fn build_aggregate_value(result: &SniffResult, aggregate: &RepoAggregate) -> Value {
     let identity = &aggregate.identity;
     let repo = aggregate.repo.as_ref();
@@ -1032,7 +1032,6 @@ mod tests {
             config: GitConfig::default(),
             tracking: Vec::new(),
             file_changes: Vec::new(),
-            aggregate: None,
         }
     }
 
@@ -1097,6 +1096,18 @@ mod tests {
             filesystem: Some(filesystem),
             performance: None,
         }
+    }
+
+    /// This literal compiles from the downstream CLI crate without any
+    /// aggregate-only field, pinning the preserved public Rust construction
+    /// contract as well as the wire shape.
+    #[test]
+    fn git_info_preserved_contract_has_no_aggregate_evidence() {
+        let value = serde_json::to_value(fixture_git_info()).unwrap();
+        assert!(
+            value.get("aggregate").is_none(),
+            "aggregate projection evidence must not appear on GitInfo"
+        );
     }
 
     #[test]
@@ -2341,8 +2352,11 @@ mod tests {
         /// exercise the real library entry point rather than a hand-built
         /// `RepoAggregate` that could drift from what it produces.
         fn aggregate_fixture(path: &Path, result: &SniffResult) -> RepoAggregate {
-            sniff::filesystem::repo::observe_repo_aggregate(path, result.filesystem.as_ref())
+            let (_, mut aggregate) = sniff::filesystem::repo::detect_repo_aggregate(path)
                 .expect("aggregate observation succeeds for the fixture repo")
+                .into_parts();
+            aggregate.repo = result.filesystem.as_ref().and_then(|fs| fs.repo.clone());
+            aggregate
         }
 
         /// A `RepoAggregate` carrying only `repo`, for projection tests that
@@ -2388,8 +2402,7 @@ mod tests {
                 .git(sniff::request::GitRequest::full().metadata(
                     sniff::request::GitMetadataRequest::none()
                         .remotes(true)
-                        .config(true)
-                        .aggregate(true),
+                        .config(true),
                 ))
                 .without_repo()
                 .without_file_inventory()
@@ -2708,9 +2721,7 @@ mod tests {
         #[test]
         fn aggregate_observation_errors_instead_of_yielding_partial_json() {
             let bad_path = PathBuf::from("/tmp/not-a-git-repo-for-aggregate-test-42");
-            let result = fixture_with_git_and_repo();
-            let outcome =
-                sniff::filesystem::repo::observe_repo_aggregate(&bad_path, result.filesystem.as_ref());
+            let outcome = sniff::filesystem::repo::detect_repo_aggregate(&bad_path);
             assert!(
                 outcome.is_err(),
                 "aggregate must fail rather than emit partial JSON"
@@ -2998,7 +3009,7 @@ mod tests {
         /// The headline R2.7 assertion: the builder opens no repository, walks
         /// no status, reads no file, normalizes no path, spawns nothing, and
         /// makes no request. The cwd-relative `context` facts are resolved
-        /// during `observe_repo_aggregate` over a single package ownership
+        /// during `detect_repo_aggregate` over a single package ownership
         /// index, so the projection records no counters at all.
         #[test]
         fn build_aggregate_value_performs_no_observation() {
