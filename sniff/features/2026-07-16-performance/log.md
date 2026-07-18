@@ -6,6 +6,7 @@ implementation_4: "2026-07-17T17:09:45-07:00"
 implementation_5: "2026-07-17T22:33:06-07:00"
 implementation_6: "2026-07-18T05:34:55-07:00"
 implementation_7: "2026-07-18T08:12:07-07:00"
+implementation_8: "2026-07-18T09:46:42-07:00"
 deferred_perf_measurement: true
 ---
 
@@ -19,6 +20,51 @@ deferred_perf_measurement: true
         1. High: native Linux and Windows Level-1 execution and matched work-count artifacts are still absent
         2. Medium: the claimed-unreachable Unix process escape is reachable through installer call sites
 - starting the work on 'installer-reachable Unix containment claim (review-7 Medium)' at 08:14:20
+
+> **Reconstructed record.** Everything below this line was written during review cycle 8 (2026-07-18),
+> not contemporaneously. The cycle-7 session recorded only its start and the single "starting the work"
+> line above before it stopped writing to this log; the source and documentation it produced
+> nevertheless landed in `HEAD`. This block is reconstructed strictly from primary evidence — the two
+> cycle-7 commits `882f5538b` and `98fa4d992`, [review-7.md](review-7.md), and the "Review 7 deferred
+> items" section of [deferred-perf-tests.md](deferred-perf-tests.md). Claims that those sources do not
+> support are marked **unrecorded** rather than reconstructed by inference.
+
+- starting the work on 'native Linux and Windows Level-1 execution and matched work-count artifacts (review-7 High)' — **start time unrecorded**
+        - `uname -a` identified the execution host as native arm64 macOS (Darwin 25.5.0, `xnu-12377.121.10`, `RELEASE_ARM64_T6041`); `rustup target list --installed` reported `aarch64-apple-darwin`, `wasm32-wasip1`, `wasm32-wasip2`, and `x86_64-pc-windows-gnu` — no Linux target, and the Windows target cannot execute on this host
+        - `git branch -r --contains c32f78e43139868cf5831905e891c388d5fa3e74` returned no remote branch, so the reviewed cycle-6 commit existed only in this local worktree and no hosted CI run for that SHA could exist — which is exactly the review's own observation that no retained run is publicly discoverable
+        - Docker was **explicitly not attempted**: a Linux container on this host would exercise real `/proc` descendant discovery, but review-7 ruled Docker results inadmissible for this finding, so a cold container build of the workspace would have spent a large budget on evidence already rejected
+        - deferred as a platform and execution-authority constraint, not a CPU-load deferral; `deferred_perf_measurement: true` remains set in this log's frontmatter
+        - the cycle-7 entry recording the exact implementation identifier, the Unix-fixture relevance note, and the closure procedure was appended to `sniff/features/2026-07-16-performance/deferred-perf-tests.md` and committed as `882f5538b`
+- work completed for 'native Linux and Windows Level-1 execution and matched work-count artifacts (review-7 High)' — **completion time unrecorded**; the containing docs commit `882f5538b` is timestamped 08:26:24
+- resuming the reconstruction of 'installer-reachable Unix containment claim (review-7 Medium)' (started 08:14:20)
+        - the finding rejected the cycle-6 justification that "no caller in this crate can reach the residual". The installer path routes third-party package managers (Brew, npm, pip, Cargo, Go) and downloaded shell installers through `run_command_with_timeout`, so the crate cannot assert that none of them forks and detaches during the 250 ms sampling gap
+        - of the three resolutions review-7 offered, cycle 7 took the second — keep installer execution outside the stronger supervision claim and **expose its best-effort timeout semantics to callers** — plus the review's mandatory executable record
+        - the resulting change is commit `98fa4d992` ("perf(sniff): surface installer timeout outcome to callers"), 4 files, +225/-8:
+                - `sniff/lib/src/programs/install/options.rs` gained the public field `InstallCapturedResult::timed_out`, letting a caller distinguish a killed-at-deadline install from a clean non-zero exit
+                - `sniff/lib/src/programs/install/execute.rs` sets it via `matches!(e, ProcessError::Timeout)` on the captured-error arm of every runner that goes through `run_command_with_timeout`, and `false` on every success/skip arm
+                - `process` module docs and `run_with_timeout`'s rustdoc were tightened to admit the install boundary can reach the Unix residual; a `## Notes` block on `run_command_with_timeout`, `execute_install_captured`, and `execute_versioned_install_captured` records that `timed_out` is **not** a promise the install stopped
+                - `sniff/docs/sniff-library-architecture.md`'s residual paragraph was corrected to agree with the source: the gap is reachable through the install boundary, not merely theoretical, and it cross-references `InstallCapturedResult::timed_out`
+        - the executable record the review demanded was added to `sniff/lib/src/process.rs`: Level-1 fixture `child_detaches_between_samples`, its child `between_samples_descendant`, and the assertion `a_descendant_that_detaches_between_samples_escapes_containment` — unlike the cycle-6 fixture, this one detaches wholly between two samples instead of remaining a descendant across three intervals
+        - an `EscapedDescendant` RAII helper SIGKILLs the 30-second sleeper on every exit path so the fixture cannot leak a process
+        - **not addressed in cycle 7, and each became a review-8 finding:** the new public field is a source break with no recorded migration or approved contract (review-8 High #2); `execute_install`/`execute_versioned_install`, the interview, and the CLI all discard `timed_out`, so no user-facing warning was delivered (also review-8 High #2); and the new fixture could return green without running its residual assertion when timing crossed a sample boundary (review-8 Medium #3). All three were fixed in cycle 8
+- work completed for 'installer-reachable Unix containment claim (review-7 Medium)' — **completion time unrecorded**; the containing source commit `98fa4d992` is timestamped 08:26:39
+
+### Successful Completion
+
+> **Reconstructed during cycle 8.** No contemporaneous completion record was written. The wall-clock
+> duration is therefore bounded rather than measured: the cycle started at 08:12:07 and its last
+> commit landed at 08:26:39, so it ran for **at most 14 minutes and 32 seconds**. The exact end time
+> is unrecorded.
+
+During this implementation both review-7 findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 was fixed and 1 was deferred (see reason below):
+
+- **Finding 1, native Linux and Windows Level-1 execution and matched three-OS work-count artifacts** — deferred because this native arm64 macOS host has no authorized native Linux or Windows execution path, and because the reviewed tree was never published. Closing the finding requires the reviewed commit to be committed and pushed so the `sniff-cross-platform` and `sniff-performance` matrices can execute it natively; the session prohibited committing, pushing, and invoking credential helpers. Cross-compilation proves compilation only, Docker was ruled inadmissible by the review itself, and a workflow definition is not an execution record. This is a platform and execution-authority constraint, not a CPU-load deferral. Full detail and the closure procedure are recorded in `sniff/features/2026-07-16-performance/deferred-perf-tests.md`.
+
+The files changed cover the public installer timeout disclosure (`InstallCapturedResult::timed_out`), its assignment across every captured install runner, the narrowed process-containment rustdoc on both the runner and the install entry points, the corrected residual paragraph in `sniff/docs/sniff-library-architecture.md`, and the between-samples Unix Level-1 fixture with its RAII cleanup guard.
+
+- **verification figures are unrecorded.** Cycle 7 wrote no `just test`, `just lint`, `git diff --check`, or cross-compile result to this log, and neither cycle-7 commit message states one. No test or lint count is reconstructed here, because inventing one would be indistinguishable from a measured result.
+        - the nearest corroborating evidence is external and post-dates the cycle: review 8, run against `98fa4d992` at 08:27:46, independently measured **1,671 `sniff-lib` passed** (19 skipped) and **781 `sniff-cli` passed** (3 skipped) with `just lint` and `just build` green. That is consistent with cycle 6's 1,670 plus the single fixture cycle 7 added, but it is review-8's measurement of the tree, not cycle-7's own record of its work
+- no commit, push, external workflow trigger, VM startup, package installation, or write-mode formatting command is recorded for this cycle
 
 ## Implementation of Review Findings #3
 
@@ -508,4 +554,100 @@ The files changed cover the aggregate request's removal of unrequested docs and 
 - measured outcome of finding 3: the review-5 design had placed a full `sysinfo` process-table scan on the **success** path of all 18 subprocess call sites, costing 16.4–32.8 ms per probe on this 1,518-process host; deferring the first sample by a full interval removes that cost entirely for probes completing quickly, so the containment fix is a net reduction rather than an addition
 - each of the three fixes was proven to bite by temporarily reverting it and confirming the new regression fails, then restoring
 - the Windows GNU all-target remote-feature cross-compile passed with zero warnings from the changed process code
+- no commit, push, external workflow trigger, VM startup, package installation, or write-mode formatting command was run
+
+## Implementation of Review Findings #8
+
+> **started at:** 2026-07-18T09:46:42-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'sniff/features/2026-07-16-performance/review-8.md'
+- this is iteration 8 of the review-to-implement cycle
+- review-8 contains 4 findings (2 High, 2 Medium):
+        1. High: native Linux and Windows Level-1 execution and matched work-count artifacts remain absent
+        2. High: the installer timeout disclosure breaks the public Rust contract but is discarded by the main callers
+        3. Medium: the between-samples Unix regression can report a green test without testing the residual
+        4. Medium: completion records still contradict the implemented and reviewed state
+- the reviewed implementation identifier is HEAD `98fa4d992adf13a85c31995b3feb3d270a9a26d1`
+- starting the work on 'native Linux and Windows Level-1 evidence' at 09:47:03
+        - `uname -a` identified the execution host as native arm64 macOS (Darwin 25.5.0); `rustup target list --installed` shows only `aarch64-apple-darwin`, `wasm32-wasip1`, `wasm32-wasip2`, and `x86_64-pc-windows-gnu` — no Linux target and no native Linux or Windows execution host
+        - `git branch -r --contains 98fa4d992adf13a85c31995b3feb3d270a9a26d1` returned empty, confirming the reviewed commit exists only in this local worktree and no hosted CI run for that SHA can exist
+        - the constraint is structurally identical to cycles 5, 6, and 7: cross-compilation proves compilation only, Docker was explicitly ruled inadmissible by the review, and a workflow definition is not an execution record; this session additionally prohibits commits, pushes, credential helpers, VM startup, and external workflow triggers
+        - deferred again as a platform and execution-authority constraint, not a CPU-load deferral; `deferred_perf_measurement: true` remains set in this log's frontmatter
+        - the cycle-8 entry recording the exact implementation identifier and closure procedure is appended to `sniff/features/2026-07-16-performance/deferred-perf-tests.md`
+- work completed for 'native Linux and Windows Level-1 evidence' at 09:47:30
+- starting the work on 'installer timeout contract propagated end to end' at 09:48:10
+        - chose **one timeout contract expressed as a distinct variant at every layer**, rather than reusing `PackageManagerFailed` with a marker string, or reverting `InstallCapturedResult::timed_out` to close the source break
+                - the marker-string option was rejected because callers would have to string-match to discriminate a deadline kill from a package-manager verdict, which is exactly the conflation the finding names
+                - reverting the field was rejected because R12.5 requires a *defined result on timeout*, so the flag must exist; the fix is to propagate it, not delete it
+        - the layers are `SniffInstallationError::InstallationTimedOut { pkg, manager, timeout_secs }` (legacy `Result` APIs) → `InstallInterviewEvent::TimeoutWarning { prose }` (semantic event) → `InstallInterviewOutcome::TimedOut { attempted }` (session outcome) → CLI `Prose` render plus non-zero exit
+        - warning ordering is load-bearing and is emitted **after** the error `Status` and **before** the retry prompt in `handle_failure` (`interview.rs`), so the user reads the detached-descendant hazard before choosing to run a second installer
+        - deliberate non-change: `RetryChoice::Quit` after a timeout still returns `AbortedByUser`, preserving existing "user chose to stop" semantics; the `TimeoutWarning` event fires regardless, so the hazard is still disclosed
+        - files/symbols changed: `error.rs:167` (new variant + rustdoc stating the best-effort-kill/partial-install contract); `install/execute.rs` (extracted `install_result_from_outcome`, shared by `execute_install`/`execute_versioned_install`, timed-out arm preceding the generic failure arm, both `## Errors` sections updated); `install/command.rs:165` (`build_install_timeout_warning`); `install/interview.rs` (new event/outcome variants, private `InstallExecutor<'a>` test seam, `handle_failure` gains `timed_out: bool`); `install/mod.rs` and `programs/mod.rs` re-exports; `cli/src/install_ui.rs:87` (`Prose` render matching the existing `ConsentWarning` idiom in the same file); `cli/src/install_plan_cmd.rs:157` (non-zero exit)
+        - the accepted source break is now recorded in the umbrella spec's "Intentional changes" list (`spec.md:312`), naming all four additions, the R12.5 justification, and the caller migration note — this was the finding's "no migration or separately approved contract is recorded" complaint
+        - the weak helper at `execute.rs:457` now asserts `result.timed_out`, which strengthens 4 pre-existing tests
+        - 7 tests added: 3 legacy injected-runner tests (including `legacy_install_still_reports_ordinary_failure_as_package_manager_failed` as the contrast case proving the new variant is not blanket), 3 interview tests (including `timeout_warning_precedes_the_retry_prompt`, which records `events.len()` at `choose_retry` and asserts the warning index is strictly lower), and 1 CLI `Prose` render test
+        - **proven to bite**: temporarily reverted the timeout arm, the warning/outcome block, and all four `timed_out: matches!(e, ProcessError::Timeout)` sites; `uv_install_honors_requested_timeout` and `uv_bootstrap_honors_requested_timeout` panicked at `execute.rs:478`, and both new interview tests failed through all 4 nextest retries; restored and re-verified green
+        - sniff-area verification: `just test` gave **1,677 `sniff-lib` passed** (19 skipped) and **782 `sniff-cli` passed** (3 skipped), exit 0 — up from the review's 1,671/781 baseline by exactly the 7 added tests, confirming they execute under the recipe's `--features remote`; `just lint` exit 0 with zero warnings
+        - **orchestrator-caught regression outside the sniff area**: adding enum variants broke two downstream package areas the subagent never compiled, because its verification was correctly scoped to `sniff`
+                - `biscuit-speaks/cli/src/install_ui.rs`, `biscuit-speaks/cli/src/main.rs`, and `playa/cli/src/install_ui.rs` all match `InstallInterviewEvent`/`InstallInterviewOutcome` exhaustively and failed with `E0004`
+                - migrated all three by hand, each matching its own file's existing rendering idiom (`strip_prose_tags(..).yellow()` for biscuit-speaks, `Prose::new(..).render(&self.terminal)` for playa) rather than importing a new one; `biscuit-speaks` `main.rs` gained a `TimedOut` arm exiting non-zero, with a comment recording that the interview already emitted the hazard warning and this arm only supplies the terminal verdict
+                - a workspace-wide grep confirmed `sniff`, `playa`, and `biscuit-speaks` are the only consumers of either type or of `SniffInstallationError::`
+                - `cargo check -p biscuit-speaks-cli -p playa-cli --all-targets` passed, and `cargo nextest run -p biscuit-speaks-cli -p playa-cli` passed **112/112**
+                - this is the concrete migration cost the finding predicted; it is now paid rather than latent
+        - Level 2 and Level 3 were not attempted, as the review explicitly states they are not required absent a new real-terminal styling or OS-input requirement
+        - scoped out: making `SniffInstallationError`/`InstallInterviewOutcome` `#[non_exhaustive]`, because that would itself be an unreviewed contract change and would break the in-repo exhaustive matches; the spec bullet instead records the added variants as accepted source breaks, consistent with how the existing `GitRequest`/inventory breaks are recorded
+- work completed for 'installer timeout contract propagated end to end' at 10:52:00
+- starting the work on 'deterministic between-samples Unix regression' at 10:53:15
+        - chose the **injectable sampler** (the review's first choice); bounded retries were rejected because each retry re-runs the same unsynchronized race, so a loaded runner would just burn N attempts and then report a failure that is a host artifact rather than a containment regression
+        - the entire `skew_ms` / `fork_ms / interval_ms` heuristic and its `return`-on-skip branch are **deleted**, so the no-verdict success path is structurally gone rather than merely made unlikely
+        - mechanism: `sample_hook` (`process.rs:134`, gated `#[cfg(all(unix, test))]`) holds a **thread-local** `FnMut` slot — thread-local because `ProcessTree::sample` always runs on the thread that called `run_command_with_timeout`, so an installed hook cannot leak into a concurrently running test
+                - `install` (`:151`) returns an RAII `HookGuard` (`:143`) that disarms on panic; `after_sample` (`:156`) takes the hook out of the slot for the call so a re-entrant hook cannot trip a `RefCell` borrow panic
+                - the single production-side call is `super::sample_hook::after_sample()` at `process.rs:331`, at the very end of `sample()` under `#[cfg(test)]`
+        - why it is deterministic: the test's hook writes a release marker then *blocks* until the escaped descendant publishes a reparent marker, and the descendant (`between_samples_descendant`, `:1016`) only publishes that marker after observing `getppid()` change — which cannot happen until the direct child has exited
+                - therefore no sample can run while the hook blocks, and by the time it returns the child is provably exited, so the loop's next `try_wait` breaks immediately and no sample can run afterwards either
+                - the fork/`setsid`/exit sequence lands strictly between two samples at any host load
+                - portability: the `getppid()` comparison is against the recorded original parent rather than `ppid == 1`, which handles Linux subreapers and PID-namespace inits — this matters because CI runs this natively on Linux where descendant discovery goes through `/proc`
+        - `EscapedDescendant` (`:1060`) was reworked to an `Arc<AtomicI32>` slot filled by the hook the instant the fixture publishes a PID, so the RAII cleanup guard is armed **before** any assertion runs and covers a panic anywhere after the fork
+        - **no-verdict path proven gone**: 20/20 consecutive focused runs passed (`PASS=20 FAIL=0`); the skip `eprintln!` no longer exists in source, so a green run necessarily executed the `libc::kill(pid, 0)` assertion, and two independent guards (`assert!(reparent_file.exists(), ..)` and `escapee.pid().expect(..)`) would fail rather than skip if the handshake broke
+        - **proven to bite, via the inverse experiment**: this test asserts the escapee *survives* (it pins the residual gap review-6 documented), so reverting sampling would make it pass more easily rather than fail
+                - the condition that actually flips it was run instead: the descendant was patched to publish its marker immediately after `setsid`, and the child made to outlive a sample boundary, so a sample observes the descendant while still parented
+                - result **10/10 FAIL** deterministically, with the intended message `descendant NNNNN was contained; Unix tree termination is now stronger than the module documentation claims — invert this test and correct the docs`; the patch was reverted from a byte-for-byte backup and restoration verified
+        - **fast-path zero-scan behavior preserved**: the supervising loop, `DESCENDANT_SAMPLE_INTERVAL` (250 ms), and the deferred-first-sample logic are byte-identical; `git diff` on production code is exactly one doc paragraph, one `#[cfg(all(unix, test))]` module, and one `#[cfg(test)]` call, and a non-test build compiles the hook out entirely — PID-reuse revalidation via `start_time()` is untouched
+        - verification: `just test` gave **1,677 `sniff-lib` passed** (19 skipped) and **782 `sniff-cli` passed** (3 skipped), matching the post-installer baseline exactly because the fixtures were rewritten in place; `just lint` exit 0; focused `cargo nextest run -p sniff --features remote -E 'test(/process::tests::/) and not test(/level2_/)'` 13/13 with the target test at ~0.39s; `ps` confirmed no orphaned 30-second sleepers after the runs
+        - flagged, not fixed (pre-existing, out of scope): `cargo clippy --all-targets --features remote -- -D warnings` reports 5 `zombie_processes` plus 1 `items_after_test_module`, verified identical against `HEAD:sniff/lib/src/process.rs`; canonical `just lint` does not pass `--all-targets` and CI's `sniff-cross-platform` runs `cargo check` rather than `clippy -D warnings`, so neither gate currently sees them
+        - also flagged: `cargo fmt --check` reports 235 pre-existing crate-wide diffs (10 in `process.rs`), all in untouched code and consistent with the known local-rustfmt-versus-`main` drift; no write-mode formatter was run
+- work completed for 'deterministic between-samples Unix regression' at 11:12:31
+- starting the work on 'reconcile contradictory completion records' at 11:13:05
+        - **Part A — cycle-7 record reconstructed** strictly from primary evidence: the two cycle-7 commits `882f5538b` (docs, 08:26:24) and `98fa4d992` (source, 08:26:39, 4 files, +225/-8), `review-7.md`, and the "Review 7 deferred items" section of `deferred-perf-tests.md`
+                - both the per-finding block and its `### Successful Completion` section carry an explicit blockquote marking them reconstructed during cycle 8 and naming the sources, so a reviewer can distinguish reconstructed from contemporaneous record
+                - **what could not be established is marked unrecorded rather than invented**: cycle 7's own `just test` / `just lint` / `git diff --check` results (no log entry, and neither commit message states one), the per-finding start and completion timestamps beyond the single logged 08:14:20, and the cycle end time
+                - the duration is therefore stated as a **bound** — at most 14m 32s (08:12:07 → last commit 08:26:39) — not as a measurement
+                - the only corroborating test figures (1,671 sniff-lib / 781 sniff-cli) are cited as **review-8's** measurement of the tree at 08:27:46, explicitly not as cycle-7's own record
+        - **Part B — Phase 8 versus source.** Phase 8 claimed in two places that "the large synthetic service-listing timing row remains deferred" for an API-surface reason; the source contradicts this
+                - `bench-internals = []` exists in `sniff/lib/Cargo.toml`; `register_service_shapes` in `sniff/lib/benches/cases/workload_matrix.rs` is `#[cfg(feature = "bench-internals")]` and registers `workloads_service_listing/{500,2000}` over `[500usize, 2_000]`; `sniff/lib/benches/README.md:203` documents both plus their two counter-bound tests
+                - per repo convention the code is correct and the doc is wrong, so both claims were rewritten to record cycle 4 as the resolution and to name the structural acceptance bound (`1 + ceil(N / 128)` runner calls, `process.spawns`), keeping the honest "no wall timing claimed" qualifier
+                - Phase 8's "remaining limitations" list was rewritten so the native-platform item is stated as still open as of cycle 8 — macOS-only host, reviewed commit on no remote — with cross-compilation, Docker, WSL, and workflow definitions explicitly ruled out as substitutes; Phase 8 now makes no claim that this evidence exists
+                - Phase 8's "Post-review verification" block (1,657 / 777) now leads with a note that those are historical cycle-3 phase-boundary figures, not current counts
+        - **Part C — one further contradiction found.** `phases/06-remote-network-and-subprocess/spec.md:188` stated unqualified that cleanup "terminate[s] the whole group/job", which cycles 5–7 disproved on Unix
+                - added a paragraph recording that the preceding text is the cycle-3 boundary and that the guarantee is asymmetric: Windows total, Unix layered with a real `setsid()` between-samples escape, reachable through the install boundary, now disclosed via `InstallCapturedResult::timed_out` and `SniffInstallationError::InstallationTimedOut`, with `process.rs` module docs as the authority
+                - checked and deliberately left alone: Phase 4's "Not done at the Phase 4 boundary" and Phase 6's "Deferred, with reasons" are already past-tense and boundary-scoped, and Phase 5:308 already records its deferred reuse items as implemented
+                - the umbrella `spec.md:313` already carried this cycle's installer timeout contract and its four accepted source breaks, so no further edit was needed there
+        - no edited file carries `hash:` frontmatter, so no Darkmatter rehash was required; `git diff --check` passed and only Markdown files were changed by this finding
+- work completed for 'reconcile contradictory completion records' at 11:16:40
+
+### Successful Completion
+
+The implementation of review cycle 8 has completed successfully in 1 hour, 33 minutes, and 30 seconds (09:46:42–11:20:12 local time). During this implementation all 4 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 3 were fixed, 1 was deferred (see reasons below):
+
+- **Finding 1, native Linux and Windows Level-1 execution and matched three-OS work-count artifacts** — deferred because this native arm64 macOS host has no authorized native Linux or Windows execution path. `rustup target list --installed` carries no Linux target, Windows targets cannot execute on macOS, and `git branch -r --contains 98fa4d992` confirms the reviewed commit exists only in this local worktree, so no hosted CI run for that SHA can exist. This session is prohibited from committing, pushing, invoking credential helpers, starting VMs, and triggering external workflows. Cross-compilation proves compilation only, Docker was explicitly ruled inadmissible by the review, and a workflow definition is not an execution record. This is a platform and execution-authority constraint, not a CPU-load deferral. Full detail and the closure procedure are recorded in `sniff/features/2026-07-16-performance/deferred-perf-tests.md` under "Review 8 deferred items".
+
+The files changed cover the end-to-end installer timeout contract (a distinct error variant, a semantic interview event and outcome, and an explicit pre-retry terminal warning), the downstream migration that contract forced in two other package areas, the deterministic between-samples Unix regression and its `#[cfg(all(unix, test))]` sampler hook, the umbrella spec's record of the accepted source breaks, the reconstructed cycle-7 log section, and the Phase 6 and Phase 8 current-state corrections.
+
+- final Sniff-area verification passed with exit code 0: **1,677 `sniff-lib` tests passed** (19 skipped) and **782 `sniff-cli` tests passed** (3 skipped); `just lint` exit 0 and `git diff --check` clean
+- the installer timeout work added exactly 7 tests to the review's 1,671/781 baseline, confirming they execute under the recipe's `--features remote` rather than being silently feature-gated out
+- **a cross-area regression was caught by the orchestrator that the finding-2 subagent could not see**: adding enum variants broke exhaustive matches in `biscuit-speaks/cli/` and `playa/cli/`, which are outside the sniff verification scope the subagent was correctly given. All three sites were migrated by hand in each file's own rendering idiom, and `cargo check -p biscuit-speaks-cli -p playa-cli --all-targets` plus `cargo nextest run -p biscuit-speaks-cli -p playa-cli` (**112/112 passed**) now confirm the workspace is whole. This is the concrete migration cost the review predicted for the public source break; it is now paid rather than latent
+- each of the two source fixes was proven to bite: the installer timeout regression by reverting the timeout arm, warning block, and all four `timed_out` sites; the between-samples regression by the inverse experiment (10/10 deterministic failures when the escape is made observable to a sample), since that test asserts the escapee *survives* and so cannot be flipped by weakening containment
+- the between-samples test's silent no-verdict path is structurally gone rather than merely unlikely: the skip branch is deleted, and 20/20 consecutive focused runs produced a real verdict
+- the review-6 fast-path guarantee is preserved — production process code gained only one doc paragraph and one `#[cfg(test)]` call, so a probe completing inside one 250 ms sample interval still performs zero `sysinfo` scans
+- two pre-existing issues were flagged rather than fixed, both out of scope: `cargo clippy --all-targets --features remote -- -D warnings` reports 5 `zombie_processes` and 1 `items_after_test_module` in `process.rs` (verified identical against `HEAD`, and invisible to both canonical `just lint` and CI's `cargo check`-based job), and `cargo fmt --check` reports 235 crate-wide diffs consistent with the known local-rustfmt-versus-`main` drift
 - no commit, push, external workflow trigger, VM startup, package installation, or write-mode formatting command was run

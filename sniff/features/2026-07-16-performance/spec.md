@@ -2,7 +2,7 @@
 status: ready for planning
 date: 2026-07-16
 reviewed: true
-review_iterations: 7
+review_iterations: 8
 reviewed_by: codex/default
 reviewed_on: 2026-07-16
 source_reviews:
@@ -310,6 +310,7 @@ These are valid observations, but they must not delay the structural work or int
 - Inventory output gains additive serialized `truncated` and `limit` fields, and a truncated subset is explicitly unspecified across runs. Adding fields to the public Rust structs is an accepted source break for struct-literal callers.
 - `GitRequest` gains fine-grained metadata storage/builders; adding a field to the public struct is an accepted source break for struct-literal callers, while legacy serialized plans remain compatible.
 - Focused path-history APIs gain an explicit incomplete/bounded-history indication, with the exact public migration subject to Open Question 1.
+- Installation timeout becomes a first-class outcome rather than an ordinary failure, because R12.5 requires a defined result on timeout and the Unix kill is only best-effort. This is one reviewed contract spanning four accepted source breaks: `InstallCapturedResult` gains `timed_out` (source break for struct-literal callers); `SniffInstallationError` gains `InstallationTimedOut { pkg, manager, timeout_secs }`, which `execute_install`/`execute_versioned_install` now return instead of `PackageManagerFailed`; `InstallInterviewEvent` gains `TimeoutWarning`, emitted after the failure status and before any retry prompt; and `InstallInterviewOutcome` gains `TimedOut`. Both enums are non-`non_exhaustive`, so the added variants are accepted source breaks for exhaustive matchers. Migration: match the new variants; the pre-existing `PackageManagerFailed` and `Failed` meanings narrow to non-timeout failures only.
 
 Any additional behavior or schema change requires a separate review and must not be smuggled in as a performance optimization.
 

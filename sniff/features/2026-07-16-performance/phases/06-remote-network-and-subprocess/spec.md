@@ -190,6 +190,17 @@ whole group/job before joining pipe drains, so a descendant retaining stdout or 
 the deadline. Portable Level-1 fixtures spawn such a descendant and require prompt cleanup; the
 Windows GNU all-target check compiles the Job Object path.
 
+**The containment guarantee is not symmetric, and the paragraph above states the cycle-3 boundary.**
+Later review cycles narrowed the Unix side to what POSIX can actually deliver: Windows tree
+termination is total (Job Object membership is inherited and kernel-enforced), while Unix is layered
+— the process group is guaranteed, but a descendant that forks and calls `setsid()` entirely between
+sniff's 250 ms samples escapes and is best-effort only. Cycle 7 established that the residual is
+**reachable**, not theoretical, because the install boundary runs third-party package managers and
+downloaded installer scripts; `InstallCapturedResult::timed_out` and the propagated
+`SniffInstallationError::InstallationTimedOut` disclose it to callers. `sniff/lib/src/process.rs`'s
+module documentation is the authority on the per-platform guarantee, and
+`a_descendant_that_detaches_between_samples_escapes_containment` is the executable record of the gap.
+
 ### Percent-encoding constrains the continuation design
 
 An early `CONTINUATION_PREFIXES` used `.github/workflows`. A probe against a mock server showed the

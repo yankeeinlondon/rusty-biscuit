@@ -198,11 +198,24 @@ dirty-file sizes, divergent worktrees, remote containment, sparse path history, 
 behavior, and a real provider backed by wiremock. Work-counter tests remain the acceptance bounds;
 no timing verdict was collected on the loaded host.
 
-The large synthetic service-listing timing row remains deferred. The public service API observes the
-host, while parser and injected-command seams are crate-private; exposing a production injection API
-only for Criterion would broaden unrelated surface. Level-1 tests already pin service chunking,
-partial failure, deadlines, descendant cleanup, and child reaping, so the missing timing row is a
-benchmark-fixture limitation rather than an unbounded-work gap.
+The large synthetic service-listing workload was deferred at review cycle 3 for an API-surface
+reason — the public service API observes the host, while parser and injected-command seams are
+crate-private — and **review cycle 4 resolved it**. The `bench-internals` feature
+(`sniff/lib/Cargo.toml`) gates a doc-hidden synthetic systemd fixture, so the production API is
+unchanged when the feature is off. `register_service_shapes`
+(`sniff/lib/benches/cases/workload_matrix.rs`) registers deterministic `workloads_service_listing/500`
+and `/2000` workloads that drive the production listing parser, running-service selection, 128-unit
+chunk builder, runner dispatch, show-block parser, and PID projection; fixture construction and
+per-iteration cursor setup sit outside Criterion's timed section.
+
+The acceptance bound is still structural, not a timing verdict:
+`large_service_workloads_preserve_cardinality_and_chunk_bounds` pins output cardinality and
+`1 + ceil(N / 128)` runner calls for both sizes, and
+`pid_enrichment_costs_one_subprocess_per_chunk_not_per_service` maps the same bound to the stable
+`process.spawns` counter through the real bounded runner. Benchmark compilation is verified locally;
+no wall timing from a loaded implementation host is recorded or claimed for these rows. See
+[`sniff/lib/benches/README.md`](../../../../lib/benches/README.md) for the workload-to-counter-test
+mapping.
 
 ## CI
 
@@ -256,6 +269,10 @@ preserved by construction; the goldens are the check on that claim, not the argu
 
 ### Post-review verification
 
+The figures in this section are **historical review-cycle-3 evidence**, retained as a phase-boundary
+record. They are not the current test counts; each later cycle added tests, and the current state is
+tracked in [`log.md`](../../log.md) and the review files.
+
 After review cycle 3 repaired host-dependent OS-version normalization and selected an explicit
 `main` branch for Git fixtures, the canonical macOS run passed all 1,657 sniff-lib tests and all 777
 sniff-cli tests; `just lint` also passed. A Windows GNU
@@ -285,12 +302,19 @@ worktree projection satisfy R9.5/R9.6. Review cycle 3 also closes aggregate proj
 linked-worktree status duplication, component-aware area matching, manifest-failure reuse, and
 process-tree-bounded subprocess cleanup.
 
-The remaining limitations are evidence and benchmark scope, not open R1–R13 implementations:
+The remaining limitation is evidence scope, not an open R1–R13 implementation:
 
-- Native Linux/Windows Level-1 runs and retained non-macOS artifacts were not produced on this
-  macOS-only host; the existing three-OS workflows must supply them.
-- The synthetic large-service Criterion row is deferred for the API-surface reason documented under
-  [Post-review workload coverage](#post-review-workload-coverage).
+- **Native Linux and Windows Level-1 execution, and a matched three-OS work-count artifact set, are
+  still absent as of review cycle 8.** Every implementation cycle has run on a macOS-only host, and
+  the reviewed commit is on no remote, so the `sniff-cross-platform` and `sniff-work-counts` matrices
+  cannot have executed it. Cross-compilation, Docker, and WSL do not substitute for a native leg, and
+  a workflow definition is not an execution record. The current deferral entry, the exact
+  implementation identifier, and the closure procedure live in
+  [`deferred-perf-tests.md`](../../deferred-perf-tests.md).
+
+The synthetic large-service Criterion workload is **no longer a limitation** — review cycle 4 landed
+it behind the `bench-internals` feature; see
+[Post-review workload coverage](#post-review-workload-coverage).
 
 R14 is explicitly not on this list — Phase 7 measured all nine candidates and deferred them with
 evidence, which the umbrella spec's completion boundary expressly permits ("unimplemented R14

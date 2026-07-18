@@ -246,3 +246,50 @@ close without external execution or unrelated public API expansion.
   and retain all three tables plus the test and lint run links under that same
   identifier. Cross-compilation, Docker, WSL, or results from a different tree do not
   close this finding.
+
+## Review 8 deferred items
+
+### Finding 1: native Linux and Windows Level-1 execution and matched work-count artifacts remain absent
+
+- **Maps to:** `sniff/features/2026-07-16-performance/review-8.md`, the single High
+  finding titled "native Linux and Windows Level-1 execution and matched work-count
+  artifacts remain absent".
+- **Umbrella requirement:** [spec.md:396](spec.md#L396) — cross-platform tests must
+  pass on macOS, Linux, and Windows, and the scheduled matrix must emit comparable
+  per-OS work-count artifacts.
+- **Implementation identifier:** the reviewed tree is HEAD
+  `98fa4d992adf13a85c31995b3feb3d270a9a26d1` plus this cycle's uncommitted changes to
+  the installer timeout contract (`sniff/lib/src/error.rs`,
+  `sniff/lib/src/programs/install/*`, `sniff/cli/src/install_ui.rs`,
+  `sniff/cli/src/install_plan_cmd.rs`), the deterministic between-samples regression
+  (`sniff/lib/src/process.rs`), and the downstream migrations in
+  `biscuit-speaks/cli/` and `playa/cli/`.
+- **Host evidence:** `uname -a` reports native arm64 macOS (Darwin 25.5.0).
+  `rustup target list --installed` carries only `aarch64-apple-darwin`,
+  `wasm32-wasip1`, `wasm32-wasip2`, and `x86_64-pc-windows-gnu` — no Linux target and
+  no native Linux or Windows execution host.
+- **Publication evidence:** `git branch -r --contains 98fa4d992adf13a85c31995b3feb3d270a9a26d1`
+  returned no remote branch, so the reviewed commit exists only in this local
+  worktree and no hosted CI run for that SHA can exist.
+- **Why deferred:** this is an execution-authority constraint, not a CPU-load
+  deferral, and it is structurally unchanged from cycles 5, 6, and 7. Closing the
+  finding requires the reviewed tree to be committed and pushed so the scheduled
+  `sniff-cross-platform` and `sniff-performance` matrices can execute it natively.
+  This session is explicitly prohibited from committing, from pushing, and from
+  invoking credential helpers such as `ssh`/`gpg`, so no authorized path exists from
+  this workspace.
+- **Cycle-8 relevance note:** this cycle again changed Unix-specific process
+  behavior. `sniff/lib/src/process.rs` replaced the load-dependent between-samples
+  fixture with a deterministic `#[cfg(all(unix, test))]` sampler hook. The new
+  handshake uses a `getppid()` comparison against the recorded original parent rather
+  than `ppid == 1`, specifically so it remains correct under Linux subreapers and PID
+  namespaces — but that portability claim has been exercised natively on **macOS
+  only**. It must run natively on Linux, where descendant discovery goes through
+  `/proc`, before this finding closes. The Windows Job Object path was not changed
+  this cycle.
+- **To close:** commit and push one immutable cycle-8 implementation identifier to
+  `origin`; obtain green native `cd sniff && just test` and `cd sniff && just lint`
+  runs on macOS, Linux, and Windows; run the `work_counts` example on each native OS;
+  and retain all three tables plus the test and lint run links under that same
+  identifier. Cross-compilation, Docker, WSL, or results from a different tree do not
+  close this finding.
