@@ -96,6 +96,7 @@
 mod detect;
 mod error;
 mod format;
+mod list_format;
 
 #[cfg(feature = "toml")]
 pub mod toml_impl;
@@ -120,6 +121,9 @@ pub use detect::{FileType, detect_file_type, detect_file_type_from_bytes};
 
 // Re-export data format enum
 pub use format::DataFormat;
+
+// Re-export list-shape classification and conversion
+pub use list_format::{ListFormat, classify_list};
 
 // Re-export format-specific types
 #[cfg(feature = "toml")]
