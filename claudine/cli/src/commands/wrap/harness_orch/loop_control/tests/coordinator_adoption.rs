@@ -354,6 +354,7 @@ fn inline_closure_ownership_follows_the_adopted_target() {
         Some(fx._dir.path()),
         fx._dir.path(),
         None,
+        claudine::composition::SchemaStage::Validate,
     )
     .expect("the router materializes");
     let router_plan = before
@@ -379,6 +380,7 @@ fn inline_closure_ownership_follows_the_adopted_target() {
         Some(fx._dir.path()),
         fx._dir.path(),
         None,
+        claudine::composition::SchemaStage::Validate,
     )
     .expect("the adopted target materializes");
     let target_plan = after

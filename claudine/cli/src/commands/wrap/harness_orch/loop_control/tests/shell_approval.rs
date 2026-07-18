@@ -244,7 +244,13 @@ fn approved_bytes_equal_the_bytes_a_with_value_resolves_to() {
     );
 
     // ...and the bytes that execute are the bytes that were approved.
-    let materialized = materialize_harness_prompt(&state, None, dir.path(), None)
+    let materialized = materialize_harness_prompt(
+        &state,
+        None,
+        dir.path(),
+        None,
+        claudine::composition::SchemaStage::Validate,
+    )
         .expect("the approved command expands at execution");
     assert_eq!(
         materialized.prompt.trim(),

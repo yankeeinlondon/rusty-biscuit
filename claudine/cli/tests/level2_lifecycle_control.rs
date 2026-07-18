@@ -175,6 +175,50 @@ esac
     );
 }
 
+/// A fake `codex` that mirrors [`write_resumable_claude`] on Codex's own wire:
+/// `thread.started` carries the session id, the first invocation fails, and only
+/// the `codex exec resume <id>` argv reaches the resume branch.
+///
+/// Codex is used for the MCP row because Claude declines runtime MCP injection
+/// outright (`--mcp` errors before the first launch), while Codex accepts it and
+/// still supports first-class resume.
+fn write_resumable_codex(
+    bin_dir: &Path,
+    events_log: &Path,
+    session_id: &str,
+    follow_up: &str,
+) {
+    write_executable(
+        &bin_dir.join("codex"),
+        &format!(
+            r#"#!/bin/sh
+prompt=$(cat)
+printf 'provider-ran\n' >> {log}
+case " $* " in
+  *" resume {session_id} "*)
+    printf 'resume-session-ok\n' >> {log}
+    case "$prompt" in
+      *"{follow_up}"*) printf 'follow-up-ok\n' >> {log} ;;
+      *) printf 'follow-up-missing:%s\n' "$prompt" >> {log} ;;
+    esac
+    printf '%s\n' '{{"type":"thread.started","thread_id":"{session_id}"}}'
+    printf '%s\n' '{{"type":"item.completed","item":{{"type":"agent_message","text":"resumed ok"}}}}'
+    exit 0
+    ;;
+  *)
+    printf 'initial-prompt-ok\n' >> {log}
+    printf '%s\n' '{{"type":"thread.started","thread_id":"{session_id}"}}'
+    exit 99
+    ;;
+esac
+"#,
+            log = events_log.display(),
+            session_id = session_id,
+            follow_up = follow_up,
+        ),
+    );
+}
+
 fn stage_with_provider(doc: &str, succeeding: bool) -> Staged {
     let workspace = tempdir().unwrap();
     let bin_dir = workspace.path().join("bin");
@@ -538,8 +582,17 @@ fn run_compose_await_exit(staged: &Staged) -> String {
 /// that refreshes it. The resolver skips empty values, so `MODEL=''` restores
 /// frontmatter precedence without needing `env -u`.
 fn run_provider_await_exit(staged: &Staged, provider_flag: &str) -> String {
+    run_compose_await_exit_with_args(staged, provider_flag)
+}
+
+/// Like [`run_provider_await_exit`] but taking the whole pre-document argument
+/// string, so a row can pass **no** provider flag (letting frontmatter `agent:`
+/// select the provider, which is what makes the provider facet movable) or add
+/// flags such as `--yolo` / `--append-system-prompt`.
+fn run_compose_await_exit_with_args(staged: &Staged, extra_args: &str) -> String {
     static SEQ: AtomicU32 = AtomicU32::new(0);
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let provider_flag = extra_args;
 
     let session = format!("biscuit_l2_lcctl_exit_{}_{seq}", std::process::id());
     let shell = biscuit_test_harness::detect_shell();
@@ -1024,23 +1077,8 @@ fn flattened(pane: &str) -> String {
 /// accepts for Claude by construction, so the row does not depend on the host's
 /// live model listings.
 ///
-/// ## Facets without a refusal row
-///
-/// Only `model` is reachable from a same-document refresh today. The remaining
-/// key facets are fixed for the whole invocation and no document mutation can
-/// move them, so there is no honest L2 row to write for them yet:
-///
-/// - `provider`, `profile/binary`, `resume protocol` — the provider is pinned by
-///   the invocation; a target-frontmatter-driven provider *switch* still needs
-///   the launch bundle to become loop-owned (see `target_launch.rs` → Scope).
-/// - `system prompt`, `MCP server set` — argv-derived, and argv is rebuilt only
-///   at invocation, so their content cannot change across a refresh.
-/// - `workspace CWD`, `permission mode`, `interactivity`, `structured-output
-///   mode` — resolved once from CLI flags with no frontmatter surface at all.
-///
-/// The per-facet projection those facets *do* have is covered at Level 1 in
-/// `session_key/tests.rs`, and the comparison that turns a projected difference
-/// into a named facet is covered in `coordinator/tests.rs`.
+/// This is the first row of the AC15 refusal matrix; the rest, and the account
+/// of which facets have no reachable row, follow immediately below.
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_resume_refuses_when_refresh_changes_model() {
@@ -1136,6 +1174,296 @@ Original body
         flat.contains("Use `retry` to start a fresh session with the new plan"),
         "the diagnostic must recommend retry as the way forward; pane:\n{pane}"
     );
+}
+
+// -- AC15 resume-compatibility refusal matrix ------------------------------
+//
+// Each row below drives a *real* refusal through the shipped binary: the
+// document opens a live provider session, its `failure` stack mutates the very
+// input a launch facet is derived from, and then asks to `resume`. The resume's
+// fresh-read boundary rebuilds the launch identity from that mutated read
+// (`target_launch::rebuild_launch_identity`), the compatibility key moves, and
+// the resume is refused before any second spawn.
+//
+// ## Facets with no row of their own, and why
+//
+// Two facets have no reachable end-to-end refusal, and are proven at the
+// projection layer (L1 `session_key::tests`) instead:
+//
+// - **`workspace CWD`** has no document surface at all — it comes from the launch
+//   workspace and `--repo`, both invocation-fixed.
+// - **`system prompt`** is *composed* into the provider-native argv once, at
+//   invocation. A document cannot author one, and rewriting the
+//   `--append-system-prompt` file afterwards changes nothing because the argv
+//   already carries the composed text. Moving it would take re-entering the
+//   launch pipeline per attempt, not rebuilding from the document.
+//
+// A further four have no *isolating* row, because none of them has its own
+// document surface: each is a function of the provider and/or the session mode,
+// so the row that moves its input names it alongside that input's own facet.
+// `profile/binary` and `resume protocol` move with the provider row;
+// `structured-output mode` moves with both the provider and the interactivity
+// row; `permission mode` moves with the provider row under `--yolo`. Each is
+// asserted by name where it moves — a row that moved one in isolation would be a
+// fiction.
+
+/// Stage a document plus the resumable fake `claude` and a fake `goose`, so a
+/// frontmatter `agent:` switch has real binaries on both sides of the change.
+fn stage_resumable(doc: &str, session_id: &str, follow_up: &str) -> Staged {
+    let workspace = tempdir().unwrap();
+    let bin_dir = workspace.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    assert!(init_git_repo(workspace.path()), "git init failed");
+
+    let events_log = workspace.path().join("events.log");
+    write_resumable_claude(&bin_dir, &events_log, session_id, follow_up);
+    write_succeeding_goose(&bin_dir, &events_log);
+
+    let md_file = workspace.path().join("doc.md");
+    fs::write(&md_file, doc).unwrap();
+    Staged {
+        workspace,
+        bin_dir,
+        md_file,
+        events_log,
+        rendezvous_endpoint: None,
+    }
+}
+
+/// Assert the shared shape of an AC15 refusal: the provider ran exactly once,
+/// the live session was never handed the new plan, the diagnostic names every
+/// expected facet, and it recommends `retry`.
+fn assert_resume_refused(staged: &Staged, pane: &str, expected_facets: &[&str]) {
+    let flat = flattened(pane);
+    let lines = event_lines(staged);
+    assert_eq!(
+        lines.iter().filter(|l| **l == "provider-ran").count(),
+        1,
+        "a refused resume must not launch the provider a second time; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        !lines.iter().any(|l| l == "resume-session-ok"),
+        "the live session must never be handed the newly prepared launch plan; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        flat.contains("resume incompatible after refresh"),
+        "the refusal must surface the typed diagnostic header; pane:\n{pane}"
+    );
+    for facet in expected_facets {
+        assert!(
+            flat.contains(&format!("`{facet}`")),
+            "the diagnostic must name the changed facet `{facet}`; pane:\n{pane}"
+        );
+    }
+    assert!(
+        flat.contains("Use `retry` to start a fresh session with the new plan"),
+        "the diagnostic must recommend retry as the way forward; pane:\n{pane}"
+    );
+}
+
+/// AC15 — `provider` (and the `profile/binary`, `resume protocol`, and
+/// `structured-output mode` that follow from it).
+///
+/// The run passes **no** provider flag, so the document's own `agent:` selects
+/// the provider — which is precisely what makes the facet movable. The `failure`
+/// stack rewrites `agent: claude` to `agent: goose` and then asks to resume, so
+/// the refreshed read resolves a different provider, a different binary, a
+/// different resume protocol, and (Goose declares no stream protocol where Claude
+/// declares `stream-json`) a different structured-output mode.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_resume_refuses_when_refresh_changes_provider() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let follow_up = "please finish the resumed work";
+    let doc = format!(
+        r#"---
+title: resume refused after provider refresh
+agent: claude
+start:
+  stack:
+    - action: {{append_line: ["events.log", "start"]}}
+failure:
+  stack:
+    - action: {{append_line: ["events.log", "failure"]}}
+    - action: {{set_frontmatter: ["doc.md", "agent", "goose"]}}
+    - action: {{resume: "{follow_up}"}}
+success:
+  stack:
+    - action: {{append_line: ["events.log", "success"]}}
+finalize:
+  stack:
+    - action: {{append_line: ["events.log", "finalize"]}}
+---
+Original body
+"#
+    );
+    let staged = stage_resumable(&doc, "provider-refused-abc", follow_up);
+
+    let pane = run_compose_await_exit_with_args(&staged, "");
+
+    let refreshed = fs::read_to_string(&staged.md_file).unwrap();
+    assert!(
+        refreshed.contains("agent: goose"),
+        "the failure stack must have rewritten the document's agent before the resume; \
+         document:\n{refreshed}"
+    );
+
+    assert_resume_refused(
+        &staged,
+        &pane,
+        &["provider", "profile/binary", "resume protocol"],
+    );
+}
+
+/// AC15 — `interactivity` (and the `structured-output mode` it implies).
+///
+/// `interactive:` is the one frontmatter surface over session shape. The
+/// `failure` stack writes `interactive: true` and then asks to resume, so the
+/// refreshed read resolves an interactive session — and structured streaming,
+/// which is non-interactive only, drops with it. Provider stays pinned by
+/// `--claude`, which isolates this pair from the provider row above.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_resume_refuses_when_refresh_changes_interactivity() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let follow_up = "please finish the resumed work";
+    let doc = format!(
+        r#"---
+title: resume refused after interactivity refresh
+start:
+  stack:
+    - action: {{append_line: ["events.log", "start"]}}
+failure:
+  stack:
+    - action: {{append_line: ["events.log", "failure"]}}
+    - action: {{set_frontmatter: ["doc.md", "interactive", true]}}
+    - action: {{resume: "{follow_up}"}}
+success:
+  stack:
+    - action: {{append_line: ["events.log", "success"]}}
+finalize:
+  stack:
+    - action: {{append_line: ["events.log", "finalize"]}}
+---
+Original body
+"#
+    );
+    let staged = stage_resumable(&doc, "interactivity-refused-abc", follow_up);
+
+    let pane = run_compose_await_exit_with_args(&staged, "--claude");
+
+    let refreshed = fs::read_to_string(&staged.md_file).unwrap();
+    assert!(
+        refreshed.contains("interactive: true"),
+        "the failure stack must have rewritten the document's interactivity before the \
+         resume; document:\n{refreshed}"
+    );
+
+    assert_resume_refused(
+        &staged,
+        &pane,
+        &["interactivity", "structured-output mode"],
+    );
+}
+
+/// AC15 — `permission mode`.
+///
+/// `--yolo` is invocation intent, but whether the provider *achieves* the bypass
+/// depends on which provider runs: Claude takes a direct flag, Pi declares no
+/// bypass mechanism at all. The `failure` stack switches `agent:` to `pi`, so the
+/// refreshed read resolves `prompt` where the live session was opened under
+/// `bypass`.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_resume_refuses_when_refresh_changes_permission_mode() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let follow_up = "please finish the resumed work";
+    let doc = format!(
+        r#"---
+title: resume refused after permission-mode refresh
+agent: claude
+start:
+  stack:
+    - action: {{append_line: ["events.log", "start"]}}
+failure:
+  stack:
+    - action: {{append_line: ["events.log", "failure"]}}
+    - action: {{set_frontmatter: ["doc.md", "agent", "pi"]}}
+    - action: {{resume: "{follow_up}"}}
+success:
+  stack:
+    - action: {{append_line: ["events.log", "success"]}}
+finalize:
+  stack:
+    - action: {{append_line: ["events.log", "finalize"]}}
+---
+Original body
+"#
+    );
+    let staged = stage_resumable(&doc, "permission-refused-abc", follow_up);
+
+    let pane = run_compose_await_exit_with_args(&staged, "--yolo");
+
+    assert_resume_refused(&staged, &pane, &["permission mode"]);
+}
+
+/// AC15 — `MCP server set`.
+///
+/// With MCP in play (`--mcp`), the `#tag`s in a document's body are what select
+/// its servers. The `failure` stack appends a tagged line to the document body
+/// and then asks to resume, so a fresh preparation of that document would select
+/// a different server set than the live session was opened with.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_resume_refuses_when_refresh_changes_mcp_server_set() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let follow_up = "please finish the resumed work";
+    let doc = format!(
+        r#"---
+title: resume refused after mcp tag refresh
+start:
+  stack:
+    - action: {{append_line: ["events.log", "start"]}}
+failure:
+  stack:
+    - action: {{append_line: ["events.log", "failure"]}}
+    - action: {{append_line: ["doc.md", "also check #calendar"]}}
+    - action: {{resume: "{follow_up}"}}
+success:
+  stack:
+    - action: {{append_line: ["events.log", "success"]}}
+finalize:
+  stack:
+    - action: {{append_line: ["events.log", "finalize"]}}
+---
+Original body
+"#
+    );
+    let staged = stage_resumable(&doc, "mcp-refused-abc", follow_up);
+    write_resumable_codex(
+        &staged.bin_dir,
+        &staged.events_log,
+        "mcp-refused-abc",
+        follow_up,
+    );
+
+    let pane = run_compose_await_exit_with_args(&staged, "--codex --mcp");
+
+    let refreshed = fs::read_to_string(&staged.md_file).unwrap();
+    assert!(
+        refreshed.contains("#calendar"),
+        "the failure stack must have added an MCP tag to the body before the resume; \
+         document:\n{refreshed}"
+    );
+
+    assert_resume_refused(&staged, &pane, &["MCP server set"]);
 }
 
 /// `defer` from `failure` parses and dispatches, but its runtime home (the
@@ -5352,4 +5680,505 @@ fn level2_lifecycle_diagnostic_matrix_preparation_failure_is_route_equivalent() 
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
     assert_route_equivalent_diagnostic(&DIAG_PREPARATION_FAILURE);
+}
+
+// ── Review 7, finding 1: `initialize` precedes the schema verdict ───────────
+//
+// R4 orders a fresh document's stages: narrow initialize-shell gate → its own
+// `initialize` → schema validation → full pre-flight. The rows below pin the
+// consequence an operator can see. A target that only satisfies its `$schema`
+// *because* its `initialize` supplies the value must run — on every route. And
+// when `initialize` cannot repair it, the target must still have run and still
+// have paid its owed `blocked`/`finalize` before the diagnostic is rendered.
+
+/// A target that violates its own `$schema` until its `initialize` repairs it.
+///
+/// `count` is required and unauthored, so any verdict reached before
+/// `initialize` fails the document. `initialize` writes it; the body then proves
+/// which read was delivered — the pre-`initialize` bootstrap composes
+/// `count-is-`, the stabilized reread composes `count-is-7`.
+const INIT_REPAIRS_SCHEMA_TARGET: &str = "---\n$schema:\n    count: 'number(required)'\n\
+     initialize:\n  stack:\n    \
+     - action: {append_line: ['events.log', 'target-init']}\n    \
+     - action: {set_frontmatter: ['target.md', 'count', 7]}\n\
+     finalize:\n  stack:\n    \
+     - action: {append_line: ['events.log', 'target-finalize']}\n\
+     ---\ncount-is-{{ count }}\n";
+
+/// The same target, whose `initialize` writes a value that is *still* invalid.
+///
+/// The verdict is therefore genuinely owed — and owed *after* `initialize` and
+/// after the target's own `blocked`/`finalize`, which is what the event log
+/// pins.
+const INIT_CANNOT_REPAIR_SCHEMA_TARGET: &str = "---\n$schema:\n    count: 'number(required)'\n\
+     initialize:\n  stack:\n    \
+     - action: {append_line: ['events.log', 'target-init']}\n    \
+     - action: {set_frontmatter: ['target.md', 'count', 'still-not-a-number']}\n\
+     blocked:\n  stack:\n    \
+     - action: {append_line: ['events.log', 'target-blocked']}\n\
+     finalize:\n  stack:\n    \
+     - action: {append_line: ['events.log', 'target-finalize']}\n\
+     ---\ncount-is-{{ count }}\n";
+
+/// A `goose` that records its prompt, then succeeds only for the *target*'s
+/// stabilized body.
+///
+/// One stub has to serve two opposite roles on the recovery route: the router's
+/// provider must fail (that failure is what drives the `failure` stack that
+/// proxies), and the target's must succeed. Keying on the target's own body text
+/// is what lets a single binary do both without the arms diverging.
+fn write_target_succeeding_goose(bin_dir: &Path, events_log: &Path) {
+    write_executable(
+        &bin_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\nstdin=$(cat)\nprintf 'prompt:%s %s\\n' \"$stdin\" \"$*\" >> {log}\n\
+             printf 'provider-ran\\n' >> {log}\n\
+             case \"$stdin$*\" in\n  *count-is-*) exit 0 ;;\n  *) exit 99 ;;\nesac\n",
+            log = events_log.display(),
+        ),
+    );
+}
+
+/// One cell of the initialize-before-schema matrix.
+struct OrderingRun {
+    pane: String,
+    lines: Vec<String>,
+    exit_code: Option<i32>,
+}
+
+/// Run `target_doc` on one route and return its pane, event log, and exit status.
+///
+/// Shares [`DiagnosticRoute`]'s router documents so the three routes here are the
+/// same three the AC28 diagnostic matrix uses.
+fn run_initialize_ordering_route(route: DiagnosticRoute, target_doc: &str) -> OrderingRun {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+
+    let router = route.router_doc("{}");
+    let mut staged = stage_proxy_pair(
+        router.as_deref().unwrap_or("---\ntitle: unused\n---\nunused\n"),
+        target_doc,
+        false,
+    );
+    write_target_succeeding_goose(&staged.bin_dir, &staged.events_log);
+    if router.is_none() {
+        staged.md_file = staged.workspace.path().join("target.md");
+    }
+
+    let session = format!("biscuit_l2_lcinit_{}_{seq}", std::process::id());
+    let shell = biscuit_test_harness::detect_shell();
+    let spawned = std::process::Command::new("tmux")
+        .args([
+            "new-session",
+            "-d",
+            "-s",
+            &session,
+            "-x",
+            "200",
+            "-y",
+            "120",
+            &format!("{shell} -l"),
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(spawned, "failed to spawn tmux session");
+
+    let mut harness = TmuxHarness::attach(&session);
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+
+    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let exit_token = format!("L2INITEXIT_{seq}");
+    let cmd = format!(
+        "cd {ws} && NO_COLOR='1' MODEL='' HOME='{home}' PATH='{path}' \
+         {claudine} compose --goose {md} ; printf '{exit_token}=%s\\n' $?",
+        ws = staged.workspace.path().display(),
+        home = staged.workspace.path().display(),
+        path = augmented_path(&staged.bin_dir).to_string_lossy(),
+        md = staged.md_file.display(),
+    );
+    harness
+        .send_command_with_env(&cmd, &[])
+        .expect("send compose command");
+
+    let deadline = Instant::now() + Duration::from_secs(40);
+    let mut pane = String::new();
+    let mut exit_code = None;
+    while Instant::now() < deadline {
+        pane = harness.capture().map(|f| f.plain).unwrap_or_default();
+        if let Some(code) = parse_exit_token(&pane, &exit_token) {
+            exit_code = Some(code);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    kill_session_by_name(&session);
+
+    OrderingRun {
+        lines: event_lines(&staged),
+        pane,
+        exit_code,
+    }
+}
+
+/// Assert the whole ordering claim for one route: `initialize` ran once, it ran
+/// before the verdict, and the delivered prompt came from the stabilized reread.
+fn assert_initialize_precedes_schema(route: DiagnosticRoute) {
+    let run = run_initialize_ordering_route(route, INIT_REPAIRS_SCHEMA_TARGET);
+    let lines = &run.lines;
+    let pane = &run.pane;
+
+    assert_eq!(
+        lines.iter().filter(|l| **l == "target-init").count(),
+        1,
+        "{route:?}: the target's `initialize` must run exactly once — the whole \
+         point of the staged boot is that the reread does not re-emit it; \
+         got {lines:?}; pane:\n{pane}"
+    );
+
+    // The load-bearing assertion. Reaching the provider at all means the schema
+    // verdict was reached *after* `initialize` supplied the required property:
+    // a verdict taken before it would have failed on a missing `count`.
+    assert!(
+        lines.iter().any(|l| l.contains("count-is-7")),
+        "{route:?}: the delivered prompt must carry the value `initialize` \
+         supplied, which is only possible if the verdict came after it; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        !pane.contains("Required propert") && !pane.contains("schema validation"),
+        "{route:?}: no schema diagnostic may be rendered — `initialize` \
+         satisfied the requirement; pane:\n{pane}"
+    );
+    assert!(
+        lines.iter().any(|l| l == "target-finalize"),
+        "{route:?}: the target must close its own run; got {lines:?}; \
+         pane:\n{pane}"
+    );
+    assert_eq!(
+        run.exit_code,
+        Some(0),
+        "{route:?}: the run must succeed; pane:\n{pane}"
+    );
+}
+
+/// **R4 / acceptance criteria 11 and 12, direct.** A document whose own
+/// `initialize` supplies a required schema property runs: the verdict is reached
+/// after `initialize`, not before it.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_initialize_precedes_schema_verdict_direct() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    assert_initialize_precedes_schema(DiagnosticRoute::Direct);
+}
+
+/// **R4 / acceptance criteria 11 and 12, initialize proxy.** The same document
+/// reached through an `initialize` proxy keeps the same stage order.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_initialize_precedes_schema_verdict_initialize_proxy() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    assert_initialize_precedes_schema(DiagnosticRoute::InitializeProxy);
+}
+
+/// **R4 / acceptance criteria 11 and 12, recovery proxy.** The same document
+/// reached through a terminal-recovery proxy keeps the same stage order.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_initialize_precedes_schema_verdict_recovery_proxy() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    assert_initialize_precedes_schema(DiagnosticRoute::TerminalRecoveryProxy);
+}
+
+/// **R4, still-invalid target.** When `initialize` cannot repair the violation,
+/// the target has nonetheless run its `initialize` and paid its owed
+/// `blocked`/`finalize` before the diagnostic is rendered — and no provider
+/// launched for it.
+///
+/// Ordering is asserted on the event log rather than on the pane because the log
+/// is written by the stacks themselves, in the order they fired.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_still_invalid_target_runs_initialize_and_closure_first() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    for route in DiagnosticRoute::ALL {
+        let run = run_initialize_ordering_route(route, INIT_CANNOT_REPAIR_SCHEMA_TARGET);
+        let lines = &run.lines;
+        let pane = &run.pane;
+
+        let position = |marker: &str| lines.iter().position(|l| l == marker);
+        let init = position("target-init").unwrap_or_else(|| {
+            panic!(
+                "{route:?}: the target's `initialize` must run even when the \
+                 document is schema-invalid — the verdict is owed *after* it; \
+                 got {lines:?}; pane:\n{pane}"
+            )
+        });
+        let blocked = position("target-blocked").unwrap_or_else(|| {
+            panic!(
+                "{route:?}: a post-lifecycle preparation failure must route \
+                 through the target's own `blocked`; got {lines:?}; pane:\n{pane}"
+            )
+        });
+        let finalize = position("target-finalize").unwrap_or_else(|| {
+            panic!(
+                "{route:?}: the target must close with `finalize`; got {lines:?}; \
+                 pane:\n{pane}"
+            )
+        });
+        assert!(
+            init < blocked && blocked < finalize,
+            "{route:?}: the owed order is `initialize` → `blocked` → `finalize`; \
+             got {lines:?}; pane:\n{pane}"
+        );
+        assert_eq!(
+            lines.iter().filter(|l| **l == "target-init").count(),
+            1,
+            "{route:?}: `initialize` must still fire exactly once; got {lines:?}; \
+             pane:\n{pane}"
+        );
+
+        assert!(
+            pane.contains("CompositionError: schema validation"),
+            "{route:?}: the verdict must still be rendered, and as the typed \
+             identity the direct route renders; pane:\n{pane}"
+        );
+        assert_eq!(
+            run.exit_code,
+            Some(1),
+            "{route:?}: an unrepaired schema violation fails the run; pane:\n{pane}"
+        );
+
+        // The target itself never launches: its verdict lands before any
+        // attempt. On the recovery route the *router*'s provider ran once, which
+        // is what produced the failure that proxied here.
+        let expected_launches = usize::from(route == DiagnosticRoute::TerminalRecoveryProxy);
+        assert_eq!(
+            lines.iter().filter(|l| **l == "provider-ran").count(),
+            expected_launches,
+            "{route:?}: the schema-invalid target must not reach a provider; \
+             got {lines:?}; pane:\n{pane}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Direct provider wrappers — review-7 finding 3
+// ---------------------------------------------------------------------------
+
+/// A `CLAUDE.md` that activates the wrapper harness (`timeout:` is a harness
+/// key, which is what `has_harness_properties` gates on) and then authors every
+/// lifecycle surface a composed prompt would, including a `failure`-stack
+/// `proxy` to a target that moves each facet the in-harness fallback used to
+/// borrow.
+const WRAPPER_MEMORY_FILE_WITH_LIFECYCLE: &str = r#"---
+timeout: 5m
+initialize:
+  stack:
+    - action: {append_line: ["events.log", "src-initialize"]}
+start:
+  stack:
+    - action: {append_line: ["events.log", "src-start"]}
+failure:
+  stack:
+    - action: {append_line: ["events.log", "src-failure"]}
+    - action: {proxy: "@target.md"}
+finalize:
+  stack:
+    - action: {append_line: ["events.log", "src-finalize"]}
+---
+memory file body
+"#;
+
+/// The hand-off target, authored so that adopting it against the *invocation's*
+/// launch bundle would be observable on every previously borrowed facet:
+/// `agent:` moves profile/binary, `interactive:` moves the argv entrypoint and
+/// structured-output mode, and the body `#calendar` tag moves the MCP server set.
+const WRAPPER_PROXY_TARGET: &str = r#"---
+agent: codex
+interactive: true
+success:
+  stack:
+    - action: {append_line: ["events.log", "TARGET-SUCCESS"]}
+finalize:
+  stack:
+    - action: {append_line: ["events.log", "TARGET-FINALIZE"]}
+---
+target body mentioning #calendar
+"#;
+
+/// Stage a repo whose root memory file drives the direct-wrapper harness.
+///
+/// Unlike [`stage_proxy_pair`] the document under test is **not** passed on the
+/// command line: `claudine claude "<prompt>"` discovers `CLAUDE.md` itself via
+/// `find_wrapper_harness_source`, which is precisely what makes this the
+/// wrapper path rather than a composition command.
+fn stage_wrapper_memory_file(memory_file: &str, target_doc: &str) -> Staged {
+    let workspace = tempdir().unwrap();
+    let bin_dir = workspace.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    assert!(init_git_repo(workspace.path()), "git init failed");
+
+    let events_log = workspace.path().join("events.log");
+    // Both providers record under their own name, so "which binary launched" is
+    // observable rather than inferred. `claude` fails, which is the only way to
+    // reach a `failure`-stack proxy at all.
+    write_executable(
+        &bin_dir.join("claude"),
+        &format!(
+            "#!/bin/sh\ncat > /dev/null 2>&1\n\
+             printf 'launched-binary=claude\\n' >> {log}\nexit 99\n",
+            log = events_log.display(),
+        ),
+    );
+    write_executable(
+        &bin_dir.join("codex"),
+        &format!(
+            "#!/bin/sh\ncat > /dev/null 2>&1\n\
+             printf 'launched-binary=codex\\n' >> {log}\nexit 0\n",
+            log = events_log.display(),
+        ),
+    );
+
+    let md_file = workspace.path().join("CLAUDE.md");
+    fs::write(&md_file, memory_file).unwrap();
+    fs::write(workspace.path().join("target.md"), target_doc).unwrap();
+
+    Staged {
+        workspace,
+        bin_dir,
+        md_file,
+        events_log,
+        rendezvous_endpoint: None,
+    }
+}
+
+/// Run `claudine claude --no-interactive "<prompt>"` in a real tmux pane.
+///
+/// No document argument: the wrapper finds its own harness source. `PATH` is
+/// augmented with the fake bin dir and `HOME` is redirected into the workspace,
+/// as every other row here does.
+fn run_wrapper_in_tmux(staged: &Staged, done_marker: &str) -> String {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+
+    let session = format!("biscuit_l2_lcctl_wrap_{}_{seq}", std::process::id());
+    let shell = biscuit_test_harness::detect_shell();
+    let spawned = std::process::Command::new("tmux")
+        .args([
+            "new-session", "-d", "-s", &session, "-x", "200", "-y", "60",
+            &format!("{shell} -l"),
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(spawned, "failed to spawn tmux session");
+
+    let mut harness = TmuxHarness::attach(&session);
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+
+    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let sentinel = format!("L2_CTL_DONE_{seq}");
+    let cmd = format!(
+        "cd {ws} && NO_COLOR='1' HOME='{home}' PATH='{path}' \
+         {claudine} claude --no-interactive 'do the thing' ; echo {sentinel}",
+        ws = staged.workspace.path().display(),
+        home = staged.workspace.path().display(),
+        path = augmented_path(&staged.bin_dir).to_string_lossy(),
+    );
+    harness
+        .send_command_with_env(&cmd, &[])
+        .expect("send wrapper command");
+
+    let deadline = Instant::now() + Duration::from_secs(40);
+    while Instant::now() < deadline {
+        if event_lines(staged).iter().any(|l| l == done_marker) {
+            std::thread::sleep(Duration::from_millis(400));
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    let pane = harness.capture().map(|f| f.plain).unwrap_or_default();
+    kill_session_by_name(&session);
+    pane
+}
+
+/// **Review-7 finding 3 — the direct provider wrappers hand off nothing.**
+///
+/// The finding asked for wrapper equivalence rows covering the facets the
+/// in-harness fallback borrowed (profile/binary, argv entrypoint, MCP runtime
+/// injection). No such row can be honest, and this is the row that says why:
+/// the wrapper passthrough never installs its memory file's lifecycle
+/// configuration at all, so it cannot raise a `proxy` — the borrowed-bundle
+/// divergence the finding predicts is **unreachable**, not merely untested.
+///
+/// The passthrough builds its guard from `LifecycleConfig::default()`
+/// (`wrapper_stages.rs::run_execution_stage`) and only the staged proxy
+/// bootstrap ever calls `set_config`, which no passthrough run reaches. So a
+/// memory file authoring `initialize`/`start`/`failure`/`finalize` gets none of
+/// them.
+///
+/// That is what this row pins, on the shipped binary: the wrapper harness is
+/// genuinely engaged (the provider launches through it and the run reports the
+/// memory file as its prompt), yet no authored lifecycle marker appears and the
+/// target's `codex` — which a borrowed-bundle adoption would have had to
+/// launch, since the target authors `agent: codex` — never runs.
+///
+/// Two consequences this row protects. If someone wires lifecycle into the
+/// passthrough without also giving it an owning coordinator, the source markers
+/// appear here and this fails, forcing the coordinator decision rather than
+/// silently re-opening the reduced launch path. And if the refusal in
+/// `surface_or_adopt_terminal_proxy` is ever reached, `TARGET-*` cannot appear
+/// without it having been consumed.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_wrapper_passthrough_raises_no_proxy_handoff() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let staged = stage_wrapper_memory_file(
+        WRAPPER_MEMORY_FILE_WITH_LIFECYCLE,
+        WRAPPER_PROXY_TARGET,
+    );
+    let pane = run_wrapper_in_tmux(&staged, "launched-binary=claude");
+    let lines = event_lines(&staged);
+
+    // Fixture check: the wrapper harness really did run this memory file. Without
+    // this the row would pass vacuously for a wrapper that never engaged at all.
+    assert!(
+        lines.iter().any(|l| l == "launched-binary=claude"),
+        "fixture check: the wrapper must launch its own provider through the \
+         harness; got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        pane.contains("CLAUDE.md"),
+        "fixture check: the run must report the memory file as its harness \
+         source; pane:\n{pane}"
+    );
+
+    // The behavior under test: no authored lifecycle surface fires, so no
+    // `proxy` control can be raised.
+    for marker in ["src-initialize", "src-start", "src-failure", "src-finalize"] {
+        assert!(
+            !lines.iter().any(|l| l == marker),
+            "the direct wrapper passthrough installs no lifecycle config, so \
+             `{marker}` must not fire; got {lines:?}; pane:\n{pane}"
+        );
+    }
+
+    // The hand-off's consequences are absent end to end: no target lifecycle,
+    // and — the anti-vacuity property — the target's own provider never
+    // launched, so no launch bundle was borrowed for it.
+    for marker in ["TARGET-SUCCESS", "TARGET-FINALIZE", "launched-binary=codex"] {
+        assert!(
+            !lines.iter().any(|l| l == marker),
+            "no hand-off is raised, so the target must never run: `{marker}` \
+             must be absent; got {lines:?}; pane:\n{pane}"
+        );
+    }
 }

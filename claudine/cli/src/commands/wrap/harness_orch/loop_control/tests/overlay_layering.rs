@@ -79,7 +79,13 @@ impl OverlayFixture {
         &self,
         state: &HarnessPromptState,
     ) -> Result<MaterializedHarnessPrompt, color_eyre::eyre::Report> {
-        super::super::super::materialize_harness_prompt(state, Some(self.dir()), self.dir(), None)
+        super::super::super::materialize_harness_prompt(
+            state,
+            Some(self.dir()),
+            self.dir(),
+            None,
+            claudine::composition::SchemaStage::Validate,
+        )
     }
 }
 

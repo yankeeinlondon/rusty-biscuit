@@ -83,6 +83,7 @@ fn a_resume_followup_recorded_on_the_model_overrides_the_composed_body() {
         Some(fx._dir.path()),
         fx._dir.path(),
         active.iteration().attempt().resume_followup(),
+        claudine::composition::SchemaStage::Validate,
     )
     .expect("the resumed attempt materializes");
     assert_eq!(
