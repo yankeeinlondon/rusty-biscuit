@@ -403,6 +403,64 @@ fn run_provider_in_tmux_for(staged: &Staged, provider_flag: &str, done_marker: &
     pane
 }
 
+/// Like [`run_provider_in_tmux_for`] but inserts extra claudine flags between
+/// the provider flag and the document (e.g. `--append-system-prompt '…'`). Used
+/// to prove a resume stays compatible even when a non-whitelisted launch flag is
+/// present on the opening attempt but dropped from the resume argv.
+fn run_provider_with_flags(
+    staged: &Staged,
+    provider_flag: &str,
+    extra_flags: &str,
+    done_marker: &str,
+) -> String {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+
+    let session = format!("biscuit_l2_lcctl_flags_{}_{seq}", std::process::id());
+    let shell = biscuit_test_harness::detect_shell();
+    let spawned = std::process::Command::new("tmux")
+        .args([
+            "new-session", "-d", "-s", &session, "-x", "200", "-y", "60",
+            &format!("{shell} -l"),
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(spawned, "failed to spawn tmux session");
+
+    let mut harness = TmuxHarness::attach(&session);
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+
+    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let sentinel = format!("L2_CTL_DONE_{seq}");
+    let env_prefix = format!(
+        "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
+        home = staged.workspace.path().display(),
+        path = augmented_path(&staged.bin_dir).to_string_lossy(),
+    );
+    let cmd = format!(
+        "cd {ws} && {env_prefix}{claudine} compose {provider_flag} {extra_flags} {md} ; echo {sentinel}",
+        ws = staged.workspace.path().display(),
+        md = staged.md_file.display(),
+    );
+    harness
+        .send_command_with_env(&cmd, &[])
+        .expect("send compose command");
+
+    let deadline = Instant::now() + Duration::from_secs(40);
+    while Instant::now() < deadline {
+        if event_lines(staged).iter().any(|l| l == done_marker) {
+            std::thread::sleep(Duration::from_millis(150));
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    let pane = harness.capture().map(|f| f.plain).unwrap_or_default();
+    kill_session_by_name(&session);
+    pane
+}
+
 /// Like [`run_in_tmux_for`] but appends caller `--set` positionals (e.g.
 /// `spec=spec.md`) to the compose invocation. Used to prove those params
 /// survive a `proxy` hand-off into the target document's re-materialization.
@@ -817,6 +875,123 @@ Original body
     );
 }
 
+/// Resume compatibility (AC15), end to end: a resume opened with a launch flag
+/// the resume path intentionally drops must still be treated as *compatible*, so
+/// the provider is genuinely resumed rather than falsely refused.
+///
+/// `--append-system-prompt` is on the opening attempt's argv but is not one of
+/// the flags [`append_resume_passthrough_args`] carries into the resume argv, so
+/// the resumed attempt's *spawned* argv no longer contains it. The session-
+/// compatibility key reads the invocation's canonical (pre-resume-normalization)
+/// argv for the system-prompt facet precisely so this intentional drop does not
+/// register as a refresh-time change. This proves that key correctness through a
+/// real run: two provider invocations, the resume branch reached, and no
+/// `resume incompatible after refresh` diagnostic.
+///
+/// ## Why there is no facet-mutating refusal row
+///
+/// The refusal branch (`CompositionError::LifecycleResumeIncompatible`) fires
+/// only when a canonical refresh changes a launch facet the key covers. Under the
+/// current pipeline no same-document resume can do that: every key facet is fixed
+/// by the invocation (provider, profile/binary, resume protocol, workspace CWD,
+/// permission mode, interactivity, structured mode) or resolved once and reused —
+/// the model/MCP env is frozen in the base child environment for a directly
+/// invoked document (`harness_orch/prompt.rs` sets `env_overrides` empty) and
+/// rebuilt a single time at proxy adoption for a target
+/// (`loop_control/target_launch.rs`), then re-applied identically to every
+/// attempt. Per-attempt launch-plan rebuild is deferred work (review-5 Finding 6),
+/// so the refusal is a latent guard with no reachable trigger to drive here; the
+/// facet projection is covered at Level 1 in `session_key/tests.rs`.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_resume_with_dropped_launch_flag_stays_compatible() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let follow_up = "please finish the resumed work";
+    let doc = format!(
+        r#"---
+title: resume compat with system prompt
+start:
+  stack:
+    - action: {{append_line: ["events.log", "start"]}}
+failure:
+  stack:
+    - action: {{append_line: ["events.log", "failure"]}}
+    - action: {{resume: "{follow_up}"}}
+success:
+  stack:
+    - action: {{append_line: ["events.log", "success"]}}
+finalize:
+  stack:
+    - action: {{append_line: ["events.log", "finalize"]}}
+---
+Original body
+"#
+    );
+    let workspace = tempdir().unwrap();
+    let bin_dir = workspace.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    assert!(init_git_repo(workspace.path()), "git init failed");
+
+    let events_log = workspace.path().join("events.log");
+    let session_id = "compat-session-abc";
+    write_resumable_claude(&bin_dir, &events_log, session_id, follow_up);
+
+    // `--append-system-prompt` reads a FILE; its content is delivered to the
+    // provider on the opening attempt's argv and dropped from the resume argv.
+    let sysprompt = workspace.path().join("sysprompt.txt");
+    fs::write(&sysprompt, "stay terse\n").unwrap();
+
+    let md_file = workspace.path().join("doc.md");
+    fs::write(&md_file, doc).unwrap();
+    let staged = Staged {
+        workspace,
+        bin_dir,
+        md_file,
+        events_log,
+        rendezvous_endpoint: None,
+    };
+
+    let extra_flags = format!("--append-system-prompt {}", sysprompt.display());
+    let pane = run_provider_with_flags(&staged, "--claude", &extra_flags, "finalize");
+
+    let lines = event_lines(&staged);
+    assert_eq!(
+        lines.iter().filter(|l| **l == "provider-ran").count(),
+        2,
+        "the session opened with a system prompt must still resume (two provider runs); \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        lines.iter().any(|l| l == "resume-session-ok"),
+        "the resume must reach the provider's resume branch, not be refused; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        !pane.contains("resume incompatible"),
+        "a resume that only dropped a non-whitelisted launch flag must not be refused \
+         as incompatible; pane:\n{pane}"
+    );
+    assert_eq!(
+        lines,
+        [
+            "start",
+            "provider-ran",
+            "initial-prompt-ok",
+            "failure",
+            "start",
+            "provider-ran",
+            "resume-session-ok",
+            "follow-up-ok",
+            "success",
+            "finalize",
+        ],
+        "the resumed attempt must run start→success→finalize with no incompatibility refusal; \
+         pane:\n{pane}"
+    );
+}
+
 /// `defer` from `failure` parses and dispatches, but its runtime home (the
 /// rendezvous deferred-execution scheduler) is not ready, so it surfaces the
 /// typed "not implemented" error. `failure` and `finalize` still fire (the
@@ -969,6 +1144,179 @@ fn level2_lifecycle_failure_proxy_runs_target_document_no_loop() {
         2,
         "the provider runs exactly twice (source fail + target success); \
          a higher count means the proxy looped; got {lines:?}; pane:\n{pane}"
+    );
+}
+
+/// Stage a source/target pair (both under the sentinel-gated proxy goose) for a
+/// terminal-event proxy into a *looping* target. `write_proxy_goose` exits 0
+/// only when an argument carries `target_sentinel`, so the source (no sentinel)
+/// fails and the looping target (sentinel in its body) succeeds every iteration.
+fn stage_proxy_pair_gated(source_doc: &str, target_doc: &str, target_sentinel: &str) -> Staged {
+    let workspace = tempdir().unwrap();
+    let bin_dir = workspace.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    assert!(init_git_repo(workspace.path()), "git init failed");
+
+    let events_log = workspace.path().join("events.log");
+    write_proxy_goose(&bin_dir, &events_log, target_sentinel);
+
+    let main_file = workspace.path().join("doc.md");
+    fs::write(&main_file, source_doc).unwrap();
+    fs::write(workspace.path().join("target.md"), target_doc).unwrap();
+
+    Staged {
+        workspace,
+        bin_dir,
+        md_file: main_file,
+        events_log,
+        rendezvous_endpoint: None,
+    }
+}
+
+/// Run `claudine compose --goose <doc>` in a real tmux pane and block until the
+/// `marker` line has been recorded at least `expected` times (a looping run's
+/// terminal marker is not unique, so we settle on a count) or the total line
+/// count goes stable (a run that finished short of `expected` — e.g. a
+/// regression that dropped the target's loop). Bounded under the nextest
+/// slow-timeout so a non-producing run never hangs the suite.
+fn run_compose_settle(staged: &Staged, marker: &str, expected: usize) -> String {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+
+    let session = format!("biscuit_l2_lcctl_settle_{}_{seq}", std::process::id());
+    let shell = biscuit_test_harness::detect_shell();
+    let spawned = std::process::Command::new("tmux")
+        .args([
+            "new-session", "-d", "-s", &session, "-x", "200", "-y", "60",
+            &format!("{shell} -l"),
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(spawned, "failed to spawn tmux session");
+
+    let mut harness = TmuxHarness::attach(&session);
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+
+    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let sentinel = format!("L2_CTL_SETTLE_{seq}");
+    let env_prefix = format!(
+        "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
+        home = staged.workspace.path().display(),
+        path = augmented_path(&staged.bin_dir).to_string_lossy(),
+    );
+    let cmd = format!(
+        "cd {ws} && {env_prefix}{claudine} compose --goose {md} ; echo {sentinel}",
+        ws = staged.workspace.path().display(),
+        md = staged.md_file.display(),
+    );
+    harness
+        .send_command_with_env(&cmd, &[])
+        .expect("send compose command");
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut last_total = 0usize;
+    let mut stable_since: Option<Instant> = None;
+    while Instant::now() < deadline {
+        let lines = event_lines(staged);
+        if lines.iter().filter(|l| l.as_str() == marker).count() >= expected {
+            std::thread::sleep(Duration::from_millis(200));
+            break;
+        }
+        let total = lines.len();
+        if total == last_total {
+            match stable_since {
+                Some(since) if since.elapsed() >= Duration::from_millis(1200) => break,
+                Some(_) => {}
+                None => stable_since = Some(Instant::now()),
+            }
+        } else {
+            stable_since = None;
+            last_total = total;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    let pane = harness.capture().map(|f| f.plain).unwrap_or_default();
+    kill_session_by_name(&session);
+    pane
+}
+
+/// Finding 2 (review-5): a terminal-event (`failure`) proxy to a *looping*
+/// target must run that target through the full canonical launch pipeline, so
+/// the target acquires its `loop:` and iterates exactly as many times as a
+/// direct invocation of the same target. This proves the terminal proxy is
+/// surfaced to the command coordinator (R6/R7) rather than adopted in-harness
+/// (which rebuilds only AGENT/MODEL/YOLO and never re-runs loop recognition, so
+/// a proxied looping target would run a single iteration). The existing
+/// terminal-proxy fixture uses a non-looping target and cannot catch this
+/// regression, because adopt-in-harness and surface produce identical output
+/// for a one-shot target.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_failure_proxy_to_looping_target_matches_direct_iterations() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    // The target's body carries this sentinel so the gated goose exits 0 on
+    // every iteration; the source body omits it, so the source fails and
+    // proxies.
+    let target_sentinel = "LOOP_TARGET_BODY_MARKER";
+
+    // Looping target: phase 1 → `until: phase > 2` runs iterations at phase
+    // 1, 2, 3, so the loop-gate stack records `target-iter` exactly three
+    // times (the gate observes pre-increment phase each pass).
+    let target_doc = format!(
+        "---\ntitle: proxy loop target\nphase: 1\nloop:\n  until: \"phase > 2\"\n  \
+         action: \"increment(phase)\"\n  max: 10\n  stack:\n    \
+         - action: {{append_line: ['events.log', 'target-iter']}}\n---\n\
+         {target_sentinel} phase {{{{phase}}}}\n"
+    );
+
+    // Baseline: invoke the looping target directly (it IS `doc.md` here).
+    let direct = stage_proxy_pair_gated(&target_doc, &target_doc, target_sentinel);
+    let direct_pane = run_compose_settle(&direct, "target-iter", 3);
+    let direct_iters = event_lines(&direct)
+        .iter()
+        .filter(|l| l.as_str() == "target-iter")
+        .count();
+    assert_eq!(
+        direct_iters, 3,
+        "direct invocation of the looping target must iterate 3 times; \
+         got {:?}; pane:\n{direct_pane}",
+        event_lines(&direct)
+    );
+
+    // Proxy: a source whose provider fails hands off at `failure` to the same
+    // looping target.
+    let source_doc = "---\ntitle: proxy loop source\nfailure:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'source-failure']}\n    \
+         - action: {proxy: '@target.md'}\n---\nsource body\n";
+    let proxy = stage_proxy_pair_gated(source_doc, &target_doc, target_sentinel);
+    let proxy_pane = run_compose_settle(&proxy, "target-iter", 3);
+    let proxy_lines = event_lines(&proxy);
+    let proxy_iters = proxy_lines
+        .iter()
+        .filter(|l| l.as_str() == "target-iter")
+        .count();
+
+    // The source proxied via its `failure` terminal event exactly once.
+    assert_eq!(
+        proxy_lines.iter().filter(|l| l.as_str() == "source-failure").count(),
+        1,
+        "the source must fail and proxy once (terminal-event route); \
+         got {proxy_lines:?}; pane:\n{proxy_pane}"
+    );
+    // Loop-ownership equivalence: the proxied looping target iterates the same
+    // number of times as the direct invocation. Adopt-in-harness would run a
+    // single iteration here (loop recognition happens only in the coordinator's
+    // re-prepare), so any count other than the direct baseline is a regression.
+    assert_eq!(
+        proxy_iters, direct_iters,
+        "a terminal-event proxy to a looping target must iterate as many times \
+         as a direct invocation (got proxy={proxy_iters}, direct={direct_iters}); \
+         a lower proxy count means the terminal proxy was adopted in-harness \
+         instead of surfaced to the coordinator; pane:\n{proxy_pane}"
     );
 }
 
@@ -1473,6 +1821,182 @@ fn level2_lifecycle_initialize_proxy_cycle_guarded() {
     );
 }
 
+// ── AC29: initialize handoff-refusal routing ────────────────────────────────
+//
+// A live `initialize` proxy is committed against the invocation-wide ledger
+// *while the source's `initialize` guard is still live* (the commit-while-live
+// contract). A refused hop — a missing target, a cycle, or a hop-limit overrun —
+// must therefore route through the source's still-legal `blocked` then
+// `finalize` with the typed `err` available, synthesize no duplicate terminal or
+// `finalize`, and never activate the target. These rows assert that ordered
+// behavior for each refusal reason; the pre-existing `..._cycle_guarded` row
+// above only checks the diagnostic text, not the source's catch stacks.
+
+/// The three catch-stack blocks every AC29 refusal source shares: `blocked`
+/// records the typed `err.kind`/`err.variant`, `finalize` records `err.msg`
+/// under a `when: err` guard and then a bare `source-finalize` marker (so a
+/// duplicate `finalize` would show two of them).
+const AC29_CATCH_STACKS: &str = "blocked:\n  stack:\n    \
+     - action: {append_line: ['events.log', \"{{ 'blocked-kind=' + err.kind }}\"]}\n    \
+     - action: {append_line: ['events.log', \"{{ 'blocked-variant=' + err.variant }}\"]}\nfinalize:\n  stack:\n    \
+     - when: \"err\"\n      action: {append_line: ['events.log', \"{{ 'finalize-msg=' + err.msg }}\"]}\n    \
+     - action: {append_line: ['events.log', 'source-finalize']}\n";
+
+/// Assert the shared AC29 outcome: the source `initialize` ran exactly once, the
+/// provider never launched, and `blocked` → `finalize` fired once each with the
+/// typed `err` payload observable.
+fn assert_ac29_source_catch(lines: &[String], pane: &str) {
+    assert_eq!(
+        lines.iter().filter(|l| **l == "source-init").count(),
+        1,
+        "the source initialize must run exactly once (no target activation re-runs it); \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert_eq!(
+        lines.iter().filter(|l| **l == "provider-ran").count(),
+        0,
+        "a refused initialize handoff must not launch any provider; got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("blocked-kind=") && l.len() > "blocked-kind=".len()),
+        "the source blocked.stack must fire and observe a non-empty err.kind; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("blocked-variant=") && l.len() > "blocked-variant=".len()),
+        "the source blocked.stack must observe a non-empty err.variant; got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("finalize-msg=") && l.len() > "finalize-msg=".len()),
+        "the source finalize.stack `when: err` must be truthy and observe a non-empty err.msg; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert_eq!(
+        lines.iter().filter(|l| **l == "source-finalize").count(),
+        1,
+        "the source finalize must fire exactly once — no duplicate/synthetic finalize; \
+         got {lines:?}; pane:\n{pane}"
+    );
+}
+
+/// AC29 — a **missing target**: the source's `initialize` proxies to a document
+/// that does not resolve. The commit-while-live resolution fails, and the still-
+/// live source routes it through `blocked` → `finalize` with `err`.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_initialize_proxy_missing_target_routes_source_blocked_finalize() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let source_doc = format!(
+        "---\ntitle: refuse source\ninitialize:\n  stack:\n    \
+         - action: {{append_line: ['events.log', 'source-init']}}\n    \
+         - action: {{proxy: '@no-such-target.md'}}\n{catch}---\nsource body\n",
+        catch = AC29_CATCH_STACKS,
+    );
+    let staged = stage(&source_doc);
+    let pane = run_in_tmux_for(&staged, "source-finalize");
+    let lines = event_lines(&staged);
+
+    assert_ac29_source_catch(&lines, &pane);
+    assert!(
+        pane.contains("no-such-target.md") || pane.to_lowercase().contains("could not"),
+        "the missing-target diagnostic must name the unresolved reference; pane:\n{pane}"
+    );
+}
+
+/// AC29 — a **cycle**: the source's `initialize` proxies back to itself. The
+/// ledger (seeded with the source) refuses the first hop as a cycle, and the
+/// still-live source routes it through `blocked` → `finalize` with `err`. The
+/// source is the cycle target, so "no target activation" means its `initialize`
+/// must not run a second time.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_initialize_proxy_cycle_routes_source_blocked_finalize() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let source_doc = format!(
+        "---\ntitle: cycle source\ninitialize:\n  stack:\n    \
+         - action: {{append_line: ['events.log', 'source-init']}}\n    \
+         - action: {{proxy: '@doc.md'}}\n{catch}---\nsource body\n",
+        catch = AC29_CATCH_STACKS,
+    );
+    let staged = stage(&source_doc);
+    let pane = run_in_tmux_for(&staged, "source-finalize");
+    let lines = event_lines(&staged);
+
+    assert_ac29_source_catch(&lines, &pane);
+    assert!(
+        pane.contains("cycle") || pane.contains("hop limit"),
+        "the LifecycleProxyCycle diagnostic must surface; pane:\n{pane}"
+    );
+}
+
+/// AC29 — a **hop-limit** overrun: a chain of `initialize` proxies reaches
+/// [`MAX_PROXY_HOPS`] documents, and the final hop is refused. The last still-
+/// live document in the chain routes the refusal through its own `blocked` →
+/// `finalize` with `err`; the over-limit target never activates.
+///
+/// `MAX_PROXY_HOPS` is 16 and the ledger seeds the chain with the caller
+/// (`doc.md`, length 1), so `doc.md` → `h1` → … → `h15` fills the chain to 16
+/// and `h15`'s hop to the (existing) `h16` is the overrun. Only `h15` carries
+/// catch stacks; the earlier links hand off cleanly (no synthetic terminal).
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_initialize_proxy_hop_limit_routes_source_blocked_finalize() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    // `doc.md` proxies into the chain; its `source-init` marker doubles as the
+    // shared assertion's "exactly one source-init" anchor.
+    let doc = "---\ntitle: hop chain head\ninitialize:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'source-init']}\n    \
+         - action: {proxy: '@h1.md'}\n---\nhead body\n";
+    let staged = stage(doc);
+    let ws = staged.workspace.path();
+
+    // h1..h14 hand off cleanly to the next link.
+    for i in 1..=14 {
+        let body = format!(
+            "---\ntitle: hop {i}\ninitialize:\n  stack:\n    \
+             - action: {{proxy: '@h{next}.md'}}\n---\nhop {i} body\n",
+            next = i + 1,
+        );
+        fs::write(ws.join(format!("h{i}.md")), body).unwrap();
+    }
+    // h15 is the last still-live document: its hop to h16 overruns the limit, so
+    // its own blocked/finalize catch stacks must fire. It reuses the source
+    // marker names so the shared assertion applies unchanged.
+    let h15 = format!(
+        "---\ntitle: hop 15\ninitialize:\n  stack:\n    \
+         - action: {{proxy: '@h16.md'}}\n{catch}---\nhop 15 body\n",
+        catch = AC29_CATCH_STACKS,
+    );
+    fs::write(ws.join("h15.md"), h15).unwrap();
+    // h16 exists so the refusal is a hop-limit overrun, not a missing target;
+    // if it ever launched a provider the `provider-ran` guard would catch it.
+    let h16 = "---\ntitle: hop 16 target\nsuccess:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'h16-success']}\n---\nhop 16 body\n";
+    fs::write(ws.join("h16.md"), h16).unwrap();
+
+    let pane = run_in_tmux_for(&staged, "source-finalize");
+    let lines = event_lines(&staged);
+
+    assert_ac29_source_catch(&lines, &pane);
+    assert!(
+        !lines.iter().any(|l| l == "h16-success"),
+        "the over-limit target must never activate; got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        pane.contains("cycle") || pane.contains("hop limit"),
+        "the hop-limit diagnostic must surface; pane:\n{pane}"
+    );
+}
+
 /// Finding 5 (High): a proxy hand-off whose target then fails **harness-plan
 /// parse** before provider launch must route the blocked pre-provider run
 /// through the target's `blocked.stack` and `finalize.stack`, with the runtime
@@ -1777,7 +2301,13 @@ fn run_until_settled(staged: &Staged, expected_lines: usize) -> String {
             std::thread::sleep(Duration::from_millis(150));
             break;
         }
-        if count == last_count {
+        // The stability break detects a run that settled *below* the expected
+        // marker count (e.g. errored after a few events). Guard it on `count > 0`
+        // so it never fires during startup: a proxied/adopted target does more
+        // pre-launch work (re-prep + staged bootstrap) before its first event
+        // than a direct run, and an unguarded window would false-break with an
+        // empty log while that setup is still in flight.
+        if count == last_count && count > 0 {
             match stable_since {
                 Some(since) if since.elapsed() >= Duration::from_millis(1200) => break,
                 Some(_) => {}
@@ -2317,9 +2847,10 @@ probe body note={{ note }}
 /// `initialize` count are identical whether it is invoked directly or reached
 /// through an `initialize` proxy.
 ///
-/// This is the matrix row that holds today. The two facets it cannot cover —
-/// launch state (R6) and loop ownership (Phase 10) — have their own rows, both
-/// `#[ignore]`d against the work that unblocks them.
+/// This row covers the non-launch facets. The two facets it cannot cover —
+/// launch state (R6) and loop ownership — have their own enabled rows
+/// ([`level2_lifecycle_equivalence_target_pinned_model_matches_direct_run`] and
+/// [`level2_lifecycle_initialize_proxy_to_looping_target_matches_direct_run`]).
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_equivalence_probe_matches_direct_run() {
@@ -2410,35 +2941,22 @@ pinned probe body
 "#;
 
 /// **Acceptance criteria 9 and 10, launch facets.** A target that pins its own
-/// `model:` must resolve the same launch state on both routes.
+/// `model:` resolves the same launch state on both routes — invoked directly and
+/// reached through an `initialize` proxy.
 ///
-/// ## Why this is `#[ignore]`d
+/// This row is the R6 launch-rebuild contract (now enabled; before the rebuild
+/// landed it was a reproduction of the R6 gap that failed by design). When a
+/// handoff surfaces to the command-owned coordinator, the target is re-prepared
+/// as a fresh document and its `model:` is recomputed into the launch
+/// environment — via `compose/prep.rs::prepare_and_run_active_document`, with the
+/// in-harness fallback `harness_orch::loop_control::target_launch` overlaying the
+/// `AGENT`/`MODEL`/`YOLO` env — so the routed arm resolves the same `env.MODEL`
+/// as the direct arm rather than the router's frozen value.
 ///
-/// It is a reproduction of the **R6 gap**, not a regression guard, and it fails
-/// on today's tree by design. Observed:
-///
-/// ```text
-/// routed: ["sig=initialize", "provider-ran", "sig=success", "env.MODEL=",                        "sig=finalize"]
-/// direct: ["sig=initialize", "provider-ran", "sig=success", "env.MODEL=llamacpp/probe-model-x", "sig=finalize"]
-/// ```
-///
-/// The fixture check above passes, so the target's `model:` *does* reach the
-/// launch environment when it is the invoked document. Reached through a proxy
-/// it resolves empty: every launch decision is computed once, before the loop,
-/// from the **router**, and `coordinator.adopt` re-derives only prompt,
-/// frontmatter, lifecycle, harness plan, timeouts, and closure plan. Provider,
-/// model, argv, MCP, system prompt, child environment, and child CWD stay the
-/// source document's — see `plan.md` checkpoint 9, "R6 — not started".
-///
-/// This is the row checkpoint 9 called unwritable ("the checkpoint's named test
-/// ... cannot pass until R6 lands"). The R6 target launch rebuild
-/// (`harness_orch::loop_control::target_launch`) now recomputes the target's
-/// `model:` into the launch environment on a proxy hand-off, so the routed arm
-/// resolves the same `env.MODEL` as the direct arm. It probes `model:` rather
-/// than `agent:` because the provider is pinned by `--goose` on both arms —
-/// explicit CLI intent that R6 keeps authoritative — so `model:` is the one
-/// launch input free to move without a second provider stub or an interactive
-/// selection prompt.
+/// It probes `model:` rather than `agent:` because the provider is pinned by
+/// `--goose` on both arms — explicit CLI intent that stays authoritative — so
+/// `model:` is the one launch input free to move without a second provider stub
+/// or an interactive selection prompt.
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_equivalence_target_pinned_model_matches_direct_run() {
@@ -2905,4 +3423,796 @@ fn run_sequence_until_target_runs(staged: &Staged, expected_runs: usize) -> Stri
     let pane = harness.capture().map(|f| f.plain).unwrap_or_default();
     kill_session_by_name(&session);
     pane
+}
+
+// ── review-5 finding 3: sequence-step proxy equivalence (loop + launch) ──────
+//
+// The prior sequence proxy row (`level2_lifecycle_proxy_inside_sequence_step_is_
+// contained`) uses a non-looping target under a pinned `--goose` provider and
+// asserts only once-per-step execution. It cannot see loop ownership (R7) or a
+// target-owned launch facet (R6), which is exactly what the reduced in-harness
+// path dropped. These two rows close that gap: a looping sequence target and a
+// target-authored `model:`, each compared against a direct invocation.
+
+/// A two-step sequence source whose every step hands its step off to the looping
+/// `target.md` at `initialize`.
+const SEQ_LOOP_SOURCE: &str = "---\ntitle: sequence with a looping proxy step\n\
+     sequence:\n  - alpha\n  - beta\ninitialize:\n  stack:\n    \
+     - action: {proxy: '@target.md'}\n---\nsequence body\n";
+
+/// A two-step sequence source whose every step proxies to the pinned-model
+/// target. Mirrors [`SEQ_LOOP_SOURCE`] but reaches [`EQUIV_PINNED_MODEL_TARGET`].
+const SEQ_MODEL_SOURCE: &str = "---\ntitle: sequence pinned-model launch facet\n\
+     sequence:\n  - alpha\n  - beta\ninitialize:\n  stack:\n    \
+     - action: {proxy: '@target.md'}\n---\nsequence body\n";
+
+/// Run `claudine sequence --goose <doc>` in tmux and block until `events.log`
+/// holds `expected_lines` markers, or the marker count settles (so a run that
+/// produces *fewer* markers than expected surfaces the mismatch instead of
+/// burning the whole deadline). Returns the captured pane.
+fn run_sequence_until_settled(staged: &Staged, expected_lines: usize) -> String {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+
+    let session = format!("biscuit_l2_lcseqset_{}_{seq}", std::process::id());
+    let shell = biscuit_test_harness::detect_shell();
+    let spawned = std::process::Command::new("tmux")
+        .args([
+            "new-session",
+            "-d",
+            "-s",
+            &session,
+            "-x",
+            "200",
+            "-y",
+            "60",
+            &format!("{shell} -l"),
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(spawned, "failed to spawn tmux session");
+
+    let mut harness = TmuxHarness::attach(&session);
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+
+    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let sentinel = format!("L2_SEQSET_DONE_{seq}");
+    let cmd = format!(
+        "cd {ws} && NO_COLOR='1' HOME='{home}' PATH='{path}' {claudine} sequence --goose {md} ; echo {sentinel}",
+        ws = staged.workspace.path().display(),
+        home = staged.workspace.path().display(),
+        path = augmented_path(&staged.bin_dir).to_string_lossy(),
+        md = staged.md_file.display(),
+    );
+    harness
+        .send_command_with_env(&cmd, &[])
+        .expect("send sequence command");
+
+    let deadline = Instant::now() + Duration::from_secs(40);
+    let mut last_count = 0usize;
+    let mut stable_since: Option<Instant> = None;
+    while Instant::now() < deadline {
+        let count = event_lines(staged).len();
+        if count >= expected_lines {
+            std::thread::sleep(Duration::from_millis(150));
+            break;
+        }
+        // Guarded on `count > 0` so the settle detection never false-breaks
+        // during startup: a sequence step whose proxied target is re-prepared
+        // and staged does more pre-launch work before its first event than a
+        // direct step. See the note in `run_until_settled`.
+        if count == last_count && count > 0 {
+            match stable_since {
+                Some(since) if since.elapsed() >= Duration::from_millis(1200) => break,
+                Some(_) => {}
+                None => stable_since = Some(Instant::now()),
+            }
+        } else {
+            stable_since = None;
+            last_count = count;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    let pane = harness.capture().map(|f| f.plain).unwrap_or_default();
+    kill_session_by_name(&session);
+    pane
+}
+
+/// **Finding 3, R7 loop ownership + R1 containment inside a sequence step.** A
+/// sequence step whose document proxies to a *looping* target gives that target
+/// its own document loop — the target runs its full iteration count, identical to
+/// a direct invocation — while the proxy stays contained in the step: each of the
+/// two steps activates the target exactly once (`target-init` twice), never
+/// advancing early or restarting the current step.
+///
+/// The reduced in-harness path this replaces adopted the target as a single
+/// provider attempt and never re-ran loop recognition, so a routed step ran one
+/// iteration where a direct run loops three times.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_sequence_step_proxy_to_looping_target_owns_the_loop() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let count = |lines: &[String], needle: &str| lines.iter().filter(|l| *l == needle).count();
+
+    // Direct contract: the looping target invoked directly runs three iterations.
+    // 1 target-init + 3 provider-ran + 3 target-finalize = 7 markers.
+    let direct = stage_proxy_pair(EQUIV_LOOP_TARGET, EQUIV_LOOP_TARGET, true);
+    let direct_pane = run_until_settled(&direct, 7);
+    let direct_lines = event_lines(&direct);
+    assert_eq!(
+        count(&direct_lines, "provider-ran"),
+        3,
+        "fixture check: the looping target runs three iterations when invoked \
+         directly; got {direct_lines:?}; pane:\n{direct_pane}"
+    );
+
+    // Routed: a two-step sequence, each step proxying to the same looping target.
+    // Per step: 1 target-init + 3 provider-ran + 3 target-finalize; two steps → 14.
+    let routed = stage_proxy_pair(SEQ_LOOP_SOURCE, EQUIV_LOOP_TARGET, true);
+    let routed_pane = run_sequence_until_settled(&routed, 14);
+    let routed_lines = event_lines(&routed);
+
+    assert_eq!(
+        count(&routed_lines, "provider-ran"),
+        6,
+        "each of the two sequence steps must give the looping target its own \
+         three-iteration loop (R7): expected 6 provider attempts (3 per step); the \
+         reduced single-run adoption would produce 2; got {routed_lines:?}; \
+         pane:\n{routed_pane}"
+    );
+    assert_eq!(
+        count(&routed_lines, "target-init"),
+        2,
+        "the proxy stays contained in its step: the target activates exactly once \
+         per step and the sequence neither advances early nor restarts a step \
+         (either would change the initialize count); got {routed_lines:?}; \
+         pane:\n{routed_pane}"
+    );
+    assert_eq!(
+        count(&routed_lines, "provider-ran"),
+        2 * count(&direct_lines, "provider-ran"),
+        "the per-step loop iteration count must match a direct invocation of the \
+         target; routed {routed_lines:?}; direct {direct_lines:?}; pane:\n{routed_pane}"
+    );
+}
+
+/// **Finding 3, R6 target launch rebuild inside a sequence step.** A sequence
+/// step's proxy target rebuilds its full launch bundle: the target's authored
+/// `model:` reaches its launch environment, exactly as when the target is
+/// composed directly. The reduced in-harness path rebuilt only AGENT/MODEL/YOLO
+/// from the step and left a proxied target's own `model:` unresolved
+/// (`env.MODEL=` empty).
+///
+/// `--goose` pins the provider on both arms — explicit CLI intent still wins
+/// (R6) — so `model:` is the one launch facet free to move; its presence on the
+/// routed arm proves the resolved launch state is the target's, not the step's.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_sequence_step_proxy_rebuilds_target_launch_bundle() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    // Direct contract: the target composed directly (goose pinned) resolves its
+    // own `model:` into env.MODEL. 5 markers.
+    let direct = stage_proxy_pair(EQUIV_PINNED_MODEL_TARGET, EQUIV_PINNED_MODEL_TARGET, true);
+    let direct_pane = run_until_settled(&direct, 5);
+    let direct_lines = event_lines(&direct);
+    assert!(
+        direct_lines.contains(&"env.MODEL=llamacpp/probe-model-x".to_string()),
+        "fixture check: invoked directly (goose pinned), the target's own `model:` \
+         reaches the launch environment; got {direct_lines:?}; pane:\n{direct_pane}"
+    );
+
+    // Routed: a two-step sequence, each step proxying to the pinned-model target.
+    // Per step: sig=initialize, provider-ran, sig=success, env.MODEL, sig=finalize
+    // = 5 markers; two steps → 10.
+    let routed = stage_proxy_pair(SEQ_MODEL_SOURCE, EQUIV_PINNED_MODEL_TARGET, true);
+    let routed_pane = run_sequence_until_settled(&routed, 10);
+    let routed_lines = event_lines(&routed);
+
+    assert!(
+        routed_lines.contains(&"env.MODEL=llamacpp/probe-model-x".to_string()),
+        "a sequence step's proxy target must rebuild its full launch bundle: the \
+         target's authored `model:` must reach env.MODEL, proving the launch state \
+         is the target's and not the step's reduced AGENT/MODEL/YOLO; got \
+         {routed_lines:?}; pane:\n{routed_pane}"
+    );
+    assert!(
+        !routed_lines.iter().any(|l| l == "env.MODEL="),
+        "the proxied target's MODEL must never resolve empty — an empty value is \
+         the signature of the reduced in-harness path that inherits the step's \
+         MODEL instead of rebuilding the target's; got {routed_lines:?}; \
+         pane:\n{routed_pane}"
+    );
+}
+
+// ── review-5 finding 6: remaining wrong-level gaps ───────────────────────────
+//
+// These rows lift required behaviors that had only Level 1 evidence up to Level
+// 2 (a real `claudine compose`/`inline-compose` run in a real tmux pane):
+//
+// - AC6  inline-compose proxy closure file-output ownership (real file mutation)
+// - AC17 approved bytes == executed bytes, end-to-end through a real shell
+// - AC26 overlay retention across retry, resume, AND loop refresh
+// - AC10 additional target launch facets: effective child CWD and the survival
+//        of a CLI-supplied system prompt through a proxy hand-off
+//
+// Every row uses the fake `#!/bin/sh` providers and self-contained temporary
+// paths already established above.
+
+// ── AC6: inline-compose proxy closure rewrites only the final target ─────────
+
+/// A fake `goose` for inline-compose: it drains the prompt and prints a fixed
+/// replacement body to stdout, which inline-compose captures and writes back to
+/// the *active* document's body. The body is deliberately distinct from every
+/// fixture's authored body so the "unchanged body" closure guard cannot trip.
+fn write_inline_body_goose(bin_dir: &Path, events_log: &Path, new_body: &str) {
+    write_executable(
+        &bin_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\ncat > /dev/null 2>&1\nprintf 'provider-ran\\n' >> {log}\n\
+             printf '%s\\n' '{body}'\nexit 0\n",
+            log = events_log.display(),
+            body = new_body,
+        ),
+    );
+}
+
+/// Run `claudine inline-compose --goose <doc>` in a real tmux pane and block
+/// until the shell sentinel lands (the command exited). inline-compose mutates
+/// files rather than emitting an `events.log` terminal marker, so the honest
+/// wait is the compose command's own exit.
+fn run_inline_compose_await_exit(staged: &Staged) -> String {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+
+    let session = format!("biscuit_l2_lcinline_{}_{seq}", std::process::id());
+    let shell = biscuit_test_harness::detect_shell();
+    let spawned = std::process::Command::new("tmux")
+        .args([
+            "new-session", "-d", "-s", &session, "-x", "200", "-y", "60",
+            &format!("{shell} -l"),
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(spawned, "failed to spawn tmux session");
+
+    let mut harness = TmuxHarness::attach(&session);
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+
+    let claudine = env!("CARGO_BIN_EXE_claudine");
+    let sentinel = format!("L2_INLINE_DONE_{seq}");
+    let env_prefix = format!(
+        "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
+        home = staged.workspace.path().display(),
+        path = augmented_path(&staged.bin_dir).to_string_lossy(),
+    );
+    let cmd = format!(
+        "cd {ws} && {env_prefix}{claudine} inline-compose --goose {md} ; echo {sentinel}",
+        ws = staged.workspace.path().display(),
+        md = staged.md_file.display(),
+    );
+    harness
+        .send_command_with_env(&cmd, &[])
+        .expect("send inline-compose command");
+
+    let deadline = Instant::now() + Duration::from_secs(40);
+    let mut pane = String::new();
+    while Instant::now() < deadline {
+        pane = harness.capture().map(|f| f.plain).unwrap_or_default();
+        if pane.lines().any(|l| l.trim() == sentinel) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    kill_session_by_name(&session);
+    pane
+}
+
+/// **Acceptance criterion 6, real file-mutation evidence.** An `inline-compose`
+/// run whose invoked router proxies through a middle document to a final target
+/// rewrites the body of **only** the final target — the router and the middle
+/// document are left byte-identical.
+///
+/// Closure ownership follows the active document, so the closure belongs to the
+/// document that actually launched the provider (the final target), not the
+/// router that pointed at it. The in-process
+/// `inline_closure_ownership_follows_the_adopted_target` test proves the closure
+/// *plan* moves with adoption; this proves the on-disk write does too, and that
+/// no non-final document in the chain is touched.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_inline_compose_proxy_closure_rewrites_only_final_target() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    // Every document is an inline-compose document (has `prompt:`); the first two
+    // hand off at `initialize` before their own prompt is ever used.
+    let router = "---\nprompt: gen-router\ninitialize:\n  stack:\n    \
+         - action: {proxy: '@mid.md'}\n---\nrouter original body\n";
+    let mid = "---\nprompt: gen-mid\ninitialize:\n  stack:\n    \
+         - action: {proxy: '@final.md'}\n---\nmid original body\n";
+    let final_doc = "---\nprompt: gen-final\n---\nfinal original body\n";
+
+    let staged = stage_success(router);
+    fs::write(staged.workspace.path().join("mid.md"), mid).unwrap();
+    let final_path = staged.workspace.path().join("final.md");
+    fs::write(&final_path, final_doc).unwrap();
+    write_inline_body_goose(
+        &staged.bin_dir,
+        &staged.events_log,
+        "REWRITTEN-BY-INLINE-CLOSURE-XYZ",
+    );
+
+    let pane = run_inline_compose_await_exit(&staged);
+
+    // The router (the invoked document) is never rewritten — it handed off.
+    assert_eq!(
+        fs::read_to_string(&staged.md_file).unwrap(),
+        router,
+        "the router's bytes must be unchanged — closure belongs to the final \
+         target, not the invoked document; pane:\n{pane}"
+    );
+    // The middle document in the chain is likewise untouched.
+    assert_eq!(
+        fs::read_to_string(staged.workspace.path().join("mid.md")).unwrap(),
+        mid,
+        "a non-final document in the proxy chain must not be rewritten; pane:\n{pane}"
+    );
+    // The final target's body IS rewritten (closure) and a `hash:` is stamped.
+    let final_after = fs::read_to_string(&final_path).unwrap();
+    assert!(
+        final_after.contains("REWRITTEN-BY-INLINE-CLOSURE-XYZ"),
+        "the final target's body must be rewritten with the provider output; \
+         final:\n{final_after}\npane:\n{pane}"
+    );
+    assert!(
+        !final_after.contains("final original body"),
+        "the final target's original body must be replaced; final:\n{final_after}"
+    );
+    assert!(
+        final_after.contains("hash:"),
+        "the inline closure must stamp a Darkmatter `hash:` into the rewritten \
+         final target; final:\n{final_after}"
+    );
+    assert!(
+        final_after.contains("prompt: gen-final"),
+        "the final target's authored frontmatter must be preserved through the \
+         rewrite; final:\n{final_after}"
+    );
+}
+
+// ── AC17: approved bytes equal executed bytes, end-to-end ────────────────────
+
+/// A recorder on `PATH` that writes its first argument verbatim to
+/// `executed_log`. A lifecycle `shell` action invokes it, so the bytes it
+/// records are exactly the bytes the audited-and-approved command executed.
+fn write_bytes_recorder(bin_dir: &Path, executed_log: &Path) {
+    write_executable(
+        &bin_dir.join("logbytes"),
+        &format!(
+            "#!/bin/sh\nprintf '%s' \"$1\" > {log}\nexit 0\n",
+            log = executed_log.display(),
+        ),
+    );
+}
+
+/// **Acceptance criterion 17, end-to-end byte equality.** A target lifecycle
+/// `shell` command whose argument interpolates an overlay-supplied value is
+/// audited/approved with that value resolved, and the exact resolved bytes are
+/// what the shell executes — no template leak, no re-evaluation to the authored
+/// default, and no re-quoting drift across an embedded space.
+///
+/// The overlay merges into the target's authored frontmatter before the audit
+/// reads the command, so the approved string is the resolved one
+/// (`loop_control::tests::shell_approval::approved_bytes_equal_the_bytes_a_with_value_resolves_to`
+/// pins this in-process). This row proves the same resolved bytes reach a real
+/// `SystemShellRunner`: the recorder captures precisely what ran.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_proxy_shell_approved_bytes_equal_executed_bytes() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    // The router installs the overlay value the command interpolates; the target
+    // authors a different default so a template re-evaluation would be visible.
+    let source_doc = "---\ntitle: approved-bytes router\ninitialize:\n  stack:\n    \
+         - action: {action: proxy, target: '@target.md', with: {marker: 'forty two'}}\n\
+         ---\nrouter body\n";
+    let target_doc = "---\ntitle: approved-bytes target\nmarker: authored\nsuccess:\n  stack:\n    \
+         - action: {shell: \"logbytes 'exact {{ marker }} bytes'\"}\n    \
+         - action: {append_line: ['events.log', 'ac17-done']}\n---\ntarget body\n";
+    let staged = stage_proxy_pair(source_doc, target_doc, true);
+
+    // The recorder is whitelisted so the non-interactive run approves it without
+    // a TTY handler (mirrors the overlay-layering L1 fixture's `prefix echo`).
+    let executed_log = staged.workspace.path().join("executed.log");
+    write_bytes_recorder(&staged.bin_dir, &executed_log);
+    fs::write(
+        staged.workspace.path().join(".darkmatter-shell-whitelist"),
+        "prefix logbytes\n",
+    )
+    .unwrap();
+
+    let pane = run_in_tmux_for(&staged, "ac17-done");
+
+    let executed = fs::read_to_string(&executed_log).unwrap_or_default();
+    assert_eq!(
+        executed, "exact forty two bytes",
+        "the bytes the shell executed must equal the audit-resolved command's \
+         argument: the overlay value (`forty two`) resolved once, the embedded \
+         space survived intact, and neither the authored default nor the raw \
+         `{{{{ marker }}}}` template reached execution; pane:\n{pane}"
+    );
+}
+
+// ── AC26: overlay retention across retry, resume, and loop refresh ───────────
+
+/// **Acceptance criterion 26, retry re-entry.** The immediate `proxy.with:`
+/// overlay survives a retry of the target: the overlay value is observable in the
+/// target's lifecycle on the original attempt *and* the retried one, never
+/// reverting to the target's authored default.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_proxy_with_overlay_survives_a_retry() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let source_doc = "---\ntitle: overlay retry router\ninitialize:\n  stack:\n    \
+         - action: {action: proxy, target: '@target.md', with: {token: OVL26retry}}\n\
+         ---\nrouter body\n";
+    let target_doc = "---\ntitle: overlay retry target\ntoken: authored\nfailure:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'attempt-token={{ token }}']}\n    \
+         - action: {retry: 1}\nfinalize:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'final-token={{ token }}']}\n    \
+         - action: {append_line: ['events.log', 'retry-done']}\n---\ntarget body\n";
+    // Failing provider so the target always routes through `failure` → `retry`.
+    let staged = stage_proxy_pair(source_doc, target_doc, false);
+
+    let pane = run_in_tmux_for(&staged, "retry-done");
+    let lines = event_lines(&staged);
+
+    assert_eq!(
+        lines.iter().filter(|l| **l == "attempt-token=OVL26retry").count(),
+        2,
+        "the overlay must be in force on the original attempt AND the retried one \
+         ({{retry: 1}} → two failures); got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        !lines.iter().any(|l| l == "attempt-token=authored"),
+        "the overlay must never revert to the target's authored default across a \
+         retry re-entry; got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        lines.iter().any(|l| l == "final-token=OVL26retry"),
+        "the overlay must still be in force at the terminal finalize; \
+         got {lines:?}; pane:\n{pane}"
+    );
+}
+
+/// **Acceptance criterion 26, loop refresh.** The overlay survives every
+/// iteration of a proxied looping target: each loop refresh re-materializes the
+/// target with the same overlay in force, so the overlay value appears on every
+/// iteration and never reverts to the authored default.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_proxy_with_overlay_survives_a_loop_refresh() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let source_doc = "---\ntitle: overlay loop router\ninitialize:\n  stack:\n    \
+         - action: {action: proxy, target: '@target.md', with: {token: OVL26loop}}\n\
+         ---\nrouter body\n";
+    let target_doc = "---\ntitle: overlay loop target\ntoken: authored\nphase: 1\n\
+         loop:\n  until: \"phase > 2\"\n  action: \"increment(phase)\"\n  max: 10\n\
+         finalize:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'loop-token={{ token }}:{{ phase }}']}\n\
+         ---\ntarget body\n";
+    let staged = stage_proxy_pair(source_doc, target_doc, true);
+
+    // 3 iterations × (provider-ran + loop-token) = 6 markers.
+    let pane = run_until_settled(&staged, 6);
+    let lines = event_lines(&staged);
+
+    for phase in 1..=3 {
+        assert!(
+            lines.iter().any(|l| *l == format!("loop-token=OVL26loop:{phase}")),
+            "the overlay must be in force on loop iteration {phase} \
+             (`loop-token=OVL26loop:{phase}`); got {lines:?}; pane:\n{pane}"
+        );
+    }
+    assert!(
+        !lines.iter().any(|l| l.starts_with("loop-token=authored")),
+        "the overlay must never revert to the authored default across a loop \
+         refresh; got {lines:?}; pane:\n{pane}"
+    );
+}
+
+/// **Acceptance criterion 26, resume re-entry.** The overlay survives a resume
+/// of the target: after `failure` resumes the session and the run re-enters at
+/// `start`, the overlay value is still observable in the target's lifecycle.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_proxy_with_overlay_survives_a_resume() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let follow_up = "please finish the resumed work";
+    let source_doc = "---\ntitle: overlay resume router\ninitialize:\n  stack:\n    \
+         - action: {action: proxy, target: '@target.md', with: {token: OVL26resume}}\n\
+         ---\nrouter body\n";
+    let target_doc = format!(
+        "---\ntitle: overlay resume target\ntoken: authored\nstart:\n  stack:\n    \
+         - action: {{append_line: ['events.log', 'start-token={{{{ token }}}}']}}\nfailure:\n  stack:\n    \
+         - action: {{resume: \"{follow_up}\"}}\nsuccess:\n  stack:\n    \
+         - action: {{append_line: ['events.log', 'success-token={{{{ token }}}}']}}\nfinalize:\n  stack:\n    \
+         - action: {{append_line: ['events.log', 'resume-done']}}\n---\ntarget body\n"
+    );
+    let staged = stage_proxy_pair(source_doc, &target_doc, true);
+    // A resume-capable Claude: fails the first attempt after reporting a session,
+    // then succeeds when re-invoked with the resume argv + follow-up prompt.
+    write_resumable_claude(
+        &staged.bin_dir,
+        &staged.events_log,
+        "overlay-resume-session",
+        follow_up,
+    );
+
+    let pane = run_provider_in_tmux_for(&staged, "--claude", "resume-done");
+    let lines = event_lines(&staged);
+
+    assert!(
+        lines.iter().any(|l| l == "resume-session-ok"),
+        "the resume must actually reach the provider's resume branch (precondition); \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert_eq!(
+        lines.iter().filter(|l| **l == "start-token=OVL26resume").count(),
+        2,
+        "the overlay must be in force on the opening `start` AND the resumed \
+         `start`; got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        lines.iter().any(|l| l == "success-token=OVL26resume"),
+        "the overlay must still be in force at the resumed success; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        !lines.iter().any(|l| l == "start-token=authored"),
+        "the overlay must never revert to the authored default across a resume \
+         re-entry; got {lines:?}; pane:\n{pane}"
+    );
+}
+
+// ── AC10: additional target launch facets (child CWD, system-prompt delivery) ─
+//
+// Findings 2/3 compared loop ownership and the `model:` launch facet. These two
+// rows add invocation-level launch facets whose equivalence is route-independent
+// by construction: the child provider's effective CWD (the launch area, borrowed
+// into every launch bundle) and a CLI-supplied system prompt (immutable
+// invocation intent the proxy hand-off must not drop). See the report for why
+// the target-frontmatter-driven facets (provider/profile/binary, MCP runtime
+// injection, argv entrypoint) are not addable as passing equivalence rows on the
+// current tree — `target_launch.rs` documents them as borrowed-not-rebuilt.
+
+/// A fake `goose` that records its effective working directory (the child
+/// process CWD the provider is spawned in) to `events.log`.
+fn write_cwd_recording_goose(bin_dir: &Path, events_log: &Path) {
+    write_executable(
+        &bin_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\ncat > /dev/null 2>&1\nprintf 'child-cwd:%s\\n' \"$(pwd -P)\" >> {log}\n\
+             printf 'provider-ran\\n' >> {log}\nexit 0\n",
+            log = events_log.display(),
+        ),
+    );
+}
+
+/// A minimal probe target whose only job is to stamp a terminal marker once the
+/// provider has launched, so a run can be settled on it.
+const LAUNCH_FACET_PROBE_TARGET: &str = "---\ntitle: launch facet probe\nsuccess:\n  stack:\n    \
+     - action: {append_line: ['events.log', 'probe-done']}\n---\nlaunch facet probe body\n";
+
+/// **Acceptance criterion 10, effective child CWD.** The provider child spawns in
+/// the launch area regardless of route: invoked directly or reached through an
+/// `initialize` proxy, the fake provider records the same effective working
+/// directory (its own arm's repository root). The launch CWD is invocation-level
+/// state borrowed into every launch bundle, so the proxy hand-off must not shift
+/// it.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_equivalence_child_cwd_matches_direct_run() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let child_cwd = |staged: &Staged, pane: &str, arm: &str| -> String {
+        let lines = event_lines(staged);
+        let line = lines
+            .iter()
+            .find(|l| l.starts_with("child-cwd:"))
+            .unwrap_or_else(|| {
+                panic!("[{arm}] the provider must record its CWD; got {lines:?}; pane:\n{pane}")
+            });
+        line.trim_start_matches("child-cwd:").to_string()
+    };
+    // Each arm's child must spawn in that arm's own launch area (repo root).
+    let expect_launch_area = |staged: &Staged, recorded: &str, arm: &str| {
+        let want = staged
+            .workspace
+            .path()
+            .canonicalize()
+            .expect("workspace canonicalizes");
+        let got = Path::new(recorded)
+            .canonicalize()
+            .unwrap_or_else(|_| Path::new(recorded).to_path_buf());
+        assert_eq!(
+            got, want,
+            "[{arm}] the provider child must spawn in the launch area (repo root); \
+             recorded {recorded}"
+        );
+    };
+
+    // Direct: the probe target IS the invoked document.
+    let direct = {
+        let mut staged = stage_proxy_pair(EQUIV_ROUTER, LAUNCH_FACET_PROBE_TARGET, true);
+        write_cwd_recording_goose(&staged.bin_dir, &staged.events_log);
+        staged.md_file = staged.workspace.path().join("target.md");
+        staged
+    };
+    let direct_pane = run_provider_in_tmux_for(&direct, "--goose", "probe-done");
+    let direct_cwd = child_cwd(&direct, &direct_pane, "direct");
+    expect_launch_area(&direct, &direct_cwd, "direct");
+
+    // Routed: the router is invoked and proxies to the probe target at initialize.
+    let routed = {
+        let staged = stage_proxy_pair(EQUIV_ROUTER, LAUNCH_FACET_PROBE_TARGET, true);
+        write_cwd_recording_goose(&staged.bin_dir, &staged.events_log);
+        staged
+    };
+    let routed_pane = run_provider_in_tmux_for(&routed, "--goose", "probe-done");
+    let routed_cwd = child_cwd(&routed, &routed_pane, "routed");
+    expect_launch_area(&routed, &routed_cwd, "routed");
+}
+
+/// A fake `goose` that records whether a system-prompt sentinel reached its argv.
+/// Goose delivers a non-interactive appended system prompt via the `--system`
+/// inline flag, so the sentinel rides an argument.
+fn write_sysprompt_recording_goose(bin_dir: &Path, events_log: &Path, sentinel: &str) {
+    write_executable(
+        &bin_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\ncat > /dev/null 2>&1\nfor a in \"$@\"; do\n  case \"$a\" in\n    \
+             *{sentinel}*) printf 'sysprompt-seen\\n' >> {log} ;;\n  esac\ndone\n\
+             printf 'provider-ran\\n' >> {log}\nexit 0\n",
+            log = events_log.display(),
+            sentinel = sentinel,
+        ),
+    );
+}
+
+/// **Acceptance criterion 10, system-prompt delivery.** A CLI-supplied
+/// `--append-system-prompt` is delivered to the provider whether the target is
+/// invoked directly or reached through an `initialize` proxy: the proxy hand-off
+/// must not drop the borrowed launch bundle's system prompt. Explicit CLI intent
+/// is immutable invocation state that survives the route.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_equivalence_cli_system_prompt_survives_the_proxy() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    const SYSPROMPT_SENTINEL: &str = "SYSPROMPTsentinelXYZ";
+
+    let run_arm = |routed: bool, arm: &str| {
+        let mut staged = stage_proxy_pair(EQUIV_ROUTER, LAUNCH_FACET_PROBE_TARGET, true);
+        write_sysprompt_recording_goose(&staged.bin_dir, &staged.events_log, SYSPROMPT_SENTINEL);
+        let sp_file = staged.workspace.path().join("sysprompt.txt");
+        fs::write(&sp_file, format!("{SYSPROMPT_SENTINEL}\n")).unwrap();
+        if !routed {
+            staged.md_file = staged.workspace.path().join("target.md");
+        }
+        let extra = format!("--append-system-prompt {}", sp_file.display());
+        let pane = run_provider_with_flags(&staged, "--goose", &extra, "probe-done");
+        let lines = event_lines(&staged);
+        assert!(
+            lines.iter().any(|l| l == "sysprompt-seen"),
+            "[{arm}] the CLI-supplied system prompt must reach the provider; \
+             got {lines:?}; pane:\n{pane}"
+        );
+    };
+
+    run_arm(false, "direct");
+    run_arm(true, "routed");
+}
+
+/// A fake provider named for its slug that records which provider actually
+/// launched. Staging two of these lets a test tell the router's default apart
+/// from the target's authored provider.
+fn write_named_provider(bin_dir: &Path, slug: &str, events_log: &Path) {
+    write_executable(
+        &bin_dir.join(slug),
+        &format!(
+            "#!/bin/sh\ncat > /dev/null 2>&1\nprintf 'launched={slug}\\n' >> {log}\nexit 0\n",
+            slug = slug,
+            log = events_log.display(),
+        ),
+    );
+}
+
+/// **Acceptance criterion 10, target-authored provider selection.** On the
+/// surfaced compose coordinator path, a proxied target's provider is rebuilt from
+/// the *target's* own frontmatter (`prepare_and_run_active_document` re-runs
+/// `eagerly_resolve_target` against the adopted document's raw hints), so a router
+/// with no `--provider` flag that hands off to a target which authors a different
+/// provider launches the *target's* provider — identical to invoking the target
+/// directly. An explicit CLI `--provider` still wins (immutable invocation
+/// intent).
+///
+/// Both fake providers are inert `#!/bin/sh` stubs that record which one ran. The
+/// router authors `goose` only so its own eager resolution succeeds before it
+/// proxies at `initialize`; it never launches (the hand-off precedes `start`).
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_equivalence_target_authored_provider_matches_direct_run() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    // Router pins `goose` (so its pre-proxy resolution is unambiguous), proxies at
+    // initialize; the target authors a *different* provider, `codex`.
+    let router = "---\ntitle: provider router\nagent: goose\ninitialize:\n  stack:\n    \
+         - action: {proxy: '@target.md'}\n---\nrouter body\n";
+    let target = "---\ntitle: provider target\nagent: codex\nsuccess:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'target-done']}\n---\ntarget body\n";
+
+    let stage_pair = || {
+        let staged = stage_proxy_pair(router, target, true);
+        write_named_provider(&staged.bin_dir, "goose", &staged.events_log);
+        write_named_provider(&staged.bin_dir, "codex", &staged.events_log);
+        staged
+    };
+
+    // Direct: invoke the target itself, no CLI provider flag → its authored
+    // `codex` launches. This is the contract the routed arm must match.
+    let direct = {
+        let mut staged = stage_pair();
+        staged.md_file = staged.workspace.path().join("target.md");
+        staged
+    };
+    let direct_pane = run_provider_in_tmux_for(&direct, "", "target-done");
+    let direct_lines = event_lines(&direct);
+    assert!(
+        direct_lines.iter().any(|l| l == "launched=codex"),
+        "fixture check: invoked directly, the target's authored `codex` launches; \
+         got {direct_lines:?}; pane:\n{direct_pane}"
+    );
+
+    // Routed: invoke the router (no CLI provider flag). It proxies at initialize;
+    // the surfaced coordinator rebuilds the target's provider from the target's own
+    // frontmatter, so `codex` launches — and the router's `goose` never does.
+    let routed = stage_pair();
+    let routed_pane = run_provider_in_tmux_for(&routed, "", "target-done");
+    let routed_lines = event_lines(&routed);
+    assert!(
+        routed_lines.iter().any(|l| l == "launched=codex"),
+        "a proxied target must launch its OWN authored provider (surfaced-path R6 \
+         provider rebuild), identical to a direct invocation; got {routed_lines:?}; \
+         pane:\n{routed_pane}"
+    );
+    assert!(
+        !routed_lines.iter().any(|l| l == "launched=goose"),
+        "the router's default provider must NOT launch for the proxied target — the \
+         hand-off precedes `start` and the target's provider is rebuilt; \
+         got {routed_lines:?}; pane:\n{routed_pane}"
+    );
+
+    // Precedence: an explicit CLI `--goose` outranks the target's authored `codex`
+    // even through the proxy — explicit invocation intent stays authoritative.
+    let pinned = stage_pair();
+    let pinned_pane = run_provider_in_tmux_for(&pinned, "--goose", "target-done");
+    let pinned_lines = event_lines(&pinned);
+    assert!(
+        pinned_lines.iter().any(|l| l == "launched=goose"),
+        "an explicit CLI `--goose` must win over the target's authored `codex`; \
+         got {pinned_lines:?}; pane:\n{pinned_pane}"
+    );
+    assert!(
+        !pinned_lines.iter().any(|l| l == "launched=codex"),
+        "the target's authored provider must not override an explicit CLI flag; \
+         got {pinned_lines:?}; pane:\n{pinned_pane}"
+    );
 }
