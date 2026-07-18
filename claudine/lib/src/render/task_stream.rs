@@ -28,7 +28,7 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
-use biscuit_terminal::utils::layout::Layout;
+use biscuit_terminal::utils::layout::{Layout, WordWrap};
 
 /// The fixed palette parallel tasks cycle through.
 ///
@@ -139,12 +139,20 @@ impl TaskStreamFrame {
     /// invisible bar is a custom prefix with no color at all. Neither path can
     /// emit an escape a `ColorDepth::None` terminal did not ask for.
     fn quote(&self) -> BlockQuote {
-        let prose = Prose::new(self.content.clone());
-        let quote = BlockQuote::from(prose);
         match self.bar.color() {
-            Some(color) => quote.with_left_block_color(color),
+            Some(color) => {
+                BlockQuote::from(Prose::new(self.content.clone())).with_left_block_color(color)
+            }
             None => {
-                let mut quote = quote.with_border(self.bar.border());
+                // The custom-prefix path folds nothing on its own — only the
+                // default-border *tree* path wraps a bordered block — and
+                // `Layout::default()` ships `word_wrap: None`. Without this
+                // opt-in a serial body line runs past the pane edge and its
+                // continuation restarts at column 0 with no gutter, which is
+                // exactly the sideways lurch the invisible bar exists to
+                // prevent.
+                let prose = Prose::new(self.content.clone()).with_word_wrap(WordWrap::default());
+                let mut quote = BlockQuote::from(prose).with_border(self.bar.border());
                 // `BlockQuote::default` ships a gray border color, and the
                 // custom-prefix path paints it unconditionally — which would put
                 // a truecolor escape around two spaces on a `NO_COLOR` terminal.
@@ -324,6 +332,16 @@ impl TaskFrameWriter {
     #[must_use]
     pub fn gutter_width(&self) -> usize {
         BAR.chars().count()
+    }
+
+    /// The rendered gutter this writer prefixes every line with.
+    ///
+    /// Exposed so a task's *status* channel can be decorated with the identical
+    /// bytes its data channel uses. Attribution only reads as one stream if the
+    /// gutter matches exactly — a rebuilt one would differ in color depth.
+    #[must_use]
+    pub fn gutter(&self) -> &str {
+        &self.gutter
     }
 
     /// Frame every *complete* line in `chunk`, holding any trailing fragment.

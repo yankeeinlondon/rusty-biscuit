@@ -1355,7 +1355,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/attempt.rs",
-      "line": 257,
+      "line": 264,
       "form": "eq-comparison",
       "dispatch_class": "conditional",
       "providers": [
@@ -3432,7 +3432,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/wrapper_exec.rs",
-      "line": 179,
+      "line": 183,
       "form": "eq-comparison",
       "dispatch_class": "conditional",
       "providers": [

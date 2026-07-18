@@ -11,22 +11,24 @@
 //! `teardown` completes, because a teardown that fails converts an otherwise
 //! successful task to failure and owes no output.
 //!
-//! ## Known gap: prompt-task body framing
+//! ## Where a prompt task's framing comes from
 //!
 //! Shell and side-effect body text reaches stdout through the task's
-//! [`TaskLiveOutput`], so it carries the task's bar. A `prompt:` task's provider
-//! text does **not**: it is already written to stdout live by the wrapper's own
-//! semantic stream, which reaches `StreamOutput` through
-//! `LiveSemanticSink`. Re-framing the final assistant text here would print it
-//! twice, so it is deliberately left alone.
+//! [`TaskLiveOutput`]. A `prompt:` task's provider text does not pass through
+//! here at all — it is written live by the wrapper's own semantic stream — so
+//! it is framed at that end instead, by two decorators threaded down from
+//! [`PromptTaskRequest::frame_writer`]:
 //!
-//! Closing the gap means giving that path a per-task decorator. It cannot be
-//! set on the coordinator: `StreamOutput::shared()` is a process-wide singleton
-//! precisely because `last_stdout_newline` models the one real stdout cursor,
-//! and a parallel group has several provider sessions on it at once. The
-//! decorator therefore has to be threaded from
-//! `execute_composition_request_inner` down to `LiveSemanticSink` — six
-//! signatures and three context structs — which is why it is not done here.
+//! - **data** — a [`TaskFrameWriter`][claudine::render::TaskFrameWriter] reaches
+//!   the provider stdout reader, framing assistant chunks, idle flushes, and
+//!   post-parser-failure raw fallback lines.
+//! - **status** — the writer's gutter also decorates the `StreamOutput` handle
+//!   `LiveSemanticSink` is built on, so reasoning, tool announcements, timing
+//!   headers, and warnings carry the same bar.
+//!
+//! Re-framing the *final* assistant text here would print it twice, so this
+//! module deliberately does not touch it. The `outputs` entry stays undecorated
+//! either way: the bar is added on the rendering path only.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

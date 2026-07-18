@@ -55,6 +55,8 @@ pub(crate) fn run_structured_stream_session(
         child_cwd,
         stream_verbosity,
         summary_details.clone(),
+        // A direct wrapper run is never a sequence task; nothing to attribute.
+        None,
     )
     .with_context_extra(dispatch_context.clone())
     .with_status_reporter(status_reporter);

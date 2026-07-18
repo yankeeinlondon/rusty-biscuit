@@ -21,7 +21,17 @@ use std::sync::{Arc, Mutex};
 pub(crate) type TestRecorder = Arc<Mutex<Vec<(bool, String)>>>;
 
 pub(crate) struct StreamOutput {
-    inner: Mutex<StreamOutputInner>,
+    /// Shared rather than owned so a [`decorated`](StreamOutput::decorated)
+    /// handle serializes against the same cursor: per-task decoration must not
+    /// buy a second opinion about where the real stdout cursor is.
+    inner: Arc<Mutex<StreamOutputInner>>,
+    /// Prefix applied to every status line this handle emits, so a sequence
+    /// task's status and reasoning carry the same bar as its data (spec →
+    /// *Reporting Concurrency*: "every subsequent status/output line").
+    ///
+    /// Status only. Task data is decorated by `TaskFrameWriter` on its way to
+    /// the data channel; prefixing here too would draw the bar twice.
+    status_gutter: Option<String>,
     /// Test-only recording buffer. When `Some`, `emit_stdout_line` and
     /// `emit_stderr_line` push `(is_stdout, line)` tuples into the shared
     /// buffer and skip writing to real stdout/stderr. This lets unit tests
@@ -41,12 +51,44 @@ impl StreamOutput {
     /// Construct a new coordinator behind an `Arc` for multi-thread sharing.
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
-            inner: Mutex::new(StreamOutputInner {
+            inner: Arc::new(Mutex::new(StreamOutputInner {
                 last_stdout_newline: true,
-            }),
+            })),
+            status_gutter: None,
             #[cfg(test)]
             test_recorder: None,
         })
+    }
+
+    /// A handle whose status lines carry `gutter`, sharing this coordinator's
+    /// cursor state and lock.
+    ///
+    /// Derived rather than constructed so the "one synchronized render sink"
+    /// rule survives: N tasks each hold their own decorated handle, but every
+    /// write still serializes on one mutex.
+    pub(crate) fn decorated(self: &Arc<Self>, gutter: String) -> Arc<Self> {
+        Arc::new(Self {
+            inner: Arc::clone(&self.inner),
+            status_gutter: Some(gutter),
+            #[cfg(test)]
+            test_recorder: self.test_recorder.clone(),
+        })
+    }
+
+    /// Apply this handle's status gutter to an already-rendered block.
+    ///
+    /// Rendered status is frequently multi-line (a `Status` block, a wrapped
+    /// `Prose` paragraph), and an unprefixed continuation line would read as
+    /// belonging to whichever task wrote last.
+    fn decorate_status(&self, line: &str) -> String {
+        match &self.status_gutter {
+            None => line.to_string(),
+            Some(gutter) => line
+                .split('\n')
+                .map(|part| format!("{gutter}{part}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        }
     }
 
     /// The process-wide coordinator.
@@ -67,6 +109,10 @@ impl StreamOutput {
     /// frame; holding the coordinator across the whole group is what makes
     /// attribution survive contention.
     pub(crate) fn emit_stderr_frames(&self, frames: &[String]) {
+        let frames: Vec<String> = frames
+            .iter()
+            .map(|line| self.decorate_status(line))
+            .collect();
         #[cfg(test)]
         if let Some(buf) = &self.test_recorder {
             let mut buf = buf.lock().unwrap_or_else(|e| e.into_inner());
@@ -81,7 +127,7 @@ impl StreamOutput {
             inner.last_stdout_newline = true;
         }
         let mut stderr = io::stderr().lock();
-        for line in frames {
+        for line in &frames {
             let _ = writeln!(stderr, "{line}");
         }
         let _ = stderr.flush();
@@ -116,9 +162,10 @@ impl StreamOutput {
     #[cfg(test)]
     pub(crate) fn test_recorder(buf: TestRecorder) -> Arc<Self> {
         Arc::new(Self {
-            inner: Mutex::new(StreamOutputInner {
+            inner: Arc::new(Mutex::new(StreamOutputInner {
                 last_stdout_newline: true,
-            }),
+            })),
+            status_gutter: None,
             test_recorder: Some(buf),
         })
     }
@@ -159,6 +206,7 @@ impl StreamOutput {
     /// writes the caller-supplied line (without any additional prefix) to
     /// stderr followed by a newline.
     pub(crate) fn emit_stderr_line(&self, line: &str) {
+        let line = &self.decorate_status(line);
         #[cfg(test)]
         if let Some(buf) = &self.test_recorder {
             buf.lock()
@@ -262,6 +310,69 @@ mod tests {
         writer.write_all(b"done\n").unwrap();
         coord.emit_stderr_line("tool: bash");
         assert!(coord.inner.lock().unwrap().last_stdout_newline);
+    }
+
+    /// Provider status and reasoning reach stderr through `emit_stderr_line`.
+    /// A sequence task's handle must decorate them, or a task's body carries the
+    /// bar while its own status lines float unattributed beside it.
+    #[test]
+    fn decorated_handle_attributes_status_lines() {
+        let buf: TestRecorder = Arc::new(Mutex::new(Vec::new()));
+        let coord = StreamOutput::test_recorder(buf.clone()).decorated("│ ".to_string());
+
+        coord.emit_stderr_line("reasoning: weighing options");
+        coord.emit_stderr_frames(&["tool: bash".to_string()]);
+
+        let recorded = buf.lock().unwrap();
+        assert_eq!(
+            recorded
+                .iter()
+                .map(|(is_stdout, line)| (*is_stdout, line.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (false, "│ reasoning: weighing options"),
+                (false, "│ tool: bash"),
+            ],
+        );
+    }
+
+    /// Rendered status is often a multi-line block; an unprefixed continuation
+    /// line would read as belonging to whichever task wrote last.
+    #[test]
+    fn decorated_handle_attributes_every_line_of_a_block() {
+        let buf: TestRecorder = Arc::new(Mutex::new(Vec::new()));
+        let coord = StreamOutput::test_recorder(buf.clone()).decorated("│ ".to_string());
+
+        coord.emit_stderr_line("first\nsecond\nthird");
+
+        let recorded = buf.lock().unwrap();
+        assert_eq!(recorded[0].1, "│ first\n│ second\n│ third");
+    }
+
+    /// A non-sequence run must be byte-identical to before the seam existed.
+    #[test]
+    fn undecorated_handle_leaves_status_untouched() {
+        let buf: TestRecorder = Arc::new(Mutex::new(Vec::new()));
+        let coord = StreamOutput::test_recorder(buf.clone());
+
+        coord.emit_stderr_line("tool: bash");
+
+        assert_eq!(buf.lock().unwrap()[0].1, "tool: bash");
+    }
+
+    /// The decoration is per-handle, but the cursor is one real thing: a
+    /// derived handle must serialize against the same state, or two tasks
+    /// disagree about whether stdout is mid-line.
+    #[test]
+    fn decorated_handle_shares_cursor_state_with_its_parent() {
+        let coord = StreamOutput::new();
+        let decorated = coord.decorated("│ ".to_string());
+
+        let mut writer = coord.stdout_writer();
+        writer.write_all(b"partial").unwrap();
+
+        assert!(!decorated.inner.lock().unwrap().last_stdout_newline);
+        assert!(Arc::ptr_eq(&coord.inner, &decorated.inner));
     }
 
     #[test]

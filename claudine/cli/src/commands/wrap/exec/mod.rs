@@ -12,6 +12,8 @@ use color_eyre::eyre::Result;
 pub(crate) mod exit;
 pub(crate) mod spawn;
 pub(crate) mod stream_capture;
+#[cfg(test)]
+pub(crate) mod task_frame_fixtures;
 pub(crate) mod subagent_watchdog;
 pub(crate) mod termination;
 pub(crate) mod timeouts;

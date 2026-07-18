@@ -91,6 +91,30 @@ fn drain_close(
     }
 }
 
+/// Emit one raw fallback line to whichever stdout path is live.
+///
+/// A post-`Fatal` line is still the task's data, so it owes the same bar the
+/// parsed text above it carried — otherwise a parser failure silently drops a
+/// task out of its own frame for the rest of the run.
+fn emit_fallback_line(
+    line: &str,
+    framed: &Option<Arc<std::sync::Mutex<claudine::render::TaskFrameWriter>>>,
+    out: &mut impl Write,
+) {
+    let text = crate::log::maybe_strip(line);
+    match framed {
+        Some(framed) => {
+            if let Ok(mut framed) = framed.lock() {
+                // The writer emits on newlines; a raw line arrives without one.
+                framed.write(&format!("{text}\n"));
+            }
+        }
+        None => {
+            let _ = writeln!(out, "{text}");
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_child_stream_semantic(
     binary: &Path,
@@ -172,6 +196,7 @@ pub(crate) fn run_child_stream_semantic(
         watchdog_state.clone(),
         section_tracker.clone(),
         timeout_config,
+        framed_writer.clone(),
     ));
 
     // Prompt-scoped periodic header + warnings. Only started when the
@@ -327,7 +352,7 @@ pub(crate) fn run_child_stream_semantic(
             }
 
             if fallback_mode {
-                let _ = writeln!(out, "{}", crate::log::maybe_strip(&line));
+                emit_fallback_line(&line, &framed_close, &mut out);
                 continue;
             }
 
@@ -342,7 +367,7 @@ pub(crate) fn run_child_stream_semantic(
                 Err(StreamParseError::Fatal(_)) => {
                     drain_close(&text_renderer, &framed_close, &mut out);
                     fallback_mode = true;
-                    let _ = writeln!(out, "{}", crate::log::maybe_strip(&line));
+                    emit_fallback_line(&line, &framed_close, &mut out);
                 }
             }
         }
@@ -632,4 +657,49 @@ pub(crate) fn run_child_stream_semantic(
         tracing::debug!(signals = ?per_kind, "signal collection summary");
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::wrap::exec::task_frame_fixtures::colored_writer;
+
+    /// After a fatal semantic-parser error the reader falls back to echoing raw
+    /// lines. Those lines are still the task's data, so they owe the same bar
+    /// the parsed text above them carried.
+    #[test]
+    fn semantic_fallback_lines_carry_the_task_gutter() {
+        let (writer, frames, gutter) = colored_writer();
+        let framed = Some(Arc::new(std::sync::Mutex::new(writer)));
+        let mut discarded = Vec::new();
+
+        emit_fallback_line("raw line one", &framed, &mut discarded);
+        emit_fallback_line("raw line two", &framed, &mut discarded);
+
+        let recorded = frames.lock().unwrap();
+        assert_eq!(
+            recorded.data.len(),
+            2,
+            "each fallback line is one frame: {:?}",
+            recorded.data
+        );
+        assert_eq!(recorded.data[0], format!("{gutter}raw line one"));
+        assert_eq!(recorded.data[1], format!("{gutter}raw line two"));
+        assert!(
+            recorded.status.is_empty(),
+            "fallback output is provider data, so it stays on stdout"
+        );
+        assert!(
+            discarded.is_empty(),
+            "the framed arm must not also write the undecorated line"
+        );
+    }
+
+    /// Outside a sequence the fallback keeps writing straight to stdout.
+    #[test]
+    fn semantic_fallback_without_a_task_writes_undecorated() {
+        let mut out = Vec::new();
+        emit_fallback_line("raw line", &None, &mut out);
+        assert_eq!(String::from_utf8(out).unwrap(), "raw line\n");
+    }
 }
