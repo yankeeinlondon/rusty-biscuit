@@ -409,6 +409,52 @@ pub(crate) fn detect_wrapper_harness(
     }
 }
 
+/// Launch identity a direct wrapper passthrough rebuilds on each attempt.
+///
+/// A passthrough is invoked *as* a provider (`claudine claude …`), so the
+/// provider is explicit invocation intent that no re-read can move, and the
+/// passthrough document is a provider memory file carrying no selection hints.
+/// The MCP facet is the one part that is not fixed by the document: the wrapper
+/// exposes `--mcp` and `--use`, and when either is present a refreshed body is
+/// lexed for `#tag`s the same way a composed prompt is. Deriving the flag from
+/// the wrapper's own switches keeps that facet honest instead of pinning it to
+/// the MCP-off shape.
+fn passthrough_launch_intent(
+    provider: Provider,
+    binary_path: &Path,
+    effective_non_interactive: bool,
+    args: &WrapperArgs,
+    // The argv the passthrough actually launches with, recorded as this path's
+    // whole launch plan. Every facet but MCP is pinned here, and a moved MCP
+    // facet is refused rather than replayed from slices this path never
+    // recorded — see [`launch_plan::LaunchPlanInputs::recorded_only`].
+    harness_base_args: &[String],
+    structured_codex: bool,
+) -> harness_orch::LaunchRebuildIntent {
+    harness_orch::LaunchRebuildIntent {
+        explicit_provider: Some(provider),
+        fallback_provider: provider,
+        fallback_binary: binary_path.to_path_buf(),
+        installed_snapshot: None,
+        default_non_interactive: effective_non_interactive,
+        cli_yolo: args.yolo,
+        is_inline: false,
+        mcp_enabled: args.mcp || !args.mcp_use.is_empty(),
+        launch_plan_inputs: crate::commands::wrap::launch_plan::LaunchPlanInputs::recorded_only(
+            crate::commands::wrap::launch_plan::DocumentLaunchFacets {
+                provider,
+                non_interactive: effective_non_interactive,
+                yolo_requested: args.yolo,
+                is_inline: false,
+                model: args.model.clone(),
+                mcp_body_tags: Vec::new(),
+            },
+            harness_base_args.to_vec(),
+            structured_codex,
+        ),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_execution_stage(
     wrapper_harness: Option<(
@@ -489,35 +535,24 @@ pub(crate) fn run_execution_stage(
         let (harness_code, harness_perf, _harness_signals, surfaced_handoff) = harness_orch::run_harness_loop(
             provider,
             profile,
-            binary_path,
             child_cwd,
             effective_non_interactive,
             args.timeout.clone(),
             cli_step_timeout.clone(),
             args.stall_timeout.clone(),
             args.model.clone(),
-            // A direct wrapper passthrough is invoked *as* a provider
-            // (`claudine claude …`), so the provider is explicit invocation
-            // intent and no re-read can move it. The passthrough document is a
-            // provider memory file, not a composed prompt: it carries no
-            // selection hints and its body is never lexed for MCP tags, so the
-            // rebuilt identity is stable across every attempt here.
-            harness_orch::LaunchRebuildIntent {
-                explicit_provider: Some(provider),
-                fallback_provider: provider,
-                fallback_binary: binary_path.to_path_buf(),
-                installed_snapshot: None,
-                default_non_interactive: effective_non_interactive,
-                cli_yolo: args.yolo,
-                is_inline: false,
-                mcp_enabled: false,
-            },
-            &harness_base_args,
+            passthrough_launch_intent(
+                provider,
+                binary_path,
+                effective_non_interactive,
+                args,
+                &harness_base_args,
+                structured_codex_output.is_some(),
+            ),
             &env_plan.env,
             &mut prompt_state,
             env_plan.repo_root.as_deref(),
             shell_options,
-            use_structured,
             structured_codex_output,
             stdout_noise,
             stderr_noise,
@@ -695,6 +730,38 @@ mod tests {
             assert!(
                 parse_cli_timeouts(&args).is_ok(),
                 "--stall-timeout {value} should be accepted"
+            );
+        }
+    }
+
+    /// The rebuilt launch identity's MCP facet must track the switches the
+    /// wrapper was actually invoked with. Pinning it to `false` is invisible
+    /// while the direct-wrapper lifecycle stays empty, but it silently
+    /// activates a stale compatibility path the moment retry/resume becomes
+    /// reachable here — a refreshed body's `#tag`s would stop moving the facet.
+    #[test]
+    fn passthrough_launch_intent_mcp_tracks_wrapper_switches() {
+        let cases: [(&[&str], bool); 5] = [
+            (&[], false),
+            (&["--mcp"], true),
+            (&["--use", "context7"], true),
+            (&["--use", "context7,gitnexus"], true),
+            (&["--mcp", "--use", "context7"], true),
+        ];
+
+        for (switches, expected) in cases {
+            let args = wrapper_args_from(switches);
+            let intent = passthrough_launch_intent(
+                Provider::Claude,
+                Path::new("/usr/local/bin/claude"),
+                true,
+                &args,
+                &[],
+                false,
+            );
+            assert_eq!(
+                intent.mcp_enabled, expected,
+                "mcp_enabled for {switches:?} should be {expected}"
             );
         }
     }
