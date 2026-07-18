@@ -18,12 +18,12 @@ use std::sync::Arc;
 use claudine::composition::lifecycle_executor::{StackExecutionContext, SystemShellRunner};
 use claudine::composition::{
     self, CompositionError, CompositionExecutionRequest, CompositionMode, DefaultLifecycleEmitter,
-    PreparedComposition, ResolvedExecutionTarget, RuntimeState,
+    PreparedComposition, ResolvedExecutionTarget, RuntimeState, SequenceTaskResult,
 };
 use claudine::composition::sequence::preflight::PreflightTask;
 use claudine::composition::sequence::task::{
     PromptRunOutcome, PromptTaskRequest, PromptTaskRunner, SystemTaskShell, TaskExecution,
-    TaskStatus,
+    TaskOutcome, TaskStatus,
 };
 use claudine::system_prompt::SystemPromptArgs;
 use darkmatter::effects::EffectEngine;
@@ -58,6 +58,7 @@ pub(super) fn run_step_task(
                 message: CompositionError::PreFlightStateBuildFailed { source }.to_string(),
                 agent_perf: None,
                 compose_perf,
+                tasks: Vec::new(),
             };
         }
     };
@@ -87,6 +88,7 @@ pub(super) fn run_step_task(
         err: None,
         timing: None,
         current: None,
+        group: None,
         base_dir: prepared.resolved_path.parent(),
         ctx_base_dir: Some(run.prep_context.launch_workspace.launch_cwd.as_path()),
         prepared_context: None,
@@ -123,15 +125,18 @@ pub(super) fn run_step_task(
     .run();
 
     let agent_perf = prompt_runner.take_perf();
+    let tasks = group_task_results(&outcome);
     match outcome.status {
         TaskStatus::Succeeded => StepOutcome::Succeeded {
             provider: prompt_runner.take_provider(),
             agent_perf,
             compose_perf,
+            tasks,
         },
         TaskStatus::Interrupted => StepOutcome::Interrupted {
             agent_perf,
             compose_perf,
+            tasks,
         },
         TaskStatus::Failed => StepOutcome::Failed {
             message: outcome
@@ -140,8 +145,23 @@ pub(super) fn run_step_task(
                 .map_or_else(|| "task failed".to_string(), |d| d.message().to_string()),
             agent_perf,
             compose_perf,
+            tasks,
         },
     }
+}
+
+/// Project a group's member outcomes into the step summary shape.
+fn group_task_results(outcome: &TaskOutcome) -> Vec<SequenceTaskResult> {
+    outcome
+        .group_tasks
+        .iter()
+        .map(|task| SequenceTaskResult {
+            name: task.name.clone(),
+            success: task.status == TaskStatus::Succeeded,
+            interrupted: task.status == TaskStatus::Interrupted,
+            duration: task.duration,
+        })
+        .collect()
 }
 
 /// The effective (composed) frontmatter a task's stacks and `params` read.

@@ -363,6 +363,7 @@ pub(super) fn build_lifecycle_stack_context_for_materialized<'a>(
         err,
         timing,
         current,
+        group: None,
         base_dir,
         ctx_base_dir: launch_area,
         prepared_context,

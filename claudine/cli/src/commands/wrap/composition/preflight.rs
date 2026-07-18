@@ -113,6 +113,7 @@ pub(super) fn emit_preflight_blocked_and_finalize(
         err: Some(&err_info),
         timing: Some(&timing),
         current: Some(&current),
+        group: None,
         base_dir,
         ctx_base_dir,
         prepared_context,

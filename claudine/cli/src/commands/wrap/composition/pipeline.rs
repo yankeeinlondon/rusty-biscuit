@@ -1397,6 +1397,7 @@ fn provider_run_handoff(
         err: None,
         timing: Some(&lifecycle_timing),
         current: Some(&lifecycle_current),
+        group: None,
         base_dir,
         ctx_base_dir: Some(launch_workspace.launch_cwd.as_path()),
         prepared_context: Some(lifecycle_context),

@@ -19,11 +19,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use biscuit_terminal::components::horizontal_rule::{
     HorizontalRule, RuleAlignment, RuleStyle, RuleWeight,
 };
+use biscuit_terminal::components::list::UnorderedList;
+use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::composition::{
     self, CompositionError, CompositionExecutionRequest, CompositionMode, PreflightGraph,
     ResolvedCompositionSource, RuntimeState, SequencePlan, SequenceRunSummary, SequenceStepResult,
+    SequenceTaskResult,
 };
 use claudine::system_prompt::SystemPromptArgs;
 use color_eyre::eyre::Result;
@@ -69,15 +72,19 @@ pub(super) enum StepOutcome {
         /// This step's own composition cost. It is metered *inside* the step's
         /// wall clock now, which is what lets the report nest it under the step.
         compose_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
+        /// Group member outcomes, when the step ran a group.
+        tasks: Vec<SequenceTaskResult>,
     },
     Failed {
         message: String,
         agent_perf: Option<crate::perf::AgentExecutionPerf>,
         compose_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
+        tasks: Vec<SequenceTaskResult>,
     },
     Interrupted {
         agent_perf: Option<crate::perf::AgentExecutionPerf>,
         compose_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
+        tasks: Vec<SequenceTaskResult>,
     },
 }
 
@@ -147,26 +154,30 @@ pub(super) fn run_sequence_steps(
         let outcome = run_one_step(run, step_index, &runtime_state);
         let duration = start.elapsed();
 
-        let (success, error, provider, agent_perf, compose_perf) = match outcome {
+        let (success, error, provider, agent_perf, compose_perf, tasks) = match outcome {
             StepOutcome::Succeeded {
                 provider,
                 agent_perf,
                 compose_perf,
-            } => (true, None, provider, agent_perf, compose_perf),
+                tasks,
+            } => (true, None, provider, agent_perf, compose_perf, tasks),
             StepOutcome::Failed {
                 message,
                 agent_perf,
                 compose_perf,
-            } => (false, Some(message), None, agent_perf, compose_perf),
+                tasks,
+            } => (false, Some(message), None, agent_perf, compose_perf, tasks),
             StepOutcome::Interrupted {
                 agent_perf,
                 compose_perf,
+                tasks,
             } => (
                 false,
                 Some("interrupted by SIGINT".to_string()),
                 None,
                 agent_perf,
                 compose_perf,
+                tasks,
             ),
         };
         let interrupted_step = error.as_deref() == Some("interrupted by SIGINT");
@@ -192,10 +203,12 @@ pub(super) fn run_sequence_steps(
             success,
             error: error.clone(),
             duration,
+            tasks: tasks.clone(),
         });
 
         if !run.silent {
             emit_step_status(run, step_index, total_steps, success, &error, provider);
+            emit_group_task_breakdown(&tasks);
         }
 
         if interrupted_step {
@@ -292,6 +305,7 @@ fn run_one_step(
             StepOutcome::Interrupted {
                 agent_perf: outcome.agent_perf,
                 compose_perf,
+                tasks: Vec::new(),
             }
         }
         Ok(outcome) if outcome.exit_code == 0 => StepOutcome::Succeeded {
@@ -301,6 +315,7 @@ fn run_one_step(
                 .then_some(outcome.provider),
             agent_perf: outcome.agent_perf,
             compose_perf,
+            tasks: Vec::new(),
         },
         Ok(outcome) => StepOutcome::Failed {
             message: format!(
@@ -309,11 +324,13 @@ fn run_one_step(
             ),
             agent_perf: outcome.agent_perf,
             compose_perf,
+            tasks: Vec::new(),
         },
         Err(error) => StepOutcome::Failed {
             message: error.to_string(),
             agent_perf: None,
             compose_perf,
+            tasks: Vec::new(),
         },
     }
 }
@@ -445,8 +462,33 @@ impl StepOutcome {
             message: error.to_string(),
             agent_perf: None,
             compose_perf: None,
+            tasks: Vec::new(),
         }
     }
+}
+
+/// List a group step's member tasks with their outcome and timing.
+///
+/// Names and timings only: `outputs` is the sole output accumulator, so nothing
+/// a task produced is echoed here.
+fn emit_group_task_breakdown(tasks: &[SequenceTaskResult]) {
+    if tasks.is_empty() {
+        return;
+    }
+    let mut list = UnorderedList::empty();
+    for task in tasks {
+        let outcome = match (task.success, task.interrupted) {
+            (true, _) => "<green>succeeded</green>",
+            (false, true) => "<yellow>interrupted</yellow>",
+            (false, false) => "<red>failed</red>",
+        };
+        list.add(Prose::new(format!(
+            "<b>{}</b> — {outcome} <dim><i>({:.1}s)</i></dim>",
+            task.name,
+            task.duration.as_secs_f64()
+        )));
+    }
+    log::message(&list.render(&log::terminal()));
 }
 
 fn emit_step_status(
