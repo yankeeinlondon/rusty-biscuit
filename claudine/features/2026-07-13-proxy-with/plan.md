@@ -171,10 +171,24 @@ skills_files_updated_during_phase_8: []
 # the surfaced-coordinator path (`compose/prep.rs::prepare_and_run_active_document`).
 # The previously-blocked criteria (7, 9-launch, 10, 15) now map to passing tests
 # and the two `#[ignore]`d reproductions are enabled. The phase comments below are
-# preserved as the historical record; read them through this note. See
-# `notes/acceptance-map.md` for the current mapping and the narrow remaining gaps
-# (profile/binary sub-selection, argv entrypoint, MCP runtime injection; latent
-# resume-refusal).
+# preserved as the historical record; read them through this note.
+#
+# REVIEW-6 RESOLUTION (2026-07-17): findings 1-5 closed the remaining gaps.
+# F1 moved the --dry-run seam ahead of lifecycle dispatch (no lifecycle events,
+# no filesystem side effects). F2 rebuilds the launch env at every retry/resume
+# fresh-read boundary, making the AC15 refusal reachable for `model`. F3
+# completed the AC9/AC10 L2 matrix, including two provider-SWITCH rows that pin
+# the launch bundle and MCP injection on the surfaced coordinator. F4 fixed a
+# REAL production bug: `prepare_and_run_active_document` lacked schema
+# pre-validation, so proxied targets rendered a raw Darkmatter error instead of
+# the typed CompositionError (AC28/R10 violation on both proxy routes). F5 is
+# the documentation reconciliation.
+# FINAL TALLY: 28 of 30 complete, 2 PARTIAL — AC10 (complete on the composition
+# commands; the in-harness fallback for direct provider wrappers still does not
+# re-select profile/binary, argv entrypoint, or MCP runtime injection) and AC15
+# (only 1 of 9 compatibility facets reachable end-to-end; the other 8 are
+# argv-derived or CLI-resolved and stay L1 projection-only). See
+# `notes/acceptance-map.md` for the authoritative per-criterion mapping.
 # Phase 9 is PARTIAL: the shell-approval group (R9) is complete and tested; the
 # launch-rebuild group (R6) is unstarted. `phase` therefore stays at 8 — see the
 # Phase 9 validation checkpoint for why R6 admits no safe partial landing.
@@ -373,14 +387,31 @@ packages:
 > it as a fresh document through `compose/prep.rs::prepare_and_run_active_document`,
 > rebuilding provider, model, document-loop ownership, `ComposeContext`, child
 > CWD, and system-prompt delivery from the target's own frontmatter. The two
-> `#[ignore]`d reproductions are enabled and pass, and criteria 7, 9-launch, 10,
-> and 15 now map to passing tests (`notes/acceptance-map.md`, 30/30). The
-> statements below are the historical phase record; read them through this note.
-> Narrow work remains, tracked in the acceptance map: profile/binary
-> *sub-selection*, argv *entrypoint*, and MCP *runtime injection* stay borrowed on
-> the in-harness `rebuild_target_launch` fallback (they diverge only under a
-> provider *switch*), and the facet-mutating resume refusal is latent (no
-> compat-key facet mutates per-resume today).
+> `#[ignore]`d reproductions are enabled and pass. The statements below are the
+> historical phase record; read them through this note.
+>
+> **review-6 (2026-07-17) then closed the remaining gaps and set the final
+> tally: 28 of 30 complete, 2 partial.** Finding 1 moved the `--dry-run` seam
+> ahead of lifecycle dispatch so a dry run fires no lifecycle event and has no
+> filesystem side effect. Finding 2 rebuilds the launch env at every retry/resume
+> fresh-read boundary rather than snapshotting it at proxy adoption, which made
+> the AC 15 refusal reachable for `model`. Finding 3 completed the AC 9/AC 10 L2
+> matrix, adding the two provider-*switch* rows that pin the launch bundle and MCP
+> injection. Finding 4 found and fixed a **real production bug** — missing schema
+> pre-validation in `prepare_and_run_active_document` — which was an AC 28 / R10
+> violation on both proxy routes. Finding 5 reconciled the documentation.
+>
+> **The two partials, stated plainly.** *AC 10* is complete on the surfaced
+> command coordinator (all three composition commands) and L2-verified including a
+> provider switch; it stays partial only because the in-harness fallback used by
+> the direct provider wrappers still does not re-select profile/binary
+> sub-selection, the argv entrypoint, or MCP runtime injection. *AC 15* is
+> reachable end-to-end for **one of nine** compatibility facets (`model`); the
+> other eight are argv-derived or CLI-resolved, cannot move across a
+> same-document refresh, and remain L1 projection-only.
+> `SessionCompatibilityKey::extra` is intentionally empty. An open question is
+> recorded there: on refusal `start` fires before the comparison and
+> `success`/`finalize` never fire. See `notes/acceptance-map.md`.
 
 ## How to read this plan
 

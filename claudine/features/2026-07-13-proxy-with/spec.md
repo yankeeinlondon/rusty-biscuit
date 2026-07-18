@@ -4,7 +4,7 @@ status: draft
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-07-16
-review_iterations: 5
+review_iterations: 6
 depends_on:
     - ../_completed/2026-05-12-lifecycle/spec.md
     - ../_completed/2026-06-26-positional-and-key-value/spec.md
