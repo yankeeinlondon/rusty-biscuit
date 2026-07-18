@@ -327,24 +327,32 @@ pub enum ReferenceSeverity {
 
 /// Run validation on a markdown document's references.
 ///
-/// Builds the reference graph once and delegates to [`validate_with_graph`].
+/// Builds the reference graph once and validates that fresh snapshot directly:
+/// the graph is constructed from this `Markdown` and these options in this
+/// same operation, so no compatibility check runs before validation.
 #[instrument(skip_all)]
 pub(crate) fn validate(
     md: &Markdown,
     options: &ReferenceValidationOptions,
 ) -> Result<ReferenceValidationReport, ReferenceError> {
+    // Keep the build and the fresh-seam call visibly adjacent: any
+    // caller-controlled handoff inserted between them would break the
+    // freshness invariant `validate_fresh_graph` relies on.
     let graph = super::graph::build_reference_graph(md, &options.graph)
         .map_err(|e| ReferenceError::Validation(e.to_string()))?;
-    validate_with_graph(md, options, &graph)
+    validate_fresh_graph(md, options, &graph)
 }
 
-/// Run validation against an already-built reference graph (Finding 18).
+/// Run validation against a caller-supplied, already-built reference graph
+/// (Finding 18).
 ///
-/// Callers that already hold a `ReferenceGraph` (e.g. `md graph --validate`,
-/// which builds one to render the tree) pass it straight through instead of
-/// paying a second `build_reference_graph`. The graph must have been built from
-/// the same document and `options.graph`, which is the only supported call
-/// shape today.
+/// Checked prebuilt seam: callers that already hold a `ReferenceGraph` (e.g.
+/// `md graph --validate`, which builds one to render the tree) pass it
+/// straight through instead of paying a second `build_reference_graph`. The
+/// graph's provenance is verified against this call's inputs before
+/// flattening, so a stale or mispaired prebuilt graph is rejected rather than
+/// producing a misleading report. Graphs built by the current operation
+/// itself skip that check via [`validate_fresh_graph`].
 #[instrument(skip_all)]
 pub(crate) fn validate_with_graph(
     md: &Markdown,
@@ -353,14 +361,58 @@ pub(crate) fn validate_with_graph(
 ) -> Result<ReferenceValidationReport, ReferenceError> {
     info!("validate: starting reference validation");
 
-    // Opaque-graph compatibility guard (runs before flattening): the prebuilt
-    // graph must have been built from this document, this source, in `Full`
-    // mode, with these graph options — and every visited local child must still
-    // hold the content it did at build time. A freshly built graph from
-    // `validate` matches by construction; a stale or mispaired prebuilt graph
-    // is rejected here rather than producing a misleading report.
+    // Opaque-graph compatibility guard (runs before flattening): the
+    // caller-supplied prebuilt graph must have been built from this document,
+    // this source, in `Full` mode, with these graph options — and every
+    // visited local child must still hold the content it did at build time.
+    // A stale or mispaired prebuilt graph is rejected here rather than
+    // producing a misleading report.
     verify_graph_compatibility(md, options, graph)?;
 
+    validate_graph_contents(md, options, graph)
+}
+
+/// Validate a graph the current operation just built, skipping the
+/// compatibility check.
+///
+/// Fresh seam for internally built graphs. The freshness precondition is that
+/// all of the following hold:
+///
+/// - `graph` was returned by [`super::graph::build_reference_graph`] (or
+///   `Markdown::reference_graph`) in this operation;
+/// - the same `Markdown` value is passed here;
+/// - `options.graph` is the same [`ReferenceGraphOptions`] used for the build,
+///   or a clone-stable clone of it; and
+/// - no caller-controlled work occurred between building and validating.
+///
+/// Any path that accepts a graph from its caller, stores it for later, or
+/// otherwise cannot prove every condition MUST use [`validate_with_graph`]
+/// and pay the full compatibility check.
+#[instrument(skip_all)]
+pub(super) fn validate_fresh_graph(
+    md: &Markdown,
+    options: &ReferenceValidationOptions,
+    graph: &ReferenceGraph,
+) -> Result<ReferenceValidationReport, ReferenceError> {
+    info!("validate: starting reference validation");
+    validate_graph_contents(md, options, graph)
+}
+
+/// Shared validation engine: flattens the graph and runs all per-reference
+/// and report work.
+///
+/// Owns every behavior after the freshness decision — flattening, the
+/// heading-slug cache, fragment preparation, the per-record
+/// local/remote/fragment match with its `fail_fast` early returns, and the
+/// batched remote pass. Freshness is decided by the caller:
+/// [`validate_with_graph`] verifies provenance first, while
+/// [`validate_fresh_graph`] trusts its just-built graph. This engine never
+/// re-verifies provenance itself.
+fn validate_graph_contents(
+    md: &Markdown,
+    options: &ReferenceValidationOptions,
+    graph: &ReferenceGraph,
+) -> Result<ReferenceValidationReport, ReferenceError> {
     let ref_set = super::graph::flatten_graph(graph);
 
     let mut report = ReferenceValidationReport {
@@ -1446,5 +1498,68 @@ mod tests {
                 .iter()
                 .any(|i| i.code == ReferenceIssueCode::MissingFragmentTarget)
         );
+    }
+
+    /// The fresh seam validates the build-time snapshot of a just-built graph,
+    /// while the checked seam rejects that same graph once a visited child
+    /// changes on disk — the two trust paths differ only at the freshness gate.
+    #[test]
+    fn fresh_seam_uses_snapshot_while_checked_path_rejects_stale_graph() {
+        use crate::markdown::reference::errors::{
+            DependencyMismatchKind, ReferenceGraphMismatchKind,
+        };
+
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("root.md"), "# Root\n\n::file child.md\n").unwrap();
+        std::fs::write(dir.path().join("child.md"), "# Child\n").unwrap();
+        let md = Markdown::try_from(dir.path().join("root.md").as_path()).unwrap();
+
+        // One options value feeds the build and both seams, so the checked
+        // path can only reject for the edited child — never for an options
+        // mismatch. Remote validation stays off: no network I/O.
+        let opts = ReferenceValidationOptions::default();
+        let graph = super::super::graph::build_reference_graph(&md, &opts.graph).unwrap();
+
+        // Edit the visited child after construction, adding a broken local
+        // reference that the build-time snapshot does not contain.
+        std::fs::write(
+            dir.path().join("child.md"),
+            "# Child\n\n[broken](./nope.md)\n",
+        )
+        .unwrap();
+
+        let fresh_result = validate_fresh_graph(&md, &opts, &graph);
+        assert!(
+            !matches!(fresh_result, Err(ReferenceError::ReferenceGraphMismatch(_))),
+            "fresh seam must not run the compatibility check"
+        );
+        let fresh_report = fresh_result.unwrap();
+        assert!(
+            !fresh_report
+                .issues
+                .iter()
+                .any(|i| i.code == ReferenceIssueCode::MissingLocalTarget),
+            "post-edit broken reference must be absent from the snapshot report: {:?}",
+            fresh_report.issues
+        );
+        assert!(fresh_report.is_valid());
+
+        let err = validate_with_graph(&md, &opts, &graph).unwrap_err();
+        match err {
+            ReferenceError::ReferenceGraphMismatch(mismatch) => match mismatch.kind() {
+                ReferenceGraphMismatchKind::Dependency { source, kind } => {
+                    assert_eq!(kind, DependencyMismatchKind::Changed);
+                    match source {
+                        ComposeSource::File(path) => assert!(
+                            path.ends_with("child.md"),
+                            "mismatch should name the edited child, got: {path:?}"
+                        ),
+                        other => panic!("expected a file child source, got: {other:?}"),
+                    }
+                }
+                other => panic!("expected a dependency-dimension mismatch, got: {other:?}"),
+            },
+            other => panic!("expected ReferenceGraphMismatch, got: {other}"),
+        }
     }
 }

@@ -89,23 +89,35 @@ impl Markdown {
                 let strip_incidental = options.incidental_newline_mode
                     == cleanup::IncidentalNewlineMode::Strip
                     || options.fixed_width.is_some();
-                if strip_incidental {
-                    self.content = cleanup::strip_incidental_newlines(&self.content);
-                }
-                self.content = match options.list_spacing {
-                    cleanup::ListSpacingMode::Normal => {
+                self.content = match (options.list_spacing, strip_incidental) {
+                    (cleanup::ListSpacingMode::Normal, true) => {
+                        cleanup::cleanup_content_with_indent(&self.content, options.indent_size)
+                    }
+                    (cleanup::ListSpacingMode::Compact, true) => {
+                        cleanup::cleanup_content_with_indent_compact(
+                            &self.content,
+                            options.indent_size,
+                        )
+                    }
+                    (cleanup::ListSpacingMode::Loose, true) => {
+                        cleanup::cleanup_content_with_indent_loose(
+                            &self.content,
+                            options.indent_size,
+                        )
+                    }
+                    (cleanup::ListSpacingMode::Normal, false) => {
                         cleanup::cleanup_content_with_indent_preserving_incidental(
                             &self.content,
                             options.indent_size,
                         )
                     }
-                    cleanup::ListSpacingMode::Compact => {
+                    (cleanup::ListSpacingMode::Compact, false) => {
                         cleanup::cleanup_content_with_indent_compact_preserving_incidental(
                             &self.content,
                             options.indent_size,
                         )
                     }
-                    cleanup::ListSpacingMode::Loose => {
+                    (cleanup::ListSpacingMode::Loose, false) => {
                         cleanup::cleanup_content_with_indent_loose_preserving_incidental(
                             &self.content,
                             options.indent_size,

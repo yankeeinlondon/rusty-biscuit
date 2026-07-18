@@ -126,6 +126,49 @@ fn test_compose_cleanup_fixed_width_forces_strip_over_preserve() {
 }
 
 #[test]
+fn test_compose_cleanup_list_modes_match_direct_library_cleanup() {
+    use crate::markdown::cleanup::{
+        cleanup_content_with_indent_preserving_incidental, reflow_to_width,
+        IncidentalNewlineMode, DEFAULT_INDENT,
+    };
+
+    let source = "- Alpha beta gamma delta\n    epsilon zeta eta theta.";
+
+    let strip_options = ComposeOptions::new().only(&[ComposeOperation::Cleanup]);
+    let (stripped, _) = Markdown::from(source).compose_with(strip_options).unwrap();
+    let mut direct: Markdown = source.into();
+    direct.cleanup();
+    assert_eq!(stripped.content(), direct.content());
+    assert_eq!(stripped.content(), "- Alpha beta gamma delta epsilon zeta eta theta.\n");
+
+    let preserve_options = ComposeOptions::new()
+        .only(&[ComposeOperation::Cleanup])
+        .with_incidental_newline_mode(IncidentalNewlineMode::Preserve);
+    let (preserved, _) = Markdown::from(source).compose_with(preserve_options).unwrap();
+    let expected_preserved = cleanup_content_with_indent_preserving_incidental(
+        source,
+        DEFAULT_INDENT,
+    );
+    assert_eq!(preserved.content(), expected_preserved);
+    assert_eq!(preserved.content(), "- Alpha beta gamma delta\n    epsilon zeta eta theta.\n");
+
+    let fixed_options = ComposeOptions::new()
+        .only(&[ComposeOperation::Cleanup])
+        .with_incidental_newline_mode(IncidentalNewlineMode::Preserve)
+        .with_fixed_width(24);
+    let (fixed, _) = Markdown::from(source).compose_with(fixed_options).unwrap();
+    let expected_fixed = reflow_to_width(direct.content(), 24);
+    assert_eq!(fixed.content(), expected_fixed);
+    assert_eq!(
+        fixed.content(),
+        "- Alpha beta gamma delta\n  epsilon zeta eta\n  theta.\n"
+    );
+    for line in fixed.content().lines() {
+        assert!(UnicodeWidthStr::width(line) <= 24, "line exceeded width: {line:?}");
+    }
+}
+
+#[test]
 fn test_compose_normalization_stage_no_change() {
     let content = "# Hello\n\n## World";
     let md: Markdown = content.into();
@@ -1019,4 +1062,3 @@ fn body_file_transclusion_stays_document_relative_with_fallback() {
     );
     assert_eq!(report.transclusions_applied, 1);
 }
-

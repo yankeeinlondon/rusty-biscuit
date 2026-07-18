@@ -10,10 +10,15 @@
 //! For each fixture three things are measured:
 //!
 //! * `build_and_validate` — `validate_references` (build the graph **and**
-//!   validate) — the baseline a caller pays without a prebuilt graph.
+//!   validate) — the baseline a caller pays without a prebuilt graph. The
+//!   graph is used while provably fresh, so the timed loop is graph
+//!   construction plus the shared validation engine with no compatibility
+//!   walk.
 //! * `validate_prebuilt` — `validate_references_with_graph` with the graph
-//!   constructed **outside** the timed loop, so only provenance checking,
-//!   descendant re-verification, and flattening are measured.
+//!   constructed **outside** the timed loop. Everything else is timed:
+//!   provenance checking, descendant re-verification, flattening, and the
+//!   ordinary per-reference validation and report work (the same shared
+//!   engine `build_and_validate` runs after its build).
 //! * `construct` — `reference_graph` alone, so the provenance-construction cost
 //!   the opacity cutover adds is measured directly. Compare it across the
 //!   baseline and candidate commits with `--save-baseline` / `--baseline`.
@@ -128,8 +133,9 @@ fn bench_reference_graph(c: &mut Criterion) {
             });
         });
 
-        // Validate a prebuilt graph: graph construction is outside the loop, so
-        // only provenance + descendant checks + flatten are timed.
+        // Validate a prebuilt graph: graph construction is outside the loop;
+        // provenance + descendant checks + flatten + the shared validation
+        // engine are timed.
         let prebuilt = md
             .reference_graph(graph_opts.clone())
             .expect("graph build must not fault");

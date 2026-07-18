@@ -94,8 +94,12 @@ impl EmphasisStyle {
 pub const DEFAULT_INDENT: usize = 4;
 
 pub fn cleanup_content(content: &str) -> String {
-    let content = strip_incidental_newlines(content);
-    cleanup_content_internal(&content, Some(DEFAULT_INDENT), ListSpacingMode::Normal)
+    cleanup_content_internal(
+        content,
+        Some(DEFAULT_INDENT),
+        ListSpacingMode::Normal,
+        IncidentalNewlineMode::Strip,
+    )
 }
 
 /// Cleans up markdown content in compact mode.
@@ -113,8 +117,12 @@ pub fn cleanup_content(content: &str) -> String {
 /// assert!(cleaned.contains("1. First\n2. Second"));
 /// ```
 pub fn cleanup_content_compact(content: &str) -> String {
-    let content = strip_incidental_newlines(content);
-    cleanup_content_internal(&content, Some(DEFAULT_INDENT), ListSpacingMode::Compact)
+    cleanup_content_internal(
+        content,
+        Some(DEFAULT_INDENT),
+        ListSpacingMode::Compact,
+        IncidentalNewlineMode::Strip,
+    )
 }
 
 /// Cleans up markdown content in loose mode.
@@ -132,8 +140,12 @@ pub fn cleanup_content_compact(content: &str) -> String {
 /// assert!(cleaned.contains("1. First\n\n2. Second"));
 /// ```
 pub fn cleanup_content_loose(content: &str) -> String {
-    let content = strip_incidental_newlines(content);
-    cleanup_content_internal(&content, Some(DEFAULT_INDENT), ListSpacingMode::Loose)
+    cleanup_content_internal(
+        content,
+        Some(DEFAULT_INDENT),
+        ListSpacingMode::Loose,
+        IncidentalNewlineMode::Strip,
+    )
 }
 
 /// Cleans up markdown content and enforces a consistent list indentation width.
@@ -151,8 +163,12 @@ pub fn cleanup_content_loose(content: &str) -> String {
 /// assert!(cleaned.contains("\n    - Child"));
 /// ```
 pub fn cleanup_content_with_indent(content: &str, indent_size: usize) -> String {
-    let content = strip_incidental_newlines(content);
-    cleanup_content_internal(&content, Some(indent_size.max(1)), ListSpacingMode::Normal)
+    cleanup_content_internal(
+        content,
+        Some(indent_size.max(1)),
+        ListSpacingMode::Normal,
+        IncidentalNewlineMode::Strip,
+    )
 }
 
 /// Cleans markdown content with forced indentation without stripping incidental newlines.
@@ -160,13 +176,22 @@ pub fn cleanup_content_with_indent_preserving_incidental(
     content: &str,
     indent_size: usize,
 ) -> String {
-    cleanup_content_internal(content, Some(indent_size.max(1)), ListSpacingMode::Normal)
+    cleanup_content_internal(
+        content,
+        Some(indent_size.max(1)),
+        ListSpacingMode::Normal,
+        IncidentalNewlineMode::Preserve,
+    )
 }
 
 /// Cleans up markdown content with forced indentation in compact mode.
 pub fn cleanup_content_with_indent_compact(content: &str, indent_size: usize) -> String {
-    let content = strip_incidental_newlines(content);
-    cleanup_content_internal(&content, Some(indent_size.max(1)), ListSpacingMode::Compact)
+    cleanup_content_internal(
+        content,
+        Some(indent_size.max(1)),
+        ListSpacingMode::Compact,
+        IncidentalNewlineMode::Strip,
+    )
 }
 
 /// Cleans compact markdown content with forced indentation without stripping incidental newlines.
@@ -174,13 +199,22 @@ pub fn cleanup_content_with_indent_compact_preserving_incidental(
     content: &str,
     indent_size: usize,
 ) -> String {
-    cleanup_content_internal(content, Some(indent_size.max(1)), ListSpacingMode::Compact)
+    cleanup_content_internal(
+        content,
+        Some(indent_size.max(1)),
+        ListSpacingMode::Compact,
+        IncidentalNewlineMode::Preserve,
+    )
 }
 
 /// Cleans up markdown content with forced indentation in loose mode.
 pub fn cleanup_content_with_indent_loose(content: &str, indent_size: usize) -> String {
-    let content = strip_incidental_newlines(content);
-    cleanup_content_internal(&content, Some(indent_size.max(1)), ListSpacingMode::Loose)
+    cleanup_content_internal(
+        content,
+        Some(indent_size.max(1)),
+        ListSpacingMode::Loose,
+        IncidentalNewlineMode::Strip,
+    )
 }
 
 /// Cleans loose markdown content with forced indentation without stripping incidental newlines.
@@ -188,7 +222,12 @@ pub fn cleanup_content_with_indent_loose_preserving_incidental(
     content: &str,
     indent_size: usize,
 ) -> String {
-    cleanup_content_internal(content, Some(indent_size.max(1)), ListSpacingMode::Loose)
+    cleanup_content_internal(
+        content,
+        Some(indent_size.max(1)),
+        ListSpacingMode::Loose,
+        IncidentalNewlineMode::Preserve,
+    )
 }
 
 /// Cleans Markdown prose by stripping incidental newlines and wrapping it to a fixed width.
@@ -217,6 +256,7 @@ fn cleanup_content_internal(
     content: &str,
     forced_indent: Option<usize>,
     list_spacing: ListSpacingMode,
+    incidental_newlines: IncidentalNewlineMode,
 ) -> String {
     // Parse with source ranges to preserve list markers and emphasis styles
     // Use custom options that exclude ENABLE_SMART_PUNCTUATION to preserve original quotes
@@ -235,8 +275,10 @@ fn cleanup_content_internal(
     // Transform events: replace emphasis/strong events with placeholder characters.
     // This prevents cmark from normalizing them or escaping literal underscores/asterisks.
     // If preferred_style is set, emphasis will be standardized; strong always preserves original.
-    let events: Vec<Event> =
-        preserve_original_emphasis(content, &events_with_ranges, preferred_style);
+    let collapsed_events = (incidental_newlines == IncidentalNewlineMode::Strip)
+        .then(|| reflow::collapse_incidental_soft_break_events(content, &events_with_ranges));
+    let cleanup_events = collapsed_events.as_deref().unwrap_or(&events_with_ranges);
+    let events: Vec<Event> = preserve_original_emphasis(content, cleanup_events, preferred_style);
 
     // Add "text" language to empty fenced code blocks
     let with_text_lang = add_text_language_to_empty_code_blocks(events);
