@@ -2470,6 +2470,162 @@ fn function_call_hover_known_and_unknown() {
     fixture.shutdown();
 }
 
+#[test]
+fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
+    let git_context: Vec<_> = expressions::context_descriptors()
+        .iter()
+        .filter(|descriptor| {
+            (descriptor.category == "Repository" && descriptor.subsection == "Git")
+                || (descriptor.category == "File Changes"
+                    && descriptor.subsection == "Conflicts")
+        })
+        .collect();
+    assert_eq!(git_context.len(), 3, "the shipped Git context descriptor set changed");
+    assert_eq!(
+        git_context
+            .iter()
+            .filter(|descriptor| {
+                !descriptor.required
+                    && !descriptor.display_type.is_array
+                    && descriptor.display_type.to_string() == "string"
+            })
+            .count(),
+        2,
+        "Git context must expose two nullable scalar strings"
+    );
+    assert_eq!(
+        git_context
+            .iter()
+            .filter(|descriptor| {
+                descriptor.required
+                    && descriptor.display_type.is_array
+                    && descriptor.display_type.to_string() == "string[]"
+            })
+            .count(),
+        1,
+        "Git context must expose one required string array"
+    );
+
+    let git_functions: Vec<_> = expressions::function_descriptors()
+        .iter()
+        .filter(|descriptor| descriptor.category == "Git")
+        .collect();
+    let [function] = git_functions.as_slice() else {
+        panic!("expected exactly one Git function descriptor: {git_functions:?}");
+    };
+    let function_name = function.signature.split('(').next().expect("function name");
+
+    let mut text = String::from("# Git catalog parity\n\n");
+    let mut context_positions = Vec::new();
+    for descriptor in &git_context {
+        let hover_line = text.lines().count() as u32;
+        text.push_str(&format!("Hover: {{{{ ctx.{} }}}}\n", descriptor.name));
+        let completion_line = text.lines().count() as u32;
+        let completion_source = format!("Complete: {{{{ ctx.{}", descriptor.name);
+        let completion_character = completion_source.len() as u32;
+        text.push_str(&completion_source);
+        text.push('\n');
+        context_positions.push((*descriptor, hover_line, completion_line, completion_character));
+    }
+    let function_hover_line = text.lines().count() as u32;
+    text.push_str(&format!(
+        "Function: {{{{ {function_name}(\"feature/example\") }}}}\n"
+    ));
+    let function_completion_line = text.lines().count() as u32;
+    let function_completion_source = format!("Complete: {{{{ {function_name}");
+    let function_completion_character = function_completion_source.len() as u32;
+    text.push_str(&function_completion_source);
+    text.push('\n');
+
+    let workspace = tempfile::tempdir().unwrap();
+    let path = workspace.path().join("doc.md");
+    std::fs::write(&path, &text).unwrap();
+    let uri = url::Url::from_file_path(&path).unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    open(&fixture, uri.as_str(), &text);
+
+    for (descriptor, hover_line, completion_line, completion_character) in context_positions {
+        let label = format!("ctx.{}", descriptor.name);
+        let completion = fixture
+            .request(
+                "textDocument/completion",
+                json!({
+                    "textDocument": { "uri": uri.as_str() },
+                    "position": { "line": completion_line, "character": completion_character }
+                }),
+            )
+            .result
+            .expect("context completion");
+        let item = completion
+            .as_array()
+            .expect("completion array")
+            .iter()
+            .find(|item| item["textEdit"]["newText"] == json!(label))
+            .unwrap_or_else(|| panic!("completion missing catalog descriptor `{label}`"));
+        assert_eq!(item["detail"], json!(descriptor.display_type.to_string()));
+        assert_eq!(item["documentation"]["kind"], json!("markdown"));
+        assert_eq!(item["documentation"]["value"], json!(descriptor.description));
+
+        let hover = fixture
+            .request(
+                "textDocument/hover",
+                json!({
+                    "textDocument": { "uri": uri.as_str() },
+                    "position": { "line": hover_line, "character": 12 }
+                }),
+            )
+            .result
+            .expect("context hover");
+        let hover_text = hover["contents"]["value"].as_str().unwrap_or_default();
+        assert!(
+            hover_text.contains(&expressions::format_ctx_hover_block(descriptor)),
+            "context hover must use the shipped descriptor: {hover_text}"
+        );
+    }
+
+    let completion = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": {
+                    "line": function_completion_line,
+                    "character": function_completion_character
+                }
+            }),
+        )
+        .result
+        .expect("function completion");
+    let item = completion
+        .as_array()
+        .expect("completion array")
+        .iter()
+        .find(|item| item["textEdit"]["newText"] == json!(function_name))
+        .expect("Git function completion");
+    assert_eq!(item["label"], json!(function.signature));
+    assert_eq!(item["detail"], json!(function.typed_signature()));
+    assert_eq!(item["documentation"]["value"], json!(function.description));
+
+    let hover = fixture
+        .request(
+            "textDocument/hover",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": function_hover_line, "character": 15 }
+            }),
+        )
+        .result
+        .expect("function hover");
+    let hover_text = hover["contents"]["value"].as_str().unwrap_or_default();
+    assert!(
+        hover_text.contains(&expressions::format_function_block(function)),
+        "function hover must use the shipped descriptor: {hover_text}"
+    );
+
+    fixture.shutdown();
+}
+
 const PROSE_PERIOD_DOC: &str = "# Doc\n\nplain prose ctx.\n";
 
 #[test]
@@ -3108,6 +3264,67 @@ fn semantic_tokens_wiki_enable_suppresses_only_f4() {
         vec![tok(0, 0, 7, TT_MACRO, TM_INTERPOLATION)],
         "the F1 interpolation must survive the wiki gate: {suppressed:?}"
     );
+
+    fixture.shutdown();
+}
+
+#[test]
+#[ignore = "Phase 1 contract; enable after the meta-schema production phase lands"]
+fn meta_schema_phase1_schema_hover_uses_nominal_type() {
+    let workspace = tempfile::tempdir().unwrap();
+    let text = "---\n$schema:\n  title: string\ntitle: Hello\n---\nBody\n";
+    let path = workspace.path().join("doc.md");
+    std::fs::write(&path, text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let markup = hover_markup(&mut fixture, uri.as_str(), 1, 2);
+    println!("{markup}");
+    assert!(markup.contains("Type: **schema**"), "schema hover: {markup}");
+    assert!(!markup.contains("Type: **any**"), "schema hover: {markup}");
+
+    fixture.shutdown();
+}
+
+#[test]
+fn meta_schema_phase6_shipped_schema_activation_and_current_error() {
+    let workspace = tempfile::tempdir().unwrap();
+    let shipped = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../docs/schemas/darkmatter.yaml");
+    let text = std::fs::read_to_string(&shipped).expect("read shipped Darkmatter schema");
+    let path = workspace.path().join("darkmatter.yaml");
+    std::fs::write(&path, &text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), &text);
+    let initial = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        initial.is_empty(),
+        "the real shipped schema must activate and parse cleanly: {initial:?}"
+    );
+
+    let malformed = "$schema:\n\tbad: string\n";
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": malformed } ]
+        }),
+    );
+    let current = fixture.wait_for_diagnostics(uri.as_str());
+    assert_eq!(
+        current.iter().filter(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.document_malformed")
+        }).count(),
+        1,
+        "the malformed current buffer must own exactly one schema diagnostic: {current:?}"
+    );
+    assert_eq!(current[0]["range"]["start"], json!({ "line": 0, "character": 0 }));
 
     fixture.shutdown();
 }

@@ -59,6 +59,28 @@ fn schema_about_prints_simplified_schema_reference() {
 }
 
 #[test]
+fn verbose_schema_about_projects_shipped_git_context_descriptors() {
+    let output = md_cmd()
+        .args(["--verbose", "schema", "about"])
+        .output()
+        .expect("run verbose md schema about");
+    assert!(output.status.success(), "verbose schema about should succeed");
+    let stdout = strip_ansi_codes(&String::from_utf8_lossy(&output.stdout));
+    let normalized = stdout.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    for needle in [
+        "ctx.branch",
+        "Current local Git branch name, or null outside a repository or at detached HEAD.",
+        "ctx.worktree",
+        "Current linked Git worktree name, or null in the main worktree or outside a repository.",
+        "ctx.merge_conflicts",
+        "Repository-relative paths currently in an unresolved Git index state.",
+    ] {
+        assert!(normalized.contains(needle), "schema about missing `{needle}`");
+    }
+}
+
+#[test]
 fn schema_about_lists_every_supported_type_keyword() {
     let mut cmd = md_cmd();
     let output = cmd.args(["schema", "about"]).output().expect("run md schema about");
@@ -86,11 +108,33 @@ fn schema_about_lists_every_supported_type_keyword() {
 
     // Explicit AC8 guard: the two feature keywords must be visible in the test
     // even though the loop above already covers them via the descriptor list.
-    for keyword in ["literal", "expression"] {
+    for keyword in ["literal", "expression", "type-definition", "schema"] {
         assert!(
             type_table_has_row(type_table, keyword),
             "type table missing the `{keyword}` row required by AC8"
         );
+    }
+}
+
+#[test]
+fn schema_about_describes_semantic_meta_types() {
+    let output = md_cmd()
+        .args(["schema", "about"])
+        .output()
+        .expect("run md schema about");
+    assert!(output.status.success(), "schema about should succeed");
+    let plain = strip_ansi_codes(&String::from_utf8_lossy(&output.stdout));
+    let normalized = plain.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    for needle in [
+        "type-definition",
+        "schema",
+        "mapping",
+        "sequence. Parse-only",
+        "Parse-only",
+        "DMLS",
+    ] {
+        assert!(normalized.contains(needle), "schema about missing `{needle}`");
     }
 }
 

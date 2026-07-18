@@ -141,7 +141,7 @@ impl<'a> SchemaAboutReport<'a> {
         self.table(
             vec![
                 TableColumn::new("Type")
-                    .with_max_width(14)
+                    .with_max_width(15)
                     .with_word_wrap(WordWrap::WrapProse(Some(4), None)),
                 TableColumn::new("Meaning")
                     .with_min_width(24)

@@ -25,6 +25,7 @@
 //! type_name        := "string" | "date" | "datetime" | "time" | "number"
 //!                   | "numberlike" | "boolean" | "boolish" | "object"
 //!                   | "file" | "enum" | "url" | "email" | "yaml" | "json"
+//!                   | "literal" | "expression" | "type-definition" | "schema"
 //!                   | "any"
 //! item_constraints := constraint ( ";" constraint )*
 //! arr_constraints  := constraint ( ";" constraint )*
@@ -838,6 +839,19 @@ impl<'a> Parser<'a> {
             }
         }
 
+        self.validate_semantic_constraints(
+            ty,
+            &item_constraints,
+            false,
+            name_span.clone(),
+        )?;
+        self.validate_semantic_constraints(
+            ty,
+            &array_constraints,
+            true,
+            name_span.clone(),
+        )?;
+
         // Enum requires members.
         if matches!(ty, SimplifiedType::Enum)
             && !item_constraints
@@ -867,6 +881,68 @@ impl<'a> Parser<'a> {
             array_constraints,
             description: None,
         })
+    }
+
+    fn validate_semantic_constraints(
+        &self,
+        ty: SimplifiedType,
+        constraints: &[Constraint],
+        is_array_level: bool,
+        span: Range<usize>,
+    ) -> Result<(), SchemaError> {
+        if !matches!(ty, SimplifiedType::TypeDefinition | SimplifiedType::Schema) {
+            return Ok(());
+        }
+
+        for constraint in constraints {
+            match constraint {
+                Constraint::Required | Constraint::Generated => {}
+                Constraint::Default(value) => {
+                    let Some(default) = value.as_str() else {
+                        return self.err(
+                            format!(
+                                "`default` value is not valid on `{}`; expected a scalar semantic value",
+                                ty.as_keyword()
+                            ),
+                            span.clone(),
+                        );
+                    };
+                    let value = serde_yaml_ng::Value::String(default.to_string());
+                    let result = match ty {
+                        SimplifiedType::TypeDefinition => {
+                            super::parse_property_definition(self.property, &value).map(|_| ())
+                        }
+                        SimplifiedType::Schema => {
+                            super::parse_schema_declaration(&value).map(|_| ())
+                        }
+                        _ => unreachable!("semantic type checked above"),
+                    };
+                    if let Err(error) = result {
+                        return self.err(
+                            format!(
+                                "`default` value is not valid on `{}`: {error}",
+                                ty.as_keyword()
+                            ),
+                            span.clone(),
+                        );
+                    }
+                }
+                Constraint::MinItems(_) | Constraint::MaxItems(_) | Constraint::Unique
+                    if is_array_level => {}
+                other => {
+                    return self.err(
+                        format!(
+                            "constraint `{}` is not valid on `{}`{}",
+                            other.keyword(),
+                            ty.as_keyword(),
+                            if is_array_level { " arrays" } else { "" }
+                        ),
+                        span.clone(),
+                    );
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Pure lookahead: returns `true` when the token stream immediately after

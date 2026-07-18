@@ -33,7 +33,8 @@ use serde_yaml_ng::Value as YamlValue;
 use crate::markdown::schemas::errors::SchemaError;
 
 use super::{
-    SimplifiedSchema, SuggestionLintProblem, lint_suggestions, parse_yaml_schema_with_source,
+    SchemaSourceMap, SimplifiedSchema, SuggestionLintProblem, lint_suggestions,
+    project_suggestion_spans, source::parse_standalone_schema_payload_with_source,
 };
 
 /// The content envelope used by a standalone SimplifiedSchema document.
@@ -48,9 +49,9 @@ pub enum StandaloneSchemaEnvelope {
 /// A parsed standalone SimplifiedSchema authoring document.
 ///
 /// Produced by [`parse_standalone_schema_document`]. Carries the parsed
-/// [`SimplifiedSchema`] payload, the content envelope that claimed the
-/// document, and suggestion lint problems with byte spans relative to
-/// `source`.
+/// [`SimplifiedSchema`] payload, structural source map, the content envelope
+/// that claimed the document, and suggestion lint problems with byte spans
+/// relative to `source`.
 ///
 /// Candidate spans are byte ranges in the authoring source, and lint problems
 /// retain those same authoring-document ranges. Parsing and linting perform no
@@ -63,6 +64,8 @@ pub struct StandaloneSchemaDocument {
     pub envelope: StandaloneSchemaEnvelope,
     /// Source-aware parsed SimplifiedSchema payload.
     pub schema: SimplifiedSchema,
+    /// Structural authored spans for the parsed schema payload.
+    pub source_map: SchemaSourceMap,
     /// Invalid advisory suggestion metadata in declaration order.
     ///
     /// These are lint problems, not errors — the schema is still usable for
@@ -150,16 +153,25 @@ pub fn parse_standalone_schema_document(
         return Ok(None);
     };
 
-    let schema = parse_yaml_schema_with_source(payload, source, 0).map_err(|error| {
+    let payload_key = match envelope {
+        StandaloneSchemaEnvelope::Pure => "$schema",
+        StandaloneSchemaEnvelope::Tagged => "types",
+    };
+    let mut parsed = parse_standalone_schema_payload_with_source(payload, source, payload_key)
+        .map_err(|error| {
+            schema_document_error(path, format!("invalid SimplifiedSchema payload: {error}"))
+        })?;
+    project_suggestion_spans(&mut parsed.value, source, 0).map_err(|error| {
         schema_document_error(path, format!("invalid SimplifiedSchema payload: {error}"))
     })?;
-    let suggestion_lints = lint_suggestions(&schema).map_err(|error| {
+    let suggestion_lints = lint_suggestions(&parsed.value).map_err(|error| {
         schema_document_error(path, format!("could not lint SimplifiedSchema payload: {error}"))
     })?;
     Ok(Some(StandaloneSchemaDocument {
         path: path.to_path_buf(),
         envelope,
-        schema,
+        schema: parsed.value,
+        source_map: parsed.source_map,
         suggestion_lints,
     }))
 }

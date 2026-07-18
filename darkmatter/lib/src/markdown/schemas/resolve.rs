@@ -35,6 +35,9 @@ use serde_yaml_ng::Value as YamlValue;
 use super::{
     SchemaArm, SchemaOrigin, SchemaShape, SimplifiedSchema,
     errors::SchemaError,
+    reference::{
+        SchemaReferenceKind, classify_schema_reference, is_bare_schema_name,
+    },
     simplified::{
         parse_standalone_schema_document, parse_yaml_schema, to_json_schema,
         types::{
@@ -257,25 +260,6 @@ fn resolve_root_union(
 // into a filesystem path; bare-name selection only chooses *which* root to
 // resolve from.
 
-/// Returns `true` when `reference` is a bare name — no path separator and no
-/// special prefix (`./`, `../`, `/`, `@`, `!`, `vault:`, `%`). A bare name
-/// is eligible for schema-root resolution when roots are provided.
-fn is_bare_name(reference: &str) -> bool {
-    if reference.is_empty() {
-        return false;
-    }
-    // Any path separator disqualifies — `docs/x.yaml`, `./x.yaml`, `/x`.
-    if reference.contains('/') || reference.contains('\\') {
-        return false;
-    }
-    // Magic-path prefixes — `@`, `!`, `vault:`, `%` — are never bare names.
-    !reference.starts_with('@')
-        && !reference.starts_with('!')
-        && !reference.starts_with('%')
-        && !reference.starts_with("vault:")
-        && !reference.starts_with("vault::")
-}
-
 /// Tries a bare name against each schema root, nearest first. Returns the
 /// resolved path of the first root that contains a file matching `name`, or
 /// `None` when no root has it. `FileReference::resolve_from` is the authority
@@ -308,23 +292,12 @@ fn resolve_reference(
     schema_roots: &[PathBuf],
 ) -> Result<ResolvedSchema, SchemaError> {
     let trimmed = reference.trim();
-    if let Some(rest) = trimmed.strip_prefix("http://") {
-        let _ = rest;
-        return Err(SchemaError::RemoteUnsupported {
-            reference: reference.into(),
-        });
-    }
-    if let Some(rest) = trimmed.strip_prefix("https://") {
-        let _ = rest;
-        return Err(SchemaError::RemoteUnsupported {
-            reference: reference.into(),
-        });
-    }
+    let classified = classify_schema_reference(reference)?;
 
     // Bare-name resolution against schema roots (Phase 3). When schema roots
     // are provided and the reference has no path component, resolve against
     // the roots nearest-first instead of the document directory.
-    if !schema_roots.is_empty() && is_bare_name(trimmed) {
+    if !schema_roots.is_empty() && classified.kind() == SchemaReferenceKind::BareName {
         if let Some(path) = try_bare_name_in_roots(trimmed, schema_roots)? {
             let mut resolved = load_schema_from_path(&path, schema_roots)?;
             resolved.origin = SchemaOrigin::referenced_file(path.clone());
@@ -350,10 +323,7 @@ fn resolve_reference(
         });
     }
 
-    let file_ref = FileReference::new(reference).map_err(|source| SchemaError::Unresolved {
-        reference: reference.to_string(),
-        source,
-    })?;
+    let file_ref = classified.into_file_reference();
     let path = file_ref
         .resolve_from(base_dir)
         .map_err(|source| SchemaError::Unresolved {
@@ -840,7 +810,7 @@ impl ImportEngine {
         }
 
         // Bare-name resolution against schema roots (Phase 3).
-        let path = if !self.schema_roots.is_empty() && is_bare_name(trimmed) {
+        let path = if !self.schema_roots.is_empty() && is_bare_schema_name(trimmed) {
             if let Some(p) = try_bare_name_in_roots(trimmed, &self.schema_roots)? {
                 p
             } else {
@@ -1263,7 +1233,7 @@ fn resolve_one_example(
             });
         }
         // Bare-name resolution against schema roots (Phase 3).
-        if !schema_roots.is_empty() && is_bare_name(trimmed) {
+        if !schema_roots.is_empty() && is_bare_schema_name(trimmed) {
             if let Some(p) = try_bare_name_in_roots(trimmed, schema_roots)? {
                 p
             } else {
@@ -2493,35 +2463,35 @@ mod bare_name_phase3 {
         serde_yaml_ng::from_str(input).expect("yaml parse")
     }
 
-    // ── is_bare_name detection ──────────────────────────────────────────
+    // ── bare-name detection ─────────────────────────────────────────────
 
     #[test]
     fn bare_name_plain_filename() {
-        assert!(is_bare_name("claudine.yaml"));
-        assert!(is_bare_name("schema.yml"));
+        assert!(is_bare_schema_name("claudine.yaml"));
+        assert!(is_bare_schema_name("schema.yml"));
     }
 
     #[test]
     fn bare_name_rejects_path_separator() {
-        assert!(!is_bare_name("./claudine.yaml"));
-        assert!(!is_bare_name("docs/claudine.yaml"));
-        assert!(!is_bare_name("../types.yaml"));
-        assert!(!is_bare_name("/abs/schema.yaml"));
-        assert!(!is_bare_name(r"docs\schema.yaml"));
+        assert!(!is_bare_schema_name("./claudine.yaml"));
+        assert!(!is_bare_schema_name("docs/claudine.yaml"));
+        assert!(!is_bare_schema_name("../types.yaml"));
+        assert!(!is_bare_schema_name("/abs/schema.yaml"));
+        assert!(!is_bare_schema_name(r"docs\schema.yaml"));
     }
 
     #[test]
     fn bare_name_rejects_magic_prefix() {
-        assert!(!is_bare_name("@schema.yaml"));
-        assert!(!is_bare_name("!schema.yaml"));
-        assert!(!is_bare_name("%schema.yaml"));
-        assert!(!is_bare_name("vault:schema.yaml"));
-        assert!(!is_bare_name("vault::schema.yaml"));
+        assert!(!is_bare_schema_name("@schema.yaml"));
+        assert!(!is_bare_schema_name("!schema.yaml"));
+        assert!(!is_bare_schema_name("%schema.yaml"));
+        assert!(!is_bare_schema_name("vault:schema.yaml"));
+        assert!(!is_bare_schema_name("vault::schema.yaml"));
     }
 
     #[test]
     fn bare_name_rejects_empty() {
-        assert!(!is_bare_name(""));
+        assert!(!is_bare_schema_name(""));
     }
 
     // ── $schema bare-name resolution ────────────────────────────────────

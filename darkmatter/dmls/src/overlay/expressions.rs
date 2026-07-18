@@ -650,6 +650,38 @@ mod tests {
     }
 
     #[test]
+    fn shipped_catalog_descriptors_all_reach_completion() {
+        let candidates = completion_candidates("", &[]);
+
+        for descriptor in context_descriptors() {
+            let label = format!("ctx.{}", descriptor.name);
+            let candidate = candidates
+                .iter()
+                .find(|candidate| candidate.label == label)
+                .unwrap_or_else(|| panic!("context descriptor `{label}` missing from completion"));
+            assert_eq!(candidate.kind, ExprCompletionKind::ContextVariable);
+            assert_eq!(candidate.insert_text, label);
+            assert_eq!(candidate.detail.as_deref(), Some(descriptor.display_type.to_string().as_str()));
+            assert_eq!(candidate.documentation.as_deref(), Some(descriptor.description));
+        }
+
+        for descriptor in function_descriptors() {
+            let name = function_name(descriptor.signature);
+            let candidate = candidates
+                .iter()
+                .find(|candidate| {
+                    candidate.label == descriptor.signature && candidate.insert_text == name
+                })
+                .unwrap_or_else(|| {
+                    panic!("function descriptor `{}` missing from completion", descriptor.signature)
+                });
+            assert_eq!(candidate.kind, ExprCompletionKind::Function);
+            assert_eq!(candidate.detail, Some(descriptor.typed_signature()));
+            assert_eq!(candidate.documentation.as_deref(), Some(descriptor.description));
+        }
+    }
+
+    #[test]
     fn test_function_call_at_finds_deepest_call() {
         let source = "as_csv(length(items))";
         let expr = parse(source).unwrap();

@@ -89,7 +89,9 @@ impl DataType {
             | SimplifiedType::Boolish
             | SimplifiedType::Enum
             | SimplifiedType::Literal
-            | SimplifiedType::Expression => {
+            | SimplifiedType::Expression
+            | SimplifiedType::TypeDefinition
+            | SimplifiedType::Schema => {
                 return None;
             }
         })

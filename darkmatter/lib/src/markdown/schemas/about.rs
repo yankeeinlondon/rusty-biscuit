@@ -112,6 +112,18 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-expression\" }",
     },
     SchemaTypeDescriptor {
+        keyword: "type-definition",
+        description: "One complete SimplifiedSchema property definition carried by a YAML string, mapping, or sequence. Parse-only and side-effect-free; DMLS uses it for schema-language completion, hover, and diagnostics.",
+        accepted_constraints: "default, required, generated",
+        json_schema_effect: "{ \"type\": [\"string\", \"object\", \"array\"], \"x-darkmatter-type-definition\": true }",
+    },
+    SchemaTypeDescriptor {
+        keyword: "schema",
+        description: "One complete `$schema` declaration carried by a YAML string, mapping, or sequence. Parse-only and side-effect-free; DMLS uses it for declaration completion, hover, and diagnostics.",
+        accepted_constraints: "default, required, generated",
+        json_schema_effect: "{ \"type\": [\"string\", \"object\", \"array\"], \"x-darkmatter-schema\": true }",
+    },
+    SchemaTypeDescriptor {
         keyword: "any",
         description: "Anything. Useful when you only care that a property exists.",
         accepted_constraints: "required",
@@ -686,6 +698,8 @@ mod tests {
             SimplifiedType::Email,
             SimplifiedType::Literal,
             SimplifiedType::Expression,
+            SimplifiedType::TypeDefinition,
+            SimplifiedType::Schema,
             SimplifiedType::Any,
         ] {
             implemented.insert(ty.as_keyword());

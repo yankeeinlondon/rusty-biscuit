@@ -10,20 +10,244 @@
 //! result to [`DarkmatterSchemas::effective_for`].
 
 use std::collections::BTreeSet;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::compose::find_git_root_from;
 use darkmatter::markdown::schemas::resolve::{merge_baseline, resolve_schema};
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, SchemaError, SchemaShape, SimplifiedSchema,
-    darkmatter_base_json_schema_ref, triggers::TriggerRegistry,
+    DarkmatterSchemas, EffectiveSchema, PropertyAtom, PropertyDef, SchemaArm, SchemaError,
+    SchemaShape, SimplifiedSchema, SimplifiedType, StandaloneSchemaDocument,
+    StandaloneSchemaEnvelope, TypeExpr, darkmatter_base_json_schema_ref, darkmatter_base_schema,
+    triggers::TriggerRegistry,
 };
 use globset::{Glob, GlobSetBuilder};
 use serde_json::Value;
 
 use crate::config::{DmlsConfig, SchemaExtensionConfig};
+
+use super::{FrontmatterAst, SchemaOutcome};
+
+/// The semantic schema grammar activated for one authored value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetaSchemaKind {
+    /// One complete SimplifiedSchema property definition.
+    TypeDefinition,
+    /// One complete `$schema` declaration.
+    Schema,
+}
+
+/// One frontmatter value whose effective definition activates meta-schema
+/// intelligence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontmatterSchemaValue {
+    /// RFC 6901 pointer to the authored value.
+    pub pointer: String,
+    /// Every semantic meta-type arm on the effective property definition.
+    pub kinds: Vec<MetaSchemaKind>,
+    /// Document-relative span of the complete authored value.
+    pub value_span: Range<usize>,
+}
+
+/// Parsed schema-authoring state attached to a [`super::DocumentOverlay`].
+#[derive(Debug, Clone)]
+pub enum SchemaAuthoringState {
+    /// No effective semantic type or standalone content envelope activates.
+    Inactive,
+    /// Semantic meta-type values in Markdown frontmatter.
+    Frontmatter(Vec<FrontmatterSchemaValue>),
+    /// A standalone pure or tagged SimplifiedSchema authoring document.
+    Standalone {
+        /// Envelope claimed by the current buffer.
+        envelope: StandaloneSchemaEnvelope,
+        /// Fresh or retained last-good semantic model and structural source map.
+        model: Option<Arc<StandaloneSchemaDocument>>,
+        /// Whether `model` belongs to an earlier valid buffer version.
+        stale: bool,
+        /// Parse failure owned by the current buffer.
+        error: Option<Arc<SchemaError>>,
+    },
+}
+
+/// Builds typed frontmatter activation from the effective schema.
+pub fn frontmatter_authoring(
+    ast: Option<&FrontmatterAst>,
+    outcome: &SchemaOutcome,
+) -> SchemaAuthoringState {
+    let Some(ast) = ast else {
+        return SchemaAuthoringState::Inactive;
+    };
+    let shape = effective_shape(outcome);
+    let mut values = Vec::new();
+    for entry in ast.entries() {
+        if entry.pointer.starts_with("/$schema/") {
+            continue;
+        }
+        let kinds = if entry.pointer == "/$schema" {
+            vec![MetaSchemaKind::Schema]
+        } else {
+            let path: Vec<&str> = entry.dotted.split('.').collect();
+            def_at_path(&shape, &path)
+                .map(|definition| meta_schema_kinds(&definition))
+                .unwrap_or_default()
+        };
+        if !kinds.is_empty() {
+            values.push(FrontmatterSchemaValue {
+                pointer: entry.pointer.clone(),
+                kinds,
+                value_span: entry.value_span.clone(),
+            });
+        }
+    }
+    if values.is_empty() {
+        SchemaAuthoringState::Inactive
+    } else {
+        SchemaAuthoringState::Frontmatter(values)
+    }
+}
+
+/// Returns the standalone envelope lexically claimed by the current text.
+///
+/// This deliberately recognizes only top-level YAML mapping entries. It keeps
+/// a previous semantic model alive while the current YAML cannot be parsed,
+/// without letting a filename, directory, or raw JSON Schema activate DMLS.
+pub fn standalone_envelope_claim(text: &str) -> Option<StandaloneSchemaEnvelope> {
+    let mut top_level = Vec::new();
+    for line in text.lines() {
+        let line = line.trim_end_matches('\r');
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed == "---" || trimmed == "..." {
+            continue;
+        }
+        if line.chars().next().is_some_and(char::is_whitespace) {
+            continue;
+        }
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let Some(key) = lexical_scalar(key.trim()) else {
+            continue;
+        };
+        top_level.push((key, value.trim().to_string()));
+    }
+    if top_level.iter().any(|(key, value)| {
+        key == "kind" && lexical_scalar(value).as_deref() == Some("schema")
+    }) {
+        return Some(StandaloneSchemaEnvelope::Tagged);
+    }
+    (top_level.len() == 1 && top_level[0].0 == "$schema")
+        .then_some(StandaloneSchemaEnvelope::Pure)
+}
+
+fn lexical_scalar(source: &str) -> Option<String> {
+    let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(source).ok()?;
+    value.as_str().map(str::to_string)
+}
+
+fn effective_shape(outcome: &SchemaOutcome) -> SchemaShape {
+    let mut shape = match darkmatter_base_schema() {
+        SimplifiedSchema::Single(shape) => shape,
+        SimplifiedSchema::Union(_) => SchemaShape::default(),
+    };
+    let SchemaOutcome::Ready(Some(bundle)) = outcome else {
+        return shape;
+    };
+    for extension in &bundle.extension_shapes {
+        overlay_shape(&mut shape, extension);
+    }
+    match &bundle.effective.simplified {
+        Some(SimplifiedSchema::Single(document)) => overlay_shape(&mut shape, document),
+        Some(SimplifiedSchema::Union(arms)) => overlay_shape(&mut shape, &merged_root_shape(arms)),
+        None => {}
+    }
+    shape
+}
+
+fn overlay_shape(base: &mut SchemaShape, overlay: &SchemaShape) {
+    for (name, definition) in &overlay.properties {
+        base.properties.insert(name.clone(), definition.clone());
+    }
+}
+
+fn merged_root_shape(arms: &[SchemaArm]) -> SchemaShape {
+    let mut merged = SchemaShape::default();
+    for arm in arms {
+        if let SchemaArm::Inline(shape) = arm {
+            merge_shape(&mut merged, shape);
+        }
+    }
+    merged
+}
+
+fn merge_shape(base: &mut SchemaShape, incoming: &SchemaShape) {
+    for (name, definition) in &incoming.properties {
+        let definition = match base.properties.get(name) {
+            Some(existing) => merge_defs(existing, definition),
+            None => definition.clone(),
+        };
+        base.properties.insert(name.clone(), definition);
+    }
+}
+
+fn def_at_path(root: &SchemaShape, path: &[&str]) -> Option<PropertyDef> {
+    let (leaf, ancestors) = path.split_last()?;
+    let mut shape = root.clone();
+    for ancestor in ancestors {
+        let definition = shape.properties.get(*ancestor)?;
+        shape = merged_inline_shape(definition)?;
+    }
+    shape.properties.get(*leaf).cloned()
+}
+
+fn merged_inline_shape(definition: &PropertyDef) -> Option<SchemaShape> {
+    let mut merged = None;
+    for atom in atoms(definition) {
+        let TypeExpr::InlineObject(shape) = &atom.ty else {
+            continue;
+        };
+        merge_shape(merged.get_or_insert_with(SchemaShape::default), shape);
+    }
+    merged
+}
+
+fn merge_defs(existing: &PropertyDef, incoming: &PropertyDef) -> PropertyDef {
+    let mut merged = atoms(existing).to_vec();
+    for atom in atoms(incoming) {
+        if !merged.contains(atom) {
+            merged.push(atom.clone());
+        }
+    }
+    if merged.len() == 1 {
+        PropertyDef::Single(merged.remove(0))
+    } else {
+        PropertyDef::Union(merged)
+    }
+}
+
+fn meta_schema_kinds(definition: &PropertyDef) -> Vec<MetaSchemaKind> {
+    let mut kinds = Vec::new();
+    for atom in atoms(definition) {
+        let kind = match atom.ty {
+            TypeExpr::Primitive(SimplifiedType::TypeDefinition) => MetaSchemaKind::TypeDefinition,
+            TypeExpr::Primitive(SimplifiedType::Schema) => MetaSchemaKind::Schema,
+            _ => continue,
+        };
+        if !kinds.contains(&kind) {
+            kinds.push(kind);
+        }
+    }
+    kinds
+}
+
+fn atoms(definition: &PropertyDef) -> &[PropertyAtom] {
+    match definition {
+        PropertyDef::Single(atom) => std::slice::from_ref(atom),
+        PropertyDef::Union(atoms) => atoms,
+    }
+}
 
 /// The assembled schema for one document: the effective schema plus the
 /// frontmatter JSON it validates (both derived from the same parsed document,

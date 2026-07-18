@@ -19,6 +19,9 @@
 //!   SimplifiedSchema bare `file`.
 //! - **`x-darkmatter-url-scheme`** — runs alongside `format: uri` and
 //!   restricts the URL scheme to a configured list (case-insensitive).
+//! - **`x-darkmatter-type-definition` / `x-darkmatter-schema`** — validate
+//!   native string, mapping, or sequence carriers through the shared passive
+//!   SimplifiedSchema parsers. They perform no resolution or I/O.
 //! - **`format: darkmatter-yaml` / `format: darkmatter-json`** (Feature D) —
 //!   the `yaml` / `json` content-format string types. The value must parse as
 //!   YAML (JSON accepted, being a YAML subset) or strict JSON respectively;
@@ -26,9 +29,8 @@
 //!   string by the schema coercion pass before it reaches the validator.
 //!
 //! `darkmatter-file` / `darkmatter-file-reference` are `Format`s (they see
-//! only the string) and `x-darkmatter-url-scheme` is a custom `Keyword`
-//! implementation (it needs the surrounding schema fragment for its scheme
-//! list). `match(...)` is **not** a validation keyword: it is suggestion
+//! only the string) and the `x-darkmatter-*` semantic validators are custom
+//! `Keyword` implementations. `match(...)` is **not** a validation keyword: it is suggestion
 //! metadata carried on the SimplifiedSchema atom (`Constraint::Match` →
 //! completion), never lowered into the compiled JSON Schema.
 //!
@@ -58,6 +60,9 @@ use serde_json::{Map, Value};
 use url::Url;
 
 use crate::markdown::compose::expression::resolve_ctx::resolve_file_ref_with_fallback;
+use crate::markdown::schemas::simplified::{
+    parse_property_definition, parse_schema_declaration,
+};
 
 /// Format name registered for eager `file(eager)` SimplifiedSchema atoms and
 /// for raw JSON Schema authors who want existence-checking.
@@ -78,6 +83,12 @@ pub const DARKMATTER_FILE_REFERENCE_FORMAT: &str = "darkmatter-file-reference";
 
 /// Keyword name registered for `url(scheme(...))` constraints.
 pub const DARKMATTER_URL_SCHEME_KEYWORD: &str = "x-darkmatter-url-scheme";
+
+/// Keyword emitted for the `type-definition` semantic meta-type.
+pub const DARKMATTER_TYPE_DEFINITION_KEYWORD: &str = "x-darkmatter-type-definition";
+
+/// Keyword emitted for the `schema` semantic meta-type.
+pub const DARKMATTER_SCHEMA_KEYWORD: &str = "x-darkmatter-schema";
 
 /// Format name registered for the `yaml` content-format string type (Feature
 /// D). The value must parse as valid YAML; because JSON is a YAML subset a JSON
@@ -418,6 +429,75 @@ impl Keyword for DarkmatterUrlSchemeKeyword {
             Value::String(s) => self.check(s),
             _ => true,
         }
+    }
+}
+
+/// Factory for the grammar-backed `x-darkmatter-type-definition` keyword.
+pub fn type_definition_keyword_factory<'a>(
+    _parent: &'a Map<String, Value>,
+    schema: &'a Value,
+    _schema_path: Location,
+) -> Result<Box<dyn Keyword>, ValidationError<'a>> {
+    require_enabled_semantic_keyword(schema, DARKMATTER_TYPE_DEFINITION_KEYWORD)?;
+    Ok(Box::new(DarkmatterTypeDefinitionKeyword))
+}
+
+/// Factory for the grammar-backed `x-darkmatter-schema` keyword.
+pub fn schema_keyword_factory<'a>(
+    _parent: &'a Map<String, Value>,
+    schema: &'a Value,
+    _schema_path: Location,
+) -> Result<Box<dyn Keyword>, ValidationError<'a>> {
+    require_enabled_semantic_keyword(schema, DARKMATTER_SCHEMA_KEYWORD)?;
+    Ok(Box::new(DarkmatterSchemaKeyword))
+}
+
+fn require_enabled_semantic_keyword<'a>(
+    schema: &'a Value,
+    keyword: &str,
+) -> Result<(), ValidationError<'a>> {
+    if schema.as_bool() == Some(true) {
+        Ok(())
+    } else {
+        Err(ValidationError::schema(format!("{keyword} must be true")))
+    }
+}
+
+fn parse_type_definition_instance(instance: &Value) -> Result<(), String> {
+    let yaml = serde_yaml_ng::to_value(instance).map_err(|error| error.to_string())?;
+    parse_property_definition("<instance>", &yaml)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+fn parse_schema_instance(instance: &Value) -> Result<(), String> {
+    let yaml = serde_yaml_ng::to_value(instance).map_err(|error| error.to_string())?;
+    parse_schema_declaration(&yaml)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+struct DarkmatterTypeDefinitionKeyword;
+
+impl Keyword for DarkmatterTypeDefinitionKeyword {
+    fn validate<'i>(&self, instance: &'i Value) -> Result<(), ValidationError<'i>> {
+        parse_type_definition_instance(instance).map_err(ValidationError::custom)
+    }
+
+    fn is_valid(&self, instance: &Value) -> bool {
+        parse_type_definition_instance(instance).is_ok()
+    }
+}
+
+struct DarkmatterSchemaKeyword;
+
+impl Keyword for DarkmatterSchemaKeyword {
+    fn validate<'i>(&self, instance: &'i Value) -> Result<(), ValidationError<'i>> {
+        parse_schema_instance(instance).map_err(ValidationError::custom)
+    }
+
+    fn is_valid(&self, instance: &Value) -> bool {
+        parse_schema_instance(instance).is_ok()
     }
 }
 
