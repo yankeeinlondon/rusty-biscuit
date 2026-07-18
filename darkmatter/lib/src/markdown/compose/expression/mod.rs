@@ -202,10 +202,8 @@ pub trait EvaluationLookup {
         }
     }
 
-    /// Returns the document-relative resolution context that the seven
-    /// read-side functions (`file_exists`, `frontmatter`, `markdown_title`,
-    /// `markdown_body_empty`, `validate_schema`, `absolute`, `relative`)
-    /// resolve their path arguments against.
+    /// Returns the resolution context for read-side filesystem, document, and
+    /// repository functions.
     ///
     /// The default `None` is the **opt-out / test** case: a lookup that has no
     /// document anchor (or a unit test that does not exercise read-side

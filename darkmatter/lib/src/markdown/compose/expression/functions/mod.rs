@@ -31,6 +31,7 @@ use crate::markdown::schemas::DarkmatterSchemas;
 mod args;
 mod collections;
 mod dates;
+mod git;
 mod markdown_docs;
 mod paths;
 mod predicates;
@@ -170,6 +171,7 @@ const BINDING_GROUPS: &[&[FunctionBinding]] = &[
     strings::BINDINGS,
     terminal::BINDINGS,
     dates::BINDINGS,
+    git::BINDINGS,
     paths::BINDINGS,
     skills::BINDINGS,
     markdown_docs::BINDINGS,
@@ -2520,7 +2522,7 @@ pub(crate) fn lazy_arity_eligibility(
     })
 }
 
-/// Context-aware dispatch for filesystem/document functions.
+/// Context-aware dispatch for filesystem, document, and repository functions.
 ///
 /// ## Returns
 ///
@@ -2554,7 +2556,7 @@ pub fn dispatch_fs(
 /// Returns `true` when `name` matches a canonical name or alias in
 /// the context-aware registration set.
 ///
-/// Lets the evaluator distinguish a known filesystem function that fell
+/// Lets the evaluator distinguish a known context-aware function that fell
 /// through dispatch only because no document resolution context was available
 /// from a genuinely unrecognized symbol.
 pub fn is_fs_function(name: &str) -> bool {

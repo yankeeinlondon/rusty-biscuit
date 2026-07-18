@@ -1416,3 +1416,23 @@ functions:
                 expression: or(false, true)
                 result: "true"
                 verification: executable
+    - name: predict_conflicts
+      category: Git
+      order: 90
+      description:
+          Returns the repository-relative paths that would conflict if the
+          named local branch were merged into the caller's current branch.
+      overloads:
+          - parameters:
+                - name: branch
+                  type: string
+            returns:
+                type: string
+                array: true
+                fallible: true
+            example:
+                expression: predict_conflicts("feature/example")
+                result: src/config.rs
+                verification: display-only
+                reason:
+                    Requires a Git fixture with divergent local branch tips.

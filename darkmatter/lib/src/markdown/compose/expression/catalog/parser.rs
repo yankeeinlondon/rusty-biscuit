@@ -360,8 +360,8 @@ functions:
     #[test]
     fn authored_catalog_matches_registration_baseline() {
         let catalog = parse_expression_function_catalog(AUTHORED_CATALOG).unwrap();
-        assert_eq!(catalog.functions.len(), 85);
-        assert_eq!(catalog.functions.iter().map(|function| function.overloads.len()).sum::<usize>(), 88);
+        assert_eq!(catalog.functions.len(), 86);
+        assert_eq!(catalog.functions.iter().map(|function| function.overloads.len()).sum::<usize>(), 89);
 
         let mut functions: Vec<_> = catalog.functions.iter().collect();
         functions.sort_by_key(|function| function.order);

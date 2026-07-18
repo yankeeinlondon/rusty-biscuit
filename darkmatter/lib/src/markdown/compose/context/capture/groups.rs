@@ -2,12 +2,13 @@ use std::collections::HashSet;
 
 use crate::markdown::compose::expression::ExpressionFinder;
 
-use super::{agent, changes, datetime, docs, host, languages, repo};
+use super::{agent, changes, datetime, docs, git, host, languages, repo};
 
 /// Independently captured runtime-context domains.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ContextGroup {
     DateTime,
+    Git,
     Repo,
     FileChanges,
     Languages,
@@ -19,9 +20,10 @@ pub(crate) enum ContextGroup {
 }
 
 impl ContextGroup {
-    pub(crate) fn all() -> [Self; 9] {
+    pub(crate) fn all() -> [Self; 10] {
         [
             Self::DateTime,
+            Self::Git,
             Self::Repo,
             Self::FileChanges,
             Self::Languages,
@@ -41,6 +43,7 @@ impl ContextGroup {
 fn group_for_key(key: &str) -> Option<ContextGroup> {
     [
         (ContextGroup::DateTime, datetime::KEYS),
+        (ContextGroup::Git, git::KEYS),
         (ContextGroup::Repo, repo::KEYS),
         (ContextGroup::FileChanges, changes::KEYS),
         (ContextGroup::Languages, languages::KEYS),
@@ -95,7 +98,7 @@ mod tests {
     #[test]
     fn every_owned_key_has_exactly_one_group() {
         let domains = [
-            datetime::KEYS, repo::KEYS, changes::KEYS, languages::KEYS, docs::KEYS,
+            datetime::KEYS, git::KEYS, repo::KEYS, changes::KEYS, languages::KEYS, docs::KEYS,
             host::OS_KEYS, host::HARDWARE_KEYS, host::GPU_KEYS, agent::KEYS,
         ];
         let mut seen = HashSet::new();

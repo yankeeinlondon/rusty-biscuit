@@ -1,4 +1,4 @@
-//! Resolution context for filesystem-aware expression functions.
+//! Resolution context for filesystem- and repository-aware expression functions.
 //!
 //! Read-only: these helpers resolve and read paths; they never mutate.
 
@@ -62,6 +62,13 @@ impl ResolutionContext {
     pub fn with_file_ref_fallback_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.file_ref_fallback_dir = Some(dir.into());
         self
+    }
+
+    /// Returns the launch directory when available, otherwise the document base directory.
+    pub(crate) fn caller_dir(&self) -> &Path {
+        self.file_ref_fallback_dir
+            .as_deref()
+            .unwrap_or(&self.base_dir)
     }
 
     /// Sets a captured context value (e.g. `agent`) for read-side functions.
@@ -254,6 +261,15 @@ mod tests {
         let ctx = ResolutionContext::new(PathBuf::from("/tmp/docdir"))
             .with_file_ref_fallback_dir("/tmp/launch");
         assert_eq!(ctx.file_ref_fallback_dir.as_deref(), Some(std::path::Path::new("/tmp/launch")));
+    }
+
+    #[test]
+    fn caller_dir_prefers_launch_fallback_and_otherwise_uses_base_dir() {
+        let document_only = ResolutionContext::new(PathBuf::from("/tmp/docdir"));
+        assert_eq!(document_only.caller_dir(), Path::new("/tmp/docdir"));
+
+        let launched_elsewhere = document_only.with_file_ref_fallback_dir("/tmp/launch");
+        assert_eq!(launched_elsewhere.caller_dir(), Path::new("/tmp/launch"));
     }
 
     /// A same-named file present in BOTH the document dir and the launch-area

@@ -412,6 +412,7 @@ refresh it after changing the catalog.
 | List Formatting | `as_space_separated(list)` | Joins a list into a space-separated string. | `as_space_separated(items)` ⇒ `1 2 3` |
 | List Formatting | `as_unordered_list(list)` | Renders a list as a Markdown unordered list, auto-nesting nested arrays and object-array shapes as indented sublists. |  |
 | List Formatting | `as_ordered_list(list)` | Renders a list as a Markdown ordered list, auto-nesting nested arrays and object-array shapes as indented sublists. |  |
+| Git | `predict_conflicts(branch)` | Returns the repository-relative paths that would conflict if the named local branch were merged into the caller's current branch. |  |
 <!-- END GENERATED FUNCTION TABLE -->
 
 ### `date()` format tokens
@@ -514,6 +515,41 @@ one or more digits, where the hyphen is not preceded by another hyphen:
 | `file_trailing(file)` | last directory segment plus basename |
 | `dir_leading(file)` | directory path above the last directory segment, dropping the basename and its parent (complement of `file_trailing`) |
 | `join(left, right)` | joins two path strings, normalizing separators |
+
+#### Git Helpers
+
+`predict_conflicts(branch)` predicts the unresolved paths produced by merging
+the named local branch into the caller's current local branch. The named branch
+is incoming (`theirs`); the current branch is the destination (`ours`). The
+repository is resolved from the caller or launch-area anchor, not from the
+Markdown document's directory.
+
+Prediction uses only the two captured committed branch tips. Staged, unstaged,
+untracked, and already-conflicted index state do not affect it, including staged
+`.gitattributes`. It performs no fetch, network request, hook, merge driver,
+filter, or subprocess, and it does not change HEAD, refs, the index, worktree,
+or on-disk object database. A clean merge returns `[]`; missing prerequisites
+such as a repository, attached current branch, exact incoming local branch, or
+supported merge configuration return an error.
+
+Render predicted paths as a Markdown list:
+
+```md
+{{ as_unordered_list(predict_conflicts("feature/api")) }}
+```
+
+Branch on the result in an ordinary interpolation:
+
+```md
+{{ is_truthy(predict_conflicts("feature/api")) ? "Conflicts need resolution" : "Merge is clean" }}
+```
+
+The same function is available in frontmatter interpolation and `$()` ternary
+conditions or branches:
+
+```yaml
+merge_status: '$( is_truthy(predict_conflicts("feature/api")) ? "conflicted" : "clean" )'
+```
 
 #### Link Helpers
 

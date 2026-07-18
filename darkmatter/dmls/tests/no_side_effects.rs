@@ -1,10 +1,11 @@
 //! Spec acceptance criterion 7: the language server is **passive**.
 //!
 //! Driving every read-side request across a document dense with `::shell`,
-//! `$(...)`, and remote-URL constructs must analyze them (a dangerous command
-//! is diagnosed) while running **nothing**: no child process is spawned (a
-//! sentinel a shell directive would create never appears) and no network fetch
-//! is made (the remote constructs resolve instantly, never hanging on I/O).
+//! `$(...)`, `predict_conflicts(...)`, and remote-URL constructs must analyze
+//! them (a dangerous command is diagnosed) while running **nothing**: no child
+//! process is spawned (a sentinel a shell directive would create never appears),
+//! no Git merge is simulated, and no network fetch is made (the remote
+//! constructs resolve instantly, never hanging on I/O).
 //!
 //! In-memory session (no real terminal or network resource), so it runs in the
 //! standard `just test` gate with no terminal harness.
@@ -128,19 +129,20 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
     let sentinel = workspace.path().join("SENTINEL_SHOULD_NOT_EXIST");
     let sentinel_display = sentinel.to_string_lossy().replace('\\', "/");
 
-    // Frontmatter `$()` + an inline `$schema` Expression-typed value + body
-    // `::shell` (dangerous + sentinel), a remote `::url`, and a remote image
-    // link — every construct that could touch a process or a socket if the
-    // analyzer were not passive. The Expression value exercises the Phase-5
-    // frontmatter expression completion/hover/diagnostics path, which parses but
-    // never evaluates.
+    // Frontmatter `$()` + inline `$schema` Expression-typed values + body
+    // `::shell` (dangerous + sentinel), a Git conflict prediction, a remote
+    // `::url`, and a remote image link — every construct that could touch a
+    // process, repository, or socket if the analyzer were not passive. The
+    // Expression values exercise frontmatter completion/hover/diagnostics,
+    // which parse but never evaluate.
     let text = format!(
-        "---\ntitle: Passive\ncommand: $(echo pwned)\n$schema:\n  when: expression\nwhen: length(title)\n---\n\n\
+        "---\ntitle: Passive\ncommand: $(echo pwned)\n$schema:\n  when: expression\n  conflicts: expression\nwhen: length(title)\nconflicts: predict_conflicts(\"feature/example\")\n---\n\n\
          # Heading\n\n\
          ::shell rm -rf /tmp/dmls-should-not-run\n\n\
          ::shell touch {sentinel_display}\n\n\
          ::url https://example.com/remote.md\n\n\
          ::file ./missing.md\n\n\
+         Conflicts: {{{{ predict_conflicts(\"feature/example\") }}}}\n\n\
          See {{{{ title }}}} and remote ![img](https://example.com/x.png).\n"
     );
 
@@ -170,10 +172,20 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
     assert!(has_security, "the dangerous ::shell must be diagnosed: {diagnostics:?}");
 
     // Drive every read-side request across the shell/remote spans and the
-    // Expression-typed frontmatter value. Each must return promptly (no network
-    // hang) and never execute anything. Body positions are shifted by the three
-    // added frontmatter lines; `(5, 8)` lands inside `when: length(title)`.
-    let positions = [(10u32, 8u32), (12, 8), (14, 8), (16, 8), (18, 8), (2, 12), (5, 8)];
+    // Expression-typed frontmatter values. Each must return promptly (no Git or
+    // network hang) and never execute anything. `(7, 15)` lands inside the Git
+    // function and `(20, 18)` lands inside the body invocation.
+    let positions = [
+        (12u32, 8u32),
+        (14, 8),
+        (16, 8),
+        (18, 8),
+        (20, 18),
+        (22, 8),
+        (2, 12),
+        (6, 8),
+        (7, 15),
+    ];
     for (line, character) in positions {
         for method in [
             "textDocument/hover",
@@ -216,7 +228,7 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
             "textDocument": { "uri": doc_uri.as_str() },
             "range": {
                 "start": { "line": 0, "character": 0 },
-                "end": { "line": 20, "character": 0 }
+                "end": { "line": 24, "character": 0 }
             }
         }),
     );
