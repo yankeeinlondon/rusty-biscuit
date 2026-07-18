@@ -955,6 +955,7 @@ sequence:
 
 /// Install a fake provider that records every launch, and return the witness
 /// path that must stay absent when preflight aborts.
+#[cfg(unix)]
 fn preflight_witness(workspace: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
     let path_dir = workspace.join("bin");
     fs::create_dir_all(&path_dir).unwrap();
@@ -966,6 +967,7 @@ fn preflight_witness(workspace: &std::path::Path) -> (std::path::PathBuf, std::p
 }
 
 /// Run `claudine sequence` against `file`, returning `(stderr, launched)`.
+#[cfg(unix)]
 fn run_preflight(
     workspace: &std::path::Path,
     file: &std::path::Path,
@@ -997,6 +999,7 @@ fn run_preflight(
 /// A `kind: group` document is never directly executable; the rejection names
 /// the construct rather than reporting a missing `sequence:` property.
 #[test]
+#[cfg(unix)]
 fn sequence_rejects_direct_group_execution() {
     let workspace = tempdir().unwrap();
     let group = workspace.path().join("group.yaml");
@@ -1017,6 +1020,7 @@ fn sequence_rejects_direct_group_execution() {
 /// A `prompt:` task pointing at a document that itself declares `sequence:` is
 /// a nested sequence, which v1 rejects during preflight.
 #[test]
+#[cfg(unix)]
 fn sequence_rejects_a_nested_sequence_prompt_document() {
     let workspace = tempdir().unwrap();
     fs::write(
@@ -1041,6 +1045,7 @@ fn sequence_rejects_a_nested_sequence_prompt_document() {
 
 /// A task reference cycle reports the whole chain, not just the repeated file.
 #[test]
+#[cfg(unix)]
 fn sequence_rejects_a_reference_cycle_with_the_full_chain() {
     let workspace = tempdir().unwrap();
     fs::write(
@@ -1076,6 +1081,7 @@ fn sequence_rejects_a_reference_cycle_with_the_full_chain() {
 /// Group `loop` commit semantics are unratified, so a group carrying `loop`
 /// is blocked with an actionable error instead of invented semantics.
 #[test]
+#[cfg(unix)]
 fn sequence_rejects_group_loop() {
     let workspace = tempdir().unwrap();
     let md_file = workspace.path().join("seq.md");
@@ -1093,6 +1099,7 @@ fn sequence_rejects_group_loop() {
 /// A shell task that depends on `outputs` could never be approved byte-for-byte
 /// up front, so preflight rejects it and points at the alternative.
 #[test]
+#[cfg(unix)]
 fn sequence_rejects_a_shell_command_depending_on_outputs() {
     let workspace = tempdir().unwrap();
     let md_file = workspace.path().join("seq.md");
@@ -1113,6 +1120,7 @@ fn sequence_rejects_a_shell_command_depending_on_outputs() {
 /// Two tasks in one parallel group rewriting the same inline-compose document
 /// would race; preflight holds the whole graph and catches it statically.
 #[test]
+#[cfg(unix)]
 fn sequence_rejects_a_parallel_write_back_collision() {
     let workspace = tempdir().unwrap();
     fs::write(
@@ -1141,6 +1149,7 @@ fn sequence_rejects_a_parallel_write_back_collision() {
 /// outcomes and cannot degrade preparation to best-effort. The later, valid
 /// step must never run.
 #[test]
+#[cfg(unix)]
 fn preflight_failure_aborts_even_with_fail_fast_false() {
     let workspace = tempdir().unwrap();
     fs::write(
@@ -1169,6 +1178,7 @@ fn preflight_failure_aborts_even_with_fail_fast_false() {
 /// `--dry-run` performs the identical preflight walk, so a graph that cannot
 /// be prepared is reported rather than rendered as a runnable plan.
 #[test]
+#[cfg(unix)]
 fn dry_run_performs_the_same_preflight() {
     let workspace = tempdir().unwrap();
     fs::write(
@@ -1194,6 +1204,7 @@ fn dry_run_performs_the_same_preflight() {
 /// A well-formed graph passes preflight: a `kind: task` file, a serial group,
 /// and a whitelisted shell command all resolve without a rejection.
 #[test]
+#[cfg(unix)]
 fn well_formed_graph_passes_preflight() {
     let workspace = tempdir().unwrap();
     fs::write(

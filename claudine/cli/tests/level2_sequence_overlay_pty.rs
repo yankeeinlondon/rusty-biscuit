@@ -196,11 +196,16 @@ fn level2_pty_sequence_prompt_dedupes_and_launches_all_steps() {
 #[test]
 #[serial_test::serial(pty)]
 fn level2_pty_sequence_step_overlay_satisfies_required_property() {
-    // The reserved overlay key `state` is set to each step's raw value
-    // (the step name for string-form steps). A schema that requires
-    // `state` is therefore satisfied by every step's overlay, so the
+    // The reserved overlay key `state` is set to each step's generated
+    // `step_state` **object** (`name`/`id`/`index`/`count`/…). A schema that
+    // requires `state` is therefore satisfied by every step's overlay, so the
     // interactive prompt should NOT fire for `state` — only for the
     // genuinely-missing `topic`.
+    //
+    // The schema declares `state` as `object`, not `string`: the
+    // string-coercion rule (`{{state}}` renders `state.name`) is a *render*
+    // contract, so the body below still composes "Step alpha", but the value
+    // being validated is the object itself.
     //
     // This exercises the review-5 contract that the per-step status
     // report must honor the per-step effective override map: `state`
@@ -239,7 +244,7 @@ exit 0
         concat!(
             "---\n",
             "$schema:\n",
-            "  state: 'string(required)'\n",
+            "  state: 'object(required)'\n",
             "  topic: 'string(required)'\n",
             "sequence:\n",
             "  - alpha\n",
