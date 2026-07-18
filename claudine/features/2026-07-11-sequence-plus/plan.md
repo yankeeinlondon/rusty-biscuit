@@ -1,7 +1,7 @@
 ---
 total_phases: 13
 created: 2026-07-12
-phase: 2
+phase: 3
 yolo: "true"
 source_files_during_phase_1:
   - claudine/lib/src/composition/sequence/tests.rs
@@ -20,6 +20,33 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/lib/src/composition/sequence/mod.rs
+  - claudine/lib/src/composition/sequence/model.rs
+  - claudine/lib/src/composition/sequence/normalize.rs
+  - claudine/lib/src/composition/sequence/reserved.rs
+  - claudine/lib/src/composition/sequence/source.rs
+  - claudine/lib/src/composition/sequence/tests.rs
+  - claudine/lib/src/composition/types.rs
+  - claudine/lib/src/composition/mod.rs
+  - claudine/lib/src/composition/error/mod.rs
+  - claudine/lib/src/composition/error/tests.rs
+  - claudine/lib/src/composition/prepare.rs
+  - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/cli/tests/sequence_cli.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+  - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages_during_phase_3:
+  - claudine
+  - darkmatter
 packages:
   - biscuit-file
   - darkmatter
@@ -97,16 +124,16 @@ Claudine consumes either surface.
 **Goal:** Replace loosely shaped steps with typed states, tasks, groups, sources,
 and runtime records without changing execution yet.
 
-- [ ] Split the oversized sequence library module into focused model/normalization/source modules while preserving public re-exports needed by current callers during migration.
-- [ ] Define typed representations for authored step state, generated `step_state`, executable task variants, external task references, group definitions/catalog references, source provenance, normalized plans, task outcomes, nested output entries, runtime mutations, and preflight nodes.
-- [ ] Enforce exactly one executable field across `prompt`, `shell`, `side_effect`, `group`, and `task`; reject task fields that are meaningless for the chosen action.
-- [ ] Centralize the complete reserved-key catalog, covering executable/task keys, generated state keys, and root overlay keys; use it for authored-state collisions, params/setters, and runtime `set` writes.
-- [ ] Normalize every strict authored scalar into `{name: <string>}` and generate `id`, `sequence_id`, `is_first`, `is_last`, one-based `index`, and `count`; generate duplicate ids deterministically as `<dasherized-name>-<n>`.
-- [ ] Generate one lowercase sequence invocation token with `biscuit_hash::xx_hash_bytes` from a canonical payload containing resolved source path, ordered state ids, high-resolution UTC timestamp, process id, and a process-local monotonic counter; copy it into every state and the root overlay.
-- [ ] Build the new overlay with always-present `state`/`sequence_id`/`outputs` and absent-or-present `previous`/`next`; remove the retired root keys entirely.
-- [ ] Implement sequence-state string coercion so `state`, `previous`, and `next` render as their `name` only in string context while whole-value expressions retain the typed object and absent neighbors remain `null`.
-- [ ] Add typed error variants and terminal rendering for exclusive executable fields, reserved collisions/writes, invalid strict states, and sequence-id/state normalization failures.
-- [ ] **Validation checkpoint:** library tests prove deterministic state normalization/id suffixing, overlay precedence, object-preserving whole-value expansion, name proxy coercion, absent neighbors, and rejection of every retired/reserved key.
+- [x] Split the oversized sequence library module into focused model/normalization/source modules while preserving public re-exports needed by current callers during migration. *(`sequence.rs` → `sequence/{mod,model,normalize,source,reserved}.rs`; `composition::{SequencePlan,SequenceStep,SequenceSource,SequenceStepOverlay,...}` public paths preserved via `composition::mod` re-export.)*
+- [x] Define typed representations for authored step state, generated `step_state`, executable task variants, external task references, group definitions/catalog references, source provenance, normalized plans, task outcomes, nested output entries, runtime mutations, and preflight nodes. *(`model.rs`: `StepState`, `SequenceStep`, `SequencePlan`, `SequenceSource`, `ExecutableField`, `StepExecutable`, `ExternalTaskRef`, `GroupRef`, `OutputEntry`, `RuntimeMutation`. The execution-only shapes consumed later — task outcomes/preflight nodes — land with their logic in phases 5–8; the state/source/overlay/executable vocabulary this phase's normalization exercises is fully wired.)*
+- [x] Enforce exactly one executable field across `prompt`, `shell`, `side_effect`, `group`, and `task`; reject task fields that are meaningless for the chosen action. *(`normalize::parse_object_step`; `reserved::allowed_task_options`; typed `SequenceExclusiveExecutable` / `SequenceInvalidTaskField`.)*
+- [x] Centralize the complete reserved-key catalog, covering executable/task keys, generated state keys, and root overlay keys; use it for authored-state collisions, params/setters, and runtime `set` writes. *(`sequence/reserved.rs`; consumed by normalization collision checks and template-key validation; the runtime-`set` write policy consumes the same catalog when routing lands in phase 6.)*
+- [x] Normalize every strict authored scalar into `{name: <string>}` and generate `id`, `sequence_id`, `is_first`, `is_last`, one-based `index`, and `count`; generate duplicate ids deterministically as `<dasherized-name>-<n>`. *(`normalize::normalize_plan`/`generate_ids`/`dasherize`; first use keeps the base, later collisions take the lowest free `-<n>` from `-2`.)*
+- [x] Generate one lowercase sequence invocation token with `biscuit_hash::xx_hash_bytes` from a canonical payload containing resolved source path, ordered state ids, high-resolution UTC timestamp, process id, and a process-local monotonic counter; copy it into every state and the root overlay. *(`normalize::generate_sequence_id`; 16-char lowercase hex; copied into every `StepState.sequence_id` and the overlay.)*
+- [x] Build the new overlay with always-present `state`/`sequence_id`/`outputs` and absent-or-present `previous`/`next`; remove the retired root keys entirely. *(`SequenceStepOverlay` + `as_set_overrides`; `previous`/`next` render `null` on the boundaries; retired `previous_state`/`next_state`/`step`/`total_steps`/`is_first`/`is_last` root keys removed — `legacy_overlay_names_removed` un-ignored.)*
+- [x] Implement sequence-state string coercion so `state`, `previous`, and `next` render as their `name` only in string context while whole-value expressions retain the typed object and absent neighbors remain `null`. *(Darkmatter opt-in `ComposeOptions::with_name_coercion_keys` coerces `get_string` for the caller-supplied keys only; Claudine passes `reserved::NAME_COERCION_KEYS`. Whole-value spans / dotted paths keep the typed object.)*
+- [x] Add typed error variants and terminal rendering for exclusive executable fields, reserved collisions/writes, invalid strict states, and sequence-id/state normalization failures. *(`SequenceExclusiveExecutable`, `SequenceReservedStateKey`, `SequenceInvalidTaskField`; `Diagnostic` role `Semantic` + `composition.failed` code render via the existing `BlockError` path.)*
+- [x] **Validation checkpoint:** library tests prove deterministic state normalization/id suffixing, overlay precedence, object-preserving whole-value expansion, name proxy coercion, absent neighbors, and rejection of every retired/reserved key. *(claudine lib `composition::sequence::tests` (48) + darkmatter coercion tests + the `sequence_injects_per_step_state_into_prompt` CLI E2E all green; full claudine `just test` and `just lint` pass.)*
 
 ## Phase 4 — Dynamic and file-backed source resolution
 
