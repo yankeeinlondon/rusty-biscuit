@@ -17,13 +17,12 @@ use biscuit_file::{FileReference, FileReferenceKind, FileResolutionContext};
 use serde_json::{Map, Value};
 
 use super::super::error::{CompositionError, SequenceLoadCause};
-use super::super::json_util::json_type_name;
 use super::data::{self, SourceFormat};
-use super::expr::{SourceExpressionLookup, render_interpolated};
+use super::expr::SourceExpressionLookup;
+use super::formal;
 use super::grammar::{SequenceReference, SourceOperator};
 use super::model::{SequencePlan, SequenceSource};
 use super::normalize::normalize_plan;
-use super::reserved;
 
 /// Resolve an external sequence reference string to an absolute existing path.
 ///
@@ -124,35 +123,36 @@ pub fn load_referenced_sequence(
     }
 
     let formal = is_formal_sequence(&document, reference);
-    let SelectedItems { items, template } = select_items(&document, reference, formal)?;
+    let items = select_items(&document, reference, formal)?;
 
     let items = match &reference.operator {
         Some(operator) => apply_source_operator(items, operator, frontmatter, invocation_path)?,
         None => items,
     };
 
-    // Formal `template:` values fill in before generated fields so a templated
-    // key is ordinary authored state by the time ids and positions are made.
-    let items = match template {
-        Some(template) => apply_template(&template, items, frontmatter, invocation_path)?,
-        None => items,
-    };
+    if formal {
+        let root = document.as_object().expect("formal implies an object root");
+        return formal::normalize_formal_plan(
+            items,
+            formal::formal_keys(root)?,
+            SequenceSource::External {
+                path: path.to_path_buf(),
+            },
+            invocation_path,
+            path,
+            frontmatter,
+            document_fail_fast,
+        );
+    }
 
-    let source = if formal {
-        SequenceSource::External {
-            path: path.to_path_buf(),
-        }
-    } else {
+    normalize_plan(
+        &items,
         SequenceSource::DataFile {
             path: path.to_path_buf(),
-        }
-    };
-
-    let plan = normalize_plan(&items, source, invocation_path, document_fail_fast)?;
-    if formal {
-        validate_state_schema(&plan, &document, path)?;
-    }
-    Ok(plan)
+        },
+        invocation_path,
+        document_fail_fast,
+    )
 }
 
 /// `JSONL` or `NDJSON`, for the offset-unsupported error.
@@ -174,54 +174,25 @@ fn is_formal_sequence(document: &Value, reference: &SequenceReference) -> bool {
             .is_some_and(|root| root.contains_key("sequence"))
 }
 
-/// A loaded document narrowed to the parts the plan is built from.
-struct SelectedItems {
-    /// The list the steps come from.
-    items: Vec<Value>,
-    /// The formal document's `template:` map, when it has one. Only a formal
-    /// root carries one — an offset or operator means the caller is treating
-    /// the document as data, where `template:` is just another key.
-    template: Option<Map<String, Value>>,
-}
-
-/// Narrow a loaded document to its item list, plus the formal `template:` map.
+/// Narrow a loaded document to the item list the plan is built from.
 fn select_items(
     document: &Value,
     reference: &SequenceReference,
     formal: bool,
-) -> Result<SelectedItems, CompositionError> {
+) -> Result<Vec<Value>, CompositionError> {
     if let Some(offset) = &reference.offset {
         let node = data::apply_offset(document, offset)?;
-        return Ok(SelectedItems {
-            items: data::expect_list(node, Some(offset))?,
-            template: None,
-        });
+        return data::expect_list(node, Some(offset));
     }
 
     let Some(root) = document.as_object() else {
         // A root array is the ordinary shape for JSON/JSONL data files.
-        return Ok(SelectedItems {
-            items: data::expect_list(document, None)?,
-            template: None,
-        });
+        return data::expect_list(document, None);
     };
 
     if formal {
         let list = root.get("sequence").expect("formal implies `sequence`");
-        let template = match root.get("template") {
-            Some(Value::Object(map)) => Some(map.clone()),
-            Some(other) => {
-                return Err(CompositionError::SequenceExternalWrongType(format!(
-                    "`template` must be an object, got {}",
-                    json_type_name(other)
-                )));
-            }
-            None => None,
-        };
-        return Ok(SelectedItems {
-            items: data::expect_list(list, Some("sequence"))?,
-            template,
-        });
+        return data::expect_list(list, Some("sequence"));
     }
 
     // Clean break (RATIFIED 2026-07-12): the external-only `kind: sequence` +
@@ -254,112 +225,4 @@ fn apply_source_operator(
         let lookup = SourceExpressionLookup::new(frontmatter, base_dir).with_item(item);
         super::expr::evaluate_whole(expression, &lookup)
     })
-}
-
-/// Validate a formal document's `template` and apply it to every item.
-///
-/// A template key never overwrites a value the item already defines, and every
-/// value is rendered through the Darkmatter expression engine with the item's
-/// fields shadowing the invoking document's frontmatter.
-fn apply_template(
-    template: &Map<String, Value>,
-    items: Vec<Value>,
-    frontmatter: &Map<String, Value>,
-    invocation_path: &Path,
-) -> Result<Vec<Value>, CompositionError> {
-    for (key, value) in template {
-        if reserved::is_reserved_state_key(key) {
-            return Err(CompositionError::SequenceReservedTemplateKey(key.clone()));
-        }
-        if !value.is_string() {
-            return Err(CompositionError::SequenceTemplateWrongType {
-                key: key.clone(),
-                found: json_type_name(value).to_string(),
-            });
-        }
-    }
-
-    let base_dir = invocation_path.parent().unwrap_or_else(|| Path::new("."));
-
-    items
-        .into_iter()
-        .map(|item| {
-            let step_map = item
-                .as_object()
-                .ok_or(CompositionError::SequenceTemplateRequiresObjectItems)?;
-            let lookup = SourceExpressionLookup::new(frontmatter, base_dir).with_item(step_map);
-
-            let mut new_map = step_map.clone();
-            for (key, value) in template {
-                if new_map.contains_key(key) {
-                    continue;
-                }
-                let raw = value.as_str().expect("validated string above");
-                new_map.insert(key.clone(), render_interpolated(raw, &lookup)?);
-            }
-            Ok(Value::Object(new_map))
-        })
-        .collect()
-}
-
-/// Validate every step's normalized state against a formal document's
-/// `$schema`.
-///
-/// Only the state portion is validated: executable and task keys are not state
-/// and were already partitioned out during normalization. The schema is applied
-/// through the ordinary Darkmatter document validator by presenting each state
-/// as a frontmatter-shaped document, so `$schema` behaves identically here and
-/// on a normal composition source.
-fn validate_state_schema(
-    plan: &SequencePlan,
-    document: &Value,
-    path: &Path,
-) -> Result<(), CompositionError> {
-    let Some(schema) = document.as_object().and_then(|root| root.get("$schema")) else {
-        return Ok(());
-    };
-
-    let schemas = darkmatter::markdown::schemas::DarkmatterSchemas::new();
-
-    let load_failure = |source: SequenceLoadCause| CompositionError::SequenceExternalLoad {
-        context: path.display().to_string(),
-        source,
-    };
-
-    for step in &plan.steps {
-        let mut frontmatter = darkmatter::markdown::Frontmatter::new();
-        frontmatter
-            .insert("$schema", schema.clone())
-            .map_err(|e| load_failure(SequenceLoadCause::Frontmatter(Box::new(e))))?;
-        let Value::Object(state) = step.state.to_value() else {
-            unreachable!("StepState::to_value always produces an object");
-        };
-        for (key, value) in state {
-            frontmatter
-                .insert(&key, value)
-                .map_err(|e| load_failure(SequenceLoadCause::Frontmatter(Box::new(e))))?;
-        }
-
-        let markdown = darkmatter::markdown::Markdown::with_frontmatter(frontmatter, "");
-        let report = schemas
-            .validate(&markdown)
-            .map_err(|e| load_failure(SequenceLoadCause::Schema(Box::new(e))))?;
-
-        if let Some(problem) = report.problems.first() {
-            // `property` is set only for missing-required failures; every other
-            // kind locates itself with the instance pointer instead.
-            let property = problem
-                .property
-                .clone()
-                .unwrap_or_else(|| problem.path.clone());
-            return Err(CompositionError::SequenceStateSchemaViolation {
-                index: step.index,
-                id: step.state.id.clone(),
-                property,
-                message: problem.message.clone(),
-            });
-        }
-    }
-
-    Ok(())
 }

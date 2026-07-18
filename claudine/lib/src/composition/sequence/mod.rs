@@ -14,6 +14,9 @@
 //!   `<file-ref> [-> offset] [::op(args)]` suffix parser;
 //! - [`data`] — multi-format loading, offset traversal, operator application;
 //! - [`expr`] — expression evaluation for dynamic sources and templates;
+//! - [`formal`] — the one formal-document pipeline (scalar shorthand →
+//!   `template:` → generated fields → step-state `$schema`) both entry modes
+//!   share;
 //! - [`normalize`] — strict/lenient state normalization, id suffixing, and the
 //!   `sequence_id` invocation token;
 //! - [`preflight`] — the recursive task graph: external task/group/catalog/
@@ -27,6 +30,7 @@
 
 pub mod data;
 pub mod expr;
+pub mod formal;
 pub mod grammar;
 pub mod model;
 pub mod normalize;
@@ -121,6 +125,20 @@ pub fn resolve_sequence_plan_with(
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
     let plan = match grammar::classify_source(&sequence_value)? {
+        // A directly invoked YAML document is itself the formal document, so it
+        // takes the same template/`$schema` pipeline a referenced one does; a
+        // Markdown frontmatter that merely declares a list is not.
+        SequenceSourceSpec::Inline(items) if formal::is_direct_formal_document(source) => {
+            formal::normalize_formal_plan(
+                items,
+                formal::formal_keys(&frontmatter)?,
+                Source::Inline,
+                &source.resolved_path,
+                &source.resolved_path,
+                &frontmatter,
+                fail_fast,
+            )?
+        }
         SequenceSourceSpec::Inline(items) => normalize::normalize_plan(
             &items,
             Source::Inline,

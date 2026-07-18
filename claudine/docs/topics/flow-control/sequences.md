@@ -254,17 +254,26 @@ $schema:
     desc: string(required)
 ```
 
-Template values apply **before** generated fields, so `desc` is ordinary
-authored state by the time `id` and `index` are made. A schema failure names the
-step index, its id, and the failing property path.
+Normalization runs in a fixed order: scalar shorthand (`- blue`) expands to
+`{name: blue}` first, then `template:` fills in, then the generated fields
+(`id`, `index`, `is_first`, …), and `$schema` validates the finished state last.
+So `desc` is ordinary authored state by the time `id` and `index` are made, and
+a `template:` default reaches a scalar step exactly as it reaches an object one.
+A schema failure names the step index, its id, and the failing property path.
 
-> **Known asymmetry.** The `$schema` above validates each step's *state* when the
-> file is **referenced** from another document (`sequence: formal.yaml`). When
-> the same file is invoked **directly** (`claudine sequence formal.yaml`) it is
-> also the composition document, so its root `$schema` is validated as the
-> document's own frontmatter schema instead. The specification calls for one
-> shape across both entry modes; reconciling them is deferred. Both behaviors are
-> pinned by tests in `cli/tests/sequence_sources_cli.rs`.
+A `template:` value is `any`, not just a string: a **string** is interpolated
+with the item's fields in scope, and any **other** value (`rank: 5`, a list, a
+map) is a literal default. A default never overwrites a value the item already
+carries.
+
+> **One shape, both entry modes.** `template:` and `$schema:` behave identically
+> whether the file is **referenced** (`sequence: formal.yaml`) or invoked
+> **directly** (`claudine sequence formal.yaml`) — both routes share a single
+> normalization pipeline. In particular the root `$schema` is always the *step
+> state* schema; on a directly invoked document it is not also validated as that
+> document's own frontmatter schema. Parity is pinned by
+> `a_formal_document_normalizes_identically_through_both_entry_paths` in
+> `cli/tests/sequence_sources_cli.rs`.
 
 The retired external `kind: sequence` + `list:` form is **gone**. Use
 `sequence:`.

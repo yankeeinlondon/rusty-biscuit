@@ -1128,14 +1128,6 @@ pub enum CompositionError {
     #[error("sequence step at index {index} has `name` of type {found}, expected string")]
     SequenceStepNameWrongType { index: usize, found: String },
 
-    /// A template value is not a string.
-    #[error("sequence template key `{key}` has type {found}, expected string")]
-    SequenceTemplateWrongType { key: String, found: String },
-
-    /// Templates require all list items to be objects.
-    #[error("sequence templates require all list items to be objects (dictionaries)")]
-    SequenceTemplateRequiresObjectItems,
-
     /// A template key collides with a reserved sequence overlay key.
     #[error("sequence template key `{0}` collides with reserved sequence key")]
     SequenceReservedTemplateKey(String),

@@ -708,25 +708,51 @@ fn missing_environment_variable_surface_is_preserved() {
     );
 }
 
+/// The specified template shape is `{ '<string>': any }`: a string value is
+/// interpolated, and any other value is a literal default. Only a string is
+/// expression input — a number, boolean, list, or map is copied verbatim.
 #[test]
-fn external_template_non_string_value_fails() {
+fn external_template_non_string_values_are_literal_defaults() {
     let dir = TempDir::new().unwrap();
-    let yaml_path = dir.path().join("bad.yaml");
-    // `rank` is a non-reserved template key with a non-string value; the
-    // wrong-type check must fire (a reserved key like `count` would trip the
-    // reserved-key check first — see `external_template_reserved_key_fails`).
+    let yaml_path = dir.path().join("typed.yaml");
     fs::write(
         &yaml_path,
-        "kind: sequence\ntemplate:\n  rank: 42\nsequence:\n  - name: One\n",
+        "kind: sequence\ntemplate:\n  rank: 42\n  active: true\n  tags: [a, b]\n\
+         sequence:\n  - name: One\n  - name: Two\n    rank: 7\n",
     )
     .unwrap();
 
-    let source = make_source(&dir, &[("sequence", json!("bad.yaml"))], "Prompt");
-    let err = resolve_sequence_plan(&source).unwrap_err();
-    assert!(
-        matches!(err, CompositionError::SequenceTemplateWrongType { .. }),
-        "got: {err}"
-    );
+    let source = make_source(&dir, &[("sequence", json!("typed.yaml"))], "Prompt");
+    let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+
+    // The typed values survive as themselves, not as rendered strings.
+    assert_eq!(plan.steps[0].state.extra["rank"], json!(42));
+    assert_eq!(plan.steps[0].state.extra["active"], json!(true));
+    assert_eq!(plan.steps[0].state.extra["tags"], json!(["a", "b"]));
+    // A default never overwrites a value the item already defines.
+    assert_eq!(plan.steps[1].state.extra["rank"], json!(7));
+}
+
+/// Scalar shorthand normalizes *before* template defaults merge, so `- One`
+/// carries them exactly as `- name: One` does — and its own `name` is in scope
+/// for the template's expressions.
+#[test]
+fn external_template_applies_to_scalar_shorthand_steps() {
+    let dir = TempDir::new().unwrap();
+    let yaml_path = dir.path().join("scalars.yaml");
+    fs::write(
+        &yaml_path,
+        "kind: sequence\ntemplate:\n  desc: \"{{name}}!\"\n  rank: 1\nsequence:\n  - One\n  - Two\n",
+    )
+    .unwrap();
+
+    let source = make_source(&dir, &[("sequence", json!("scalars.yaml"))], "Prompt");
+    let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+
+    assert_eq!(plan.steps[0].name, "One");
+    assert_eq!(plan.steps[0].state.extra["desc"], json!("One!"));
+    assert_eq!(plan.steps[0].state.extra["rank"], json!(1));
+    assert_eq!(plan.steps[1].state.extra["desc"], json!("Two!"));
 }
 
 #[test]

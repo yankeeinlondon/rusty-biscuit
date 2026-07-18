@@ -385,47 +385,80 @@ fn a_referenced_formal_documents_schema_validates_the_step_state() {
     );
 }
 
-/// A directly-invoked YAML file is simultaneously the data source *and* the
-/// composition document, so its root `$schema` is validated as the document's
-/// own frontmatter schema — not as the per-step state schema it becomes when
-/// the same file is referenced.
+/// The whole formal-document contract in one fixture, reached both ways.
 ///
-/// This asymmetry is a known deviation from the specification's
-/// "both entry modes accept the identical document shape" and is pinned here so
-/// a change to it is a deliberate one. See `docs/topics/flow-control/sequences.md`.
+/// The file is written once and invoked twice — directly, and through a
+/// Markdown document that references it — because the spec's "both entry modes
+/// accept the identical document shape" is only meaningful if the *same bytes*
+/// normalize the same way. It exercises scalar shorthand (`- blue`), an
+/// interpolated template value, a typed literal template default, a template
+/// default an item overrides, and generated fields, all of which the root
+/// `$schema` must then accept as step state.
+///
+/// The two entry modes differ in exactly one respect: a directly invoked YAML
+/// has no Markdown body, so its steps render through a document-level `prompt`
+/// the referencing document supplies as its body instead. Both strings are
+/// therefore identical, and so are both results.
+fn write_parity_fixture(workspace: &TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
+    const STEP_BODY: &str = "Step {{ state.name }}/{{ state.desc }}/{{ state.rank }}.";
+
+    let direct = write(
+        workspace,
+        "formal.yaml",
+        &format!(
+            "kind: sequence\nprompt: \"{STEP_BODY}\"\n\
+             sequence:\n  - blue\n  - name: red\n    rank: 3\n\
+             template:\n  desc: \"{{{{ name }}}}!\"\n  rank: 5\n\
+             $schema:\n  desc: string(required)\n  rank: number(required)\n"
+        ),
+    );
+    let referenced = write(
+        workspace,
+        "ref.md",
+        &format!("---\nsequence: formal.yaml\n---\n{STEP_BODY}\n"),
+    );
+    (direct, referenced)
+}
+
 #[test]
-fn a_directly_invoked_documents_schema_validates_the_document_not_the_state() {
+fn a_formal_document_normalizes_identically_through_both_entry_paths() {
+    let workspace = tempdir().unwrap();
+    let (direct, referenced) = write_parity_fixture(&workspace);
+
+    let expected = ["blue/blue!/5", "red/red!/3"];
+    assert_eq!(
+        composed_steps(&workspace, &direct, &[]),
+        expected,
+        "direct invocation"
+    );
+    assert_eq!(
+        composed_steps(&workspace, &referenced, &[]),
+        expected,
+        "the same file, referenced"
+    );
+}
+
+/// The counterpart to
+/// [`a_referenced_formal_documents_schema_validates_the_step_state`]: a
+/// directly invoked document's root `$schema` is the *step state* schema too,
+/// not its own frontmatter schema. Before this was unified, the direct mode
+/// reported `rank` merely missing from the document root.
+#[test]
+fn a_directly_invoked_documents_schema_validates_the_step_state() {
     let workspace = tempdir().unwrap();
     let doc = write(
         &workspace,
         "formal.yaml",
-        "kind: sequence\nprompt: \"Handle {{ state.name }}\"\nsequence:\n  - name: blue\n    rank: 5\n$schema:\n  rank: number(required)\n",
+        "kind: sequence\nprompt: \"Handle {{ state.name }}\"\nsequence:\n  - name: blue\n    rank: not-a-number\n$schema:\n  rank: number(required)\n",
     );
 
     let (_, stderr) = dry_run(&workspace, &doc, &[], false);
+    let flat = stderr.replace('\u{2503}', " ").split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        stderr.contains("Missing required schema properties"),
-        "`rank` lives in the step state, so a root-level schema reports it missing; stderr:\n{stderr}"
+        flat.contains("sequence step 0 (`blue`) failed schema validation at `/rank`"),
+        "the direct mode must report the same step-state violation the referenced mode does; \
+         stderr:\n{flat}"
     );
-}
-
-#[test]
-fn direct_invocation_and_a_markdown_reference_read_the_same_sequence_shape() {
-    let workspace = tempdir().unwrap();
-    // Identical `sequence:` block, reached two ways. Only the prompt surface
-    // differs: a directly-invoked YAML has no Markdown body, so its steps run
-    // through a document-level `prompt`.
-    write(
-        &workspace,
-        "direct.yaml",
-        "kind: sequence\nprompt: \"Step {{ state.name }}.\"\nsequence:\n  - alpha\n  - beta\n",
-    );
-    write(&workspace, "shared.yaml", "kind: sequence\nsequence:\n  - alpha\n  - beta\n");
-    let referenced = source_doc(&workspace, "ref.md", "shared.yaml");
-
-    let direct = workspace.path().join("direct.yaml");
-    assert_eq!(composed_steps(&workspace, &direct, &[]), ["alpha", "beta"]);
-    assert_eq!(composed_steps(&workspace, &referenced, &[]), ["alpha", "beta"]);
 }
 
 /// A directly invoked YAML file has no Markdown body, so every step must carry

@@ -143,6 +143,46 @@ pub fn load_yaml_document(path: &Path) -> Result<Markdown, CompositionError> {
     ))
 }
 
+/// Frontmatter keys that belong to a *formal sequence document* rather than to
+/// the composition frontmatter of the document carrying them.
+///
+/// Referenced through `sequence: steps.yaml` these keys never reach the
+/// invoking document's frontmatter at all; a directly invoked YAML document has
+/// only one mapping to put them in, so they must be lifted back out before
+/// composition — otherwise Darkmatter's always-on `$schema` stage would judge
+/// each step's *state* schema against the document root, which cannot satisfy
+/// it. The sequence plan has already consumed both by this point.
+const FORMAL_SEQUENCE_KEYS: [&str; 2] = ["$schema", "template"];
+
+/// Return `source` with [`FORMAL_SEQUENCE_KEYS`] removed when it is a directly
+/// invoked formal sequence document, and unchanged otherwise.
+#[must_use]
+pub fn without_formal_sequence_keys(
+    source: &ResolvedCompositionSource,
+) -> ResolvedCompositionSource {
+    if !super::sequence::formal::is_direct_formal_document(source) {
+        return source.clone();
+    }
+
+    let mut frontmatter = darkmatter::markdown::Frontmatter::new();
+    for (key, value) in source.markdown.frontmatter().as_map() {
+        if FORMAL_SEQUENCE_KEYS.contains(&key.as_str()) {
+            continue;
+        }
+        // The values round-trip from a frontmatter that already accepted them,
+        // so a rejection here is not reachable; keeping the key is strictly
+        // better than panicking on an unreachable branch.
+        let _ = frontmatter.insert(key, value.clone());
+    }
+
+    ResolvedCompositionSource {
+        original_ref: source.original_ref.clone(),
+        resolved_path: source.resolved_path.clone(),
+        original_text: source.original_text.clone(),
+        markdown: Markdown::with_frontmatter(frontmatter, source.markdown.content()),
+    }
+}
+
 /// Re-read an already-resolved source from disk.
 ///
 /// Sequence steps compose just in time, so each step reads the file as it
@@ -152,7 +192,9 @@ pub fn load_yaml_document(path: &Path) -> Result<Markdown, CompositionError> {
 /// magic-root discovery mid-sequence could silently retarget the run.
 ///
 /// A YAML source reloads through [`load_yaml_document`], the same conversion
-/// its initial resolution used.
+/// its initial resolution used, and then sheds its formal sequence keys
+/// ([`without_formal_sequence_keys`]) so every step composes the same document
+/// shape the first one did.
 ///
 /// ## Errors
 ///
@@ -173,12 +215,12 @@ pub fn reload_composition_source(
             .map_err(|e| map_load_error(&source.resolved_path, e))?
     };
 
-    Ok(ResolvedCompositionSource {
+    Ok(without_formal_sequence_keys(&ResolvedCompositionSource {
         original_ref: source.original_ref.clone(),
         resolved_path: source.resolved_path.clone(),
         original_text,
         markdown,
-    })
+    }))
 }
 
 /// Build a [`FileReference`] for a top-level Claudine prompt argument with the

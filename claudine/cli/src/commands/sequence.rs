@@ -277,6 +277,11 @@ fn run_sequence_inner(
         },
     )?;
 
+    // The plan now owns a formal document's `template:` and `$schema`; from here
+    // down `source` is only ever composed, and there those are not frontmatter.
+    // Every later re-read sheds them too (`reload_composition_source`).
+    let source = composition::without_formal_sequence_keys(&source);
+
     // A dynamic source legitimately resolves to nothing — a clean repository
     // makes `{{ ctx.dirty_files }}` empty. That is a no-op, not a failure; a
     // static `sequence: []` is still rejected during normalization.
