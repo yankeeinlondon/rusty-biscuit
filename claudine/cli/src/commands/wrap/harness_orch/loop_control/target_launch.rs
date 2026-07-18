@@ -1,29 +1,58 @@
-//! R6 — target-dependent launch state is rebuilt per document.
+//! R6/R8 — document-dependent launch state is rebuilt from the document that is
+//! about to run.
 //!
-//! When a `proxy` hand-off adopts a new active document, its launch decisions
-//! must be recomputed from the *target's* own frontmatter plus the immutable
-//! invocation intent, not inherited from the router that pointed at it. This
-//! module owns the reusable rebuild the coordinator invokes once a target
-//! stabilizes; a proxied target therefore launches with the same launch
-//! identity a direct invocation of that target would produce.
+//! Launch decisions must be recomputed from the frontmatter of the document the
+//! attempt will actually execute, not inherited from whatever produced the
+//! previous attempt. Two callers need that:
+//!
+//! - **Proxy adoption (R6).** A hand-off adopts a new active document, so its
+//!   launch identity comes from the *target's* own frontmatter plus the
+//!   immutable invocation intent, not from the router that pointed at it.
+//! - **Every retry/resume fresh-read boundary (R8).** Those boundaries
+//!   re-materialize the active document from disk. If the refreshed frontmatter
+//!   resolves to a different launch identity, the attempt must launch with the
+//!   refreshed one — and, for `resume`, that difference is exactly what the
+//!   session-compatibility key has to see in order to refuse mixing a live
+//!   session with a newly prepared launch plan.
+//!
+//! Both paths share [`rebuild_launch_env`]; only proxy adoption additionally
+//! needs the early-binding context, so [`rebuild_target_launch`] wraps it.
 //!
 //! ## Scope
 //!
-//! This rebuild recomputes the target's **launch identity** — provider/model
-//! selection (honoring explicit CLI precedence) projected into the
-//! `AGENT`/`MODEL`/`YOLO` environment — and propagates it to the two consumers
-//! that read it: the provider child's environment (via the materialized
-//! prompt's `env_overrides`, which [`super::super::build_harness_launch`]
-//! overlays onto the base env) and the target's lifecycle early-binding context
-//! (installed on the guard, so `env.MODEL`/`ctx.model` in the target's stacks
-//! resolve to the target's own identity).
+//! The rebuild recomputes **launch identity** — provider/model selection
+//! (honoring explicit CLI precedence) projected into the `AGENT`/`MODEL`/`YOLO`
+//! environment — and propagates it to the provider child's environment (via the
+//! materialized prompt's `env_overrides`, which
+//! [`super::super::build_harness_launch`] overlays onto the base env). Proxy
+//! adoption also installs the rebuilt early-binding context on the guard, so
+//! `env.MODEL`/`ctx.model` in the target's stacks resolve to its own identity.
 //!
-//! Facets that require a provider *switch* to rebuild (profile/binary, argv
-//! entrypoint, MCP runtime injection, system-prompt delivery, child CWD) are
-//! not yet rebuilt here: they need the launch bundle to become loop-owned rather
-//! than borrowed from the caller's stack. Explicit CLI provider selection — the
-//! common case — pins the provider, so this rebuild is correct for it; a
-//! target-frontmatter-driven provider change is the remaining structural work.
+//! ## This is the in-harness fallback, not the composition-command path
+//!
+//! [`rebuild_target_launch`] runs only when a handoff has **no** run ledger to
+//! surface to — see `super::surface_or_adopt_terminal_proxy`, which adopts
+//! in-harness only in that case. Every composition command (`compose`,
+//! `inline-compose`, `sequence`) carries a ledger, so its handoffs surface to the
+//! command-owned coordinator instead, and the target is re-prepared as a fresh
+//! document through `commands::compose::prep::prepare_and_run_active_document` —
+//! which re-enters the production selection/MCP/argv pipeline and therefore
+//! rebuilds profile/binary sub-selection, the argv entrypoint, MCP runtime
+//! injection, child CWD, and system-prompt delivery from the target's own
+//! frontmatter.
+//!
+//! This env-only overlay is consequently a **fallback** scope, and its limits are
+//! limits of that fallback alone: it does not re-select profile/binary, argv
+//! entrypoint, or MCP runtime injection, so on this path those stay as the
+//! invocation resolved them. They diverge only when a proxy changes the provider
+//! itself; explicit CLI provider selection — the common case on this path — pins
+//! it.
+//!
+//! [`rebuild_launch_env`] is the shared half and *is* on the hot path for every
+//! retry/resume fresh read regardless of route, which is what lets `model` move
+//! across a canonical refresh and makes the AC15 refusal reachable. The other
+//! compatibility facets are argv-derived or CLI-resolved and cannot move across a
+//! same-document refresh on either path — see `super::super::session_key`.
 
 use std::path::Path;
 
@@ -45,6 +74,48 @@ pub(super) struct TargetLaunchRebuild {
     pub(super) prepared_context: darkmatter::markdown::compose::ComposeContext,
 }
 
+/// Recompute the `AGENT`/`MODEL`/`YOLO` launch-identity overlays from a
+/// prepared document's own selection hints.
+///
+/// This is the whole of the rebuild that the per-attempt fresh-read boundary
+/// needs; proxy adoption calls it through [`rebuild_target_launch`], which adds
+/// the early-binding context. Splitting them keeps the retry/resume path off the
+/// context capture it has no consumer for.
+///
+/// `cli_model` is the explicit `--model`, which stays authoritative over any
+/// frontmatter `model:`. The shape mirrors `install_agent_env_for_composition`
+/// exactly — `AGENT` always, `MODEL` only when a model resolved, `YOLO` always —
+/// because that identity is what a direct invocation of the same document at the
+/// same moment would install, and equality with it is the contract.
+pub(super) fn rebuild_launch_env(
+    provider: Provider,
+    cli_model: Option<&str>,
+    yolo: bool,
+    repo_root: Option<&Path>,
+    document: &MaterializedHarnessPrompt,
+) -> Vec<(String, String)> {
+    let selection_config =
+        crate::commands::wrap::composition::load_selection_config_for_repo(repo_root);
+    let catalog = match &selection_config {
+        Some(cfg) => ModelCatalogService::with_overrides(cfg.model_overrides.clone()),
+        None => ModelCatalogService::new(),
+    };
+    let (model, _model_reason) = claudine::composition::resolve_model_with_hints(
+        provider,
+        &document.selection_hints,
+        cli_model,
+        Some(&catalog),
+    );
+
+    let mut env_overrides: Vec<(String, String)> = Vec::new();
+    env_overrides.push(("AGENT".to_string(), provider.as_slug().to_string()));
+    if let Some(model) = &model {
+        env_overrides.push(("MODEL".to_string(), model.clone()));
+    }
+    env_overrides.push(("YOLO".to_string(), yolo.to_string()));
+    env_overrides
+}
+
 /// Recompute a proxied target's launch identity from its own frontmatter.
 ///
 /// `provider` is the run's resolved provider (pinned by an explicit CLI flag in
@@ -62,28 +133,7 @@ pub(super) fn rebuild_target_launch(
     launch_area: &Path,
     target: &MaterializedHarnessPrompt,
 ) -> TargetLaunchRebuild {
-    let selection_config =
-        crate::commands::wrap::composition::load_selection_config_for_repo(repo_root);
-    let catalog = match &selection_config {
-        Some(cfg) => ModelCatalogService::with_overrides(cfg.model_overrides.clone()),
-        None => ModelCatalogService::new(),
-    };
-    let (model, _model_reason) = claudine::composition::resolve_model_with_hints(
-        provider,
-        &target.selection_hints,
-        cli_model,
-        Some(&catalog),
-    );
-
-    // Mirror `install_agent_env_for_composition`: AGENT always, MODEL only when
-    // a model resolved, YOLO always. Keeping the shape identical is what makes a
-    // proxied target's lifecycle `env.*` match the direct invocation's.
-    let mut env_overrides: Vec<(String, String)> = Vec::new();
-    env_overrides.push(("AGENT".to_string(), provider.as_slug().to_string()));
-    if let Some(model) = &model {
-        env_overrides.push(("MODEL".to_string(), model.clone()));
-    }
-    env_overrides.push(("YOLO".to_string(), yolo.to_string()));
+    let env_overrides = rebuild_launch_env(provider, cli_model, yolo, repo_root, target);
 
     // Rebuild the early-binding context the same way the pipeline builds the
     // router's lifecycle context (see `construct_lifecycle_runtime`): capture at

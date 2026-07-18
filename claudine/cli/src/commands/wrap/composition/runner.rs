@@ -88,7 +88,11 @@ pub(super) struct CompositionRunCtx<'a> {
 }
 
 /// Execute a single composition iteration: harness-plan parse, pre-flight
-/// shell approval, dry-run seam, env/prompt output, and the harness loop.
+/// shell approval, env/prompt output, and the harness loop.
+///
+/// Live runs only — `--dry-run` returns at the seam in
+/// [`super::pipeline::execute_composition_request_inner_with_guard`], before the
+/// lifecycle runtime this body depends on is constructed.
 ///
 /// This is the promoted form of the former inline `run_body` closure. `guard` and
 /// `perf_collector` are passed separately because they are mutable and vary per
@@ -271,12 +275,10 @@ pub(super) fn run_composition_body(
         })?;
 
         // Emit the preflight-complete indicator for direct compose and
-        // inline-compose runs. This must sit *before* the dry-run seam below:
-        // dry-run returns early, so a completion message placed after it would
-        // never render for dry-run — leaving the "Starting pre-flight checks"
-        // spinner without its matching "complete" line. Sequence runs handle
-        // their own preflight messaging in the orchestrator
-        // (`wrap::sequence::execute_sequence`) and must not re-emit per step.
+        // inline-compose runs, matching the "Starting pre-flight checks"
+        // spinner. Sequence runs handle their own preflight messaging in the
+        // orchestrator (`wrap::sequence::execute_sequence`) and must not
+        // re-emit per step.
         if !request.sequence && !silent && !quiet {
             let compose_label = if is_inline {
                 "inline composition"
@@ -291,55 +293,10 @@ pub(super) fn run_composition_body(
         }
     }
 
-    // --dry-run seam: the full composition pipeline (compose, real shell
-    // expansion, shell approval, harness pre-checks) has now run. Stop here —
-    // before any provider launches — and emit the composed artifacts:
-    //   - the composed body → stdout (the data product; pipeable/redirectable)
-    //   - the finalized frontmatter (highlighted YAML) → stderr
-    //   - a metadata table → stderr (after the frontmatter)
-    // `--quiet` / `--silent` do not suppress this render: the dry-run output
-    // *is* the command's purpose.
-    if request.dry_run {
-        // Dry-run never launches the provider or mutates the source.
-        // Pre-check validation has been removed; only timeout parsing
-        // and shell-command audit run during composition preflight.
-        //
-        // `initial_transition` is deliberately dropped here, and this is the
-        // one place that is correct. Dry-run *does* fire `initialize` (its
-        // `blocked`/`finalize` routing is contract, not accident), so a
-        // router's `initialize` can hand off — but a dry run reports what the
-        // document it was given would do, and traversing the hand-off would
-        // mean composing, approving, and rendering a different document than
-        // the one named on the command line. The seam owns that decision
-        // rather than leaving it to a caller that forgot to look.
-        let render = super::dry_run::DryRunRender::from_request(request);
-
-        crate::log::data(&render.body);
-        crate::log::message(&super::dry_run::render_hr(term));
-        crate::log::message(&super::dry_run::render_frontmatter_heading(term));
-        crate::log::message("");
-        crate::log::message(&super::dry_run::render_frontmatter(&render.frontmatter, term));
-        crate::log::message(&super::dry_run::render_metadata_table(&render, term));
-
-        if let Some(collector) = perf_collector.as_mut() {
-            collector.set_dry_run();
-        }
-        let outcome = SingleCompositionOutcome {
-            exit_code: 0,
-            provider,
-            agent_perf: None,
-            // Dry-run never produces a per-iteration summary.
-            iteration_signals: None,
-            terminal_signal: None,
-            initialize_handoff: None,
-        };
-        // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
-        // The perf report is always emitted to stderr when requested.
-        if let Some(collector) = perf_collector.take() {
-            crate::perf::emit_report(&collector.into_report());
-        }
-        return Ok(outcome);
-    }
+    // No dry-run seam here. `--dry-run` returns from
+    // `pipeline::execute_composition_request_inner_with_guard` before the
+    // lifecycle runtime is even constructed, so this body — and every lifecycle
+    // event it can reach — is live-run-only.
 
     // Plan is validated; the harness loop re-parses from the materialized
     // frontmatter, so the live path no longer needs this copy.

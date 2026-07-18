@@ -379,6 +379,44 @@ pub(crate) fn prepare_and_run_active_document(
         claudine::harness::report::report_proxy_handoff(&source.resolved_path, &wrap_terminal());
     }
 
+    // R10 — the target's schema verdict is reached by Claudine's typed layer,
+    // not by whichever layer happens to compose the document first.
+    //
+    // The caller's own document is pre-validated once at the invocation boundary
+    // (`run_composition_inner`), before the pre-flight compose, precisely so the
+    // user-visible surface is a typed `CompositionError` rather than
+    // Darkmatter's raw `MarkdownError::SchemaValidationFailed`. A proxied target
+    // enters here instead, and used to reach the pre-flight compose below with
+    // no pre-validation in front of it — so the *same document failing the same
+    // way* rendered `CompositionError: schema validation` (with problem list and
+    // frontmatter excerpt) when invoked directly and `MarkdownError: schema
+    // validation failed` (different remediation, no excerpt) when reached
+    // through a proxy. That is exactly the cross-route typed identity AC28
+    // requires, and the equivalence the canonical preparation service already
+    // guarantees one layer down.
+    //
+    // Non-interactive by construction: interactive collection of missing
+    // required values belongs to the invocation boundary, where the caller is
+    // still at the prompt. A target adopted mid-run inherits the caller's
+    // collected values through `set_overrides` and surfaces anything still
+    // missing as the typed `MissingProperties` diagnostic.
+    //
+    // Invalid *optional* values are elided here, so the cleaned source and
+    // overrides — not the originals — flow into eager resolution, the pre-flight
+    // compose, and preparation.
+    let (source, set_overrides) = if first {
+        (source, set_overrides)
+    } else {
+        let pre = claudine::composition::pre_validate_schema(
+            &source,
+            set_overrides.as_ref(),
+            launch_area_fallback.as_deref(),
+        )
+        .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
+        emit_dropped_optional_warnings(&pre.dropped_optionals);
+        (pre.source, pre.set_overrides)
+    };
+
     // Phase 2 (2026-05-09-slow-prep): build the per-invocation prep context
     // immediately after source resolution. The context owns the single
     // source-repo-root discovery, the loaded selection config, and the

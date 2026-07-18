@@ -35,13 +35,6 @@ pub(super) struct ActiveDocumentCoordinator {
     ledger: RunLedger,
     bootstrap_pending: bool,
     active_provenance: Option<ProxyProvenance>,
-    /// The active target's rebuilt launch-identity env overlays
-    /// (`AGENT`/`MODEL`/`YOLO`), recomputed by the R6 target launch rebuild and
-    /// retained so every subsequent attempt's child environment carries the
-    /// target's own configuration, not the router's. Empty until a proxy is
-    /// committed and its target's launch state is rebuilt; discarded on the next
-    /// hand-off (a fresh target rebuilds its own).
-    target_env_overrides: Vec<(String, String)>,
 }
 
 impl ActiveDocumentCoordinator {
@@ -55,24 +48,7 @@ impl ActiveDocumentCoordinator {
             ledger: RunLedger::new(origin, approval_cache),
             bootstrap_pending: false,
             active_provenance: None,
-            target_env_overrides: Vec::new(),
         }
-    }
-
-    /// The active target's rebuilt launch-identity env overlays, applied to every
-    /// attempt's child environment. Empty for a directly-invoked document.
-    pub(super) fn target_env_overrides(&self) -> &[(String, String)] {
-        &self.target_env_overrides
-    }
-
-    /// Install the rebuilt target launch identity produced by the R6 rebuild.
-    ///
-    /// Called during the target's staged boot, once the target's provider/model
-    /// have been recomputed from its own frontmatter. Replaces (never merges) any
-    /// prior target's overlays: launch identity is document-scoped and a fresh
-    /// hand-off owns its own.
-    pub(super) fn set_target_env_overrides(&mut self, overrides: Vec<(String, String)>) {
-        self.target_env_overrides = overrides;
     }
 
     /// How the active document was reached, or `None` when the caller named it
@@ -170,10 +146,6 @@ impl ActiveDocumentCoordinator {
         // closure after the source has already ended. The target's own config is
         // installed by its staged boot, once it exists.
         lifecycle_guard.set_config(LifecycleConfig::default());
-        // The replaced document's rebuilt launch identity is discarded with the
-        // rest of its state; the newly adopted target rebuilds its own during its
-        // staged boot.
-        self.target_env_overrides.clear();
         self.bootstrap_pending = true;
         Ok(())
     }
@@ -207,7 +179,6 @@ impl ActiveDocumentCoordinator {
         *active = ActiveDocumentState::initial();
         lifecycle_guard.reset_for_proxy();
         lifecycle_guard.set_config(LifecycleConfig::default());
-        self.target_env_overrides.clear();
         self.bootstrap_pending = true;
     }
 }

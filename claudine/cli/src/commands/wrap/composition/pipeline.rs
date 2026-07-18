@@ -159,6 +159,24 @@ pub(super) fn execute_composition_request_inner_with_guard<'guard, 'runtime>(
 
     let prepare_span = tracing::info_span!("composition_prepare").entered();
     let selection = proceed_phase!(resolve_selection_and_launch(&mut attempt));
+
+    // --dry-run seam. Composition, shell expansion, and body/frontmatter
+    // finalization have all happened in `prepare`; provider/model selection has
+    // just resolved. Stop here — before MCP shadow-HOME materialization, argv
+    // and system-prompt overlay construction, the child-CWD switch, and every
+    // lifecycle event — and emit the composed artifacts.
+    //
+    // The seam sits *ahead of* lifecycle dispatch because dry run is
+    // contractually side-effect free: it fires no lifecycle event, so a stack
+    // carrying `append_line`/`set_frontmatter`/`shell` cannot touch the
+    // workspace, and no dynamic `proxy` route can be traversed. See
+    // `2026-07-13-proxy-with/spec.md` ("Existing dry-run behavior remains
+    // side-effect-free") and its non-goal of turning dry run into lifecycle
+    // simulation.
+    if attempt.request.dry_run {
+        return Ok(emit_dry_run_outcome(&mut attempt, selection.provider));
+    }
+
     let mut environment =
         proceed_phase!(prepare_environment_and_mcp(&mut attempt, &selection));
     let command = proceed_phase!(construct_argv_and_system_prompt(
@@ -186,36 +204,71 @@ pub(super) fn execute_composition_request_inner_with_guard<'guard, 'runtime>(
     Ok(outcome)
 }
 
+/// Render the `--dry-run` artifacts and build the terminal outcome.
+///
+/// Emits the composed body to stdout (the pipeable data product) and the
+/// finalized frontmatter plus the metadata table to stderr. `--quiet` /
+/// `--silent` do not suppress this render: the dry-run output *is* the
+/// command's purpose.
+///
+/// `provider` only labels the outcome; when the target never resolved the
+/// caller passes a placeholder, because the rendered agent cell — not the
+/// outcome — carries the real resolution state.
+///
+/// ## Notes
+///
+/// Callers must invoke this before any lifecycle event is dispatched. Firing
+/// `initialize` first would let a stack mutate the workspace (or hand the run
+/// off through `proxy`) during a run the user asked to be a rehearsal.
+fn emit_dry_run_outcome(
+    attempt: &mut CompositionAttempt<'_, '_>,
+    provider: Provider,
+) -> SingleCompositionOutcome {
+    let term = &attempt.term;
+    let render = dry_run::DryRunRender::from_request(&attempt.request);
+    crate::log::data(&render.body);
+    crate::log::message(&dry_run::render_hr(term));
+    crate::log::message(&dry_run::render_frontmatter_heading(term));
+    crate::log::message("");
+    crate::log::message(&dry_run::render_frontmatter(&render.frontmatter, term));
+    crate::log::message(&dry_run::render_metadata_table(&render, term));
+
+    if let Some(collector) = attempt.perf_collector.as_mut() {
+        collector.set_dry_run();
+    }
+    // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
+    if let Some(collector) = attempt.perf_collector.take() {
+        crate::perf::emit_report(&collector.into_report());
+    }
+
+    SingleCompositionOutcome {
+        exit_code: 0,
+        provider,
+        agent_perf: None,
+        // Dry-run never produces a per-iteration summary.
+        iteration_signals: None,
+        terminal_signal: None,
+        initialize_handoff: None,
+    }
+}
+
 fn resolve_selection_and_launch(
     attempt: &mut CompositionAttempt<'_, '_>,
 ) -> CompositionPhaseResult<SelectionPhase> {
-    let request = &attempt.request;
-    let term = &attempt.term;
-    if request.dry_run && request.resolved_target.is_none() {
-        let render = dry_run::DryRunRender::from_request(request);
-        crate::log::data(&render.body);
-        crate::log::message(&dry_run::render_hr(term));
-        crate::log::message(&dry_run::render_frontmatter_heading(term));
-        crate::log::message("");
-        crate::log::message(&dry_run::render_frontmatter(&render.frontmatter, term));
-        crate::log::message(&dry_run::render_metadata_table(&render, term));
-        if let Some(collector) = attempt.perf_collector.as_mut() {
-            collector.set_dry_run();
-        }
-        let outcome = SingleCompositionOutcome {
-            exit_code: 0,
-            provider: Provider::Claude,
-            agent_perf: None,
-            iteration_signals: None,
-            terminal_signal: None,
-            initialize_handoff: None,
-        };
-        if let Some(collector) = attempt.perf_collector.take() {
-            crate::perf::emit_report(&collector.into_report());
-        }
-        return CompositionPhaseResult::Completed(Box::new(outcome));
+    // An unresolved target means provider selection would have to prompt, which
+    // a dry run must never do — so this variant of the seam fires before target
+    // resolution and reports the unresolved state instead. `Provider::Claude` is
+    // an inert placeholder in the outcome; the rendered agent cell carries the
+    // real (unresolved) state.
+    if attempt.request.dry_run && attempt.request.resolved_target.is_none() {
+        return CompositionPhaseResult::Completed(Box::new(emit_dry_run_outcome(
+            attempt,
+            Provider::Claude,
+        )));
     }
 
+    let request = &attempt.request;
+    let term = &attempt.term;
     CompositionPhaseResult::from_result((|| -> Result<SelectionPhase> {
         let verbose = attempt.verbose;
         let perf_collector = &mut attempt.perf_collector;
@@ -883,11 +936,6 @@ fn construct_argv_and_system_prompt(
             collector.mark_env_setup_complete();
         }
 
-        // --dry-run no longer exits here. The seam now sits *after* the harness
-        // shell-approval preflight block below, so shell-approval decisions
-        // participate in the dry-run gate before the composed output is rendered.
-        // See the `request.dry_run` early-return after preflight.
-
         switch_process_cwd(child_cwd)?;
 
         if !silent && !quiet {
@@ -1439,9 +1487,10 @@ fn provider_run_handoff(
     //
     // Both the top-level `compose`/`inline-compose` coordinator
     // (`compose/prep.rs`) and each sequence step's contained coordinator
-    // (`sequence/iterate.rs`) provide that ledger (R1). `--dry-run` reports the
-    // named document and never traverses a handoff, so it stays on the in-harness
-    // coordinator.
+    // (`sequence/iterate.rs`) provide that ledger (R1). The `!dry_run` term is a
+    // defensive backstop only: a dry run returns at the seam in
+    // `execute_composition_request_inner_with_guard`, so it never reaches
+    // `initialize` and cannot produce a handoff to commit.
     match initial_transition {
         DocumentTransition::Proxy(handoff)
             if !request.dry_run && request.handoff_ledger.is_some() =>

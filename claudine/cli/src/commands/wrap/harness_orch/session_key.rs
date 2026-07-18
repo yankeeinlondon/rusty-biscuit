@@ -14,9 +14,13 @@
 //!
 //! - **Environment-derived** (`model`, and the environment MCP signals): read
 //!   from [`AttemptLaunch::env`], the exact child environment the provider is
-//!   spawned with. This is the effective value *after* the target-launch rebuild
-//!   overlays its `AGENT`/`MODEL`/`YOLO` env, so a proxied target's rebuilt model
-//!   enters the comparison rather than the router's frozen value.
+//!   spawned with. This is the effective value *after* the launch-identity
+//!   rebuild overlays its `AGENT`/`MODEL`/`YOLO` env. That rebuild runs at every
+//!   retry/resume fresh-read boundary against the document just re-read from
+//!   disk (`loop_control::materialize_attempt_prompt_phase` →
+//!   `target_launch::rebuild_launch_env`), which is what makes `model` a facet
+//!   a canonical refresh can actually move — and therefore what makes the AC15
+//!   refusal reachable rather than latent.
 //! - **Argv-derived** (`system_prompt`, the argv MCP flags): read from the
 //!   invocation's *canonical* argv — the pre-resume-normalization argv, the same
 //!   for the session-opening attempt and the resume attempt. It is deliberately
@@ -26,9 +30,13 @@
 //!   system-prompt and MCP flags because the live session already holds them.
 //!   Comparing the resume's stripped argv against the opener's full argv would
 //!   flag every such resume as incompatible — a false refusal. The canonical argv
-//!   keeps the comparison apples-to-apples. (Per-attempt argv rebuild is deferred
-//!   work — see `loop_control/target_launch.rs` — so the canonical argv is also
-//!   the freshest argv identity available.)
+//!   keeps the comparison apples-to-apples. A consequence worth knowing: because
+//!   the argv a refresh compares against is invocation-fixed, the argv-derived
+//!   facets — `system_prompt` and the argv MCP flags — cannot move across a
+//!   same-document refresh, so no L2 row can drive *their* refusal. They are
+//!   proven at the projection layer (L1) only. A proxy to a target that changes
+//!   them re-prepares through the command coordinator, which opens a new session
+//!   rather than resuming, so there is nothing for the key to refuse.
 //! - **Provider-contributed** ([`SessionCompatibilityKey::extra`]): not yet
 //!   populated. No provider adapter currently contributes a precise resume
 //!   identity, so the map is left empty rather than filled with a heuristic. The

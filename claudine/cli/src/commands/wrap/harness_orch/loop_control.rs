@@ -125,7 +125,7 @@ use coordinator::ActiveDocumentCoordinator;
 use error_routing::*;
 use lifecycle_events::*;
 use proxy::*;
-use target_launch::rebuild_target_launch;
+use target_launch::{rebuild_launch_env, rebuild_target_launch};
 #[allow(unused_imports)] // entirely dead_code until the rendezvous backend lands
 use requeue::*;
 
@@ -764,10 +764,15 @@ fn bootstrap_adopted_document_phase(
     // explicit CLI precedence) into the `AGENT`/`MODEL`/`YOLO` env, then installs
     // it on both consumers: the target's lifecycle early-binding context (so its
     // stacks resolve `env.MODEL`/`ctx.model` to the target's own identity) and
-    // the child environment (via `materialized.env_overrides`, retained on the
-    // coordinator so every subsequent attempt carries it too). Without this a
-    // proxied target keeps the router's launch state — a target pinned to a
-    // different model would otherwise launch with the router's empty model.
+    // this attempt's child environment (via `materialized.env_overrides`).
+    // Without this a proxied target keeps the router's launch state — a target
+    // pinned to a different model would otherwise launch with the router's empty
+    // model.
+    //
+    // Nothing is cached for later attempts: every subsequent attempt re-reads the
+    // document and runs `rebuild_launch_env` against that read
+    // (`materialize_attempt_prompt_phase`), so the identity always comes from the
+    // document about to run rather than from this one adoption-time snapshot.
     let launch_area = lifecycle
         .guard
         .context()
@@ -784,9 +789,6 @@ fn bootstrap_adopted_document_phase(
         materialized,
     );
     apply_target_env_overrides(materialized, &rebuild.env_overrides);
-    control
-        .coordinator
-        .set_target_env_overrides(rebuild.env_overrides);
     lifecycle
         .guard
         .set_proxy_prepared_context(rebuild.prepared_context);
@@ -1009,12 +1011,24 @@ fn materialize_attempt_prompt_phase(
     if let Some(seed) = initial_materialized.take() {
         return Ok(seed);
     }
-    // Re-apply the active target's rebuilt launch identity (R6). A directly
-    // invoked document has none (empty), so this is a no-op there; a proxied
-    // target's every attempt — including later loop iterations, which
-    // re-materialize from disk — carries the target's own `AGENT`/`MODEL`/`YOLO`
-    // in its child environment.
-    let target_env_overrides = control.coordinator.target_env_overrides().to_vec();
+    // R8 — this is a fresh-read boundary: the document has just been re-read from
+    // disk, so its launch identity is rebuilt from *that* read rather than
+    // re-applied from a snapshot taken at invocation or at proxy adoption.
+    //
+    // Two things depend on the rebuild being live rather than frozen. The
+    // provider child must launch under the refreshed document's own
+    // `AGENT`/`MODEL`/`YOLO` (R6, for a proxied target and for every later loop
+    // iteration alike). And the session-compatibility key, which reads the
+    // resolved launch bundle's effective child env, must move when the refreshed
+    // frontmatter moves — otherwise a `resume` whose refresh changed `model:`
+    // would silently run the live session under a plan it was not opened with,
+    // which is precisely what AC15 requires be refused.
+    //
+    // For an unchanged document this reproduces the identity the invocation
+    // already installed, so the key compares equal and the resume proceeds.
+    let provider = control.provider;
+    let cli_model = control.cli_model;
+    let yolo = control.yolo;
     info_span!(
         "harness_materialize_prompt",
         attempt,
@@ -1024,7 +1038,8 @@ fn materialize_attempt_prompt_phase(
         materialize_harness_prompt(prompt_state, repo_root, child_cwd, resume_followup.as_deref())
     })
     .map(|mut materialized| {
-        apply_target_env_overrides(&mut materialized, &target_env_overrides);
+        let refreshed = rebuild_launch_env(provider, cli_model, yolo, repo_root, &materialized);
+        apply_target_env_overrides(&mut materialized, &refreshed);
         materialized
     })
     .map_err(|error| {
