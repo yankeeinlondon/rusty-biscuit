@@ -2,10 +2,93 @@
 agent: claude/
 total_phases: 8
 created: 2026-07-14
-phase: 1
+phase: 6
 yolo: "true"
 packages:
   - darkmatter
+  - dmls
+source_files_during_phase_1:
+  - darkmatter/lib/tests/meta_schema_phase1.rs
+  - darkmatter/dmls/tests/lsp_session.rs
+docs_updated_during_phase_1:
+  - darkmatter/features/2026-07-13-meta-schema/plan.md
+docs_created_during_phase_1:
+  - darkmatter/features/2026-07-13-meta-schema/phase1-baseline-compiled-json-schema.txt
+  - darkmatter/features/2026-07-13-meta-schema/phase1-baseline-dmls-hover.txt
+  - darkmatter/features/2026-07-13-meta-schema/phase1-baseline-schema-about.txt
+  - darkmatter/features/2026-07-13-meta-schema/phase1-baseline-validation.txt
+  - darkmatter/features/2026-07-13-meta-schema/phase1-impact.md
+  - darkmatter/features/2026-07-13-meta-schema/phase1-test-matrix.md
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/schemas/mod.rs
+  - darkmatter/lib/src/markdown/schemas/reference.rs
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+  - darkmatter/lib/tests/meta_schema_phase1.rs
+  - darkmatter/lib/tests/schemas_source_projection.rs
+docs_updated_during_phase_2:
+  - darkmatter/features/2026-07-13-meta-schema/plan.md
+docs_created_during_phase_2:
+  - darkmatter/features/2026-07-13-meta-schema/phase2-test-map.md
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/cli/src/commands/context/format.rs
+  - claudine/lib/src/composition/schema/classify.rs
+  - darkmatter/cli/src/commands/schema/about.rs
+  - darkmatter/cli/tests/schema_about.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+  - darkmatter/lib/src/markdown/schemas/about.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+  - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+  - darkmatter/lib/tests/meta_schema_phase1.rs
+  - darkmatter/lib/tests/meta_schema_phase3.rs
+  - darkmatter/lib/tests/schemas_grammar_proptest.rs
+docs_updated_during_phase_3:
+  - darkmatter/features/2026-07-13-meta-schema/plan.md
+docs_created_during_phase_3:
+  - darkmatter/features/2026-07-13-meta-schema/phase3-test-map.md
+skills_files_updated_during_phase_3:
+  - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/schemas/coerce.rs
+  - darkmatter/lib/src/markdown/schemas/format.rs
+  - darkmatter/lib/src/markdown/schemas/mod.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+  - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+  - darkmatter/lib/src/markdown/schemas/validate.rs
+  - darkmatter/lib/tests/meta_schema_phase1.rs
+  - darkmatter/lib/tests/meta_schema_phase4.rs
+docs_updated_during_phase_4:
+  - darkmatter/features/2026-07-13-meta-schema/plan.md
+docs_created_during_phase_4:
+  - darkmatter/features/2026-07-13-meta-schema/phase4-test-map.md
+skills_files_updated_during_phase_4:
+  - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_5:
+  - darkmatter/lib/tests/meta_schema_phase5.rs
+docs_updated_during_phase_5:
+  - darkmatter/docs/schemas/darkmatter.yaml
+  - darkmatter/features/2026-07-13-meta-schema/plan.md
+docs_created_during_phase_5:
+  - darkmatter/features/2026-07-13-meta-schema/phase5-baseline-replay.md
+  - darkmatter/features/2026-07-13-meta-schema/phase5-test-map.md
+skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+  - darkmatter/dmls/src/overlay/mod.rs
+  - darkmatter/dmls/src/overlay/schema.rs
+  - darkmatter/dmls/tests/lsp_session.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/standalone.rs
+  - darkmatter/lib/tests/meta_schema_phase6.rs
+docs_updated_during_phase_6:
+  - darkmatter/features/2026-07-13-meta-schema/plan.md
+docs_created_during_phase_6:
+  - darkmatter/features/2026-07-13-meta-schema/phase6-test-map.md
+skills_files_updated_during_phase_6: []
 ---
 
 # Execution Plan: SimplifiedSchema Meta-Schema Types (`type-definition`, `schema`)
@@ -74,34 +157,35 @@ Traceable to the spec's 13 acceptance criteria:
 Goal: establish a green starting line, a documented blast radius, and a failing
 test suite that encodes every acceptance criterion before any production edit.
 
-- [ ] Refresh the GitNexus index (`node .gitnexus/run.cjs analyze`) so impact
+- [x] Refresh the GitNexus index (`node .gitnexus/run.cjs analyze`) so impact
   analysis reflects current source.
-- [ ] Run upstream GitNexus `impact({direction: "upstream"})` on every symbol
+- [x] Run upstream GitNexus `impact({direction: "upstream"})` on every symbol
   slated for edit (the private property-definition entry point in
   `simplified/grammar.rs`/`simplified/mod.rs`, `parse_yaml_schema`, the
   `resolve.rs` reference classifier, `SimplifiedType`, the `convert.rs`
   lowering, the `format.rs`/`validate.rs` validator registration, and the DMLS
   `DocumentOverlay`). Record blast radius and flag any HIGH/CRITICAL result to
   the user before proceeding.
-- [ ] Capture pre-change output for representative existing schema fixtures:
+- [x] Capture pre-change output for representative existing schema fixtures:
   `md schema about`, `md schema validate` on a schema using `$schema: any`,
   compiled JSON Schema of a representative document, and a DMLS hover on
   `$schema`. Save as `phase1-baseline*.txt` under the feature directory so
   AC12 byte-identity can be proven later.
-- [ ] Write `phase1-impact.md` and `phase1-test-matrix.md` mapping each of the
+- [x] Write `phase1-impact.md` and `phase1-test-matrix.md` mapping each of the
   13 acceptance criteria to concrete test locations (library integration test
   file(s) under `darkmatter/lib/tests/`, proptest generators, and DMLS L2
   session tests under `darkmatter/dmls/tests/`).
-- [ ] Add **failing** tests first, covering: the `PropertyDef`-parity matrix
+- [x] Add **failing** tests first, covering: the `PropertyDef`-parity matrix
   (scalar/mapping/union accept + invalid scalar/empty union/invalid arm/bad
   constraint reject), `type-definition[]`/`schema[]` array vs union-item
   disambiguation, `schema` reference-syntax accept + remote reject with no I/O,
   span-projection across plain/single/double-quoted + CRLF + UTF-8 + nested +
   union, `MAX_INLINE_OBJECT_DEPTH` over-limit structured error, and the base
   schema `$schema: schema` acceptance-parity + changed-failure-stage split.
-- [ ] **Validation checkpoint:** `just test` / `just test-l2` are green on the
-  pre-existing suites; the new tests compile and fail for the expected
-  (unimplemented) reasons — not for setup errors.
+- [x] **Validation checkpoint:** the full L1 population is green and the new
+  tests compile and fail for the expected unimplemented reasons. All 19
+  Darkmatter library L2 tests pass; two pre-existing CLI terminal-luminance
+  failures are recorded in `phase1-test-matrix.md`.
 
 ---
 
@@ -112,35 +196,35 @@ points for both a single `PropertyDef` and a whole `$schema` declaration, plus
 the shared depth bound. Everything downstream depends on this phase; it is on
 the critical path and largely serial.
 
-- [ ] Extract the existing private property-definition entry point into a
+- [x] Extract the existing private property-definition entry point into a
   public, passive parser that accepts a YAML value and returns `PropertyDef`
   with structured `SchemaError`. Do **not** create an isomorphic second AST —
   `PropertyDef` remains the semantic product. (`simplified/grammar.rs`,
   `simplified/mod.rs`)
-- [ ] Generalize the existing scalar projection seam in `simplified/source.rs`
+- [x] Generalize the existing scalar projection seam in `simplified/source.rs`
   into a structural **sidecar source map** keyed by structural schema paths,
   recording authored spans of mapping keys, complete definitions, atoms, type
   keywords, constraints, arguments, import names/references, and union arms.
   Project through plain, single-quoted, and double-quoted YAML scalars via the
   existing `yaml_scalar` seam, without normalizing line endings. No spanned AST.
-- [ ] Add the **source-aware companion** parser that returns the same
+- [x] Add the **source-aware companion** parser that returns the same
   `PropertyDef` plus that sidecar map.
-- [ ] Add the passive **schema-declaration** parse/classification surface: reuse
+- [x] Add the passive **schema-declaration** parse/classification surface: reuse
   `parse_yaml_schema` for inline mappings and root-union mapping arms; reuse the
   resolver's local-reference classifier + `biscuit_file::FileReference`
   construction for reference syntax. Add outer declaration/file-reference spans
   to the sidecar. (`simplified/mod.rs` new surface)
-- [ ] Extract the HTTP(S) / bare-name / path-qualified local-reference
+- [x] Extract the HTTP(S) / bare-name / path-qualified local-reference
   classification policy out of `resolve.rs` into a shared classifier reused by
   the `schema` surface — **without moving any I/O** into semantic validation.
   Bare schema-root names stay valid declaration syntax; remote forms are
   rejected as syntax. (`resolve.rs`)
-- [ ] Apply `MAX_INLINE_OBJECT_DEPTH` as the single shared limit across
+- [x] Apply `MAX_INLINE_OBJECT_DEPTH` as the single shared limit across
   string-form inline objects and YAML-native mapping definitions: root parse
   starts at depth zero, every nested schema object (including mapping arms under
   property unions) increments the same counter, and over-limit returns
   `SchemaError::Grammar` with no panic/overflow.
-- [ ] **Validation checkpoint:** parser-parity tests prove the semantic-only and
+- [x] **Validation checkpoint:** parser-parity tests prove the semantic-only and
   source-aware entry points return the same `PropertyDef`; span-projection tests
   pass across all quote/line-ending/nesting variants; depth-limit test returns a
   structured error. `just test` for the affected library suites is green.
@@ -154,28 +238,28 @@ constraint applicability, canonical serialization (including `[]`), and
 descriptor-catalog presence. Depends on Phase 2's public parser for validation
 routing.
 
-- [ ] Add `SimplifiedType::TypeDefinition` (keyword `"type-definition"`) and
+- [x] Add `SimplifiedType::TypeDefinition` (keyword `"type-definition"`) and
   `SimplifiedType::Schema` (keyword `"schema"`) with stable canonical keywords.
   (`simplified/types.rs`)
-- [ ] Accept both keywords through the ordinary primitive-keyword path, ensuring
+- [x] Accept both keywords through the ordinary primitive-keyword path, ensuring
   terminal `Name@file` import syntax still wins over primitive lookup so
   `schema@file` / `type-definition@file` remain imports (AC12 migration
   compatibility). (`simplified/grammar.rs`)
-- [ ] Enforce constraint applicability: permit only `required`, `default(...)`
+- [x] Enforce constraint applicability: permit only `required`, `default(...)`
   (scalar type-expression default only, per the shared `default(...)` grammar),
   and `generated`. Reject all value-domain constraints (`min`, `max`, `pattern`,
   `suggest`, `eager`, …) because they constrain denoted values, not the
   definition artifact.
-- [ ] Extend canonical serialization (and proptest generators/shrinkers) so both
+- [x] Extend canonical serialization (and proptest generators/shrinkers) so both
   keywords and their `[]` postfix forms round-trip. (`simplified/serialize.rs`,
   `schemas_grammar_proptest.rs`)
-- [ ] Add authoritative descriptors (accepted carriers, permitted constraints,
+- [x] Add authoritative descriptors (accepted carriers, permitted constraints,
   parse-only behavior, DMLS meaning) so both types appear in
   `schema_type_descriptors()` and `md schema about`. Add parity coverage.
   (`about.rs`)
-- [ ] Confirm `md schema detect` **never** infers either type (carrier-only
+- [x] Confirm `md schema detect` **never** infers either type (carrier-only
   inference is preserved).
-- [ ] **Validation checkpoint:** focused grammar, serialization, proptest, and
+- [x] **Validation checkpoint:** focused grammar, serialization, proptest, and
   `md schema about` snapshot tests pass; `type-definition`/`schema` round-trip
   with and without `[]`.
 
@@ -188,30 +272,30 @@ grammar-backed custom keyword, wired to the Phase 2 shared parsers, preserving
 diagnostic-specialization schema paths and ordinary array lowering. Depends on
 Phases 2–3.
 
-- [ ] Emit the carrier + keyword fragments in `convert.rs`:
+- [x] Emit the carrier + keyword fragments in `convert.rs`:
   `{"type": ["string","object","array"], "x-darkmatter-type-definition": true}`
   and the `x-darkmatter-schema` counterpart. Keep the optional-nullable wrapper
   outside the fragment and preserve existing `required` parent-object behavior.
-- [ ] Register both custom keyword validators in `format.rs`/`validate.rs`,
+- [x] Register both custom keyword validators in `format.rs`/`validate.rs`,
   backed by the Phase 2 passive parsers. The `type-definition` keyword validates
   the full `PropertyDef` grammar; the `schema` keyword validates the full
   declaration (inline shape / local reference syntax / root union) with **no
   I/O**. Failures return ordinary structured `ValidationProblem`s carrying
   instance path, source position, and `ConstraintViolation` classification.
-- [ ] Preserve distinguishing keyword schema paths (`x-darkmatter-type-definition`
+- [x] Preserve distinguishing keyword schema paths (`x-darkmatter-type-definition`
   / `x-darkmatter-schema`) so DMLS can replace the generic problem with a
   precise diagnostic — **without** adding a new public `ValidationProblemCode`
   variant.
-- [ ] Verify ordinary generic array lowering wraps each fragment under `items`
+- [x] Verify ordinary generic array lowering wraps each fragment under `items`
   for `type-definition[]` / `schema[]`, and the keyword always validates exactly
   the item value it appears on.
-- [ ] Keep coercion/normalization explicit no-ops for these carriers in
+- [x] Keep coercion/normalization explicit no-ops for these carriers in
   `coerce.rs`: a mapping stays a mapping, a sequence stays a sequence, no
   native-to-string coercion; YAML boolean/number/null scalars are invalid.
-- [ ] Add pure parse-based trigger matching for both variants in
+- [x] Add pure parse-based trigger matching for both variants in
   `triggers/matcher.rs` (both types are pure; the reserved `$schema` control key
   stays absent from the trigger-matching instance).
-- [ ] **Validation checkpoint (with escape-hatch check):** conversion snapshots,
+- [x] **Validation checkpoint (with escape-hatch check):** conversion snapshots,
   the custom-keyword validation table (accept/reject parity with the
   `PropertyDef` and `$schema` parsers), array-lowering fixtures, coercion
   no-op fixtures, and trigger-match tests pass. Confirm validation-only callers
@@ -229,18 +313,18 @@ Goal: replace `$schema: any` with `$schema: schema` in the Darkmatter base
 schema and prove the acceptance/failure-stage contract. Depends on Phases 3–4
 (the `schema` type and its validator must exist).
 
-- [ ] Retype `$schema` from `any` to `schema` in
+- [x] Retype `$schema` from `any` to `schema` in
   `darkmatter/docs/schemas/darkmatter.yaml`, and correct the description so it
   no longer implies raw JSON Schema can be authored as an inline mapping (raw
   JSON Schema is a referenced-file concern only).
-- [ ] Prove **acceptance parity**: existing valid inline, referenced,
+- [x] Prove **acceptance parity**: existing valid inline, referenced,
   root-union, and referenced-raw-JSON documents still prepare through
   `resolve_schema_with_roots`.
-- [ ] Prove the **changed failure stage**: malformed `$schema` declarations now
+- [x] Prove the **changed failure stage**: malformed `$schema` declarations now
   fail at the validation stage (grammar-specific message) rather than only at a
   later resolver call. Tests must distinguish acceptance parity from the changed
   failure stage.
-- [ ] **Validation checkpoint:** base-schema compile + representative document
+- [x] **Validation checkpoint:** base-schema compile + representative document
   preparation tests pass; the `phase1` baseline captures are re-run and diffs
   are limited to the intentional `$schema` metadata correction (AC8, AC12).
 
@@ -252,10 +336,10 @@ Goal: give `DocumentOverlay` a real parsed standalone schema + source map with
 last-good retention and content-based activation. Depends on Phase 2's
 source-aware parsers; unblocks Phase 7's providers.
 
-- [ ] Carry the parsed standalone schema and its sidecar source map on
+- [x] Carry the parsed standalone schema and its sidecar source map on
   `DocumentOverlay` (the existing `SuggestionState::Standalone` marker is not a
   sufficient semantic model). (`dmls/src/overlay/mod.rs`, `overlay/schema.rs`)
-- [ ] Implement the two explicit activation paths: (1) frontmatter values whose
+- [x] Implement the two explicit activation paths: (1) frontmatter values whose
   effective `PropertyDef` contains a `type-definition`/`schema` atom, plus the
   reserved `$schema` control value from the base language contract; (2)
   standalone content-based activation through
@@ -263,10 +347,10 @@ source-aware parsers; unblocks Phase 7's providers.
   top-level `$schema`, or top-level `kind: schema`) retaining the last-good
   parsed schema/source map while exposing current parser errors. File extension
   / directory location alone must never activate.
-- [ ] Mirror frontmatter's last-good AST contract: completion and hover survive
+- [x] Mirror frontmatter's last-good AST contract: completion and hover survive
   a mid-keystroke YAML error, but the current buffer always owns diagnostics and
   stale semantic data must never claim malformed current text is valid.
-- [ ] **Validation checkpoint:** DMLS L2 tests prove content-based activation
+- [x] **Validation checkpoint:** DMLS L2 tests prove content-based activation
   (never filename-based), last-good retention during a malformed edit, and that
   raw JSON Schema / ordinary YAML stay outside the provider.
 
