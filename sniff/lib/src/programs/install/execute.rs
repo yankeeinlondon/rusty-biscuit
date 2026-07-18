@@ -134,6 +134,16 @@ fn run_uv_bootstrap(
 ///   and spawn failures.
 /// - `InstallCapturedOutcome::SetupError` only when the input is invalid (e.g.
 ///   package name contains shell metacharacters) so no command could be built.
+///
+/// ## Notes
+///
+/// A `Completed` result with `timed_out` set was killed at its deadline. The
+/// installer's process tree was terminated on a best-effort basis: on Unix a
+/// descendant that forked and detached with `setsid()` between sniff's samples
+/// survives and may still be modifying the host. Third-party package managers
+/// and downloaded installer scripts are exactly the kind of code that can do
+/// this, so `timed_out` is not a promise that the install stopped. See the
+/// `process` module documentation for the per-platform guarantee.
 pub fn execute_install_captured(
     method: &InstallationMethod,
     opts: &InstallOptions,
@@ -171,6 +181,7 @@ fn execute_install_captured_with_runner(
             stdout: String::new(),
             stderr: String::new(),
             success: true,
+            timed_out: false,
         });
     }
 
@@ -187,6 +198,7 @@ fn execute_install_captured_with_runner(
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             success: output.status.success(),
+            timed_out: false,
         }),
         Err(e) => InstallCapturedOutcome::Completed(InstallCapturedResult {
             command,
@@ -195,6 +207,7 @@ fn execute_install_captured_with_runner(
             stdout: String::new(),
             stderr: e.to_string(),
             success: false,
+            timed_out: matches!(e, ProcessError::Timeout),
         }),
     }
 }
@@ -209,6 +222,16 @@ fn execute_install_captured_with_runner(
 ///   and spawn failures.
 /// - `InstallCapturedOutcome::SetupError` only when the input is invalid (e.g.
 ///   package name contains shell metacharacters) so no command could be built.
+///
+/// ## Notes
+///
+/// A `Completed` result with `timed_out` set was killed at its deadline. The
+/// installer's process tree was terminated on a best-effort basis: on Unix a
+/// descendant that forked and detached with `setsid()` between sniff's samples
+/// survives and may still be modifying the host. Third-party package managers
+/// and downloaded installer scripts are exactly the kind of code that can do
+/// this, so `timed_out` is not a promise that the install stopped. See the
+/// `process` module documentation for the per-platform guarantee.
 pub fn execute_versioned_install_captured(
     method: &InstallationMethod,
     version: &str,
@@ -253,6 +276,7 @@ fn execute_versioned_install_captured_with_runner(
             stdout: String::new(),
             stderr: String::new(),
             success: true,
+            timed_out: false,
         });
     }
 
@@ -269,6 +293,7 @@ fn execute_versioned_install_captured_with_runner(
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             success: output.status.success(),
+            timed_out: false,
         }),
         Err(e) => InstallCapturedOutcome::Completed(InstallCapturedResult {
             command,
@@ -277,6 +302,7 @@ fn execute_versioned_install_captured_with_runner(
             stdout: String::new(),
             stderr: e.to_string(),
             success: false,
+            timed_out: matches!(e, ProcessError::Timeout),
         }),
     }
 }
@@ -312,6 +338,7 @@ fn execute_uv_with_install_captured_with_runner(
             stdout: String::new(),
             stderr: String::new(),
             success: true,
+            timed_out: false,
         });
     }
 
@@ -331,6 +358,7 @@ fn execute_uv_with_install_captured_with_runner(
                     stdout: String::new(),
                     stderr: e.to_string(),
                     success: false,
+                    timed_out: matches!(e, ProcessError::Timeout),
                 });
             }
         };
@@ -346,6 +374,7 @@ fn execute_uv_with_install_captured_with_runner(
                 stdout: combined_stdout,
                 stderr: combined_stderr,
                 success: false,
+                timed_out: false,
             });
         }
     }
@@ -362,6 +391,7 @@ fn execute_uv_with_install_captured_with_runner(
                 stderr: "uv could not be located on PATH or at ~/.local/bin/uv after bootstrap"
                     .into(),
                 success: false,
+                timed_out: false,
             });
         }
     };
@@ -385,6 +415,7 @@ fn execute_uv_with_install_captured_with_runner(
                 stdout: combined_stdout,
                 stderr: combined_stderr,
                 success: output.status.success(),
+                timed_out: false,
             })
         }
         Err(e) => {
@@ -396,6 +427,7 @@ fn execute_uv_with_install_captured_with_runner(
                 stdout: combined_stdout,
                 stderr: combined_stderr,
                 success: false,
+                timed_out: matches!(e, ProcessError::Timeout),
             })
         }
     }

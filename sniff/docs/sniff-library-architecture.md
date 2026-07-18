@@ -361,8 +361,15 @@ child's descendant tree every `DESCENDANT_SAMPLE_INTERVAL` (250ms) *while the ch
 PID survives the reparenting that follows the child's exit; recorded PIDs are re-validated against
 process start time before signaling, so a recycled PID is never hit. The residual gap — a descendant
 that forks *and* `setsid()`s entirely between two samples, whose parent then exits — is not portably
-closable without Linux cgroups or a supervising process. No sniff probe daemonizes, so no caller
-reaches it; do not route a deliberately-detaching command through this boundary and expect cleanup.
+closable without Linux cgroups or a supervising process.
+
+Whether a caller reaches that residual depends on what it runs. Sniff's *detection* probes are a
+fixed, in-tree set of well-known commands, none of which daemonize. The *installation* boundary is
+different: it executes third-party package managers (Brew, npm, pip, Cargo, Go) and downloaded
+remote shell installers, whose lifecycle and build hooks may fork and detach. On Unix, therefore, a
+timed-out installation may leave a detached descendant running and still modifying the host after
+sniff reports the timeout. Installation results carry `InstallCapturedResult::timed_out` so callers
+can distinguish that best-effort outcome from a clean non-zero exit.
 
 Sampling is deferred by a full interval, so a probe that completes within 250ms — nearly all of them
 — performs **zero** process-table scans. This matters: one `sysinfo` all-process refresh measured

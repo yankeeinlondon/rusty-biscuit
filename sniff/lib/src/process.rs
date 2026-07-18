@@ -29,8 +29,22 @@
 //! The unclosable gap is a descendant that both forks *and* calls `setsid()`
 //! entirely between two samples, whose parent then exits. Closing it portably
 //! would need Linux cgroups or `PR_SET_CHILD_SUBREAPER` (Linux-only, and
-//! process-global — not a library's to set), or a supervising process. Sniff
-//! runs no command that daemonizes, so no caller in this crate reaches it.
+//! process-global — not a library's to set), or a supervising process.
+//!
+//! Who reaches that gap depends on what is being run. Sniff's own *detection*
+//! probes are a fixed, in-tree set of well-known commands, none of which
+//! daemonize. The *installation* boundary
+//! ([`crate::programs::install`]) is different in kind: it executes third-party
+//! package managers (Brew, npm, pip, Cargo, Go) and downloaded remote shell
+//! installers, whose lifecycle and build hooks are outside sniff's control and
+//! may fork and detach. So on Unix a timed-out installation may leave a
+//! detached descendant running — and still modifying the host — after sniff has
+//! reported the timeout. Installs surface this through
+//! [`crate::programs::install::InstallCapturedResult::timed_out`].
+//!
+//! `tests::a_descendant_that_detaches_between_samples_escapes_containment` is
+//! the executable record of this residual: it is the assertion that flips if a
+//! future change ever closes the gap.
 
 use std::ffi::OsStr;
 use std::process::{Command, ExitStatus, Stdio};
@@ -537,10 +551,10 @@ impl From<ProcessError> for std::io::Error {
 /// to observe.
 ///
 /// Tree termination is total on Windows and best-effort on Unix; see the module
-/// documentation for exactly what each platform guarantees. Sniff's own probes
-/// never daemonize, so the Unix gap is not reachable through this crate's
-/// callers — do not route a command that deliberately detaches through this
-/// boundary and expect it to be cleaned up.
+/// documentation for exactly what each platform guarantees. A command that
+/// deliberately detaches — or a third-party installer that does so on its own —
+/// can outlive this boundary on Unix, so a `Timeout` is not proof that every
+/// process the command started has stopped.
 pub(crate) fn run_with_timeout<S, A>(
     program: S,
     args: &[A],
@@ -561,6 +575,13 @@ where
 /// executable, arguments, working directory, and environment are preserved;
 /// this boundary owns stdin and captured stdout/stderr so it can enforce the
 /// same supervision contract for every subprocess.
+///
+/// ## Notes
+///
+/// This is the form the installation boundary uses to run third-party package
+/// managers and downloaded installer scripts. Tree termination for those is
+/// total on Windows and best-effort on Unix; see the module documentation for
+/// the exact residual.
 pub(crate) fn run_command_with_timeout(
     command: &mut Command,
     timeout: Duration,
@@ -704,6 +725,10 @@ mod tests {
     const QUIET_DETACHED_DESCENDANT: &str = "process::tests::quiet_detached_descendant";
     #[cfg(unix)]
     const EXITING_PARENT_CHILD: &str = "process::tests::child_detaches_descendant_then_exits";
+    #[cfg(unix)]
+    const BETWEEN_SAMPLES_CHILD: &str = "process::tests::child_detaches_between_samples";
+    #[cfg(unix)]
+    const BETWEEN_SAMPLES_DESCENDANT: &str = "process::tests::between_samples_descendant";
     #[cfg(unix)]
     const DETACHED_PID_FILE: &str = "SNIFF_DETACHED_PID_FILE";
     const SLEEPING_CHILD: &str = "process::tests::child_sleeps";
@@ -859,6 +884,150 @@ mod tests {
             std::thread::sleep(POLL_INTERVAL);
         }
         panic!("descendant did not establish its own session");
+    }
+
+    /// Reproduces the residual the module documentation admits: a descendant
+    /// created *and* detached entirely between two of sniff's samples, whose
+    /// parent then exits at once.
+    ///
+    /// The parent first outlives two samples, so the sampler is provably
+    /// running and has already recorded this process; only then does it fork,
+    /// at the mid-interval point furthest from either neighbouring sample. It
+    /// reports its own fork and exit offsets so the test can distinguish a
+    /// genuine escape from a host too loaded to land inside the window.
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    fn child_detaches_between_samples() {
+        let start = Instant::now();
+        std::thread::sleep(DESCENDANT_SAMPLE_INTERVAL * 5 / 2);
+        let fork_offset = start.elapsed();
+
+        let executable = std::env::current_exe().expect("current test executable should resolve");
+        let args = test_child_args(BETWEEN_SAMPLES_DESCENDANT);
+        let descendant = std::process::Command::new(executable)
+            .args(args)
+            .spawn()
+            .expect("between-samples descendant should spawn");
+        let descendant_pid = libc::pid_t::try_from(descendant.id())
+            .expect("descendant process ID should fit pid_t");
+
+        // Exiting before `setsid` returns would reproduce nothing: until then
+        // the descendant is still in the supervised process group, where the
+        // guaranteed layer of cleanup reaches it.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            // SAFETY: `descendant_pid` names the child spawned above. A session
+            // leader's process-group ID equals its PID.
+            if unsafe { libc::getpgid(descendant_pid) } == descendant_pid {
+                println!(
+                    "escape|{}|{}|{}",
+                    descendant_pid,
+                    fork_offset.as_millis(),
+                    start.elapsed().as_millis()
+                );
+                return;
+            }
+            std::thread::sleep(POLL_INTERVAL);
+        }
+        panic!("descendant did not establish its own session");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    fn between_samples_descendant() {
+        // SAFETY: this fixture is a fresh child and is not a process-group
+        // leader, so it can establish an isolated session for the regression.
+        assert_ne!(unsafe { libc::setsid() }, -1, "setsid should succeed");
+        std::thread::sleep(Duration::from_secs(30));
+    }
+
+    /// SIGKILLs an escaped descendant on every exit path, including panics.
+    ///
+    /// The escapee is reparented to init, so it is not ours to `wait` on — but
+    /// leaving a 30s sleeper behind on a developer's or CI host is not
+    /// acceptable either.
+    #[cfg(unix)]
+    struct EscapedDescendant(libc::pid_t);
+
+    #[cfg(unix)]
+    impl Drop for EscapedDescendant {
+        fn drop(&mut self) {
+            // SAFETY: the PID was reported by a fixture this test spawned and is
+            // signaled at most once, immediately after the assertions read it.
+            unsafe { libc::kill(self.0, libc::SIGKILL) };
+        }
+    }
+
+    /// Encodes the documented Unix containment gap — it is a record of what
+    /// sniff currently does, not an endorsement of it.
+    ///
+    /// A descendant that forks and calls `setsid()` wholly between two samples,
+    /// whose parent then exits, is never observed by any sample and is outside
+    /// the process group by cleanup time, so nothing names it. The installation
+    /// boundary runs third-party package managers and downloaded installer
+    /// scripts through this same helper, which makes the outcome reachable
+    /// rather than theoretical: sniff can report an install timeout while an
+    /// escaped process keeps modifying the host.
+    ///
+    /// If Unix containment is ever made total, this assertion is what flips —
+    /// invert it and update the module documentation together.
+    #[cfg(unix)]
+    #[test]
+    fn a_descendant_that_detaches_between_samples_escapes_containment() {
+        let executable = std::env::current_exe().expect("current test executable should resolve");
+        let args = test_child_args(BETWEEN_SAMPLES_CHILD);
+        let mut command = Command::new(executable);
+        command.args(args);
+
+        let start = Instant::now();
+        let out = run_command_with_timeout(&mut command, Duration::from_secs(30))
+            .expect("the direct child exits successfully, it does not time out");
+        let returned_after = start.elapsed();
+
+        assert!(out.status.success(), "the direct child should exit cleanly");
+        assert!(
+            returned_after < Duration::from_secs(10),
+            "an escaped descendant must not delay the helper's return"
+        );
+
+        let report = out.stdout_lossy();
+        let fields = report
+            .lines()
+            .find_map(|line| line.strip_prefix("escape|"))
+            .expect("the fixture should report its escaped descendant")
+            .split('|')
+            .map(|field| field.parse::<u128>().expect("report fields are numeric"))
+            .collect::<Vec<_>>();
+        let [pid, fork_ms, exit_ms] = fields[..] else {
+            panic!("the fixture report should carry a PID and two offsets");
+        };
+        let pid = libc::pid_t::try_from(pid).expect("reported PID should fit pid_t");
+        let _escapee = EscapedDescendant(pid);
+
+        // The fixture times itself from its own start, which trails the helper's
+        // by the spawn cost. Charging the whole unaccounted span to that skew
+        // over-estimates it, which is the safe direction: a host loaded enough
+        // to straddle a sample boundary gets no verdict rather than a false one.
+        let skew_ms = returned_after.as_millis().saturating_sub(exit_ms);
+        let interval_ms = DESCENDANT_SAMPLE_INTERVAL.as_millis();
+        if fork_ms / interval_ms != (exit_ms + skew_ms) / interval_ms {
+            eprintln!(
+                "host too loaded to fork between samples (fork {fork_ms}ms, exit {exit_ms}ms, \
+                 skew <={skew_ms}ms, interval {interval_ms}ms); residual assertion skipped"
+            );
+            return;
+        }
+
+        // SAFETY: signal zero performs existence and permission checks without
+        // delivering a signal to the reported process.
+        let exists = unsafe { libc::kill(pid, 0) } == 0;
+        assert!(
+            exists,
+            "descendant {pid} was contained; Unix tree termination is now stronger than \
+             the module documentation claims — invert this test and correct the docs"
+        );
     }
 
     /// A child that outstrips its pipe buffer must still be captured whole.
