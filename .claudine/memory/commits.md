@@ -31,6 +31,12 @@ do not belong here.
 - Conflict-marker checks must inspect the full staged blob (`git show :<path>`),
   not only staged diff hunks or `git diff --check`; malformed or pre-existing
   marker fragments outside the changed hunk can otherwise pass unnoticed.
+- When a full-blob scan finds unresolved markers in an assigned path, the
+  subagent MUST refuse the commit, leave the path staged, and report the
+  markers' file coordinates (grep output or `file:line` from `git show`).
+  The orchestrator resolves them in the working tree (`edit` or equivalent),
+  restages the same single path (`git add <path>`), and re-issues the
+  `--only -- <path>` commit — never amend, never reset, never restage peers.
 - Use `git log` for commit-history examples. `sniff git commits` is not valid.
 
 ## Path-Limited Commits
