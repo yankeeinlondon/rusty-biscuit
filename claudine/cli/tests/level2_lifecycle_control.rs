@@ -728,6 +728,260 @@ Body
     );
 }
 
+// ── review-8 finding 2: the retried attempt's actual launch bundle ───────────
+//
+// R8 requires a retry's refreshed body, lifecycle, context, and launch plan to
+// come from one coherent prepared document, and a retry opens a *fresh* session,
+// so unlike `resume` there is nothing to refuse — it must simply launch under
+// the refreshed plan. The rows below drive that end to end: a document's
+// `failure` stack mutates the very input a launch facet derives from and then
+// `retry`s, and each row asserts what the *retried provider process itself*
+// recorded — which binary ran, which flags reached its argv, which MCP
+// configuration was injected, and what its environment carried.
+//
+// Every row authors its provider in frontmatter rather than passing a
+// `--provider` flag: explicit CLI intent stays authoritative under R6, so a
+// flag would pin the facet and make the assertion vacuous.
+//
+// Before the re-entrant launch-plan builder landed, all of these launched the
+// retried attempt through the invocation's frozen argv/profile/MCP bundle.
+
+/// A recorder that reports the launch bundle it actually received.
+///
+/// Records the binary name, the *flag-shaped* argv entries, and the launch
+/// environment. Only arguments beginning with `-` are recorded: providers like
+/// Goose take the prompt body on argv, and a multi-line body would otherwise
+/// corrupt the line-oriented log this fixture is read back with.
+///
+/// `exit_code` lets a row make the first attempt fail (driving `failure` →
+/// `retry`) and the retried attempt succeed, or fail both to observe two
+/// launches under one budget.
+///
+/// Stdin is drained only when it is not a terminal. A row that flips
+/// `interactive:` gets the pane's tty on the retried attempt, where an
+/// unconditional `cat` would block until the operator sent EOF — which, in a
+/// non-interactive test session, is never.
+fn write_launch_recorder(bin_dir: &Path, slug: &str, events_log: &Path, exit_code: i32) {
+    write_executable(
+        &bin_dir.join(slug),
+        &format!(
+            "#!/bin/sh\nif [ ! -t 0 ]; then cat > /dev/null 2>&1; fi\n\
+             printf 'launched-binary=%s\\n' \"$(basename \"$0\")\" >> {log}\n\
+             flags=\nallowed=none\nprev=\n\
+             for a in \"$@\"; do\n  \
+             case \"$a\" in -*) flags=\"$flags $a\";; esac\n  \
+             if [ \"$prev\" = '--allowed-mcp-server-names' ]; then allowed=\"$a\"; fi\n  \
+             prev=\"$a\"\ndone\n\
+             printf 'flags=%s\\n' \"$flags\" >> {log}\n\
+             printf 'mcp-allowed=%s\\n' \"$allowed\" >> {log}\n\
+             printf 'env-yolo=%s\\n' \"${{YOLO:-unset}}\" >> {log}\n\
+             printf 'provider-ran\\n' >> {log}\nexit {code}\n",
+            log = events_log.display(),
+            code = exit_code,
+        ),
+    );
+}
+
+/// Stage a document plus a git repo and minimal config, with no providers
+/// installed yet — each row writes the recorders it needs.
+fn stage_launch_recording(doc: &str) -> Staged {
+    let workspace = tempdir().unwrap();
+    let bin_dir = workspace.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    assert!(init_git_repo(workspace.path()), "git init failed");
+    let events_log = workspace.path().join("events.log");
+    let md_file = workspace.path().join("doc.md");
+    fs::write(&md_file, doc).unwrap();
+    Staged {
+        workspace,
+        bin_dir,
+        md_file,
+        events_log,
+        rendezvous_endpoint: None,
+    }
+}
+
+/// The `launched-binary=` values in recording order.
+fn launched_binaries(staged: &Staged) -> Vec<String> {
+    event_lines(staged)
+        .into_iter()
+        .filter_map(|line| line.strip_prefix("launched-binary=").map(str::to_string))
+        .collect()
+}
+
+/// **Review-8 finding 2 — provider, profile, and binary.** A document whose
+/// `failure` stack rewrites its own `agent:` and then retries launches the
+/// retried attempt through the *new* provider's binary and profile.
+///
+/// The first attempt runs `goose` (which exits non-zero, driving `failure`); the
+/// stack rewrites `agent: gemini` and retries; the second attempt must be a real
+/// `gemini` process. The old behavior re-ran `goose` — the rebuilt identity said
+/// "gemini" while the invocation's frozen bundle spawned Goose.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_retry_launches_the_refreshed_provider_binary() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let doc = r#"---
+title: retry switches provider
+agent: goose
+failure:
+  stack:
+    - action:
+        - {append_line: ["events.log", "failure"]}
+        - {set_frontmatter: ["doc.md", "agent", "gemini"]}
+    - action: {retry: 1}
+finalize:
+  stack:
+    - action: {append_line: ["events.log", "finalize"]}
+---
+Body
+"#;
+    let staged = stage_launch_recording(doc);
+    write_launch_recorder(&staged.bin_dir, "goose", &staged.events_log, 1);
+    write_launch_recorder(&staged.bin_dir, "gemini", &staged.events_log, 0);
+
+    let pane = run_compose_await_exit_with_args(&staged, "");
+
+    let refreshed = fs::read_to_string(&staged.md_file).unwrap();
+    assert!(
+        refreshed.contains("agent: gemini"),
+        "fixture check: the failure stack must have rewritten `agent:` before the \
+         retry; document:\n{refreshed}"
+    );
+    assert_eq!(
+        launched_binaries(&staged),
+        vec!["goose".to_string(), "gemini".to_string()],
+        "the retried attempt must spawn the refreshed document's provider binary, \
+         not the invocation's; pane:\n{pane}"
+    );
+}
+
+/// **Review-8 finding 2 — MCP runtime injection.** A document whose `failure`
+/// stack adds an MCP `#tag` to its own body and then retries has the retried
+/// attempt's MCP configuration rebuilt from the refreshed tag set.
+///
+/// `--allowed-mcp-server-names` is contributed by the Gemini injector alone, so
+/// its value is direct evidence of the server set injected for *this* launch.
+/// The seeded catalog has empty user- and repo-scope defaults, so the server can
+/// only enter a session set through the body tag; the tag is lexed out of the
+/// prompt before delivery, so the id in argv cannot be the prompt echoing back.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_retry_rebuilds_mcp_injection_from_the_refreshed_body() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let doc = r#"---
+title: retry gains an mcp tag
+agent: gemini
+failure:
+  stack:
+    - action:
+        - {append_line: ["events.log", "failure"]}
+        - {append_line: ["doc.md", "also check #proxyprobeserver"]}
+    - action: {retry: 1}
+finalize:
+  stack:
+    - action: {append_line: ["events.log", "finalize"]}
+---
+Body with no tag
+"#;
+    let staged = stage_launch_recording(doc);
+    seed_mcp_catalog(staged.workspace.path());
+    write_launch_recorder(&staged.bin_dir, "gemini", &staged.events_log, 1);
+
+    let pane = run_compose_await_exit_with_args(&staged, "--mcp");
+
+    let refreshed = fs::read_to_string(&staged.md_file).unwrap();
+    assert!(
+        refreshed.contains("#proxyprobeserver"),
+        "fixture check: the failure stack must have added the tag before the retry; \
+         document:\n{refreshed}"
+    );
+
+    let allowed: Vec<String> = event_lines(&staged)
+        .into_iter()
+        .filter_map(|line| line.strip_prefix("mcp-allowed=").map(str::to_string))
+        .collect();
+    assert_eq!(
+        allowed,
+        vec!["none".to_string(), MCP_PROBE_SERVER.to_string()],
+        "the first attempt's body selects no server and the retried attempt's \
+         refreshed body selects one, so the injected MCP configuration must differ \
+         between the two launches; pane:\n{pane}"
+    );
+}
+
+/// **Review-8 finding 2 — session mode, structured output, and permission
+/// mode.** A document whose `failure` stack flips its own `interactive:` and
+/// then retries launches the retried attempt in the refreshed mode: the
+/// structured-stream flags drop from argv, and OpenCode's `--yolo` bypass — which
+/// is non-interactive only — stops applying, which the child's `YOLO`
+/// environment must report.
+///
+/// Three facets move together here because they are read off one rebuilt facet
+/// set rather than derived independently; asserting them in one row is what
+/// proves they cannot disagree.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_retry_launches_the_refreshed_mode_and_permission() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let doc = r#"---
+title: retry flips session mode
+agent: opencode
+failure:
+  stack:
+    - action:
+        - {append_line: ["events.log", "failure"]}
+        - {set_frontmatter: ["doc.md", "interactive", true]}
+    - action: {retry: 1}
+finalize:
+  stack:
+    - action: {append_line: ["events.log", "finalize"]}
+---
+Body
+"#;
+    let staged = stage_launch_recording(doc);
+    write_launch_recorder(&staged.bin_dir, "opencode", &staged.events_log, 1);
+
+    let pane = run_compose_await_exit_with_args(&staged, "--yolo");
+
+    let flags: Vec<String> = event_lines(&staged)
+        .into_iter()
+        .filter_map(|line| line.strip_prefix("flags=").map(str::to_string))
+        .collect();
+    let yolo: Vec<String> = event_lines(&staged)
+        .into_iter()
+        .filter_map(|line| line.strip_prefix("env-yolo=").map(str::to_string))
+        .collect();
+
+    assert_eq!(
+        flags.len(),
+        2,
+        "fixture check: both the original and the retried attempt must have \
+         launched; got {flags:?}; pane:\n{pane}"
+    );
+    assert!(
+        flags[0].contains("--print-logs") || flags[0].contains("--log-level"),
+        "fixture check: the non-interactive opening attempt carries OpenCode's \
+         structured-stream flags; got {flags:?}; pane:\n{pane}"
+    );
+    assert_ne!(
+        flags[0], flags[1],
+        "the retried attempt's argv must be rebuilt for the refreshed session \
+         mode, not replayed from the invocation; got {flags:?}; pane:\n{pane}"
+    );
+    assert_eq!(
+        yolo,
+        vec!["true".to_string(), "false".to_string()],
+        "OpenCode's bypass is non-interactive only, so the refreshed interactive \
+         attempt must launch with the permission mode it actually achieved; \
+         got {yolo:?}; pane:\n{pane}"
+    );
+}
+
 /// Verify-in-`success`, recover-in-`finalize`: a `success.stack` that detects a
 /// missing artifact raises `{error: "..."}`, which routes through the `failure` event
 /// and carries an `err` into `finalize`; the `finalize.stack` then `retry`s the
@@ -1063,15 +1317,15 @@ fn flattened(pane: &str) -> String {
 /// the session, the resume must be **refused** — no second provider launch, a
 /// diagnostic naming the changed facet, and a recommendation to retry.
 ///
-/// The refusal is driven through the one facet a same-document refresh can
-/// actually move. The document opens pinned to one `model:`; its `failure` stack
-/// rewrites that frontmatter with `set_frontmatter` and *then* asks to `resume`.
-/// The resume's fresh-read boundary re-reads the mutated document and rebuilds
-/// the launch identity from that read (`target_launch::rebuild_launch_env`), so
-/// the refreshed `MODEL` reaches the child environment the session-compatibility
-/// key is computed from — and no longer matches the key the opening attempt
-/// stored. Before the per-attempt rebuild landed, the launch identity was frozen
-/// at invocation and this refusal had no reachable trigger at all.
+/// This is the first row of the refusal matrix, driven through `model:`. The
+/// document opens pinned to one `model:`; its `failure` stack rewrites that
+/// frontmatter with `set_frontmatter` and *then* asks to `resume`. The resume's
+/// fresh-read boundary re-reads the mutated document and rebuilds the launch
+/// bundle from that read (`target_launch::rebuild_launch_identity`), so the
+/// refreshed `MODEL` reaches the child environment the session-compatibility key
+/// is computed from — and no longer matches the key the opening attempt stored.
+/// Before the per-attempt rebuild landed, the launch identity was frozen at
+/// invocation and this refusal had no reachable trigger at all.
 ///
 /// Both models are `llamacpp/`-namespaced, which `matches_offering_source`
 /// accepts for Claude by construction, so the row does not depend on the host's
@@ -1192,11 +1446,13 @@ Original body
 //
 // - **`workspace CWD`** has no document surface at all — it comes from the launch
 //   workspace and `--repo`, both invocation-fixed.
-// - **`system prompt`** is *composed* into the provider-native argv once, at
-//   invocation. A document cannot author one, and rewriting the
-//   `--append-system-prompt` file afterwards changes nothing because the argv
-//   already carries the composed text. Moving it would take re-entering the
-//   launch pipeline per attempt, not rebuilding from the document.
+// - **`system prompt`** has no document surface for its *content*: a document
+//   cannot author one, and rewriting the `--append-system-prompt` file
+//   afterwards changes nothing because the composed text was already captured.
+//   Its *delivery* is rebuilt — a provider move re-applies it in the new
+//   provider's shape (`wrap::launch_plan`) — so the facet moves only as a
+//   consequence of the provider moving, never on its own. Making the content
+//   itself movable is review-8 finding 3's scope.
 //
 // A further four have no *isolating* row, because none of them has its own
 // document surface: each is a function of the provider and/or the session mode,
@@ -5720,6 +5976,44 @@ const INIT_CANNOT_REPAIR_SCHEMA_TARGET: &str = "---\n$schema:\n    count: 'numbe
      - action: {append_line: ['events.log', 'target-finalize']}\n\
      ---\ncount-is-{{ count }}\n";
 
+// The same two documents, plus a `loop:` they own. Owning a `loop:` routes a
+// document down `execute_loop_or_single`'s loop branch instead of its single
+// branch, and that branch used to hard-code `defer_schema_verdict: false` and an
+// unconditional schema-aware iteration-1 prepare — so a looping document reached
+// its verdict *before* its own `initialize`, and the identical document without
+// `loop:` did not. These rows are the regression cover for that divergence.
+//
+// `phase` starts past the `until` bound, so the run is exactly one iteration.
+// The claim under test is the stage order a looping document is given; later
+// iterations deliberately reuse the prepared source snapshot rather than
+// rereading (the ratified stage matrix), so a multi-pass fixture would be
+// asserting a different contract.
+
+/// [`INIT_REPAIRS_SCHEMA_TARGET`] with a `loop:` of its own.
+const INIT_REPAIRS_SCHEMA_LOOP_TARGET: &str = "---\n$schema:\n    count: 'number(required)'\n\
+     phase: 3\n\
+     loop:\n  until: 'phase > 2'\n  action: 'increment(phase)'\n  max: 10\n\
+     initialize:\n  stack:\n    \
+     - action: {append_line: ['events.log', 'target-init']}\n    \
+     - action: {set_frontmatter: ['target.md', 'count', 7]}\n\
+     finalize:\n  stack:\n    \
+     - action: {append_line: ['events.log', 'target-finalize']}\n\
+     ---\ncount-is-{{ count }}\n";
+
+/// [`INIT_CANNOT_REPAIR_SCHEMA_TARGET`] with a `loop:` of its own.
+const INIT_CANNOT_REPAIR_SCHEMA_LOOP_TARGET: &str =
+    "---\n$schema:\n    count: 'number(required)'\n\
+     phase: 3\n\
+     loop:\n  until: 'phase > 2'\n  action: 'increment(phase)'\n  max: 10\n\
+     initialize:\n  stack:\n    \
+     - action: {append_line: ['events.log', 'target-init']}\n    \
+     - action: {set_frontmatter: ['target.md', 'count', 'still-not-a-number']}\n\
+     blocked:\n  stack:\n    \
+     - action: {append_line: ['events.log', 'target-blocked']}\n\
+     finalize:\n  stack:\n    \
+     - action: {append_line: ['events.log', 'target-finalize']}\n\
+     ---\ncount-is-{{ count }}\n";
+
 /// A `goose` that records its prompt, then succeeds only for the *target*'s
 /// stabilized body.
 ///
@@ -5823,8 +6117,8 @@ fn run_initialize_ordering_route(route: DiagnosticRoute, target_doc: &str) -> Or
 
 /// Assert the whole ordering claim for one route: `initialize` ran once, it ran
 /// before the verdict, and the delivered prompt came from the stabilized reread.
-fn assert_initialize_precedes_schema(route: DiagnosticRoute) {
-    let run = run_initialize_ordering_route(route, INIT_REPAIRS_SCHEMA_TARGET);
+fn assert_initialize_precedes_schema(route: DiagnosticRoute, target_doc: &str) {
+    let run = run_initialize_ordering_route(route, target_doc);
     let lines = &run.lines;
     let pane = &run.pane;
 
@@ -5870,7 +6164,7 @@ fn assert_initialize_precedes_schema(route: DiagnosticRoute) {
 fn level2_lifecycle_initialize_precedes_schema_verdict_direct() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    assert_initialize_precedes_schema(DiagnosticRoute::Direct);
+    assert_initialize_precedes_schema(DiagnosticRoute::Direct, INIT_REPAIRS_SCHEMA_TARGET);
 }
 
 /// **R4 / acceptance criteria 11 and 12, initialize proxy.** The same document
@@ -5880,7 +6174,7 @@ fn level2_lifecycle_initialize_precedes_schema_verdict_direct() {
 fn level2_lifecycle_initialize_precedes_schema_verdict_initialize_proxy() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    assert_initialize_precedes_schema(DiagnosticRoute::InitializeProxy);
+    assert_initialize_precedes_schema(DiagnosticRoute::InitializeProxy, INIT_REPAIRS_SCHEMA_TARGET);
 }
 
 /// **R4 / acceptance criteria 11 and 12, recovery proxy.** The same document
@@ -5890,7 +6184,49 @@ fn level2_lifecycle_initialize_precedes_schema_verdict_initialize_proxy() {
 fn level2_lifecycle_initialize_precedes_schema_verdict_recovery_proxy() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    assert_initialize_precedes_schema(DiagnosticRoute::TerminalRecoveryProxy);
+    assert_initialize_precedes_schema(
+        DiagnosticRoute::TerminalRecoveryProxy,
+        INIT_REPAIRS_SCHEMA_TARGET,
+    );
+}
+
+/// **R4 / acceptance criteria 11 and 12, looping document, direct.** Owning a
+/// `loop:` must not move the verdict ahead of `initialize`.
+///
+/// The loop branch threaded no [`claudine::composition::SchemaStage`]: it built
+/// its prepare options with `defer_schema_verdict: false` and always reached the
+/// verdict on iteration 1, so this exact document failed on a missing `count`
+/// while the same document without `loop:` ran.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_initialize_precedes_schema_verdict_loop_direct() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    assert_initialize_precedes_schema(DiagnosticRoute::Direct, INIT_REPAIRS_SCHEMA_LOOP_TARGET);
+}
+
+/// **R4 / acceptance criteria 11 and 12, looping document, initialize proxy.**
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_initialize_precedes_schema_verdict_loop_initialize_proxy() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    assert_initialize_precedes_schema(
+        DiagnosticRoute::InitializeProxy,
+        INIT_REPAIRS_SCHEMA_LOOP_TARGET,
+    );
+}
+
+/// **R4 / acceptance criteria 11 and 12, looping document, recovery proxy.**
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_initialize_precedes_schema_verdict_loop_recovery_proxy() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    assert_initialize_precedes_schema(
+        DiagnosticRoute::TerminalRecoveryProxy,
+        INIT_REPAIRS_SCHEMA_LOOP_TARGET,
+    );
 }
 
 /// **R4, still-invalid target.** When `initialize` cannot repair the violation,
@@ -5905,8 +6241,25 @@ fn level2_lifecycle_initialize_precedes_schema_verdict_recovery_proxy() {
 fn level2_lifecycle_still_invalid_target_runs_initialize_and_closure_first() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
+    assert_still_invalid_target_pays_its_closure(INIT_CANNOT_REPAIR_SCHEMA_TARGET);
+}
+
+/// **R4, still-invalid looping target.** The converse of the looping rows above:
+/// deferring the verdict must not *drop* it. A looping document whose
+/// `initialize` cannot repair the violation still runs `initialize`, still pays
+/// its owed `blocked`/`finalize`, and still fails with the typed diagnostic — in
+/// that order, on every route.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_still_invalid_loop_target_runs_initialize_and_closure_first() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    assert_still_invalid_target_pays_its_closure(INIT_CANNOT_REPAIR_SCHEMA_LOOP_TARGET);
+}
+
+fn assert_still_invalid_target_pays_its_closure(target_doc: &str) {
     for route in DiagnosticRoute::ALL {
-        let run = run_initialize_ordering_route(route, INIT_CANNOT_REPAIR_SCHEMA_TARGET);
+        let run = run_initialize_ordering_route(route, target_doc);
         let lines = &run.lines;
         let pane = &run.pane;
 
