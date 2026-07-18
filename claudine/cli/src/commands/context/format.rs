@@ -70,11 +70,13 @@ pub(super) fn format_safety(safety: EffectSafety, term: &Terminal) -> String {
         EffectSafety::FilesystemWrite => "FilesystemWrite",
         EffectSafety::Network => "Network",
         EffectSafety::MarkdownMutation => "MarkdownMutation",
+        EffectSafety::InMemoryState => "InMemoryState",
     };
     let colored = match safety {
         EffectSafety::FilesystemWrite => format!("<orange>{text}</orange>"),
         EffectSafety::Network => format!("<red>{text}</red>"),
         EffectSafety::MarkdownMutation => format!("<blue>{text}</blue>"),
+        EffectSafety::InMemoryState => format!("<green>{text}</green>"),
     };
     Prose::new(colored).render(term)
 }
