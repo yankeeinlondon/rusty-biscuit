@@ -197,6 +197,18 @@ At most one flow-control action may appear in a stack item, and it must be the l
 
 The provider run-loop events — `start`, `success`, `failure`, `finalize` — dispatch `retry`/`resume`/`proxy` fully (this is where `success` + `resume` lives). `proxy` from `initialize` is equally complete: the active-document coordinator sits above both the document loop and the provider harness, so an `initialize` handoff is a real transition rather than a reduced pre-launch path, and the target it hands to is prepared exactly as a directly-invoked document would be (see [Proxy Handoffs](#proxy-handoffs)). What remains unsupported is narrower than it once was: `retry` from `initialize`, and `retry`/`resume`/`proxy` from a compose pre-flight `blocked` or from the `loop` gate, have no re-entry loop to act on and surface a typed `LifecycleSetupPhaseRecoveryUnsupported` rather than a silent no-op. `resume` from `initialize` surfaces `ResumeWithoutSession` — there is no session yet to continue. Put those recoveries on a post-launch event. `defer` (deferred re-execution) is **not implemented in any event yet** — it always surfaces `LifecycleDeferNotImplemented` until its rendezvous backend lands.
 
+#### Retry and resume re-entry
+
+`retry` and `resume` replace only the **provider-attempt slice** of the active document; they do not change document identity. Both refresh the document canonically — a fresh read from disk with full validation — and both keep the document's `with:` overlay, its proxy provenance, and their own decrementing budgets (a `retry` cannot reset its budget by replacing the attempt). `initialize` does **not** re-fire: it is once per active document, not once per attempt.
+
+Launch identity is recomputed at that fresh-read boundary, against the document about to run, so a `model:` changed between attempts actually reaches the child environment rather than being pinned to an adoption-time snapshot.
+
+`resume` additionally checks a **session-compatibility key**. It retains the live provider session only when the key still matches across the refresh; when a facet moved, the resume refuses with `CompositionError::LifecycleResumeIncompatible { facets }`, names the changed facets, and recommends `retry` for a fresh session. Note the observed ordering: `start` fires before the comparison, and a refusal propagates as a hard error — `success`/`finalize` do not fire. Full facet list, reachability, and coverage: [composition.md — Retry and resume re-entry](composition.md#retry-and-resume-re-entry).
+
+#### Lifecycle events and `--dry-run`
+
+`--dry-run` fires **no lifecycle events at all**. The dry-run seam returns before the lifecycle runtime is constructed, so a stack carrying `append_line`, `set_frontmatter`, or `shell` cannot touch the workspace during a rehearsal, and no dynamic `proxy` route can be traversed. Do not author lifecycle stacks expecting a dry run to exercise them; turning dry run into lifecycle simulation is an explicit non-goal. See [composition.md — Dry Run](composition.md#dry-run).
+
 ### Proxy Handoffs
 
 `proxy` hands the run to another prompt document. The target enters at its own `initialize` and becomes the **active document**: it owns the remaining lifecycle, the closure, and the output. A clean handoff synthesizes no source-side terminal, `finalize`, or `loop` event — a `proxy` from `success`/`failure` skips that attempt's ordinary `finalize`, and a `proxy` from `finalize` does not re-enter it.

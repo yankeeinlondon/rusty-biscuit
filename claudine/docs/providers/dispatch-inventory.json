@@ -309,7 +309,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/composition/pipeline.rs",
-      "line": 207,
+      "line": 266,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -319,7 +319,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/composition/pipeline.rs",
-      "line": 346,
+      "line": 399,
       "form": "matches-macro",
       "dispatch_class": "conditional",
       "providers": [
