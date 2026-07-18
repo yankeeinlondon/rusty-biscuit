@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::{FileReference, FileReferenceError, FileResolutionContext};
 
-use crate::harness::error::{HarnessError, PathResolutionFailure};
+use crate::harness::error::{HarnessError, PathResolutionFailure, ResolutionDetail};
 
 /// Context for resolving harness-internal document references.
 #[derive(Debug, Clone)]
@@ -38,7 +38,7 @@ pub struct HarnessResolutionContext<'a> {
 ///   source document's directory.
 /// - **explicit** (`./foo.md`, `../foo.md`) — pinned to the source directory.
 /// - **`@foo`** — magic-root search (repository root, configured roots, home).
-/// - **`~foo`** / **`~/foo`** — the user's home directory.
+/// - **`~`**, **`~/foo`** — the user's home directory (`~user` unsupported).
 /// - **absolute** — the path itself.
 ///
 /// ## Errors
@@ -63,6 +63,7 @@ pub fn resolve_harness_path(
             failure: PathResolutionFailure::EmptyReference,
             source_path: Some(ctx.source_path.to_path_buf()),
             resolved: None,
+            resolution: None,
         });
     }
 
@@ -77,6 +78,10 @@ pub fn resolve_harness_path(
         .candidates()
         .first()
         .map(|probed| probed.candidate().path().to_path_buf());
+    // Retain the whole ordered plan before `into_convenience` discards it, so a
+    // no-match projects candidate/root/kind detail rather than just its winner
+    // (spec §D8).
+    let resolution = ResolutionDetail::from_detailed(&detailed);
 
     match detailed.into_convenience() {
         Ok(Some(path)) => Ok(path),
@@ -85,6 +90,7 @@ pub fn resolve_harness_path(
             failure: PathResolutionFailure::TargetMissing,
             source_path: Some(ctx.source_path.to_path_buf()),
             resolved: primary,
+            resolution: Some(Box::new(resolution)),
         }),
         Err(error) => Err(unresolvable(trimmed, ctx.source_path, error)),
     }
@@ -108,6 +114,7 @@ fn build_resolution_context(
             failure: PathResolutionFailure::NoSourceParent,
             source_path: Some(ctx.source_path.to_path_buf()),
             resolved: None,
+            resolution: None,
         })?;
 
     let mut resolution_ctx =
@@ -298,5 +305,113 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// D8: an implicit no-match retains the whole ordered candidate plan. The
+    /// bare reference misses at both anchors, so the typed diagnostic projects
+    /// `kind`, `repository_root`, and the two probed candidates in
+    /// repository-then-source order — not just the winner the convenience
+    /// projection would keep.
+    #[test]
+    fn implicit_no_match_projects_ordered_candidate_detail() {
+        use crate::diagnostics::Diagnostic;
+
+        let repo = tempfile::tempdir().unwrap();
+        let source = repo.path().join("prompts/run.md");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, "x").unwrap();
+
+        let ctx = HarnessResolutionContext {
+            source_path: &source,
+            repo_root: Some(repo.path()),
+        };
+        // Neither `<repo>/absent.md` nor `<repo>/prompts/absent.md` exists.
+        let err = resolve_harness_path("absent.md", &ctx).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                HarnessError::PathResolutionFailed {
+                    failure: PathResolutionFailure::TargetMissing,
+                    ..
+                }
+            ),
+            "unexpected variant: {err:?}"
+        );
+
+        let detail = err.detail();
+        assert_eq!(detail["kind"], serde_json::json!("implicit_relative"));
+        assert_eq!(detail["failure"], serde_json::json!("no_match"));
+        assert_eq!(
+            detail["repository_root"],
+            serde_json::json!(repo.path().to_string_lossy())
+        );
+
+        let candidates = detail["candidates"]
+            .as_array()
+            .expect("candidates must be an array");
+        assert_eq!(candidates.len(), 2, "both anchors were probed: {detail}");
+
+        let repo_candidate = repo.path().join("absent.md");
+        assert_eq!(
+            candidates[0]["path"],
+            serde_json::json!(repo_candidate.to_string_lossy())
+        );
+        assert_eq!(candidates[0]["provenance"], serde_json::json!("repository"));
+        assert_eq!(candidates[0]["disposition"], serde_json::json!("missing"));
+
+        let source_candidate = repo.path().join("prompts/absent.md");
+        assert_eq!(
+            candidates[1]["path"],
+            serde_json::json!(source_candidate.to_string_lossy())
+        );
+        assert_eq!(candidates[1]["provenance"], serde_json::json!("source"));
+        assert_eq!(candidates[1]["disposition"], serde_json::json!("missing"));
+    }
+
+    /// The retained plan is also reachable as typed candidates for the renderer,
+    /// in the same repository-then-source order.
+    #[test]
+    fn implicit_no_match_exposes_typed_candidates_for_rendering() {
+        use biscuit_file::RootProvenance;
+
+        let repo = tempfile::tempdir().unwrap();
+        let source = repo.path().join("prompts/run.md");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, "x").unwrap();
+
+        let ctx = HarnessResolutionContext {
+            source_path: &source,
+            repo_root: Some(repo.path()),
+        };
+        let err = resolve_harness_path("absent.md", &ctx).unwrap_err();
+
+        let candidates = err.resolution_candidates();
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(
+            candidates[0].candidate().provenance(),
+            RootProvenance::Repository
+        );
+        assert_eq!(candidates[1].candidate().provenance(), RootProvenance::Source);
+    }
+
+    /// A failure drawn before resolution carries no plan: `resolution` stays
+    /// `None`, so the structured `candidates`/`kind`/`repository_root` keys
+    /// project `null` rather than an invented shape.
+    #[test]
+    fn pre_resolution_failure_carries_no_candidate_plan() {
+        use crate::diagnostics::Diagnostic;
+
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("run.md");
+        let ctx = HarnessResolutionContext {
+            source_path: &source,
+            repo_root: None,
+        };
+        let err = resolve_harness_path("   ", &ctx).unwrap_err();
+        assert!(err.resolution_candidates().is_empty());
+        let detail = err.detail();
+        for key in ["kind", "repository_root", "candidates"] {
+            assert_eq!(detail[key], serde_json::Value::Null, "`{key}` must be null");
+        }
     }
 }

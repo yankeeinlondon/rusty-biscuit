@@ -507,11 +507,24 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             // `escape_prose_path` escapes `"` for `<a href="…">` attributes;
             // it over-escapes body text, and this source's `Display` quotes
             // the reference. `Prose::escape_text` is the body-text escape.
-            let body = format!(
+            let mut body = format!(
                 "Cannot resolve <cyan>`{}`</cyan>, referenced by {surface}.\n\n{}",
                 escape_prose_path(reference),
                 Prose::escape_text(&source.to_string())
             );
+            // Enumerate the ordered plan only when the resolver tried more than
+            // one candidate: the single-candidate `Display` above already names
+            // its one path, so a "Tried:" list adds information solely for an
+            // implicit reference that fell through repository- then
+            // source-relative candidates (spec §D8).
+            let candidates = source.resolution_candidates();
+            if candidates.len() >= 2 {
+                body.push_str("\n\nTried:");
+                for (index, probed) in candidates.iter().enumerate() {
+                    let path = probed.candidate().path().display().to_string();
+                    body.push_str(&format!("\n  {}. {}", index + 1, Prose::escape_text(&path)));
+                }
+            }
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "CompositionError",

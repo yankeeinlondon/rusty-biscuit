@@ -399,6 +399,7 @@ fn typed_errors() -> Vec<Box<dyn Diagnostic>> {
             failure: crate::harness::PathResolutionFailure::TargetMissing,
             source_path: None,
             resolved: None,
+            resolution: None,
         }),
     ]
 }

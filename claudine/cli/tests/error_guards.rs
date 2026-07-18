@@ -755,6 +755,7 @@ mod corpus {
                     failure: PathResolutionFailure::TargetMissing,
                     source_path: Some(PathBuf::from("/repo/run.md")),
                     resolved: Some(PathBuf::from("/repo/nope.md")),
+                    resolution: None,
                 }),
             ),
             // --- CompositionError ---

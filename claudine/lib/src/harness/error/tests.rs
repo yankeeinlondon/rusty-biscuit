@@ -184,6 +184,7 @@ mod classification_tests {
             failure: PathResolutionFailure::TargetMissing,
             source_path: Some(PathBuf::from("/repo/run.md")),
             resolved: Some(PathBuf::from("/repo/nope.md")),
+            resolution: None,
         };
         assert_eq!(err.code(), "composition.invalid_file_reference");
         assert_eq!(err.category(), Category::Composition);
@@ -193,11 +194,15 @@ mod classification_tests {
 
     #[test]
     fn path_resolution_detail_projects_only_what_the_resolver_knows() {
+        // No `resolution` plan attached (the failure was drawn before a probe),
+        // so `kind`, `repository_root`, and `candidates` stay `null`. The probed
+        // no-match projection is covered in `resolve.rs`.
         let err = HarnessError::PathResolutionFailed {
             raw: "nope.md".to_string(),
             failure: PathResolutionFailure::TargetMissing,
             source_path: Some(PathBuf::from("/repo/run.md")),
             resolved: Some(PathBuf::from("/repo/nope.md")),
+            resolution: None,
         };
         let detail = err.detail();
 
@@ -205,9 +210,9 @@ mod classification_tests {
         assert_eq!(detail["failure"], json!("no_match"));
         assert_eq!(detail["source_path"], json!("/repo/run.md"));
 
-        // Every declared key is present; the ones this resolver cannot supply
-        // are `null` rather than invented (spec §D3). `kind` in particular is
-        // not back-derived from `failure`.
+        // Every declared key is present; without a plan the resolver-supplied
+        // ones stay `null` rather than invented (spec §D3). `kind` in particular
+        // is not back-derived from `failure`.
         for field in [
             "kind",
             "base_dir",
@@ -257,6 +262,7 @@ mod classification_tests {
             failure: PathResolutionFailure::TargetMissing,
             source_path: None,
             resolved: Some(PathBuf::from("/repo/nope.md")),
+            resolution: None,
         };
         let text = err.to_string();
         assert!(text.contains("nope.md"), "{text}");
@@ -267,6 +273,7 @@ mod classification_tests {
             failure: PathResolutionFailure::EmptyReference,
             source_path: None,
             resolved: None,
+            resolution: None,
         };
         assert!(empty.to_string().contains("path is empty"));
     }

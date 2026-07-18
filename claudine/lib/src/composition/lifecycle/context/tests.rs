@@ -732,6 +732,7 @@ fn err_cause_projects_one_level_of_registered_diagnostic() {
             failure: crate::harness::PathResolutionFailure::TargetMissing,
             source_path: Some(std::path::PathBuf::from("route.md")),
             resolved: Some(std::path::PathBuf::from("/repo/no/such/target.md")),
+            resolution: None,
         },
     };
     let value = LifecycleErrorInfo::from_composition_error(&err).to_value();

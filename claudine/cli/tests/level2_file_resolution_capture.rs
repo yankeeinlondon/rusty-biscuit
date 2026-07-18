@@ -76,6 +76,23 @@ initialize:
 Router body (never used — the run proxies away at initialize).
 ";
 
+/// A router proxying a **bare** reference that exists at neither anchor, so both
+/// implicit candidates miss.
+///
+/// Repository candidate `<repo>/missing/target.md` and source candidate
+/// `<repo>/prompts/missing/target.md` are both absent, so the run fails with the
+/// typed block and the report enumerates the two attempted candidates in
+/// repository-then-source order (spec §D8).
+const NO_MATCH_ROUTER_DOC: &str = "\
+---
+title: no-match router
+initialize:
+  stack:
+    - action: {proxy: \"missing/target.md\"}
+---
+Router body (never used — the run proxies away at initialize).
+";
+
 /// The proxied target. Benign: no lifecycle, so once the hand-off lands the run
 /// composes it and launches the provider stub.
 const TARGET_DOC: &str = "\
@@ -294,5 +311,60 @@ fn level2_explicit_reference_stays_source_relative_and_fails_in_tmux() {
         capture.exit_code, 1,
         "an unresolvable explicit reference must exit 1.\nplain:\n{}",
         capture.frame.plain
+    );
+}
+
+/// AC8 / D8: an implicit reference that misses at both anchors renders the typed
+/// block with the ordered candidate plan — the two attempted candidates in
+/// repository-then-source order — not just the repository winner. This is the
+/// user-observable proof that the detailed resolution record reaches the report
+/// instead of being discarded before diagnostics.
+#[test]
+#[serial(level2_terminal)]
+fn level2_implicit_no_match_lists_two_ordered_candidates_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let staged = stage("claudine-l2-fileres-nomatch", NO_MATCH_ROUTER_DOC);
+    let capture = run_in_pane(&mut harness, &staged);
+
+    assert!(
+        has_status_block(&capture.frame),
+        "an implicit no-match must render the typed resolution block.\nplain:\n{}",
+        capture.frame.plain
+    );
+
+    let plain = &capture.frame.plain;
+    assert!(
+        plain.contains("Tried:"),
+        "the report must enumerate the ordered candidate plan.\nplain:\n{plain}"
+    );
+
+    // Anchor the ordering check inside the "Tried:" list so the earlier
+    // reference/`does not exist` lines (which also name the bare path) cannot
+    // satisfy it. Within the list, the bare repository candidate must precede
+    // the `prompts/`-nested source candidate.
+    let tried = plain
+        .split("Tried:")
+        .nth(1)
+        .expect("the report must contain a Tried section");
+    let repo_idx = tried
+        .find("missing/target.md")
+        .expect("the repository candidate must be listed");
+    let source_idx = tried
+        .find("prompts/missing/target.md")
+        .expect("the source candidate must be listed");
+    assert!(
+        repo_idx < source_idx,
+        "candidates must be listed repository-then-source.\nplain:\n{plain}"
+    );
+
+    assert!(
+        !staged.launch_count.exists(),
+        "a no-match hand-off must not launch the provider.\nplain:\n{plain}"
+    );
+    assert_eq!(
+        capture.exit_code, 1,
+        "an unresolvable implicit reference must exit 1.\nplain:\n{plain}"
     );
 }

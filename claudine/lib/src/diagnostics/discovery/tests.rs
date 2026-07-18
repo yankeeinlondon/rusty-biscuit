@@ -417,6 +417,7 @@ fn role_defaults_to_semantic() {
         failure: crate::harness::PathResolutionFailure::TargetMissing,
         source_path: None,
         resolved: None,
+        resolution: None,
     };
     assert_eq!(err.role(), DiagnosticRole::Semantic);
 }

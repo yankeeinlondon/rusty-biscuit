@@ -1,8 +1,11 @@
 //! Error types for the harness module.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use biscuit_file::FileReferenceError;
+use biscuit_file::{
+    DetailedResolution, FileReferenceError, FileReferenceKind, ProbeDisposition, ProbedCandidate,
+    RootProvenance,
+};
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::errors::{BlockError, ErrorHeader, StatusBlockExt};
@@ -46,6 +49,36 @@ impl PathResolutionFailure {
             Self::NoSourceParent => "missing_context",
             Self::TargetMissing => "no_match",
         }
+    }
+}
+
+/// The structured diagnostic projection of a `biscuit-file` detailed resolution.
+///
+/// Carried on [`HarnessError::PathResolutionFailed`] so the ordered candidate
+/// plan the shared resolver probed reaches `err.detail.*` and the rendered
+/// report instead of being discarded by the convenience projection: its parsed
+/// kind, the repository root it anchored on, and each attempted candidate's
+/// provenance and probe disposition (spec §D8).
+#[derive(Debug, Clone)]
+pub struct ResolutionDetail {
+    kind: FileReferenceKind,
+    repository_root: Option<PathBuf>,
+    candidates: Vec<ProbedCandidate>,
+}
+
+impl ResolutionDetail {
+    /// Project the retained detail out of a shared [`DetailedResolution`].
+    pub fn from_detailed(detailed: &DetailedResolution) -> Self {
+        Self {
+            kind: detailed.class().kind,
+            repository_root: detailed.repository_root().map(Path::to_path_buf),
+            candidates: detailed.candidates().to_vec(),
+        }
+    }
+
+    /// The ordered candidates the resolver attempted, each with its disposition.
+    pub fn candidates(&self) -> &[ProbedCandidate] {
+        &self.candidates
     }
 }
 
@@ -154,6 +187,13 @@ pub enum HarnessError {
         source_path: Option<PathBuf>,
         /// The path the reference resolved to, when resolution got that far.
         resolved: Option<PathBuf>,
+        /// The shared resolver's retained candidate plan, when a filesystem
+        /// probe ran. `None` for failures drawn before resolution
+        /// ([`PathResolutionFailure::EmptyReference`],
+        /// [`PathResolutionFailure::NoSourceParent`]). Boxed to keep the `Err`
+        /// variant small, the same `clippy::result_large_err` trade the boxed
+        /// fields below make.
+        resolution: Option<Box<ResolutionDetail>>,
     },
 
     /// The shared `biscuit-file` resolver rejected a reference for a reason
@@ -203,6 +243,22 @@ pub enum HarnessError {
         #[source]
         source: Box<ShellExpansionError>,
     },
+}
+
+impl HarnessError {
+    /// The ordered candidate plan a resolution failure attempted, when one was
+    /// retained. Empty for every other arm and for a failure drawn before a
+    /// filesystem probe. The renderer enumerates it as the report's "Tried:"
+    /// list so a miss shows repository-then-source order, not just its winner.
+    pub fn resolution_candidates(&self) -> &[ProbedCandidate] {
+        match self {
+            HarnessError::PathResolutionFailed {
+                resolution: Some(detail),
+                ..
+            } => detail.candidates(),
+            _ => &[],
+        }
+    }
 }
 
 impl BlockError for HarnessError {
@@ -276,16 +332,18 @@ impl Diagnostic for HarnessError {
             }
             HarnessError::ShellAuditParseError { detail, .. } => json!({ "command": detail }),
             HarnessError::RepoRootRequired { path } => json!({ "path": path }),
-            // Seeded from the catalog so every declared key is present. Only
-            // `reference`, `source_path`, and `failure` are things this
-            // resolver actually knows; the rest stay `null` rather than being
-            // invented (spec §D3). `failure` is populated from the typed
-            // `PathResolutionFailure`, never back-derived from `kind` — which
-            // is exactly why `kind` itself stays `null` here.
+            // Seeded from the catalog so every declared key is present.
+            // `reference`, `source_path`, and the typed `failure` are always
+            // known; `kind`, `repository_root`, and the ordered `candidates`
+            // are populated from the shared resolver's retained plan when a
+            // probe ran, and stay `null` when the failure was drawn before
+            // resolution (spec §D8). `failure` is the typed
+            // `PathResolutionFailure`, never back-derived from `kind`.
             HarnessError::PathResolutionFailed {
                 raw,
                 failure,
                 source_path,
+                resolution,
                 ..
             } => {
                 let mut base = null_detail_for("composition.invalid_file_reference");
@@ -293,6 +351,16 @@ impl Diagnostic for HarnessError {
                 base["failure"] = json!(failure.as_str());
                 base["source_path"] =
                     json!(source_path.as_ref().map(|p| p.to_string_lossy().into_owned()));
+                if let Some(detail) = resolution {
+                    base["kind"] = json!(file_reference_kind_slug(detail.kind));
+                    base["repository_root"] = json!(
+                        detail
+                            .repository_root
+                            .as_ref()
+                            .map(|p| p.to_string_lossy().into_owned())
+                    );
+                    base["candidates"] = resolution_candidates_detail(&detail.candidates);
+                }
                 base
             }
             // Same projection as `PathResolutionFailed`, but `failure` is
@@ -337,6 +405,68 @@ fn file_reference_failure_slug(error: &FileReferenceError) -> &'static str {
         | E::Io { .. } => "permission_io",
         _ => "invalid_syntax",
     }
+}
+
+/// Slug for a reference kind, drawn from the `kind` vocabulary the
+/// `composition.invalid_file_reference` catalog entry declares.
+fn file_reference_kind_slug(kind: FileReferenceKind) -> &'static str {
+    use FileReferenceKind as K;
+    match kind {
+        K::ExplicitRelative => "explicit_relative",
+        K::ImplicitRelative => "implicit_relative",
+        K::Absolute => "absolute",
+        K::Magic => "magic",
+        K::Package => "package",
+        K::Home => "home",
+        K::Vault => "vault",
+        K::Url => "url",
+    }
+}
+
+/// Slug for the root a candidate was built from (spec §D3), so a handler reads
+/// provenance as data rather than inferring it from a path prefix.
+fn root_provenance_slug(provenance: RootProvenance) -> &'static str {
+    use RootProvenance as P;
+    match provenance {
+        P::Repository => "repository",
+        P::Source => "source",
+        P::Package => "package",
+        P::Home => "home",
+        P::Magic => "magic",
+        P::Vault => "vault",
+        P::Absolute => "absolute",
+    }
+}
+
+/// Slug for a candidate's probe disposition (spec §D8). `Io` collapses its
+/// `ErrorKind` here; the kind is retained on the typed `FileReferenceError`.
+fn probe_disposition_slug(disposition: ProbeDisposition) -> &'static str {
+    use ProbeDisposition as D;
+    match disposition {
+        D::Missing => "missing",
+        D::NonFile => "non_file",
+        D::Matched => "matched",
+        D::Io(_) => "io",
+        D::SearchRoot => "search_root",
+    }
+}
+
+/// Project the ordered probe record into the `candidates` detail array: one
+/// object per attempt carrying its path, root provenance, and probe
+/// disposition, in first-seen (repository-then-source) order.
+fn resolution_candidates_detail(candidates: &[ProbedCandidate]) -> Value {
+    Value::Array(
+        candidates
+            .iter()
+            .map(|probed| {
+                json!({
+                    "path": probed.candidate().path().to_string_lossy(),
+                    "provenance": root_provenance_slug(probed.candidate().provenance()),
+                    "disposition": probe_disposition_slug(probed.disposition()),
+                })
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]

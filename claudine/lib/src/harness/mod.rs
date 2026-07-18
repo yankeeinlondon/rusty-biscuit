@@ -15,7 +15,7 @@ pub mod speech;
 pub mod timeout;
 
 pub use audit::{audit_shell_commands, collect_auditable_commands};
-pub use error::{HarnessError, PathResolutionFailure};
+pub use error::{HarnessError, PathResolutionFailure, ResolutionDetail};
 pub use model::*;
 pub use parse::{has_harness_properties, parse_harness_plan};
 pub use resolve::{HarnessResolutionContext, resolve_harness_path};

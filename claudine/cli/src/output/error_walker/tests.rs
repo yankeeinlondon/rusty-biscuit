@@ -50,6 +50,7 @@ fn renders_harness_error_block() {
         failure: claudine::harness::PathResolutionFailure::TargetMissing,
         source_path: Some(PathBuf::from("route.md")),
         resolved: Some(PathBuf::from("/repo/no/such/target.md")),
+        resolution: None,
     };
     let report: Report = eyre!(err);
 
@@ -129,6 +130,7 @@ fn invalid_file_reference() -> CompositionError {
             failure: claudine::harness::PathResolutionFailure::TargetMissing,
             source_path: Some(PathBuf::from("route.md")),
             resolved: Some(PathBuf::from("/repo/no/such/target.md")),
+            resolution: None,
         },
     }
 }

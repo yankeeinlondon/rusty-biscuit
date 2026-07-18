@@ -1564,6 +1564,7 @@ fn proxy_reference_error() -> CompositionError {
             failure: crate::harness::PathResolutionFailure::TargetMissing,
             source_path: Some(PathBuf::from("/repo/run.md")),
             resolved: Some(PathBuf::from("/repo/nope.md")),
+            resolution: None,
         },
     }
 }
@@ -1670,6 +1671,57 @@ fn invalid_file_reference_body_does_not_leak_escape_backslashes() {
         "escape backslash leaked into rendered body:\n{rendered}"
     );
     assert!(rendered.contains("nope.md"), "{rendered}");
+}
+
+/// Stage a bare-implicit `reference` under `<repo>/prompts/run.md` and wrap the
+/// resulting harness resolution failure in the authoring surface, so the block
+/// renders against a real (repository-first) candidate plan.
+fn implicit_reference_error(reference: &str, repo: &std::path::Path) -> CompositionError {
+    let source = repo.join("prompts/run.md");
+    std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+    std::fs::write(&source, "x").unwrap();
+
+    let ctx = crate::harness::HarnessResolutionContext {
+        source_path: &source,
+        repo_root: Some(repo),
+    };
+    let source_err = crate::harness::resolve_harness_path(reference, &ctx).unwrap_err();
+
+    CompositionError::InvalidFileReference {
+        context: Box::new(FileReferenceContext {
+            source_path: source,
+            event: Some("initialize".to_string()),
+            property: "initialize.stack[0].proxy".to_string(),
+            reference: reference.to_string(),
+            hint: "A `proxy` target must name an existing Markdown document.".to_string(),
+        }),
+        source: source_err,
+    }
+}
+
+#[test]
+fn invalid_file_reference_block_enumerates_the_plan_only_for_a_multi_candidate_miss() {
+    // The ordered "Tried:" list is enumerated only when more than one candidate
+    // was probed: an implicit miss (repository + source) shows it; an explicit
+    // `./` miss (one candidate) does not, since its single path is already named
+    // (spec §D8).
+    let term = biscuit_terminal::terminal::Terminal::default();
+
+    let implicit_repo = tempfile::tempdir().unwrap();
+    let implicit = implicit_reference_error("absent.md", implicit_repo.path());
+    let implicit_rendered = implicit.status_block(&term).render(&term);
+    assert!(
+        implicit_rendered.contains("Tried:"),
+        "an implicit two-candidate miss must enumerate its plan:\n{implicit_rendered}"
+    );
+
+    let explicit_repo = tempfile::tempdir().unwrap();
+    let explicit = implicit_reference_error("./absent.md", explicit_repo.path());
+    let explicit_rendered = explicit.status_block(&term).render(&term);
+    assert!(
+        !explicit_rendered.contains("Tried:"),
+        "an explicit single-candidate miss must not enumerate a one-item plan:\n{explicit_rendered}"
+    );
 }
 
 // -- Burn-down batch 3: typed sources on the composition edges ---------------
