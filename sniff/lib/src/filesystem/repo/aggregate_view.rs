@@ -123,7 +123,13 @@ pub struct AggregateCwdContext {
 /// Branch, worktree, and file-aware history shapes are collected through a
 /// crate-private companion while the original Git handle is still available.
 pub fn detect_repo_aggregate(dir: &Path) -> Result<RepoAggregateObservation> {
-    let started = Instant::now();
+    // Reading a clock is instrumentation setup, so it is gated on collection
+    // the same way `classify_file` gates its own — see `performance`'s module
+    // docs. `record_logged_stage` rather than `StageTimer` because these two
+    // stages are the aggregate's counterparts to `detect_with_plan`'s, and an
+    // active collector must still see their INFO tracing events.
+    let collecting = performance::is_collecting();
+    let started = collecting.then(Instant::now);
     let request = FilesystemRequest::new()
         .git(
             GitRequest::full().commit_count(10).metadata(
@@ -133,15 +139,27 @@ pub fn detect_repo_aggregate(dir: &Path) -> Result<RepoAggregateObservation> {
             ),
         )
         .repo(RepoRequest::focused(RepoDetailRequest::all()))
-        .without_file_inventory();
-    let filesystem_started = Instant::now();
+        .without_file_inventory()
+        // The aggregate renders neither the Markdown inventory nor the
+        // `.editorconfig` result, and its `documentation_changes` block is a
+        // filter over the one commit set — not a filesystem document walk.
+        // Leaving docs enabled would make the aggregate a repository-wide walk
+        // consumer and parse every Markdown file in the tree for output it
+        // never emits.
+        .without_docs()
+        .without_formatting();
+    let filesystem_started = collecting.then(Instant::now);
     let detected = crate::filesystem::detect_filesystem_for_aggregate(dir, &request)?;
-    performance::record_logged_stage(
-        "detect.filesystem",
-        filesystem_started.elapsed(),
-        tracing::Level::INFO,
-    );
-    performance::record_logged_stage("detect.total", started.elapsed(), tracing::Level::INFO);
+    if let Some(filesystem_started) = filesystem_started {
+        performance::record_logged_stage(
+            "detect.filesystem",
+            filesystem_started.elapsed(),
+            tracing::Level::INFO,
+        );
+    }
+    if let Some(started) = started {
+        performance::record_logged_stage("detect.total", started.elapsed(), tracing::Level::INFO);
+    }
     let evidence = detected
         .git
         .as_ref()
@@ -577,7 +595,104 @@ mod tests {
         use crate::filesystem::git::GitRepo;
         use crate::performance::{counters, testing::measure};
         use crate::request::{GitMetadataRequest, GitRequest};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
         use tempfile::TempDir;
+
+        /// Counts INFO events from `sniff::performance` on the calling thread.
+        ///
+        /// This is the only black-box observable that separates a gated clock
+        /// from an ungated one: `record_logged_stage` emits its event whether
+        /// or not a collector is installed, so an ungated `Instant::now()`
+        /// still logs. Every stage nested inside aggregate detection logs at
+        /// DEBUG, and those run on spawned threads a thread-local dispatcher
+        /// never sees, so an INFO count here is exactly the two stages the
+        /// aggregate boundary owns.
+        struct InfoStageCounter(Arc<AtomicUsize>);
+
+        impl tracing::Subscriber for InfoStageCounter {
+            // Callsite interest is cached process-wide, so a definite answer
+            // here would leak into every later test in this binary.
+            fn register_callsite(
+                &self,
+                _: &'static tracing::Metadata<'static>,
+            ) -> tracing::subscriber::Interest {
+                tracing::subscriber::Interest::sometimes()
+            }
+
+            fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+                *metadata.level() == tracing::Level::INFO
+                    && metadata.target() == "sniff::performance"
+            }
+
+            fn event(&self, _: &tracing::Event<'_>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+
+            fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+                tracing::span::Id::from_u64(1)
+            }
+            fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+            fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+            fn enter(&self, _: &tracing::span::Id) {}
+            fn exit(&self, _: &tracing::span::Id) {}
+        }
+
+        /// The opt-in instrumentation contract at the aggregate entry point,
+        /// the sibling of `system_view`'s uncollected-walk test: with nothing
+        /// collecting, the boundary reads no clock, so it records and logs no
+        /// stage, and leaves nothing behind for a later request to adopt.
+        #[test]
+        fn uncollected_aggregate_reads_no_clock_and_records_no_stage() {
+            let dir = fixture();
+            assert!(
+                !performance::is_collecting(),
+                "no collector should be active here"
+            );
+
+            let events = Arc::new(AtomicUsize::new(0));
+            {
+                let counter = InfoStageCounter(Arc::clone(&events));
+                let _guard =
+                    tracing::dispatcher::set_default(&tracing::Dispatch::new(counter));
+                detect_repo_aggregate(dir.path()).expect("aggregate detection succeeds");
+            }
+
+            assert_eq!(
+                events.load(Ordering::Relaxed),
+                0,
+                "the disabled path must not read a clock; a logged stage here means \
+                 detect.filesystem/detect.total timed themselves for a report nobody \
+                 asked for"
+            );
+
+            let ((), counts) = measure(|| {});
+            assert!(
+                !counts.recorded_any_stage(),
+                "stages leaked from an uncollected aggregate: {:?}",
+                counts.stage_names()
+            );
+        }
+
+        /// The other half of the same contract: gating must not cost an active
+        /// collector the two stages `--perf` renders for this command.
+        #[test]
+        fn collected_aggregate_records_both_detection_stages() {
+            let dir = fixture();
+            let (_, counts) =
+                measure(|| detect_repo_aggregate(dir.path()).expect("detection succeeds"));
+
+            assert!(
+                counts.recorded_stage("detect.filesystem"),
+                "stages: {:?}",
+                counts.stage_names()
+            );
+            assert!(
+                counts.recorded_stage("detect.total"),
+                "stages: {:?}",
+                counts.stage_names()
+            );
+        }
 
         /// A repository with one file per working-tree scope, so a projection
         /// that silently dropped a bucket would show up as an empty bucket.

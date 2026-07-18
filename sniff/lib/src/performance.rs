@@ -569,6 +569,16 @@ pub(crate) mod testing {
         pub(crate) fn recorded_any_stage(&self) -> bool {
             !self.report.stages.is_empty()
         }
+
+        /// Whether `name` was observed at least once.
+        pub(crate) fn recorded_stage(&self, name: &str) -> bool {
+            self.report.stages.contains_key(name)
+        }
+
+        /// Every recorded stage name, for diagnosing an unexpected assertion.
+        pub(crate) fn stage_names(&self) -> Vec<&str> {
+            self.report.stages.keys().map(String::as_str).collect()
+        }
     }
 }
 

@@ -2296,6 +2296,119 @@ mod tests {
         assert_eq!(aggregate.worktrees.len(), 1);
     }
 
+    /// The aggregate renders no Markdown inventory and no `.editorconfig`
+    /// result, so observing either is work outside its output contract. Docs
+    /// are a repository-wide walk consumer, so leaving them enabled also
+    /// reinstates the shared descendant walk this boundary exists to avoid.
+    #[test]
+    fn aggregate_command_path_observes_no_markdown_or_formatting() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        let repo = git2::Repository::init(root).unwrap();
+        let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"docs-fixture\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join(".editorconfig"),
+            "root = true\n\n[*]\nindent_style = space\nindent_size = 4\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        for name in ["README.md", "docs/guide.md", "docs/reference.md"] {
+            std::fs::write(root.join(name), "# Title\n\nBody.\n").unwrap();
+        }
+        std::fs::write(root.join("tracked.rs"), "fn original() {}\n").unwrap();
+
+        let mut index = repo.index().unwrap();
+        index
+            .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+            .unwrap();
+        index.add_path(std::path::Path::new(".editorconfig")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+                .unwrap();
+        }
+        std::fs::write(root.join("tracked.rs"), "fn changed() {}\n").unwrap();
+
+        let collector = sniff::performance::PerformanceCollector::new_shared();
+        let observation = sniff::performance::with_current_collector(
+            Some(collector.clone()),
+            || sniff::filesystem::repo::detect_repo_aggregate(root),
+        )
+        .expect("aggregate command path succeeds");
+        let counters = collector.snapshot(std::time::Duration::ZERO).counters;
+        let count = |name: &str| counters.get(name).copied().unwrap_or(0);
+
+        assert_eq!(
+            count(sniff::performance::counters::FS_DOCS_PARSED),
+            0,
+            "the aggregate renders no filesystem Markdown inventory, so it must \
+             parse no documents: {counters:?}"
+        );
+        assert_eq!(
+            count(sniff::performance::counters::FS_WALK_ENTRIES),
+            0,
+            "with docs and inventory both off the aggregate has no repository-wide \
+             walk consumer and must start no shared walk: {counters:?}"
+        );
+
+        // The Git bounds the aggregate already contracts for must survive.
+        assert_eq!(
+            count(sniff::performance::counters::GIT_DISCOVERIES),
+            1,
+            "the complete command path shares one repository discovery: {counters:?}"
+        );
+        assert_eq!(
+            count(sniff::performance::counters::GIT_STATUS_WALKS),
+            1,
+            "the complete command path shares one status walk: {counters:?}"
+        );
+        assert_eq!(
+            count(sniff::performance::counters::GIT_REF_WALKS),
+            1,
+            "aggregate branches reuse the detection ref snapshot: {counters:?}"
+        );
+
+        let (filesystem, aggregate) = observation.into_parts();
+        assert!(
+            filesystem.docs.is_none(),
+            "unrendered Markdown inventory must stay unobserved"
+        );
+        assert!(
+            filesystem.formatting.is_none(),
+            "unrendered formatting result must stay unobserved"
+        );
+
+        let result = sniff::SniffResult {
+            filesystem: Some(filesystem),
+            ..Default::default()
+        };
+        let value = output::repo_json::build_aggregate_value(&result, &aggregate);
+        let obj = value.as_object().expect("aggregate must be an object");
+        for absent in ["docs", "markdown", "formatting", "editorconfig"] {
+            assert!(
+                !obj.contains_key(absent),
+                "aggregate output must not contain `{absent}`: {:?}",
+                obj.keys().collect::<Vec<_>>()
+            );
+        }
+        // `documentation_changes` is Git-derived (a filter over the one commit
+        // set), so it survives docs being off — this is the fact that makes the
+        // Markdown walk unnecessary rather than merely unrendered.
+        assert!(
+            obj.contains_key("documentation_changes"),
+            "Git-derived documentation_changes must still render: {:?}",
+            obj.keys().collect::<Vec<_>>()
+        );
+    }
+
     #[test]
     fn completions_help_detection() {
         assert!(wants_completions_help_with_args(&[
