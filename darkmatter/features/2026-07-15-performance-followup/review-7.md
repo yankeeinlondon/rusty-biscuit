@@ -10,6 +10,7 @@ log: darkmatter/features/2026-07-15-performance-followup/log.md
 description: "A **feature** review of `2026-07-15-performance-followup/spec.md`"
 feature: 2026-07-15-performance-followup/review-7.md
 previous: 2026-07-15-performance-followup/review-6.md
+next: 2026-07-15-performance-followup/review-8.md
 ---
 
 # Review 7 — Performance Follow-up
