@@ -70,20 +70,56 @@ close without external execution or unrelated public API expansion.
   retain the passing macOS, Linux, and Windows artifacts. The workflow definition alone
   is not counted as execution evidence.
 
-### Finding 7: large synthetic service-listing Criterion workload
+### Resolved finding 7: large synthetic service-listing Criterion workload
 
 - **Review mapping:** "Medium: the specified Criterion workload families remain absent."
-- **Implemented locally:** every other missing workload family now has a Criterion ID,
-  reusable fixture, and mapped deterministic counter bound in
-  `sniff/lib/benches/README.md`; both `network` and `remote` benchmark targets compile.
-- **Why deferred:** `ServiceManager::detect()` intentionally observes the live host, while
-  backend parsers and command injection are crate-private. A deterministic hundreds- or
-  thousands-service Criterion fixture cannot be supplied through the public API, and
-  exposing a production injection seam solely for this benchmark would add unrelated
-  public surface.
-- **Existing structural evidence:** Level-1 tests already pin enrichment chunking,
-  partial failure, subprocess deadlines, and process-tree reaping, so the production
-  work bounds remain verified even though the wall-clock workload row is absent.
-- **To close:** introduce a separately reviewed internal benchmark seam that does not
-  expand the production public API, then add the synthetic service inventory case and
-  collect timings on the stable runner.
+- **Resolved by review 4 finding 6:** the `bench-internals` feature now exposes a
+  doc-hidden synthetic systemd fixture without changing the default production API.
+  Criterion registers deterministic 500- and 2,000-service workloads that execute the
+  production listing parser, running-service selection, 128-unit chunk construction,
+  runner dispatch, show-block parser, and PID projection. Fixture construction and
+  per-iteration cursor setup are outside the timed section.
+- **Structural evidence:** `large_service_workloads_preserve_cardinality_and_chunk_bounds`
+  pins output cardinality and one listing plus `ceil(N / 128)` enrichment calls for both
+  workload sizes. `pid_enrichment_costs_one_subprocess_per_chunk_not_per_service` maps
+  the same bound to the stable `process.spawns` counter through the real bounded runner.
+- **Timing status:** benchmark compilation is verified locally; no wall timing from the
+  loaded implementation host is recorded or claimed. The existing stable CI runner can
+  collect comparable timing artifacts.
+
+## Review 4 deferred items
+
+### Finding 5: native Linux/Windows Level-1 execution and retained work-count artifacts
+
+- **Review mapping:** "High: native Linux and Windows Level-1 completion remains
+  unverified" in [review-4.md](review-4.md).
+- **Exact implementation evaluated:** the dirty worktree based on
+  `407a1dbfbce1bb953ef80ce8596805c77170b424`, containing the review-cycle-4 changes
+  present during the 2026-07-17 verification run.
+- **Native macOS evidence:** `just test` passed all 1,664 `sniff-lib` tests and all 779
+  `sniff-cli` tests (14 and 3 skipped, respectively), and `just lint` passed on arm64
+  macOS 26.5.2 (Darwin 25.5.0).
+- **Supplemental Windows compile evidence:** `cargo check -p sniff --all-targets
+  --features remote --target x86_64-pc-windows-gnu` passed in 8.23 seconds with four
+  target-gated test warnings. This is cross-compilation and is not counted as native
+  Windows Level-1 execution. The same check for `x86_64-pc-windows-msvc` stopped in
+  native C dependencies because the macOS host has no Windows SDK headers
+  (`ctype.h`/`windows.h`) or Visual C++ environment.
+- **Available execution investigated:** Docker Desktop exposes a local aarch64 Linux
+  6.12.76 kernel and cached Rust images, but the images contain neither `cargo-nextest`
+  nor `just`; installing tools was outside this non-interactive task's authority, and a
+  non-canonical container check would not verify native filesystem behavior. Suspended
+  Parallels Debian 13, Ubuntu, and Windows 11 guests also exist, but starting user VMs
+  was not authorized, so none was started.
+- **Why deferred:** this run could not execute the canonical Level-1 suite natively on
+  Linux or Windows, and no three-OS work-count artifacts for this exact dirty
+  implementation were produced or retained. The Linux target is not installed, the
+  Windows targets cannot execute on macOS, and this task prohibited commits, pushes,
+  installs, VM startup, and unauthorized external workflow triggers. This is an
+  execution-authority/platform constraint, not a CPU-load deferral. Existing workflow
+  definitions were inspected previously but are not claimed as execution.
+- **To close:** place this exact implementation on authorized native macOS, Linux, and
+  Windows runners; run the canonical sniff-area `just test` and `just lint` commands on
+  each OS; collect the work-count table on each OS; and retain the green run plus all
+  three per-OS artifacts under one implementation identifier. Cross-compilation does
+  not substitute for any native leg.

@@ -2,6 +2,7 @@
 implementation_1: "2026-07-17T10:46:27-07:00"
 implementation_2: "2026-07-17T11:40:50-07:00"
 implementation_3: "2026-07-17T14:36:02-07:00"
+implementation_4: "2026-07-17T17:09:45-07:00"
 deferred_perf_measurement: true
 ---
 
@@ -257,3 +258,103 @@ The implemented files cover aggregate observation and rendering, focused Git req
         - review-cycle-3 changes participate in the expected aggregate CLI performance-output and benchmark-fixture registration flows
         - the remaining cross-package collector and request-metadata flows come from shared Sniff symbols in the broader feature delta; no unexpected review-cycle-3 execution flow was identified
 - scoped `git diff --check` passed for `sniff` and the updated Sniff skill; no commit or write-mode formatting command was run
+
+## Implementation of Review Findings #4
+
+> **started at:** 2026-07-17T17:09:45-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'sniff/features/2026-07-16-performance/review-4.md'
+- this is iteration 4 of the review-to-implement cycle
+- review-4 contains 6 findings (4 High, 2 Medium):
+        1. High: bare aggregate execution still rediscovers and independently queries the repository
+        2. High: `repo --json --perf` omits most aggregate work from its report
+        3. High: Unix process-group cleanup does not guarantee a bounded process tree
+        4. Medium: the documented universal subprocess boundary still has production bypasses
+        5. High: native Linux and Windows Level-1 completion remains unverified
+        6. Medium: the required synthetic service benchmark is still absent
+- starting the work on 'aggregate repository observation reuse' at 17:13:15
+        - confirmed the review finding: the bare aggregate runs the original filesystem detection and then `observe_repo_aggregate`, which performs a second repository discovery plus independent identity, branch, worktree, current-worktree, and history observations
+        - GitNexus reported HIGH impact for the additive `GitInfo` evidence extension (18 indexed dependents across Git, Repo, and Commands, with no directly affected indexed process); `observe_repo_aggregate`, `select_git_request`, and the worktree helpers are LOW impact and participate only in the expected CLI `run` flow
+        - proceeding with an additive, Serde-skipped aggregate evidence field produced inside the original `GitRepo::detect_with_request` call, then consumed by a repository-observation-free aggregate completion step; aggregate JSON remains unchanged
+        - implemented request-scoped aggregate evidence from the original Git detection: branches share its single ref snapshot, worktrees share its discovered repository handle, and recent commits share one file-aware history observation plus the detected repository ownership index
+        - changed `observe_repo_aggregate` into a pure completion step over detected Git and repository information; it no longer discovers a repository or performs status, ref, worktree, identity, or history observations
+        - added a CLI command-path Level-1 regression test that exercises the real aggregate request and pins one repository discovery, one status walk, one ref walk, and zero extra worktree opens while requiring populated identity, branch, and worktree output
+        - focused verification passed the new CLI regression, both linked-worktree aggregate regressions, and all 20 aggregate-view tests; `cargo check -p sniff-cli --tests` passed, `just lint` passed, and `git diff --check` passed
+        - canonical `just test` completed all 1,657 sniff-lib tests successfully on two attempts, but the subsequent sniff-cli feature-set compilation exceeded the session's 60-second non-interactive command boundary; the compiled focused CLI regression passed, while the complete sniff-cli runtime suite was not rerun within that boundary
+        - final GitNexus `detect_changes(all)` reported MEDIUM risk across the concurrent shared worktree delta (31 changed files and 2 affected CLI `run` processes); the affected performance-report and stderr-emission flows are the expected aggregate command paths
+- work completed for 'aggregate repository observation reuse' at 17:36:46
+- starting the work on 'complete aggregate performance reporting' at 17:39:12
+        - confirmed the review finding: `detect_with_plan` snapshotted and detached its collector before aggregate completion and projection, while `CliPerf::emit` preferred that stale report over its end-to-end clock
+        - GitNexus reported CRITICAL impact for `detect_with_plan` (33 direct and 64 total dependents across 13 modules and 4 process families), MEDIUM impact for `CliPerf::build_report`, and LOW impact for the disambiguated CLI `run` and `CliPerf` type; the repository process catalog was reviewed before editing
+        - implemented one request-scoped CLI collector that is reused by performance-enabled detection and remains available for aggregate completion/projection; standalone library callers retain their existing result snapshot, while the final aggregate report uses the CLI's command-wide elapsed time and counters
+        - added a named aggregate-projection stage and a spawned-CLI Level-1 regression that requires the emitted JSON and stderr reports to include that post-detection stage, elapsed time covering detection plus projection, and exact one-discovery/one-status/one-ref/zero-worktree-open bounds
+        - focused verification passed the spawned-CLI regression alone and a combined 4-test remote-feature run covering collector propagation, aggregate reuse, aggregate reporting, and existing JSON performance attachment
+        - canonical `just test` passed all 1,657 sniff-lib tests; its CLI phase exposed 8 stale aggregate fixtures from the preceding aggregate-evidence change, so the shared fixture was updated to request the same evidence as the real command and all 10 aggregate unit tests then passed
+        - canonical `just lint` passed for the directly impacted sniff package area, and a finding-scoped `git diff --check` passed
+        - required GitNexus `detect_changes(all)` reported MEDIUM risk across the concurrent shared worktree delta (16 files, 44 changed symbols, and 2 affected CLI performance-output processes); both traces were reviewed and are the expected report construction and stderr emission flows
+        - no implementation or performance measurement was deferred for this finding; the full CLI suite was not repeated after the fixture correction to respect the non-interactive 60-second command boundary, with focused aggregate and reporting coverage green
+- work completed for 'complete aggregate performance reporting' at 17:51:08
+- starting the work on 'bounded Unix detached-descendant cleanup' at 17:53:45
+        - reading the subprocess supervision implementation and Level-1 coverage before selecting a portable bounded-cleanup design
+        - GitNexus reported HIGH impact for `run_with_timeout` (8 direct callers and 30 total affected symbols across OS, network, programs, and service-related modules, with no indexed execution process); the repository process catalog was reviewed and the orchestrator was warned before editing
+        - proceeding with cancellable Unix pipe readers: after process-group termination and direct-child reaping, readers stop without requiring EOF from a session-detached descendant; Windows retains its existing suspended-start, kill-on-close Job Object containment and blocking EOF drain
+        - the first `O_NONBLOCK` implementation passed the detached-descendant regression but made the existing 1 MiB dual-pipe fixtures time out on macOS; it was rejected and replaced with `poll(2)` readiness using a 10 ms cancellation interval, which does not alter the child pipe's blocking behavior
+        - added a cfg-gated Level-1 fixture whose descendant calls `setsid()`, proves it moved to its own process group, and retains and writes both inherited pipes after the direct child times out; the regression requires bounded return and verifies the direct child is no longer waitable
+        - Unix now drains bytes only after `poll(2)` reports readiness and, after cleanup cancellation, caps the final drain at 50 ms rather than waiting for EOF; this remains bounded even when an escaped descendant writes continuously, while already-available output receives a short drain grace and the descendant receives a broken pipe after readers close
+        - focused verification passed the escaped-descendant regression, including its final no-sleep continuous writer, and then the corrected detached plus two 1 MiB pipe regressions 3/3; the large-output cases completed in under 0.1 seconds and the detached case returned at its injected 3-second timeout rather than its fixture's 30-second lifetime
+        - canonical `just test` passed all 1,658 sniff-lib tests and all 779 sniff-cli tests (11 and 3 skipped, respectively); canonical `just lint` and a finding-scoped `git diff --check` passed
+        - required GitNexus `detect_changes(all)` reported MEDIUM risk across the concurrent shared worktree delta (17 changed files, 53 changed symbols, and 2 affected CLI performance-output processes); the subprocess helper itself has no indexed process and the two reported flows come from the preceding aggregate findings
+        - no implementation or performance measurement was deferred for this finding; native Linux execution remains owned by review finding 5, while the Unix design uses APIs available on both macOS and Linux and leaves Windows Job Object behavior intact
+- work completed for 'bounded Unix detached-descendant cleanup' at 18:15:47
+- starting the work on 'bounded installation and remote-refresh subprocess paths' at 18:17:10
+        - reading the required package, Rust, and testing guidance before tracing each production bypass and its existing timeout policy
+        - GitNexus reported HIGH impact for `run_with_timeout` (8 direct callers, 30 total affected symbols), `refresh_remote_tracking_refs` (4 direct, 17 total), and `fetch_single_remote` (1 direct, 18 total), plus CRITICAL impact for `execute_install_captured` (5 direct, 31 total across five modules); the orchestrator was warned before editing
+        - proceeding with an additive builder-capable bounded runner and crate-private injected Level-1 seams, preserving public install signatures, result shapes, cwd/environment configuration, and direct executable invocation
+        - implemented `run_command_with_timeout(&mut Command, Duration)` as the builder-capable form of the shared supervisor; `run_with_timeout` now delegates to it, and caller-configured executable, arguments, cwd, and environment survive while the boundary owns stdin, captured pipes, the deadline, termination, and reaping
+        - routed ordinary install, versioned install, uv bootstrap, uv tool install, and explicit `git fetch` refresh through the shared runner; every install subprocess now uses `InstallOptions::timeout_secs`, and explicit remote refresh has the named 30-second `process::timeouts::REMOTE_REFRESH` policy
+        - added injected Level-1 fixtures for ordinary, versioned, uv install, uv bootstrap, and remote refresh timeouts without invoking a real package manager, network bootstrap, or Git remote; a builder regression also executes a fixture with an injected cwd and environment value
+        - the first builder regression exposed only macOS `/var` versus `/private/var` canonicalization plus libtest framing in captured stdout; the assertion was corrected to compare the canonical child-reported line, with no production change
+        - focused verification passed all 6 injected timeout/builder regressions; static inspection found no remaining production `.output()`, `.status()`, or `.spawn()` bypass under `sniff/lib/src`
+        - canonical `just test` passed all 1,664 sniff-lib tests and all 779 sniff-cli tests (14 and 3 skipped, respectively); canonical `just lint`, scoped `git diff --check`, and remote-feature library compilation passed
+        - documentation and the Sniff skill now describe both shared runner forms, the caller-selected installation timeout, and the named remote-refresh policy; the Sniff skill's Darkmatter body hash was updated
+        - required GitNexus `detect_changes(all)` reported MEDIUM risk across the concurrent review-cycle worktree (21 changed files, 79 indexed symbols, and 2 affected aggregate CLI performance-output processes); the subprocess/install/refresh changes add no indexed execution process, and the reported traces belong to the preceding aggregate findings
+        - no implementation or performance measurement was deferred for this finding; native Linux/Windows execution remains owned by review finding 5
+- work completed for 'bounded installation and remote-refresh subprocess paths' at 18:34:14
+- starting the work on 'native Linux and Windows Level-1 evidence' at 18:38:29
+        - `sniff os --json` identified the execution host as native arm64 macOS 26.5.2 (Darwin 25.5.0); Rustup has `aarch64-apple-darwin`, `x86_64-pc-windows-gnu`, and `x86_64-pc-windows-msvc` installed, but no Linux target
+        - canonical native macOS Level-1 verification passed all 1,664 sniff-lib tests and all 779 sniff-cli tests (14 and 3 skipped, respectively); canonical `just lint` also passed
+        - the exact current dirty tree at HEAD `407a1dbfbce1bb953ef80ce8596805c77170b424` passed `cargo check -p sniff --all-targets --features remote --target x86_64-pc-windows-gnu` in 8.23 seconds, with four existing target-gated test warnings; this is supplemental cross-compilation evidence, not native Windows Level-1 execution
+        - the installed MSVC target reached native dependencies but could not compile them because this macOS host lacks the Windows SDK C headers (`ctype.h` and `windows.h`) and Visual C++ environment; this is a host toolchain limitation and supplies no native Windows evidence
+        - Docker Desktop exposes a local aarch64 Linux 6.12.76 kernel and cached Rust images, but those images lack `cargo-nextest` and `just`; installing tools was not authorized, and a non-canonical container check would not satisfy native host/path/process Level-1 acceptance
+        - suspended Parallels Debian 13, Ubuntu, and Windows 11 guests exist, but starting user VMs was not authorized; no guest was started and no external workflow, image pull, install, commit, or push was performed
+        - native Linux and Windows Level-1 execution plus retained exact-implementation work-count artifacts for all three OSes are deferred; the workflow definitions are not claimed as execution evidence, and the precise closure requirements are recorded in `sniff/features/2026-07-16-performance/deferred-perf-tests.md`
+- work completed for 'native Linux and Windows Level-1 evidence' at 18:44:35
+- starting the work on 'synthetic large-service Criterion workload' at 18:46:55
+        - reading the required package, Rust, and testing guidance before tracing the production service batching, parsing, and runner orchestration
+        - GitNexus reported LOW impact for `list_systemd_services` (2 direct and 16 total dependents, with one affected CLI `run` process) and `collect_systemd_pids` (1 direct and 12 total dependents, with no indexed process); the benchmark registration symbol is not indexed
+        - proceeding with an additive `bench-internals` feature that exposes only a benchmark fixture module when explicitly enabled; the default production API remains unchanged
+        - selected deterministic 500- and 2,000-service workloads, which map to 5 and 17 runner calls respectively: one primary listing plus `ceil(service_count / 128)` enrichment chunks
+        - implemented a doc-hidden, feature-gated synthetic systemd fixture over the production listing parser, running-service selection, chunk builder, runner dispatch, show-block parser, and PID projection; Criterion constructs fixture data and per-iteration cursor state outside the timed section
+        - first verification passed benchmark compilation with `remote,bench-internals` and both focused Level-1 tests; the synthetic test covers 500 and 2,000 services, while the real shim test maps the chunk bound to the stable `process.spawns` counter
+        - updated the benchmark catalog, CI benchmark ID catalog, benchmark recipes, performance workflow feature set, and the earlier service-workload deferral to record the finding as resolved
+        - canonical `just test` passed all 1,665 sniff-lib tests and all 779 sniff-cli tests (14 and 3 skipped, respectively); canonical `just lint`, feature-enabled benchmark compilation, four focused Level-1 contract tests, and scoped `git diff --check` passed
+        - a stricter feature-enabled all-target Clippy run reached three unrelated concurrent test-only warnings in `process.rs` and `programs/enums/metadata.rs`; the canonical package-area lint remained green and no unrelated files were changed
+        - required GitNexus `detect_changes(all)` reported MEDIUM risk across the concurrent review-cycle worktree (31 changed files, 88 indexed symbols, and 2 aggregate CLI performance-output processes); this finding's indexed systemd changes had LOW pre-change impact and add no affected execution process
+        - no implementation or performance measurement was deferred for this finding; benchmark compilation and deterministic work bounds are the accepted local evidence, and no unstable wall timing was collected or claimed
+- work completed for 'synthetic large-service Criterion workload' at 19:02:41
+
+### Successful Completion
+
+The implementation of review cycle 4 has completed successfully in 1 hour, 57 minutes, and 40 seconds (17:09:45–19:07:25 local time). During this implementation all 6 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 5 were fixed, 1 was deferred (see reasons below):
+
+- **Finding 5, native Linux/Windows Level-1 execution and retained work-count artifacts** — deferred because this macOS host cannot execute the canonical suite natively on Linux or Windows, the available Docker images lack the repository's required `just` and nextest tooling, and starting suspended user VMs or publishing the dirty implementation was not authorized. Native macOS tests/lint passed, and the exact dirty tree cross-compiled for Windows GNU, but neither cross-compilation nor workflow definitions are claimed as native execution. Full closure requirements are recorded in `sniff/features/2026-07-16-performance/deferred-perf-tests.md`.
+
+The files changed cover aggregate Git evidence and end-to-end performance reporting, bounded cross-platform subprocess execution, installation and remote-refresh timeout enforcement, escaped Unix descendant cleanup, synthetic service benchmark fixtures and CI registration, Level-1 regression coverage, architecture/skill documentation, and review-cycle records.
+
+- final Sniff-area verification passed all 1,665 `sniff-lib` tests and all 779 `sniff-cli` tests (14 and 3 skipped), `just lint`, `just build`, feature-enabled Criterion benchmark compilation, and scoped `git diff --check`
+- the exact dirty tree passed the Windows GNU all-target, remote-feature cross-check; native Linux/Windows execution remains the single deferred evidence item
+- final GitNexus `detect_changes(compare main)` reported HIGH risk across the complete multi-iteration feature delta (124 files, 1,410 indexed symbols, and 8 affected processes); all 8 traces were reviewed
+        - the two aggregate performance-output traces are expected review-cycle-4 behavior
+        - the three benchmark fixture registration traces are expected performance-benchmark flows
+        - the three collector-propagation traces belong to the broader feature's shared performance-accounting boundary; no unexpected review-cycle-4 flow was identified
+- no commit, push, external workflow trigger, VM startup, package installation, or write-mode formatting command was run

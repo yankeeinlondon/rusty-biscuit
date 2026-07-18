@@ -103,6 +103,16 @@ do not belong here.
 - A truncated body is not corruption. Per the Concurrency rule, do not amend
   mid-batch — accept the loss, note it in the orchestrator's summary, and let
   the developer decide whether to rewrite the message after the batch settles.
+- Before dispatching subagents, cross-check that the union of every group's
+  pathspec list equals the exact staged file set (sort both and diff). If a
+  staged path is not in any group, the orchestrator has missed it and must
+  recover before dispatch, not after the batch lands. Catching it after the
+  fact still works (`git status --short` exposes leftovers), but it produces
+  an unplanned catch-up commit mid-summary that complicates the report and
+  shifts the convention from "every commit was planned" to "we patched one
+  in late". Observed in this repo with `area.rs` slipping past an 8-group
+  split — small file, big directory list, easy to skip during fast path
+  partitioning.
 
 ## Verification
 
