@@ -162,6 +162,7 @@ fn ctx<'a>(
         signal,
         frontmatter,
         live_frontmatter: None,
+        runtime_state: None,
         err,
         timing: None,
         current: None,
@@ -183,6 +184,26 @@ fn map(value: Value) -> Map<String, Value> {
     value.as_object().unwrap().clone()
 }
 
+/// Build a context wired to both the per-attempt `live` cell and the
+/// invocation-local `runtime` cell, modelling the harness loop's full wiring.
+#[allow(clippy::too_many_arguments)]
+fn ctx_with_runtime<'a>(
+    signal: LifecycleSignal,
+    base: &'a Map<String, Value>,
+    live: &'a std::cell::RefCell<Map<String, Value>>,
+    runtime: &'a crate::composition::RuntimeState,
+    engine: &'a EffectEngine,
+    shell: &'a dyn ShellRunner,
+    recorder: &'a Recorder,
+    harness: &'a Harness,
+    source_path: &'a Path,
+) -> StackExecutionContext<'a> {
+    StackExecutionContext {
+        runtime_state: Some(runtime),
+        ..ctx_with_live(signal, base, live, engine, shell, recorder, harness, source_path)
+    }
+}
+
 /// Build a context whose reads/writes flow through a shared cross-event
 /// `live` cell, modelling the harness loop's per-attempt live frontmatter.
 /// `base` is the immutable composed frontmatter fallback; `live` is the
@@ -202,6 +223,7 @@ fn ctx_with_live<'a>(
         signal,
         frontmatter: base,
         live_frontmatter: Some(live),
+        runtime_state: None,
         err: None,
         timing: None,
         current: None,
@@ -225,4 +247,5 @@ mod conditions_control;
 mod event_time_interpolation;
 mod filesystem_lookup;
 mod mutation_visibility;
+mod runtime_set;
 

@@ -189,9 +189,11 @@ pub fn prepare_direct(
         pre_approved_commands: options.pre_approved_commands.clone(),
         env_overrides: options.env_overrides.clone(),
     };
-    if let Some(overrides) = options.set_overrides {
-        compose_opts = compose_opts.with_set_overrides(overrides);
-    }
+    // `outputs` is initialized for *every* composition, not just sequences, so
+    // a document written with `{{ last(outputs) }}` behaves identically
+    // standalone and mid-sequence (spec → *The `outputs` Array*).
+    compose_opts = compose_opts
+        .with_set_overrides(super::runtime_state::with_initialized_outputs(options.set_overrides));
     if !options.name_coercion_keys.is_empty() {
         compose_opts = compose_opts.with_name_coercion_keys(options.name_coercion_keys.clone());
     }
@@ -368,9 +370,11 @@ pub fn prepare_inline(
         pre_approved_commands: options.pre_approved_commands.clone(),
         env_overrides: options.env_overrides.clone(),
     };
-    if let Some(overrides) = options.set_overrides {
-        compose_opts = compose_opts.with_set_overrides(overrides);
-    }
+    // `outputs` is initialized for *every* composition, not just sequences, so
+    // a document written with `{{ last(outputs) }}` behaves identically
+    // standalone and mid-sequence (spec → *The `outputs` Array*).
+    compose_opts = compose_opts
+        .with_set_overrides(super::runtime_state::with_initialized_outputs(options.set_overrides));
     if !options.name_coercion_keys.is_empty() {
         compose_opts = compose_opts.with_name_coercion_keys(options.name_coercion_keys.clone());
     }

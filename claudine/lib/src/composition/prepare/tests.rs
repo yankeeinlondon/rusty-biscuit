@@ -982,3 +982,101 @@ fn compose_error_preserves_frontmatter_fence_mismatch_source() {
         other => panic!("expected ComposeFailed, got: {other:?}"),
     }
 }
+
+/// Every composition — not just a sequence step — initializes the `outputs`
+/// accumulator, so a document written with `{{ last(outputs) }}` composes
+/// identically standalone and mid-sequence.
+#[test]
+fn direct_composition_initializes_the_outputs_accumulator() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        &[("title", json!("Research"))],
+        "# Research\n\nprev={{ last(outputs) }}.",
+    );
+
+    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let fm = prepared.effective_frontmatter.as_object().unwrap();
+    assert_eq!(fm.get("outputs"), Some(&json!([])));
+    assert!(
+        prepared.prompt.contains("prev=."),
+        "an empty accumulator renders as nothing, not as a raw span: {:?}",
+        prepared.prompt
+    );
+}
+
+/// The caller's runtime layers survive into the composed body: entries handed
+/// through `set_overrides` are what `last(outputs)` reads.
+#[test]
+fn prior_outputs_are_visible_to_the_composed_body() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &[], "prev={{ last(outputs) }}");
+
+    let runtime = crate::composition::RuntimeState::new();
+    runtime.append_output("step one output\n");
+    let prepared = prepare_direct(
+        &source,
+        PrepareOptions {
+            set_overrides: Some(crate::composition::layered_set_overrides(
+                None,
+                Some(&runtime.snapshot()),
+                None,
+            )),
+            ..PrepareOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert!(
+        prepared.prompt.contains("prev=step one output"),
+        "{:?}",
+        prepared.prompt
+    );
+    assert_eq!(
+        prepared.effective_frontmatter.as_object().unwrap().get("outputs"),
+        Some(&json!(["step one output"]))
+    );
+}
+
+/// A user setter cannot displace the accumulator.
+#[test]
+fn a_user_setter_cannot_replace_outputs() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &[], "body");
+
+    let prepared = prepare_direct(
+        &source,
+        PrepareOptions {
+            set_overrides: Some(crate::composition::layered_set_overrides(
+                Some(&json!({"outputs": ["hijacked"]})),
+                Some(&crate::composition::RuntimeState::new().snapshot()),
+                None,
+            )),
+            ..PrepareOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        prepared.effective_frontmatter.as_object().unwrap().get("outputs"),
+        Some(&json!([]))
+    );
+}
+
+/// An author who declares `outputs:` in their own frontmatter still gets the
+/// executor's accumulator — the reserved key is never author-owned.
+#[test]
+fn authored_outputs_frontmatter_is_overridden_by_the_accumulator() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        &[("outputs", json!(["authored"]))],
+        "prev={{ last(outputs) }}",
+    );
+
+    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    assert_eq!(
+        prepared.effective_frontmatter.as_object().unwrap().get("outputs"),
+        Some(&json!([]))
+    );
+}

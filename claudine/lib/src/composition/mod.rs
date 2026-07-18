@@ -33,6 +33,7 @@ pub mod preflight;
 mod prepare;
 mod resolve;
 mod reserved;
+pub mod runtime_state;
 pub mod schema;
 mod select;
 pub mod sequence;
@@ -92,6 +93,10 @@ pub use mismatch::{capture_frontmatter_yaml, is_inline_sequence_mismatch};
 pub use preflight::{PreFlightResult, resolve_graph_shell_approvals, resolve_shell_approvals};
 pub use hints::{parse_interactive_hint, parse_selection_hints_from_frontmatter};
 pub use prepare::{PrepareOptions, bind_agent_workspace, prepare_direct, prepare_inline};
+pub use runtime_state::{
+    OUTPUTS_KEY, RuntimeMutationError, RuntimeSnapshot, RuntimeState, layered_set_overrides,
+    trim_transport_newline, with_initialized_outputs,
+};
 pub use resolve::{
     build_prompt_reference, enrich_composition_source_load_error, resolve_composition_source,
     validate_file_permissions,

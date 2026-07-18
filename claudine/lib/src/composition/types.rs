@@ -752,6 +752,16 @@ pub struct CompositionExecutionRequest {
     /// (opaque, unclassified) rather than an implicit non-Claudine switch.
     /// Drives the INFO status wording only; never affects forwarding.
     pub provider_args_explicit: bool,
+
+    /// The invocation-local runtime state cell shared with the caller.
+    ///
+    /// Supplied by callers that execute more than one composition in one
+    /// logical run — the `--loop` engine across iterations, and sequence
+    /// execution across steps — so accumulated `set` mutations and the
+    /// `outputs` array survive from one execution to the next. `None` makes the
+    /// executor mint a fresh cell, which is the correct lifetime for a
+    /// standalone `compose` / `inline-compose`.
+    pub runtime_state: Option<std::rc::Rc<super::runtime_state::RuntimeState>>,
 }
 
 /// Options for sequence execution at the CLI level.

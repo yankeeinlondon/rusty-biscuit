@@ -253,6 +253,7 @@ fn exhausted_remediation_fails_finalize_and_preserves_findings() {
         signal,
         frontmatter,
         live_frontmatter: None,
+        runtime_state: None,
         err: None,
         timing: None,
         current: None,

@@ -977,6 +977,7 @@ fn build_loop_stack_context<'a>(
         // live cell is unnecessary here; intra-stack visibility is handled by
         // `execute_stack`'s local working map.
         live_frontmatter: None,
+        runtime_state: None,
         err: None,
         timing,
         current,

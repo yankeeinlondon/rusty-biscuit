@@ -299,6 +299,14 @@ pub struct StackExecutionContext<'a> {
     /// single-event caller: `frontmatter` is the only base state and stack
     /// mutations are visible intra-stack only.
     pub live_frontmatter: Option<&'a std::cell::RefCell<Map<String, Value>>>,
+    /// The invocation-local runtime state cell.
+    ///
+    /// `live_frontmatter` is per-*attempt*; this cell spans the whole
+    /// invocation, so a `set` written by one lifecycle event survives loop
+    /// rematerialization and (from phase 8) later sequence steps. When `None`,
+    /// `set` still validates its key and mutates the intra-stack working state,
+    /// but the write is not accumulated beyond this event.
+    pub runtime_state: Option<&'a super::super::runtime_state::RuntimeState>,
     /// The `err` global snapshot (only meaningful for error-carrying events).
     pub err: Option<&'a LifecycleErrorInfo>,
     /// The `timing` global snapshot.
@@ -464,6 +472,7 @@ impl StackExecutionContext<'_> {
             signal,
             frontmatter: self.frontmatter,
             live_frontmatter: self.live_frontmatter,
+            runtime_state: self.runtime_state,
             err: self.err,
             timing: self.timing,
             current: self.current,
@@ -494,6 +503,7 @@ impl StackExecutionContext<'_> {
             signal: self.signal,
             frontmatter: self.frontmatter,
             live_frontmatter: self.live_frontmatter,
+            runtime_state: self.runtime_state,
             err: Some(err),
             timing: self.timing,
             current: self.current,
@@ -1082,6 +1092,22 @@ impl StackExecutionContext<'_> {
                 .ok_or_else(|| dispatch_err(format!("`{verb}` is missing a required argument")))
         };
 
+        // `set` is the in-memory counterpart of `set_frontmatter`: it targets
+        // the runtime mutation layer rather than a file, so it takes
+        // `(key, value)` instead of `(file, prop, value)` and never reaches the
+        // effect engine's path-based verbs below.
+        if verb == "set" {
+            let key = s(0)?;
+            let value = v(1)?;
+            let prior = self
+                .apply_runtime_set(&key, value.clone(), working)
+                .map_err(|error| {
+                    ActionFailure::Dispatch(LifecycleErrorInfo::from_error_or_action(verb, &error))
+                })?;
+            working.insert(key, value);
+            return Ok(prior);
+        }
+
         let result = match verb {
             "set_frontmatter" => engine.set_frontmatter(&s(0)?, &s(1)?, v(2)?),
             "merge_frontmatter" => engine.merge_frontmatter(&s(0)?, v(1)?),
@@ -1111,6 +1137,26 @@ impl StackExecutionContext<'_> {
         })?;
         self.mirror_frontmatter_mutation(verb, &values, working);
         Ok(out)
+    }
+
+    /// Apply one `set` write to the invocation-local runtime layer and report
+    /// the value it replaced.
+    ///
+    /// Without a runtime cell the write is still key-checked — an author must
+    /// get the same typed refusal for `set: [outputs, …]` whether or not the
+    /// caller wired an accumulator — and the prior value is read from the
+    /// caller's working state.
+    fn apply_runtime_set(
+        &self,
+        key: &str,
+        value: Value,
+        working: &Map<String, Value>,
+    ) -> Result<Value, super::super::runtime_state::RuntimeMutationError> {
+        let state = match self.runtime_state {
+            Some(state) => return state.set(self.effect_engine, key, value, working),
+            None => super::super::runtime_state::RuntimeState::new(),
+        };
+        state.set(self.effect_engine, key, value, working)
     }
 
     /// Mirror a successful frontmatter-verb mutation onto the in-memory
