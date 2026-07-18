@@ -2,10 +2,9 @@
 agent: claude/
 total_phases: 8
 created: 2026-07-14
-phase: 6
+phase: 7
 yolo: "true"
 packages:
-  - darkmatter
   - dmls
 source_files_during_phase_1:
   - darkmatter/lib/tests/meta_schema_phase1.rs
@@ -89,6 +88,15 @@ docs_updated_during_phase_6:
 docs_created_during_phase_6:
   - darkmatter/features/2026-07-13-meta-schema/phase6-test-map.md
 skills_files_updated_during_phase_6: []
+source_files_during_phase_7:
+  - darkmatter/dmls/src/diagnostics/frontmatter.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+  - darkmatter/dmls/tests/lsp_session.rs
+docs_updated_during_phase_7:
+  - darkmatter/features/2026-07-13-meta-schema/phase7-test-map.md
+  - darkmatter/features/2026-07-13-meta-schema/plan.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
 ---
 
 # Execution Plan: SimplifiedSchema Meta-Schema Types (`type-definition`, `schema`)
@@ -361,14 +369,14 @@ source-aware parsers; unblocks Phase 7's providers.
 Goal: the schema-driven editor UX. Depends on Phase 6's overlay model and the
 Phase 2–4 library APIs.
 
-- [ ] **Hover** (`providers/frontmatter.rs`): `$schema` control key reports
+- [x] **Hover** (`providers/frontmatter.rs`): `$schema` control key reports
   `Type: schema` with the base description. Within a schema shape, hover shows
   the artifact role plus the denoted type — `Type: type-definition` /
   `Declares: string | object` — and the existing schema-hover renderer must
   render **all** union arms (first-arm-as-representative is insufficient). For
   `foo: string(required)`, `Declares: string` plus a `Required` constraint
   summary.
-- [ ] **Completion**: inside a `type-definition` value, drive from
+- [x] **Completion**: inside a `type-definition` value, drive from
   `schema_type_descriptors()` + parser state (type keywords, valid constraints,
   `[]`/inline-object/union/`Name@file` scaffolds, referenced named types when a
   passive namespace exists). Inside a `schema` value, offer outer scaffolds then
@@ -377,7 +385,7 @@ Phase 2–4 library APIs.
   `type-definition[]`/`schema[]`, identify the outer array item at the cursor,
   then apply scalar completion; support inline `$schema` blocks and standalone
   documents (incl. tagged `kind: schema` → `types` mapping).
-- [ ] **Diagnostics** (`dmls/src/diagnostics/frontmatter.rs`): emit
+- [x] **Diagnostics** (`dmls/src/diagnostics/frontmatter.rs`): emit
   `dm.schema.invalid_type_definition` at the smallest reliable authored range
   and retain `dm.schema.invalid_schema_shape` for outer declarations. Keep
   file-reference syntax errors distinguishable from resolution failures.
@@ -385,14 +393,14 @@ Phase 2–4 library APIs.
   failure for the same span. Use projected token spans for scalar errors and the
   smallest key/value/arm sidecar span for shape errors, falling back to the
   parent mapping span only for a missing structural element.
-- [ ] Record the typed activation signal for the deferred semantic-token family
+- [x] Record the typed activation signal for the deferred semantic-token family
   (a complete definition may be classified as a semantic type) — no fine-grained
   meta-schema tokens required this feature.
-- [ ] **Side-effect audit:** extend the DMLS `no_side_effects` test so
+- [x] **Side-effect audit:** extend the DMLS `no_side_effects` test so
   `type-definition`/`schema` analysis loads no references, expands no
   imports/examples, composes nothing, executes no expression/shell, and touches
   no network (AC10).
-- [ ] **Validation checkpoint:** focused DMLS provider + L2 session tests prove
+- [x] **Validation checkpoint:** focused DMLS provider + L2 session tests prove
   gated completion, union-aware hover, precise diagnostics, and side-effect
   freedom.
 
