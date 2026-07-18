@@ -1,7 +1,7 @@
 ---
 total_phases: 13
 created: 2026-07-12
-phase: 5
+phase: 6
 yolo: "true"
 source_files_during_phase_1:
   - claudine/lib/src/composition/sequence/tests.rs
@@ -82,6 +82,42 @@ docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
 packages_during_phase_5:
+  - claudine
+source_files_during_phase_6:
+  - claudine/lib/src/composition/runtime_state.rs
+  - claudine/lib/src/composition/runtime_state/tests.rs
+  - claudine/lib/src/composition/mod.rs
+  - claudine/lib/src/composition/types.rs
+  - claudine/lib/src/composition/prepare.rs
+  - claudine/lib/src/composition/prepare/tests.rs
+  - claudine/lib/src/composition/lifecycle/executor.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+  - claudine/lib/src/composition/lifecycle/tests/guard_runtime.rs
+  - claudine/lib/src/composition/looping/engine.rs
+  - claudine/lib/tests/agent_errors_fleet.rs
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/cli/src/commands/compose/loop_run.rs
+  - claudine/cli/src/commands/wrap/overlay.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/src/commands/wrap/composition/mod.rs
+  - claudine/cli/src/commands/wrap/composition/pipeline.rs
+  - claudine/cli/src/commands/wrap/composition/preflight.rs
+  - claudine/cli/src/commands/wrap/composition/runner.rs
+  - claudine/cli/src/commands/wrap/harness_orch/types.rs
+  - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+  - claudine/cli/src/commands/wrap/sequence/iterate.rs
+  - claudine/cli/tests/composition_outputs.rs
+  - claudine/docs/providers/dispatch-inventory.json
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+packages_during_phase_6:
   - claudine
 packages:
   - biscuit-file
@@ -210,15 +246,15 @@ any provider, command, or side effect.
 **Goal:** Establish one invocation-local state cell shared by standalone compose,
 serial sequence work, lifecycle actions, and loop rematerialization.
 
-- [ ] Introduce explicit runtime layers with precedence `live source < prompt/task params and sequence user setters < accumulated mutations < reserved overlay`, without mutating process environment or process CWD.
-- [ ] Route Darkmatter's `set` action through Claudine's lifecycle executor into the runtime mutation layer; preserve typed values, return the prior value, allow top-level keys only, and reject all reserved keys with a typed error.
-- [ ] Make runtime mutations visible to subsequent lifecycle actions, loop iterations, serial tasks, and later sequence steps while keeping `state`/`previous`/`next` as immutable authored views.
-- [ ] Initialize `outputs` for every direct compose/inline-compose run as well as sequences; prevent authors, params, setters, and `set` from replacing it.
-- [ ] Extend the shared composition execution outcome with captured undecorated final stdout and the existing invalid-byte policy; strip one trailing transport newline while preserving other whitespace.
-- [ ] Append one output only after successful teardown: provider final assistant text for prompt tasks, concatenated command stdout for multi-command shell tasks, returned text-or-empty for side effects, and empty text for successful no-output tasks.
-- [ ] Expose the correct temporal view to lifecycle hooks: prior entries before/during a run, appended current output on `success`, no new entry on `failure`, and accumulated entries on `finalize`.
-- [ ] Add standalone compose/inline-compose tests proving `{{ last(outputs) }}` parity with sequence tasks and failure/finalize timing.
-- [ ] **Validation checkpoint:** runtime-layer precedence and immutability tests pass, `set` is visible without disk writes, and captured outputs exclude status rendering, stderr, protocol records, ANSI decoration, and lifecycle messages.
+- [x] Introduce explicit runtime layers with precedence `live source < prompt/task params and sequence user setters < accumulated mutations < reserved overlay`, without mutating process environment or process CWD. *(`composition/runtime_state.rs`: `RuntimeState` (the invocation-local cell), `RuntimeSnapshot`, and `layered_set_overrides` — the single place the four-layer ordering is encoded. Pure in-memory: no env, CWD, or filesystem touch.)*
+- [x] Route Darkmatter's `set` action through Claudine's lifecycle executor into the runtime mutation layer; preserve typed values, return the prior value, allow top-level keys only, and reject all reserved keys with a typed error. *(`dispatch_side_effect` handles `set` ahead of the path-based verbs and calls `EffectEngine::set` through `RuntimeState`; Claudine owns the reserved-root policy, Darkmatter owns the key-shape rule. The prior value is the effective prior — the document's value on a first write.)*
+- [x] Make runtime mutations visible to subsequent lifecycle actions, loop iterations, serial tasks, and later sequence steps while keeping `state`/`previous`/`next` as immutable authored views. *(`set` writes both the intra-stack `working` map and the invocation-local cell; `materialize_harness_prompt` re-layers the accumulated snapshot after every disk re-read, so a `--loop` iteration or `retry` cannot roll a mutation back. `state`/`previous`/`next` stay in the reserved-overlay layer above mutations.)*
+- [x] Initialize `outputs` for every direct compose/inline-compose run as well as sequences; prevent authors, params, setters, and `set` from replacing it. *(`prepare_direct`/`prepare_inline` route every composition through `with_initialized_outputs`; `layered_set_overrides` re-asserts the accumulator above user setters; `RuntimeState::set` refuses `outputs` as a reserved root.)*
+- [x] Extend the shared composition execution outcome with captured undecorated final stdout and the existing invalid-byte policy; strip one trailing transport newline while preserving other whitespace. *(`SingleCompositionOutcome::final_output`, sourced from the semantic pipeline's `AttemptOutcome::final_response` — already decoded under the existing wrapped-execution byte policy — through `trim_transport_newline`.)*
+- [x] Append one output only after successful teardown: provider final assistant text for prompt tasks, concatenated command stdout for multi-command shell tasks, returned text-or-empty for side effects, and empty text for successful no-output tasks. *(`commit_run_output` on the harness loop's success path only — a failed or interrupted run commits nothing. The prompt/provider entry lands here because it is the only task variant that exists yet; the shell-concatenation and side-effect-return entries land with their executors in phase 7, which reuses `RuntimeState::append_output`. A successful run with no stdout appends the empty string, keeping entries aligned with executed work.)*
+- [x] Expose the correct temporal view to lifecycle hooks: prior entries before/during a run, appended current output on `success`, no new entry on `failure`, and accumulated entries on `finalize`. *(The commit is published to the per-attempt live cell immediately before the `success` event fires, so `initialize`/`start` see only prior entries, `success` and `finalize` see the appended one, and `failure` — which never reaches the commit — sees prior entries only.)*
+- [x] Add standalone compose/inline-compose tests proving `{{ last(outputs) }}` parity with sequence tasks and failure/finalize timing. *(`cli/tests/composition_outputs.rs` — 14 end-to-end cases through the real `compose` / `inline-compose` / `sequence` invocation paths with a fake provider on `PATH`.)*
+- [x] **Validation checkpoint:** runtime-layer precedence and immutability tests pass, `set` is visible without disk writes, and captured outputs exclude status rendering, stderr, protocol records, ANSI decoration, and lifecycle messages. *(14 unit tests in `composition::runtime_state::tests`, 9 in `lifecycle::executor::tests::runtime_set`, 4 in `composition::prepare::tests`, and 14 CLI E2E cases. `set_is_visible_to_a_later_event_and_writes_no_file` asserts the source document is byte-identical after the run; `provider_stderr_is_excluded_from_the_captured_entry` and `the_captured_entry_is_undecorated_and_preserves_interior_whitespace` pin the capture boundary. `just test` — 3677 + 2025 + 47 + 152 + 21 pass; `just lint` clean.)*
 
 ## Phase 7 — Atomic task execution and lifecycle semantics
 
