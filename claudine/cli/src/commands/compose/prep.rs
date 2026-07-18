@@ -74,7 +74,7 @@ fn enrich_report(
 /// `initialize`; loop recognition then reruns for the *target*, so a proxied
 /// target acquires the same document loop it would receive when invoked
 /// directly (R7).
-enum ActiveDocumentOutcome {
+pub(crate) enum ActiveDocumentOutcome {
     /// The active document (and any loop it owned) ran to completion.
     Done(i32),
     /// A proxy handed the run off to a target. The coordinator re-prepares the
@@ -242,196 +242,31 @@ pub(crate) fn run_composition_inner(
     // explicit, so a downstream hop that omits `with:` starts from empty.
     let mut current_overlay: indexmap::IndexMap<String, serde_json::Value> =
         indexmap::IndexMap::new();
+    // The already-committed handoff the *next* active document adopts for its
+    // staged bootstrap. `None` for the caller's document; set to each committed
+    // handoff below so the target re-runs its own `initialize`/reread/audit (R4)
+    // rather than having the setup pipeline route `initialize` a second time.
+    let mut adopted_handoff: Option<Box<ProxyHandoff>> = None;
 
     loop {
-        // Running a document switches the process CWD to that document's child
-        // CWD (the repo root). Restore the launch area before preparing the next
-        // active document so a proxied target's context is anchored exactly as a
-        // direct invocation from the launch area would anchor it — `ctx.area`,
-        // file-reference fallbacks, and the launch workspace must not inherit the
-        // previous document's mutated CWD (R5). A no-op on the first iteration.
-        if let Some(ref anchor) = launch_area_fallback {
-            let _ = std::env::set_current_dir(anchor);
-        }
-
-        // Phase 2 (2026-05-09-slow-prep): build the per-invocation prep context
-        // immediately after source resolution. The context owns the single
-        // source-repo-root discovery, the loaded selection config, and the
-        // installed-provider snapshot used by every later prep phase.
-        let prep_ctx_t = std::time::Instant::now();
-        let prep_context =
-            CompositionPrepContext::new(&current_file, &source.resolved_path, &shared.excluded())?;
-        record_prep_substage(&mut prep_substages, perf_enabled, "prep context", prep_ctx_t);
-        // This document's own repository root resolves its `@repo/…` proxy
-        // targets; captured before `execute_loop_or_single` consumes the context.
-        let commit_repo_root = prep_context.source_repo_root.clone();
-
-        // -- Eager target resolution -------------------------------------------
-        // Resolve the execution target *before* composing templates so that
-        // `{{env.AGENT}}` in the body resolves to the chosen provider's slug.
-        // Hints come from the raw frontmatter (no compose). For a proxied target
-        // this reads the *target's* hints, so provider/model launch state is
-        // rebuilt per document (R6) under the caller's explicit-CLI precedence.
-        let raw_hints = claudine::composition::parse_selection_hints_from_frontmatter(
-            source.markdown.frontmatter(),
-        )?;
-        let resolved_target = {
-            let _span = info_span!("compose_prep.eager_target").entered();
-            eagerly_resolve_target(
-                &prep_context,
-                &raw_hints,
-                shared.explicit_provider(),
-                shared.model.as_deref(),
-                shared.dry_run,
-                &source.resolved_path,
-            )
-            .map_err(|e| enrich_report(e, &source, stderr_is_tty))?
-        };
-
-        let mut env_overrides: BTreeMap<String, String> = BTreeMap::new();
-        if let Some(ref target) = resolved_target {
-            install_agent_env_for_composition(target, shared.yolo, &mut env_overrides);
-        }
-
-        // Render the execution line the moment the agent is known. Eager
-        // resolution above prompts the interactive picker when the agent is
-        // ambiguous, so by this point the target is settled for every real
-        // run — and this lands *before* the expensive prepare/compose work, so
-        // the user sees immediate feedback. The lone case without a target is
-        // a `--dry-run` with an unresolved agent; the executor emits the
-        // header itself there after rendering the unresolved state.
-        //
-        // The header must describe the *resolved* session mode, not the raw
-        // `-i` flag: a document with `interactive: true` and no flag still runs
-        // interactively. `raw_hints.interactive` carries the authored
-        // frontmatter value, so resolving it here keeps the eager header in
-        // agreement with the executor's `session_interactive`.
-        let header_interactive = shared.resolve_session_interactivity(raw_hints.interactive).value;
-        let header_emitted = match (shared.silent, resolved_target.as_ref()) {
-            (false, Some(target)) => emit_execution_header(
-                target.provider,
-                shared.yolo,
-                header_interactive,
-                verbose > 0,
-                shared.repo,
-                kind.is_inline(),
-                false, // sequence
-                shared.operation.as_deref(),
-                &current_file,
-                prep_context.launch_workspace.package_context.clone(),
-                &crate::log::terminal(),
-            ),
-            _ => false,
-        };
-
-        // Inline-compose's deferred body reporting is a property of the caller's
-        // document. A proxied target owns the eventual inline closure but does
-        // not re-run the router's deferred report, so this fires only for the
-        // first (caller) document.
-        if first {
-            kind.on_header_emitted(&source, &shared, &current_file, inline_state.take())?;
-        }
-
-        // ── Pre-flight shell approval ────────────────────────────────────────
-        //
-        // The snapshot carries the resolved `AGENT` (and any other composition env
-        // overrides) into the same Darkmatter compose pipeline the preflight pass
-        // walks. Without it, frontmatter values that derive from env (e.g.
-        // `runtime_agent: '{{ env.AGENT }}'`) fail Darkmatter's built-in schema
-        // validation during preflight, before reaching `prepare_direct_with_schema`.
-        //
-        // Anchored on the launch area, never the process CWD: the wrapper mutates
-        // the parent CWD to the repo root, so an ambient capture would answer
-        // `ctx.area` differently depending on when it ran — and would disagree with
-        // the launch-area-anchored snapshot the body compose uses, so the audit
-        // could discover different commands than the compose expands.
-        let compose_options = {
-            let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_for_document(
-                prep_context.launch_workspace.launch_cwd.as_path(),
-                &source.markdown,
-            );
-            for (key, value) in &env_overrides {
-                ctx.env_mut().insert(key.clone(), value.clone());
-            }
-            let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
-                .with_source_file(&source.resolved_path)
-                // Defer the lifecycle event keys (DM1), exactly as the main prepare
-                // passes do. The preflight runs a full compose pipeline purely to
-                // discover template `::shell` directives; without the exclusion it
-                // also resolves the deferred lifecycle subtree at compose time, so a
-                // `success`/`failure` event's read-side file reference (e.g.
-                // `frontmatter(plan, …)` over a plan this very run is about to
-                // create) trips the now-fatal file-ref check before the event that
-                // would make the file exist ever fires. Lifecycle shell commands are
-                // audited separately via `collect_lifecycle_shell_commands`.
-                .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied())
-                // Anchor `file`-typed schema validation on the launch area so a
-                // caller-supplied area-relative path resolves here document-first
-                // then launch-area — exactly as the main prepare pass and the
-                // lifecycle events do. Without it the preflight's built-in schema
-                // validation would fall back to the (already-mutated) process CWD.
-                .with_file_ref_fallback_dir(prep_context.launch_workspace.launch_cwd.clone());
-            if let Some(ref overrides) = set_overrides {
-                opts = opts.with_set_overrides(overrides.clone());
-            }
-            opts
-        };
-
-        let approval_options = crate::commands::wrap::apply_composition_shell_overrides(
-            crate::commands::wrap::build_harness_shell_options_with_cache(
-                &source.resolved_path,
-                prep_context.source_repo_root.as_deref(),
-                Some(Arc::clone(&shared_approval_cache)),
-            ),
-            shared.dry_run,
-            shared.yolo,
-        );
-
-        let shell_approval_t = std::time::Instant::now();
-        let preflight = {
-            let _span = info_span!("compose_prep.shell_preflight").entered();
-            claudine::composition::resolve_shell_approvals(
-                Some(&source.markdown),
-                Some(&compose_options),
-                &approval_options,
-                None,
-                None,
-            )?
-        };
-        record_prep_substage(
-            &mut prep_substages,
-            perf_enabled,
-            "shell approval",
-            shell_approval_t,
-        );
-
-        // Post-prep interrupt checkpoint. If the user pressed Ctrl+C during
-        // any of the prep phases (compose source parse, target resolution,
-        // env install, shell preflight) the SIGINT handler has already
-        // emitted the INFO notice — short-circuit before launching the agent
-        // or entering the loop.
-        if crate::output::user_interrupt_observed() {
-            return Ok(USER_INTERRUPT_EXIT_CODE);
-        }
-
-        let outcome = execute_loop_or_single(
+        let (outcome, commit_repo_root) = prepare_and_run_active_document(
             &shared,
-            current_file.clone(),
+            kind,
             source,
-            prep_context,
-            resolved_target,
-            env_overrides,
-            header_emitted,
-            preflight,
-            Arc::clone(&shared_approval_cache),
+            &current_file,
+            &current_overlay,
+            adopted_handoff.take(),
+            first,
+            &mut inline_state,
             &system_prompt_args,
             set_overrides.clone(),
-            kind,
+            &launch_area_fallback,
+            &shared_approval_cache,
+            &ledger,
             verbose,
             startup_timings.take(),
             std::mem::take(&mut prep_substages),
             compose_entry,
-            current_overlay.clone(),
         )?;
 
         match outcome {
@@ -471,10 +306,264 @@ pub(crate) fn run_composition_inner(
                 // composition. Replaced, not merged: an omitted downstream `with:`
                 // starts the next target from empty (forwarding is explicit).
                 current_overlay = handoff.overlay().clone();
+                // The target adopts this committed handoff for its staged
+                // bootstrap on the next iteration.
+                adopted_handoff = Some(Box::new(handoff));
                 first = false;
             }
         }
     }
+}
+
+/// Prepare one active document through the canonical launch pipeline and run
+/// loop-vs-single on it, returning the outcome plus this document's repository
+/// root (used to resolve any surfaced `@repo/…` proxy target).
+///
+/// This is the single canonical active-document preparation step (R6/R7): it
+/// rebuilds the full launch bundle (prep context, eager target/provider/model,
+/// env, header, shell preflight) for whatever `source` it is handed and then
+/// runs `execute_loop_or_single`, so a proxied target acquires exactly the same
+/// launch state and document loop it would receive when invoked directly.
+///
+/// Both the `compose`/`inline-compose` active-document coordinator
+/// ([`run_composition_inner`]) and the sequence step's contained coordinator
+/// ([`crate::commands::wrap::sequence`]) drive their own thin loop around this
+/// helper, committing each surfaced handoff against their own ledger — there is
+/// one canonical preparation, not a per-command reimplementation.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)]
+pub(crate) fn prepare_and_run_active_document(
+    shared: &SharedComposeArgs,
+    kind: CompositionKind,
+    source: ResolvedCompositionSource,
+    current_file: &str,
+    current_overlay: &indexmap::IndexMap<String, serde_json::Value>,
+    adopted_handoff: Option<Box<ProxyHandoff>>,
+    first: bool,
+    inline_state: &mut Option<crate::commands::compose::InlinePromptState>,
+    system_prompt_args: &SystemPromptArgs,
+    set_overrides: Option<serde_json::Value>,
+    launch_area_fallback: &Option<std::path::PathBuf>,
+    shared_approval_cache: &SharedApprovalCache,
+    ledger: &SharedRunLedger,
+    verbose: u8,
+    startup_timings: Option<crate::perf::StartupTimings>,
+    mut prep_substages: Vec<crate::perf::SubstageTiming>,
+    compose_entry: std::time::Instant,
+) -> Result<(ActiveDocumentOutcome, Option<std::path::PathBuf>)> {
+    let perf_enabled = shared.perf;
+    // Captured for frontmatter-excerpt enrichment of any error rendered below;
+    // gates whether the YAML block is shown (TTY or FORCE_COLOR) or withheld.
+    let stderr_is_tty =
+        std::io::stderr().is_terminal() || std::env::var_os("FORCE_COLOR").is_some();
+
+    // Running a document switches the process CWD to that document's child
+    // CWD (the repo root). Restore the launch area before preparing the next
+    // active document so a proxied target's context is anchored exactly as a
+    // direct invocation from the launch area would anchor it — `ctx.area`,
+    // file-reference fallbacks, and the launch workspace must not inherit the
+    // previous document's mutated CWD (R5). A no-op on the first iteration.
+    if let Some(anchor) = launch_area_fallback {
+        let _ = std::env::set_current_dir(anchor);
+    }
+
+    // Announce the flow-control redirect for a proxied target (never the caller's
+    // own first document, which was not reached through a `proxy`). A handoff
+    // surfaced to this command coordinator no longer passes through the harness's
+    // in-harness `report_proxy_handoff`, so the announcement is emitted here
+    // instead — the operator still sees *why* the running prompt changed before
+    // the target's own header and prompt render, identically to the legacy
+    // harness-local adoption path. Covers both `compose`/`inline-compose` handoffs
+    // and each sequence step's contained proxy (R1).
+    if !first && !shared.silent {
+        claudine::harness::report::report_proxy_handoff(&source.resolved_path, &wrap_terminal());
+    }
+
+    // Phase 2 (2026-05-09-slow-prep): build the per-invocation prep context
+    // immediately after source resolution. The context owns the single
+    // source-repo-root discovery, the loaded selection config, and the
+    // installed-provider snapshot used by every later prep phase.
+    let prep_ctx_t = std::time::Instant::now();
+    let prep_context =
+        CompositionPrepContext::new(current_file, &source.resolved_path, &shared.excluded())?;
+    record_prep_substage(&mut prep_substages, perf_enabled, "prep context", prep_ctx_t);
+    // This document's own repository root resolves its `@repo/…` proxy
+    // targets; captured before `execute_loop_or_single` consumes the context.
+    let commit_repo_root = prep_context.source_repo_root.clone();
+
+    // -- Eager target resolution -------------------------------------------
+    // Resolve the execution target *before* composing templates so that
+    // `{{env.AGENT}}` in the body resolves to the chosen provider's slug.
+    // Hints come from the raw frontmatter (no compose). For a proxied target
+    // this reads the *target's* hints, so provider/model launch state is
+    // rebuilt per document (R6) under the caller's explicit-CLI precedence.
+    let raw_hints =
+        claudine::composition::parse_selection_hints_from_frontmatter(source.markdown.frontmatter())?;
+    let resolved_target = {
+        let _span = info_span!("compose_prep.eager_target").entered();
+        eagerly_resolve_target(
+            &prep_context,
+            &raw_hints,
+            shared.explicit_provider(),
+            shared.model.as_deref(),
+            shared.dry_run,
+            &source.resolved_path,
+        )
+        .map_err(|e| enrich_report(e, &source, stderr_is_tty))?
+    };
+
+    let mut env_overrides: BTreeMap<String, String> = BTreeMap::new();
+    if let Some(ref target) = resolved_target {
+        install_agent_env_for_composition(target, shared.yolo, &mut env_overrides);
+    }
+
+    // Render the execution line the moment the agent is known. Eager
+    // resolution above prompts the interactive picker when the agent is
+    // ambiguous, so by this point the target is settled for every real
+    // run — and this lands *before* the expensive prepare/compose work, so
+    // the user sees immediate feedback. The lone case without a target is
+    // a `--dry-run` with an unresolved agent; the executor emits the
+    // header itself there after rendering the unresolved state.
+    //
+    // The header must describe the *resolved* session mode, not the raw
+    // `-i` flag: a document with `interactive: true` and no flag still runs
+    // interactively. `raw_hints.interactive` carries the authored
+    // frontmatter value, so resolving it here keeps the eager header in
+    // agreement with the executor's `session_interactive`.
+    let header_interactive = shared.resolve_session_interactivity(raw_hints.interactive).value;
+    let header_emitted = match (shared.silent, resolved_target.as_ref()) {
+        (false, Some(target)) => emit_execution_header(
+            target.provider,
+            shared.yolo,
+            header_interactive,
+            verbose > 0,
+            shared.repo,
+            kind.is_inline(),
+            false, // sequence
+            shared.operation.as_deref(),
+            current_file,
+            prep_context.launch_workspace.package_context.clone(),
+            &crate::log::terminal(),
+        ),
+        _ => false,
+    };
+
+    // Inline-compose's deferred body reporting is a property of the caller's
+    // document. A proxied target owns the eventual inline closure but does
+    // not re-run the router's deferred report, so this fires only for the
+    // first (caller) document.
+    if first {
+        kind.on_header_emitted(&source, shared, current_file, inline_state.take())?;
+    }
+
+    // ── Pre-flight shell approval ────────────────────────────────────────
+    //
+    // The snapshot carries the resolved `AGENT` (and any other composition env
+    // overrides) into the same Darkmatter compose pipeline the preflight pass
+    // walks. Without it, frontmatter values that derive from env (e.g.
+    // `runtime_agent: '{{ env.AGENT }}'`) fail Darkmatter's built-in schema
+    // validation during preflight, before reaching `prepare_direct_with_schema`.
+    //
+    // Anchored on the launch area, never the process CWD: the wrapper mutates
+    // the parent CWD to the repo root, so an ambient capture would answer
+    // `ctx.area` differently depending on when it ran — and would disagree with
+    // the launch-area-anchored snapshot the body compose uses, so the audit
+    // could discover different commands than the compose expands.
+    let compose_options = {
+        let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_for_document(
+            prep_context.launch_workspace.launch_cwd.as_path(),
+            &source.markdown,
+        );
+        for (key, value) in &env_overrides {
+            ctx.env_mut().insert(key.clone(), value.clone());
+        }
+        let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
+            .with_source_file(&source.resolved_path)
+            // Defer the lifecycle event keys (DM1), exactly as the main prepare
+            // passes do. The preflight runs a full compose pipeline purely to
+            // discover template `::shell` directives; without the exclusion it
+            // also resolves the deferred lifecycle subtree at compose time, so a
+            // `success`/`failure` event's read-side file reference (e.g.
+            // `frontmatter(plan, …)` over a plan this very run is about to
+            // create) trips the now-fatal file-ref check before the event that
+            // would make the file exist ever fires. Lifecycle shell commands are
+            // audited separately via `collect_lifecycle_shell_commands`.
+            .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied())
+            // Anchor `file`-typed schema validation on the launch area so a
+            // caller-supplied area-relative path resolves here document-first
+            // then launch-area — exactly as the main prepare pass and the
+            // lifecycle events do. Without it the preflight's built-in schema
+            // validation would fall back to the (already-mutated) process CWD.
+            .with_file_ref_fallback_dir(prep_context.launch_workspace.launch_cwd.clone());
+        if let Some(ref overrides) = set_overrides {
+            opts = opts.with_set_overrides(overrides.clone());
+        }
+        opts
+    };
+
+    let approval_options = crate::commands::wrap::apply_composition_shell_overrides(
+        crate::commands::wrap::build_harness_shell_options_with_cache(
+            &source.resolved_path,
+            prep_context.source_repo_root.as_deref(),
+            Some(Arc::clone(shared_approval_cache)),
+        ),
+        shared.dry_run,
+        shared.yolo,
+    );
+
+    let shell_approval_t = std::time::Instant::now();
+    let preflight = {
+        let _span = info_span!("compose_prep.shell_preflight").entered();
+        claudine::composition::resolve_shell_approvals(
+            Some(&source.markdown),
+            Some(&compose_options),
+            &approval_options,
+            None,
+            None,
+        )?
+    };
+    record_prep_substage(
+        &mut prep_substages,
+        perf_enabled,
+        "shell approval",
+        shell_approval_t,
+    );
+
+    // Post-prep interrupt checkpoint. If the user pressed Ctrl+C during
+    // any of the prep phases (compose source parse, target resolution,
+    // env install, shell preflight) the SIGINT handler has already
+    // emitted the INFO notice — short-circuit before launching the agent
+    // or entering the loop.
+    if crate::output::user_interrupt_observed() {
+        return Ok((
+            ActiveDocumentOutcome::Done(USER_INTERRUPT_EXIT_CODE),
+            commit_repo_root,
+        ));
+    }
+
+    let outcome = execute_loop_or_single(
+        shared,
+        current_file.to_string(),
+        source,
+        prep_context,
+        resolved_target,
+        env_overrides,
+        header_emitted,
+        preflight,
+        Arc::clone(shared_approval_cache),
+        Arc::clone(ledger),
+        system_prompt_args,
+        set_overrides,
+        kind,
+        verbose,
+        startup_timings,
+        prep_substages,
+        compose_entry,
+        current_overlay.clone(),
+        adopted_handoff,
+    )?;
+
+    Ok((outcome, commit_repo_root))
 }
 
 /// Validate timeout flags against interactive mode and parse their values.
@@ -501,7 +590,7 @@ fn validate_timeout_flags(shared: &SharedComposeArgs) -> Result<()> {
 /// Resolve the composition source, with inline-specific error reporting
 /// for reference-resolution failures and an ENTER-path autocomplete fallback
 /// when the file reference is not found.
-fn resolve_composition_source(
+pub(crate) fn resolve_composition_source(
     file: &str,
     kind: CompositionKind,
     shared: &SharedComposeArgs,
@@ -592,6 +681,7 @@ fn build_and_run_loop(
     verbose: u8,
     shared: &SharedComposeArgs,
     proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
+    handoff_ledger: &SharedRunLedger,
 ) -> std::result::Result<Option<LoopExecutionResult>, CompositionError> {
     let config = resolve_loop_config(source)?;
     let Some(config) = config else {
@@ -714,6 +804,10 @@ fn build_and_run_loop(
                 kind.mode(),
                 prep_context,
                 proxy_overlay,
+                Arc::clone(handoff_ledger),
+                // A looping proxy target runs its `initialize` through the loop
+                // engine, not the staged bootstrap, so it is never adopted here.
+                None,
             );
 
             let outcome = execute_composition_attempt(
@@ -763,6 +857,8 @@ fn build_execution_request(
     mode: CompositionMode,
     prep_context: &CompositionPrepContext,
     proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
+    handoff_ledger: SharedRunLedger,
+    adopted_handoff: Option<Box<ProxyHandoff>>,
 ) -> CompositionExecutionRequest {
     let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
     CompositionExecutionRequest {
@@ -804,11 +900,15 @@ fn build_execution_request(
         provider_args_explicit: shared.provider_args_explicit,
         // The immediate proxy overlay for a proxied target (empty for a
         // directly-invoked document), re-applied on every re-materialization so a
-        // retry/resume keeps the pre-schema handoff input (AC26). The shared
-        // invocation ledger the harness commits terminal-route proxies against is
-        // not yet threaded here.
+        // retry/resume keeps the pre-schema handoff input (AC26).
         proxy_overlay: proxy_overlay.clone(),
-        handoff_ledger: None,
+        // The one invocation-wide ledger, threaded from the command coordinator so
+        // a terminal-event proxy commits against the same hop/cycle chain and
+        // surfaces back up rather than being adopted in-harness (R6/R7).
+        handoff_ledger: Some(handoff_ledger),
+        // The already-committed handoff a proxied target adopts for its staged
+        // bootstrap (R4), or `None` for the caller's own document.
+        adopted_handoff,
     }
 }
 
@@ -837,6 +937,7 @@ fn execute_loop_or_single(
     header_emitted: bool,
     preflight: claudine::composition::PreFlightResult,
     shared_approval_cache: SharedApprovalCache,
+    handoff_ledger: SharedRunLedger,
     system_prompt_args: &SystemPromptArgs,
     set_overrides: Option<serde_json::Value>,
     kind: CompositionKind,
@@ -848,6 +949,11 @@ fn execute_loop_or_single(
     // caller's document), re-applied on every re-materialization of a proxied
     // target so a retry/resume keeps the pre-schema handoff input (AC26).
     proxy_overlay: indexmap::IndexMap<String, serde_json::Value>,
+    // The already-committed handoff a proxied target adopts for its staged
+    // bootstrap on the single (non-loop) path, or `None` for the caller's
+    // document. A looping target routes its `initialize` through the loop engine
+    // instead, so this is consumed only by the single-execution branch below.
+    adopted_handoff: Option<Box<ProxyHandoff>>,
 ) -> Result<ActiveDocumentOutcome> {
     let loop_options = build_loop_options(shared);
 
@@ -910,6 +1016,7 @@ fn execute_loop_or_single(
             verbose,
             shared,
             &proxy_overlay,
+            &handoff_ledger,
         )?;
         if let Some(loop_result) = loop_result {
             if let Some(error) = loop_result.error {
@@ -995,6 +1102,8 @@ fn execute_loop_or_single(
         kind.mode(),
         &prep_context,
         &proxy_overlay,
+        handoff_ledger,
+        adopted_handoff,
     );
 
     if let Some(ref mut timings) = startup_timings {

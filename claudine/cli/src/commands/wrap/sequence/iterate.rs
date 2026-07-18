@@ -4,8 +4,9 @@
 //! step through the wrapper-grade composition executor, and builds the
 //! [`SequenceRunSummary`] consumed by the final report.
 
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use biscuit_terminal::components::horizontal_rule::{
     HorizontalRule, RuleAlignment, RuleStyle, RuleWeight,
@@ -13,15 +14,21 @@ use biscuit_terminal::components::horizontal_rule::{
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::composition::{
-    self, CompositionExecutionRequest, CompositionMode, ResolvedCompositionSource, SequencePlan,
-    SequenceRunSummary, SequenceStepResult,
+    self, CompositionExecutionRequest, CompositionMode, ProxyHandoff, ResolvedCompositionSource,
+    RunLedger, SequencePlan, SequenceRunSummary, SequenceStepResult, SharedRunLedger,
+    SurfacedHandoff, commit_proxy,
 };
 use claudine::system_prompt::SystemPromptArgs;
 use color_eyre::eyre::Result;
 use tracing::{debug, info_span};
 
+use crate::commands::compose::CompositionKind;
 use crate::commands::compose::SharedComposeArgs;
+use crate::commands::compose::prep::{
+    ActiveDocumentOutcome, prepare_and_run_active_document, resolve_composition_source,
+};
 use crate::commands::wrap::composition::{execute_composition_request_inner, CompositionPrepContext};
+use crate::commands::wrap::overlay::merge_frontmatter_overlay;
 use crate::log;
 
 use super::phase1c::StepContext;
@@ -42,6 +49,7 @@ pub(super) fn run_sequence_steps(
     prep_context: &CompositionPrepContext,
     shared: &SharedComposeArgs,
     shared_approval_cache: &composition::SharedApprovalCache,
+    user_set_overrides: &Option<serde_json::Value>,
     interrupted: &Arc<AtomicBool>,
     inline_mode: bool,
     effective_fail_fast: bool,
@@ -57,6 +65,19 @@ pub(super) fn run_sequence_steps(
         failed: 0,
         steps: Vec::with_capacity(total_steps),
     };
+
+    // A sequence step's proxy target is re-prepared through the same canonical
+    // pipeline the top-level `compose`/`inline-compose` commands use, so the
+    // step's inline-vs-chained mode maps onto the shared `CompositionKind`. The
+    // launch-area anchor lets that pipeline restore the launch CWD before
+    // preparing the target (R5), exactly as the compose coordinator does.
+    let step_kind = if inline_mode {
+        CompositionKind::Inline
+    } else {
+        CompositionKind::Direct
+    };
+    let launch_area_fallback: Option<PathBuf> =
+        Some(prep_context.launch_workspace.launch_cwd.clone());
 
     let mut interrupt_observed = false;
     for (step_index, step_ctx) in step_contexts.iter().enumerate() {
@@ -119,6 +140,17 @@ pub(super) fn run_sequence_steps(
             replace_file: shared.replace_system_prompt.clone(),
         };
 
+        // Each step owns its own coordinator scope (R1). Hop/cycle accounting is
+        // per-step: a fresh ledger, seeded with the sequence document so a
+        // self-proxy is a first-hop cycle, means one step's proxy chain never
+        // shares a hop counter with another step's. The invocation-wide approval
+        // cache is still shared across every step (R9) — only hop/cycle isolation
+        // is per-step.
+        let step_ledger: SharedRunLedger = Arc::new(Mutex::new(RunLedger::new(
+            source.resolved_path.clone(),
+            Arc::clone(shared_approval_cache),
+        )));
+
         let request = {
             let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
             CompositionExecutionRequest {
@@ -137,7 +169,7 @@ pub(super) fn run_sequence_steps(
                 include: shared.include.clone(),
                 model: shared.model.clone(),
                 output: shared.output,
-                system_prompt_args,
+                system_prompt_args: system_prompt_args.clone(),
                 timeout: shared.timeout.clone(),
                 step_timeout: shared.step_timeout.clone(),
                 stall_timeout: shared.stall_timeout.clone(),
@@ -166,12 +198,17 @@ pub(super) fn run_sequence_steps(
                 // regardless of the provider each step resolves to.
                 provider_args: shared.provider_args.clone(),
                 provider_args_explicit: shared.provider_args_explicit,
-                // A sequence step's proxy stays contained within the step (R1):
-                // it adopts on the in-harness coordinator rather than surfacing
-                // to a command-level ledger, so no overlay or shared ledger is
-                // threaded here.
+                // A sequence step's proxy stays contained within the step (R1),
+                // but it is surfaced to the step's own command-owned coordinator
+                // (via `handoff_ledger`) rather than adopted in-harness, so the
+                // target is re-prepared through canonical preparation (R6/R7).
+                // The caller's document is the first hop; `with:` overlays arrive
+                // per-handoff and are applied by the contained loop below.
                 proxy_overlay: indexmap::IndexMap::new(),
-                handoff_ledger: None,
+                handoff_ledger: Some(Arc::clone(&step_ledger)),
+                // The step's own document is invoked directly, not through a
+                // proxy; a surfaced handoff is adopted by the target below.
+                adopted_handoff: None,
             }
         };
 
@@ -181,6 +218,34 @@ pub(super) fn run_sequence_steps(
             None,
             perf_enabled,
         );
+
+        // Resolve any surfaced proxy INSIDE this step (R1). The step remains in
+        // its current iteration until the target completes, fails, or proxies
+        // again; the sequence neither advances nor restarts. The target is
+        // committed against the per-step ledger and re-prepared through the same
+        // canonical launch pipeline a direct invocation uses (R6/R7), so it
+        // acquires its own launch bundle and document loop rather than being
+        // adopted as a reduced in-harness attempt. The contained loop's final
+        // exit code becomes the step's exit code and flows into the existing
+        // success/fail/fail-fast handling unchanged. `--dry-run` never surfaces a
+        // handoff, so a dry-run step skips the loop and behaves exactly as before.
+        let step_result = step_result.and_then(|mut outcome| {
+            if let Some(surfaced) = outcome.initialize_handoff.take() {
+                outcome.exit_code = run_step_proxy_loop(
+                    surfaced,
+                    &step_ledger,
+                    prep_context.source_repo_root.as_deref(),
+                    shared,
+                    step_kind,
+                    &system_prompt_args,
+                    user_set_overrides.clone(),
+                    &launch_area_fallback,
+                    shared_approval_cache,
+                    verbose,
+                )?;
+            }
+            Ok(outcome)
+        });
 
         let duration = start.elapsed();
 
@@ -336,4 +401,94 @@ pub(super) fn run_sequence_steps(
     }
 
     Ok((summary, interrupt_observed))
+}
+
+/// Drive a sequence step's contained handoff chain to completion (R1).
+///
+/// A proxy surfaced by the step's harness (via the per-step ledger) is committed
+/// here and its target is re-prepared through the shared canonical pipeline
+/// [`prepare_and_run_active_document`] — the same one the top-level
+/// `compose`/`inline-compose` coordinator uses — so the target rebuilds its full
+/// launch bundle and acquires its own document loop (R6/R7). The loop stays
+/// inside the current sequence step: it never advances or restarts the sequence,
+/// and every commit is scoped to the step's own `ledger`, so hop/cycle accounting
+/// is per-step. Returns the final target's exit code, which becomes the step's
+/// exit code.
+///
+/// The first commit resolves `@repo/…` targets against the step document's
+/// repository root; each subsequent hop uses the freshly-prepared target's own
+/// root (returned alongside its outcome), matching the compose coordinator.
+#[allow(clippy::too_many_arguments)]
+fn run_step_proxy_loop(
+    initial: SurfacedHandoff,
+    ledger: &SharedRunLedger,
+    step_repo_root: Option<&Path>,
+    shared: &SharedComposeArgs,
+    kind: CompositionKind,
+    system_prompt_args: &SystemPromptArgs,
+    user_set_overrides: Option<serde_json::Value>,
+    launch_area_fallback: &Option<PathBuf>,
+    shared_approval_cache: &composition::SharedApprovalCache,
+    verbose: u8,
+) -> Result<i32> {
+    let mut surfaced = initial;
+    let mut commit_repo_root: Option<PathBuf> = step_repo_root.map(Path::to_path_buf);
+    loop {
+        // An `initialize`-route proxy arrives as a request awaiting commit by
+        // this step's ledger; a terminal-route proxy was already committed by
+        // the harness against the same ledger and is used directly.
+        let handoff: ProxyHandoff = match surfaced {
+            SurfacedHandoff::Request(request) => {
+                commit_proxy(&mut ledger.lock().unwrap(), request, commit_repo_root.as_deref())
+                    .map_err(color_eyre::eyre::Report::from)?
+            }
+            SurfacedHandoff::Committed(handoff) => *handoff,
+        };
+        let target_ref = handoff.resolved_target().to_string_lossy().into_owned();
+        let mut target_source = resolve_composition_source(&target_ref, kind, shared)?;
+        // Precedence, low→high: target-authored frontmatter < the proxy's `with:`
+        // overlay < caller `--set`. The overlay lands in the authored map before
+        // composition; the caller's overrides ride on the compose options on top.
+        merge_frontmatter_overlay(
+            target_source.markdown.frontmatter_mut().as_map_mut(),
+            handoff.overlay(),
+        );
+        let overlay = handoff.overlay().clone();
+        let target_file = handoff.authored_target().to_string();
+        // A proxied target is never the caller's document, so it never re-runs the
+        // inline deferred body report — pass an empty inline state and `first=false`.
+        let mut inline_state = None;
+        // The step's target adopts the committed handoff for its staged bootstrap
+        // (R4), so its own `initialize`/reread/audit run rather than the setup
+        // pipeline routing `initialize` a second time.
+        let adopted_handoff = Some(Box::new(handoff));
+
+        let (outcome, next_repo_root) = prepare_and_run_active_document(
+            shared,
+            kind,
+            target_source,
+            &target_file,
+            &overlay,
+            adopted_handoff,
+            false,
+            &mut inline_state,
+            system_prompt_args,
+            user_set_overrides.clone(),
+            launch_area_fallback,
+            shared_approval_cache,
+            ledger,
+            verbose,
+            None,
+            Vec::new(),
+            std::time::Instant::now(),
+        )?;
+
+        match outcome {
+            ActiveDocumentOutcome::Done(code) => return Ok(code),
+            ActiveDocumentOutcome::Handoff(next) => {
+                surfaced = next;
+                commit_repo_root = next_repo_root;
+            }
+        }
+    }
 }

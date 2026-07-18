@@ -111,8 +111,10 @@ pub(crate) struct SingleCompositionOutcome {
     /// This is how loop recognition follows document identity (R7): the router's
     /// `initialize` is evaluated here, and if it hands off, the coordinator
     /// re-prepares the target as a fresh document and decides loop-vs-single on
-    /// the *target*. `None` on every ordinary run. Only the owned-guard
-    /// (non-sequence, non-dry-run) `compose`/`inline-compose` path populates it.
+    /// the *target*. `None` on every ordinary run. Populated on any live
+    /// (non-dry-run) run that carries a command-owned coordinator ledger — both
+    /// the top-level `compose`/`inline-compose` path and each `sequence` step's
+    /// contained coordinator, which surfaces the proxy to the step's own scope.
     ///
     /// Carries a [`SurfacedHandoff`]: an `initialize`-route proxy arrives as a
     /// [`SurfacedHandoff::Request`] awaiting commit by the command ledger; a

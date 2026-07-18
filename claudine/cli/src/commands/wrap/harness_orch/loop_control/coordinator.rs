@@ -18,8 +18,8 @@ use std::path::Path;
 
 use claudine::composition::{
     ActiveDocumentState, DocumentEntryReason, EvaluatedProxyRequest, LifecycleConfig,
-    LifecycleRunGuard, ProxyCommitError, ProxyProvenance, RunLedger, SharedApprovalCache,
-    commit_proxy,
+    LifecycleRunGuard, ProxyCommitError, ProxyHandoff, ProxyProvenance, RunLedger,
+    SharedApprovalCache, commit_proxy,
 };
 
 use super::super::HarnessPromptState;
@@ -176,5 +176,38 @@ impl ActiveDocumentCoordinator {
         self.target_env_overrides.clear();
         self.bootstrap_pending = true;
         Ok(())
+    }
+
+    /// Adopt an **already-committed** handoff for its staged bootstrap.
+    ///
+    /// The command-owned coordinator has already resolved the target and
+    /// approved the hop against the invocation-wide shared ledger (an
+    /// `initialize`-route commit while the source's stacks were live, or a
+    /// terminal-route commit the harness itself made). This performs the same
+    /// CLI-side repointing as [`adopt`](Self::adopt) — discarding the source's
+    /// execution state, resetting the guard, and arming the bootstrap so the
+    /// staged boot runs the target's own narrow gate, `initialize`, stabilized
+    /// reread, and full audit — but it does **not** re-resolve or re-approve the
+    /// hop: doing so would re-count it and, because the target is already in the
+    /// chain, reject it as a cycle. Hop/cycle accounting stays where it was made,
+    /// on the shared ledger.
+    pub(super) fn adopt_committed(
+        &mut self,
+        handoff: ProxyHandoff,
+        prompt_state: &mut HarnessPromptState,
+        lifecycle_guard: &mut LifecycleRunGuard<'_>,
+        active: &mut ActiveDocumentState,
+    ) {
+        prompt_state.overlay = handoff.overlay().clone();
+        self.active_provenance = Some(handoff.provenance().clone());
+        prompt_state.source_path = handoff.resolved_target().to_path_buf();
+        prompt_state.original_ref = handoff.authored_target().to_string();
+        prompt_state.entry = DocumentEntryReason::ProxyTarget;
+        prompt_state.prompt_tail.clear();
+        *active = ActiveDocumentState::initial();
+        lifecycle_guard.reset_for_proxy();
+        lifecycle_guard.set_config(LifecycleConfig::default());
+        self.target_env_overrides.clear();
+        self.bootstrap_pending = true;
     }
 }

@@ -140,6 +140,16 @@ pub(super) fn run_composition_body(
     // `request.prepared` describes a document that will never reach the agent.
     let hands_off = initial_transition.hands_off_source();
 
+    // Whether `request.prepared` is an already-committed proxy target the harness
+    // loop will re-stage (narrow gate → `initialize` → stabilized reread → audit)
+    // via its bootstrap. When adopting, the target's `initialize` has NOT fired
+    // here (the setup pipeline skipped `route_initialize`), so this body must not
+    // pre-parse the harness plan or run the pre-flight audit against the
+    // bootstrap read — the staged boot does both after the target's `initialize`,
+    // so an initialize-time mutation and the typed HarnessError facets are
+    // observed. It also delivers the target's prompt itself (seed `None`).
+    let adopting = request.adopted_handoff.is_some();
+
     // Composed frontmatter / source-derived base dir, reused by every
     // composition-preflight failure path so the blocked+finalize stacks
     // see the same `frontmatter` and `base_dir` namespaces the
@@ -152,51 +162,69 @@ pub(super) fn run_composition_body(
         .resolved_path
         .parent()
         .or(effective_repo_root);
-    // Validate that the harness plan can be parsed before proceeding.
-    let plan = claudine::harness::parse_harness_plan(
-        &request.prepared.effective_frontmatter,
-        &request.prepared.resolved_path,
-    )
-    .map_err(|e| {
-        // Route through the stack-aware runner so `blocked.stack` and
-        // `finalize.stack` fire (spec.md:436/650/652), not just the
-        // legacy top-level surface.
-        let preflight_outcome = emit_preflight_blocked_and_finalize(
-            guard,
-            lifecycle_effect_engine,
-            emitter,
-            lifecycle_settings,
-            lifecycle_messaging,
-            term,
-            &request.prepared.resolved_path,
-            effective_repo_root,
-            base_dir,
-            Some(launch_workspace.launch_cwd.as_path()),
-            Some(lifecycle_context),
-            frontmatter,
-            document_start,
-            claudine::composition::LifecycleErrorInfo::from_action_failure(
-                "harness_plan",
-                e.to_string(),
-            ),
-        );
-        match preflight_outcome {
-            PreflightBlockedOutcome::EvaluationError(ce) => ce.into(),
-            PreflightBlockedOutcome::Control(control) => {
-                match preflight_blocked_control_error(control, &request.prepared.resolved_path) {
-                    Some(ce) => ce.into(),
-                    None => color_eyre::eyre::eyre!("{e}"),
+    // Validate that the harness plan can be parsed before proceeding. Skipped
+    // for an adopted target: its `initialize` has not run yet, so parsing the
+    // plan here would reject the target's (possibly initialize-mutated)
+    // frontmatter before the target could initialize, and would attribute the
+    // failure to a facet-less `harness_plan` action rather than the typed
+    // HarnessError the staged boot's own plan parse surfaces.
+    let plan = if adopting {
+        None
+    } else {
+        Some(
+            claudine::harness::parse_harness_plan(
+                &request.prepared.effective_frontmatter,
+                &request.prepared.resolved_path,
+            )
+            .map_err(|e| {
+                // Route through the stack-aware runner so `blocked.stack` and
+                // `finalize.stack` fire (spec.md:436/650/652), not just the
+                // legacy top-level surface.
+                let preflight_outcome = emit_preflight_blocked_and_finalize(
+                    guard,
+                    lifecycle_effect_engine,
+                    emitter,
+                    lifecycle_settings,
+                    lifecycle_messaging,
+                    term,
+                    &request.prepared.resolved_path,
+                    effective_repo_root,
+                    base_dir,
+                    Some(launch_workspace.launch_cwd.as_path()),
+                    Some(lifecycle_context),
+                    frontmatter,
+                    document_start,
+                    claudine::composition::LifecycleErrorInfo::from_action_failure(
+                        "harness_plan",
+                        e.to_string(),
+                    ),
+                );
+                match preflight_outcome {
+                    PreflightBlockedOutcome::EvaluationError(ce) => ce.into(),
+                    PreflightBlockedOutcome::Control(control) => {
+                        match preflight_blocked_control_error(
+                            control,
+                            &request.prepared.resolved_path,
+                        ) {
+                            Some(ce) => ce.into(),
+                            None => color_eyre::eyre::eyre!("{e}"),
+                        }
+                    }
                 }
-            }
-        }
-    })?;
+            })?,
+        )
+    };
 
     // The parsed harness plan is used only for shell-command audit and
     // timeout configuration; there are no longer pre/post validation
     // checks that need an effective-plan transform.
 
     // ── Pre-flight shell approval for harness commands ───────────
-    if !skip_preflight {
+    // Skipped for an adopted target: the staged boot runs the narrow
+    // initialize-shell gate and then the full post-stabilization audit itself,
+    // so auditing the bootstrap read here (before the target's `initialize` and
+    // stabilized reread) would audit a document the run will not execute.
+    if !skip_preflight && !adopting {
         let _harness_preflight = claudine::composition::resolve_shell_approvals(
             None, // template commands already approved during compose
             None,
@@ -401,10 +429,11 @@ pub(super) fn run_composition_body(
         }
 
         // Skip the pre-loop agent-prompt preview when an `initialize` proxy
-        // handed the run off: `request.prepared.prompt` is the proxying
-        // *source* document's body, which never reaches the agent. The harness
-        // loop emits the settled *target* document's prompt after the hand-off.
-        if effective_non_interactive && !hands_off {
+        // handed the run off (`request.prepared.prompt` is the proxying *source*
+        // body, which never reaches the agent) or when adopting a proxy target
+        // (its prompt is delivered by the staged boot after its own reread). The
+        // harness loop emits the settled *target* document's prompt in both cases.
+        if effective_non_interactive && !hands_off && !adopting {
             crate::output::log_compose_prompt(
                 &request.prepared.prompt,
                 detail_requested,
@@ -436,7 +465,7 @@ pub(super) fn run_composition_body(
     // `initial_materialized = None` on a hand-off so the loop composes the
     // adopted target rather than reusing the proxying document's prepared
     // prompt.
-    let seed_materialized = (!hands_off)
+    let seed_materialized = (!hands_off && !adopting)
         .then(|| materialized_harness_prompt_from_prepared(&request.prepared));
 
     let mut prompt_state = HarnessPromptState {
@@ -466,6 +495,11 @@ pub(super) fn run_composition_body(
         profile.prepare_captured_output(&mut harness_base_args);
     }
 
+    // The harness loop surfaces a terminal-recovery / start-stack proxy the
+    // provider harness already committed against the shared invocation ledger
+    // (`SurfacedHandoff::Committed`). It is propagated into the outcome below so
+    // the command coordinator re-prepares that target through the full canonical
+    // launch pipeline (R6/R7) rather than the harness adopting it in place.
     let (exit_code, harness_perf, harness_signals, surfaced_handoff) = run_harness_loop(
         provider,
         profile,
@@ -498,6 +532,7 @@ pub(super) fn run_composition_body(
         guard,
         initial_transition,
         request.handoff_ledger.clone(),
+        request.adopted_handoff.clone(),
         true,
     )?;
     if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
@@ -516,9 +551,12 @@ pub(super) fn run_composition_body(
         // exit_reason pickup for every composition document.
         iteration_signals: harness_signals,
         terminal_signal,
-        // Initialize proxies are surfaced before the harness loop begins (see
-        // `provider_run_handoff`); a run that reached the harness never carries one.
-        initialize_handoff: None,
+        // A run that reached the harness carries a handoff only when a terminal
+        // recovery / start-stack proxy fired mid-run: the harness committed it
+        // against the shared invocation ledger and surfaces it here for the
+        // coordinator to re-prepare. `initialize`-route proxies are surfaced
+        // earlier (see `provider_run_handoff`) and never reach this path.
+        initialize_handoff: surfaced_handoff,
     };
     // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
     // The perf report is always emitted to stderr when requested.

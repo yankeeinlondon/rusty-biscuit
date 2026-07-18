@@ -486,7 +486,7 @@ pub(crate) fn run_execution_stage(
             &default_lifecycle_emitter,
         );
 
-        let (harness_code, harness_perf, _harness_signals) = harness_orch::run_harness_loop(
+        let (harness_code, harness_perf, _harness_signals, surfaced_handoff) = harness_orch::run_harness_loop(
             provider,
             profile,
             binary_path,
@@ -519,8 +519,26 @@ pub(crate) fn run_execution_stage(
             // A direct wrapper passthrough has no `initialize` route to hand
             // off from; the run starts on the document it was given.
             claudine::composition::DocumentTransition::Continue,
+            // The direct passthrough owns no command-level invocation ledger, so
+            // a terminal-event proxy has nothing to commit against and can never
+            // surface a handoff (rejected explicitly below).
+            None,
+            // No proxy reached this document, so there is no committed handoff to
+            // adopt: the passthrough runs the document it was given directly.
+            None,
+            // Has a prompt file (the passthrough document), so it emits the
+            // prompt-scoped timing header like a composition caller.
             true,
         )?;
+        // The passthrough passes `None` for the ledger and `Continue` for the
+        // initial transition, so the harness loop can never produce a surfaced
+        // handoff. If one ever arrives, an invariant upstream broke; reject it
+        // rather than silently discarding it.
+        if let Some(handoff) = surfaced_handoff {
+            return Err(eyre!(
+                "direct wrapper passthrough surfaced an impossible proxy handoff: {handoff:?}"
+            ));
+        }
         if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
             collector.set_agent_perf(perf);
         }

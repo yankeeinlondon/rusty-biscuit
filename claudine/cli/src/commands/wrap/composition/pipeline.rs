@@ -4,11 +4,12 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use super::*;
+use super::preflight::{PreflightBlockedOutcome, emit_preflight_blocked_and_finalize};
 use claudine::composition::{
     DocumentTransition, EvaluatedProxyRequest, LifecycleCatchProtocol, LifecycleCatchResult,
-    LifecycleCatchState, LifecycleTransitionAbort, LifecycleTransitionDecision,
+    LifecycleCatchState, LifecycleErrorInfo, LifecycleTransitionAbort, LifecycleTransitionDecision,
     LifecycleTransitionError, LifecycleTransitionInput, ProxyProvenance, SurfacedHandoff,
-    decide_lifecycle_transition,
+    commit_proxy, decide_lifecycle_transition,
 };
 
 enum CompositionPhaseResult<T> {
@@ -1392,6 +1393,24 @@ fn provider_run_handoff(
         messaging: lifecycle_messaging,
         settings: lifecycle_settings,
     };
+    // An adopted proxy target's `initialize` is NOT routed here: the command
+    // coordinator already committed the hop, and the harness loop's staged
+    // bootstrap owns the target's narrow initialize-shell gate, its own
+    // `initialize`, the stabilized reread, and the full audit — the one
+    // canonical R4 staging shared with an in-harness adoption. Routing
+    // `initialize` here as well would fire it twice and audit a bootstrap read
+    // the target's `initialize` may replace, so hand straight to the body, which
+    // adopts the committed handoff into the loop.
+    if request.adopted_handoff.is_some() {
+        return runner::run_composition_body(
+            &ctx,
+            &mut guard,
+            perf_collector,
+            false,
+            DocumentTransition::Continue,
+        );
+    }
+
     let initial_transition = proceed_phase!(route_initialize(
         &mut guard,
         &init_ctx,
@@ -1400,36 +1419,88 @@ fn provider_run_handoff(
         term,
     ));
 
-    // R1/R7 — every committed `initialize` proxy on a live (non-dry-run,
-    // non-sequence) run surfaces its handoff out of the provider harness up to
-    // the composition command's active-document coordinator (`compose/prep.rs`),
-    // which re-prepares the target as a fresh document through the *same*
-    // canonical launch pipeline a direct invocation uses. That is what rebuilds
-    // the target's complete launch bundle — provider/profile/binary, argv, MCP,
-    // system prompt, child CWD, structured mode, dispatch — rather than
-    // inheriting the router's, and it gives the target the same loop recognition
-    // it would receive when invoked directly. The router's `initialize` has
-    // fired; a clean handoff skips the source's terminal/finalize (the guard is
-    // dropped here), so the source is transferred, not completed.
+    // R1/R7 — an `initialize` proxy on a live run that carries a command-owned
+    // coordinator ledger is committed against that shared ledger **here**, while
+    // the source's `initialize` guard is still live, then surfaced up as an
+    // already-committed handoff. The command coordinator re-prepares the target
+    // through the *same* canonical launch pipeline a direct invocation uses —
+    // rebuilding the complete launch bundle rather than inheriting the router's —
+    // and adopts it into the harness loop's staged bootstrap for its own
+    // `initialize`/reread/audit. This mirrors the terminal-proxy route's
+    // `surface_or_adopt_terminal_proxy`: one commit point, one set of resolution
+    // and cycle semantics.
     //
-    // The routing decision no longer peeks at whether the target loops: a
-    // looping and a non-looping target take the same route, so one path decides
-    // loop ownership from the fully prepared target. `--dry-run` reports the
-    // named document and never traverses a handoff; a sequence proxy is
-    // contained within its step (R1) and stays on the in-harness coordinator.
+    // Committing while the guard is live is what makes a refused hop (missing
+    // target, cycle, or hop-limit) route through the source's still-legal
+    // `blocked`/`finalize` — the atomic-handoff contract and AC29 — instead of
+    // `?`-propagating out of the command past the closure the source still owes.
+    // A clean commit synthesizes no source terminal/`finalize`; the source is
+    // transferred, not completed.
+    //
+    // Both the top-level `compose`/`inline-compose` coordinator
+    // (`compose/prep.rs`) and each sequence step's contained coordinator
+    // (`sequence/iterate.rs`) provide that ledger (R1). `--dry-run` reports the
+    // named document and never traverses a handoff, so it stays on the in-harness
+    // coordinator.
     match initial_transition {
-        DocumentTransition::Proxy(handoff) if !request.dry_run && !request.sequence => {
-            Ok(SingleCompositionOutcome {
-                exit_code: 0,
-                provider,
-                agent_perf: None,
-                iteration_signals: None,
-                terminal_signal: None,
-                initialize_handoff: Some(SurfacedHandoff::Request(handoff)),
-            })
+        DocumentTransition::Proxy(handoff)
+            if !request.dry_run && request.handoff_ledger.is_some() =>
+        {
+            let ledger = request
+                .handoff_ledger
+                .as_ref()
+                .expect("handoff_ledger.is_some() checked in the match guard");
+            match commit_proxy(
+                &mut ledger.lock().expect("run ledger mutex poisoned"),
+                handoff,
+                effective_repo_root,
+            ) {
+                Ok(committed) => Ok(SingleCompositionOutcome {
+                    exit_code: 0,
+                    provider,
+                    agent_perf: None,
+                    iteration_signals: None,
+                    terminal_signal: None,
+                    initialize_handoff: Some(SurfacedHandoff::Committed(Box::new(committed))),
+                }),
+                // A refused hop leaves the source active; route the typed commit
+                // failure through its still-live `blocked`/`finalize` stacks with
+                // the concrete cause as `err`, exactly as the terminal route's
+                // `route_handoff_failure` does.
+                Err(commit_error) => {
+                    let info = LifecycleErrorInfo::from_proxy_commit_error(&commit_error);
+                    let outcome = emit_preflight_blocked_and_finalize(
+                        &mut guard,
+                        lifecycle_effect_engine,
+                        emitter,
+                        lifecycle_settings,
+                        lifecycle_messaging,
+                        term,
+                        &request.prepared.resolved_path,
+                        effective_repo_root,
+                        base_dir,
+                        Some(launch_workspace.launch_cwd.as_path()),
+                        Some(lifecycle_context),
+                        fm_map.unwrap_or(&empty_frontmatter),
+                        document_start,
+                        info,
+                    );
+                    match outcome {
+                        // A raise inside the catch stacks supersedes the hand-off
+                        // failure.
+                        PreflightBlockedOutcome::EvaluationError(ce) => Err(ce.into()),
+                        // No flow-control recovery exists for a pre-launch
+                        // `initialize` blocked; surface the typed commit error so
+                        // the renderer walks `source()` to the concrete cause.
+                        PreflightBlockedOutcome::Control(_) => {
+                            Err(color_eyre::eyre::Report::new(commit_error))
+                        }
+                    }
+                }
+            }
         }
-        // Dry-run and sequence-contained proxies (and every other transition)
-        // stay on the in-harness coordinator.
+        // Dry-run proxies (and every other transition) stay on the in-harness
+        // coordinator.
         other => runner::run_composition_body(&ctx, &mut guard, perf_collector, false, other),
     }
 }

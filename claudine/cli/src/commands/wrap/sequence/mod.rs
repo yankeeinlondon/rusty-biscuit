@@ -465,6 +465,7 @@ pub(crate) fn execute_sequence(
         &prep_context,
         shared,
         &shared_approval_cache,
+        &user_set_overrides,
         &interrupted,
         inline_mode,
         effective_fail_fast,

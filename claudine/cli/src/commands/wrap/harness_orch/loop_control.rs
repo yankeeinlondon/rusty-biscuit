@@ -47,6 +47,12 @@ type HarnessLoopResult = (
 );
 
 #[allow(dead_code)]
+// `Return` carries the whole `HarnessLoopResult`; adding the surfaced-handoff
+// element pushed it past the `large_enum_variant` threshold. This is a
+// transient control token returned once per terminal loop decision (not hot),
+// so boxing the result just to shrink the enum would trade a real allocation
+// for no measurable win.
+#[allow(clippy::large_enum_variant)]
 enum LoopStep {
     NextAttempt,
     Return(HarnessLoopResult),
@@ -96,6 +102,13 @@ struct HarnessLoopCtx<'a, 'guard> {
     // place. `None` for a sequence step (its proxy stays contained) and for the
     // direct wrapper passthrough.
     handoff_ledger: Option<SharedRunLedger>,
+    // An already-committed proxy handoff whose target this run adopts for its
+    // staged bootstrap. `Some` when the command coordinator re-prepares a
+    // proxied target: the hop was already committed against `handoff_ledger`, so
+    // the loop runs the target's R4 staging (narrow gate → `initialize` →
+    // stabilized reread → audit) without re-committing. `None` for a
+    // directly-invoked document.
+    adopted_handoff: Option<Box<claudine::composition::ProxyHandoff>>,
     emit_prompt_timing: bool,
 }
 
@@ -157,6 +170,10 @@ pub(crate) fn run_harness_loop(
     // The shared invocation ledger (compose/inline-compose), or `None` for a
     // sequence step / direct passthrough. See [`HarnessLoopCtx::handoff_ledger`].
     handoff_ledger: Option<SharedRunLedger>,
+    // An already-committed proxy handoff whose target this run adopts for its
+    // staged bootstrap, or `None` for a directly-invoked document. See
+    // [`HarnessLoopCtx::adopted_handoff`].
+    adopted_handoff: Option<Box<claudine::composition::ProxyHandoff>>,
     // When `true`, every structured-stream attempt in the harness loop
     // emits the prompt-scoped timing header and — if the parsed plan
     // carries `timeout_warn` / `step_timeout_warn` — their fire-once
@@ -197,6 +214,7 @@ pub(crate) fn run_harness_loop(
         lifecycle_guard,
         initial_transition,
         handoff_ledger,
+        adopted_handoff,
         emit_prompt_timing,
     };
     match run_harness_loop_inner(ctx)? {
@@ -263,6 +281,20 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
                 run.lifecycle_guard,
                 &mut active,
             )?;
+        }
+        // The command coordinator already committed this handoff against the
+        // shared ledger (an `initialize`-route commit-while-live or a
+        // terminal-route commit). Adopt it without re-committing so the target's
+        // R4 staging runs here — the one canonical bootstrap for every route —
+        // rather than the setup pipeline routing the target's `initialize` a
+        // second time.
+        if let Some(handoff) = run.adopted_handoff.take() {
+            coordinator.adopt_committed(
+                *handoff,
+                run.prompt_state,
+                run.lifecycle_guard,
+                &mut active,
+            );
         }
         let initial_materialized = run.initial_materialized.take();
         Ok(Self {
@@ -668,29 +700,28 @@ fn bootstrap_adopted_document_phase(
         }
         TargetInitializeAction::Abort(error) => return Err(error),
         TargetInitializeAction::Reproxy(request) => {
-            // A chained proxy re-enters this same staging for its own target,
-            // so the chain stabilizes one atomic hop at a time before anything
-            // commits to a provider launch or loop execution.
-            if let Err(error) = control.coordinator.adopt(
+            // A chained proxy hands off exactly like a terminal-event proxy: on
+            // the compose/sequence path it commits against the shared invocation
+            // ledger while the target's `initialize` guard is still live to catch
+            // a refused hop, then surfaces the committed handoff up so the command
+            // coordinator re-prepares the next target through the same canonical
+            // launch pipeline and staged bootstrap — one atomic hop at a time.
+            // Only the direct-passthrough (no shared ledger) still adopts in place.
+            return Ok(Some(surface_or_adopt_terminal_proxy(
+                control.handoff_ledger,
+                control.coordinator,
                 request,
                 prompt.repo_root,
                 prompt.prompt_state,
                 lifecycle.guard,
                 control.active,
-            ) {
-                return Err(route_handoff_failure(
-                    lifecycle.guard,
-                    materialized,
-                    &prompt.prompt_state.source_path,
-                    prompt.repo_root,
-                    lifecycle.term,
-                    lifecycle.effect_engine,
-                    error,
-                    lifecycle.loop_start,
-                ));
-            }
-            // `adopt` reset `active` to attempt 1 for the chained target.
-            return Ok(Some(LoopStep::NextAttempt));
+                materialized,
+                lifecycle.term,
+                lifecycle.effect_engine,
+                lifecycle.loop_start,
+                None,
+                None,
+            )?));
         }
     }
 
@@ -773,20 +804,24 @@ fn bootstrap_adopted_document_phase(
 }
 
 /// Resolve a terminal-event proxy request either by surfacing it up to the
-/// command coordinator (compose path) or by adopting it in place (sequence path).
+/// command coordinator (when a coordinator ledger is present) or by adopting it
+/// in place (legacy harness-local coordinator).
 ///
 /// This is the one place a terminal-recovery / `start`-stack proxy is turned
 /// into a loop step, so the two ownership models converge here:
 ///
-/// - **Compose** (`handoff_ledger` is `Some`): the harness commits the request
-///   against the *one* invocation-wide ledger while the source document's stacks
+/// - **Coordinator-owned** (`handoff_ledger` is `Some`): the harness commits the
+///   request against the coordinator's ledger while the source document's stacks
 ///   are still live to catch a refused hop, then surfaces the committed handoff
 ///   up as a [`LoopStep::Return`] carrying it. The harness never repoints its own
 ///   active document; the command coordinator re-prepares the resolved target
 ///   through the full canonical launch pipeline — the same rebuild a direct
-///   invocation performs (R6).
-/// - **Sequence** (`handoff_ledger` is `None`): the proxy stays contained within
-///   the current step and adopts in place on the harness-local coordinator (R1).
+///   invocation performs (R6). Both the top-level `compose`/`inline-compose`
+///   coordinator and each `sequence` step's contained coordinator take this arm:
+///   a sequence step surfaces to the step's own per-step ledger, staying inside
+///   the step while still rebuilding launch state above the harness (R1).
+/// - **Harness-local** (`handoff_ledger` is `None`): the proxy adopts in place on
+///   the harness-local coordinator.
 ///
 /// A refused hop routes through the source's `blocked`/`finalize` with the typed
 /// commit error in both models, since the source is still the active document.
@@ -903,7 +938,6 @@ fn preflight_pending_proxy_phase(
     let attempt = control.active.iteration().attempt().number();
     let proxy_pending = control.coordinator.bootstrap_pending();
     let has_seed = prompt.initial_materialized.is_some();
-    let silent = prompt.silent;
     let prompt_state = &mut *prompt.prompt_state;
     let harness_context = &mut *prompt.harness_context;
     let child_cwd = prompt.child_cwd;
@@ -912,9 +946,12 @@ fn preflight_pending_proxy_phase(
     let effect_engine = lifecycle.effect_engine;
     let term = lifecycle.term;
     let loop_start = lifecycle.loop_start;
-    if proxy_pending && !silent {
-        claudine::harness::report::report_proxy_handoff(&prompt_state.source_path, term);
-    }
+    // The "flow control redirected" announcement is emitted once by the command
+    // coordinator when it re-prepares a proxied target
+    // (`compose::prep::prepare_and_run_active_document`), covering every surfaced
+    // route (compose/inline/sequence, looping or not) uniformly. It is
+    // deliberately not re-emitted here, where the target has already been
+    // adopted, to avoid a doubled redirect line.
     if !proxy_pending || has_seed {
         return Ok(());
     }
@@ -1187,47 +1224,6 @@ fn execute_attempt_phase(
     let loop_start = state.loop_start;
     let PreparedHarnessAttempt { materialized, plan } = prepared;
 
-    // R8 — compute the session-compatibility key for the launch this attempt is
-    // about to run, from the resolved launch state the harness will execute
-    // (provider, effective child env, resolved argv, working directory, mode).
-    let launch_key = session_compat_key(
-        provider,
-        profile,
-        binary_path,
-        child_cwd,
-        state.run.yolo,
-        effective_non_interactive,
-        use_structured,
-        structured_codex_output.is_some(),
-        base_args,
-        base_env,
-        &materialized,
-    );
-    // A resume carries the key of the session-producing attempt forward with the
-    // live session. If the canonical refresh changed a launch property the
-    // provider fixed when it opened the session, refuse the resume with a typed
-    // diagnostic before launching the provider under the stale session — never
-    // mix a live session with a newly prepared launch plan.
-    if resume_session.is_some()
-        && let Some(prior) = state.active.iteration().attempt().compat_key()
-    {
-        let facets = prior.incompatibilities(&launch_key);
-        if !facets.is_empty() {
-            return Err(CompositionError::LifecycleResumeIncompatible {
-                source_path: prompt_state.source_path.clone(),
-                facets,
-            }
-            .into());
-        }
-    }
-    // Record the key of the launch this attempt runs with, so a subsequent
-    // resume can compare its refreshed plan against it.
-    state
-        .active
-        .iteration_mut()
-        .attempt_mut()
-        .set_compat_key(launch_key);
-
     let launch = build_harness_launch(
         provider,
         profile,
@@ -1277,6 +1273,48 @@ fn execute_attempt_phase(
             .unwrap_or(0),
     )
     .entered();
+
+    // R8 — compute the session-compatibility key for this attempt from the
+    // resolved launch bundle (its effective child env) plus the canonical argv,
+    // then compare before the provider is spawned. Built here, after
+    // `build_harness_launch`, so it reads the launch state actually about to run
+    // — including the R6 target-launch env overlay — not frozen pre-launch inputs.
+    let launch_key = session_compat_key(
+        provider,
+        profile,
+        binary_path,
+        child_cwd,
+        state.run.yolo,
+        effective_non_interactive,
+        use_structured,
+        structured_codex_output.is_some(),
+        base_args,
+        &launch,
+    );
+    // A resume carries the key of the session-producing attempt forward with the
+    // live session. If the canonical refresh changed a launch property the
+    // provider fixed when it opened the session, refuse the resume with a typed
+    // diagnostic before launching the provider under the stale session — never
+    // mix a live session with a newly prepared launch plan.
+    if resume_session.is_some()
+        && let Some(prior) = state.active.iteration().attempt().compat_key()
+    {
+        let facets = prior.incompatibilities(&launch_key);
+        if !facets.is_empty() {
+            return Err(CompositionError::LifecycleResumeIncompatible {
+                source_path: prompt_state.source_path.clone(),
+                facets,
+            }
+            .into());
+        }
+    }
+    // Record the key of the launch this attempt runs with, so a subsequent
+    // resume can compare its refreshed plan against it.
+    state
+        .active
+        .iteration_mut()
+        .attempt_mut()
+        .set_compat_key(launch_key);
 
     // Build the prompt-scoped timing context for this attempt. The
     // warn thresholds are re-read from each parsed plan so a
