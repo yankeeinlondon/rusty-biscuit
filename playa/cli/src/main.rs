@@ -7,7 +7,7 @@ mod install_ui;
 use clap::builder::PossibleValue;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::CompleteEnv;
-use sniff::programs::InstalledHeadlessAudio;
+use sniff::programs::{InstallInterviewOutcome, InstalledHeadlessAudio};
 use strum::IntoEnumIterator;
 
 use biscuit_terminal::components::compose::Compose;
@@ -1006,9 +1006,49 @@ fn install_players() {
         let mut opts = InstallInterviewOptions::default();
         opts.install.timeout_secs = 120;
 
-        if let Err(e) = run_install_interview(&input, &opts, &mut ui) {
-            error_exit(&format!("installation failed: {e}"), 1);
+        match run_install_interview(&input, &opts, &mut ui) {
+            Ok(outcome) => {
+                if let Err(message) =
+                    install_outcome_verdict(label, &outcome, opts.install.timeout_secs)
+                {
+                    error_exit(&message, 1);
+                }
+            }
+            Err(e) => error_exit(&format!("installation failed: {e}"), 1),
         }
+    }
+}
+
+/// Terminal verdict for one installer outcome at the `playa install` boundary.
+///
+/// The interview has already narrated itself through [`install_ui::CliInstallUi`]
+/// — including the `TimeoutWarning` detached-descendant caveat that precedes
+/// [`InstallInterviewOutcome::TimedOut`] — so this seam only decides whether the
+/// selected-install loop may continue and, when it may not, what to say.
+///
+/// ## Returns
+///
+/// `Ok(())` when the player may be treated as handled, or `Err(message)` with
+/// the text the CLI should render before exiting non-zero.
+fn install_outcome_verdict(
+    program: &str,
+    outcome: &InstallInterviewOutcome,
+    timeout_secs: u64,
+) -> Result<(), String> {
+    match outcome {
+        InstallInterviewOutcome::Installed { .. } | InstallInterviewOutcome::DryRun { .. } => Ok(()),
+        // Declining one player in a multi-select run is a user choice, not a
+        // command failure — the remaining selections still deserve a turn.
+        InstallInterviewOutcome::AbortedByUser => Ok(()),
+        InstallInterviewOutcome::Failed { .. } => Err(format!("{program} installation failed")),
+        // The selection list is pre-filtered by `ProgramDetector::installable`,
+        // so reaching this arm means the host disagreed with that filter.
+        InstallInterviewOutcome::NotInstallable => {
+            Err(format!("{program} cannot be installed on this host"))
+        }
+        InstallInterviewOutcome::TimedOut { .. } => Err(format!(
+            "{program} installation timed out after {timeout_secs}s"
+        )),
     }
 }
 
@@ -1482,6 +1522,7 @@ fn format_sample_rate_khz(rate_hz: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sniff::programs::InstallationMethod;
 
     #[test]
     fn builds_meta_markdown_with_formatting_and_links() {
@@ -1778,4 +1819,67 @@ mod tests {
             Some(Command::Players(PlayersCommand::Install))
         ));
     }
+
+    #[test]
+    fn install_verdict_timeout_fails_and_names_the_deadline() {
+        let outcome = InstallInterviewOutcome::TimedOut {
+            attempted: vec![InstallationMethod::Brew("mpv")],
+        };
+
+        let verdict = install_outcome_verdict("mpv", &outcome, 120);
+
+        let message = verdict.expect_err("a timed-out installer must not be a success");
+        assert!(message.contains("timed out"), "got: {message}");
+        assert!(message.contains("120s"), "got: {message}");
+        // The timeout verdict must stay distinguishable from a plain failure.
+        assert!(!message.contains("installation failed"), "got: {message}");
+    }
+
+    #[test]
+    fn install_verdict_failed_is_a_failure() {
+        let outcome = InstallInterviewOutcome::Failed {
+            attempted: vec![InstallationMethod::Brew("mpv")],
+        };
+
+        let message =
+            install_outcome_verdict("mpv", &outcome, 120).expect_err("Failed must not succeed");
+        assert!(message.contains("installation failed"), "got: {message}");
+    }
+
+    #[test]
+    fn install_verdict_not_installable_is_a_failure() {
+        let message = install_outcome_verdict("mpv", &InstallInterviewOutcome::NotInstallable, 120)
+            .expect_err("NotInstallable must not succeed");
+        assert!(message.contains("cannot be installed"), "got: {message}");
+    }
+
+    #[test]
+    fn install_verdict_installed_and_dry_run_succeed() {
+        assert!(
+            install_outcome_verdict(
+                "mpv",
+                &InstallInterviewOutcome::Installed {
+                    method: InstallationMethod::Brew("mpv"),
+                },
+                120,
+            )
+            .is_ok()
+        );
+        assert!(
+            install_outcome_verdict(
+                "mpv",
+                &InstallInterviewOutcome::DryRun {
+                    method: InstallationMethod::Brew("mpv"),
+                },
+                120,
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn install_verdict_user_abort_continues_the_loop() {
+        assert!(install_outcome_verdict("mpv", &InstallInterviewOutcome::AbortedByUser, 120).is_ok());
+    }
+
 }

@@ -23,6 +23,17 @@ impl CliInstallUi {
         Self { terminal, plain }
     }
 
+    /// Renders a prose-carrying event body, newline-terminated so consecutive
+    /// events never share a line.
+    fn render_prose_line(&self, prose: &str) -> String {
+        let rendered = Prose::new(prose.to_owned()).render(&self.terminal);
+        if rendered.ends_with('\n') {
+            rendered
+        } else {
+            format!("{rendered}\n")
+        }
+    }
+
     fn emit(&mut self, text: &str) {
         let output = if self.plain {
             strip_escape_codes(text)
@@ -37,33 +48,10 @@ impl CliInstallUi {
 impl InstallInterviewDelegate for CliInstallUi {
     fn on_event(&mut self, event: &InstallInterviewEvent) -> Result<(), SniffInstallationError> {
         match event {
-            InstallInterviewEvent::Announcement { prose } => {
-                let rendered = Prose::new(prose.clone()).render(&self.terminal);
-                let line = if rendered.ends_with('\n') {
-                    rendered
-                } else {
-                    format!("{rendered}\n")
-                };
-                self.emit(&line);
-            }
-
-            InstallInterviewEvent::ConsentWarning { prose } => {
-                let rendered = Prose::new(prose.clone()).render(&self.terminal);
-                let line = if rendered.ends_with('\n') {
-                    rendered
-                } else {
-                    format!("{rendered}\n")
-                };
-                self.emit(&line);
-            }
-
-            InstallInterviewEvent::TimeoutWarning { prose } => {
-                let rendered = Prose::new(prose.clone()).render(&self.terminal);
-                let line = if rendered.ends_with('\n') {
-                    rendered
-                } else {
-                    format!("{rendered}\n")
-                };
+            InstallInterviewEvent::Announcement { prose }
+            | InstallInterviewEvent::ConsentWarning { prose }
+            | InstallInterviewEvent::TimeoutWarning { prose } => {
+                let line = self.render_prose_line(prose);
                 self.emit(&line);
             }
 
@@ -185,4 +173,22 @@ impl InstallInterviewDelegate for CliInstallUi {
 fn ensure_trailing_blank_line(s: &str) -> String {
     let trimmed = s.trim_end_matches('\n');
     format!("{trimmed}\n\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timeout_warning_prose_reaches_the_rendered_line() {
+        let ui = CliInstallUi::new(Terminal::default(), true);
+
+        let line = ui.render_prose_line(
+            "The installer was stopped at its deadline; it may have left partial changes.",
+        );
+
+        let plain = strip_escape_codes(&line);
+        assert!(plain.contains("stopped at its deadline"), "got: {plain}");
+        assert!(line.ends_with('\n'));
+    }
 }
