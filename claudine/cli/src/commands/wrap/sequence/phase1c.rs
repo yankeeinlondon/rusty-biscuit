@@ -309,6 +309,12 @@ fn run_phase_1c_attempt(
             // to capture-at-prepare (the lib default).
             prepared_context: None,
             file_ref_fallback_dir: launch_area.map(std::path::Path::to_path_buf),
+            // `{{state}}`/`{{previous}}`/`{{next}}` render their `name` in
+            // string context; whole-value/dotted access keeps the typed object.
+            name_coercion_keys: composition::sequence::reserved::NAME_COERCION_KEYS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect(),
         };
 
         // Inline steps prepare via `prepare_inline_with_schema` so the
@@ -499,6 +505,14 @@ fn build_template_preflight_options(
         opts = opts.with_file_ref_fallback_dir(launch_area.to_path_buf());
     }
     opts = opts.with_set_overrides(set_overrides.clone());
+    // Coerce `{{state}}`/`{{previous}}`/`{{next}}` to their `name` in string
+    // context so a shell command's approved bytes match its executed bytes.
+    opts = opts.with_name_coercion_keys(
+        composition::sequence::reserved::NAME_COERCION_KEYS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
+    );
     opts
 }
 

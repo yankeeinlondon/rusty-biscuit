@@ -576,7 +576,7 @@ sequence:
   - green
   - blue
 ---
-COLOR={{state}} STEP={{step}}/{{total_steps}}
+COLOR={{state}} STEP={{state.index}}/{{state.count}}
 "#,
     )
     .unwrap();
