@@ -164,6 +164,10 @@ pub fn function_call_at<'a>(
             then_branch,
             else_branch,
         } => vec![condition, then_branch, else_branch],
+        SpannedExprKind::ArrayLiteral(items) => items.iter().collect(),
+        SpannedExprKind::ObjectLiteral(entries) => {
+            entries.iter().map(|(_, value)| value).collect()
+        }
         SpannedExprKind::FunctionCall { args, .. } => args.iter().collect(),
         _ => Vec::new(),
     };
@@ -216,6 +220,10 @@ pub fn expression_at(expr: &SpannedExpr, offset: usize) -> Option<&SpannedExpr> 
             then_branch,
             else_branch,
         } => vec![condition, then_branch, else_branch],
+        SpannedExprKind::ArrayLiteral(items) => items.iter().collect(),
+        SpannedExprKind::ObjectLiteral(entries) => {
+            entries.iter().map(|(_, value)| value).collect()
+        }
         SpannedExprKind::FunctionCall { args, .. } => args.iter().collect(),
         _ => Vec::new(),
     };
@@ -650,6 +658,25 @@ mod tests {
     }
 
     #[test]
+    fn remote_functions_and_closed_enum_reach_passive_descriptors() {
+        for name in [
+            "branch_exists_on_remote",
+            "remote_vendor",
+            "pr",
+            "pr_list",
+            "cicd",
+            "cicd_list",
+        ] {
+            assert!(function_descriptor(name).is_some(), "missing {name}");
+        }
+
+        let vendor = function_descriptor("remote_vendor").unwrap();
+        let typed = vendor.typed_signature();
+        assert!(typed.contains("enum(\"\", github, gitlab, gitea, forgejo"));
+        assert!(typed.ends_with("| error"));
+    }
+
+    #[test]
     fn shipped_catalog_descriptors_all_reach_completion() {
         let candidates = completion_candidates("", &[]);
 
@@ -699,6 +726,21 @@ mod tests {
         assert_eq!(function_call_at(&expr, source, source.len() + 5), None);
         let plain = parse("title").unwrap();
         assert_eq!(function_call_at(&plain, "title", 2), None);
+    }
+
+    #[test]
+    fn function_and_expression_lookup_descend_into_collection_literals() {
+        let source = "pr_list({ state: [fallback(\"open\", status)] })";
+        let expr = parse(source).unwrap();
+        let fallback = source.find("fallback").unwrap();
+        assert_eq!(
+            function_call_at(&expr, source, fallback + 1),
+            Some("fallback")
+        );
+
+        let status = source.find("status").unwrap();
+        let sub = expression_at(&expr, status + 1).unwrap();
+        assert_eq!(root_identifier(sub).as_deref(), Some("status"));
     }
 
     #[test]

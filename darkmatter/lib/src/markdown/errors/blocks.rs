@@ -432,6 +432,16 @@ fn collect_frontmatter_roots(expr: &Expr, names: &mut Vec<String>) {
                 collect_frontmatter_roots(arg, names);
             }
         }
+        Expr::ArrayLiteral(items) => {
+            for item in items {
+                collect_frontmatter_roots(item, names);
+            }
+        }
+        Expr::ObjectLiteral(entries) => {
+            for (_, value) in entries {
+                collect_frontmatter_roots(value, names);
+            }
+        }
     }
 }
 

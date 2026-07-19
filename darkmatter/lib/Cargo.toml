@@ -98,7 +98,7 @@ biscuit-terminal = { path = "../../biscuit-terminal/lib", features = ["image"] }
 biscuit-hash = { path = "../../biscuit-hash/lib" }
 
 # System detection (OS, hardware, repo, docs)
-sniff = { path = "../../sniff/lib" }
+sniff = { path = "../../sniff/lib", features = ["remote"] }
 serde_yaml_ng = "0.10"
 
 # Unicode Script lookup for cleanup's join-separator decision (spaceless scripts

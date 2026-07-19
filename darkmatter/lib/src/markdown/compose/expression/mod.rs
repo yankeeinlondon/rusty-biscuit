@@ -80,7 +80,7 @@ pub mod semantics;
 pub use ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
 pub use catalog::{
     expression_function_descriptors, generate_expression_function_table,
-    DataType, ExpressionFunctionDescriptor, ParamType, ReturnType,
+    DataType, ExpressionFunctionDescriptor, ParamType, ReturnType, ReturnValueType,
 };
 pub use ctx::CtxLookup;
 pub use error::{ArityBound, ExpressionError, FileRefFailure, FileReferenceDiagnostic};
@@ -414,6 +414,16 @@ pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, E
             Ok(Value::Number(num))
         }
         Expr::BoolLiteral(b) => Ok(Value::Bool(*b)),
+        Expr::ArrayLiteral(items) => items
+            .iter()
+            .map(|item| evaluate(item, lookup))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array),
+        Expr::ObjectLiteral(entries) => entries
+            .iter()
+            .map(|(key, value)| Ok((key.clone(), evaluate(value, lookup)?)))
+            .collect::<Result<serde_json::Map<_, _>, ExpressionError>>()
+            .map(Value::Object),
         Expr::Paren(inner) => evaluate(inner, lookup),
         Expr::UnaryNot(inner) => {
             let value = evaluate(inner, lookup)?;

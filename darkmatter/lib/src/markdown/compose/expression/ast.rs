@@ -35,7 +35,7 @@
 //! ```
 
 use super::ComparisonOp;
-use crate::markdown::span::SourceSpan;
+use crate::markdown::span::{SourceSpan, Spanned};
 use std::fmt;
 
 /// Arithmetic binary operators supported by the expression evaluator.
@@ -83,6 +83,12 @@ pub enum Expr {
 
     /// Boolean literal: `true` or `false`.
     BoolLiteral(bool),
+
+    /// Immutable array literal: `[value, computed]`.
+    ArrayLiteral(Vec<Expr>),
+
+    /// Immutable object literal: `{ key: value, "quoted-key": computed }`.
+    ObjectLiteral(Vec<(String, Expr)>),
 
     /// Unary not expression: `!expr`.
     UnaryNot(Box<Expr>),
@@ -184,6 +190,26 @@ impl fmt::Display for Expr {
                 }
             }
             Expr::BoolLiteral(b) => write!(f, "{}", b),
+            Expr::ArrayLiteral(items) => {
+                write!(f, "[")?;
+                for (index, item) in items.iter().enumerate() {
+                    if index > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{item}")?;
+                }
+                write!(f, "]")
+            }
+            Expr::ObjectLiteral(entries) => {
+                write!(f, "{{")?;
+                for (index, (key, value)) in entries.iter().enumerate() {
+                    if index > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "\"{key}\": {value}")?;
+                }
+                write!(f, "}}")
+            }
             Expr::UnaryNot(expr) => write!(f, "!{}", expr),
             Expr::UnaryMinus(expr) => write!(f, "-{}", expr),
             Expr::Paren(expr) => write!(f, "({})", expr),
@@ -245,6 +271,10 @@ pub enum SpannedExprKind {
     NumberLiteral(f64),
     /// Boolean literal: `true` or `false`.
     BoolLiteral(bool),
+    /// Immutable array literal. Each child retains its complete source span.
+    ArrayLiteral(Vec<SpannedExpr>),
+    /// Immutable object literal. Keys and values retain their source spans.
+    ObjectLiteral(Vec<(Spanned<String>, SpannedExpr)>),
     /// Unary not expression: `!expr`.
     UnaryNot(Box<SpannedExpr>),
     /// Unary minus expression: `-expr`.
@@ -329,6 +359,15 @@ impl SpannedExpr {
             SpannedExprKind::StringLiteral(s) => Expr::StringLiteral(s.clone()),
             SpannedExprKind::NumberLiteral(n) => Expr::NumberLiteral(*n),
             SpannedExprKind::BoolLiteral(b) => Expr::BoolLiteral(*b),
+            SpannedExprKind::ArrayLiteral(items) => {
+                Expr::ArrayLiteral(items.iter().map(SpannedExpr::erase).collect())
+            }
+            SpannedExprKind::ObjectLiteral(entries) => Expr::ObjectLiteral(
+                entries
+                    .iter()
+                    .map(|(key, value)| (key.value.clone(), value.erase()))
+                    .collect(),
+            ),
             SpannedExprKind::UnaryNot(inner) => Expr::UnaryNot(Box::new(inner.erase())),
             SpannedExprKind::UnaryMinus(inner) => Expr::UnaryMinus(Box::new(inner.erase())),
             SpannedExprKind::Paren(inner) => Expr::Paren(Box::new(inner.erase())),

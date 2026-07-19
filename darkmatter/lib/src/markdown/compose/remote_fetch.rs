@@ -7,6 +7,7 @@
 
 #[cfg(test)]
 use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
 
@@ -97,6 +98,9 @@ pub struct RemoteFetchRuntime {
 
 struct RemoteFetchInner {
     slots: DashMap<String, Arc<SlotGuard>>,
+    provider_queries: ProviderQueryCache,
+    provider_in_flight: Mutex<usize>,
+    provider_notify: Condvar,
     policy: FetchPolicy,
     stats: Mutex<RemoteFetchStats>,
     /// Shared redirect-disabled HTTP client reused for every fetch in a compose
@@ -130,6 +134,9 @@ struct RemoteFetchInner {
     /// TTL, refresh, and freshness-mode inputs for cache evaluation.
     cache_config: RemoteCacheConfig,
 }
+
+type ProviderQueryCache =
+    Mutex<HashMap<String, Arc<OnceLock<Result<serde_json::Value, String>>>>>;
 
 impl RemoteFetchInner {
     /// Returns the shared fetch runtime, building it on first use.
@@ -227,6 +234,11 @@ impl RemoteFetchWeakId {
 }
 
 impl RemoteFetchRuntime {
+    /// Returns the exact host policy shared by all run-local remote reads.
+    pub(crate) fn policy(&self) -> FetchPolicy {
+        self.inner.policy.clone()
+    }
+
     /// Returns a clone-stable weak identity handle for this runtime.
     ///
     /// The narrow accessor exists so identity capture never reaches through the
@@ -299,6 +311,9 @@ impl RemoteFetchRuntime {
         Self {
             inner: Arc::new(RemoteFetchInner {
                 slots: DashMap::new(),
+                provider_queries: Mutex::new(HashMap::new()),
+                provider_in_flight: Mutex::new(0),
+                provider_notify: Condvar::new(),
                 policy,
                 stats: Mutex::new(RemoteFetchStats::default()),
                 client: OnceLock::new(),
@@ -312,6 +327,44 @@ impl RemoteFetchRuntime {
                 cache_config,
             }),
         }
+    }
+
+    /// Shares one normalized provider result across every surface in this run.
+    pub(crate) fn cached_provider_query(
+        &self,
+        key: String,
+        query: impl FnOnce() -> Result<serde_json::Value, String>,
+    ) -> Result<serde_json::Value, String> {
+        let slot = {
+            let mut queries = self
+                .inner
+                .provider_queries
+                .lock()
+                .map_err(|_| "provider query cache lock was poisoned".to_string())?;
+            queries.entry(key).or_default().clone()
+        };
+        slot.get_or_init(|| {
+            let _permit = self.acquire_provider_permit()?;
+            query()
+        })
+        .clone()
+    }
+
+    fn acquire_provider_permit(&self) -> Result<ProviderPermit<'_>, String> {
+        let mut in_flight = self
+            .inner
+            .provider_in_flight
+            .lock()
+            .map_err(|_| "provider concurrency lock was poisoned".to_string())?;
+        while *in_flight >= self.inner.concurrency {
+            in_flight = self
+                .inner
+                .provider_notify
+                .wait(in_flight)
+                .map_err(|_| "provider concurrency lock was poisoned".to_string())?;
+        }
+        *in_flight += 1;
+        Ok(ProviderPermit { runtime: self })
     }
 
     /// Checks whether a URL is allowed by policy, returning a
@@ -520,6 +573,19 @@ impl RemoteFetchRuntime {
     }
 }
 
+struct ProviderPermit<'a> {
+    runtime: &'a RemoteFetchRuntime,
+}
+
+impl Drop for ProviderPermit<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut in_flight) = self.runtime.inner.provider_in_flight.lock() {
+            *in_flight = in_flight.saturating_sub(1);
+            self.runtime.inner.provider_notify.notify_one();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -581,6 +647,37 @@ mod tests {
         rt.register_and_fetch(url);
         let urls = rt.registered_urls();
         assert!(urls.contains("https://example.com/doc.md"));
+    }
+
+    #[test]
+    fn provider_queries_share_the_remote_concurrency_cap() {
+        let runtime = RemoteFetchRuntime::with_policy_and_concurrency(
+            FetchPolicy::deny_all(),
+            2,
+        );
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let mut workers = Vec::new();
+        for index in 0..6 {
+            let runtime = runtime.clone();
+            let active = Arc::clone(&active);
+            let peak = Arc::clone(&peak);
+            workers.push(std::thread::spawn(move || {
+                runtime
+                    .cached_provider_query(format!("query:{index}"), || {
+                        let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                        peak.fetch_max(now, Ordering::SeqCst);
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                        active.fetch_sub(1, Ordering::SeqCst);
+                        Ok(serde_json::Value::Null)
+                    })
+                    .unwrap();
+            }));
+        }
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert_eq!(peak.load(Ordering::SeqCst), 2);
     }
 }
 

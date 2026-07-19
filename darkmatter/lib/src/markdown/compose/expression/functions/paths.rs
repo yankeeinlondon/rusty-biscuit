@@ -9,6 +9,8 @@ pub(super) const BINDINGS: &[FunctionBinding] = &[
     FunctionBinding { canonical: "file_index", aliases: &["fileindex"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::file_index_fn)) },
     FunctionBinding { canonical: "increment_file_index", aliases: &["incrementfileindex"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::increment_file_index_fn)) },
     FunctionBinding { canonical: "decrement_file_index", aliases: &["decrementfileindex"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::decrement_file_index_fn)) },
+    FunctionBinding { canonical: "find_first_index", aliases: &["findfirstindex"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::find_first_index_fn)) },
+    FunctionBinding { canonical: "find_last_index", aliases: &["findlastindex"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::find_last_index_fn)) },
     FunctionBinding { canonical: "basename", aliases: &[], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::basename_fn)) },
     FunctionBinding { canonical: "basename_without_index", aliases: &["basenamewithoutindex"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::basename_without_index_fn)) },
     FunctionBinding { canonical: "dirname", aliases: &[], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::dirname_fn)) },
