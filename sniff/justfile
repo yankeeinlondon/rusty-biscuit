@@ -51,8 +51,12 @@ sanity:
     @just _sanity sniff-cli
 
 # test library and CLI
+#
+# `remote` transitively enables `network`. Selecting `network` alone would
+# cfg-out the whole `sniff::remote` module and silently reduce its Wiremock
+# suites to empty binaries instead of failing.
 test *args="":
-    @just _test sniff --features network {{ args }}
+    @just _test sniff --features remote {{ args }}
     @just _test sniff-cli {{ args }}
 
 # Real-terminal (Level-2) tests: CI/CD status-cell styling in sniff-cli.
@@ -74,8 +78,11 @@ test-real *args="":
     @just _test_real sniff-cli {{ args }}
 
 # lint with clippy
+#
+# `remote` is required for the same reason as `test`: without it the provider
+# and remote-observation modules are never handed to clippy at all.
 lint *args="":
-    @cargo clippy -p sniff -p sniff-cli -- {{ args }}
+    @cargo clippy -p sniff --features remote -p sniff-cli -- {{ args }}
 
 # Per-package LCOV coverage.
 coverage *args="":

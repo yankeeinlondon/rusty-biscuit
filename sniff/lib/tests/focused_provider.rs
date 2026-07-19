@@ -196,6 +196,69 @@ async fn pull_request_query_paginates_until_filtered_limit() {
     assert_eq!(page.items.iter().map(|item| item.identity.native_id.as_str()).collect::<Vec<_>>(), ["2", "3"]);
 }
 
+/// Builds a query exercising exactly one canonical field.
+///
+/// `direction` is the catalog-facing name for the struct's `descending` flag,
+/// so it has no serde key of its own.
+fn single_filter_query(field: &str) -> PullRequestQuery {
+    if field == "direction" {
+        return PullRequestQuery { descending: true, limit: Some(5), ..Default::default() };
+    }
+    let value = match field {
+        "state" => serde_json::json!(["open"]),
+        "labels" => serde_json::json!(["bug"]),
+        "draft" => serde_json::json!(true),
+        "limit" => serde_json::json!(5),
+        "sort" => serde_json::json!("created"),
+        "created_after" | "created_before" | "updated_after" | "updated_before" => {
+            serde_json::json!("2024-01-01T00:00:00Z")
+        }
+        _ => serde_json::json!("x"),
+    };
+    serde_json::from_value(serde_json::json!({ field: value, "limit": 5 })).unwrap()
+}
+
+/// AC22: `capabilities()` is a public promise, not documentation. Every filter
+/// it declares must actually be honored, and every filter it omits from the
+/// canonical query vocabulary must be refused rather than silently dropped.
+#[tokio::test]
+async fn declared_filters_match_the_filters_the_client_actually_honors() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/repos/acme/project/pulls"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(&server)
+        .await;
+    let adapter = client(&server, ApiFlavor::GitHub);
+    let declared = adapter.capabilities().pull_request_filters;
+
+    for field in &declared {
+        adapter
+            .query_pull_requests(single_filter_query(field))
+            .await
+            .unwrap_or_else(|error| panic!("declared filter {field} was not honored: {error}"));
+    }
+
+    for field in ["assignee", "reviewer", "milestone", "commit"] {
+        assert!(
+            !declared.iter().any(|declared| declared == field),
+            "{field} is rejected at runtime but still advertised"
+        );
+        assert!(
+            matches!(
+                adapter.query_pull_requests(single_filter_query(field)).await,
+                Err(SniffError::UnsupportedRemoteFilter { .. })
+            ),
+            "{field} was silently ignored instead of refused"
+        );
+    }
+
+    let capabilities = adapter.capabilities();
+    assert!(!capabilities.logs);
+    assert!(!capabilities.artifacts);
+    assert!(!capabilities.test_reports);
+}
+
 #[tokio::test]
 async fn denial_validation_and_provider_failures_remain_distinct() {
     let server = MockServer::start().await;
