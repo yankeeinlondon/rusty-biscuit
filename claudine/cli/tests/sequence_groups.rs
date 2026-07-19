@@ -942,6 +942,106 @@ Body.
     }
 }
 
+/// A prompt task's provider output must land on the channel the command
+/// contract puts it on, and stay attributed on both.
+///
+/// The pane test
+/// (`level2_sequence_task_stream_capture::level2_parallel_prompt_streams_keep_task_attribution_in_tmux`)
+/// proves both channels still carry the task's bar once merged; it structurally
+/// cannot say *which* channel a line came from. This does, with two real pipes:
+/// assistant text is data (stdout), reasoning and tool status are status
+/// (stderr), and each carries its task's textual label under `NO_COLOR`.
+#[test]
+fn parallel_prompt_task_splits_data_and_status_across_channels() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    // `claude`, not `goose`: only a provider with a `stream_protocol` reaches
+    // the semantic spawn where the task decorator is installed.
+    write_executable(
+        &path_dir.join("claude"),
+        r#"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"stub-1","model":"stub-model"}'
+printf '%s\n' '{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"weighing-options"}}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"body-payload"}]}}'
+printf '%s\n' '{"type":"tool_use","name":"Bash","input":{"command":"stub-tool-call"}}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"done"}'
+exit 0
+"#,
+    );
+
+    fs::write(workspace.path().join("one.md"), "---\nprompt: hi\n---\n\nOne.\n").unwrap();
+    fs::write(workspace.path().join("two.md"), "---\nprompt: hi\n---\n\nTwo.\n").unwrap();
+    fs::write(
+        workspace.path().join("seq.md"),
+        r#"---
+sequence:
+  - name: alpha
+    group:
+      name: bundle
+      execution: parallel
+      tasks:
+        - name: task-one
+          prompt: one.md
+        - name: task-two
+          prompt: two.md
+---
+
+Body.
+"#,
+    )
+    .unwrap();
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["sequence", "--claude", "--yolo", "seq.md"])
+        .assert()
+        .get_output()
+        .clone();
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+
+    // Assistant text is data: stdout only, once per member.
+    assert_eq!(
+        stdout.matches("body-payload").count(),
+        2,
+        "each member's assistant text must reach stdout exactly once: {stdout}"
+    );
+    assert!(
+        !stderr.contains("body-payload"),
+        "assistant text leaked onto the status channel: {stderr}"
+    );
+
+    // Reasoning and tool status are status: stderr only.
+    for marker in ["weighing-options", "stub-tool-call"] {
+        assert_eq!(
+            stderr.matches(marker).count(),
+            2,
+            "`{marker}` must reach stderr once per member: {stderr}"
+        );
+        assert!(
+            !stdout.contains(marker),
+            "`{marker}` leaked onto the data channel: {stdout}"
+        );
+    }
+
+    // Attribution without color: every member names itself on the status
+    // channel, so a reader can still tell the two interleaved streams apart.
+    for task in ["task-one", "task-two"] {
+        assert!(
+            stderr
+                .lines()
+                .any(|line| line.contains(task) && line.contains("succeeded")),
+            "`{task}` has no named outcome footer: {stderr}"
+        );
+    }
+}
+
 /// Concurrency must not merge two members' provider sessions into one JSONL
 /// record stream. Each member's run keeps its own session identity.
 #[test]

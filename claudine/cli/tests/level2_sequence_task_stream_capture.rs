@@ -1,7 +1,23 @@
 //! Level 2 real-terminal capture for sequence task-stream rendering.
 //!
 //! Feature: `claudine/features/2026-07-11-sequence-plus/` (spec →
-//! *Reporting Concurrency*), review-2 finding 4.
+//! *Reporting Concurrency*), review-2 finding 4 and review-3 finding 3.
+//!
+//! ## Shell fixtures vs. prompt fixtures
+//!
+//! The shell fixtures here exercise the task decorator directly. The prompt
+//! fixtures additionally cross the provider protocol, the semantic parser, and
+//! the live semantic sink before reaching the same decorator — the hops
+//! review-2 found were bypassing it. They stub `claude`, not `goose`, because
+//! `goose` carries no `stream_protocol` and so never reaches the semantic
+//! spawn at all.
+//!
+//! Both surviving provider paths are covered here. A third — a
+//! post-parser-failure raw fallback — used to exist and is now gone: no
+//! `SemanticStreamParser` implementation ever constructed the
+//! `StreamParseError::Fatal` that gated it, so neither scripted input nor any
+//! real provider stream could reach it. Review-4 finding 6 removed the whole
+//! parser error channel rather than leave an emitter no input can drive.
 //!
 //! ## Why a real pane, when L1 already asserts the frames
 //!
@@ -116,10 +132,96 @@ sequence: \"{{ items }}\"
 Work on {{state}}.
 ";
 
+/// A parallel group of two **prompt** tasks, both driven by the same scripted
+/// provider stub.
+///
+/// Prompt tasks, not shell: a `shell:` body reaches the pane through the task
+/// decorator directly, whereas a prompt task's text first crosses the provider
+/// protocol, the semantic parser, and the stdout/stderr merge. Those are the
+/// hops that can strip attribution, and only a prompt fixture walks them.
+const PARALLEL_PROMPT_DOC: &str = "\
+---
+sequence:
+  - name: alpha
+    group:
+      name: bundle
+      execution: parallel
+      tasks:
+        - name: task-one
+          prompt: one.md
+        - name: task-two
+          prompt: two.md
+---
+
+Body.
+";
+
+/// A single prompt task whose provider holds a partial Markdown block, then
+/// stays alive well past the idle-flush window.
+const IDLE_FLUSH_DOC: &str = "\
+---
+sequence:
+  - name: alpha
+    group:
+      name: bundle
+      execution: parallel
+      tasks:
+        - name: slow-task
+          prompt: one.md
+---
+
+Body.
+";
+
+/// Scripted `claude` stream-json emitting one assistant block, one reasoning
+/// delta, and one tool call — the three provider-side shapes whose task
+/// attribution review-2 repaired.
+///
+/// `claude` rather than `goose`: `goose` has no `stream_protocol`, so it never
+/// reaches the semantic spawn at all. Every pre-existing sequence fixture stubs
+/// `goose` and therefore proves nothing about the provider paths.
+const CLAUDE_STREAM_STUB: &str = r#"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"stub-1","model":"stub-model"}'
+printf '%s\n' '{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"weighing-options"}}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"body-payload"}]}}'
+printf '%s\n' '{"type":"tool_use","name":"Bash","input":{"command":"stub-tool-call"}}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"done"}'
+exit 0
+"#;
+
+/// Scripted `claude` that emits one *held* Markdown block and then stalls.
+///
+/// The trailing newline is load-bearing: `AssistantStream::append` streams a
+/// partial line immediately, but a complete, non-list, non-sentence-terminated
+/// line goes into the block buffer and is held. Only the idle flush can then
+/// surface it — which is the path under test.
+///
+/// The post-stall marker is what makes the test discriminating. The
+/// end-of-stream `close()` drain also flushes a held block and also decorates
+/// it, so "the block reached the pane with a bar" is true either way. Emitting
+/// a later event *after* the stall separates them: an idle flush puts the block
+/// ahead of that marker, `close()` puts it behind.
+///
+/// The stall spans the ticker's *second* tick on purpose. Cadence and silence
+/// window are both 30s, so the first tick only flushes if the block was stamped
+/// within a hair of the ticker starting; under pane setup and load it usually
+/// is not, and the block then waits for t=60s. A 45s stall made that a coin
+/// flip — the run ended first and `close()` drained the block.
+const CLAUDE_IDLE_STUB: &str = r#"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"stub-idle","model":"stub-model"}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"held-idle-block\n"}]}}'
+sleep 75
+printf '%s\n' '{"type":"tool_use","name":"Bash","input":{"command":"post-stall-marker"}}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"done"}'
+exit 0
+"#;
+
 struct Staged {
     workspace: TestWorkspace,
     bin_dir: PathBuf,
     doc: PathBuf,
+    /// The `--<provider>` selector `run_in_pane` passes to `claudine sequence`.
+    provider_flag: &'static str,
 }
 
 /// Stage a workspace holding `doc_body` at `seq.md` plus a `goose` stub.
@@ -146,7 +248,27 @@ fn stage(name: &str, doc_body: &str) -> Staged {
         workspace,
         bin_dir,
         doc,
+        provider_flag: "--goose",
     }
+}
+
+/// Stage a workspace whose prompt tasks are served by `stub`, a scripted
+/// `claude` stream-json script on `PATH`.
+///
+/// A shell script, not a test-only binary: an L2 probe must not ship as a
+/// production bin, and `PATH` interposition is how every other provider
+/// fixture in this crate injects a deterministic stream.
+fn stage_prompt(name: &str, doc_body: &str, stub: &str) -> Staged {
+    let mut staged = stage(name, doc_body);
+    let root = staged.workspace.path().to_path_buf();
+
+    write_executable(&staged.bin_dir.join("claude"), stub);
+    for member in ["one.md", "two.md"] {
+        write(&root.join(member), "---\nprompt: run\n---\n\nMember.\n");
+    }
+    write(&staged.doc, doc_body);
+    staged.provider_flag = "--claude";
+    staged
 }
 
 struct Capture {
@@ -195,6 +317,19 @@ fn run_in_pane(
     rows: u32,
     extra_env: &[(&str, &str)],
 ) -> Capture {
+    run_in_pane_within(harness, staged, cols, rows, extra_env, Duration::from_secs(45))
+}
+
+/// [`run_in_pane`] with an explicit deadline, for fixtures that deliberately
+/// outlast the default (the idle-flush stall).
+fn run_in_pane_within(
+    harness: &mut TmuxHarness,
+    staged: &Staged,
+    cols: u32,
+    rows: u32,
+    extra_env: &[(&str, &str)],
+    deadline: Duration,
+) -> Capture {
     harness.resize(cols, rows).expect("resize pane");
 
     let claudine = cargo_bin!("claudine").display().to_string();
@@ -212,7 +347,8 @@ fn run_in_pane(
     let _ = biscuit_test_harness::wait_for_prompt(harness);
 
     let cmd = format!(
-        "{claudine} sequence --goose --yolo {}; echo {EXIT_MARKER}$?",
+        "{claudine} sequence {} --yolo {}; echo {EXIT_MARKER}$?",
+        staged.provider_flag,
         staged.doc.display()
     );
     let mut env: Vec<(&str, &str)> = vec![("HOME", home.as_str()), ("PATH", path.as_str())];
@@ -221,7 +357,7 @@ fn run_in_pane(
         .send_command_with_env(&cmd, &env)
         .expect("send claudine command");
 
-    let capture = wait_for_exit_marker(harness, Duration::from_secs(45));
+    let capture = wait_for_exit_marker(harness, deadline);
     let _ = biscuit_test_harness::wait_for_prompt(harness);
     capture
 }
@@ -320,6 +456,183 @@ fn level2_parallel_task_bodies_carry_their_own_bar_color_in_tmux() {
         colors[0], colors[1],
         "two concurrent tasks painted the same bar, so their interleaved body \
          lines are indistinguishable in the pane"
+    );
+}
+
+/// Every line a *prompt* task emits — assistant body, reasoning, tool status —
+/// must still name its owner once it has crossed the provider protocol and the
+/// stdout/stderr merge.
+///
+/// This is the review-3 finding-3 gap. The shell fixtures above prove the bar
+/// renderer; they never reach `run_child_stream_semantic`, because `goose` has
+/// no stream protocol. A `claude` stub does, so this is the only case in which
+/// the parser, the live semantic sink, and the task decorator are all in the
+/// path at once — and the pane is the only place their combined output is
+/// judged, since a reader has neither pipe.
+///
+/// Reasoning and tool lines are *status* (stderr) while the body is *data*
+/// (stdout). The channel split itself is asserted at L1
+/// (`stream_io.rs`, `sequence_groups.rs::parallel_prompt_task_splits_data_and_status`);
+/// what only a pane can show is that both channels still carry the same bar
+/// after being interleaved.
+#[test]
+#[serial(level2_terminal)]
+fn level2_parallel_prompt_streams_keep_task_attribution_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let staged = stage_prompt(
+        "claudine-l2-prompt-attribution",
+        PARALLEL_PROMPT_DOC,
+        CLAUDE_STREAM_STUB,
+    );
+    // A tall pane, because `capture()` has no scrollback and a prompt run
+    // renders two system-prompt panels on top of the task stream.
+    let capture = run_in_pane(&mut harness, &staged, 110, 130, &[]);
+
+    assert_eq!(
+        capture.exit_code, 0,
+        "the parallel prompt group must succeed.\nplain:\n{}",
+        capture.frame.plain
+    );
+
+    let lines = framed_region_raw(&capture.frame.raw, "Starting pre-flight checks");
+    let mut header_colors = Vec::new();
+    for task in ["task-one", "task-two"] {
+        let header = lines
+            .iter()
+            .find(|line| line.contains('▶') && line.contains(task))
+            .unwrap_or_else(|| panic!("no header for `{task}`.\nraw region:\n{lines:#?}"));
+        header_colors.push(
+            bar_color(header)
+                .unwrap_or_else(|| panic!("header for `{task}` drew no colored bar: {header:?}")),
+        );
+    }
+    assert_ne!(
+        header_colors[0], header_colors[1],
+        "two concurrent prompt tasks painted the same bar, so their interleaved \
+         provider output is indistinguishable in the pane"
+    );
+
+    // Each of the three repaired provider paths emits one identifiable marker.
+    // Both tasks run the same stub, so each marker must appear once per task —
+    // and the set of bars painting it must be exactly the set of task bars.
+    for (path, marker) in [
+        ("assistant body (data)", "body-payload"),
+        ("provider reasoning (status)", "weighing-options"),
+        ("provider tool status (status)", "stub-tool-call"),
+    ] {
+        let painted: Vec<String> = lines
+            .iter()
+            .filter(|line| line.contains(marker))
+            .map(|line| {
+                bar_color(line).unwrap_or_else(|| {
+                    panic!("`{path}` reached the pane with no bar at all: {line:?}")
+                })
+            })
+            .collect();
+        let mut distinct: Vec<String> = painted.clone();
+        distinct.sort();
+        distinct.dedup();
+        let mut expected = header_colors.clone();
+        expected.sort();
+        assert_eq!(
+            distinct, expected,
+            "`{path}` (marker `{marker}`) is not attributed to both owning \
+             tasks: saw bars {painted:?}, task bars are {header_colors:?}\
+             \nraw region:\n{lines:#?}"
+        );
+    }
+
+    // Textual attribution must survive alongside the color, per the spec's
+    // degradation rule — the footer names the task that produced the stream.
+    let plain = framed_region(&capture.frame.plain).join("\n");
+    for task in ["task-one", "task-two"] {
+        assert!(
+            plain
+                .lines()
+                .any(|line| line.contains(task) && line.contains("succeeded")),
+            "`{task}` has no named outcome footer.\nregion:\n{plain}"
+        );
+    }
+}
+
+/// A held Markdown block surfaced by the idle flush must still carry its task's
+/// bar when it lands, mid-run, in a real pane.
+///
+/// The stub emits one complete non-terminal line and then stalls, so the block
+/// buffer sits untouched and only `flush_idle` can release it. The stall is
+/// what makes the assertion honest: the marker appears while the provider is
+/// still running, so it cannot have come from the end-of-stream drain.
+///
+/// Slow by construction — `SILENCE_WINDOW` and the ticker cadence are both a
+/// hardcoded 30s with no env override, and the stall has to clear the second
+/// tick to be reliable, so ~80s is the cheapest honest version of this test.
+/// `.config/nextest.toml` carries the matching slow-timeout grant.
+#[test]
+#[serial(level2_terminal)]
+fn level2_prompt_idle_flush_keeps_the_task_bar_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let staged = stage_prompt(
+        "claudine-l2-prompt-idleflush",
+        IDLE_FLUSH_DOC,
+        CLAUDE_IDLE_STUB,
+    );
+    let capture = run_in_pane_within(
+        &mut harness,
+        &staged,
+        110,
+        130,
+        &[],
+        Duration::from_secs(150),
+    );
+
+    assert_eq!(
+        capture.exit_code, 0,
+        "the stalled prompt task must still succeed.\nplain:\n{}",
+        capture.frame.plain
+    );
+
+    let lines = framed_region_raw(&capture.frame.raw, "Starting pre-flight checks");
+    let header = lines
+        .iter()
+        .find(|line| line.contains('▶') && line.contains("slow-task"))
+        .unwrap_or_else(|| panic!("no header for `slow-task`.\nraw region:\n{lines:#?}"));
+    let header_color = bar_color(header)
+        .unwrap_or_else(|| panic!("`slow-task`'s header drew no colored bar: {header:?}"));
+
+    let flushed_at = lines
+        .iter()
+        .position(|line| line.contains("held-idle-block"))
+        .unwrap_or_else(|| {
+            panic!("the held block never reached the pane.\nraw region:\n{lines:#?}")
+        });
+    let flushed_color = bar_color(lines[flushed_at]).unwrap_or_else(|| {
+        panic!(
+            "the idle-flushed block reached the pane with no bar: {:?}",
+            lines[flushed_at]
+        )
+    });
+    assert_eq!(
+        header_color, flushed_color,
+        "the idle flush surfaced the held block under a different task's bar \
+         than the header that announced it"
+    );
+
+    // Proof that this was the idle flush and not the end-of-stream drain: the
+    // block is ahead of an event the provider only emitted after its stall.
+    let post_stall_at = lines
+        .iter()
+        .position(|line| line.contains("post-stall-marker"))
+        .unwrap_or_else(|| {
+            panic!("the post-stall marker never reached the pane.\nraw region:\n{lines:#?}")
+        });
+    assert!(
+        flushed_at < post_stall_at,
+        "the held block surfaced only after the provider resumed, so `close()` \
+         drained it and the idle flush never ran.\nraw region:\n{lines:#?}"
     );
 }
 
