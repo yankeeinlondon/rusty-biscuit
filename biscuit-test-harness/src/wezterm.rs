@@ -19,7 +19,7 @@ use std::ffi::OsString;
 use std::io;
 use std::process::{Command, Stdio};
 use std::sync::Once;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::{
     CAPTURE_TIMEOUT, CLEANUP_TIMEOUT, CapturedFrame, QUERY_TIMEOUT, SEND_TIMEOUT, SPAWN_TIMEOUT,
@@ -368,7 +368,8 @@ impl WezTermHarness {
                 eprintln!(
                     "[focus_spawned_pane] WezTerm window pos=({x},{y}) size=({w},{h}) → click target ({click_x},{click_y})"
                 );
-                std::thread::sleep(Duration::from_millis(200));
+                #[cfg(target_os = "macos")]
+                wait_until_wezterm_frontmost(Duration::from_secs(5))?;
                 Ok(Some((click_x, click_y)))
             }
             None => {
@@ -816,6 +817,46 @@ fn kill_wezterm_pane(pane_id: u64) {
 /// loosens.
 fn applescript_quote(title: &str) -> String {
     title.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Blocks until a WezTerm process is the frontmost macOS application.
+///
+/// `AXRaise` returns before the WindowServer has necessarily made the window
+/// key, and on a busy desktop an unrelated application can reclaim front
+/// within the same window — observed here with a media app stealing front
+/// between the raise and the injection. Polling the actual frontmost process
+/// replaces a fixed sleep that could only ever be a guess.
+///
+/// ## Errors
+///
+/// Returns `io::Error` on timeout, naming the app that held front instead.
+/// Failing here is deliberate: OS keyboard injection goes to whatever app owns
+/// focus, so proceeding unfocused would fire the chord into an unrelated
+/// application rather than the pane under test.
+#[cfg(target_os = "macos")]
+fn wait_until_wezterm_frontmost(timeout: Duration) -> io::Result<()> {
+    const FRONTMOST: &str =
+        r#"tell application "System Events" to get name of first application process whose frontmost is true"#;
+    let deadline = Instant::now() + timeout;
+    let mut last = String::new();
+    loop {
+        let mut cmd = Command::new("osascript");
+        cmd.args(["-e", FRONTMOST]);
+        if let Ok(out) = run_with_timeout(&mut cmd, QUERY_TIMEOUT) {
+            last = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if last.to_lowercase().contains("wezterm") {
+                return Ok(());
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(io::Error::other(format!(
+                "WezTerm did not become frontmost within {timeout:?}; {last:?} holds \
+                 focus. OS keyboard injection would land in that app instead of the \
+                 pane under test."
+            )));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 fn which(bin: &str) -> bool {

@@ -380,7 +380,7 @@ fn level3_chooser_arrow_navigation_moves_active_item() {
         baseline.plain
     );
 
-    cliclick::press("down").expect("inject OS Down arrow");
+    cliclick::press("arrow-down").expect("inject OS Down arrow");
     let after_down = wait_for_active_change(&mut harness, &baseline_active, Duration::from_secs(3));
     let down_active = active_line(&after_down.plain)
         .expect("chooser must still show an active item after Down")
@@ -390,7 +390,7 @@ fn level3_chooser_arrow_navigation_moves_active_item() {
         "Down arrow must move the active item; baseline={baseline_active:?}, after={down_active:?}"
     );
 
-    cliclick::press("up").expect("inject OS Up arrow");
+    cliclick::press("arrow-up").expect("inject OS Up arrow");
     let after_up = wait_for_active_change(&mut harness, &down_active, Duration::from_secs(3));
     let up_active = active_line(&after_up.plain)
         .expect("chooser must still show an active item after Up")
@@ -462,7 +462,7 @@ fn level3_chooser_space_toggles_multi_select() {
     // Toggle the active item, move down, toggle a second item.
     cliclick::press("space").expect("inject first OS Space");
     std::thread::sleep(Duration::from_millis(150));
-    cliclick::press("down").expect("inject OS Down arrow");
+    cliclick::press("arrow-down").expect("inject OS Down arrow");
     std::thread::sleep(Duration::from_millis(150));
     cliclick::press("space").expect("inject second OS Space");
 

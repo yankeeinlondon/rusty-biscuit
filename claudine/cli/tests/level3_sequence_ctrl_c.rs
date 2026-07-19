@@ -65,23 +65,34 @@
 //!
 //! ## Execution status (2026-07-18)
 //!
-//! This test has **not** yet been observed passing. On the authoring host every
-//! stage up to and including the keystroke works — the pane spawns, claudine
-//! launches, the group announces all three children, and the pids publish — but
-//! the cliclick chord does not reach WezTerm, so no SIGINT is delivered. That
-//! is the focus-transfer reliability limit already documented in
-//! `level3_wrap_ctrl_c.rs`, not a fan-out defect, and the control experiment
-//! confirms it: the pre-existing `level3_ctrl_c_terminates_wrapped_child` fails
-//! the same way on the same host, echoing a bare `c` into its pane.
+//! Observed passing: all three children reported `interrupted`, the
+//! `must-not-run` step was suppressed, and the pane's exit marker read
+//! `L3SEQ_0rc=130`.
 //!
-//! The behavior under test is independently confirmed at the tier below. Via
-//! `tmux send-keys C-c` against this exact fixture, claudine reports both tasks
-//! `interrupted`, prints `step 1/2 interrupted by Ctrl+C`, suppresses the
-//! `must-not-run` step, and exits `130`. So the fixture and the product path are
-//! sound; what remains unproven from this host is only the OS-keyboard leg.
+//! It did *not* pass when first authored — the cliclick chord never reached
+//! WezTerm, matching the focus-transfer limit documented in
+//! `level3_wrap_ctrl_c.rs`. Two `biscuit-test-harness` changes fixed delivery:
+//! `focus_spawned_pane` now polls until WezTerm is genuinely the frontmost
+//! application rather than sleeping a fixed 200ms after `AXRaise`, and the
+//! Ctrl chord now goes through AppleScript `keystroke … using control down`,
+//! which carries the modifier flag on the same key event instead of racing it
+//! (measured 24/24 delivery versus 7/10 for cliclick's `kd:ctrl t:c ku:ctrl`).
+//! A checkout without those harness changes reproduces the original failure.
 //!
 //! This test is deliberately NOT loosened to force a pass. It asserts real
-//! termination and fails honestly when the OS event does not land.
+//! termination and fails honestly when the OS event does not land — the
+//! corroborating `tmux send-keys C-c` run over the same fixture lives at L2 and
+//! does not substitute for the OS-keyboard leg.
+//!
+//! ## This test takes the desktop
+//!
+//! It raises a GUI terminal to frontmost and injects real keystrokes into
+//! whatever holds focus. Two guards bound that: `just test-l3` refuses to start
+//! unattended (no TTY and no `BISCUIT_L3_TAKE_FOCUS=1` → hard error, so agents
+//! and CI cannot hijack an active session), and
+//! `test_placement.rs::focus_stealing_apis_stay_in_keyboard_tier_files` keeps
+//! `SpawnVisibility::Foreground` and `focus_spawned_pane` out of any file not
+//! named `level3_*`.
 
 #![cfg(target_os = "macos")]
 
@@ -288,11 +299,24 @@ fn level3_sequence_ctrl_c_fans_out_to_parallel_children() {
     let term_deadline = Instant::now() + Duration::from_secs(15);
     let mut last_plain = String::new();
     let mut observed_rc: Option<String> = None;
+    // Match the *last* occurrence, not the first. The pane holds the echoed
+    // command line as well as its output, so `<sentinel>rc=` appears twice
+    // whenever the command has not yet scrolled off the visible capture: first
+    // as the literal `; echo <sentinel>rc=$?` the shell echoed, then as the
+    // result. Reading the first match yields `$?` — no digits — so the poll
+    // would spin out its deadline while the sequence had in fact already exited
+    // correctly, reporting a product failure that never happened. Whether the
+    // command line is still on screen depends on pane height and output volume,
+    // which is why this only bit once the fixture grew.
+    let needle = format!("{sentinel}rc=");
     while Instant::now() < term_deadline {
         if let Ok(frame) = harness.capture() {
             last_plain = frame.plain;
-            if let Some(rest) = last_plain.split(&format!("{sentinel}rc=")).nth(1) {
-                let code: String = rest.chars().take_while(char::is_ascii_digit).collect();
+            if let Some(index) = last_plain.rfind(&needle) {
+                let code: String = last_plain[index + needle.len()..]
+                    .chars()
+                    .take_while(char::is_ascii_digit)
+                    .collect();
                 if !code.is_empty() {
                     observed_rc = Some(code);
                     break;

@@ -260,59 +260,63 @@ pub fn click_then_press(x: i32, y: i32, modifier: &str) -> io::Result<()> {
     ])
 }
 
-/// Clicks at `(x, y)` and dispatches a Ctrl+`key` chord **in a single
-/// cliclick invocation**.
-///
-/// Same atomicity rationale as [`click_then_press`]. Use this for any
-/// momentary chord (Ctrl-letter, Alt-letter, etc.) where you want
-/// focus transfer and the chord to land together.
+/// Clicks at `(x, y)` to transfer focus, then dispatches a Ctrl+`key` chord.
 ///
 /// ## Errors
 ///
-/// Returns `io::Error` when cliclick is missing or returns non-zero.
+/// Returns `io::Error` when cliclick is missing, the click fails, or the
+/// chord's `osascript` invocation fails.
 pub fn click_then_ctrl_chord(x: i32, y: i32, key: &str) -> io::Result<()> {
-    if !available() {
-        return Err(io::Error::other("cliclick not installed"));
-    }
-    run_verbose(&[
-        "-m",
-        "verbose",
-        "-w",
-        "100",
-        &format!("c:{x},{y}"),
-        "kd:ctrl",
-        &format!("t:{key}"),
-        "ku:ctrl",
-    ])
+    click_then_modified_chord(x, y, key, "control")
 }
 
-/// Clicks at `(x, y)` and dispatches an Alt+`key` chord **in a single
-/// cliclick invocation**.
+/// Click at `(x, y)` for focus, then send `key` with `modifier` held.
 ///
-/// Mirror of [`click_then_ctrl_chord`] for the Alt/Option modifier. On
-/// macOS, the chord rides along with the letter keyDown as a normal
-/// CGEvent (the modifier flag is set on the same event), so this path
-/// reaches WezTerm even though bare-Option presses do not — see the
-/// commentary in [`system_events_key_down`] for the flagsChanged
-/// distinction.
+/// The chord goes through System Events rather than cliclick because
+/// cliclick cannot express a modified letter as one event: `kp:` accepts only
+/// named keys (no letters), forcing letters through `t:`, whose
+/// `CGEventKeyboardSetUnicodeString` event is *separate* from the `kd:`/`ku:`
+/// modifier events. The modifier flag therefore races the letter, and the
+/// terminal intermittently receives the unmodified character instead of the
+/// control code. Measured on macOS 15 / WezTerm against a raw-byte reader,
+/// `kd:ctrl t:c ku:ctrl` yielded `0x03` in only 7 of 10 injections (2 bare
+/// `0x63`, 1 dropped) while `keystroke … using <modifier> down`, which carries
+/// the flag on the same key event, yielded `0x03` in 24 of 24.
 ///
-/// ## Errors
-///
-/// Returns `io::Error` when cliclick is missing or returns non-zero.
-pub fn click_then_alt_chord(x: i32, y: i32, key: &str) -> io::Result<()> {
+/// `t:` also fails to synthesise SHIFT from a capital letter (`t:X` emits
+/// `0x78`); AppleScript `keystroke "X"` does, so capital-letter chords such as
+/// Ctrl+Shift+R only work on this path.
+fn click_then_modified_chord(x: i32, y: i32, key: &str, modifier: &str) -> io::Result<()> {
     if !available() {
         return Err(io::Error::other("cliclick not installed"));
     }
-    run_verbose(&[
-        "-m",
-        "verbose",
-        "-w",
-        "100",
-        &format!("c:{x},{y}"),
-        "kd:alt",
-        &format!("t:{key}"),
-        "ku:alt",
-    ])
+    run_verbose(&["-m", "verbose", "-w", "100", &format!("c:{x},{y}")])?;
+    let script = format!(
+        r#"tell application "System Events" to keystroke "{}" using {modifier} down"#,
+        key.replace('\\', r"\\").replace('"', "\\\"")
+    );
+    let out = Command::new("osascript").args(["-e", &script]).output()?;
+    if !out.status.success() {
+        return Err(io::Error::other(format!(
+            "System Events keystroke {key:?} using {modifier} down failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(())
+}
+
+/// Clicks at `(x, y)` to transfer focus, then dispatches an Alt+`key` chord.
+///
+/// Mirror of [`click_then_ctrl_chord`] for the Alt/Option modifier; see
+/// [`click_then_modified_chord`] for why the chord does not go through
+/// cliclick. AppleScript names this modifier `option`.
+///
+/// ## Errors
+///
+/// Returns `io::Error` when cliclick is missing, the click fails, or the
+/// chord's `osascript` invocation fails.
+pub fn click_then_alt_chord(x: i32, y: i32, key: &str) -> io::Result<()> {
+    click_then_modified_chord(x, y, key, "option")
 }
 
 /// Holds a bare modifier (e.g. `"control"`, `"option"`, `"command"`,

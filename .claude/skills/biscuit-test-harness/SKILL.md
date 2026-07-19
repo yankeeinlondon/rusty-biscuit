@@ -195,6 +195,44 @@ Rules:
   raw-kitty-bytes test instead.
 - Linux callers would need `xdotool` (not implemented).
 
+### Never steal focus outside a `level3_` file
+
+`SpawnVisibility::Foreground` and `focus_spawned_pane()` raise a GUI
+terminal over whatever the user is doing. The `level3_` filename prefix
+is what keeps them behind the `level3_` nextest filterset **and** the
+`RUN_LEVEL3=1` opt-in — `just test` and `just test-l2` exclude
+`test(/level3_/)`, so a focus-stealing test in any other file runs
+unannounced on someone's desktop.
+
+Claudine enforces this at L1 via
+`cli/tests/test_placement.rs::focus_stealing_apis_stay_in_keyboard_tier_files`,
+which scans comment-stripped test sources. Copy that guard into other
+areas that grow L3 coverage.
+
+Corollary trap: **a test *name* must not contain `level3_`** unless the
+test really is L3 — the filtersets match by substring, so a name like
+`focus_apis_stay_in_level3_files` silently excludes itself from every
+recipe that would run it.
+
+`just test-l3` also **refuses to start unattended**: with no TTY it
+exits non-zero unless `BISCUIT_L3_TAKE_FOCUS=1` authorizes the run, so
+an agent, hook, or CI job cannot hijack an active desktop session. From
+a terminal it prompts first. Never set that variable on an agent's
+behalf — it exists for a human who knows the machine is free.
+
+If a focus-stealing test cannot be made to pass reliably, fix the
+*harness*, not the test. Two changes turned Claudine's L3 sequence
+Ctrl+C test from never-green to reliable, and both are the kind of
+thing to reach for first:
+
+- poll until the terminal is genuinely frontmost (`AXRaise` returns
+  before the WindowServer has made the window key) rather than sleeping
+  a fixed interval and hoping;
+- send modified chords via AppleScript `keystroke … using <mod> down`,
+  which carries the flag on the same key event. cliclick's
+  `kd:ctrl t:c ku:ctrl` emits the modifier and the letter as *separate*
+  events, so they race — measured 7/10 delivery versus 24/24.
+
 ## Defensive cleanup
 
 Panes/sessions/windows are tagged with the creating pid; later runs
