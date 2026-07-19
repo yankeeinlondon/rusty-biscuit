@@ -236,6 +236,28 @@ lint-fix:
 check:
     @cargo check -p claudine-catalog-types -p claudine -p claudine-contract -p claudine-cli -p claudine-gen
 
+# Type-check the library and CLI *including test targets* for Windows.
+#
+# The only gate that compiles the Windows-only suites (`termination/windows.rs`
+# and `level2_windows_sequence_ctrl_c.rs`). Without it they are unverifiable
+# dead source that merely looks like coverage. Requires the mingw-w64 toolchain
+# and the `x86_64-pc-windows-gnu` rustup target.
+#
+# Two host workarounds are load-bearing, not incidental:
+#   - `RUSTC_WRAPPER=""` — a `rustc-wrapper` in ~/.cargo/config.toml leaks into
+#     cc-rs as a compiler launcher and breaks every C build for this target.
+#   - `-Wa,-mbig-obj` — duckdb's unity build (reached via the `rendezvous-daemon`
+#     dev-dependency) emits objects past COFF's 32767-section limit, which
+#     mingw's assembler rejects until told to use the big-object format.
+check-windows:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export RUSTC_WRAPPER=""
+    export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target/windows-check}"
+    export CFLAGS_x86_64_pc_windows_gnu="-Wa,-mbig-obj"
+    export CXXFLAGS_x86_64_pc_windows_gnu="-Wa,-mbig-obj"
+    cargo check -p claudine -p claudine-cli --tests --target x86_64-pc-windows-gnu
+
 # Run the latest debug build of the Claudine CLI
 cli *args="":
     @cargo run -p claudine-cli {{ args }}
