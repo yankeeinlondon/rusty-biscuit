@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{self, Write};
 
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::prose::Prose;
@@ -13,14 +13,35 @@ use sniff::programs::{
     RetryChoice, RetryPrompt,
 };
 
-pub struct CliInstallUi {
+pub struct CliInstallUi<W: Write = io::Stdout> {
     pub terminal: Terminal,
     pub plain: bool,
+    output: W,
 }
 
-impl CliInstallUi {
+impl CliInstallUi<io::Stdout> {
     pub fn new(terminal: Terminal, plain: bool) -> Self {
-        Self { terminal, plain }
+        Self {
+            terminal,
+            plain,
+            output: io::stdout(),
+        }
+    }
+}
+
+impl<W: Write> CliInstallUi<W> {
+    #[cfg(test)]
+    pub(crate) fn with_writer(terminal: Terminal, plain: bool, output: W) -> Self {
+        Self {
+            terminal,
+            plain,
+            output,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn into_writer(self) -> W {
+        self.output
     }
 
     /// Renders a prose-carrying event body, newline-terminated so consecutive
@@ -40,12 +61,12 @@ impl CliInstallUi {
         } else {
             text.to_owned()
         };
-        print!("{output}");
-        let _ = std::io::stdout().flush();
+        let _ = self.output.write_all(output.as_bytes());
+        let _ = self.output.flush();
     }
 }
 
-impl InstallInterviewDelegate for CliInstallUi {
+impl<W: Write> InstallInterviewDelegate for CliInstallUi<W> {
     fn on_event(&mut self, event: &InstallInterviewEvent) -> Result<(), SniffInstallationError> {
         match event {
             InstallInterviewEvent::Announcement { prose }
@@ -173,22 +194,4 @@ impl InstallInterviewDelegate for CliInstallUi {
 fn ensure_trailing_blank_line(s: &str) -> String {
     let trimmed = s.trim_end_matches('\n');
     format!("{trimmed}\n\n")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn timeout_warning_prose_reaches_the_rendered_line() {
-        let ui = CliInstallUi::new(Terminal::default(), true);
-
-        let line = ui.render_prose_line(
-            "The installer was stopped at its deadline; it may have left partial changes.",
-        );
-
-        let plain = strip_escape_codes(&line);
-        assert!(plain.contains("stopped at its deadline"), "got: {plain}");
-        assert!(line.ends_with('\n'));
-    }
 }

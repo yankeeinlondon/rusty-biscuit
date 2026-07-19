@@ -1006,17 +1006,46 @@ fn install_players() {
         let mut opts = InstallInterviewOptions::default();
         opts.install.timeout_secs = 120;
 
-        match run_install_interview(&input, &opts, &mut ui) {
-            Ok(outcome) => {
-                if let Err(message) =
-                    install_outcome_verdict(label, &outcome, opts.install.timeout_secs)
-                {
-                    error_exit(&message, 1);
-                }
-            }
-            Err(e) => error_exit(&format!("installation failed: {e}"), 1),
+        if let Err(failure) = run_install_command(
+            label,
+            opts.install.timeout_secs,
+            &mut ui,
+            |delegate| run_install_interview(&input, &opts, delegate),
+        ) {
+            error_exit(&failure.message, failure.exit_code);
         }
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct InstallCommandFailure {
+    message: String,
+    exit_code: i32,
+}
+
+impl InstallCommandFailure {
+    fn new(message: String) -> Self {
+        Self {
+            message,
+            exit_code: 1,
+        }
+    }
+}
+
+/// Preserves delegate errors and non-success outcomes as a non-zero terminal verdict.
+fn run_install_command<D, R>(
+    program: &str,
+    timeout_secs: u64,
+    delegate: &mut D,
+    run_interview: R,
+) -> Result<(), InstallCommandFailure>
+where
+    D: sniff::programs::InstallInterviewDelegate,
+    R: FnOnce(&mut D) -> Result<InstallInterviewOutcome, sniff::error::SniffInstallationError>,
+{
+    let outcome = run_interview(delegate)
+        .map_err(|error| InstallCommandFailure::new(format!("installation failed: {error}")))?;
+    install_outcome_verdict(program, &outcome, timeout_secs).map_err(InstallCommandFailure::new)
 }
 
 /// Terminal verdict for one installer outcome at the `playa install` boundary.
@@ -1522,7 +1551,9 @@ fn format_sample_rate_khz(rate_hz: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sniff::programs::InstallationMethod;
+    use sniff::programs::{
+        InstallInterviewDelegate, InstallInterviewEvent, InstallStatusKind, InstallationMethod,
+    };
 
     #[test]
     fn builds_meta_markdown_with_formatting_and_links() {
@@ -1833,6 +1864,35 @@ mod tests {
         assert!(message.contains("120s"), "got: {message}");
         // The timeout verdict must stay distinguishable from a plain failure.
         assert!(!message.contains("installation failed"), "got: {message}");
+    }
+
+    #[test]
+    fn install_command_timeout_warns_and_returns_nonzero_verdict() {
+        let warning =
+            "The installer was stopped at its deadline; it may have left partial changes.";
+        let mut ui = install_ui::CliInstallUi::with_writer(Terminal::default(), true, Vec::new());
+
+        let result = run_install_command("mpv", 120, &mut ui, |delegate| {
+            delegate.on_event(&InstallInterviewEvent::Status {
+                kind: InstallStatusKind::Error,
+                text: "mpv installation failed".to_string(),
+            })?;
+            delegate.on_event(&InstallInterviewEvent::TimeoutWarning {
+                prose: warning.to_string(),
+            })?;
+            Ok(InstallInterviewOutcome::TimedOut {
+                attempted: vec![InstallationMethod::Brew("mpv")],
+            })
+        });
+
+        let failure = result.expect_err("a timeout must fail at the command boundary");
+        assert_eq!(failure.exit_code, 1);
+        assert!(failure.message.contains("timed out"), "got: {}", failure.message);
+
+        let rendered = String::from_utf8(ui.into_writer()).expect("CLI output must be UTF-8");
+        let plain = biscuit_terminal::prelude::strip_escape_codes(&rendered);
+        assert!(plain.contains("mpv installation failed"), "got: {plain}");
+        assert!(plain.contains("stopped at its deadline"), "got: {plain}");
     }
 
     #[test]
