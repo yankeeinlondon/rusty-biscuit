@@ -483,6 +483,17 @@ pub(crate) fn execute_sequence(
         live_targets.into_iter().map(Some).collect()
     };
 
+    // Announced *before* Phase 1c, not after it. Schema validation and shell
+    // approval can be slow or interactive, so this is the progress feedback the
+    // user waits behind — emitting it afterwards would describe finished work.
+    if !silent {
+        let term = log::terminal();
+        let status = Status::from_prose("Starting pre-flight checks".to_string())
+            .state(StatusState::Info)
+            .theme(biscuit_terminal::components::status::StatusTheme::Circular);
+        log::message(&status.render(&term));
+    }
+
     // ── Phase 1c: sequence-wide validation and shell approval ──────────
     //
     // Every step is validated against its `$schema` and every reachable shell
@@ -519,14 +530,6 @@ pub(crate) fn execute_sequence(
         }
         return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
     };
-
-    if !silent {
-        let term = log::terminal();
-        let status = Status::from_prose("Starting pre-flight checks".to_string())
-            .state(StatusState::Info)
-            .theme(biscuit_terminal::components::status::StatusTheme::Circular);
-        log::message(&status.render(&term));
-    }
 
     let _preflight_span = info_span!("sequence_preflight", total_steps).entered();
 
