@@ -20,12 +20,16 @@
 
 use std::ffi::{OsStr, OsString};
 use std::io;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use rendezvous_core::local_endpoint::LocalEndpoint;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::windows::named_pipe::{NamedPipeServer, PipeMode, ServerOptions};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
+use tonic::transport::server::Connected;
 use windows::Win32::Security::SECURITY_ATTRIBUTES;
 
 use crate::private_dir::{SecurityDescriptor, current_user_descriptor};
@@ -68,13 +72,59 @@ pub(super) fn serve(
     ))
 }
 
+/// A connected pipe instance, in the shape tonic's server requires.
+///
+/// tonic implements [`Connected`] for `TcpStream` and `UnixStream` but not for
+/// `NamedPipeServer`, so the Windows transport supplies it rather than the
+/// shared `serve_local_incoming` loosening its bound for one platform.
+///
+/// `ConnectInfo` is `()` deliberately: a named pipe has no peer address, and
+/// the local threat boundary is the DACL applied at instance creation, which is
+/// enforced by the kernel before a connection ever arrives. Nothing downstream
+/// inspects per-connection identity, so there is nothing honest to report here.
+struct PipeConnection(NamedPipeServer);
+
+impl Connected for PipeConnection {
+    type ConnectInfo = ();
+
+    fn connect_info(&self) -> Self::ConnectInfo {}
+}
+
+impl AsyncRead for PipeConnection {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.0).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for PipeConnection {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.0).poll_write(cx, buf)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.0).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.0).poll_shutdown(cx)
+    }
+}
+
 /// Accept connections forever, keeping an unconnected instance available at all
 /// times.
 async fn accept_loop(
     name: OsString,
     descriptor: SecurityDescriptor,
     mut server: NamedPipeServer,
-    tx: mpsc::Sender<io::Result<NamedPipeServer>>,
+    tx: mpsc::Sender<io::Result<PipeConnection>>,
 ) {
     loop {
         if let Err(error) = server.connect().await {
@@ -96,7 +146,7 @@ async fn accept_loop(
         };
 
         let connected = std::mem::replace(&mut server, next);
-        if tx.send(Ok(connected)).await.is_err() {
+        if tx.send(Ok(PipeConnection(connected))).await.is_err() {
             // tonic stopped serving. Returning drops `server`, closing the last
             // unconnected instance and releasing the name.
             return;
