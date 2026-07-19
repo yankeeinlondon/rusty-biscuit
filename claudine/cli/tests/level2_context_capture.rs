@@ -69,6 +69,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 use test_toolkit::{require_level, Level};
 
+mod common;
+use common::clear_no_color;
+
 /// Captures a `claudine context <args>` run inside a freshly spawned tmux
 /// session of `cols` × `rows` cells, then tears the session down.
 ///
@@ -108,6 +111,9 @@ fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+    // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
+    // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
+    clear_no_color(&mut harness);
 
     let claudine = cargo_bin!("claudine").display().to_string();
     let cols_s = cols.to_string();

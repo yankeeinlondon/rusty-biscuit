@@ -47,7 +47,7 @@ use std::time::{Duration, Instant};
 use test_toolkit::{Level, require_level};
 
 mod common;
-use common::{TestWorkspace, augmented_path, write, write_executable};
+use common::{TestWorkspace, augmented_path, clear_no_color, write, write_executable};
 
 // --- Fixtures -------------------------------------------------------------
 
@@ -351,6 +351,13 @@ fn run_in_pane(
     // earlier emission would scroll away and `emission_count` would silently
     // undercount, turning a real duplicate-emission regression into a pass.
     let _ = harness.resize(120, 200);
+
+    // A fixture that does not itself select `NO_COLOR` is asserting the *colored*
+    // contract, so an ambient `NO_COLOR` on the host must not reach it. See
+    // `common::clear_no_color` for why the env list cannot express this.
+    if !env.iter().any(|(key, _)| *key == "NO_COLOR") {
+        clear_no_color(harness);
+    }
 
     let claudine = cargo_bin!("claudine").display().to_string();
     let home = staged.workspace.path().to_string_lossy().into_owned();

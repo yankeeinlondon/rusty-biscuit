@@ -43,7 +43,7 @@ use std::time::{Duration, Instant};
 use test_toolkit::{Level, require_level};
 
 mod common;
-use common::{TestWorkspace, augmented_path, init_git_repo, write, write_executable};
+use common::{TestWorkspace, augmented_path, clear_no_color, init_git_repo, write, write_executable};
 
 /// A router whose `initialize` stack proxies the **bare** motivating reference.
 ///
@@ -191,6 +191,10 @@ fn wait_for_exit_marker(harness: &mut TmuxHarness, deadline: Duration) -> Captur
 /// pane and capture the result.
 fn run_in_pane(harness: &mut TmuxHarness, staged: &Staged) -> Capture {
     let _ = harness.resize(120, 200);
+
+    // This fixture runs under `FORCE_COLOR=1`, which an ambient `NO_COLOR` would
+    // out-vote — see `common::clear_no_color`.
+    clear_no_color(harness);
 
     let claudine = cargo_bin!("claudine").display().to_string();
     let home = staged.workspace.path().to_string_lossy().into_owned();

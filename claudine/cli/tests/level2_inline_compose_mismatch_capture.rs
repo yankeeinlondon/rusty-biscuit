@@ -34,7 +34,7 @@ use std::time::{Duration, Instant};
 use test_toolkit::{Level, require_level};
 
 mod common;
-use common::TestWorkspace;
+use common::{TestWorkspace, assert_row_is_styled, clear_no_color};
 
 /// Mismatch fixture exercising the YAML fidelity surface (comment, anchor +
 /// alias, block scalar, non-canonical order). Both `prompt` and `sequence` are
@@ -95,6 +95,9 @@ fn level2_tmux_mismatch_renders_styled_diagnostic_with_yaml() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
+    // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
+    clear_no_color(&mut harness);
     let staged = stage(MISMATCH_FIXTURE);
     let home = staged.workspace.path().to_string_lossy().into_owned();
     let claudine = cargo_bin!("claudine").display().to_string();
@@ -144,15 +147,14 @@ fn level2_tmux_mismatch_renders_styled_diagnostic_with_yaml() {
         );
     }
 
-    // Styling contract (assert on `raw`): the emulator re-rendered a *styled*
-    // surface — the status-block border and inline tags carry SGR escapes. This
-    // is what makes the test a genuine real-terminal capture rather than an L1
-    // string comparison.
-    assert!(
-        frame.raw.contains('\u{1b}'),
-        "expected the rendered diagnostic to carry styling (escape sequences) \
-         through the real terminal.\nraw:\n{}",
-        frame.raw,
+    // Styling contract, anchored on the diagnostic's own row. A bare
+    // `frame.raw.contains(ESC)` is satisfied by any escape anywhere in the pane
+    // — a colored shell prompt included — so it can hold on a run that rendered
+    // the diagnostic with no styling at all.
+    assert_row_is_styled(
+        &frame.raw,
+        "claudine sequence",
+        "inline-mismatch diagnostic (tmux)",
     );
 }
 
@@ -170,6 +172,9 @@ fn level2_wezterm_mismatch_renders_yaml_codeblock() {
     );
 
     let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");
+    // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
+    // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
+    clear_no_color(&mut harness);
     let staged = stage(MINIMAL_FIXTURE);
     let home = staged.workspace.path().to_string_lossy().into_owned();
     let claudine = cargo_bin!("claudine").display().to_string();

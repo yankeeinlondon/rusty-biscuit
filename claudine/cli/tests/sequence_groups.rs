@@ -52,6 +52,11 @@ fn run(workspace: &Path, path_dir: &Path, args: &[&str]) -> (String, String, i32
 fn run_in_color(workspace: &Path, path_dir: &Path, args: &[&str]) -> (String, String, i32) {
     let output = cargo_bin_cmd!("claudine")
         .env("FORCE_COLOR", "1")
+        // `NO_COLOR` is absolute for this CLI (`log::colors_disabled`), so
+        // `FORCE_COLOR` cannot out-vote an inherited one the way it does in
+        // bare `biscuit-terminal` detection. Without this the child renders
+        // colorless on a `NO_COLOR` host and every bar compares equal.
+        .env_remove("NO_COLOR")
         .env("COLUMNS", "100")
         .env("HOME", workspace)
         .env("PATH", augmented_path(path_dir))
