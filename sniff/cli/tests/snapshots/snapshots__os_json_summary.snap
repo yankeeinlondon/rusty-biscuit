@@ -4,10 +4,10 @@ expression: normalized_os_summary(&stdout)
 ---
 {
   "distribution": "macos",
-  "kernel": "25.5.0",
-  "long_version": "macOS 26.5.1",
+  "kernel": "<normalized>",
+  "long_version": "<normalized>",
   "manager_count": 2,
   "name": "Darwin",
   "os_type": "MacOS",
-  "version": "26.5.1"
+  "version": "<normalized>"
 }

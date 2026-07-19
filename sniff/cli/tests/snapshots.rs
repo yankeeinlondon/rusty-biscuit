@@ -103,11 +103,20 @@ fn normalized_os_summary(output: &str) -> Value {
 
     json!({
         "distribution": json.get("distribution"),
-        "kernel": json.get("kernel"),
-        "long_version": json.get("long_version"),
+        "kernel": json
+            .get("kernel")
+            .and_then(Value::as_str)
+            .map(|_| "<normalized>"),
+        "long_version": json
+            .get("long_version")
+            .and_then(Value::as_str)
+            .map(|_| "<normalized>"),
         "name": json.get("name"),
         "os_type": json.get("os_type"),
-        "version": json.get("version"),
+        "version": json
+            .get("version")
+            .and_then(Value::as_str)
+            .map(|_| "<normalized>"),
         "manager_count": manager_count
     })
 }
