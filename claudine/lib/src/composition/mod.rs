@@ -127,9 +127,9 @@ pub use sequence::preflight::{
     build_preflight_graph_with_context, reject_non_sequence_kind,
 };
 pub use sequence::task::{
-    DEFAULT_COMMAND_TIMEOUT, PromptRunOutcome, PromptTaskRequest, PromptTaskRunner,
-    ShellCommandOutput, SystemTaskShell, TaskDiagnostic, TaskExecution, TaskOutcome, TaskShellRunner,
-    TaskStage, TaskStatus, UnavailablePromptRunner,
+    DEFAULT_COMMAND_TIMEOUT, PromptRunOutcome, PromptTaskRequest, PromptTaskRunner, RunawayTrip,
+    RunawayTripKind, ShellCommandOutput, SystemTaskShell, TaskDiagnostic, TaskExecution,
+    TaskOutcome, TaskShellError, TaskShellRunner, TaskStage, TaskStatus, UnavailablePromptRunner,
 };
 pub use types::{
     AgentHint, AgentResolutionState, AmbientVariable, CompositionClosurePlan,

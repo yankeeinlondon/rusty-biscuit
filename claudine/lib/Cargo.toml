@@ -97,6 +97,10 @@ windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
+    # Thread enumeration for the suspended-spawn → Job-assign → resume
+    # sequence: std exposes no thread handle, so the initial thread is found
+    # via a Toolhelp snapshot (see `composition/sequence/task/shell.rs`).
+    "Win32_System_Diagnostics_ToolHelp",
 ] }
 
 [dev-dependencies]

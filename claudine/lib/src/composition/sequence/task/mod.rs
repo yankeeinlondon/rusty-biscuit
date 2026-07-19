@@ -58,7 +58,8 @@ use crate::render::{TaskLiveOutput, TaskStreamOutcome, TaskStreamSink};
 
 pub use group::GroupTaskResult;
 pub use shell::{
-    DEFAULT_COMMAND_TIMEOUT, ShellCommandOutput, SystemTaskShell, TaskShellRunner,
+    DEFAULT_COMMAND_TIMEOUT, RunawayTrip, RunawayTripKind, ShellCommandOutput, SystemTaskShell,
+    TaskShellError, TaskShellRunner,
 };
 
 /// Which stage of a task produced a diagnostic.
@@ -555,7 +556,17 @@ impl TaskExecution<'_> {
             }
             let output = match self.shell.run(command, timeout, self.interrupt, self.live) {
                 Ok(output) => output,
-                Err(source) => {
+                Err(TaskShellError::Isolation(source)) => {
+                    return PrimaryOutcome::failed(TaskDiagnostic::from_composition(
+                        TaskStage::Primary,
+                        &CompositionError::SequenceTaskShellIsolation {
+                            task: self.label(),
+                            command: command.clone(),
+                            source,
+                        },
+                    ));
+                }
+                Err(TaskShellError::Io(source)) => {
                     return PrimaryOutcome::failed(TaskDiagnostic::from_composition(
                         TaskStage::Primary,
                         &CompositionError::SequenceTaskShellSpawn {
@@ -578,7 +589,7 @@ impl TaskExecution<'_> {
             // Before the timeout check: a command killed for flooding may well
             // have outrun its deadline too, and "produced runaway output" is
             // the diagnosis a reader can act on.
-            if output.aborted {
+            if let Some(trip) = output.runaway {
                 return PrimaryOutcome::failed_with(
                     collected.join("\n"),
                     TaskDiagnostic::from_composition(
@@ -586,6 +597,7 @@ impl TaskExecution<'_> {
                         &CompositionError::SequenceTaskShellRunaway {
                             task: self.label(),
                             command: command.clone(),
+                            trip,
                         },
                     ),
                 );

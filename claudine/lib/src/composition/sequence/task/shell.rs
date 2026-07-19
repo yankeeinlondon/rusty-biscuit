@@ -15,6 +15,26 @@
 //! volume cap, and the wait for the capture thread is bounded too, so no
 //! descendant can defeat the deadline by retaining a pipe handle.
 //!
+//! ## Ownership contract
+//!
+//! Tree ownership is uniform across macOS, Linux, and Windows, and fail-closed:
+//!
+//! - **Establishment is fallible.** A command whose tree cannot be owned — the
+//!   Unix process group is missing, or the Windows Job Object cannot be
+//!   created, configured, assigned, or resumed — is killed and reported as
+//!   [`TaskShellError::Isolation`]. There is no degraded direct-child-only
+//!   mode: the deadline and the runaway guards are only enforceable against a
+//!   tree that is actually owned.
+//! - **Descendants are reaped at completion, on every exit path.** When the
+//!   command finishes — success included — the remaining members of its tree
+//!   are killed before the capture threads are waited on, so `x &` never
+//!   outlives its task on any platform and no descendant can hold the output
+//!   pipe open to emit frames after the task's footer. Early returns and
+//!   panics reach the same reap through [`ProcessTree`]'s `Drop`.
+//! - **Windows assignment is race-free.** The child is spawned suspended,
+//!   assigned to the kill-on-close Job, and only then resumed, so it cannot
+//!   create a descendant outside the Job.
+//!
 //! ## Both pipes, live, on their own channels
 //!
 //! Each pipe is drained by its own chunked reader, and every chunk is framed
@@ -85,8 +105,10 @@ pub struct ShellCommandOutput {
     /// between commands: every sibling in a parallel group watches the same flag,
     /// so one press fans out to all of them.
     pub interrupted: bool,
-    /// `true` when the command was killed because the per-task runaway volume
-    /// cap tripped.
+    /// Present when the command was killed because the per-task runaway volume
+    /// cap tripped; carries which limit tripped, the observed count, and the
+    /// configured limit, so a slightly oversized command reads differently
+    /// from an uncontrolled flood.
     ///
     /// Distinct from [`timed_out`](Self::timed_out): this is the
     /// [`ProcessTermination::Aborted`] sense — the command was doing something
@@ -94,7 +116,82 @@ pub struct ShellCommandOutput {
     /// retried.
     ///
     /// [`ProcessTermination::Aborted`]: crate::harness::ProcessTermination
-    pub aborted: bool,
+    pub runaway: Option<RunawayTrip>,
+}
+
+/// Which capture-volume limit a runaway command tripped, and by how much.
+///
+/// `observed` is the counter's value when the trip was detected, which is a
+/// chunk boundary rather than the offending byte: the guard checks after each
+/// read, so the observed count can exceed the limit by up to one chunk from
+/// each pipe. When two pipes trip, the first observed trip wins; when a single
+/// chunk pushes *both* counters past their limits there is no observable
+/// "first", so the line limit is reported deterministically.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunawayTrip {
+    /// Which of the two limits tripped.
+    pub kind: RunawayTripKind,
+    /// The counter's value when the trip was detected.
+    pub observed: u64,
+    /// The configured limit that value crossed.
+    pub limit: u64,
+}
+
+/// The unit of the limit a [`RunawayTrip`] reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunawayTripKind {
+    /// The line-count limit tripped.
+    Lines,
+    /// The byte-count limit tripped.
+    Bytes,
+}
+
+impl RunawayTrip {
+    /// Classify which limit to report for counters that tripped `cap`.
+    fn from_counters(cap: &CaptureVolumeCap, lines: u64, bytes: u64) -> Self {
+        if lines > cap.max_lines {
+            Self {
+                kind: RunawayTripKind::Lines,
+                observed: lines,
+                limit: cap.max_lines,
+            }
+        } else {
+            Self {
+                kind: RunawayTripKind::Bytes,
+                observed: bytes,
+                limit: cap.max_bytes,
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for RunawayTrip {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let unit = match self.kind {
+            RunawayTripKind::Lines => "lines",
+            RunawayTripKind::Bytes => "bytes",
+        };
+        write!(f, "{} {unit}, limit {}", self.observed, self.limit)
+    }
+}
+
+/// Why a task shell command could not run at all.
+///
+/// Both variants precede any result: a command that *ran* reports through
+/// [`ShellCommandOutput`], including the three kill triggers.
+#[derive(Debug, thiserror::Error)]
+pub enum TaskShellError {
+    /// The process could not be spawned or waited on.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    /// The process spawned, but exclusive ownership of its process tree could
+    /// not be established, so it was killed without running.
+    ///
+    /// Fail-closed by design: without an owned tree the deadline, interrupt,
+    /// and runaway guards can each be defeated by a descendant, so the command
+    /// is refused rather than run with direct-child-only cleanup.
+    #[error("process-tree ownership could not be established: {0}")]
+    Isolation(#[source] std::io::Error),
 }
 
 /// Runs one approved command under a deadline, capturing stdout.
@@ -113,17 +210,18 @@ pub trait TaskShellRunner: Sync {
     ///
     /// ## Errors
     ///
-    /// Returns the underlying [`std::io::Error`] only when the process could
-    /// not be spawned or waited on. A command that ran and failed reports its
-    /// code through [`ShellCommandOutput::exit_code`], and one that was killed
-    /// reports which of the three triggers fired.
+    /// Returns [`TaskShellError::Io`] when the process could not be spawned or
+    /// waited on, and [`TaskShellError::Isolation`] when it spawned but
+    /// whole-tree ownership could not be established. A command that ran and
+    /// failed reports its code through [`ShellCommandOutput::exit_code`], and
+    /// one that was killed reports which of the three triggers fired.
     fn run(
         &self,
         command: &str,
         timeout: Duration,
         interrupt: Option<&AtomicBool>,
         live: Option<&Arc<TaskLiveOutput>>,
-    ) -> Result<ShellCommandOutput, std::io::Error>;
+    ) -> Result<ShellCommandOutput, TaskShellError>;
 }
 
 /// Production [`TaskShellRunner`]: the platform's system shell, both pipes
@@ -141,7 +239,7 @@ pub trait TaskShellRunner: Sync {
 ///
 /// let output = SystemTaskShell::default().run("echo hi", Duration::from_secs(5), None, None)?;
 /// assert_eq!(output.stdout.trim_end(), "hi");
-/// # Ok::<(), std::io::Error>(())
+/// # Ok::<(), claudine::composition::TaskShellError>(())
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct SystemTaskShell {
@@ -149,12 +247,46 @@ pub struct SystemTaskShell {
     /// one so the overflow path is reachable in milliseconds; the derived
     /// default is the production 50k-line / 32 MiB guard.
     volume_cap: CaptureVolumeCap,
+    /// Fault injection: report ownership establishment as failed right after a
+    /// real spawn. The real tree is reaped first, so the injected failure
+    /// exercises the fail-closed path without leaking the fixture's processes.
+    #[cfg(test)]
+    fail_isolation: bool,
+    /// Fault injection: fail the first wait attempt, modeling `try_wait`
+    /// erroring while the command and its descendants are still alive.
+    #[cfg(test)]
+    fail_wait: bool,
 }
 
 impl SystemTaskShell {
     /// Build a runner with a non-default capture volume cap.
     pub fn with_volume_cap(volume_cap: CaptureVolumeCap) -> Self {
-        Self { volume_cap }
+        Self {
+            volume_cap,
+            #[cfg(test)]
+            fail_isolation: false,
+            #[cfg(test)]
+            fail_wait: false,
+        }
+    }
+}
+
+#[cfg(test)]
+impl SystemTaskShell {
+    /// A runner whose ownership establishment always fails.
+    pub(crate) fn failing_isolation() -> Self {
+        Self {
+            fail_isolation: true,
+            ..Self::default()
+        }
+    }
+
+    /// A runner whose first wait attempt always fails.
+    pub(crate) fn failing_wait() -> Self {
+        Self {
+            fail_wait: true,
+            ..Self::default()
+        }
     }
 }
 
@@ -165,7 +297,7 @@ impl TaskShellRunner for SystemTaskShell {
         timeout: Duration,
         interrupt: Option<&AtomicBool>,
         live: Option<&Arc<TaskLiveOutput>>,
-    ) -> Result<ShellCommandOutput, std::io::Error> {
+    ) -> Result<ShellCommandOutput, TaskShellError> {
         let mut builder = system_shell_command(command);
         builder
             .stdout(Stdio::piped())
@@ -181,7 +313,31 @@ impl TaskShellRunner for SystemTaskShell {
             .stdin(Stdio::null());
         isolate_process_tree(&mut builder);
         let mut child = builder.spawn()?;
-        let tree = ProcessTree::own(&child);
+        let ownership = ProcessTree::own(&child);
+        #[cfg(test)]
+        let ownership = ownership.and_then(|tree| {
+            if self.fail_isolation {
+                // The injected failure stands in for a real one, so the real
+                // tree must not leak: dropping it reaps the group/Job first.
+                drop(tree);
+                Err(std::io::Error::other("injected isolation failure"))
+            } else {
+                Ok(tree)
+            }
+        });
+        let tree = match ownership {
+            Ok(tree) => tree,
+            Err(error) => {
+                // Fail closed: a command whose descendants cannot be reaped
+                // must not run. The direct child is all that verifiably exists
+                // — ownership of anything beyond it is exactly what could not
+                // be established — and on Windows it is still suspended, so
+                // killing it here is also what prevents it from ever forking.
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(TaskShellError::Isolation(error));
+            }
+        };
 
         // Each pipe is drained on its own thread: a command that fills a pipe
         // buffer would otherwise block forever and the deadline below would
@@ -191,14 +347,16 @@ impl TaskShellRunner for SystemTaskShell {
         // thread must be able to take what accumulated even when the reader
         // never finishes.
         let captured = Arc::new(Mutex::new(Vec::<u8>::new()));
-        let overflow = Arc::new(AtomicBool::new(false));
+        // `None` until a reader trips the volume cap; first trip wins, so a
+        // stdout flood and a stderr flood cannot overwrite each other's report.
+        let runaway = Arc::new(Mutex::new(None::<RunawayTrip>));
         let (finished_tx, finished_rx) = std::sync::mpsc::sync_channel::<()>(2);
 
         let mut readers = 1usize;
         let stdout_reader = spawn_capture(
             child.stdout.take().expect("stdout was piped"),
             self.volume_cap.clone(),
-            Arc::clone(&overflow),
+            Arc::clone(&runaway),
             finished_tx.clone(),
             Some(Arc::clone(&captured)),
             live.map(Arc::clone).map(|live| (live, Channel::Data)),
@@ -213,7 +371,7 @@ impl TaskShellRunner for SystemTaskShell {
                 Some(spawn_capture(
                     pipe,
                     self.volume_cap.clone(),
-                    Arc::clone(&overflow),
+                    Arc::clone(&runaway),
                     finished_tx.clone(),
                     None,
                     live.map(Arc::clone).map(|live| (live, Channel::Status)),
@@ -226,12 +384,19 @@ impl TaskShellRunner for SystemTaskShell {
         let mut timed_out = false;
         let mut interrupted = false;
         let status = loop {
+            #[cfg(test)]
+            if self.fail_wait {
+                // Modeling `try_wait` failing while everything still runs; the
+                // early return must reach `tree`'s `Drop` reap like the real
+                // `?` below would.
+                return Err(std::io::Error::other("injected wait failure").into());
+            }
             if let Some(status) = child.try_wait()? {
                 break status;
             }
             if interrupt.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
                 interrupted = true;
-            } else if overflow.load(Ordering::SeqCst) {
+            } else if observed_trip(&runaway).is_some() {
                 // Terminate rather than merely stopping the capture: a command
                 // that ignores SIGPIPE would otherwise keep flooding a pipe
                 // nobody reads until its deadline.
@@ -244,6 +409,12 @@ impl TaskShellRunner for SystemTaskShell {
             tree.terminate(&mut child);
             break child.wait()?;
         };
+        // The ratified success-path policy: an owned tree does not outlive its
+        // command, on any platform. Dropping here — before the reader settle —
+        // reaps whatever the command backgrounded, which is also what closes
+        // the pipes those readers are parked on: a dead descendant cannot emit
+        // a frame after the task's footer.
+        drop(tree);
 
         // Never `join()`: see `READER_SHUTDOWN_GRACE`. Dropping the handles
         // detaches a reader that is still parked on a descendant's pipe; the
@@ -268,8 +439,8 @@ impl TaskShellRunner for SystemTaskShell {
         }
         // Read once the reader has settled rather than inside the wait loop:
         // closing the pipe on a trip usually kills the flooder by SIGPIPE
-        // first, so the child can reap before the loop ever sees the flag.
-        let aborted = overflow.load(Ordering::SeqCst);
+        // first, so the child can reap before the loop ever sees the trip.
+        let runaway = observed_trip(&runaway);
         let bytes = match captured.lock() {
             Ok(mut buffer) => std::mem::take(&mut *buffer),
             Err(poisoned) => std::mem::take(&mut *poisoned.into_inner()),
@@ -280,8 +451,17 @@ impl TaskShellRunner for SystemTaskShell {
             exit_code: status.code().unwrap_or(-1),
             timed_out,
             interrupted,
-            aborted,
+            runaway,
         })
+    }
+}
+
+/// Read the shared trip slot, surviving a poisoned lock: a reader that
+/// panicked after recording its trip still reported a real trip.
+fn observed_trip(slot: &Mutex<Option<RunawayTrip>>) -> Option<RunawayTrip> {
+    match slot.lock() {
+        Ok(guard) => *guard,
+        Err(poisoned) => *poisoned.into_inner(),
     }
 }
 
@@ -316,7 +496,7 @@ impl Channel {
 fn spawn_capture(
     mut pipe: impl Read + Send + 'static,
     cap: CaptureVolumeCap,
-    overflow: Arc<AtomicBool>,
+    runaway: Arc<Mutex<Option<RunawayTrip>>>,
     finished: SyncSender<()>,
     captured: Option<Arc<Mutex<Vec<u8>>>>,
     live: Option<(Arc<TaskLiveOutput>, Channel)>,
@@ -350,7 +530,12 @@ fn spawn_capture(
                 }
             }
             if let Some(Trip::RunawayVolume { .. }) = cap.check(lines, bytes) {
-                overflow.store(true, Ordering::SeqCst);
+                let trip = RunawayTrip::from_counters(&cap, lines, bytes);
+                let mut slot = match runaway.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                slot.get_or_insert(trip);
                 break;
             }
         }
@@ -418,36 +603,53 @@ impl Utf8Stream {
 
 /// Ownership of one command's whole process tree.
 ///
-/// Unix needs no state — the process group established at spawn is addressed by
-/// the child's own pid — while Windows carries the Job Object handle whose
-/// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` limit is what reaps descendants when
-/// this value drops at the end of the command.
+/// Constructing one is fallible — see the module's *Ownership contract* — and
+/// dropping one reaps every member still alive, which is what makes every exit
+/// path (success, early wait error, panic unwind) end the tree.
 #[cfg(unix)]
-struct ProcessTree;
+struct ProcessTree {
+    /// The process-group id, equal to the direct child's pid per
+    /// `process_group(0)`.
+    pgid: i32,
+}
 
 /// Ownership of one command's whole process tree. See the Unix twin.
 #[cfg(windows)]
 struct ProcessTree {
-    /// `None` when the Job could not be created or assigned; termination then
-    /// degrades to killing the direct child. A command that runs is worth more
-    /// than one that fails because the OS refused a Job Object.
-    job: Option<isize>,
+    /// The kill-on-close Job Object owning the tree. Always valid: `own`
+    /// refuses to return a tree it does not fully own.
+    job: isize,
 }
 
 #[cfg(unix)]
 impl ProcessTree {
     /// Take ownership of `child`'s tree.
-    fn own(_child: &Child) -> Self {
-        Self
+    ///
+    /// `process_group(0)` already ran between fork and exec — a failure there
+    /// fails the spawn itself — so this *verifies* the group rather than
+    /// establishing it: a child observed outside its own group means the
+    /// isolation the deadline depends on does not exist, and the command must
+    /// not run.
+    fn own(child: &Child) -> Result<Self, std::io::Error> {
+        let pid = child.id() as i32;
+        let pgid = unsafe { libc::getpgid(pid) };
+        if pgid < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if pgid != pid {
+            return Err(std::io::Error::other(format!(
+                "child {pid} is in foreign process group {pgid}"
+            )));
+        }
+        Ok(Self { pgid: pid })
     }
 
     /// Terminate every process in the tree, not merely the direct child.
     fn terminate(&self, child: &mut Child) {
-        let pid = child.id() as i32;
-        // SAFETY: a negative pid addresses a process group. `spawn` used
-        // `process_group(0)`, so the group id equals this child's pid and the
-        // group can contain nothing but this command's own descendants.
-        let signalled = unsafe { libc::kill(-pid, libc::SIGTERM) } == 0;
+        // SAFETY: a negative pid addresses a process group. `own` verified the
+        // group id equals this child's pid, so the group can contain nothing
+        // but this command's own descendants.
+        let signalled = unsafe { libc::kill(-self.pgid, libc::SIGTERM) } == 0;
         if !signalled {
             let _ = child.kill();
             return;
@@ -465,7 +667,23 @@ impl ProcessTree {
         //
         // SAFETY: as above.
         unsafe {
-            libc::kill(-pid, libc::SIGKILL);
+            libc::kill(-self.pgid, libc::SIGKILL);
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ProcessTree {
+    /// Reap every remaining member of the group.
+    ///
+    /// `SIGKILL` with no graceful rung: on every path that reaches here the
+    /// command itself has already finished or been terminated, so whatever
+    /// remains is a backgrounded straggler the ownership contract says dies
+    /// with the task. Killing an already-empty group is an `ESRCH` no-op.
+    fn drop(&mut self) {
+        // SAFETY: as in `terminate`.
+        unsafe {
+            libc::kill(-self.pgid, libc::SIGKILL);
         }
     }
 }
@@ -473,11 +691,14 @@ impl ProcessTree {
 #[cfg(windows)]
 impl ProcessTree {
     /// Take ownership of `child`'s tree by assigning it to a fresh
-    /// kill-on-close Job Object.
+    /// kill-on-close Job Object and only then letting it run.
     ///
-    /// Assignment is valid here because it happens immediately after `spawn`,
-    /// before the child has forked anything of its own.
-    fn own(child: &Child) -> Self {
+    /// The child was spawned `CREATE_SUSPENDED` (see [`isolate_process_tree`]),
+    /// so the create → configure → assign → resume sequence is race-free: a
+    /// process that has never been scheduled cannot have created a descendant
+    /// outside the Job. Any failure leaves the child suspended for the caller
+    /// to kill.
+    fn own(child: &Child) -> Result<Self, std::io::Error> {
         use std::os::windows::io::AsRawHandle;
         use windows::Win32::Foundation::{CloseHandle, HANDLE};
         use windows::Win32::System::JobObjects::{
@@ -486,12 +707,10 @@ impl ProcessTree {
             SetInformationJobObject,
         };
 
-        let Ok(job) = (unsafe { CreateJobObjectW(None, None) }) else {
-            return Self { job: None };
-        };
+        let job = unsafe { CreateJobObjectW(None, None) }.map_err(std::io::Error::other)?;
         let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        let assigned = unsafe {
+        let established = unsafe {
             SetInformationJobObject(
                 job,
                 JobObjectExtendedLimitInformation,
@@ -499,43 +718,85 @@ impl ProcessTree {
                 std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
             )
             .and_then(|()| AssignProcessToJobObject(job, HANDLE(child.as_raw_handle())))
-        };
-        if assigned.is_err() {
+        }
+        .and_then(|()| resume_main_thread(child.id()));
+        if let Err(error) = established {
+            // Kill-on-close reaps the child if assignment got that far; the
+            // caller kills the still-suspended direct child either way.
             unsafe {
                 let _ = CloseHandle(job);
             }
-            return Self { job: None };
+            return Err(std::io::Error::other(error));
         }
-        Self {
-            job: Some(job.0 as isize),
-        }
+        Ok(Self { job: job.0 as isize })
     }
 
     /// Terminate every process in the tree, not merely the direct child.
-    fn terminate(&self, child: &mut Child) {
-        match self.job {
-            Some(raw) => unsafe {
-                let _ = windows::Win32::System::JobObjects::TerminateJobObject(as_handle(raw), 1);
-            },
-            None => {
-                let _ = child.kill();
-            }
+    fn terminate(&self, _child: &mut Child) {
+        unsafe {
+            let _ =
+                windows::Win32::System::JobObjects::TerminateJobObject(as_handle(self.job), 1);
         }
     }
 }
 
 #[cfg(windows)]
 impl Drop for ProcessTree {
+    /// Reap every remaining member of the Job. See the Unix twin.
     fn drop(&mut self) {
-        if let Some(raw) = self.job {
-            // Closing the last handle is what makes kill-on-close destroy
-            // anything still assigned, so a command that returned normally but
-            // left a descendant behind still gets cleaned up here.
-            unsafe {
-                let _ = windows::Win32::Foundation::CloseHandle(as_handle(raw));
-            }
+        unsafe {
+            let _ =
+                windows::Win32::System::JobObjects::TerminateJobObject(as_handle(self.job), 1);
+            // Kill-on-close makes the close a backstop for the terminate.
+            let _ = windows::Win32::Foundation::CloseHandle(as_handle(self.job));
         }
     }
+}
+
+/// Resume the `CREATE_SUSPENDED` child's initial thread.
+///
+/// A suspended, freshly created process has exactly one thread, so resuming
+/// the first thread the snapshot attributes to `pid` completes the spawn. Not
+/// finding one — or the resume failing — leaves the child suspended and is
+/// reported as an ownership failure.
+#[cfg(windows)]
+fn resume_main_thread(pid: u32) -> windows::core::Result<()> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+    };
+    use windows::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
+
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) }?;
+    let outcome = (|| {
+        let mut entry = THREADENTRY32 {
+            dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+            ..Default::default()
+        };
+        unsafe { Thread32First(snapshot, &mut entry) }?;
+        loop {
+            if entry.th32OwnerProcessID == pid {
+                let thread =
+                    unsafe { OpenThread(THREAD_SUSPEND_RESUME, false, entry.th32ThreadID) }?;
+                let resumed = unsafe { ResumeThread(thread) };
+                unsafe {
+                    let _ = CloseHandle(thread);
+                }
+                // `u32::MAX` is the documented `ResumeThread` failure sentinel.
+                if resumed == u32::MAX {
+                    return Err(windows::core::Error::from_thread());
+                }
+                return Ok(());
+            }
+            // Exhausting the snapshot without a match reports the iterator's
+            // own `ERROR_NO_MORE_FILES`, which is exactly what happened.
+            unsafe { Thread32Next(snapshot, &mut entry) }?;
+        }
+    })();
+    unsafe {
+        let _ = CloseHandle(snapshot);
+    }
+    outcome
 }
 
 #[cfg(windows)]
@@ -561,10 +822,14 @@ fn isolate_process_tree(command: &mut Command) {
     use std::os::windows::process::CommandExt;
 
     // Defined locally rather than imported so the spawn path does not pull the
-    // `windows` crate in for a single constant.
+    // `windows` crate in for two constants.
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    // Suspended so `ProcessTree::own` can assign the child to its Job before
+    // it executes a single instruction — the race-free half of the ownership
+    // contract. `own` resumes it; an ownership failure kills it suspended.
+    const CREATE_SUSPENDED: u32 = 0x0000_0004;
 
-    command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+    command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED);
 }
 
 /// Build the platform `Command` that runs `command` through the system shell.
@@ -584,58 +849,4 @@ fn system_shell_command(command: &str) -> Command {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::Utf8Stream;
-
-    /// The chunk boundary a fixed-size reader actually produces: mid-character.
-    #[test]
-    fn a_code_point_split_across_chunks_is_decoded_whole() {
-        let bytes = "é".as_bytes();
-        let mut stream = Utf8Stream::default();
-
-        assert_eq!(stream.push(&bytes[..1]), "", "a partial code point is held");
-        assert_eq!(stream.push(&bytes[1..]), "é");
-        assert_eq!(stream.finish(), "");
-    }
-
-    /// A three-byte character split at both possible boundaries.
-    #[test]
-    fn a_three_byte_code_point_survives_either_split() {
-        for split in 1..3 {
-            let bytes = "日".as_bytes();
-            let mut stream = Utf8Stream::default();
-            let decoded = format!("{}{}", stream.push(&bytes[..split]), stream.push(&bytes[split..]));
-            assert_eq!(decoded, "日", "split after {split} byte(s)");
-        }
-    }
-
-    /// Text either side of a held fragment still comes through in one piece.
-    #[test]
-    fn complete_text_around_a_held_fragment_is_emitted_immediately() {
-        let mut stream = Utf8Stream::default();
-        let mut bytes = b"ready ".to_vec();
-        bytes.extend_from_slice(&"✅".as_bytes()[..2]);
-
-        assert_eq!(stream.push(&bytes), "ready ");
-        assert_eq!(stream.push(&"✅".as_bytes()[2..]), "✅");
-    }
-
-    /// A byte that no continuation can rescue is replaced at once rather than
-    /// held — otherwise a binary-emitting command would stall the stream.
-    #[test]
-    fn a_genuinely_invalid_byte_is_replaced_without_being_held() {
-        let mut stream = Utf8Stream::default();
-
-        assert_eq!(stream.push(b"a\xffb"), "a\u{FFFD}b");
-        assert_eq!(stream.finish(), "", "nothing was left held");
-    }
-
-    /// An incomplete tail at end of stream is released rather than dropped.
-    #[test]
-    fn an_incomplete_tail_is_released_at_end_of_stream() {
-        let mut stream = Utf8Stream::default();
-
-        assert_eq!(stream.push(&"€".as_bytes()[..2]), "");
-        assert_eq!(stream.finish(), "\u{FFFD}");
-    }
-}
+mod tests;

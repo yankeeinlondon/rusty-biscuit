@@ -21,6 +21,7 @@ use darkmatter::markdown::compose::expression::{
 use serde_json::{Value, json};
 
 use super::frontmatter_excerpt::FrontmatterExcerpt;
+use super::sequence::task::RunawayTrip;
 use super::types::{ResolutionMode, ResolvedCompositionSource, SessionInteractivitySource};
 use crate::diagnostics::{
     Category, Diagnostic, DiagnosticRole, Disposition, Origin, code_spec, null_detail_for,
@@ -1524,12 +1525,15 @@ pub enum CompositionError {
     /// retry on a quieter machine.
     ///
     /// [`SequenceTaskShellTimeout`]: CompositionError::SequenceTaskShellTimeout
-    #[error("command `{command}` in {task} produced runaway output and was stopped")]
+    #[error("command `{command}` in {task} produced runaway output ({trip}) and was stopped")]
     SequenceTaskShellRunaway {
         /// A label locating the task.
         task: String,
         /// The approved command bytes that ran.
         command: String,
+        /// Which capture limit tripped, the observed count, and the configured
+        /// limit — what separates a slightly oversized command from a flood.
+        trip: RunawayTrip,
     },
 
     /// A task's shell command could not be spawned at all.
@@ -1540,6 +1544,24 @@ pub enum CompositionError {
         /// The approved command bytes that were attempted.
         command: String,
         /// The underlying spawn/wait failure.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// A task's shell command spawned, but exclusive ownership of its process
+    /// tree could not be established, so it was killed without running.
+    ///
+    /// Fail-closed by design: the per-command deadline and the runaway guards
+    /// are only enforceable against an owned tree (a Unix process group, a
+    /// Windows Job Object), so a command that could only be given
+    /// direct-child cleanup is refused rather than run degraded.
+    #[error("command `{command}` in {task} could not be isolated into an owned process tree: {source}")]
+    SequenceTaskShellIsolation {
+        /// A label locating the task.
+        task: String,
+        /// The approved command bytes that were attempted.
+        command: String,
+        /// The underlying ownership failure.
         #[source]
         source: std::io::Error,
     },

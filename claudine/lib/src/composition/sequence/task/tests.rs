@@ -332,6 +332,7 @@ struct FakeTaskShell {
     seen: Mutex<Vec<(String, Duration)>>,
     results: Mutex<Vec<ShellCommandOutput>>,
     spawn_failure: Mutex<bool>,
+    isolation_failure: Mutex<bool>,
     /// How long a given command blocks before reporting, so a test can decide
     /// completion order independently of declaration order.
     delays: Mutex<HashMap<String, Duration>>,
@@ -355,7 +356,7 @@ impl FakeTaskShell {
                 exit_code: 0,
                 timed_out: false,
                 interrupted: false,
-                aborted: false,
+                runaway: None,
             })
             .collect();
         shell
@@ -396,6 +397,11 @@ impl FakeTaskShell {
         *shell.spawn_failure.lock().unwrap() = true;
         shell
     }
+    fn failing_isolation() -> Self {
+        let shell = Self::default();
+        *shell.isolation_failure.lock().unwrap() = true;
+        shell
+    }
     fn commands(&self) -> Vec<String> {
         self.seen
             .lock()
@@ -421,7 +427,7 @@ impl TaskShellRunner for FakeTaskShell {
         timeout: Duration,
         interrupt: Option<&AtomicBool>,
         live: Option<&Arc<TaskLiveOutput>>,
-    ) -> Result<ShellCommandOutput, std::io::Error> {
+    ) -> Result<ShellCommandOutput, TaskShellError> {
         // Streaming is the runner's job now, so the fake owes it too: a fake
         // that only returned bytes would leave every group-framing test
         // asserting against a body line the production path emits and this one
@@ -450,7 +456,7 @@ impl TaskShellRunner for FakeTaskShell {
                 exit_code: -1,
                 timed_out: false,
                 interrupted: true,
-                aborted: false,
+                runaway: None,
             }));
         }
         self.seen
@@ -464,14 +470,19 @@ impl TaskShellRunner for FakeTaskShell {
                 exit_code: i32::from(failing),
                 timed_out: false,
                 interrupted: false,
-                aborted: false,
+                runaway: None,
             }));
         }
         if *self.spawn_failure.lock().unwrap() {
-            return Err(std::io::Error::new(
+            return Err(TaskShellError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "no such file or directory",
-            ));
+            )));
+        }
+        if *self.isolation_failure.lock().unwrap() {
+            return Err(TaskShellError::Isolation(std::io::Error::other(
+                "job object unavailable",
+            )));
         }
         let mut results = self.results.lock().unwrap();
         if results.is_empty() {
@@ -480,7 +491,7 @@ impl TaskShellRunner for FakeTaskShell {
                 exit_code: 0,
                 timed_out: false,
                 interrupted: false,
-                aborted: false,
+                runaway: None,
             }));
         }
         Ok(stream(results.remove(0)))
@@ -614,7 +625,7 @@ mod stages {
             exit_code: 3,
             timed_out: false,
             interrupted: false,
-            aborted: false,
+            runaway: None,
         }]);
 
         let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
@@ -677,7 +688,7 @@ mod stages {
             exit_code: 7,
             timed_out: false,
             interrupted: false,
-            aborted: false,
+            runaway: None,
         }]);
 
         let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
@@ -934,7 +945,7 @@ mod shell_tasks {
             exit_code: 143,
             timed_out: true,
             interrupted: false,
-            aborted: false,
+            runaway: None,
         }]);
 
         let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
@@ -946,6 +957,42 @@ mod shell_tasks {
             failure_message(&outcome),
         );
         assert_eq!(shell.commands(), vec!["slow".to_string()]);
+    }
+
+    /// Review 6 finding 5: the runaway diagnostic carries the trip counters,
+    /// so a reader can tell a slightly oversized command from a flood without
+    /// reproducing the run.
+    #[test]
+    fn a_runaway_command_reports_observed_count_against_the_limit() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(
+            dir.path(),
+            json!({ "name": "alpha", "shell": ["flood", "never"] }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_results(vec![ShellCommandOutput {
+            stdout: "partial\n".to_string(),
+            exit_code: 137,
+            timed_out: false,
+            interrupted: false,
+            runaway: Some(RunawayTrip {
+                kind: RunawayTripKind::Lines,
+                observed: 50_417,
+                limit: 50_000,
+            }),
+        }]);
+
+        let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(
+            failure_message(&outcome)
+                .contains("produced runaway output (50417 lines, limit 50000)"),
+            "{}",
+            failure_message(&outcome),
+        );
+        assert_eq!(shell.commands(), vec!["flood".to_string()]);
     }
 
     #[test]
@@ -962,7 +1009,7 @@ mod shell_tasks {
             exit_code: 2,
             timed_out: false,
             interrupted: false,
-            aborted: false,
+            runaway: None,
         }]);
 
         let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
@@ -984,6 +1031,27 @@ mod shell_tasks {
         assert_eq!(outcome.status, TaskStatus::Failed);
         assert!(
             failure_message(&outcome).contains("failed to run"),
+            "{}",
+            failure_message(&outcome),
+        );
+    }
+
+    /// Review 6 finding 2: an ownership-establishment failure is its own typed
+    /// error, distinct from a spawn failure — fail-closed, never a silent
+    /// degradation to direct-child cleanup.
+    #[test]
+    fn a_command_that_cannot_be_isolated_is_a_typed_failure() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), json!({ "name": "alpha", "shell": "work" }));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::failing_isolation();
+
+        let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(
+            failure_message(&outcome).contains("could not be isolated"),
             "{}",
             failure_message(&outcome),
         );
@@ -1087,7 +1155,7 @@ mod shell_tasks {
         assert_eq!(output.exit_code, 0);
         assert_eq!(output.stdout.trim_end(), "HELLO");
         assert!(!output.timed_out);
-        assert!(!output.aborted);
+        assert!(output.runaway.is_none());
         assert!(!output.interrupted);
     }
 
@@ -1103,7 +1171,7 @@ mod shell_tasks {
         assert_eq!(output.exit_code, 0);
         assert_eq!(output.stdout.trim_end(), "hello");
         assert!(!output.timed_out);
-        assert!(!output.aborted);
+        assert!(output.runaway.is_none());
         assert!(!output.interrupted);
     }
 
@@ -1118,7 +1186,7 @@ mod shell_tasks {
 
         assert!(start.elapsed() < NON_HANG_BOUND, "the call must not hang");
         assert!(output.timed_out);
-        assert!(!output.aborted);
+        assert!(output.runaway.is_none());
     }
 
     /// Compile-checked under `just check-windows`; not executed on a Windows
@@ -1138,7 +1206,7 @@ mod shell_tasks {
 
         assert!(start.elapsed() < NON_HANG_BOUND, "the call must not hang");
         assert!(output.timed_out);
-        assert!(!output.aborted);
+        assert!(output.runaway.is_none());
     }
 
     /// Ctrl+C reaching a *running* tree. The budget is far longer than the
@@ -1187,7 +1255,16 @@ mod shell_tasks {
             .unwrap();
 
         assert!(start.elapsed() < NON_HANG_BOUND, "the call must not hang");
-        assert!(output.aborted, "the volume cap must stop the command");
+        let trip = output.runaway.expect("the volume cap must stop the command");
+        // Any read large enough to breach the byte cap already carries far more
+        // than 16 seventeen-byte lines, so when both limits are crossed the
+        // documented tie-break reports the line limit.
+        assert_eq!(trip.kind, RunawayTripKind::Lines);
+        assert_eq!(trip.limit, 16);
+        assert!(
+            trip.observed > trip.limit,
+            "the observed count is the tripped counter, saw {trip:?}",
+        );
         assert!(
             !output.timed_out,
             "the budget outlives the fixture, so this cannot be a timeout",
@@ -1199,6 +1276,186 @@ mod shell_tasks {
             "capture must stay bounded, saw {} bytes",
             output.stdout.len(),
         );
+    }
+
+    /// Review 6 finding 5: a trip must say *which* limit fired and by how
+    /// much. With the line cap effectively off, only the byte cap can stop
+    /// the flood, and the trip carries byte counts.
+    #[cfg(unix)]
+    #[test]
+    fn a_byte_limit_trip_carries_the_byte_counters() {
+        let shell = SystemTaskShell::with_volume_cap(crate::runaway::CaptureVolumeCap::new(
+            true,
+            u64::MAX,
+            1024,
+        ));
+
+        let output = shell
+            .run("yes claudine-runaway", Duration::from_secs(300), None, None)
+            .unwrap();
+
+        let trip = output.runaway.expect("the byte cap must stop the command");
+        assert_eq!(trip.kind, RunawayTripKind::Bytes);
+        assert_eq!(trip.limit, 1024);
+        assert!(
+            trip.observed > trip.limit,
+            "the observed count is the tripped counter, saw {trip:?}",
+        );
+    }
+
+    /// The line-limit twin: with the byte cap effectively off, the trip
+    /// carries line counts.
+    #[cfg(unix)]
+    #[test]
+    fn a_line_limit_trip_carries_the_line_counters() {
+        let shell = SystemTaskShell::with_volume_cap(crate::runaway::CaptureVolumeCap::new(
+            true,
+            16,
+            u64::MAX,
+        ));
+
+        let output = shell
+            .run("yes claudine-runaway", Duration::from_secs(300), None, None)
+            .unwrap();
+
+        let trip = output.runaway.expect("the line cap must stop the command");
+        assert_eq!(trip.kind, RunawayTripKind::Lines);
+        assert_eq!(trip.limit, 16);
+        assert!(
+            trip.observed > trip.limit,
+            "the observed count is the tripped counter, saw {trip:?}",
+        );
+    }
+
+    /// A unique path a surviving descendant would write to. Asserting its
+    /// absence *after* the descendant's write time is what proves the reap:
+    /// process liveness itself is unobservable once the pid is gone.
+    fn marker_path(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "claudine-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ))
+    }
+
+    /// Review 6 finding 2, success-path policy: a command that *succeeds* but
+    /// backgrounded work has that work reaped at completion, on every
+    /// platform, rather than surviving into later tasks.
+    #[cfg(unix)]
+    #[test]
+    fn a_successful_command_reaps_its_backgrounded_descendant() {
+        let marker = marker_path("success-reap");
+        let output = SystemTaskShell::default()
+            .run(
+                &format!("(sleep 1; echo late > '{}') & echo done", marker.display()),
+                Duration::from_secs(30),
+                None,
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        assert!(!output.timed_out);
+        assert_eq!(output.stdout.trim_end(), "done");
+        // Past the descendant's write time: if it survived completion, the
+        // marker exists by now.
+        std::thread::sleep(Duration::from_millis(1600));
+        assert!(
+            !marker.exists(),
+            "the backgrounded descendant outlived its completed command"
+        );
+    }
+
+    /// The `cmd` twin. Compile-checked under `just check-windows`; not
+    /// executed on a Windows host.
+    #[cfg(windows)]
+    #[test]
+    fn a_successful_command_reaps_its_backgrounded_descendant() {
+        let marker = marker_path("success-reap");
+        let output = SystemTaskShell::default()
+            .run(
+                &format!(
+                    "start /b cmd /c \"timeout /t 1 >nul & echo late > {}\" & echo done",
+                    marker.display(),
+                ),
+                Duration::from_secs(30),
+                None,
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        assert!(!output.timed_out);
+        std::thread::sleep(Duration::from_millis(1600));
+        assert!(
+            !marker.exists(),
+            "the backgrounded descendant outlived its completed command"
+        );
+    }
+
+    /// Review 6 finding 2: an early wait error must still reap the whole tree
+    /// — cleanup is owned by `ProcessTree`'s `Drop`, not by the happy path.
+    #[cfg(unix)]
+    #[test]
+    fn an_early_wait_error_still_reaps_the_whole_tree() {
+        let marker = marker_path("wait-error-reap");
+        let start = std::time::Instant::now();
+        let result = SystemTaskShell::failing_wait().run(
+            &format!("(sleep 1; echo late > '{}') & sleep 300", marker.display()),
+            Duration::from_secs(300),
+            None,
+            None,
+        );
+
+        assert!(start.elapsed() < NON_HANG_BOUND, "the call must not hang");
+        assert!(
+            matches!(result, Err(TaskShellError::Io(_))),
+            "the injected wait failure must surface as the io error it models: {result:?}"
+        );
+        std::thread::sleep(Duration::from_millis(1600));
+        assert!(!marker.exists(), "a wait error left the tree running");
+    }
+
+    /// Review 6 finding 2: failed ownership setup is a typed, fail-closed
+    /// error on every platform, never a degradation to direct-child cleanup.
+    #[test]
+    fn a_failed_ownership_setup_is_a_typed_isolation_error() {
+        let start = std::time::Instant::now();
+        let result = SystemTaskShell::failing_isolation().run(
+            "echo hi",
+            Duration::from_secs(30),
+            None,
+            None,
+        );
+
+        assert!(start.elapsed() < NON_HANG_BOUND, "the call must not hang");
+        assert!(
+            matches!(result, Err(TaskShellError::Isolation(_))),
+            "ownership failure must be typed, not silently degraded: {result:?}"
+        );
+    }
+
+    /// The fail-closed path kills what it refused to run, descendants
+    /// included.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_ownership_setup_kills_the_spawned_command() {
+        let marker = marker_path("isolation-reap");
+        let start = std::time::Instant::now();
+        let result = SystemTaskShell::failing_isolation().run(
+            &format!("(sleep 1; echo late > '{}') & sleep 300", marker.display()),
+            Duration::from_secs(300),
+            None,
+            None,
+        );
+
+        assert!(start.elapsed() < NON_HANG_BOUND, "the call must not hang");
+        assert!(matches!(result, Err(TaskShellError::Isolation(_))));
+        std::thread::sleep(Duration::from_millis(1600));
+        assert!(!marker.exists(), "a refused command left work running");
     }
 }
 
@@ -1398,6 +1655,48 @@ mod shell_streaming {
             second.saturating_sub(first) >= Duration::from_secs(1),
             "both lines reached the sink together, so the command was silent \
              until it exited: first at {first:?}, second at {second:?}"
+        );
+    }
+
+    /// Review 6 finding 2: a descendant that inherited stdout cannot emit
+    /// frames after the command completes. The completion reap kills it — and
+    /// closes the pipe — before its write time, so "late" never arrives: not
+    /// on the stream, not in the captured payload, and nothing at all arrives
+    /// after `run` returns.
+    #[cfg(unix)]
+    #[test]
+    fn no_frames_arrive_after_a_command_completes() {
+        let sink = TimedSink::new();
+        let stream = live("task", TaskBar::for_index(0), &sink);
+
+        let output = SystemTaskShell::default()
+            .run(
+                "(sleep 1; printf 'late\\n') & printf 'now\\n'",
+                Duration::from_secs(30),
+                None,
+                Some(&stream),
+            )
+            .unwrap();
+        let frames_at_return = sink.writes().len();
+
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.stdout.trim_end(), "now");
+        // Past the descendant's write time: a survivor would have emitted by
+        // now.
+        std::thread::sleep(Duration::from_millis(1600));
+        let data = sink.payloads(Channel::Data);
+        assert!(
+            data.iter().any(|line| line.contains("now")),
+            "the command's own line was streamed: {data:?}"
+        );
+        assert!(
+            data.iter().all(|line| !line.contains("late")),
+            "a reaped descendant still reached the stream: {data:?}"
+        );
+        assert_eq!(
+            sink.writes().len(),
+            frames_at_return,
+            "frames arrived after the command completed"
         );
     }
 
@@ -2019,7 +2318,7 @@ mod outcome_contract {
             exit_code: 0,
             timed_out: false,
             interrupted: false,
-            aborted: false,
+            runaway: None,
         }]);
         let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
@@ -2048,7 +2347,7 @@ mod outcome_contract {
             exit_code: 0,
             timed_out: false,
             interrupted: false,
-            aborted: false,
+            runaway: None,
         }]);
         let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
@@ -2471,14 +2770,14 @@ mod serial_groups {
                 exit_code: 0,
                 timed_out: false,
                 interrupted: false,
-                aborted: false,
+                runaway: None,
             },
             ShellCommandOutput {
                 stdout: String::new(),
                 exit_code: 3,
                 timed_out: false,
                 interrupted: false,
-                aborted: false,
+                runaway: None,
             },
         ]);
         let runtime = Arc::new(RuntimeState::new());
