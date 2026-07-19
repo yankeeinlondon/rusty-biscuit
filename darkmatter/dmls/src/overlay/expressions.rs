@@ -708,6 +708,46 @@ mod tests {
         }
     }
 
+    /// The spec requires function hover to link to the authored query
+    /// vocabulary. Both promised surfaces — D5 hover and D4 completion
+    /// documentation — must carry the link for `pr_list` and `cicd_list`.
+    /// Both emit `MarkupKind::Markdown`, so the Markdown link renders.
+    #[test]
+    fn list_query_functions_link_to_the_vocabulary_in_hover_and_completion() {
+        const LINK: &str = "(darkmatter-expressions.md#provider-query-vocabulary)";
+
+        let candidates = completion_candidates("", &[]);
+        for name in ["pr_list", "cicd_list"] {
+            let descriptor =
+                function_descriptor(name).unwrap_or_else(|| panic!("`{name}` must be in the catalog"));
+
+            // D5 function-call hover.
+            let block = format_function_block(descriptor);
+            assert!(
+                block.contains(LINK),
+                "`{name}` hover block must link to the query vocabulary: {block}"
+            );
+
+            // D4 completion documentation.
+            let documented = candidates
+                .iter()
+                .filter(|candidate| function_name(&candidate.label) == name)
+                .collect::<Vec<_>>();
+            assert!(!documented.is_empty(), "`{name}` must reach completion");
+            for candidate in documented {
+                assert_eq!(candidate.kind, ExprCompletionKind::Function);
+                let documentation = candidate
+                    .documentation
+                    .as_deref()
+                    .unwrap_or_else(|| panic!("`{name}` completion must carry documentation"));
+                assert!(
+                    documentation.contains(LINK),
+                    "`{name}` completion documentation must link to the query vocabulary: {documentation}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn test_function_call_at_finds_deepest_call() {
         let source = "as_csv(length(items))";
