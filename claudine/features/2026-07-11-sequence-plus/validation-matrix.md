@@ -11,22 +11,26 @@ Review-5 finding 6 asked for one thing: every claim in this file must name the
 the **command**, and the **result** — and historical evidence must not sit
 undifferentiated beside current-tree evidence.
 
-Three revision anchors are used throughout. Cite one by name in any new claim.
+Four revision anchors are used throughout. Cite one by name in any new claim.
 
 | Anchor | Revision | Round | Date |
 |---|---|---|---|
-| **R0** | `be2d100a6` + uncommitted working tree | review 5 | 2026-07-19 |
+| **R1** | `a7bfdd7a7` + uncommitted working tree (review-6 fixes) | review 6 | 2026-07-19 |
+| **R0** | `be2d100a6` + uncommitted working tree (review-5 fixes, since committed) | review 5 | 2026-07-19 |
 | **R-1** | `be2d100a6` (`432fd25ab` for the gate record) | review 4 | 2026-07-18 |
 | **R-2** | pre-review-4 tree | review 3 | earlier |
 
-**R0 contains no commits from the review-5 round.** Findings 1–5 were
-implemented into the working tree and nothing was committed; `git status` at the
-time of writing shows 24 modified files and 6 untracked ones. Anything below
-attributed to R0 is therefore evidence about a tree that exists only in a working
-copy.
+**R1 is the current tree.** The review-5 working tree that R0 described was
+subsequently committed as the series ending at `a7bfdd7a7`, so a prior claim in
+this file that "review 5 produced no commits" is stale: it was true of R0 as a
+snapshot and is false of the branch today (review-6 finding 4). R1 is
+`a7bfdd7a7` **plus** an uncommitted working tree carrying the review-6 fixes
+(findings 1, 2, 5 implemented; finding 3 partially — fixtures and runbook only);
+`git status` at the time of the R1 gate runs showed 17 modified and 6 untracked
+paths. Anything attributed to R1 is evidence about that working copy.
 
-Hosts: **R0 and R-1** are macOS 26.5.2 / Darwin 25.5.0 / arm64, 16 logical cores,
-on branch `error-prop-and-file-resolution`. The Linux subsection is a
+Hosts: **R1, R0 and R-1** are macOS 26.5.2 / Darwin 25.5.0 / arm64, 16 logical
+cores, on branch `error-prop-and-file-resolution`. The Linux subsection is a
 `rust:latest` Docker container on the same host and is **R-2**.
 
 Two words are used precisely and are not interchangeable:
@@ -49,21 +53,22 @@ Two words are used precisely and are not interchangeable:
 | `just check-windows` (from `claudine/`) | Windows **type-check** of lib + CLI test targets — the only gate that compiles the Windows-only suites, and the only one; it does not link or run them |
 
 The bare `just test-l2` recipe fail-fasts at the first failure; `--no-fail-fast`
-is required to get real coverage of the 144-case L2 suite.
+is required to get real coverage of the 146-case L2 suite.
 
-Gate results live under "Gate runs" below, split by revision anchor: R0
-(2026-07-19) is the current tree; R-1 (2026-07-18) has its full verbatim record
-in [`gate-run-2026-07-18.md`](gate-run-2026-07-18.md). There is no run of any
+Gate results live under "Gate runs" below, split by revision anchor: R1
+(2026-07-19) is the current tree; R0 (also 2026-07-19) and R-1 (2026-07-18) are
+historical — R-1 has its full verbatim record in
+[`gate-run-2026-07-18.md`](gate-run-2026-07-18.md). There is no run of any
 kind behind `just check-windows` — it type-checks and stops.
 
 ## Test inventory
 
-Counts are `#[test]` occurrences **at R0** unless a row says otherwise.
+Counts are `#[test]` occurrences **at R1** unless a row says otherwise.
 
 | File | Level | `#[test]` count |
 |------|-------|-----------------|
 | `claudine/lib/src/composition/sequence/tests.rs` | L1 | 104 |
-| `claudine/lib/src/composition/sequence/task/tests.rs` | L1 | 88 (was 73 at R-1; +15 from review-5 findings 1–2) |
+| `claudine/lib/src/composition/sequence/task/tests.rs` | L1 | 98 (was 88 at R0; +10 from review-6 findings 2 and 5 — fail-closed process-tree and runaway-trip regressions) |
 | `claudine/lib/src/composition/sequence/preflight/tests.rs` | L1 | 37 |
 | `claudine/lib/src/render/task_stream/tests.rs` | L1 | 24 |
 | `claudine/lib/src/composition/runtime_state/tests.rs` | L1 | 13 |
@@ -80,13 +85,13 @@ Counts are `#[test]` occurrences **at R0** unless a row says otherwise.
 | `claudine/cli/tests/composition_outputs.rs` | CLI E2E | 14 |
 | `claudine/cli/tests/sequence_jit.rs` | CLI E2E | 13 |
 | `claudine/cli/tests/sequence_overlay_pty.rs` | L1 (PTY) | 7 |
-| `claudine/lib/src/composition/sequence/task/shell.rs` | L1 | 5 — `Utf8Stream` decoder units (new at R0) |
+| `claudine/lib/src/composition/sequence/task/shell/tests.rs` | L1 | 8 — `Utf8Stream` decoder + shell-runner units (was 5 inline in `shell.rs` at R0; moved to a sibling module and grew at R1) |
 | `claudine/cli/tests/level2_sequence_task_stream_capture.rs` | L2 | 9 (was 7 at R-1; +2 from review-5 finding 2) |
 | `claudine/cli/tests/level2_windows_sequence_ctrl_c.rs` | L2 (Windows host) | 1 — type-checked by `just check-windows`, **never executed** |
 | `claudine/cli/src/commands/wrap/exec/termination/windows.rs` | L1 (Windows host) | 2 — type-checked by `just check-windows`, **never executed** |
-| `claudine/cli/tests/level3_sequence_ctrl_c.rs` | L3 (macOS) | 1 — **never executed at R0** |
+| `claudine/cli/tests/level3_sequence_ctrl_c.rs` | L3 (macOS) | 1 — **never executed at R0 or R1**; gained the descendant-cleanup assertion at R1 |
 | `claudine/cli/tests/level3_linux_sequence_ctrl_c.rs` | L3 (Linux X11) | 1 — new at R0, **never executed on any host** |
-| `claudine/cli/tests/level3_windows_sequence_ctrl_c.rs` | L3 (Windows) | 1 — new at R0, **never executed on any host** |
+| `claudine/cli/tests/level3_windows_sequence_ctrl_c.rs` | L3 (Windows) | 1 — new at R0, updated at R1, **never executed on any host** |
 | `biscuit-file/lib/src/list_format.rs` | L1 | 22 (+3 doctests) |
 
 Four entries are new or grew at the review-4 round, and each exists to close a
@@ -130,10 +135,13 @@ missing-property aggregation, dry-run, Ctrl+C exit `130`.
   (review-2 finding 5 — see "Level-3 sequence Ctrl+C fan-out"). **The
   OS-keyboard leg of this criterion has not been executed since R-2.** It was
   guard-blocked at R-1 (see [`gate-run-2026-07-18.md`](gate-run-2026-07-18.md)
-  § Gate 4) and not attempted at R0. AC1's keyboard evidence therefore rests on
-  R-2's green — two trees behind the one the L1/L2 gates certify, and behind
-  review-5 finding 1's rewrite of the termination path it exercises. Linux and
-  Windows L3 fixtures exist as of R0 but have **never run**. The procedure that
+  § Gate 4) and not attempted at R0 or R1 — both sessions non-interactive.
+  AC1's keyboard evidence therefore rests on R-2's green — **three** trees
+  behind the one the L1/L2 gates certify, behind review-5 finding 1's rewrite
+  of the termination path it exercises, and behind review-6 finding 2's
+  fail-closed rewrite of the same path. At R1 all three fixtures assert the
+  current contract (including descendant cleanup) and compile, but Linux and
+  Windows have **never run** and macOS has not re-run. The procedure that
   discharges all three is [`l3-ctrl-c-runbook.md`](l3-ctrl-c-runbook.md).
 - The exit-code derivation itself is now covered rather than assumed
   (review-4 finding 2). `run_was_interrupted(exit_code, interrupted)` in
@@ -224,8 +232,13 @@ missing-property aggregation, dry-run, Ctrl+C exit `130`.
 - `task/shell.rs` is the only spawner: `cfg(windows)` `cmd /C` vs `sh -c`,
   `try_wait` polling (no `wait4`/signals). **Termination is no longer
   `child.kill()`** — review-5 finding 1 replaced it with tree-scoped ownership,
-  and the two platforms are *deliberately* not identical there. See "Review-5
-  round (R0)" § finding 1, including the open success-path asymmetry.
+  and review-6 finding 2 made that ownership **fail-closed and uniform**:
+  descendants are reaped on completion on every OS (the success-path asymmetry
+  recorded at R0 is resolved), a failed ownership setup aborts the task with
+  the typed `SequenceTaskShellIsolation` error instead of degrading to
+  direct-child cleanup, and Windows Job membership is established race-free
+  (`CREATE_SUSPENDED` → assign-to-Job → resume). See "Review-6 round (R1)"
+  § finding 2. Native Windows runtime evidence for any of this remains absent.
 - CRLF handled twice independently: `ListFormat::normalize_newlines` inbound,
   `trim_transport_newline` outbound
 - Durations via `harness::parse_timeout`; paths via `FileReference`
@@ -295,22 +308,117 @@ any prefix would have left the binary running in no canonical recipe.
 ### AC11 — Verification commands
 
 See "Commands" above and "Known failures and skips" below. Executed results are
-under "Gate runs", **current-first**: R0 (2026-07-19) is the tree as it stands;
-R-1 and everything after it in that section is historical.
+under "Gate runs", **current-first**: R1 (2026-07-19) is the tree as it stands;
+R0 and everything after it in that section is historical.
 
 The spec's stated gates are `just test`, `just test-l2` where terminal or
 concurrency behavior requires it, and `just lint`, from the `claudine` package
-area. All three are green at R0 — `test-l2` modulo 4 named pre-existing
-failures — and `just doctest` and `just check-windows` are green alongside them.
-Formatting was checked read-only only; no `cargo fmt` write mode was used, and
-`cargo fmt --check`'s diffs in untouched files are the known local-rustfmt drift,
-not a gate result.
+area. At R1, `just test` and `just lint` are green and `just check-windows` is
+green (type-check only). `just test-l2 --no-fail-fast` is **red overall** (exit
+`100`): 146 run, 143 passed, 3 failed — the 3 are the pre-existing, non-feature
+`level2_context_*_at_140` trio, and **zero feature-owned L2 tests failed**,
+including the previously failing ASCII-glyph fixture, which now passes on both
+cold and warm tmux servers.
+
+No `cargo fmt` write mode was used at any round; `cargo fmt --check`'s diffs in
+untouched files are the known local-rustfmt drift, not a gate result, and
+`just lint` is the formatting-adjacent gate of record.
+
+## Review-6 round (R1) — what landed and what it proves
+
+Findings 1, 2, and 5 of [`review-6.md`](review-6.md) were implemented into the
+working tree on 2026-07-19; finding 3 landed its fixtures and runbook but not
+its evidence; finding 4 is this refresh of this document. Every claim here is
+about R1 — `a7bfdd7a7` plus that uncommitted working tree — and every executed
+result below was re-measured for this refresh, not carried forward.
+
+| Finding | Source state | Strongest evidence | Executed on |
+|---|---|---|---|
+| 1 — ASCII header glyph under forced color | Fixed | L2 tmux, cold **and** warm server | macOS at R1 |
+| 2 — fail-closed process-tree ownership | Fixed | L1 real-process (Unix) | macOS at R1; Windows type-check only |
+| 3 — Ctrl+C L3 evidence | Fixtures + runbook updated | **none — compile only** | nowhere |
+| 4 — this validation record | Refreshed | this document | — |
+| 5 — runaway trip counters in the diagnostic | Fixed | L1 | macOS at R1 |
+
+### Finding 1 — the ASCII fallback failure was real, and the prior classification here was wrong
+
+The R0 revision of this file recorded
+`level2_non_utf8_locale_uses_the_ascii_header_glyph_in_tmux` as a "cold-server
+isolation artifact" that "passes on a warm server", and simultaneously claimed
+no sequence-plus L2 test failed. Review-6 finding 4 called that out, and it was
+wrong on the substance as well as the bookkeeping: the failure was a **product
+defect**. Under forced color the CLI built its terminal via
+`Terminal::new_optimistic`, which flips `supports_unicode` optimistic regardless
+of locale — so a `LC_ALL=C` process still rendered `▶` instead of `>`. The tmux
+server temperature only changed which environment leaked in; it was never the
+cause.
+
+The fix is `with_locale_unicode` in `claudine/cli/src/log.rs`: every
+forced-color terminal construction now re-derives `supports_unicode` from the
+locale instead of inheriting the optimistic default. The fixture now pins
+`FORCE_COLOR=1` explicitly so the forced-color path is exercised
+deterministically rather than by harness accident.
+
+Executed at R1 on macOS, both server states:
+
+- **Cold server** — the full `just test-l2 --no-fail-fast` run below started
+  with no tmux server (`no server running` verified immediately before):
+  `PASS [ 2.159s]`.
+- **Warm server** — `just test-l2 non_utf8` against a live tmux server:
+  `Summary [ 2.193s] 1 test run: 1 passed`, exit `0`, `PASS [ 2.190s]`.
+
+### Finding 2 — process-tree ownership is fail-closed and uniform
+
+`SystemTaskShell::run` now enforces one success-path policy on every OS:
+**remaining descendants are reaped when the command completes**, not only on
+abort. Ownership establishment is fallible — if the process tree cannot be
+isolated, the task aborts with the typed `SequenceTaskShellIsolation` error
+rather than silently degrading to direct-child cleanup. On Windows the child is
+spawned `CREATE_SUSPENDED`, assigned to the Job Object, and only then resumed,
+so a fast child can no longer create an unowned descendant in the
+spawn-to-assignment window. On Unix, `ProcessTree` gained a `Drop` reaper, so
+early `wait` errors and panic unwinds no longer leak the tree.
+
+Evidence at R1: the new real-process regressions in
+`task/tests.rs` (88 → 98 `#[test]`s together with finding 5) — normal-success
+background descendants reaped, early wait errors, late writes through inherited
+pipes, failed ownership setup — **executed on macOS** inside the green L1 gate
+below. The Windows twins **type-check only** (`just check-windows`, exit `0`);
+**native Windows runtime evidence is still absent**, so the Windows rows of
+this matrix stay red.
+
+### Finding 3 — L3 fixtures updated; evidence still absent
+
+All three `level3_*` Ctrl+C fixtures compile at R1 and now assert the current
+contract, including descendant cleanup (the macOS fixture's deliberate omission
+recorded at R0 is gone). [`l3-ctrl-c-runbook.md`](l3-ctrl-c-runbook.md) was
+corrected — per-platform runs use **positional** nextest filters, since a second
+`-E` would union with the recipe's `test(/level3_/)` filterset instead of
+narrowing it.
+
+**No attended L3 run has happened at R1.** The macOS green is still R-2-era and
+predates both process-tree rewrites; Linux and Windows have never run on any
+host. All three L3 rows are red/pending an attended run.
+
+### Finding 5 — runaway diagnostics carry the trip counters
+
+`ShellCommandOutput` now carries an optional `RunawayTrip { kind, observed,
+limit }` (kind = lines or bytes), and `SequenceTaskShellRunaway` threads it into
+the diagnostic message, so a slightly oversized command is distinguishable from
+an uncontrolled flood. Covered by L1 tests executed on macOS at R1 inside the
+green gate below.
 
 ## Review-5 round (R0) — what landed and what it proves
 
+> **Historical.** This section describes R0 as a snapshot. The working tree it
+> repeatedly calls uncommitted was subsequently committed as the series ending
+> at `a7bfdd7a7`, and both of the "open judgment calls" below were closed by the
+> review-6 round — see "Review-6 round (R1)".
+
 Findings 1–5 of [`review-5.md`](review-5.md) were implemented into the working
 tree on 2026-07-19. Finding 6 is this section and the provenance convention
-above. **Nothing was committed**, so every claim here is about R0's working copy.
+above. **Nothing was committed at the time**, so every claim here is about R0's
+working copy as it then stood.
 
 | Finding | Source state | Strongest evidence | Executed on |
 |---|---|---|---|
@@ -347,17 +455,19 @@ flood tripping the volume cap — plus 3 `#[cfg(windows)]` `cmd`-based twins
 R0 and that is all. There is no Linux runtime evidence for this finding either;
 the Unix tests would run there but no one has run them.
 
-#### Two open judgment calls for Ken
+#### Two open judgment calls for Ken — both closed at R1
 
-1. `SequenceTaskShellRunaway` carries `task` and `command` but **not** the
-   tripped line/byte counters, so the error says a cap was hit without saying
+> **Superseded.** Review 6 ratified answers to both: (1) became review-6
+> finding 5 — `RunawayTrip { kind, observed, limit }` now reaches the
+> diagnostic; (2) became part of review-6 finding 2 — the uniform policy is
+> reap-on-completion on every OS. See "Review-6 round (R1)".
+
+1. `SequenceTaskShellRunaway` carried `task` and `command` but **not** the
+   tripped line/byte counters, so the error said a cap was hit without saying
    which one or by how much.
-2. **Unix and Windows disagree on the success path.** A shell command that exits
-   `0` having deliberately backgrounded a daemon leaves that daemon alive on
-   Unix, and has it killed at Job-Object drop on Windows. Either answer is
-   defensible; the platforms disagreeing is worse than both. This needs a
-   decision before ship — it is a user-visible semantic difference, not an
-   implementation detail.
+2. **Unix and Windows disagreed on the success path.** A shell command that
+   exited `0` having deliberately backgrounded a daemon left that daemon alive
+   on Unix, and had it killed at Job-Object drop on Windows.
 
 ### Finding 2 — parallel shell output is live and attributed
 
@@ -408,11 +518,11 @@ Three things remain outstanding, and none of them is closed by the above:
 The runbook exists precisely because only an attended desktop session can
 discharge these. **Finding 3 is not closed.**
 
-One asymmetry is deliberate and recorded rather than silently left: the macOS
-fixture lacks the descendant-cleanup assertion its Linux and Windows siblings
-carry. It was not added because it could not be re-verified from this session,
-and an unverifiable assertion in a test that never runs is worse than its
-absence.
+One asymmetry was deliberate and recorded rather than silently left: at R0 the
+macOS fixture lacked the descendant-cleanup assertion its Linux and Windows
+siblings carry. **Superseded at R1** — review-6 finding 3 added the assertion
+to the macOS fixture, so all three now assert the same contract; none has run
+at R1.
 
 ### Finding 4 — the `NO_COLOR` gate, and why the exposure was nondeterministic
 
@@ -458,14 +568,16 @@ for Ken.**
 
 ## Level-2 task-stream coverage
 
-`claudine/cli/tests/level2_sequence_task_stream_capture.rs` — 7 tmux tests,
-gated by `require_level!(Level::L2, TmuxHarness::available(), "tmux")` so the
+`claudine/cli/tests/level2_sequence_task_stream_capture.rs` — 9 tmux tests
+(the 7 below plus the two live shell-interleaving captures added by review-5
+finding 2, in color and no-color), gated by
+`require_level!(Level::L2, TmuxHarness::available(), "tmux")` so the
 suite skips cleanly on a host without tmux.
 
-Six of the seven finish in ~3 s each. The seventh,
+Eight of the nine finish in ~2–5 s each. The ninth,
 `level2_prompt_idle_flush_keeps_the_task_bar_in_tmux`, costs `78.128s` on its own
-— 72.7% of the whole L2 tier — and is its critical path. See "The L2 tier's cost
-profile changed this round" under "Gate runs".
+(`77.776s` at R1) — ~73% of the whole L2 tier — and is its critical path. See
+"The L2 tier's cost profile changed this round" under "Gate runs".
 
 L2 **complements** the L1 tests; it does not replace them. The exact-byte and
 SGR assertions for frame atomicity stay in `sequence_groups.rs` and
@@ -546,7 +658,7 @@ skip-clean with `RUN_LEVEL3` unset: `skipping: set RUN_LEVEL3=1 to enable Level 
 (L1) and `just test-l2` filtersets — confirmed by `cargo nextest list`, which
 matches it under `test(/level3_/)` and not under the L1 expression.
 
-### Execution status — last green at R-2; **not re-run at R-1 or R0**
+### Execution status — last green at R-2; **not re-run at R-1, R0, or R1**
 
 `just test-l3` was guard-blocked on 2026-07-18: `_test_l3` refuses to start
 without a TTY unless `BISCUIT_L3_TAKE_FOCUS=1` authorizes it, and the override
@@ -557,10 +669,11 @@ refusal. The guard doing its job is a passing observation about
 
 So the record below stands as the most recent green, but it was obtained at
 **R-2** — before the review-4 finding-2 interrupt-derivation change, the
-finding-5 cfg gate, and the finding-8 compose guard, and long before review-5
-finding 1 rewrote the very termination path this test exercises. AC1's
-OS-keyboard leg is therefore **two rounds behind** the tree the L1 and L2 gates
-certify, and the gap widened rather than narrowed at R0.
+finding-5 cfg gate, and the finding-8 compose guard, long before review-5
+finding 1 rewrote the very termination path this test exercises, and before
+review-6 finding 2 rewrote it again (fail-closed ownership, reap-on-completion).
+AC1's OS-keyboard leg is therefore **three rounds behind** the tree the L1 and
+L2 gates certify, and the gap widened again at R1.
 
 Observed green at R-2 on the authoring host (macOS, WezTerm + cliclick): all three
 children reported `interrupted`, `step 1/2 interrupted by Ctrl+C` printed,
@@ -624,15 +737,15 @@ keystrokes into whatever holds focus. Two guards bound that blast radius:
 
 | Item | Status | Reason |
 |------|--------|--------|
-| `level2_context_{default,values,side_effects}_at_140_fills_cap_in_tmux` | **Pre-existing fail (3) — real, not a load artifact** | `claudine context` renders 140 visible cells on this host where the contract wants 138–139. Unrelated to sequences; Phase 2's checkpoint recorded the identical three failures, including the untouched default report. The 2026-07-18 run pins them as deterministic: all three fail on **all four** attempts, in `1.1`–`1.5 s`, with an identical off-by-one cell count. Do not excuse them as load — "pre-existing" is not "green", and the L2 tier does not return `0` while they stand. |
+| `level2_context_{default,values,side_effects}_at_140_fills_cap_in_tmux` | **Pre-existing fail (3) — real, not a load artifact; still failing at R1** | `claudine context` renders 140 visible cells on this host where the contract wants 138–139. Unrelated to sequences; verified failing on an untouched baseline as well as here, and Phase 2's checkpoint recorded the identical three failures. Deterministic at R-1 and again at R1: all three fail on **all four** attempts, in `1.3`–`1.6 s` at R1, with the identical message `expected 138..=139 visible cells; got 140`. Do not excuse them as load — "pre-existing" is not "green", and the L2 tier does not return `0` while they stand. |
 | Windows runtime execution | **Not run — nothing Windows has ever executed** | No Windows host and no emulation available. The strongest Windows evidence is a `--target x86_64-pc-windows-gnu` *compile* of lib+bin, a `--tests` *type-check* of both crates, and a source audit. None of that is a run. See "Windows: what compiles versus what has run". |
 | Windows **test suites** | **Type-checked, never executed** | Both Windows suites — `termination/windows.rs`'s `#[cfg(all(test, windows))]` Job-object regressions and `cli/tests/level2_windows_sequence_ctrl_c.rs` — type-check under `just check-windows`. That closes the "invisible to every gate" half of review-4 finding 1: a typo or signature drift is now caught. It does **not** make them evidence of behavior. `cargo check --tests` neither links nor runs. |
 | Windows **test-target** compilation | **Fixed — verified green** | Was 7 errors (Unix-only APIs in `#[cfg(test)]` code) plus a `duckdb-sys`/mingw wall. Both cleared at review 4; `just check-windows` type-checks lib **and** CLI test targets for `x86_64-pc-windows-gnu`, exit `0`, and the gate was probed to bite. See "Windows test targets: how the wall came down". |
-| `level2_non_utf8_locale_uses_the_ascii_header_glyph_in_tmux` | **Pre-existing fail (1) at R0 — cold-server artifact** | New to this table at R0 only because R0's L2 run used a **cold** tmux server (required by finding 4's A/B). It passes on a warm server. An isolation artifact of the run configuration, not a sequence-plus regression — but recorded rather than dropped, because "passes on a warm server" is a caveat, not a green. |
-| Level-2 suite | **Run at R0, green modulo 4 pre-existing fails** | `just test-l2 --no-fail-fast` on macOS at R0: **146 run, 142 passed, 4 failed**. The 4 are the `level2_context_*_at_140` trio plus the non-UTF-8 locale row above. No sequence-plus L2 test failed. R-1's reading was `144 tests run: 141 passed (6 slow), 3 failed`, exit `100` ([`gate-run-2026-07-18.md`](gate-run-2026-07-18.md)); the tier gained 2 tests from finding 2. |
+| `level2_non_utf8_locale_uses_the_ascii_header_glyph_in_tmux` | **Was a feature-owned defect, misclassified here; fixed at R1 — passes cold and warm** | The R0 row called this a "cold-server artifact" that "passes on a warm server". Both halves were wrong as release evidence (review-6 findings 1 and 4): the failure was a product defect — forced color built the terminal via `Terminal::new_optimistic`, discarding the locale-derived `supports_unicode`, so a `LC_ALL=C` pane rendered `▶`. Fixed by `with_locale_unicode` in `cli/src/log.rs`; the fixture now pins `FORCE_COLOR=1`. Executed at R1 on macOS: `PASS [ 2.159s]` in the full cold-server gate and `PASS [ 2.190s]` in a warm-server run. See "Review-6 round (R1)" § finding 1. |
+| Level-2 suite | **Run at R1 — red overall (exit `100`): 3 pre-existing non-feature failures; zero feature-owned failures** | `just test-l2 --no-fail-fast` on macOS at R1, cold tmux server: `Summary [ 104.436s] 146 tests run: 143 passed (3 slow), 3 failed, 2193 skipped` → `JUST_L2_EXIT=100`. The 3 are exactly the `level2_context_*_at_140` trio above. Every sequence-plus L2 test passed. The R0 reading (146 run, 142 passed, 4 failed — the trio plus the then-failing ASCII fixture) and R-1's (`144 tests run: 141 passed (6 slow), 3 failed`, [`gate-run-2026-07-18.md`](gate-run-2026-07-18.md)) are historical. |
 | L2 for task-stream rendering | **Added** (review-2 finding 4) | See "Level-2 task-stream coverage" above. The prior "deliberately omitted" rationale was wrong in one respect: the contract is *not* a pure function of capability flags, because the flags themselves are chosen by a real handshake and the pane — not the renderer — decides what folding failure looks like. |
-| `level3_sequence_ctrl_c_fans_out_to_parallel_children` (macOS) | **Last green at R-2; not re-run at R-1 or R0** | Green on the authoring host at R-2: every child interrupted, next step suppressed, exit `130`. `just test-l3` was **guard-blocked** at R-1 and simply not attempted at R0 — both sessions non-interactive. Two rounds stale, and it is the developer's step. See [`l3-ctrl-c-runbook.md`](l3-ctrl-c-runbook.md). |
-| `level3_linux_sequence_ctrl_c.rs`, `level3_windows_sequence_ctrl_c.rs` | **Never executed on any host** | Added at R0 for review-5 finding 3. Compile and filterset evidence only. Neither Linux nor Windows has ever run an L3 sequence-interruption test. Finding 3 is **open**. |
+| `level3_sequence_ctrl_c_fans_out_to_parallel_children` (macOS) | **Red — pending attended run. Last green at R-2; not re-run at R-1, R0, or R1** | Green on the authoring host at R-2: every child interrupted, next step suppressed, exit `130`. That green predates both process-tree rewrites (review-5 finding 1, review-6 finding 2) and the fixture's new descendant-cleanup assertion, so it certifies neither the current code nor the current contract. `just test-l3` was **guard-blocked** at R-1 and not attempted at R0 or R1 — all sessions non-interactive; L3 keyboard injection is reserved for attended runs. See [`l3-ctrl-c-runbook.md`](l3-ctrl-c-runbook.md). |
+| `level3_linux_sequence_ctrl_c.rs`, `level3_windows_sequence_ctrl_c.rs` | **Red — never executed on any host** | Added at R0 for review-5 finding 3, updated at R1 to the current contract. Compile and filterset evidence only. Neither Linux nor Windows has ever run an L3 sequence-interruption test. Review-6 finding 3 is **open**. |
 | `#[ignore]`d perf harnesses | **Pre-existing** | `compose_ttff_perf.rs`, `completion_perf.rs`, `system_prompt_perf_bench.rs` — diagnostic, not gates. |
 
 ## Gate runs (review-2 finding 6)
@@ -640,29 +753,31 @@ keystrokes into whatever holds focus. Two guards bound that blast radius:
 Recorded on the authoring host (macOS, Apple Silicon). Nothing in this section is
 reported green unless a command was run to completion.
 
-**This section is ordered current-first.** "Current tree (R0)" is the tree a
+**This section is ordered current-first.** "Current tree (R1)" is the tree a
 reader checking out this branch gets today. Everything under "Historical" was
 measured against a tree that no longer exists and is retained for the
-discrimination it supports, not as a statement about R0.
+discrimination it supports, not as a statement about R1.
 
-| Subsection | Anchor | Host | Re-run at R0? |
+| Subsection | Anchor | Host | Re-run at R1? |
 |---|---|---|---|
-| Current tree (R0) | R0 | macOS | — |
-| macOS — R-1 | R-1 | macOS | superseded by R0 |
+| Current tree (R1) | R1 | macOS | — |
+| macOS — R0 | R0 | macOS | superseded by R1 |
+| macOS — R-1 | R-1 | macOS | superseded by R0, then R1 |
 | Linux — real kernel via Docker | R-2 | Docker on macOS | **no** |
-| Windows: what compiles versus what has run | R-1 | macOS cross-compile | type-check only |
+| Windows: what compiles versus what has run | R-1 | macOS cross-compile | type-check re-run green at R1 |
 
-Per the repository's drift-bracket convention every timed gate in the **R-1**
-subsections carries the `uptime` bracket it was measured within. That is not
-decoration on this host: the R-1 session's 1-minute load ranged from `8.46` to
-`197.32` on 16 cores — a 23× spread — and one full L1 run went red at the top of
-that range with 12 timeouts that did not reproduce at the bottom of it. **A
+Per the repository's drift-bracket convention every timed gate in the **R1** and
+**R-1** subsections carries the `uptime` bracket it was measured within. That is
+not decoration on this host: the R-1 session's 1-minute load ranged from `8.46`
+to `197.32` on 16 cores — a 23× spread — and one full L1 run went red at the top
+of that range with 12 timeouts that did not reproduce at the bottom of it. The
+R1 session's 1-minute load swung `11.34`–`75.67` across its gates. **A
 cross-run timing comparison without a bracket is not a measurement here.**
 
 **The R0 table carries no brackets**, which is a real limitation of it: its
 verdicts (exit codes, pass/fail counts) are sound, but nothing in it supports a
-timing comparison against R-1. Treat the R0 row counts as verdicts, not
-measurements.
+timing comparison. Treat the R0 row counts as verdicts, not measurements. The
+R1 table below restores brackets and verbatim summary lines.
 
 ### Status legend
 
@@ -671,10 +786,50 @@ measurements.
   or environment-limited, each named individually.
 - **Not run / blocked** — did not execute, with the exact blocker.
 
-### Current tree (R0) — macOS, 2026-07-19
+### Current tree (R1) — macOS, 2026-07-19
+
+Run from `claudine/` on macOS 26.5.2 (Darwin 25.5.0, arm64, 16 logical cores)
+against `a7bfdd7a7` + the review-6 working tree (17 modified + 6 untracked
+paths), after review-6 findings 1, 2, and 5 landed and finding 3's fixtures
+were updated. Every result below was executed fresh for this refresh; nothing
+was carried forward from the R0 or R-1 records. Verbatim summary lines are
+quoted from the run transcripts.
+
+| Gate | Level | Verdict | Load bracket | Result |
+|------|-------|---------|--------------|--------|
+| `just test --no-fail-fast` | L1 | **Green** | `19.04`→`75.67` | exit `0`. `claudine-catalog-types`: `Summary [   0.021s] 21 tests run: 21 passed, 0 skipped` · `claudine`: `Summary [  35.212s] 3804 tests run: 3804 passed (3 slow), 7 skipped` · `claudine-contract`: `Summary [   0.097s] 47 tests run: 47 passed, 5 skipped` · `claudine-cli`: `Summary [ 115.306s] 2165 tests run: 2165 passed (69 slow), 174 skipped` · `claudine-gen`: `Summary [   1.701s] 152 tests run: 152 passed, 4 skipped` — 6,189 passes total |
+| `just lint` | clippy | **Green** | `11.34`→`11.88` | exit `0` |
+| `just test-l2 --no-fail-fast` | L2 | **Red overall — zero feature-owned failures** | `13.09`→`14.20` | exit `100`. `Summary [ 104.436s] 146 tests run: 143 passed (3 slow), 3 failed, 2193 skipped`. Cold tmux server (`no server running` verified immediately before). The 3 failures are exactly the pre-existing `level2_context_{default,side_effects,values}_at_140_fills_cap_in_tmux` trio — each failed all four attempts in `1.3`–`1.6 s` with the identical `expected 138..=139 visible cells; got 140`. Every sequence-plus L2 test passed, including `level2_non_utf8_locale_uses_the_ascii_header_glyph_in_tmux` (`PASS [   2.159s]`) and `level2_prompt_idle_flush_keeps_the_task_bar_in_tmux` (`PASS [  77.776s]`) |
+| `just test-l2 non_utf8` (warm-server leg) | L2 | **Green** | — | exit `0`. Against a live tmux server: `Summary [   2.193s] 1 test run: 1 passed, 2338 skipped`, `PASS [   2.190s]`. Together with the cold-server pass above, this is the executed evidence that review-6 finding 1's fix holds in **both** tmux-server states |
+| `just check-windows` | type-check | **Green — nothing ran** | `35.71`→`37.09` | exit `0`, `Finished dev profile [unoptimized + debuginfo] target(s) in 2.78s` (warm cache). Type-check only; no Windows code executed |
+| `just test-l3` | L3 | **Not run — red, pending attended run** | — | Not attempted: session non-interactive, and the focus guard reserves OS keyboard injection for attended sessions. The macOS L3 green is R-2-era and predates both process-tree rewrites; Linux and Windows have never run |
+
+The L2 gate is stated **red overall** deliberately (review-6 finding 4's rule):
+the tier returns exit `100` while the pre-existing context trio stands, even
+though none of the 3 failures is feature-owned. "Green modulo known" undersold
+that; the honest reading is *red gate, zero feature-owned failures*.
+
+The L1 lib count moved `3,792 → 3,804` between review 6's own run and this one
+because the review-6 fix work added lib tests in the same working tree; the
+`6,189` total supersedes both the `~6,156` figure this file previously reported
+and review 6's `3,792` lib figure, at the later tree state.
+
+The load brackets straddle a wide range (`11.34`–`75.67` 1-minute on 16 cores;
+7 users, 5-day uptime, concurrent sessions). Verdicts are sound; treat every
+timing above as bracketed and compare across runs only within comparable
+brackets.
+
+---
+
+**Everything from here to the end of this section is historical.** No subsection
+below was measured against R1.
+
+### macOS — R0, 2026-07-19 (review-5 round)
 
 Run from `claudine/` on macOS 26.5.2 (Darwin 25.5.0, arm64) against
-`be2d100a6` + the review-5 working tree, after findings 1–5 landed.
+`be2d100a6` + the review-5 working tree, after findings 1–5 landed. Superseded
+by the R1 table above; its non-UTF-8-locale row was later shown to be
+misclassified (see "Review-6 round (R1)" § finding 1).
 
 | Gate | Level | Verdict | Result |
 |------|-------|---------|--------|
@@ -690,11 +845,19 @@ Run from `claudine/` on macOS 26.5.2 (Darwin 25.5.0, arm64) against
 and the cold server is what makes it meaningful — see finding 4 above for why a
 warm server would have made both legs pass vacuously.
 
-The 4 L2 failures are pre-existing and none belongs to this work: the three
-`level2_context_*_at_140_fills_cap_in_tmux` (`expected 138..=139 visible cells;
-got 140` — the known `claudine context` table-width drift) plus
-`level2_non_utf8_locale_uses_the_ascii_header_glyph_in_tmux`, a cold-server
-isolation artifact that passes warm. Both rows are in "Known failures and skips".
+The 4 L2 failures were recorded at the time as pre-existing with none belonging
+to this work: the three `level2_context_*_at_140_fills_cap_in_tmux` (`expected
+138..=139 visible cells; got 140` — the known `claudine context` table-width
+drift) plus `level2_non_utf8_locale_uses_the_ascii_header_glyph_in_tmux`,
+then called a cold-server isolation artifact that passes warm.
+
+> **That last classification was wrong.** Review 6 reproduced the ASCII-glyph
+> failure four consecutive times and traced it to a product defect in the
+> forced-color terminal construction — see "Review-6 round (R1)" § finding 1
+> for the root cause and the fix. A gate containing a feature-owned failure
+> should have been stated red; this subsection's "green modulo 4" verdict
+> overstated R0's evidence and is retained only as the historical record
+> review-6 finding 4 corrected.
 
 Two caveats that will cost the next person time if not recorded:
 
@@ -711,11 +874,6 @@ lines: these results were recorded by the session that ran the gates and relayed
 here, not captured into a transcript. Counts are reported to the precision they
 were reported at. For verbatim gate output, R-1's
 [`gate-run-2026-07-18.md`](gate-run-2026-07-18.md) remains the model.
-
----
-
-**Everything from here to the end of this section is historical.** No subsection
-below was measured against R0.
 
 ### macOS — R-1, 2026-07-18
 
@@ -824,7 +982,10 @@ Everything in this subsection is a **compile-time** result obtained by
 cross-compiling from macOS. Read no runtime claim into any of it: `cargo check`
 type-checks, `cargo check --tests` additionally type-checks test code, and
 neither links a binary nor executes one instruction. **Zero Windows code in this
-feature has ever run.**
+feature has ever run** — including, at R1, the rewritten fail-closed
+process-tree ownership (`CREATE_SUSPENDED` → Job assignment → resume), whose
+only Windows evidence is the R1 `just check-windows` green in the R1 gate
+table above.
 
 The `duckdb-sys` + mingw blocker recorded in prior notes was re-tested rather
 than inherited, and it turned out to be a missing assembler flag rather than an

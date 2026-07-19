@@ -1,9 +1,15 @@
 # Level-3 Ctrl+C Runbook — Sequence Interruption
 
-Procedure for producing the Level-3 evidence review 5 finding 3 requires. The
-tests exist and type-check; **none of them has been run**. Only an attended
-desktop session can produce this evidence, because each test raises a GUI
-terminal to frontmost and injects real OS keystrokes into whatever holds focus.
+Procedure for producing the Level-3 evidence review 6 finding 3 requires
+(carried forward from review 5 finding 3). Current status: the macOS test
+passed once on 2026-07-18, but **that pass is stale** — it predates the
+task-shell process-tree ownership rewrite (fail-closed `ProcessTree` with
+reap-on-completion in `lib/src/composition/sequence/task/shell.rs`) and the
+descendant-cleanup assertion the macOS fixture now carries. The Linux and
+Windows tests have **never been run** on any host. All three must be run at the
+current revision. Only an attended desktop session can produce this evidence,
+because each test raises a GUI terminal to frontmost and injects real OS
+keystrokes into whatever holds focus.
 
 ## The requirement being discharged
 
@@ -66,18 +72,23 @@ so a host without the backend **skips cleanly** rather than failing.
 Run from the `claudine/` package area. `just test-l3` prompts for confirmation
 when it has a TTY; answer `y`.
 
+The filter is **positional** (a nextest substring filter), not `-E`: the recipe
+already passes `-E 'test(/level3_/)'`, and a second `-E` would *union* with it
+— running the entire L3 tier, chooser tests included — whereas a positional
+filter intersects, selecting only the named fixture.
+
 ```bash
 # macOS
-just test-l3 -E 'test(/level3_sequence_ctrl_c/)'
+just test-l3 level3_sequence_ctrl_c
 
 # Linux
-just test-l3 -E 'test(/level3_linux_sequence_ctrl_c/)'
+just test-l3 level3_linux_sequence_ctrl_c
 
 # Windows
-just test-l3 -E 'test(/level3_windows_sequence_ctrl_c/)'
+just test-l3 level3_windows_sequence_ctrl_c
 ```
 
-To run the whole L3 tier on a platform, drop the `-E` filter: `just test-l3`.
+To run the whole L3 tier on a platform, drop the filter: `just test-l3`.
 
 ### The focus opt-in
 
@@ -87,7 +98,7 @@ knows the machine is free**. Set it only when running the tests yourself from a
 non-interactive shell:
 
 ```bash
-BISCUIT_L3_TAKE_FOCUS=1 just test-l3 -E 'test(/level3_linux_sequence_ctrl_c/)'
+BISCUIT_L3_TAKE_FOCUS=1 just test-l3 level3_linux_sequence_ctrl_c
 ```
 
 Never set it on an agent's behalf, and never in CI.
@@ -96,7 +107,7 @@ To make a missing backend a hard failure instead of a skip — useful to confirm
 the run actually executed rather than quietly skipping:
 
 ```bash
-BISCUIT_TEST_LEVEL_REQUIRED=3 just test-l3 -E 'test(/level3_linux_sequence_ctrl_c/)'
+BISCUIT_TEST_LEVEL_REQUIRED=3 just test-l3 level3_linux_sequence_ctrl_c
 ```
 
 ## What to record, per OS
@@ -117,17 +128,21 @@ distinguish "verified" from "skipped".
    the test's temp workspace. Proves the step after the interrupted group never
    launched.
 4. **Descendant-process cleanup** — the tasks' descendants were reaped, not just
-   their direct children. This is newly meaningful: review 5 finding 1 added
-   Unix process-group and Windows Job Object tree ownership.
-   - macOS: currently covered by the L1 process-tree regressions plus the
-     interrupt fan-out assertion; the L3 fixture asserts per-task pid death.
-   - Linux: each task forks a SIGINT-immune background subshell and publishes
-     its pid to `<task>.desc.pid`; the test asserts every descendant pid is dead.
+   their direct children. This is newly meaningful twice over: review 5
+   finding 1 added Unix process-group and Windows Job Object tree ownership,
+   and review 6 finding 2 made that ownership **fail-closed with
+   reap-on-completion** — establishment failure aborts the task with
+   `TaskShellError::Isolation`, and remaining tree members are killed on every
+   exit path, success included, uniformly across macOS, Linux, and Windows.
+   - macOS and Linux: each task forks a SIGINT-immune background subshell and
+     publishes its pid to `<task>.desc.pid`; the test asserts every descendant
+     pid is dead alongside every task pid.
    - Windows: each task launches `start /b ping -n 60N 127.0.0.1`, a grandchild
      that **inherits the task's stdout pipe**. The test counts live `PING.EXE`
      processes by command line and requires zero. If the Job Object did not reap
-     the tree, the descendant would hold the pipe open and Claudine would block
-     in `reader.join()` — the test would hang into its deadline rather than pass.
+     the tree, the surviving descendant would fail that count (Claudine itself
+     no longer hangs on it — the reader settle is bounded, so a held pipe costs
+     at most the two-second shutdown grace).
 
 Record each as: tested revision (`git rev-parse HEAD`), host OS and version,
 terminal and version, verification level, exact command, and result.
@@ -142,8 +157,9 @@ terminal and version, verification level, exact command, and result.
   the chord did not land. Check the per-OS prerequisites above (Accessibility on
   macOS, X11 + WM activation on Linux, foreground activation on Windows). Then
   run the lower tiers to confirm the fan-out itself is healthy:
-  `just test-l2 -E 'test(/level2_wrap_ctrl_c/)'`, and on Windows the
-  `level2_windows_sequence_ctrl_c` fixture.
+  `just test-l2 level2_wrap_ctrl_c` (positional filter, for the same
+  union-vs-intersect reason as above), and on Windows
+  `just test-l2 level2_windows_sequence_ctrl_c`.
 - **A descendant survived** — a genuine product defect in tree-scoped
   termination, not a harness problem.
 
