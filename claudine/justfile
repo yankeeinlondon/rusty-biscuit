@@ -123,9 +123,10 @@ test-l2 *args="":
 
 # Level-3 OS-keyboard-injection tests. Gated by `require_level!(Level::L3, ...)`;
 # the recipe exports RUN_LEVEL3=1, and each test also skips cleanly when its
-# backend (WezTerm + cliclick, macOS only) is absent. Covers genuine OS Ctrl+C
-# keystroke delivery into a real WezTerm window (signal-handling.md). The tmux
-# multiplexer Ctrl+C coverage lives at L2 (`just test-l2`).
+# backend is absent (WezTerm plus the per-OS injector: cliclick on macOS,
+# xdotool on Linux/X11, PowerShell SendKeys on Windows). Covers genuine OS
+# Ctrl+C keystroke delivery into a real WezTerm window (signal-handling.md).
+# The tmux multiplexer Ctrl+C coverage lives at L2 (`just test-l2`).
 test-l3 *args="":
     @just _test_l3 claudine-cli {{ args }}
 

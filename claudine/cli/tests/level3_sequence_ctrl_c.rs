@@ -11,7 +11,7 @@
 //! all-child Ctrl+C fan-out acceptance criterion) are about the sequence
 //! orchestrator:
 //!
-//! - every running parallel child terminates,
+//! - every running parallel child terminates, descendants included,
 //! - no later sequence step launches,
 //! - the shell regains control,
 //! - the process exits `130`.
@@ -48,6 +48,19 @@
 //! before the keystroke is injected, closing the handler-install race) and the
 //! per-child identity used to prove each one died.
 //!
+//! ## The descendant is the point of the extra pid
+//!
+//! Each task also forks a background subshell that ignores SIGINT and blocks
+//! forever. It inherits the task's process group but is *not* the process
+//! Claudine holds a `Child` handle for, so killing only the direct child would
+//! leave it running — the exact defect that motivated tree-scoped ownership,
+//! now fail-closed with reap-on-completion (`ProcessTree` in
+//! `lib/src/composition/sequence/task/shell.rs`). Its death is the assertion
+//! that termination addresses the group rather than the pid.
+//!
+//! Publishing the descendant's pid before the task's own also orders the
+//! readiness barrier correctly: once `<task>.pid` exists, both processes are up.
+//!
 //! ## One test, not several
 //!
 //! L3 is the most expensive tier and depends on a focused GUI window. This
@@ -66,11 +79,15 @@
 //! file is honestly `#[cfg(target_os = "macos")]` rather than pretending
 //! portability.
 //!
-//! ## Execution status (2026-07-18)
+//! ## Execution status
 //!
-//! Observed passing: all three children reported `interrupted`, the
-//! `must-not-run` step was suppressed, and the pane's exit marker read
-//! `L3SEQ_0rc=130`.
+//! Observed passing on 2026-07-18: all three children reported `interrupted`,
+//! the `must-not-run` step was suppressed, and the pane's exit marker read
+//! `L3SEQ_0rc=130`. **That pass is stale**: it predates the task-shell
+//! process-tree ownership rewrite (fail-closed `ProcessTree` with
+//! reap-on-completion) and the descendant-cleanup assertion this fixture now
+//! carries. Current evidence requires an attended re-run at the current
+//! revision — see `features/2026-07-11-sequence-plus/l3-ctrl-c-runbook.md`.
 //!
 //! It did *not* pass when first authored — the cliclick chord never reached
 //! WezTerm, matching the focus-transfer limit documented in
@@ -148,7 +165,8 @@ fn sequence_document() -> String {
             format!(
                 "        - name: {name}\n\
                  \x20         timeout: 300s\n\
-                 \x20         shell: \"trap '' INT; echo $$ > {name}.pid; while :; do sleep 1; done\"\n"
+                 \x20         shell: \"trap '' INT; (trap '' INT; while :; do sleep 1; done) & \
+                 echo $! > {name}.desc.pid; echo $$ > {name}.pid; while :; do sleep 1; done\"\n"
             )
         })
         .collect();
@@ -170,10 +188,26 @@ fn sequence_document() -> String {
     )
 }
 
+/// Blocks until `path` holds a parsable pid, or the deadline passes.
+fn await_pid(path: &Path, deadline: Instant, what: &str) -> i32 {
+    loop {
+        if let Ok(text) = fs::read_to_string(path)
+            && let Ok(pid) = text.trim().parse::<i32>()
+        {
+            return pid;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{what} never published a pid; the group did not reach its blocking state",
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
 /// A real OS Ctrl+C keystroke, delivered to a focused WezTerm window running a
 /// sequence that is blocked inside a parallel group, must terminate every
-/// parallel child, suppress the following step, return control to the shell,
-/// and exit `130`.
+/// parallel child and its descendants, suppress the following step, return
+/// control to the shell, and exit `130`.
 #[test]
 #[serial(level3_keyboard)]
 fn level3_sequence_ctrl_c_fans_out_to_parallel_children() {
@@ -245,28 +279,28 @@ fn level3_sequence_ctrl_c_fans_out_to_parallel_children() {
         )
         .expect("send sequence command");
 
-    // Readiness barrier: every task has published its pid, so every child is
-    // inside its blocking loop — strictly after the orchestrator registered its
-    // SIGINT handler and after each task's wait loop began polling the shared
-    // interrupt flag. Injecting earlier would race the handler.
+    // Readiness barrier: every task has published its pid, so every child and
+    // its descendant are inside their blocking loops — strictly after the
+    // orchestrator registered its SIGINT handler and after each task's wait
+    // loop began polling the shared interrupt flag. Injecting earlier would
+    // race the handler.
     let marker_deadline = Instant::now() + Duration::from_secs(30);
-    let mut pids: Vec<(&str, i32)> = Vec::new();
+    let mut pids: Vec<(String, i32)> = Vec::new();
     for name in TASKS {
-        let pid_file = workspace.path().join(format!("{name}.pid"));
-        loop {
-            if let Ok(text) = fs::read_to_string(&pid_file)
-                && let Ok(pid) = text.trim().parse::<i32>()
-            {
-                pids.push((name, pid));
-                break;
-            }
-            assert!(
-                Instant::now() < marker_deadline,
-                "parallel task {name} never published a pid; the group did not \
-                 reach its blocking state within 60s",
-            );
-            std::thread::sleep(Duration::from_millis(25));
-        }
+        // `<task>.pid` is written last, so waiting on it also guarantees the
+        // descendant's pid file is already complete.
+        let task_pid = await_pid(
+            &workspace.path().join(format!("{name}.pid")),
+            marker_deadline,
+            &format!("parallel task {name}"),
+        );
+        let descendant_pid = await_pid(
+            &workspace.path().join(format!("{name}.desc.pid")),
+            marker_deadline,
+            &format!("descendant of {name}"),
+        );
+        pids.push((name.to_string(), task_pid));
+        pids.push((format!("{name} descendant"), descendant_pid));
     }
 
     // Sanity: the group really is running concurrently right now. Without this,
@@ -275,8 +309,8 @@ fn level3_sequence_ctrl_c_fans_out_to_parallel_children() {
     for (name, pid) in &pids {
         assert!(
             pid_alive(*pid),
-            "parallel task {name} (pid {pid}) was not alive at injection time; \
-             the fixture is not blocking as intended",
+            "{name} (pid {pid}) was not alive at injection time; the fixture is \
+             not blocking as intended",
         );
     }
 
@@ -343,13 +377,14 @@ fn level3_sequence_ctrl_c_fans_out_to_parallel_children() {
         "an interrupted sequence must exit 130.\npane:\n{last_plain}",
     );
 
-    // Claim 1: every parallel child terminated. The tasks ignore SIGINT, so a
-    // dead pid can only be claudine's interrupt fan-out reaching that task.
-    // Poll briefly — the shell prints the sentinel as soon as claudine exits,
-    // which can very slightly precede the last child's reaping.
+    // Claim 1: every parallel child AND every descendant terminated. The
+    // fixture ignores SIGINT throughout, so a dead pid can only be claudine's
+    // interrupt fan-out reaching that process group. Poll briefly — the shell
+    // prints the sentinel as soon as claudine exits, which can very slightly
+    // precede the last child's reaping.
     let reap_deadline = Instant::now() + Duration::from_secs(5);
     let survivors = loop {
-        let survivors: Vec<&(&str, i32)> =
+        let survivors: Vec<&(String, i32)> =
             pids.iter().filter(|(_, pid)| pid_alive(*pid)).collect();
         if survivors.is_empty() || Instant::now() >= reap_deadline {
             break survivors
@@ -361,9 +396,10 @@ fn level3_sequence_ctrl_c_fans_out_to_parallel_children() {
     };
     assert!(
         survivors.is_empty(),
-        "Ctrl+C must fan out to every running parallel child; these survived \
-         (they ignore SIGINT, so surviving means the interrupt flag never \
-         reached their wait loop): {survivors:?}\npane:\n{last_plain}",
+        "Ctrl+C must fan out to every running parallel child and its \
+         descendants; these survived (they ignore SIGINT, so surviving means \
+         the interrupt never reached their process group): \
+         {survivors:?}\npane:\n{last_plain}",
     );
 
     // Claim 2: the step after the interrupted group never launched.

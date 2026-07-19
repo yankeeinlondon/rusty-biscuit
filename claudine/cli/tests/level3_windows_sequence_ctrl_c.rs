@@ -45,10 +45,13 @@
 //! outlives the task's own loop, is *not* the process Claudine holds a `Child`
 //! handle for, and deliberately **inherits the task's stdout pipe**. That last
 //! detail is the hazard tree-scoped ownership exists for: a descendant holding
-//! the pipe open can make Claudine block in `reader.join()` after it believes
-//! the command is dead. If the Job Object reaps the tree, the pipe closes and
-//! the sequence exits; if it does not, this test hangs into its own deadline
-//! rather than passing.
+//! the pipe open could keep emitting frames after Claudine believes the command
+//! is dead. The ownership contract answers it twice — `ProcessTree` terminates
+//! the Job on interrupt and reaps any remainder at completion (which closes the
+//! pipe), and the reader settle is bounded by `READER_SHUTDOWN_GRACE` so a
+//! surviving handle costs seconds, not a hang. If the Job Object failed to reap
+//! the tree, the descendant would outlive the sequence and the live-descendant
+//! count below would report it as a survivor.
 //!
 //! The per-task `-n 60N` count makes each descendant's command line unique, so
 //! it can be counted by `Win32_Process` without being confused with the
