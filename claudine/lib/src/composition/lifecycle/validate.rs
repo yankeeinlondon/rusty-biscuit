@@ -262,9 +262,24 @@ fn iter_action_expressions<'a>(
 ///
 /// Used by the leak scan to detect surviving `{{ … }}` spans inside parsed
 /// expression literals (e.g. `say('leaked {{ expr }}')`).
+///
+/// Object-literal *keys* are visited alongside the values. A key is authored
+/// text that reaches the dispatched value verbatim, so a span hiding in
+/// `{ "{{ leaked }}": 1 }` is as much a leak as one in the value position.
 fn visit_string_literals<F: FnMut(&str)>(expr: &Expr, visitor: &mut F) {
     match expr {
         Expr::StringLiteral(s) => visitor(s),
+        Expr::ArrayLiteral(elements) => {
+            for element in elements {
+                visit_string_literals(element, visitor);
+            }
+        }
+        Expr::ObjectLiteral(entries) => {
+            for (key, value) in entries {
+                visitor(key);
+                visit_string_literals(value, visitor);
+            }
+        }
         Expr::Variable(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
         Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
             visit_string_literals(inner, visitor);
@@ -438,6 +453,15 @@ fn find_undefined_top_level_variable<'a>(
         Expr::FunctionCall { args, .. } => args
             .iter()
             .find_map(|arg| find_undefined_top_level_variable(arg, defined)),
+        // Every element of a container literal is evaluated, so an undefined
+        // operand inside `[missing]` is caught like a top-level `{{ missing }}`.
+        // Object keys are authored text and reference nothing.
+        Expr::ArrayLiteral(elements) => elements
+            .iter()
+            .find_map(|element| find_undefined_top_level_variable(element, defined)),
+        Expr::ObjectLiteral(entries) => entries
+            .iter()
+            .find_map(|(_, value)| find_undefined_top_level_variable(value, defined)),
     }
 }
 
@@ -478,6 +502,15 @@ fn find_undefined_stack_variable<'a>(
         Expr::FunctionCall { args, .. } => args
             .iter()
             .find_map(|arg| find_undefined_stack_variable(arg, defined)),
+        // Every element of a container literal is evaluated, so an undefined
+        // operand inside `[missing]` is caught like a bare `missing`. Object
+        // keys are authored text and reference nothing.
+        Expr::ArrayLiteral(elements) => elements
+            .iter()
+            .find_map(|element| find_undefined_stack_variable(element, defined)),
+        Expr::ObjectLiteral(entries) => entries
+            .iter()
+            .find_map(|(_, value)| find_undefined_stack_variable(value, defined)),
     }
 }
 
@@ -674,6 +707,14 @@ fn references_bare_err(expr: &Expr) -> bool {
         }
         Expr::Index { base, index } => references_bare_err(base) || references_bare_err(index),
         Expr::FunctionCall { args, .. } => args.iter().any(references_bare_err),
+        // A container literal references `err` when any element does, so
+        // `[err.msg]` in a no-error event is rejected like a bare `err.msg`.
+        // Object keys are authored text; a `{{ err … }}` span hiding in a key
+        // is caught by the literal-span scan in `surface_references_err`.
+        Expr::ArrayLiteral(elements) => elements.iter().any(references_bare_err),
+        Expr::ObjectLiteral(entries) => {
+            entries.iter().any(|(_, value)| references_bare_err(value))
+        }
         Expr::Fallback { primary, fallback } => {
             references_bare_err(primary) || references_bare_err(fallback)
         }

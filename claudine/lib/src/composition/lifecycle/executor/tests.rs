@@ -2338,3 +2338,21 @@ fn regression_conflicting_filename_prompt_dir_wins() {
 
     std::env::set_current_dir(&original_cwd).unwrap();
 }
+
+/// The `ctx.*` capture hint is demand-driven, so a read buried in a container
+/// literal must still be collected — otherwise the expression evaluates
+/// against an uncaptured sniff group. A non-recursing arm yields an empty hint.
+#[test]
+fn ctx_scan_hint_descends_container_literals() {
+    use darkmatter::markdown::compose::expression::parse;
+
+    let array = parse("[ctx.area, ctx.package]").expect("array literal must parse");
+    let hint = ctx_scan_hint(&array);
+    assert!(hint.contains("ctx.area"), "got: {hint}");
+    assert!(hint.contains("ctx.package"), "got: {hint}");
+
+    // Object values are expressions and contribute a hint; the key `ctx` is
+    // authored text, not a reference, so it adds nothing.
+    let object = parse("{ ctx: ctx.agent }").expect("object literal must parse");
+    assert_eq!(ctx_scan_hint(&object), "ctx.agent");
+}

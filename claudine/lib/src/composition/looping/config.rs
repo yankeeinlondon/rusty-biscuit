@@ -228,6 +228,19 @@ fn collect_identifiers(expr: &Expr, names: &mut BTreeSet<String>) {
                 collect_identifiers(arg, names);
             }
         }
+        // A container literal contributes the union of the identifiers its
+        // elements reference. Object keys are authored text, not variable
+        // references, so they never name a control variable.
+        Expr::ArrayLiteral(elements) => {
+            for element in elements {
+                collect_identifiers(element, names);
+            }
+        }
+        Expr::ObjectLiteral(entries) => {
+            for (_, value) in entries {
+                collect_identifiers(value, names);
+            }
+        }
         Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
     }
 }
@@ -870,6 +883,29 @@ mod tests {
         assert_eq!(
             extract_control_variables(&config),
             vec!["counter".to_string()]
+        );
+    }
+
+    #[test]
+    fn extract_control_variables_descends_array_literal_elements() {
+        // An array literal contributes the union of the identifiers its
+        // elements reference; a no-op arm would drop `phase` and `max`.
+        let config = control_config("length([phase, max]) > 0", vec![]);
+        assert_eq!(
+            extract_control_variables(&config),
+            vec!["max".to_string(), "phase".to_string()]
+        );
+    }
+
+    #[test]
+    fn extract_control_variables_descends_object_literal_values_not_keys() {
+        // Object *values* are expressions and contribute identifiers; the
+        // keys are authored text and must not be lifted as control
+        // variables (`stage` below is a key, not a reference).
+        let config = control_config("{ stage: phase, limit: max }", vec![]);
+        assert_eq!(
+            extract_control_variables(&config),
+            vec!["max".to_string(), "phase".to_string()]
         );
     }
 
