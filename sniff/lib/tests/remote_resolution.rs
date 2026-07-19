@@ -1,5 +1,6 @@
 use sniff::SniffError;
-use sniff::filesystem::git::{ApiFlavor, resolve_remote_at};
+use sniff::filesystem::git::{ApiFlavor, GitRepo, resolve_remote_at};
+use sniff::filesystem::preferred_remote_url;
 
 fn repository() -> (tempfile::TempDir, git2::Repository) {
     let directory = tempfile::tempdir().unwrap();
@@ -50,6 +51,34 @@ fn azure_ssh_remote_is_classified_without_network_access() {
     let resolved = resolve_remote_at(directory.path(), None).unwrap().unwrap();
     assert_eq!(resolved.api_flavor, ApiFlavor::AzureDevOps);
     assert_eq!(resolved.host.as_deref(), Some("ssh.dev.azure.com"));
+}
+
+/// AC19: the aggregate `GitRepo` projection and the shared resolver must
+/// select the same remote. A URL-less `origin` used to win the aggregate
+/// selection and then yield no org/repo at all, while `resolve_remote_at`
+/// skipped it and reported the usable remote.
+#[test]
+fn aggregate_projection_and_resolver_agree_when_origin_has_no_url() {
+    let (directory, repository) = repository();
+    repository
+        .config()
+        .unwrap()
+        .set_str("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+        .unwrap();
+    repository.remote("alpha", "https://github.com/acme/alpha.git").unwrap();
+
+    let resolved = resolve_remote_at(directory.path(), None).unwrap().unwrap();
+    assert_eq!(resolved.name, "alpha");
+    assert_eq!(
+        preferred_remote_url(directory.path()).unwrap().as_deref(),
+        Some("https://github.com/acme/alpha.git")
+    );
+
+    let repo = GitRepo::discover(directory.path()).unwrap().unwrap();
+    assert_eq!(
+        repo.org_and_repo(),
+        (Some("acme".to_string()), Some("alpha".to_string()))
+    );
 }
 
 #[test]

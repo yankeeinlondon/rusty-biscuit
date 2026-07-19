@@ -74,22 +74,38 @@ pub fn resolve_remote_at(path: &Path, requested: Option<&str>) -> Result<Option<
         }
         Some(name.to_string())
     } else {
-        names
+        let usable = names
             .iter()
-            .find(|name| name.as_str() == "origin" && configured_url(&repo, name).is_some())
-            .or_else(|| {
-                names.iter().find(|name| {
-                    name.as_str() != "upstream" && configured_url(&repo, name).is_some()
-                })
-            })
-            .or_else(|| {
-                names.iter().find(|name| {
-                    name.as_str() == "upstream" && configured_url(&repo, name).is_some()
-                })
-            })
-            .cloned()
+            .filter(|name| configured_url(&repo, name).is_some())
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        select_preferred_remote(usable).map(str::to_string)
     };
     selected.map(|name| resolve_named(&repo, name)).transpose()
+}
+
+/// Applies the preferred-remote order to names already known to have URLs.
+///
+/// This is the single ordering authority behind both [`resolve_remote_at`] and
+/// the aggregate `GitRepo` projections. Callers must pre-filter out remotes
+/// without a usable URL; a URL-less remote is never preferred over one that
+/// can actually be contacted.
+///
+/// ## Notes
+///
+/// Order is `origin`, then the alphabetically first non-`upstream` remote,
+/// then `upstream`.
+pub(super) fn select_preferred_remote<'a>(
+    candidates: impl IntoIterator<Item = &'a str>,
+) -> Option<&'a str> {
+    let mut names = candidates.into_iter().collect::<Vec<_>>();
+    names.sort_unstable();
+    names
+        .iter()
+        .find(|name| **name == "origin")
+        .or_else(|| names.iter().find(|name| **name != "upstream"))
+        .or_else(|| names.first())
+        .copied()
 }
 
 fn configured_url(repo: &gix::Repository, name: &str) -> Option<String> {

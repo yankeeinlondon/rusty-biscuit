@@ -1442,32 +1442,20 @@ fn parse_org_repo(url: &str) -> (Option<String>, Option<String>) {
     }
 }
 
-/// Selects the preferred remote from a list of remotes.
+/// Selects the preferred remote from an already-collected remote list.
 ///
-/// Preference order:
-/// 1. `origin` (always preferred)
-/// 2. First alphabetically, excluding `upstream`
-/// 3. `upstream` as last resort (only if it's the sole remote)
+/// Ordering is delegated to [`super::remote_resolver::select_preferred_remote`]
+/// so this aggregate projection and `resolve_remote_at` can never disagree
+/// about which remote a repository prefers. Remotes without a usable URL are
+/// excluded before selection, matching the resolver.
 fn preferred_remote(remotes: &[RemoteInfo]) -> Option<&RemoteInfo> {
-    if remotes.is_empty() {
-        return None;
-    }
-
-    // Prefer "origin"
-    if let Some(origin) = remotes.iter().find(|r| r.name == "origin") {
-        return Some(origin);
-    }
-
-    // First non-upstream remote alphabetically
-    let mut candidates: Vec<_> = remotes.iter().filter(|r| r.name != "upstream").collect();
-    candidates.sort_by(|a, b| a.name.cmp(&b.name));
-
-    if let Some(first) = candidates.first() {
-        return Some(first);
-    }
-
-    // Fall back to upstream if it's the only remote
-    remotes.first()
+    let usable = remotes
+        .iter()
+        .filter(|remote| remote.url.as_deref().is_some_and(|url| !url.trim().is_empty()))
+        .collect::<Vec<_>>();
+    let selected =
+        super::remote_resolver::select_preferred_remote(usable.iter().map(|r| r.name.as_str()))?;
+    usable.into_iter().find(|remote| remote.name == selected)
 }
 
 #[cfg(test)]
