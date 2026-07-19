@@ -25,20 +25,23 @@
 //!
 //! ## The fixture is deliberately SIGINT-immune
 //!
-//! The obvious fixture — a task running `sleep 300` — would prove almost
-//! nothing. `SystemTaskShell` spawns each task's `sh -c` **without**
-//! `process_group(0)` (see `lib/src/composition/sequence/task/shell.rs`), so
-//! those children share claudine's foreground process group. A tty-delivered
-//! SIGINT would reach them directly and kill them even if claudine's fan-out
-//! were entirely broken; the test would pass on a regression.
+//! The obvious fixture — a task running `sleep 300` — risks proving almost
+//! nothing: a child sharing claudine's foreground process group would be killed
+//! by the tty-delivered SIGINT directly, even if claudine's fan-out were
+//! entirely broken, and the test would pass on a regression.
 //!
-//! So each task instead runs `trap '' INT` and then loops forever. The task
-//! shell now *ignores* the tty's SIGINT. The only remaining thing that can end
-//! it is claudine's own machinery: the sequence's `signal_hook` handler sets
-//! the shared interrupt flag, and every task's wait loop observes that flag and
-//! calls `child.kill()` (SIGKILL, unignorable). Each dead pid is therefore
-//! positive evidence that the fan-out reached *that specific task* — not a
-//! side effect of the terminal's process-group broadcast.
+//! Two independent things now rule that out. `SystemTaskShell` spawns each
+//! task's `sh -c` under `process_group(0)` (see
+//! `lib/src/composition/sequence/task/shell.rs`), so the children are no longer
+//! in the foreground group the terminal broadcasts to; and each task
+//! additionally runs `trap '' INT` before looping forever, so even a delivered
+//! SIGINT would be ignored. The only remaining thing that can end a task is
+//! claudine's own machinery: the sequence's `signal_hook` handler sets the
+//! shared interrupt flag, every task's wait loop observes it, and
+//! `ProcessTree::terminate` signals the task's whole group — SIGTERM, then an
+//! unconditional, unignorable SIGKILL. Each dead pid is therefore positive
+//! evidence that the fan-out reached *that specific task*, not a side effect of
+//! the terminal's process-group broadcast.
 //!
 //! Each task publishes its own pid before blocking, which serves double duty:
 //! the pid files are the readiness barrier (all children are in their loops
