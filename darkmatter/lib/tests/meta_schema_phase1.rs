@@ -1,8 +1,5 @@
-//! Phase 1 executable contracts for the SimplifiedSchema semantic meta-types.
-//!
-//! Tests whose production surface lands in later phases are ignored by the
-//! ordinary suite, but compile now and are run explicitly with `--ignored` to
-//! prove that they fail because the semantic types are not implemented yet.
+//! Executable contracts established in Phase 1 for the SimplifiedSchema
+//! semantic meta-types.
 
 use std::{fs, path::Path};
 
@@ -254,7 +251,6 @@ fn shipped_schema_corpus_is_passively_classified_without_resolution() {
 }
 
 #[test]
-#[ignore = "Phase 1 contract; enable after the meta-schema production phase lands"]
 fn shipped_base_schema_retypes_schema_and_preserves_resolution_acceptance() {
     let compiled = darkmatter_base_json_schema();
     assert!(schema_property_contains(&compiled, "$schema", "x-darkmatter-schema"));

@@ -190,6 +190,112 @@ pub(super) fn parse_standalone_schema_payload_with_source(
     Ok(SourceAware { value, source_map })
 }
 
+/// One authored node inside a schema value, with its exact source span.
+///
+/// This is the structural half of the sidecar, for consumers that must point at
+/// something *inside* a value the semantic parser rejects — where
+/// [`parse_property_definition_with_source`] cannot help, because there is no
+/// parse product to project. The shapes come from the same block/flow locator
+/// the source-aware parsers use, so a `[]` inside a quoted scalar or a `:`
+/// inside a regex is never mistaken for structure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaValueNode {
+    /// Authored byte range of the complete node.
+    pub span: Range<usize>,
+    /// The node's authored shape, with its children.
+    pub kind: SchemaValueKind,
+}
+
+impl SchemaValueNode {
+    /// Every node in this subtree paired with its depth, deepest first.
+    ///
+    /// Ordering makes "the smallest authored node that fails" a single pass.
+    pub fn deepest_first(&self) -> Vec<(usize, &SchemaValueNode)> {
+        let mut out = Vec::new();
+        self.collect(0, &mut out);
+        out.sort_by_key(|(depth, _)| std::cmp::Reverse(*depth));
+        out
+    }
+
+    fn collect<'a>(&'a self, depth: usize, out: &mut Vec<(usize, &'a SchemaValueNode)>) {
+        out.push((depth, self));
+        match &self.kind {
+            SchemaValueKind::Scalar => {}
+            SchemaValueKind::Mapping(entries) => {
+                for entry in entries {
+                    entry.value.collect(depth + 1, out);
+                }
+            }
+            SchemaValueKind::Sequence(items) => {
+                for item in items {
+                    item.collect(depth + 1, out);
+                }
+            }
+        }
+    }
+}
+
+/// The authored shape of a [`SchemaValueNode`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SchemaValueKind {
+    /// A plain, single-quoted, or double-quoted scalar.
+    Scalar,
+    /// A block or flow mapping.
+    Mapping(Vec<SchemaValueEntry>),
+    /// A block or flow sequence. Empty for `[]`.
+    Sequence(Vec<SchemaValueNode>),
+}
+
+/// One key/value pair of a [`SchemaValueKind::Mapping`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaValueEntry {
+    /// The decoded mapping key.
+    pub key: String,
+    /// Authored byte range of the key token.
+    pub key_span: Range<usize>,
+    /// The pair's value node.
+    pub value: SchemaValueNode,
+}
+
+/// Locates the authored structure of one schema value without interpreting it.
+///
+/// `yaml_source` is the value's own authored YAML text and `source_offset` its
+/// byte offset in the caller's document. The source is never
+/// line-ending-normalized.
+///
+/// ## Returns
+///
+/// `None` when the text is not a locatable YAML block or flow node — the signal
+/// to fall back to the whole value's range.
+pub fn locate_schema_value(yaml_source: &str, source_offset: usize) -> Option<SchemaValueNode> {
+    locate_yaml_value(yaml_source)
+        .ok()
+        .map(|located| public_node(&located, source_offset))
+}
+
+fn public_node(located: &LocatedValue, offset: usize) -> SchemaValueNode {
+    let kind = match &located.kind {
+        LocatedKind::Scalar(_) => SchemaValueKind::Scalar,
+        LocatedKind::Mapping(pairs) => SchemaValueKind::Mapping(
+            pairs
+                .iter()
+                .map(|pair| SchemaValueEntry {
+                    key: pair.key.clone(),
+                    key_span: offset_span(&pair.key_span, offset),
+                    value: public_node(&pair.value, offset),
+                })
+                .collect(),
+        ),
+        LocatedKind::Sequence(items) => SchemaValueKind::Sequence(
+            items.iter().map(|item| public_node(item, offset)).collect(),
+        ),
+    };
+    SchemaValueNode {
+        span: offset_span(&located.span, offset),
+        kind,
+    }
+}
+
 #[derive(Debug, Clone)]
 struct LocatedValue {
     span: Range<usize>,
@@ -435,8 +541,12 @@ fn locate_inline(source: &str, range: Range<usize>) -> Result<LocatedValue, Sche
         let end = matching_delimiter(source, range.start, b'[', b']')
             .filter(|end| *end + 1 == range.end)
             .ok_or_else(projection_error)?;
+        // An empty flow collection (`[]`) splits into one empty item; it has
+        // no child node, and is itself the smallest authored node there is.
         let items = split_top_level(source, range.start + 1..end, b',')
             .into_iter()
+            .map(|item| trim_range(source, item))
+            .filter(|item| item.start < item.end)
             .map(|item| locate_inline(source, item))
             .collect::<Result<Vec<_>, _>>()?;
         return Ok(LocatedValue {
@@ -451,6 +561,9 @@ fn locate_inline(source: &str, range: Range<usize>) -> Result<LocatedValue, Sche
         let mut pairs = Vec::new();
         for pair in split_top_level(source, range.start + 1..end, b',') {
             let pair = trim_range(source, pair);
+            if pair.start == pair.end {
+                continue;
+            }
             let raw_pair = &source[pair.clone()];
             let colon = mapping_separator(raw_pair).ok_or_else(projection_error)?;
             let key_span = trim_range(source, pair.start..pair.start + colon);

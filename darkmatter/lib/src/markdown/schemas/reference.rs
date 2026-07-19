@@ -22,6 +22,9 @@ pub struct SchemaReference {
 
 impl SchemaReference {
     /// Borrows the syntax-checked [`FileReference`].
+    ///
+    /// Its `raw()` is the canonical (trimmed) reference — the same string used
+    /// for classification, resolution, and error reporting.
     pub fn file_reference(&self) -> &FileReference {
         &self.file_reference
     }
@@ -38,6 +41,12 @@ impl SchemaReference {
 
 /// Classifies one authored schema reference without resolving it.
 ///
+/// The authored string is trimmed once here, and every downstream product —
+/// the classification, the [`FileReference`], and the `reference` carried on
+/// errors — is derived from that one trimmed string. Callers must not re-trim
+/// or re-classify: a padded declaration such as `" ./schemas/post.yaml "` must
+/// never be checked as one string and resolved as another.
+///
 /// Construction delegates syntax to [`FileReference::new`]. HTTP(S) values
 /// are rejected by Darkmatter's local-only schema policy before construction.
 /// This function performs no filesystem or network access.
@@ -46,12 +55,22 @@ impl SchemaReference {
 ///
 /// Returns [`SchemaError::RemoteUnsupported`] for HTTP(S) values and
 /// [`SchemaError::Unresolved`] carrying the syntax error for malformed local
-/// file references.
+/// file references, including a value that is empty or entirely whitespace.
 pub fn classify_schema_reference(reference: &str) -> Result<SchemaReference, SchemaError> {
     let trimmed = reference.trim();
     if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
         return Err(SchemaError::RemoteUnsupported {
-            reference: reference.to_string(),
+            reference: trimmed.to_string(),
+        });
+    }
+    // A whitespace-only value is an empty reference, not a path made of
+    // spaces; reject it here rather than handing the padding to biscuit-file.
+    if trimmed.is_empty() {
+        return Err(SchemaError::Unresolved {
+            reference: String::new(),
+            source: biscuit_file::FileReferenceError::InvalidSyntax(
+                "empty reference string".to_string(),
+            ),
         });
     }
     let kind = if is_bare_schema_name(trimmed) {
@@ -59,11 +78,10 @@ pub fn classify_schema_reference(reference: &str) -> Result<SchemaReference, Sch
     } else {
         SchemaReferenceKind::PathQualified
     };
-    let file_reference =
-        FileReference::new(reference).map_err(|source| SchemaError::Unresolved {
-            reference: reference.to_string(),
-            source,
-        })?;
+    let file_reference = FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
+        reference: trimmed.to_string(),
+        source,
+    })?;
     Ok(SchemaReference { file_reference, kind })
 }
 

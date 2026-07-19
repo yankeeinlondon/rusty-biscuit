@@ -2510,10 +2510,20 @@ fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
         .iter()
         .filter(|descriptor| descriptor.category == "Git")
         .collect();
-    let [function] = git_functions.as_slice() else {
-        panic!("expected exactly one Git function descriptor: {git_functions:?}");
-    };
-    let function_name = function.signature.split('(').next().expect("function name");
+    assert_eq!(
+        git_functions
+            .iter()
+            .map(|descriptor| descriptor.signature)
+            .collect::<Vec<_>>(),
+        [
+            "predict_conflicts(branch)",
+            "branch_exists_on_remote()",
+            "branch_exists_on_remote(branch)",
+            "branch_exists_on_remote(branch, remote)",
+            "remote_vendor([remote])",
+        ],
+        "the shipped Git function signature set changed"
+    );
 
     let mut text = String::from("# Git catalog parity\n\n");
     let mut context_positions = Vec::new();
@@ -2527,15 +2537,25 @@ fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
         text.push('\n');
         context_positions.push((*descriptor, hover_line, completion_line, completion_character));
     }
-    let function_hover_line = text.lines().count() as u32;
-    text.push_str(&format!(
-        "Function: {{{{ {function_name}(\"feature/example\") }}}}\n"
-    ));
-    let function_completion_line = text.lines().count() as u32;
-    let function_completion_source = format!("Complete: {{{{ {function_name}");
-    let function_completion_character = function_completion_source.len() as u32;
-    text.push_str(&function_completion_source);
-    text.push('\n');
+    let mut function_positions = Vec::new();
+    for function in &git_functions {
+        let function_name = function.signature.split('(').next().expect("function name");
+        let hover_line = if expressions::function_descriptor(function_name) == Some(*function) {
+            let line = text.lines().count() as u32;
+            text.push_str(&format!(
+                "Function: {{{{ {function_name}(\"feature/example\") }}}}\n"
+            ));
+            Some(line)
+        } else {
+            None
+        };
+        let completion_line = text.lines().count() as u32;
+        let completion_source = format!("Complete: {{{{ {function_name}");
+        let completion_character = completion_source.len() as u32;
+        text.push_str(&completion_source);
+        text.push('\n');
+        function_positions.push((*function, hover_line, completion_line, completion_character));
+    }
 
     let workspace = tempfile::tempdir().unwrap();
     let path = workspace.path().join("doc.md");
@@ -2584,44 +2604,52 @@ fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
         );
     }
 
-    let completion = fixture
-        .request(
-            "textDocument/completion",
-            json!({
-                "textDocument": { "uri": uri.as_str() },
-                "position": {
-                    "line": function_completion_line,
-                    "character": function_completion_character
-                }
-            }),
-        )
-        .result
-        .expect("function completion");
-    let item = completion
-        .as_array()
-        .expect("completion array")
-        .iter()
-        .find(|item| item["textEdit"]["newText"] == json!(function_name))
-        .expect("Git function completion");
-    assert_eq!(item["label"], json!(function.signature));
-    assert_eq!(item["detail"], json!(function.typed_signature()));
-    assert_eq!(item["documentation"]["value"], json!(function.description));
+    for (function, hover_line, completion_line, completion_character) in function_positions {
+        let function_name = function.signature.split('(').next().expect("function name");
+        let completion = fixture
+            .request(
+                "textDocument/completion",
+                json!({
+                    "textDocument": { "uri": uri.as_str() },
+                    "position": {
+                        "line": completion_line,
+                        "character": completion_character
+                    }
+                }),
+            )
+            .result
+            .expect("function completion");
+        let item = completion
+            .as_array()
+            .expect("completion array")
+            .iter()
+            .find(|item| {
+                item["label"] == json!(function.signature)
+                    && item["textEdit"]["newText"] == json!(function_name)
+            })
+            .unwrap_or_else(|| {
+                panic!("completion missing Git signature `{}`", function.signature)
+            });
+        assert_eq!(item["detail"], json!(function.typed_signature()));
+        assert_eq!(item["documentation"]["value"], json!(function.description));
 
-    let hover = fixture
-        .request(
-            "textDocument/hover",
-            json!({
-                "textDocument": { "uri": uri.as_str() },
-                "position": { "line": function_hover_line, "character": 15 }
-            }),
-        )
-        .result
-        .expect("function hover");
-    let hover_text = hover["contents"]["value"].as_str().unwrap_or_default();
-    assert!(
-        hover_text.contains(&expressions::format_function_block(function)),
-        "function hover must use the shipped descriptor: {hover_text}"
-    );
+        let Some(hover_line) = hover_line else { continue };
+        let hover = fixture
+            .request(
+                "textDocument/hover",
+                json!({
+                    "textDocument": { "uri": uri.as_str() },
+                    "position": { "line": hover_line, "character": 15 }
+                }),
+            )
+            .result
+            .expect("function hover");
+        let hover_text = hover["contents"]["value"].as_str().unwrap_or_default();
+        assert!(
+            hover_text.contains(&expressions::format_function_block(function)),
+            "function hover must use the shipped descriptor: {hover_text}"
+        );
+    }
 
     fixture.shutdown();
 }
@@ -3551,6 +3579,377 @@ fn meta_schema_phase6_shipped_schema_activation_and_current_error() {
         "the malformed current buffer must own exactly one schema diagnostic: {current:?}"
     );
     assert_eq!(current[0]["range"]["start"], json!({ "line": 0, "character": 0 }));
+
+    fixture.shutdown();
+}
+
+/// Every parser state the shared tolerant parser-state authority distinguishes,
+/// end to end through the protocol.
+///
+/// Each case is a value the schema grammar cannot parse yet, so nothing here can
+/// be answered by re-parsing: the completion must come from the cursor's
+/// structural role. The last three cases additionally prove the projection seam
+/// — multibyte content, CRLF line endings, and quoted scalars all report ranges
+/// in authored document bytes.
+#[test]
+fn meta_schema_completion_reads_parser_state_for_partially_authored_values() {
+    const ACTIVATION: &str = "$schema:\n  definition: type-definition\n";
+
+    // (name, frontmatter body after ACTIVATION, line, character, expected label)
+    let cases = [
+        // The innermost `(` belongs to `pattern(...)`, so a delimiter search
+        // cannot see that the cursor is back in `string`'s constraint list.
+        (
+            "second-constraint.md",
+            "definition: string(pattern(^a); re\n",
+            3u32,
+            34u32,
+            "required",
+        ),
+        // The postfix `[](…)` list carries the array constraint surface, not
+        // the `type-definition` item atom's (default / required / generated).
+        (
+            "array-constraints.md",
+            "definition: type-definition[](mi\n",
+            3,
+            32,
+            "min",
+        ),
+        // An inline object is not a token under a comma/bracket splitter.
+        (
+            "inline-object.md",
+            "definition: '{ child: str'\n",
+            3,
+            25,
+            "string",
+        ),
+        // A union arm authored as a block-sequence item keeps its own state.
+        (
+            "union-arm.md",
+            "definition:\n  - string\n  - string(mi\n",
+            5,
+            13,
+            "min",
+        ),
+        // Double-quoted projection.
+        ("double-quoted.md", "definition: \"string(mi\"\n", 3, 22, "min"),
+        // Multibyte content inside the value being completed.
+        ("utf8.md", "definition: enum(café)[](mi\n", 3, 27, "min"),
+    ];
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    for (name, body, line, character, expected) in cases {
+        for crlf in [false, true] {
+            let text = format!("---\n{ACTIVATION}{body}---\n\nbody\n");
+            let text = if crlf { text.replace('\n', "\r\n") } else { text };
+            let file = if crlf { format!("crlf-{name}") } else { name.to_string() };
+            let path = workspace.path().join(&file);
+            std::fs::write(&path, &text).unwrap();
+            let uri = url::Url::from_file_path(path).unwrap();
+            open(&fixture, uri.as_str(), &text);
+            let completion = fixture
+                .request(
+                    "textDocument/completion",
+                    json!({
+                        "textDocument": { "uri": uri.as_str() },
+                        "position": { "line": line, "character": character }
+                    }),
+                )
+                .result
+                .expect("completion result");
+            let items = completion.as_array().expect("completion array");
+            let offered = items
+                .iter()
+                .find(|item| item["label"] == json!(expected))
+                .unwrap_or_else(|| panic!("{file}: {expected} not offered: {completion:?}"));
+            // The replaced range is the authored token, located by the parser
+            // rather than by searching the decoded text.
+            let range = &offered["textEdit"]["range"];
+            assert_eq!(range["end"], json!({ "line": line, "character": character }), "{file}");
+            assert_eq!(range["start"]["line"], json!(line), "{file}");
+            assert!(
+                range["start"]["character"].as_u64().unwrap() < u64::from(character),
+                "{file}: a partial token must be replaced, not appended: {range:?}"
+            );
+        }
+    }
+
+    fixture.shutdown();
+}
+
+/// A top-level `value` property typed as a **mixed union** of a semantic
+/// meta-type arm and one ordinary `arm`, in both arm orders
+/// (`semantic_first`), with `value_line` as the authored instance.
+fn mixed_semantic_union_doc(
+    semantic: &str,
+    semantic_first: bool,
+    arm: &str,
+    value_line: &str,
+) -> String {
+    let semantic_arm = format!("    - {semantic}");
+    let other = format!("    - \"{arm}\"");
+    let (first, second) =
+        if semantic_first { (semantic_arm, other) } else { (other, semantic_arm) };
+    format!("---\n$schema:\n  value:\n{first}\n{second}\n{value_line}\n---\n\nbody\n")
+}
+
+fn codes(diagnostics: &[Value]) -> Vec<String> {
+    diagnostics
+        .iter()
+        .filter_map(|diagnostic| diagnostic["code"].as_str().map(str::to_string))
+        .collect()
+}
+
+#[test]
+fn mixed_semantic_union_gates_the_specialized_diagnostic_on_whole_union_failure() {
+    // Activation records the semantic kind when *any* arm carries it, so the
+    // specialized diagnostic must additionally prove the whole union rejected
+    // the value — otherwise a sibling arm that validly accepts it is diagnosed.
+    //
+    // (semantic type, specialized code, sibling arm, value the sibling accepts,
+    //  value no arm accepts)
+    let cases = [
+        (
+            "type-definition",
+            "dm.schema.invalid_type_definition",
+            "string",
+            "value: hello",
+            "value:\n  a: 1",
+        ),
+        (
+            "schema",
+            "dm.schema.invalid_schema_shape",
+            "string",
+            "value: https://example.com/schema.yaml",
+            "value:\n  a: 1",
+        ),
+    ];
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let mut counter = 0usize;
+    for (semantic, expected_code, arm, accepted, rejected) in cases {
+        for semantic_first in [true, false] {
+            for (value_line, whole_union_fails) in [(accepted, false), (rejected, true)] {
+                counter += 1;
+                let text = mixed_semantic_union_doc(semantic, semantic_first, arm, value_line);
+                let path = workspace.path().join(format!("union-{counter}.md"));
+                std::fs::write(&path, &text).unwrap();
+                let uri = url::Url::from_file_path(path).unwrap();
+                open(&fixture, uri.as_str(), &text);
+                let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+                let present = codes(&diagnostics).iter().any(|code| code == expected_code);
+                assert_eq!(
+                    present, whole_union_fails,
+                    "{semantic} (semantic_first={semantic_first}, `{value_line}`): \
+                     expected {expected_code} present={whole_union_fails}: {diagnostics:?}"
+                );
+            }
+        }
+    }
+
+    fixture.shutdown();
+}
+
+#[test]
+fn single_arm_semantic_type_keeps_its_specialized_diagnostic() {
+    // The common non-union path is unchanged: one specialized diagnostic, and
+    // the generic custom-keyword problem it replaces stays suppressed.
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let text = "---\n$schema:\n  value: type-definition\nvalue: string(nope)\n---\n\nbody\n";
+    let path = workspace.path().join("single-arm.md");
+    std::fs::write(&path, text).unwrap();
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), text);
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    let codes = codes(&diagnostics);
+    assert_eq!(
+        codes.iter().filter(|code| *code == "dm.schema.invalid_type_definition").count(),
+        1,
+        "exactly one specialized diagnostic: {diagnostics:?}"
+    );
+    assert!(
+        !codes.iter().any(|code| code == "dm.schema.constraint"),
+        "the generic custom-keyword diagnostic stays replaced: {diagnostics:?}"
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn mixed_semantic_union_completion_merges_sibling_arm_candidates() {
+    // `[type-definition, enum(foo, bar)]` activates semantic authoring on one
+    // arm; the enum arm's members must still reach the merged union list.
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    for semantic_first in [true, false] {
+        let text = mixed_semantic_union_doc(
+            "type-definition",
+            semantic_first,
+            "enum(foo, bar)",
+            "value: ",
+        );
+        let file = format!("union-completion-{semantic_first}.md");
+        let path = workspace.path().join(&file);
+        std::fs::write(&path, &text).unwrap();
+        let uri = url::Url::from_file_path(path).unwrap();
+        open(&fixture, uri.as_str(), &text);
+        let completion = fixture
+            .request(
+                "textDocument/completion",
+                json!({
+                    "textDocument": { "uri": uri.as_str() },
+                    "position": { "line": 5, "character": 7 }
+                }),
+            )
+            .result
+            .expect("completion result");
+        let labels: Vec<&str> = completion
+            .as_array()
+            .expect("completion array")
+            .iter()
+            .filter_map(|item| item["label"].as_str())
+            .collect();
+        for expected in ["foo", "bar", "string"] {
+            assert!(
+                labels.contains(&expected),
+                "{file}: `{expected}` must be offered by the merged union: {labels:?}"
+            );
+        }
+    }
+
+    fixture.shutdown();
+}
+
+/// The LSP range of `needle`'s first occurrence in an ASCII fixture.
+fn range_of(text: &str, needle: &str) -> Value {
+    let start = text.find(needle).expect("fixture substring");
+    let line = text[..start].matches('\n').count() as u32;
+    let line_start = text[..start].rfind('\n').map_or(0, |index| index + 1);
+    let character = (start - line_start) as u32;
+    json!({
+        "start": { "line": line, "character": character },
+        "end": { "line": line, "character": character + needle.len() as u32 }
+    })
+}
+
+/// The LSP range covering an entire ASCII fixture.
+fn whole_document_range(text: &str) -> Value {
+    let line = text.matches('\n').count() as u32;
+    let line_start = text.rfind('\n').map_or(0, |index| index + 1);
+    json!({
+        "start": { "line": 0, "character": 0 },
+        "end": { "line": line, "character": (text.len() - line_start) as u32 }
+    })
+}
+
+/// A rejected **outer** standalone declaration must carry the declaration-shape
+/// code over the smallest offending value or union arm; only a buffer that is
+/// not parseable YAML keeps the whole-document `document_malformed` contract,
+/// and a rejected **inner** definition keeps its own specialized code.
+///
+/// The ranges are the point of this test: a whole-document range on any of the
+/// first four cases is the defect it exists to catch.
+#[test]
+fn standalone_outer_declaration_errors_are_shape_coded_and_precisely_ranged() {
+    // (file, text, expected code, offending substring — `None` = whole buffer)
+    let cases: [(&str, &str, &str, Option<&str>); 7] = [
+        (
+            "pure-empty-union.yaml",
+            "$schema: []\n",
+            "dm.schema.invalid_schema_shape",
+            Some("[]"),
+        ),
+        (
+            "tagged-empty-union.yaml",
+            "kind: schema\ntypes: []\n",
+            "dm.schema.invalid_schema_shape",
+            Some("[]"),
+        ),
+        (
+            "pure-invalid-arm.yaml",
+            "$schema:\n  - title: string\n  - 42\n",
+            "dm.schema.invalid_schema_shape",
+            Some("42"),
+        ),
+        (
+            "pure-invalid-reference.yaml",
+            "$schema: \"   \"\n",
+            "dm.schema.invalid_schema_shape",
+            Some("\"   \""),
+        ),
+        (
+            // A tab cannot indent YAML, so this never becomes a mapping at all.
+            "malformed.yaml",
+            "$schema:\n\tbad: string\n",
+            "dm.schema.document_malformed",
+            None,
+        ),
+        (
+            "pure-invalid-inner.yaml",
+            "$schema:\n  title: str\n",
+            "dm.schema.invalid_type_definition",
+            Some("str"),
+        ),
+        (
+            "tagged-invalid-inner.yaml",
+            "kind: schema\ntypes:\n  title: str\n",
+            "dm.schema.invalid_type_definition",
+            Some("str"),
+        ),
+    ];
+    let schema_codes = [
+        "dm.schema.invalid_schema_shape",
+        "dm.schema.document_malformed",
+        "dm.schema.invalid_type_definition",
+    ];
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    for (file, text, expected_code, offending) in cases {
+        let path = workspace.path().join(file);
+        std::fs::write(&path, text).unwrap();
+        let uri = url::Url::from_file_path(path).unwrap();
+        open(&fixture, uri.as_str(), text);
+        let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+
+        let published = codes(&diagnostics);
+        let owned: Vec<&String> = published
+            .iter()
+            .filter(|code| schema_codes.contains(&code.as_str()))
+            .collect();
+        assert_eq!(
+            owned,
+            vec![&expected_code.to_string()],
+            "{file}: exactly one schema-document diagnostic, with the stable code \
+             clients use to tell declaration shape from document YAML failure: \
+             {diagnostics:?}"
+        );
+
+        let expected_range = match offending {
+            Some(needle) => range_of(text, needle),
+            None => whole_document_range(text),
+        };
+        let reported = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic["code"] == json!(expected_code))
+            .expect("the asserted diagnostic");
+        assert_eq!(
+            reported["range"], expected_range,
+            "{file}: the range must cover only the offending value: {reported:?}"
+        );
+    }
 
     fixture.shutdown();
 }

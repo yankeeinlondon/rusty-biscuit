@@ -10,6 +10,7 @@
 //! `serde_yaml_ng::Value` and produces a [`SimplifiedSchema`].
 
 pub mod convert;
+mod cursor;
 pub mod grammar;
 mod lint;
 pub mod query;
@@ -20,11 +21,16 @@ pub mod types;
 pub mod yaml_scalar;
 
 pub use convert::{DRAFT_2020_12, to_json_schema};
+pub use cursor::{
+    SchemaCursor, SchemaCursorRole, is_union_arm_path, locate_schema_declaration_cursor,
+    locate_type_definition_cursor,
+};
 pub use lint::{SuggestionLintProblem, SuggestionLintReason, lint_suggestions};
 pub use query::{SuggestionItem, SuggestionQuery, suggestions_for_def, suggestions_for_path};
 pub use serialize::serialize_property_atom;
 pub use source::{
-    SchemaSourceMap, SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, SourceAware,
+    SchemaSourceMap, SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, SchemaValueEntry,
+    SchemaValueKind, SchemaValueNode, SourceAware, locate_schema_value,
     parse_property_definition_with_source, parse_schema_declaration_with_source,
     parse_yaml_schema_with_source, project_suggestion_spans,
 };
@@ -35,7 +41,9 @@ pub use types::{
     Constraint, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
     SimplifiedSchema, SimplifiedType, SuggestionCandidate, TypeExpr,
 };
-pub use yaml_scalar::{DecodedScalar, decode_scalar, decode_scalar_at};
+pub use yaml_scalar::{
+    DecodedScalar, decode_partial_scalar_at, decode_scalar, decode_scalar_at,
+};
 
 use indexmap::IndexMap;
 use serde_yaml_ng::Value as YamlValue;

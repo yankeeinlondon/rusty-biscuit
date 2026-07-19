@@ -98,14 +98,14 @@ struct Token {
     span: Range<usize>,
 }
 
-struct Lexer<'a> {
+pub(super) struct Lexer<'a> {
     src: &'a str,
     bytes: &'a [u8],
-    pos: usize,
+    pub(super) pos: usize,
 }
 
 impl<'a> Lexer<'a> {
-    fn new(src: &'a str) -> Self {
+    pub(super) fn new(src: &'a str) -> Self {
         Self {
             src,
             bytes: src.as_bytes(),
@@ -113,11 +113,11 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn peek_byte(&self) -> Option<u8> {
+    pub(super) fn peek_byte(&self) -> Option<u8> {
         self.bytes.get(self.pos).copied()
     }
 
-    fn skip_ws(&mut self) {
+    pub(super) fn skip_ws(&mut self) {
         while let Some(b) = self.peek_byte() {
             if b.is_ascii_whitespace() {
                 self.pos += 1;
@@ -185,7 +185,7 @@ impl<'a> Lexer<'a> {
     ///
     /// `-` is a normal word character except when followed by `>` (the
     /// description arrow), where the `-` terminates the word.
-    fn read_word(&mut self) -> (String, Range<usize>) {
+    pub(super) fn read_word(&mut self) -> (String, Range<usize>) {
         let start = self.pos;
         while let Some(b) = self.peek_byte() {
             if matches!(b, b',' | b';' | b'(' | b')' | b'\'' | b'"') || b.is_ascii_whitespace() {
@@ -202,7 +202,7 @@ impl<'a> Lexer<'a> {
 
     /// Read an identifier (`[a-z][a-z0-9-]*`). Used in the type-name and
     /// constraint-keyword positions.
-    fn read_ident(&mut self) -> (String, Range<usize>) {
+    pub(super) fn read_ident(&mut self) -> (String, Range<usize>) {
         let start = self.pos;
         while let Some(b) = self.peek_byte() {
             if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' {

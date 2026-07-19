@@ -3,6 +3,7 @@ use darkmatter::markdown::schemas::{
     SchemaSpanKind, SimplifiedSchema, parse_property_definition,
     parse_property_definition_with_source, parse_schema_declaration,
     parse_schema_declaration_with_source, parse_yaml_schema,
+    classify_schema_reference, resolve::resolve_schema_with_roots,
     simplified::grammar::MAX_INLINE_OBJECT_DEPTH,
 };
 use serde_yaml_ng::Value as YamlValue;
@@ -353,6 +354,88 @@ fn schema_declaration_parser_classifies_syntax_without_io() {
         assert!(
             parse_schema_declaration(&yaml(source)).is_err(),
             "invalid declaration was accepted: {source:?}",
+        );
+    }
+}
+
+/// Padded local references must be syntax-checked and resolved as the same
+/// string. Before this contract a quoted `' ./schemas/post.yaml '` classified
+/// as path-qualified on the trimmed value but resolved the padded one.
+#[test]
+fn padded_schema_references_are_classified_and_resolved_as_one_trimmed_string() {
+    let padded_path = [
+        " ./schemas/post.yaml",
+        "./schemas/post.yaml ",
+        " ./schemas/post.yaml ",
+        "\t\n./schemas/post.yaml\n\t",
+    ];
+    for source in padded_path {
+        let reference = classify_schema_reference(source).expect("padded local reference");
+        assert_eq!(reference.file_reference().raw(), "./schemas/post.yaml");
+        assert_eq!(reference.kind(), SchemaReferenceKind::PathQualified);
+    }
+    for source in [" post.yaml", "post.yaml ", " post.yaml ", "\tpost.yaml\n"] {
+        let reference = classify_schema_reference(source).expect("padded bare name");
+        assert_eq!(reference.file_reference().raw(), "post.yaml");
+        assert_eq!(reference.kind(), SchemaReferenceKind::BareName);
+    }
+
+    // Classification stays passive: none of the above exists on disk.
+    for source in ["  ./no/such/dir/missing.yaml  ", " missing.yaml "] {
+        classify_schema_reference(source).expect("a missing file is still valid syntax");
+    }
+
+    // The declaration parser (parser/validator path) reports the same product.
+    let declaration = parse_schema_declaration(&yaml("' ./schemas/does-not-exist.yaml '"))
+        .expect("quoted padded declaration");
+    let SchemaDeclaration::Reference(reference) = declaration else {
+        panic!("string declaration must classify as a reference");
+    };
+    assert_eq!(reference.file_reference().raw(), "./schemas/does-not-exist.yaml");
+    assert_eq!(reference.kind(), SchemaReferenceKind::PathQualified);
+
+    // A whitespace-only value is an empty reference, not a path of spaces.
+    for source in ["", " ", "   ", "\t", "\n", " \t\n "] {
+        let error = classify_schema_reference(source).expect_err("empty reference must be rejected");
+        let SchemaError::Unresolved { reference, source: cause } = &error else {
+            panic!("empty reference must report a structured resolution error: {error:?}");
+        };
+        assert_eq!(reference, "");
+        assert!(cause.to_string().contains("empty reference string"), "{cause}");
+    }
+    assert!(parse_schema_declaration(&yaml("'   '")).is_err());
+
+    // Resolver parity: the same padded strings load the same schema file.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let schemas = dir.path().join("schemas");
+    std::fs::create_dir(&schemas).expect("schemas dir");
+    std::fs::write(schemas.join("post.yaml"), "$schema:\n  title: string(required)\n")
+        .expect("write referenced schema");
+
+    let expected =
+        resolve_schema_with_roots(&serde_json::json!("./schemas/post.yaml"), dir.path(), &[])
+            .expect("unpadded reference resolves")
+            .json_schema;
+    for source in padded_path {
+        let resolved = resolve_schema_with_roots(&serde_json::json!(source), dir.path(), &[])
+            .unwrap_or_else(|error| panic!("padded reference {source:?} must resolve: {error}"))
+            .json_schema;
+        assert_eq!(resolved, expected, "padded reference {source:?} resolved differently");
+    }
+
+    // Bare-name resolution against schema roots agrees on the same trimming.
+    let roots = [schemas.clone()];
+    for source in [" post.yaml", "post.yaml ", " post.yaml ", "\tpost.yaml\n"] {
+        let resolved = resolve_schema_with_roots(&serde_json::json!(source), dir.path(), &roots)
+            .unwrap_or_else(|error| panic!("padded bare name {source:?} must resolve: {error}"))
+            .json_schema;
+        assert_eq!(resolved, expected, "padded bare name {source:?} resolved differently");
+    }
+
+    for source in ["", "   ", "\t\n"] {
+        assert!(
+            resolve_schema_with_roots(&serde_json::json!(source), dir.path(), &[]).is_err(),
+            "the resolver must reject the empty reference {source:?}",
         );
     }
 }

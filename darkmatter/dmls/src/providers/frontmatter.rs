@@ -15,11 +15,12 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::schemas::{
-    Constraint, DecodedScalar, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration,
-    SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr, darkmatter_base_schema, decode_scalar,
-    parse_property_definition, parse_schema_declaration, parse_schema_declaration_with_source,
-    schema_constraint_descriptors, schema_type_descriptors, select_literal_discriminant_arm,
-    suggestions_for_def,
+    Constraint, DecodedScalar, PropertyAtom, PropertyDef, SchemaArm, SchemaCursor,
+    SchemaCursorRole, SchemaDeclaration, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
+    darkmatter_base_schema, decode_scalar, locate_schema_declaration_cursor,
+    locate_type_definition_cursor, parse_property_definition, parse_schema_declaration,
+    parse_schema_declaration_with_source, schema_constraint_descriptors, schema_type_descriptors,
+    select_literal_discriminant_arm, suggestions_for_def,
 };
 use serde_json::Value;
 use darkmatter::markdown::span::SourceSpan;
@@ -44,10 +45,22 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
 
 /// Completion inside the frontmatter block: schema keys, enum values, boolish
 /// scaffolds, file paths, `style.*` keys, and `suggest(...)` candidates.
+///
+/// Semantic meta-type candidates are **merged** with the ordinary schema-driven
+/// ones rather than replacing them. A property typed
+/// `[type-definition, enum(foo, bar)]` activates semantic authoring on one arm
+/// only, so short-circuiting there would silently discard every sibling arm's
+/// candidates. Semantic items lead so the pure-`type-definition` ordering is
+/// unchanged, and `dedup_completions` keeps first-seen order.
 pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
-    if let Some(items) = meta_schema_completion(ctx, offset) {
-        return items;
-    }
+    let mut items = meta_schema_completion(ctx, offset).unwrap_or_default();
+    items.extend(schema_completion(ctx, offset));
+    dedup_completions(items)
+}
+
+/// The ordinary (non-semantic) frontmatter completion candidates: schema keys,
+/// enum values, boolish scaffolds, file paths, `style.*` keys, and suggestions.
+fn schema_completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
     let Some(ast) = overlay_ast(ctx) else {
         return Vec::new();
     };
@@ -76,6 +89,13 @@ pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
 }
 
 /// Completion for values interpreted as SimplifiedSchema authoring syntax.
+///
+/// Activation (which values carry a semantic meta-type at all) comes from the
+/// overlay's typed [`SchemaAuthoringState`]. Everything past that — what the
+/// cursor is in the middle of authoring, and the range a text edit may replace
+/// — comes from the shared tolerant parser-state authority
+/// ([`locate_type_definition_cursor`] / [`locate_schema_declaration_cursor`]),
+/// never from searching the value text for a delimiter.
 fn meta_schema_completion(ctx: &DocumentContext, offset: usize) -> Option<Vec<CompletionItem>> {
     let overlay = ctx.overlay?;
     let (line_start, prefix) = line_prefix(ctx.text, offset);
@@ -83,37 +103,65 @@ fn meta_schema_completion(ctx: &DocumentContext, offset: usize) -> Option<Vec<Co
     let trimmed = prefix.trim_start();
     let ancestors = enclosing_path(ctx.text, line_start, indent);
 
-    let (partial, start, kinds) = if let Some(colon) = trimmed.find(':') {
+    let (value_start, kinds) = if let Some(colon) = trimmed.find(':') {
         let key = trimmed[..colon].trim();
-        let value = trimmed[colon + 1..].trim_start();
-        let value_start = offset - value.len();
         let kinds = meta_schema_kinds_for_line(overlay, &ancestors, key, false)?;
-        let (partial, start) = semantic_value_token(value, value_start);
-        (partial, start, kinds)
+        (semantic_value_start(ctx, offset, trimmed, colon), kinds)
     } else if let Some(after_dash) = trimmed.strip_prefix("- ") {
-        let start = offset - after_dash.len();
         let kinds = meta_schema_kinds_for_line(overlay, &ancestors, "", true)?;
-        let (partial, start) = semantic_value_token(after_dash, start);
-        (partial, start, kinds)
+        (offset - after_dash.len(), kinds)
     } else if trimmed == "-" {
         let kinds = meta_schema_kinds_for_line(overlay, &ancestors, "", true)?;
-        ("", offset, kinds)
+        (offset, kinds)
     } else {
         return None;
     };
 
+    let value_source = ctx.text.get(value_start..)?;
     let mut items = Vec::new();
     for kind in kinds {
-        match kind {
+        let state = match kind {
             MetaSchemaKind::TypeDefinition => {
-                items.extend(type_definition_completions(ctx, start, offset, partial));
+                locate_type_definition_cursor(value_source, value_start, offset)
             }
             MetaSchemaKind::Schema => {
-                items.extend(schema_value_completions(ctx, start, offset, partial));
+                locate_schema_declaration_cursor(value_source, value_start, offset)
+            }
+        };
+        // A cursor the grammar cannot speak to (inside a `-> description`)
+        // deliberately offers nothing rather than guessing.
+        let Some(state) = state else { continue };
+        let start = state.token_span.start;
+        match kind {
+            MetaSchemaKind::TypeDefinition => {
+                items.extend(type_definition_completions(ctx, start, offset, &state));
+            }
+            MetaSchemaKind::Schema => {
+                items.extend(schema_value_completions(ctx, start, offset, &state.token));
             }
         }
     }
     Some(dedup_completions(items))
+}
+
+/// The document byte offset where a `key:` line's value begins.
+///
+/// The frontmatter AST's value span is authoritative whenever the buffer's YAML
+/// still parses; a value being typed into a not-yet-parseable buffer (an open
+/// `{`, a half-written flow sequence) has no entry, so the line's own
+/// `key:`-relative start is the fallback.
+fn semantic_value_start(
+    ctx: &DocumentContext,
+    offset: usize,
+    trimmed: &str,
+    colon: usize,
+) -> usize {
+    let fallback = offset - trimmed[colon + 1..].trim_start().len();
+    overlay_ast(ctx)
+        .and_then(|ast| ast.entry_at_offset(offset))
+        .filter(|entry| entry.value_span.start <= offset && entry.value_span.start >= fallback)
+        .map(|entry| entry.value_span.start)
+        .unwrap_or(fallback)
 }
 
 fn meta_schema_kinds_for_line(
@@ -168,59 +216,35 @@ fn meta_schema_kinds_for_line(
     }
 }
 
-/// The trailing scalar token within a semantic value plus its document start.
-fn semantic_value_token(value: &str, value_start: usize) -> (&str, usize) {
-    let separator = value.rfind([',', '[']);
-    let candidate = separator.map_or(value, |index| &value[index + 1..]);
-    let token = candidate.trim_start();
-    let skipped = value.len() - candidate.len() + candidate.len() - token.len();
-    let start = value_start + skipped;
-    match token.as_bytes().first() {
-        Some(b'\'' | b'"') => (&token[1..], start + 1),
-        _ => (token, start),
-    }
-}
-
+/// Completion for a cursor inside a `type-definition` value, dispatched on the
+/// structural role the shared parser-state authority reports.
 fn type_definition_completions(
     ctx: &DocumentContext,
     start: usize,
     offset: usize,
-    partial: &str,
+    state: &SchemaCursor,
 ) -> Vec<CompletionItem> {
-    if let Some(open) = partial.rfind('(')
-        && !partial[open + 1..].contains(')')
-    {
-        let keyword = partial[..open].trim_end_matches("[]");
-        let argument = partial[open + 1..].rsplit(',').next().unwrap_or("").trim_start();
-        let argument_start = offset - argument.len();
-        let Some(descriptor) = schema_type_descriptors()
-            .iter()
-            .find(|descriptor| descriptor.keyword == keyword)
-        else {
-            return Vec::new();
-        };
-        return schema_constraint_descriptors()
-            .iter()
-            .filter(|constraint| !constraint.keyword.starts_with('<'))
-            .filter(|constraint| descriptor.accepted_constraints.contains(constraint.keyword))
-            .filter(|constraint| constraint.keyword.starts_with(argument))
-            .filter_map(|constraint| {
-                let insert = match constraint.keyword {
-                    "default" => "default()".to_string(),
-                    _ if constraint.form.contains('(') => constraint.form.to_string(),
-                    keyword => keyword.to_string(),
-                };
-                item(
-                    ctx,
-                    argument_start,
-                    offset,
-                    constraint.keyword,
-                    &insert,
-                    CompletionItemKind::PROPERTY,
-                    Some(constraint.description.to_string()),
-                )
-            })
-            .collect();
+    let partial = state.token.as_str();
+    match &state.role {
+        SchemaCursorRole::Constraint { subject, array_level } => {
+            return constraint_completions(
+                ctx,
+                start,
+                offset,
+                partial,
+                subject.as_deref(),
+                *array_level,
+            );
+        }
+        // A constraint's arguments are author-supplied values (a regex body, a
+        // glob, an enum member); the catalog has nothing to offer there.
+        SchemaCursorRole::Argument { .. } => return Vec::new(),
+        // An inline object's keys are the author's own property names.
+        SchemaCursorRole::InlineObjectKey => return Vec::new(),
+        // The file half of `Name@reference` names a schema file, not a type
+        // keyword — the catalog must not leak into it.
+        SchemaCursorRole::ImportReference { .. } => return Vec::new(),
+        SchemaCursorRole::Type => {}
     }
 
     let mut items = Vec::new();
@@ -285,6 +309,78 @@ fn type_definition_completions(
         }
     }
     items
+}
+
+/// Constraint-keyword completion for a cursor inside a `(…)` list.
+///
+/// Which constraints are legal depends on the list's level, which only the
+/// parser can decide: an item-level list is bounded by the subject type's
+/// `accepted_constraints`, while the postfix `[](…)` list carries the separate
+/// array surface ([`SchemaConstraintDescriptor::accepts_array_level`]). A
+/// subject the catalog does not know (a half-typed keyword, an import name)
+/// offers nothing.
+fn constraint_completions(
+    ctx: &DocumentContext,
+    start: usize,
+    offset: usize,
+    partial: &str,
+    subject: Option<&str>,
+    array_level: bool,
+) -> Vec<CompletionItem> {
+    let item_descriptor = if array_level {
+        None
+    } else {
+        let Some(descriptor) = subject.and_then(|subject| {
+            schema_type_descriptors()
+                .iter()
+                .find(|descriptor| descriptor.keyword == subject)
+        }) else {
+            return Vec::new();
+        };
+        Some(descriptor)
+    };
+    schema_constraint_descriptors()
+        .iter()
+        .filter(|constraint| !constraint.keyword.starts_with('<'))
+        .filter(|constraint| match item_descriptor {
+            Some(descriptor) => accepts_constraint(descriptor, constraint.keyword),
+            None => constraint.accepts_array_level(),
+        })
+        .filter(|constraint| constraint.keyword.starts_with(partial))
+        .filter_map(|constraint| {
+            let insert = match constraint.keyword {
+                "default" => "default()".to_string(),
+                _ if constraint.form.contains('(') => constraint.form.to_string(),
+                keyword => keyword.to_string(),
+            };
+            item(
+                ctx,
+                start,
+                offset,
+                constraint.keyword,
+                &insert,
+                CompletionItemKind::PROPERTY,
+                Some(constraint.description.to_string()),
+            )
+        })
+        .collect()
+}
+
+/// Whether a type descriptor's published item-level constraint list names
+/// `keyword`.
+///
+/// The list is prose (`"eager, match(glob, ...), default, required"`), so each
+/// entry is compared as a whole keyword rather than as a substring — otherwise
+/// `match`'s own argument list would make unrelated keywords appear accepted.
+fn accepts_constraint(
+    descriptor: &darkmatter::markdown::schemas::SchemaTypeDescriptor,
+    keyword: &str,
+) -> bool {
+    descriptor
+        .accepted_constraints
+        .split([',', ';'])
+        .filter_map(|entry| entry.trim().split('(').next())
+        .any(|entry| entry.trim() == keyword)
 }
 
 fn passive_namespace_names(ctx: &DocumentContext) -> BTreeSet<String> {

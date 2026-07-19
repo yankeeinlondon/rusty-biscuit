@@ -6,6 +6,7 @@ related_specs:
     - "@darkmatter/features/_completed/2026-06-10-schema-improvement/spec.md"
     - "@darkmatter/features/_completed/2026-07-08-schema-plus/spec.md"
     - "@darkmatter/features/_completed/2026-07-09-suggest-constraint/spec.md"
+    - "@darkmatter/features/2026-07-13-meta-schema/spec.md"
 ---
 
 # Schema Definition
@@ -104,9 +105,73 @@ $schema:
 | `yaml`       | A string whose **content** parses as YAML, **or** a native mapping/sequence/scalar coerced to a YAML string. | JSON Schema `format: darkmatter-yaml`. Accepts JSON too (JSON is valid YAML). See [Content-Format Types](#content-format-types-yaml--json).                              |
 | `json`       | A string whose **content** parses as strict JSON, **or** a native value coerced to a JSON string.      | JSON Schema `format: darkmatter-json`. Rejects YAML-only syntax. See [Content-Format Types](#content-format-types-yaml--json).                                                  |
 | `expression` | A string that parses under the Darkmatter expression grammar. Parse-only — never evaluated.            | JSON Schema `format: darkmatter-expression`. The third content-format string type. Native booleans/numbers coerce to their string form. See [Expressions](#expressions).        |
+| `type-definition` | A string type expression, native mapping object definition, or non-empty property union.          | Describes one SimplifiedSchema property definition as data. Parse-only; the value is never resolved or normalized. See [Semantic Meta-Types](#semantic-meta-types).              |
+| `schema`     | An inline schema mapping, local schema reference string, or non-empty root union.                       | Describes one complete `$schema` declaration as data. Parse-only; validation checks syntax without reading referenced files. See [Semantic Meta-Types](#semantic-meta-types).  |
 | `any`        | Anything.                                                                                              | Only `required` is meaningful. `any(required)` is presence-only because `any` already includes `null`.                                                                          |
 
 Append `[]` to any type for an array of that type — e.g. `string[]`, `enum(red,green,blue)[]`, `file(match('*.md'))[]`.
+
+### Semantic Meta-Types
+
+`type-definition` and `schema` are Darkmatter's semantic meta-types: they let a
+SimplifiedSchema describe its own authored grammar without maintaining a
+second JSON meta-schema. The existing Rust parsers remain authoritative.
+Compiled JSON Schema delegates to those parsers through
+`x-darkmatter-type-definition` and `x-darkmatter-schema`.
+
+A semantic meta-type has two distinct type relationships:
+
+- Its **carrier type** is how the definition is represented in YAML. Both
+  meta-types accept string, mapping, and sequence carriers.
+- Its **denoted type** is what that authored definition describes. For example,
+  the value `string(required)` has carrier type `string`, semantic type
+  `type-definition`, and denotes a required string property. A union containing
+  `string` and an object definition denotes `string | object`.
+
+`type-definition` accepts exactly one complete property definition: a scalar
+type expression, a native mapping object definition, or a non-empty property
+union. `schema` accepts exactly one complete document schema declaration: an
+inline mapping, a syntactically valid local `FileReference`, or a non-empty
+root union of those forms. Remote references and malformed or empty unions are
+invalid semantic values.
+
+```yaml
+$schema:
+    field-definition: type-definition(required)
+    document-schema:  schema(required)
+
+field-definition:
+    - string(required)
+    - nested: number
+document-schema: ./schemas/article.yaml
+```
+
+Both meta-types are **parse-only**. Validation never loads a reference, expands
+an import or example, evaluates an expression, runs composition, or accesses
+the network. It also preserves the authored YAML representation: mappings stay
+mappings and sequences stay sequences. Actual `$schema` preparation remains a
+separate operation that may resolve referenced schema files.
+
+The ordinary array postfix remains available. `type-definition[]` and
+`schema[]` mean arrays of independent semantic values. When one array item is
+itself a union, use a nested sequence so the outer sequence remains the
+collection boundary.
+
+```yaml
+$schema:
+    definitions: type-definition[]
+
+definitions:
+    - string
+    - [number, { nested: boolean }]
+```
+
+Only `required`, `default(...)`, and `generated` apply to these nominal types.
+Semantic defaults must themselves parse as the declared artifact. Darkmatter
+does not infer either meta-type in `md schema detect`, because a carrier value
+does not establish the author's semantic intent. Terminal import syntax still
+takes precedence, so `schema@file` and `type-definition@file` remain named-type
+imports rather than primitive meta-type declarations.
 
 ### Universal Constraints
 

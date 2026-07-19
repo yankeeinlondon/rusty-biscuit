@@ -597,6 +597,20 @@ pub struct SchemaConstraintDescriptor {
     pub json_schema_effect: &'static str,
 }
 
+impl SchemaConstraintDescriptor {
+    /// Whether this constraint is accepted in a postfix `[](…)` array-level
+    /// constraint list.
+    ///
+    /// The array surface is a separate question from a type descriptor's
+    /// `accepted_constraints`, which describes the *item* atom. This reads the
+    /// same [`target_types`](Self::target_types) contract the catalog already
+    /// publishes, so the two cannot drift apart.
+    pub fn accepts_array_level(&self) -> bool {
+        self.target_types == "all types"
+            || self.target_types.split(" | ").any(|target| target == "array")
+    }
+}
+
 /// Descriptor for a single schema shape / grammar form.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SchemaShapeDescriptor {
@@ -671,6 +685,44 @@ mod tests {
     use crate::markdown::schemas::simplified::grammar;
     use crate::markdown::schemas::simplified::{PropertyDef, SimplifiedSchema, TypeExpr};
     use std::collections::HashSet;
+
+    /// The array-level constraint set the catalog publishes is the set a
+    /// postfix `[](…)` list actually accepts.
+    ///
+    /// Only one direction is a grammar fact. `parse_one_constraint` is
+    /// deliberately permissive about level — `string[](integer)` parses and
+    /// lowers to a meaningless array-level `Integer` — so the catalog, not the
+    /// parser, is the authority on which constraints an editor should offer
+    /// there. The exact-set assertion pins that authority.
+    #[test]
+    fn array_level_constraint_set_is_published_and_parseable() {
+        let accepted: HashSet<&str> = SCHEMA_CONSTRAINT_DESCRIPTORS
+            .iter()
+            .filter(|descriptor| descriptor.accepts_array_level())
+            .map(|descriptor| descriptor.keyword)
+            .collect();
+        assert_eq!(
+            accepted,
+            HashSet::from(["required", "default", "generated", "min", "max", "unique"]),
+        );
+        for keyword in accepted {
+            let form = match keyword {
+                "default" => "default(1)".to_string(),
+                "min" | "max" => format!("{keyword}(1)"),
+                keyword => keyword.to_string(),
+            };
+            let parsed = grammar::parse_type_expr("p", &format!("string[]({form})"));
+            assert!(parsed.is_ok(), "`{form}` at array level: {parsed:?}");
+        }
+        // `suggest` describes individual elements, so the grammar rejects it on
+        // the array surface and the catalog must not offer it there.
+        assert!(!SCHEMA_CONSTRAINT_DESCRIPTORS
+            .iter()
+            .find(|descriptor| descriptor.keyword == "suggest")
+            .expect("suggest descriptor")
+            .accepts_array_level());
+        assert!(grammar::parse_type_expr("p", "string[](suggest(a))").is_err());
+    }
 
     /// Every `SimplifiedType` variant has exactly one type descriptor, and
     /// every type descriptor maps to a parseable implemented type.

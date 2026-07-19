@@ -91,10 +91,14 @@ pub use reference::{SchemaReference, SchemaReferenceKind, classify_schema_refere
 pub use rewrite::NormalizationOutcome;
 pub use simplified::{
     Constraint, DRAFT_2020_12, DecodedScalar, PropertyAtom, PropertyDef, SchemaArm,
-    SchemaDeclaration, SchemaShape, SchemaSourceMap, SchemaSourcePath, SchemaSourcePathSegment,
-    SchemaSpanKind, SimplifiedSchema, SimplifiedType, SourceAware, SuggestionItem,
+    SchemaCursor, SchemaCursorRole, SchemaDeclaration, SchemaShape, SchemaSourceMap,
+    SchemaSourcePath, SchemaSourcePathSegment,
+    SchemaSpanKind, SchemaValueEntry, SchemaValueKind, SchemaValueNode, SimplifiedSchema,
+    SimplifiedType, SourceAware, SuggestionItem,
     SuggestionLintProblem, SuggestionLintReason, SuggestionQuery, TypeExpr, decode_scalar,
-    decode_scalar_at, lint_suggestions, parse_property_definition,
+    decode_partial_scalar_at, decode_scalar_at, is_union_arm_path, lint_suggestions,
+    locate_schema_declaration_cursor, locate_schema_value, locate_type_definition_cursor,
+    parse_property_definition,
     parse_property_definition_with_source, parse_schema_declaration,
     parse_schema_declaration_with_source, suggestions_for_def, suggestions_for_path,
     StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,

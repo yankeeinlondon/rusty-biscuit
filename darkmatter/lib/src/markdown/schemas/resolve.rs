@@ -291,8 +291,12 @@ fn resolve_reference(
     base_dir: &Path,
     schema_roots: &[PathBuf],
 ) -> Result<ResolvedSchema, SchemaError> {
-    let trimmed = reference.trim();
     let classified = classify_schema_reference(reference)?;
+    // Take the canonical string back off the classifier rather than trimming
+    // again here: syntax checking, resolution, and reporting must never see
+    // different strings for the same authored reference.
+    let canonical = classified.file_reference().raw().to_string();
+    let trimmed = canonical.as_str();
 
     // Bare-name resolution against schema roots (Phase 3). When schema roots
     // are provided and the reference has no path component, resolve against
@@ -316,7 +320,7 @@ fn resolve_reference(
         }
         // No sibling either — the bare name simply does not resolve.
         return Err(SchemaError::Unresolved {
-            reference: reference.to_string(),
+            reference: trimmed.to_string(),
             source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
                 "bare-name reference `{trimmed}` not found in any schema root"
             )),
@@ -327,13 +331,13 @@ fn resolve_reference(
     let path = file_ref
         .resolve_from(base_dir)
         .map_err(|source| SchemaError::Unresolved {
-            reference: reference.to_string(),
+            reference: trimmed.to_string(),
             source,
         })?
         .ok_or_else(|| SchemaError::Unresolved {
-            reference: reference.to_string(),
+            reference: trimmed.to_string(),
             source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
-                "no file matched `{reference}`"
+                "no file matched `{trimmed}`"
             )),
         })?;
 
@@ -831,20 +835,20 @@ impl ImportEngine {
             }
         } else {
             let file_ref =
-                FileReference::new(reference).map_err(|source| SchemaError::Unresolved {
-                    reference: reference.to_string(),
+                FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
+                    reference: trimmed.to_string(),
                     source,
                 })?;
             file_ref
                 .resolve_from(&current.base_dir)
                 .map_err(|source| SchemaError::Unresolved {
-                    reference: reference.to_string(),
+                    reference: trimmed.to_string(),
                     source,
                 })?
                 .ok_or_else(|| SchemaError::Unresolved {
-                    reference: reference.to_string(),
+                    reference: trimmed.to_string(),
                     source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
-                        "no file matched `{reference}`"
+                        "no file matched `{trimmed}`"
                     )),
                 })?
         };
@@ -1253,20 +1257,20 @@ fn resolve_one_example(
             }
         } else {
             let file_ref =
-                FileReference::new(reference).map_err(|source| SchemaError::Unresolved {
-                    reference: reference.to_string(),
+                FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
+                    reference: trimmed.to_string(),
                     source,
                 })?;
             file_ref
                 .resolve_from(base_dir)
                 .map_err(|source| SchemaError::Unresolved {
-                    reference: reference.to_string(),
+                    reference: trimmed.to_string(),
                     source,
                 })?
                 .ok_or_else(|| SchemaError::Unresolved {
-                    reference: reference.to_string(),
+                    reference: trimmed.to_string(),
                     source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
-                        "no file matched `{reference}`"
+                        "no file matched `{trimmed}`"
                     )),
                 })?
         }
