@@ -27,8 +27,7 @@ recursive interpolation bypasses the ratified effective-anchoring and
 sigil-injection rules; detailed I/O failures discard their candidate record at
 the harness boundary; package-area context is not carried by most nested
 surfaces; and the purported request-scoped context still captures ambient state
-per resolution. These violate D1/D2/D8/D9 and Acceptance Criteria 1, 6, 7, 8,
-12, and 13.
+per resolution. These violate D1/D2/D8/D9 and Acceptance Criteria 1, 6, 7, 8, 12, and 13.
 
 ## Findings
 

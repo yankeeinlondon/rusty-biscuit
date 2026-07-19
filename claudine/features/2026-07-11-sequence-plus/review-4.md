@@ -5,6 +5,7 @@ agent: claude/default
 created: 2026-07-18T13:57:22-07:00
 spec: 2026-07-11-sequence-plus/spec.md
 implemented: true
+next: 2026-07-11-sequence-plus/review-5.md
 description: A **feature** review of `2026-07-11-sequence-plus/spec.md`
 feature: 2026-07-11-sequence-plus/review-4.md
 previous: 2026-07-11-sequence-plus/review-3.md
