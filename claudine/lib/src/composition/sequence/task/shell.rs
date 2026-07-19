@@ -26,11 +26,13 @@
 //!   mode: the deadline and the runaway guards are only enforceable against a
 //!   tree that is actually owned.
 //! - **Descendants are reaped at completion, on every exit path.** When the
-//!   command finishes — success included — the remaining members of its tree
-//!   are killed before the capture threads are waited on, so `x &` never
-//!   outlives its task on any platform and no descendant can hold the output
-//!   pipe open to emit frames after the task's footer. Early returns and
-//!   panics reach the same reap through [`ProcessTree`]'s `Drop`.
+//!   command finishes — success, kill, or a failed wait — the remaining
+//!   members of its tree are killed before the capture threads are waited on,
+//!   so `x &` never outlives its task on any platform and no descendant can
+//!   hold the output pipe open to emit frames after the task's footer. Every
+//!   post-spawn exit shares the one epilogue in `run` (tree teardown, bounded
+//!   reader settlement, live-stream flush); a panic unwind still reaches the
+//!   reap through [`ProcessTree`]'s `Drop`.
 //! - **Windows assignment is race-free.** The child is spawned suspended,
 //!   assigned to the kill-on-close Job, and only then resumed, so it cannot
 //!   create a descendant outside the Job.
@@ -175,15 +177,27 @@ impl std::fmt::Display for RunawayTrip {
     }
 }
 
-/// Why a task shell command could not run at all.
+/// Why a task shell command failed outside its own exit status.
 ///
-/// Both variants precede any result: a command that *ran* reports through
+/// [`Io`](Self::Io) and [`Isolation`](Self::Isolation) precede any result —
+/// the command never ran. [`Wait`](Self::Wait) is the post-spawn failure: the
+/// command ran, and may have streamed output, but its exit could not be
+/// observed. A command that ran to an observable end reports through
 /// [`ShellCommandOutput`], including the three kill triggers.
 #[derive(Debug, thiserror::Error)]
 pub enum TaskShellError {
-    /// The process could not be spawned or waited on.
+    /// The process could not be spawned.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    /// The process spawned and ran, but waiting on it failed, so its exit
+    /// status is unknown.
+    ///
+    /// Split from [`Io`](Self::Io) because the operation stage changes what
+    /// the user is told: a wait failure means the command *did* run — its
+    /// output may already be on screen — where a spawn failure means it never
+    /// started.
+    #[error("waiting on the spawned process failed: {0}")]
+    Wait(#[source] std::io::Error),
     /// The process spawned, but exclusive ownership of its process tree could
     /// not be established, so it was killed without running.
     ///
@@ -210,11 +224,12 @@ pub trait TaskShellRunner: Sync {
     ///
     /// ## Errors
     ///
-    /// Returns [`TaskShellError::Io`] when the process could not be spawned or
-    /// waited on, and [`TaskShellError::Isolation`] when it spawned but
-    /// whole-tree ownership could not be established. A command that ran and
-    /// failed reports its code through [`ShellCommandOutput::exit_code`], and
-    /// one that was killed reports which of the three triggers fired.
+    /// Returns [`TaskShellError::Io`] when the process could not be spawned,
+    /// [`TaskShellError::Wait`] when it ran but waiting on it failed, and
+    /// [`TaskShellError::Isolation`] when it spawned but whole-tree ownership
+    /// could not be established. A command that ran and failed reports its
+    /// code through [`ShellCommandOutput::exit_code`], and one that was killed
+    /// reports which of the three triggers fired.
     fn run(
         &self,
         command: &str,
@@ -252,8 +267,11 @@ pub struct SystemTaskShell {
     /// exercises the fail-closed path without leaking the fixture's processes.
     #[cfg(test)]
     fail_isolation: bool,
-    /// Fault injection: fail the first wait attempt, modeling `try_wait`
-    /// erroring while the command and its descendants are still alive.
+    /// Fault injection: fail the first wait attempt after the command's first
+    /// captured stdout byte, modeling `try_wait` erroring while the command
+    /// and its descendants are still alive with output already in flight.
+    /// Gating on the byte is what makes "bytes buffered at the wait failure"
+    /// fixtures deterministic — so their commands must write to stdout.
     #[cfg(test)]
     fail_wait: bool,
 }
@@ -281,7 +299,7 @@ impl SystemTaskShell {
         }
     }
 
-    /// A runner whose first wait attempt always fails.
+    /// A runner whose first wait attempt after captured output always fails.
     pub(crate) fn failing_wait() -> Self {
         Self {
             fail_wait: true,
@@ -383,16 +401,26 @@ impl TaskShellRunner for SystemTaskShell {
         let start = Instant::now();
         let mut timed_out = false;
         let mut interrupted = false;
-        let status = loop {
+        // The loop breaks with a `Result` rather than `?`-returning on a
+        // failed wait: every post-spawn exit — clean, killed, or a wait error
+        // — must reach the one epilogue below (tree teardown, bounded reader
+        // settlement, live-stream flush). An early return would leave detached
+        // readers free to drain buffered bytes *after* the caller has closed
+        // the task stream, appending body frames behind the failure footer.
+        let wait_outcome = loop {
             #[cfg(test)]
-            if self.fail_wait {
-                // Modeling `try_wait` failing while everything still runs; the
-                // early return must reach `tree`'s `Drop` reap like the real
-                // `?` below would.
-                return Err(std::io::Error::other("injected wait failure").into());
+            if self.fail_wait
+                && captured.lock().map(|buffer| !buffer.is_empty()).unwrap_or(true)
+            {
+                // Modeling `try_wait` failing while everything still runs and
+                // output is already in the pipes — the shape the epilogue's
+                // settle-then-flush exists for.
+                break Err(std::io::Error::other("injected wait failure"));
             }
-            if let Some(status) = child.try_wait()? {
-                break status;
+            match child.try_wait() {
+                Ok(Some(status)) => break Ok(status),
+                Ok(None) => {}
+                Err(error) => break Err(error),
             }
             if interrupt.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
                 interrupted = true;
@@ -407,13 +435,14 @@ impl TaskShellRunner for SystemTaskShell {
                 continue;
             }
             tree.terminate(&mut child);
-            break child.wait()?;
+            break child.wait();
         };
-        // The ratified success-path policy: an owned tree does not outlive its
-        // command, on any platform. Dropping here — before the reader settle —
-        // reaps whatever the command backgrounded, which is also what closes
-        // the pipes those readers are parked on: a dead descendant cannot emit
-        // a frame after the task's footer.
+        // The ratified policy for every post-spawn exit: an owned tree does
+        // not outlive its command, on any platform. Dropping here — before the
+        // reader settle — reaps whatever the command backgrounded (and, on a
+        // wait error, the command itself), which is also what closes the pipes
+        // those readers are parked on: a dead descendant cannot emit a frame
+        // after the task's footer.
         drop(tree);
 
         // Never `join()`: see `READER_SHUTDOWN_GRACE`. Dropping the handles
@@ -437,6 +466,17 @@ impl TaskShellRunner for SystemTaskShell {
         if let Some(live) = live {
             live.flush();
         }
+        // Only now — readers settled, stream flushed — may the preserved wait
+        // error surface. The tree drop above already killed the still-running
+        // command; waiting reaps the direct child so a failed `try_wait` does
+        // not also leak a zombie.
+        let status = match wait_outcome {
+            Ok(status) => status,
+            Err(error) => {
+                let _ = child.wait();
+                return Err(TaskShellError::Wait(error));
+            }
+        };
         // Read once the reader has settled rather than inside the wait loop:
         // closing the pipe on a trip usually kills the flooder by SIGPIPE
         // first, so the child can reap before the loop ever sees the trip.

@@ -1543,7 +1543,26 @@ pub enum CompositionError {
         task: String,
         /// The approved command bytes that were attempted.
         command: String,
-        /// The underlying spawn/wait failure.
+        /// The underlying spawn failure.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// A task's shell command spawned and ran, but waiting on it failed, so
+    /// its exit status is unknown.
+    ///
+    /// Distinct from [`SequenceTaskShellSpawn`]: that command never started,
+    /// this one did — its output may already be on screen — so reporting it
+    /// as "failed to run" would misstate what the user watched happen.
+    ///
+    /// [`SequenceTaskShellSpawn`]: CompositionError::SequenceTaskShellSpawn
+    #[error("command `{command}` in {task} ran, but waiting for it failed: {source}")]
+    SequenceTaskShellWait {
+        /// A label locating the task.
+        task: String,
+        /// The approved command bytes that ran.
+        command: String,
+        /// The underlying wait failure.
         #[source]
         source: std::io::Error,
     },

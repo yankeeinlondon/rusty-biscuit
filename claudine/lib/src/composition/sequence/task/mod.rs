@@ -576,6 +576,19 @@ impl TaskExecution<'_> {
                         },
                     ));
                 }
+                // Not folded into the spawn arm: this command *ran* — its
+                // output may already be on screen — so "failed to run" would
+                // misreport the stage that actually failed.
+                Err(TaskShellError::Wait(source)) => {
+                    return PrimaryOutcome::failed(TaskDiagnostic::from_composition(
+                        TaskStage::Primary,
+                        &CompositionError::SequenceTaskShellWait {
+                            task: self.label(),
+                            command: command.clone(),
+                            source,
+                        },
+                    ));
+                }
             };
             // Not emitted here: the runner already streamed both pipes line by
             // line as the command ran, which is what a reader needs while it is

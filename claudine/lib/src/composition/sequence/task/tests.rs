@@ -332,6 +332,7 @@ struct FakeTaskShell {
     seen: Mutex<Vec<(String, Duration)>>,
     results: Mutex<Vec<ShellCommandOutput>>,
     spawn_failure: Mutex<bool>,
+    wait_failure: Mutex<bool>,
     isolation_failure: Mutex<bool>,
     /// How long a given command blocks before reporting, so a test can decide
     /// completion order independently of declaration order.
@@ -395,6 +396,11 @@ impl FakeTaskShell {
     fn failing_to_spawn() -> Self {
         let shell = Self::default();
         *shell.spawn_failure.lock().unwrap() = true;
+        shell
+    }
+    fn failing_wait() -> Self {
+        let shell = Self::default();
+        *shell.wait_failure.lock().unwrap() = true;
         shell
     }
     fn failing_isolation() -> Self {
@@ -477,6 +483,11 @@ impl TaskShellRunner for FakeTaskShell {
             return Err(TaskShellError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "no such file or directory",
+            )));
+        }
+        if *self.wait_failure.lock().unwrap() {
+            return Err(TaskShellError::Wait(std::io::Error::other(
+                "waitpid interrupted",
             )));
         }
         if *self.isolation_failure.lock().unwrap() {
@@ -1036,6 +1047,32 @@ mod shell_tasks {
         );
     }
 
+    /// Review 7 finding 3: a wait failure is not a spawn failure. The command
+    /// ran — its output may already be on screen — so the diagnostic must say
+    /// so instead of the spawn arm's "failed to run".
+    #[test]
+    fn a_command_whose_wait_fails_is_reported_as_having_run() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), json!({ "name": "alpha", "shell": "work" }));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::failing_wait();
+
+        let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(
+            failure_message(&outcome).contains("waiting for it failed"),
+            "{}",
+            failure_message(&outcome),
+        );
+        assert!(
+            !failure_message(&outcome).contains("failed to run"),
+            "a command that ran was reported as never having run: {}",
+            failure_message(&outcome),
+        );
+    }
+
     /// Review 6 finding 2: an ownership-establishment failure is its own typed
     /// error, distinct from a spawn failure — fail-closed, never a silent
     /// degradation to direct-child cleanup.
@@ -1397,14 +1434,19 @@ mod shell_tasks {
     }
 
     /// Review 6 finding 2: an early wait error must still reap the whole tree
-    /// — cleanup is owned by `ProcessTree`'s `Drop`, not by the happy path.
+    /// — through the shared epilogue's tree teardown, not a leaked survivor.
+    /// The leading `echo` feeds the injection seam, which arms only once a
+    /// stdout byte has been captured.
     #[cfg(unix)]
     #[test]
     fn an_early_wait_error_still_reaps_the_whole_tree() {
         let marker = marker_path("wait-error-reap");
         let start = std::time::Instant::now();
         let result = SystemTaskShell::failing_wait().run(
-            &format!("(sleep 1; echo late > '{}') & sleep 300", marker.display()),
+            &format!(
+                "echo started; (sleep 1; echo late > '{}') & sleep 300",
+                marker.display(),
+            ),
             Duration::from_secs(300),
             None,
             None,
@@ -1412,8 +1454,8 @@ mod shell_tasks {
 
         assert!(start.elapsed() < NON_HANG_BOUND, "the call must not hang");
         assert!(
-            matches!(result, Err(TaskShellError::Io(_))),
-            "the injected wait failure must surface as the io error it models: {result:?}"
+            matches!(result, Err(TaskShellError::Wait(_))),
+            "the injected wait failure must surface as the wait error it models: {result:?}"
         );
         std::thread::sleep(Duration::from_millis(1600));
         assert!(!marker.exists(), "a wait error left the tree running");
@@ -1471,7 +1513,7 @@ mod shell_streaming {
     use std::time::Instant;
 
     use super::*;
-    use crate::render::{TaskBar, TaskStream};
+    use crate::render::{TaskBar, TaskStream, TaskStreamOutcome};
 
     /// One frame group, stamped with when the sink received it.
     #[derive(Debug, Clone)]
@@ -1697,6 +1739,73 @@ mod shell_streaming {
             sink.writes().len(),
             frames_at_return,
             "frames arrived after the command completed"
+        );
+    }
+
+    /// Review 7 finding 3: a wait failure must flow through the same reader
+    /// settlement and flush as every other exit. Bytes already in the pipe
+    /// when the wait fails are on the stream *before* `run` returns; the
+    /// scheduler then closes the stream, and nothing — not the buffered
+    /// tail, not a reaped descendant's late write — arrives after that
+    /// failure footer.
+    ///
+    /// The injection seam arms on the first captured stdout byte, so
+    /// `buffered` is deterministically in flight when the wait error fires;
+    /// the backgrounded `late` writer models the descendant a bypassed
+    /// epilogue would have left draining behind the footer.
+    #[cfg(unix)]
+    #[test]
+    fn a_wait_error_settles_readers_before_returning_and_nothing_follows_the_footer() {
+        let sink = TimedSink::new();
+        let stream = live("task", TaskBar::for_index(0), &sink);
+        stream.open();
+
+        let started = Instant::now();
+        let result = SystemTaskShell::failing_wait().run(
+            "printf 'buffered\\n'; (sleep 1; printf 'late\\n') & sleep 300",
+            Duration::from_secs(300),
+            None,
+            Some(&stream),
+        );
+        let run_returned = started.elapsed();
+
+        assert!(
+            run_returned < Duration::from_secs(45),
+            "the call must not hang"
+        );
+        assert!(
+            matches!(result, Err(TaskShellError::Wait(_))),
+            "a wait failure must surface as the typed wait error: {result:?}"
+        );
+        let data_at_return = sink.payloads(Channel::Data);
+        assert!(
+            data_at_return.iter().any(|line| line.contains("buffered")),
+            "output buffered at the wait failure was not flushed before `run` \
+             returned: {data_at_return:?}"
+        );
+        let frames_at_return = sink.writes().len();
+
+        // What the group scheduler does immediately after `member.run()`
+        // returns: close the stream with a failure footer.
+        stream.close(TaskStreamOutcome::Failed, run_returned);
+        let frames_at_footer = sink.writes().len();
+        assert!(
+            frames_at_footer > frames_at_return,
+            "the close must have written a footer for the assertion to bound"
+        );
+
+        // Past the descendant's write time: a reader still draining behind
+        // the returned error would have appended by now.
+        std::thread::sleep(Duration::from_millis(1600));
+        assert_eq!(
+            sink.writes().len(),
+            frames_at_footer,
+            "frames arrived after the failure footer"
+        );
+        let data = sink.payloads(Channel::Data);
+        assert!(
+            data.iter().all(|line| !line.contains("late")),
+            "a descendant survived the wait error and reached the stream: {data:?}"
         );
     }
 
