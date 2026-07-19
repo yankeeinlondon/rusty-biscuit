@@ -296,9 +296,14 @@ pub struct TaskExecution<'a> {
     /// Everything the task's primary action produces goes through here, so a
     /// reader can attribute a body line and not just the header and footer that
     /// bracket it. The scheduler owns header/footer timing; this field carries
-    /// only the data channel, which is why a lone sequence step can supply one
-    /// with an invisible bar and no header at all.
-    pub live: Option<&'a TaskLiveOutput>,
+    /// only the body, which is why a lone sequence step can supply one with an
+    /// invisible bar and no header at all.
+    ///
+    /// Shared as an `Arc` because a shell command's two pipes are drained on
+    /// their own threads, which outlive nothing the borrow checker can see: a
+    /// reader parked on a descendant's pipe is deliberately detached rather
+    /// than joined, so it cannot hold a borrow of this execution.
+    pub live: Option<&'a std::sync::Arc<TaskLiveOutput>>,
 }
 
 impl TaskExecution<'_> {
@@ -496,7 +501,7 @@ impl TaskExecution<'_> {
             // The provider's text is framed *live*, on its way to the terminal.
             // The final assistant text is deliberately not re-emitted here: the
             // wrapper already wrote it, so a second emission would double-print.
-            frame_writer: self.live.map(TaskLiveOutput::rendered_writer),
+            frame_writer: self.live.map(|live| live.rendered_writer()),
         };
 
         match self.prompt.run(&request) {
@@ -527,6 +532,11 @@ impl TaskExecution<'_> {
     /// untouched — approved *is* executed. Each command's stdout contributes one
     /// line-terminated block to the task's output, so a two-command task reads
     /// as its two results in declaration order.
+    ///
+    /// Display and capture diverge here: the runner streams *both* pipes
+    /// through the task's live stream as they are read, while only stdout is
+    /// collected into the payload below. A command's stderr is therefore
+    /// attributed on screen and absent from `outputs`.
     fn run_shell(&self, commands: &[String]) -> PrimaryOutcome {
         let timeout = match self.command_timeout() {
             Ok(timeout) => timeout,
@@ -543,7 +553,7 @@ impl TaskExecution<'_> {
             if self.interrupted() {
                 return PrimaryOutcome::interrupted(collected.join("\n"));
             }
-            let output = match self.shell.run(command, timeout, self.interrupt) {
+            let output = match self.shell.run(command, timeout, self.interrupt, self.live) {
                 Ok(output) => output,
                 Err(source) => {
                     return PrimaryOutcome::failed(TaskDiagnostic::from_composition(
@@ -556,15 +566,29 @@ impl TaskExecution<'_> {
                     ));
                 }
             };
-            let text = trim_transport_newline(&output.stdout).to_string();
-            // Emitted per command, before the failure checks below: a command
-            // that then timed out or exited non-zero still produced this, and
-            // partial output is exactly what a reader needs to see why.
-            self.emit_live(&text);
-            collected.push(text);
+            // Not emitted here: the runner already streamed both pipes line by
+            // line as the command ran, which is what a reader needs while it is
+            // still running. Emitting the captured payload again would print
+            // every line twice.
+            collected.push(trim_transport_newline(&output.stdout).to_string());
 
             if output.interrupted {
                 return PrimaryOutcome::interrupted(collected.join("\n"));
+            }
+            // Before the timeout check: a command killed for flooding may well
+            // have outrun its deadline too, and "produced runaway output" is
+            // the diagnosis a reader can act on.
+            if output.aborted {
+                return PrimaryOutcome::failed_with(
+                    collected.join("\n"),
+                    TaskDiagnostic::from_composition(
+                    TaskStage::Primary,
+                        &CompositionError::SequenceTaskShellRunaway {
+                            task: self.label(),
+                            command: command.clone(),
+                        },
+                    ),
+                );
             }
             if output.timed_out {
                 return PrimaryOutcome::failed_with(

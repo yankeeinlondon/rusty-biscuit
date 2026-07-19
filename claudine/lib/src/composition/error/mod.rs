@@ -1515,6 +1515,23 @@ pub enum CompositionError {
         seconds: f64,
     },
 
+    /// A task's shell command was killed because it breached the per-task
+    /// runaway output-volume guard.
+    ///
+    /// Distinct from [`SequenceTaskShellTimeout`]: that command was too slow,
+    /// this one was too loud. A flood is deterministic in a way a deadline
+    /// breach is not, so this fails the task outright rather than inviting a
+    /// retry on a quieter machine.
+    ///
+    /// [`SequenceTaskShellTimeout`]: CompositionError::SequenceTaskShellTimeout
+    #[error("command `{command}` in {task} produced runaway output and was stopped")]
+    SequenceTaskShellRunaway {
+        /// A label locating the task.
+        task: String,
+        /// The approved command bytes that ran.
+        command: String,
+    },
+
     /// A task's shell command could not be spawned at all.
     #[error("command `{command}` in {task} failed to run: {source}")]
     SequenceTaskShellSpawn {

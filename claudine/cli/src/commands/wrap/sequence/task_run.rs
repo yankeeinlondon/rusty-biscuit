@@ -123,7 +123,7 @@ pub(super) fn run_step_task(
     };
 
     let prompt_runner = WrapperPromptRunner::new(run, env_overrides, target, runtime_state);
-    let shell = SystemTaskShell;
+    let shell = SystemTaskShell::default();
     // `--silent` drops the sink entirely rather than rendering frames nobody
     // reads; the library then skips the render altogether.
     let sink: Option<Arc<dyn TaskStreamSink>> = (!run.silent)
@@ -134,14 +134,14 @@ pub(super) fn run_step_task(
     // *Reporting Concurrency*). A `group:` task's members replace it with their
     // own stream, and a group never emits body text of its own.
     let live = sink.as_ref().map(|sink| {
-        TaskLiveOutput::new(
+        Arc::new(TaskLiveOutput::new(
             TaskStream::new(
                 task.name.clone().unwrap_or_else(|| task.label.clone()),
                 TaskBar::Invisible,
                 term.clone(),
             ),
             Arc::clone(sink),
-        )
+        ))
     });
 
     let outcome = TaskExecution {

@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicBool;
 
+use biscuit_terminal::discovery::detection::ColorDepth;
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::effects::EffectEngine;
 use darkmatter::markdown::compose::{ComposeContext, EffectiveStateBuilder};
@@ -28,9 +29,23 @@ use crate::composition::sequence::preflight::build_preflight_graph_with_context;
 use crate::composition::sequence::{build_step_overlay, resolve_sequence_plan};
 use crate::events::GlobalSettings;
 use crate::messaging::RuntimeMessagingSettings;
-use crate::render::TaskStreamSink;
+use crate::render::{TaskLiveOutput, TaskStreamSink};
 
 // -- fixtures ---------------------------------------------------------------
+
+/// Which of a [`TaskStreamSink`]'s two channels a write arrived on.
+///
+/// Shared vocabulary rather than per-module, because the channel a frame lands
+/// on *is* the contract under test in both the streaming and group-framing
+/// suites.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Channel {
+    /// Headers, footers, warnings, and a shell command's stderr — stderr in
+    /// production.
+    Status,
+    /// Task and provider data — stdout in production.
+    Data,
+}
 
 fn write_source(dir: &Path, name: &str, frontmatter: &[(&str, Value)], body: &str) -> String {
     let mut text = String::from("---\n");
@@ -134,6 +149,16 @@ impl Fixture {
             },
             source_path: PathBuf::from(source),
         })
+    }
+
+    /// Render against `term` instead of the detected one.
+    ///
+    /// `Terminal::default()` reads `NO_COLOR` / `COLORTERM` / terminfo from the
+    /// host process, so any assertion about *styling* would otherwise be decided
+    /// by the ambient environment the gate happens to run in.
+    fn with_terminal(mut self, term: Terminal) -> Self {
+        self.term = term;
+        self
     }
 
     fn task(&self) -> &PreflightTask {
@@ -330,6 +355,7 @@ impl FakeTaskShell {
                 exit_code: 0,
                 timed_out: false,
                 interrupted: false,
+                aborted: false,
             })
             .collect();
         shell
@@ -394,7 +420,19 @@ impl TaskShellRunner for FakeTaskShell {
         command: &str,
         timeout: Duration,
         interrupt: Option<&AtomicBool>,
+        live: Option<&Arc<TaskLiveOutput>>,
     ) -> Result<ShellCommandOutput, std::io::Error> {
+        // Streaming is the runner's job now, so the fake owes it too: a fake
+        // that only returned bytes would leave every group-framing test
+        // asserting against a body line the production path emits and this one
+        // does not.
+        let stream = |output: ShellCommandOutput| {
+            if let Some(live) = live {
+                live.append(&output.stdout);
+                live.flush();
+            }
+            output
+        };
         {
             let mut gauge = self.in_flight.lock().unwrap();
             gauge.0 += 1;
@@ -407,12 +445,13 @@ impl TaskShellRunner for FakeTaskShell {
         }
         self.in_flight.lock().unwrap().0 -= 1;
         if interrupt.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::SeqCst)) {
-            return Ok(ShellCommandOutput {
+            return Ok(stream(ShellCommandOutput {
                 stdout: String::new(),
                 exit_code: -1,
                 timed_out: false,
                 interrupted: true,
-            });
+                aborted: false,
+            }));
         }
         self.seen
             .lock()
@@ -420,12 +459,13 @@ impl TaskShellRunner for FakeTaskShell {
             .push((command.to_string(), timeout));
         if let Some(stdout) = self.by_command.lock().unwrap().get(command).cloned() {
             let failing = self.failing.lock().unwrap().contains(command);
-            return Ok(ShellCommandOutput {
+            return Ok(stream(ShellCommandOutput {
                 stdout,
                 exit_code: i32::from(failing),
                 timed_out: false,
                 interrupted: false,
-            });
+                aborted: false,
+            }));
         }
         if *self.spawn_failure.lock().unwrap() {
             return Err(std::io::Error::new(
@@ -435,14 +475,15 @@ impl TaskShellRunner for FakeTaskShell {
         }
         let mut results = self.results.lock().unwrap();
         if results.is_empty() {
-            return Ok(ShellCommandOutput {
+            return Ok(stream(ShellCommandOutput {
                 stdout: String::new(),
                 exit_code: 0,
                 timed_out: false,
                 interrupted: false,
-            });
+                aborted: false,
+            }));
         }
-        Ok(results.remove(0))
+        Ok(stream(results.remove(0)))
     }
 }
 
@@ -573,6 +614,7 @@ mod stages {
             exit_code: 3,
             timed_out: false,
             interrupted: false,
+            aborted: false,
         }]);
 
         let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
@@ -635,6 +677,7 @@ mod stages {
             exit_code: 7,
             timed_out: false,
             interrupted: false,
+            aborted: false,
         }]);
 
         let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
@@ -891,6 +934,7 @@ mod shell_tasks {
             exit_code: 143,
             timed_out: true,
             interrupted: false,
+            aborted: false,
         }]);
 
         let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
@@ -918,6 +962,7 @@ mod shell_tasks {
             exit_code: 2,
             timed_out: false,
             interrupted: false,
+            aborted: false,
         }]);
 
         let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
@@ -948,8 +993,8 @@ mod shell_tasks {
     /// `echo` exists on macOS, Linux, and Windows `cmd`.
     #[test]
     fn the_system_shell_captures_stdout_on_this_platform() {
-        let output = SystemTaskShell
-            .run("echo task-shell-ok", Duration::from_secs(30), None)
+        let output = SystemTaskShell::default()
+            .run("echo task-shell-ok", Duration::from_secs(30), None, None)
             .unwrap();
         assert_eq!(output.exit_code, 0);
         assert!(!output.timed_out);
@@ -961,10 +1006,551 @@ mod shell_tasks {
     #[cfg(unix)]
     #[test]
     fn the_system_shell_kills_a_command_that_overruns_its_budget() {
-        let output = SystemTaskShell
-            .run("sleep 5", Duration::from_millis(150), None)
+        let output = SystemTaskShell::default()
+            .run("sleep 5", Duration::from_millis(150), None, None)
             .unwrap();
         assert!(output.timed_out, "the child must be killed, not awaited");
+    }
+
+    /// A very generous non-hang bound. The fixtures below outlive it several
+    /// times over, so crossing it means the call never returned rather than
+    /// that this host was slow — which it routinely is.
+    const NON_HANG_BOUND: Duration = Duration::from_secs(45);
+
+    /// The core regression for review 5 finding 1.
+    ///
+    /// `echo early; (sleep 300; echo late) &` leaves a *descendant* holding the
+    /// inherited stdout write end. Killing only the direct shell leaves that
+    /// pipe open, so the pre-fix runner reported a kill and then blocked in
+    /// `reader.join()` for the descendant's full lifetime. Owning the process
+    /// group means the descendant dies with it.
+    #[cfg(unix)]
+    #[test]
+    fn the_system_shell_kills_a_backgrounded_descendant_holding_stdout() {
+        let start = std::time::Instant::now();
+        let output = SystemTaskShell::default()
+            .run(
+                "(sleep 300; echo late) & echo early; sleep 300",
+                Duration::from_secs(2),
+                None,
+                None,
+            )
+            .unwrap();
+
+        assert!(start.elapsed() < NON_HANG_BOUND, "the call must not hang");
+        assert!(output.timed_out, "the tree must be killed, not awaited");
+        assert!(
+            output.stdout.contains("early"),
+            "output written before the kill survives it: {:?}",
+            output.stdout,
+        );
+        assert!(
+            !output.stdout.contains("late"),
+            "the descendant must not outlive the deadline: {:?}",
+            output.stdout,
+        );
+    }
+
+    /// The same contract in `cmd` terms. Compile-checked under
+    /// `just check-windows`; not executed on a Windows host.
+    #[cfg(windows)]
+    #[test]
+    fn the_system_shell_kills_a_backgrounded_descendant_holding_stdout() {
+        let start = std::time::Instant::now();
+        let output = SystemTaskShell::default()
+            .run(
+                "start /b cmd /c \"timeout /t 300 >nul & echo late\" & echo early & timeout /t 300 >nul",
+                Duration::from_secs(2),
+                None,
+                None,
+            )
+            .unwrap();
+
+        assert!(start.elapsed() < NON_HANG_BOUND, "the call must not hang");
+        assert!(output.timed_out, "the tree must be killed, not awaited");
+        assert!(
+            !output.stdout.contains("late"),
+            "the descendant must not outlive the deadline: {:?}",
+            output.stdout,
+        );
+    }
+
+    /// A pipeline is two processes plus the shell: capture must come from the
+    /// tail of the pipeline, not the shell's own (empty) stdout.
+    #[cfg(unix)]
+    #[test]
+    fn the_system_shell_captures_a_pipeline() {
+        let output = SystemTaskShell::default()
+            .run("echo hello | tr a-z A-Z", Duration::from_secs(30), None, None)
+            .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.stdout.trim_end(), "HELLO");
+        assert!(!output.timed_out);
+        assert!(!output.aborted);
+        assert!(!output.interrupted);
+    }
+
+    /// Compile-checked under `just check-windows`; not executed on a Windows
+    /// host.
+    #[cfg(windows)]
+    #[test]
+    fn the_system_shell_captures_a_pipeline() {
+        let output = SystemTaskShell::default()
+            .run("echo hello | findstr hello", Duration::from_secs(30), None, None)
+            .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.stdout.trim_end(), "hello");
+        assert!(!output.timed_out);
+        assert!(!output.aborted);
+        assert!(!output.interrupted);
+    }
+
+    /// The deadline holds against a *nested* shell, not just a direct child.
+    #[cfg(unix)]
+    #[test]
+    fn the_system_shell_times_out_a_nested_tree() {
+        let start = std::time::Instant::now();
+        let output = SystemTaskShell::default()
+            .run("sh -c 'sh -c \"sleep 300\"'", Duration::from_secs(2), None, None)
+            .unwrap();
+
+        assert!(start.elapsed() < NON_HANG_BOUND, "the call must not hang");
+        assert!(output.timed_out);
+        assert!(!output.aborted);
+    }
+
+    /// Compile-checked under `just check-windows`; not executed on a Windows
+    /// host.
+    #[cfg(windows)]
+    #[test]
+    fn the_system_shell_times_out_a_nested_tree() {
+        let start = std::time::Instant::now();
+        let output = SystemTaskShell::default()
+            .run(
+                "cmd /c \"cmd /c timeout /t 300 >nul\"",
+                Duration::from_secs(2),
+                None,
+                None,
+            )
+            .unwrap();
+
+        assert!(start.elapsed() < NON_HANG_BOUND, "the call must not hang");
+        assert!(output.timed_out);
+        assert!(!output.aborted);
+    }
+
+    /// Ctrl+C reaching a *running* tree. The budget is far longer than the
+    /// fixture's life, so `interrupted` cannot be a disguised timeout.
+    #[cfg(unix)]
+    #[test]
+    fn the_system_shell_interrupts_a_running_tree() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let setter = Arc::clone(&flag);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            setter.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        let start = std::time::Instant::now();
+        let output = SystemTaskShell::default()
+            .run(
+                "(sleep 300) & sleep 300",
+                Duration::from_secs(300),
+                Some(&flag),
+                None,
+            )
+            .unwrap();
+
+        assert!(start.elapsed() < NON_HANG_BOUND, "the call must not hang");
+        assert!(output.interrupted, "the interrupt flag must end the tree");
+        assert!(
+            !output.timed_out,
+            "the budget outlives the fixture, so this cannot be a timeout",
+        );
+    }
+
+    /// A command that floods stdout is stopped by the volume cap rather than
+    /// growing this process's memory without bound. The cap is injected tiny so
+    /// the trip happens on the first chunk.
+    #[cfg(unix)]
+    #[test]
+    fn the_system_shell_aborts_a_command_that_floods_stdout() {
+        let shell = SystemTaskShell::with_volume_cap(crate::runaway::CaptureVolumeCap::new(
+            true, 16, 1024,
+        ));
+
+        let start = std::time::Instant::now();
+        let output = shell
+            .run("yes claudine-runaway", Duration::from_secs(300), None, None)
+            .unwrap();
+
+        assert!(start.elapsed() < NON_HANG_BOUND, "the call must not hang");
+        assert!(output.aborted, "the volume cap must stop the command");
+        assert!(
+            !output.timed_out,
+            "the budget outlives the fixture, so this cannot be a timeout",
+        );
+        // One 8 KiB read past a 1 KiB cap is the expected shape; the bound is
+        // loose because the assertion under test is "bounded", not "exact".
+        assert!(
+            output.stdout.len() < 512 * 1024,
+            "capture must stay bounded, saw {} bytes",
+            output.stdout.len(),
+        );
+    }
+}
+
+// -- live shell streaming ---------------------------------------------------
+
+/// Review 5 finding 2: a shell task's output must be *live*, on the right
+/// channel, in arrival order, and never torn by a concurrent sibling.
+///
+/// These drive [`SystemTaskShell`] with real processes rather than
+/// [`FakeTaskShell`], because every claim here is about when bytes leave a pipe
+/// — which a fake decides by construction and therefore cannot falsify.
+mod shell_streaming {
+    use std::time::Instant;
+
+    use super::*;
+    use crate::render::{TaskBar, TaskStream};
+
+    /// One frame group, stamped with when the sink received it.
+    #[derive(Debug, Clone)]
+    struct Recorded {
+        channel: Channel,
+        lines: Vec<String>,
+        at: Duration,
+    }
+
+    /// A [`TaskStreamSink`] that timestamps every write against a fixed origin.
+    ///
+    /// The timestamp is the whole point: "streamed" and "buffered until the
+    /// command returned" produce identical *content*, and differ only in when
+    /// the sink saw it.
+    struct TimedSink {
+        origin: Instant,
+        writes: Mutex<Vec<Recorded>>,
+    }
+
+    impl TimedSink {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                origin: Instant::now(),
+                writes: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn record(&self, channel: Channel, frames: &[String]) {
+            self.writes.lock().unwrap().push(Recorded {
+                channel,
+                lines: frames.iter().map(|line| strip_ansi(line)).collect(),
+                at: self.origin.elapsed(),
+            });
+        }
+
+        fn writes(&self) -> Vec<Recorded> {
+            self.writes.lock().unwrap().clone()
+        }
+
+        /// Every recorded line on one channel, in arrival order, gutter removed.
+        ///
+        /// The gutter has to go for the tearing assertion to be exact: what is
+        /// under test is that a frame's *payload* is one whole line, and the
+        /// bar in front of it is decoration this comparison must not see.
+        fn payloads(&self, channel: Channel) -> Vec<String> {
+            self.writes()
+                .into_iter()
+                .filter(|write| write.channel == channel)
+                .flat_map(|write| write.lines)
+                .map(|line| {
+                    line.split_once('│')
+                        .map_or(line.clone(), |(_, rest)| rest.to_string())
+                        .trim()
+                        .to_string()
+                })
+                .filter(|line| !line.is_empty())
+                .collect()
+        }
+
+        /// When the sink first saw `needle` on `channel`.
+        fn first_seen(&self, channel: Channel, needle: &str) -> Option<Duration> {
+            self.writes()
+                .into_iter()
+                .find(|write| {
+                    write.channel == channel && write.lines.iter().any(|l| l.contains(needle))
+                })
+                .map(|write| write.at)
+        }
+    }
+
+    impl TaskStreamSink for TimedSink {
+        fn write_frames(&self, frames: &[String]) {
+            self.record(Channel::Status, frames);
+        }
+
+        fn write_data_frames(&self, frames: &[String]) {
+            self.record(Channel::Data, frames);
+        }
+    }
+
+    /// A live stream for `label` bound to `sink`.
+    fn live(label: &str, bar: TaskBar, sink: &Arc<TimedSink>) -> Arc<TaskLiveOutput> {
+        Arc::new(TaskLiveOutput::new(
+            TaskStream::new(label, bar, Terminal::default()),
+            Arc::clone(sink) as Arc<dyn TaskStreamSink>,
+        ))
+    }
+
+    /// A command emitting one stdout line and one stderr line.
+    #[cfg(unix)]
+    const TWO_CHANNEL_COMMAND: &str = "printf 'out-payload\\n'; printf 'err-payload\\n' >&2";
+
+    /// The `cmd` twin. Compile-checked under `just check-windows`; not executed
+    /// on a Windows host.
+    #[cfg(windows)]
+    const TWO_CHANNEL_COMMAND: &str = "echo out-payload& echo err-payload 1>&2";
+
+    /// The channel contract: stdout is data, stderr is status, and only stdout
+    /// is captured.
+    ///
+    /// Before this, stderr was `Stdio::inherit()` — it reached the terminal
+    /// with no bar, no label, and no coordination with a sibling's writes.
+    #[test]
+    fn stdout_streams_to_the_data_channel_and_stderr_to_the_status_channel() {
+        let sink = TimedSink::new();
+        let stream = live("task", TaskBar::for_index(0), &sink);
+
+        let output = SystemTaskShell::default()
+            .run(
+                TWO_CHANNEL_COMMAND,
+                Duration::from_secs(30),
+                None,
+                Some(&stream),
+            )
+            .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        let data = sink.payloads(Channel::Data);
+        let status = sink.payloads(Channel::Status);
+        assert!(
+            data.iter().any(|line| line.contains("out-payload")),
+            "stdout never reached the data channel: {data:?}"
+        );
+        assert!(
+            status.iter().any(|line| line.contains("err-payload")),
+            "stderr never reached the status channel: {status:?}"
+        );
+        assert!(
+            data.iter().all(|line| !line.contains("err-payload")),
+            "stderr leaked onto the data channel, so `2>/dev/null` and `| jq` \
+             now disagree about what the task produced: {data:?}"
+        );
+
+        // The capture boundary is unchanged: stderr is displayed, never
+        // captured, so it cannot reach `outputs`.
+        assert_eq!(output.stdout.trim_end(), "out-payload");
+        assert!(
+            !output.stdout.contains("err-payload"),
+            "stderr entered the captured payload: {:?}",
+            output.stdout
+        );
+    }
+
+    /// Frames must arrive *while* the command runs, not in one batch after it
+    /// returns.
+    ///
+    /// The sleep between the two lines is the discriminator. A buffered runner
+    /// records both stamps at the end, a hair apart; a streaming one records
+    /// them a sleep apart.
+    #[cfg(unix)]
+    #[test]
+    fn a_long_running_command_streams_its_first_line_before_it_finishes() {
+        let sink = TimedSink::new();
+        let stream = live("task", TaskBar::for_index(0), &sink);
+
+        let started = Instant::now();
+        let output = SystemTaskShell::default()
+            .run(
+                "printf 'first-line\\n'; sleep 2; printf 'second-line\\n'",
+                Duration::from_secs(30),
+                None,
+                Some(&stream),
+            )
+            .unwrap();
+        let ran_for = started.elapsed();
+
+        assert_eq!(output.exit_code, 0);
+        assert!(
+            ran_for >= Duration::from_secs(2),
+            "the fixture did not actually sleep, so it discriminates nothing"
+        );
+        let first = sink
+            .first_seen(Channel::Data, "first-line")
+            .expect("the first line reached the data channel");
+        let second = sink
+            .first_seen(Channel::Data, "second-line")
+            .expect("the second line reached the data channel");
+        // A full second of the fixture's two-second sleep, so a loaded host
+        // cannot turn a streaming run into a failure.
+        assert!(
+            second.saturating_sub(first) >= Duration::from_secs(1),
+            "both lines reached the sink together, so the command was silent \
+             until it exited: first at {first:?}, second at {second:?}"
+        );
+    }
+
+    /// Two concurrent tasks interleave by line *arrival*, not by completion.
+    ///
+    /// The staggered sleeps make arrival order deterministic and different from
+    /// completion order: `beta` produces its first line after `alpha`'s but
+    /// finishes at the same time. A completion-ordered stream would emit
+    /// `alpha-1 alpha-2 beta-1 beta-2`; an arrival-ordered one alternates.
+    #[cfg(unix)]
+    #[test]
+    fn two_concurrent_tasks_interleave_in_line_arrival_order() {
+        let sink = TimedSink::new();
+        let alpha = live("alpha", TaskBar::for_index(0), &sink);
+        let beta = live("beta", TaskBar::for_index(1), &sink);
+
+        std::thread::scope(|scope| {
+            for (stream, command) in [
+                (
+                    &alpha,
+                    "printf 'alpha-1\\n'; sleep 1.2; printf 'alpha-2\\n'",
+                ),
+                (
+                    &beta,
+                    "sleep 0.6; printf 'beta-1\\n'; sleep 1.2; printf 'beta-2\\n'",
+                ),
+            ] {
+                scope.spawn(move || {
+                    SystemTaskShell::default()
+                        .run(command, Duration::from_secs(30), None, Some(stream))
+                        .unwrap();
+                });
+            }
+        });
+
+        let data = sink.payloads(Channel::Data);
+        let markers: Vec<&str> = data
+            .iter()
+            .filter_map(|line| {
+                ["alpha-1", "alpha-2", "beta-1", "beta-2"]
+                    .into_iter()
+                    .find(|marker| line.contains(marker))
+            })
+            .collect();
+        assert_eq!(
+            markers,
+            vec!["alpha-1", "beta-1", "alpha-2", "beta-2"],
+            "concurrent output is not in line arrival order: {data:?}"
+        );
+    }
+
+    /// Under concurrent load every frame is a whole line — never a splice of
+    /// two tasks' lines, never half of one.
+    ///
+    /// The synchronized sink is what guarantees this; the volume of lines is
+    /// what would expose its absence. A frame carrying two markers, or a
+    /// truncated marker, is a torn write.
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_tasks_never_tear_a_line_at_the_sink() {
+        const LINES: usize = 300;
+
+        let sink = TimedSink::new();
+        let alpha = live("alpha", TaskBar::for_index(0), &sink);
+        let beta = live("beta", TaskBar::for_index(1), &sink);
+
+        std::thread::scope(|scope| {
+            for (stream, prefix) in [(&alpha, "alpha"), (&beta, "beta")] {
+                scope.spawn(move || {
+                    SystemTaskShell::default()
+                        .run(
+                            &format!("for i in $(seq 1 {LINES}); do echo {prefix}-line-$i; done"),
+                            Duration::from_secs(60),
+                            None,
+                            Some(stream),
+                        )
+                        .unwrap();
+                });
+            }
+        });
+
+        let expected: std::collections::HashSet<String> = ["alpha", "beta"]
+            .into_iter()
+            .flat_map(|prefix| (1..=LINES).map(move |i| format!("{prefix}-line-{i}")))
+            .collect();
+        let data = sink.payloads(Channel::Data);
+        assert_eq!(
+            data.len(),
+            expected.len(),
+            "every emitted line must reach the sink exactly once"
+        );
+        for line in &data {
+            assert!(
+                expected.contains(line),
+                "a frame carried something other than one whole line — either a \
+                 splice of two tasks or a fragment of one: {line:?}"
+            );
+        }
+    }
+
+    /// A command whose last line carries no newline still reaches the sink,
+    /// per command rather than at task close.
+    #[cfg(unix)]
+    #[test]
+    fn a_trailing_fragment_is_flushed_when_the_command_ends() {
+        let sink = TimedSink::new();
+        let stream = live("task", TaskBar::for_index(0), &sink);
+
+        SystemTaskShell::default()
+            .run(
+                "printf 'no-trailing-newline'",
+                Duration::from_secs(30),
+                None,
+                Some(&stream),
+            )
+            .unwrap();
+
+        let data = sink.payloads(Channel::Data);
+        assert!(
+            data.iter().any(|line| line.contains("no-trailing-newline")),
+            "a final line without its newline was held forever: {data:?}"
+        );
+    }
+
+    /// Streaming must not change what the command reports as captured.
+    #[cfg(unix)]
+    #[test]
+    fn multibyte_output_survives_the_chunked_reader_intact() {
+        let sink = TimedSink::new();
+        let stream = live("task", TaskBar::for_index(0), &sink);
+
+        // Long enough to cross the 8 KiB read boundary many times over, so a
+        // decoder that split a code point would show it.
+        let output = SystemTaskShell::default()
+            .run(
+                "for i in $(seq 1 2000); do printf '日本語のタスク — ✅ 完了\\n'; done",
+                Duration::from_secs(60),
+                None,
+                Some(&stream),
+            )
+            .unwrap();
+
+        assert_eq!(output.stdout.lines().count(), 2000);
+        assert!(
+            !output.stdout.contains('\u{FFFD}'),
+            "the capture buffer split a code point"
+        );
+        let data = sink.payloads(Channel::Data);
+        assert_eq!(data.len(), 2000, "every line must reach the sink once");
+        assert!(
+            data.iter().all(|line| line.contains("日本語のタスク")),
+            "the streamed text lost characters to a chunk boundary"
+        );
     }
 }
 
@@ -1433,6 +2019,7 @@ mod outcome_contract {
             exit_code: 0,
             timed_out: false,
             interrupted: false,
+            aborted: false,
         }]);
         let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
@@ -1461,6 +2048,7 @@ mod outcome_contract {
             exit_code: 0,
             timed_out: false,
             interrupted: false,
+            aborted: false,
         }]);
         let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
@@ -1883,12 +2471,14 @@ mod serial_groups {
                 exit_code: 0,
                 timed_out: false,
                 interrupted: false,
+                aborted: false,
             },
             ShellCommandOutput {
                 stdout: String::new(),
                 exit_code: 3,
                 timed_out: false,
                 interrupted: false,
+                aborted: false,
             },
         ]);
         let runtime = Arc::new(RuntimeState::new());
@@ -2573,15 +3163,6 @@ mod group_framing {
     use super::*;
 
     /// Records whole write calls, so a torn write shows up as a split group.
-    /// Which of the sink's two channels a write arrived on.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum Channel {
-        /// Headers, footers, warnings — stderr in production.
-        Status,
-        /// Task and provider data — stdout in production.
-        Data,
-    }
-
     #[derive(Default)]
     struct FrameSink {
         writes: Mutex<Vec<(Channel, Vec<String>)>>,
@@ -2655,9 +3236,19 @@ mod group_framing {
     }
 
     fn run(commands: &[&str], execution: &str, sink: &Arc<FrameSink>) -> TaskOutcome {
+        run_on(commands, execution, sink, Terminal::default())
+    }
+
+    /// [`run`], rendering against an explicitly constructed terminal.
+    fn run_on(
+        commands: &[&str],
+        execution: &str,
+        sink: &Arc<FrameSink>,
+        term: Terminal,
+    ) -> TaskOutcome {
         let dir = TempDir::new().unwrap();
         let source = one_step_source(dir.path(), group_step(commands, execution));
-        let fixture = Fixture::build(dir, &source).unwrap();
+        let fixture = Fixture::build(dir, &source).unwrap().with_terminal(term);
         let recorder = Recorder::default();
         let shell = commands
             .iter()
@@ -2691,7 +3282,15 @@ mod group_framing {
     #[test]
     fn a_parallel_group_gives_each_task_its_own_palette_entry() {
         let sink = Arc::new(FrameSink::default());
-        run(&["alpha", "bravo", "charlie"], "parallel", &sink);
+        // `new_forced` rather than `default`: the palette only exists on a
+        // color-capable terminal, and a gate must not change verdict because the
+        // host exported `NO_COLOR` or a colorless `TERM`.
+        run_on(
+            &["alpha", "bravo", "charlie"],
+            "parallel",
+            &sink,
+            Terminal::new_forced(),
+        );
 
         let bars: Vec<String> = sink
             .lines()
@@ -2706,6 +3305,27 @@ mod group_framing {
             sink.lines()
         );
         assert_eq!(distinct.len(), 3, "three tasks shared a color: {bars:?}");
+    }
+
+    #[test]
+    fn a_no_color_terminal_still_attributes_every_task_by_name() {
+        let sink = Arc::new(FrameSink::default());
+        let term = Terminal::builder().color_depth(ColorDepth::None).build();
+        run_on(&["alpha", "bravo", "charlie"], "parallel", &sink, term);
+
+        let lines = sink.lines();
+        assert!(
+            lines.iter().all(|line| !line.contains('\u{1b}')),
+            "a colorless terminal was still sent an escape sequence: {lines:?}"
+        );
+        // Color is the redundant channel; the name on every header and footer is
+        // the one that must survive its loss (spec → *Reporting Concurrency*).
+        for name in ["alpha", "bravo", "charlie"] {
+            assert!(
+                lines.iter().any(|l| l.contains(name) && l.contains("succeeded")),
+                "task `{name}` lost its footer attribution: {lines:?}"
+            );
+        }
     }
 
     #[test]
@@ -2873,7 +3493,16 @@ mod group_framing {
     #[test]
     fn every_body_line_carries_its_own_tasks_bar() {
         let sink = Arc::new(FrameSink::default());
-        run(&["alpha", "bravo", "charlie"], "parallel", &sink);
+        // Forced color, not `default`: the prefixes compared below are the SGR
+        // runs ahead of the bar. On a colorless host every prefix collapses to a
+        // bare `│` and the equality holds vacuously, so the case would silently
+        // stop testing anything.
+        run_on(
+            &["alpha", "bravo", "charlie"],
+            "parallel",
+            &sink,
+            Terminal::new_forced(),
+        );
 
         // The bar prefix each body line carries must be the same prefix that
         // task's header carried — that is the whole attribution contract.

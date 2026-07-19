@@ -192,12 +192,18 @@ impl TerminalRenderable for TaskStreamFrame {
 /// Stateful only in the partial-line sense: [`append`](Self::append) holds a
 /// trailing fragment until its newline arrives, so no frame is ever emitted with
 /// half a line in it.
+///
+/// The two channels hold their fragments **separately**. A shell task's stdout
+/// and stderr are drained by two independent threads, and a single held fragment
+/// would let a half-written stdout line and a half-written stderr line splice
+/// into one frame attributed to whichever channel completed first.
 #[derive(Debug, Clone)]
 pub struct TaskStream {
     label: String,
     bar: TaskBar,
     term: Terminal,
     pending: String,
+    pending_status: String,
 }
 
 impl TaskStream {
@@ -209,6 +215,7 @@ impl TaskStream {
             bar,
             term,
             pending: String::new(),
+            pending_status: String::new(),
         }
     }
 
@@ -235,15 +242,19 @@ impl TaskStream {
     /// Frame every *complete* line in `chunk`, holding any trailing fragment.
     #[must_use]
     pub fn append(&mut self, chunk: &str) -> Vec<String> {
-        self.pending.push_str(chunk);
-        let Some(last_newline) = self.pending.rfind('\n') else {
+        let Some(complete) = take_complete_lines(&mut self.pending, chunk) else {
             return Vec::new();
         };
-        let complete: String = self.pending.drain(..=last_newline).collect();
-        complete
-            .lines()
-            .flat_map(|line| self.frame(&Prose::escape_text(line)))
-            .collect()
+        self.frame_lines(&complete)
+    }
+
+    /// [`append`](Self::append) for the status channel's own held fragment.
+    #[must_use]
+    pub fn append_status(&mut self, chunk: &str) -> Vec<String> {
+        let Some(complete) = take_complete_lines(&mut self.pending_status, chunk) else {
+            return Vec::new();
+        };
+        self.frame_lines(&complete)
     }
 
     /// Frame whatever fragment is still held, without waiting for a newline.
@@ -253,11 +264,19 @@ impl TaskStream {
     /// footer is status and belongs on stderr.
     #[must_use]
     pub fn flush(&mut self) -> Vec<String> {
-        if self.pending.is_empty() {
+        let Some(held) = take_held(&mut self.pending) else {
             return Vec::new();
-        }
-        let held = std::mem::take(&mut self.pending);
-        self.frame(&Prose::escape_text(held.trim_end_matches('\n')))
+        };
+        self.frame(&Prose::escape_text(&held))
+    }
+
+    /// [`flush`](Self::flush) for the status channel's own held fragment.
+    #[must_use]
+    pub fn flush_status(&mut self) -> Vec<String> {
+        let Some(held) = take_held(&mut self.pending_status) else {
+            return Vec::new();
+        };
+        self.frame(&Prose::escape_text(&held))
     }
 
     /// The footer frame carrying outcome and duration.
@@ -272,6 +291,14 @@ impl TaskStream {
             outcome.markup(),
             duration.as_secs_f64()
         ))
+    }
+
+    /// Frame each line of an already-drained run of complete lines.
+    fn frame_lines(&self, complete: &str) -> Vec<String> {
+        complete
+            .lines()
+            .flat_map(|line| self.frame(&Prose::escape_text(line)))
+            .collect()
     }
 
     /// Render one Prose-markup chunk into complete, bar-prefixed lines.
@@ -302,6 +329,25 @@ impl TaskStream {
             .expect("a task frame must render its content");
         framed[..at].to_string()
     }
+}
+
+/// Append `chunk` to `pending` and drain everything up to its last newline.
+///
+/// `None` when the buffer still holds no complete line, which is the common case
+/// for a chunked reader landing mid-line.
+fn take_complete_lines(pending: &mut String, chunk: &str) -> Option<String> {
+    pending.push_str(chunk);
+    let last_newline = pending.rfind('\n')?;
+    Some(pending.drain(..=last_newline).collect())
+}
+
+/// Take the held fragment, with any trailing newline removed.
+fn take_held(pending: &mut String) -> Option<String> {
+    if pending.is_empty() {
+        return None;
+    }
+    let held = std::mem::take(pending);
+    Some(held.trim_end_matches('\n').to_string())
 }
 
 /// An owned, thread-safe handle that frames **already-rendered** lines.
@@ -459,6 +505,31 @@ impl TaskLiveOutput {
         self.data(&frames);
     }
 
+    /// Frame every complete line of `chunk` onto the *status* channel.
+    ///
+    /// A shell command's stderr is diagnostics, not results: it must be
+    /// attributed and interleaved like everything else the task emits, but it is
+    /// never part of the payload `outputs` captures (spec → *Output capture
+    /// boundary*).
+    pub fn append_status(&self, chunk: &str) {
+        let frames = self.locked().append_status(chunk);
+        self.status(&frames);
+    }
+
+    /// Emit whatever fragment either channel still holds.
+    ///
+    /// A command whose last line carried no newline would otherwise keep that
+    /// line held until the *task* closed, so a mid-task reader would see the
+    /// command's output silently truncated by one line.
+    pub fn flush(&self) {
+        let mut stream = self.locked();
+        let held = stream.flush();
+        let held_status = stream.flush_status();
+        drop(stream);
+        self.data(&held);
+        self.status(&held_status);
+    }
+
     /// Emit a captured payload that will receive no further chunks.
     ///
     /// Captured stdout arrives with its transport newline already removed, so
@@ -479,10 +550,11 @@ impl TaskLiveOutput {
     pub fn close(&self, outcome: TaskStreamOutcome, duration: Duration) {
         let mut stream = self.locked();
         let held = stream.flush();
-        let footer = stream.close(outcome, duration);
+        let mut status = stream.flush_status();
+        status.extend(stream.close(outcome, duration));
         drop(stream);
         self.data(&held);
-        self.status(&footer);
+        self.status(&status);
     }
 
     /// The task's stable textual label.

@@ -86,16 +86,16 @@ impl TaskExecution<'_> {
     ///
     /// `None` — the `--silent` shape — costs nothing: no frame is rendered at
     /// all, rather than rendered and dropped.
-    fn task_stream(&self, task: &PreflightTask, bar: TaskBar) -> Option<TaskLiveOutput> {
+    fn task_stream(&self, task: &PreflightTask, bar: TaskBar) -> Option<Arc<TaskLiveOutput>> {
         self.stream.map(|sink| {
-            TaskLiveOutput::new(
+            Arc::new(TaskLiveOutput::new(
                 TaskStream::new(
                     task.name.clone().unwrap_or_else(|| task.label.clone()),
                     bar,
                     self.stack.term.clone(),
                 ),
-                std::sync::Arc::clone(sink),
-            )
+                Arc::clone(sink),
+            ))
         })
     }
 
