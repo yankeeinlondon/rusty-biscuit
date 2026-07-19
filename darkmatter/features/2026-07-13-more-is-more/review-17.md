@@ -4,7 +4,9 @@ ready: false
 agent: codex/default
 created: 2026-07-18T11:03:23-07:00
 spec: 2026-07-13-more-is-more/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/default
+log: darkmatter/features/2026-07-13-more-is-more/log.md
 description: "A **feature** review of `2026-07-13-more-is-more/spec.md`"
 feature: 2026-07-13-more-is-more/review-17.md
 previous: 2026-07-13-more-is-more/review-16.md
