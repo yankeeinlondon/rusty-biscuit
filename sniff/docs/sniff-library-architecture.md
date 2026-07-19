@@ -195,6 +195,29 @@ Git status collection has four code paths selected by the request (`GitRepo::det
 
 All status-bearing paths share the same `gix` repository handle opened once by `GitRepo::discover`. The identity-only path is the exception: it returns repository identity without scanning the working tree, and is the only request level below `summary()`/`minimal()`. For bare repo-root access without even branch/HEAD resolution, use the Tier-3 `GitRepo::discover().repo_root()` handle directly.
 
+A **bare repository** (no working directory) discovers successfully — its refs, HEAD, and objects are all readable, so `current_branch()`, `head_id()`, and commit queries stay valid. `GitRepo::is_bare()` reports the distinction, `repo_root()` falls back to the git directory, `try_current_worktree_name()` is `None`, and `merge_conflicts()` is empty (no index). Worktree-dependent APIs (`collect_changed_paths`, `detect_repo_identity_with_repo`) reject a bare repository with `NotARepository` rather than walking the git directory as if it were a source tree.
+
+### Actual and Predicted Merge Conflicts
+
+Sniff deliberately separates live index observation from branch-tip prediction:
+
+- `merge_conflicts_at(path)` returns the sorted repository-relative paths in
+  non-zero live-index stages. It observes an in-progress merge, rebase,
+  cherry-pick, or revert and returns an empty list outside a repository.
+- `merge_conflicts_with_branch_at(path, incoming_branch)` predicts the paths
+  produced by merging the exact named local branch (`theirs`) into the attached
+  current local branch (`ours`). Missing repository or branch prerequisites are
+  errors rather than clean results.
+
+Both prediction and `WorktreeEntry::has_conflicts` use the same commit-pair
+merge authority. The probe enables `gix` object-memory storage before merging,
+builds its temporary index and attribute stack from the captured `ours` tree,
+collects unresolved temporary-index stages, and leaves refs, the live index,
+worktree, and on-disk object database unchanged. Applicable external merge
+drivers, filters, and renormalization are rejected; no hook, subprocess, fetch,
+credential helper, or network operation is invoked. The required plumbing is
+re-exported by `gix`, so this boundary adds no direct dependency.
+
 ### Parallel Program Detection with Shared Executable Index
 
 `ProgramsInfo::detect()` first builds a single `ExecutableIndex` by scanning every `PATH` directory and macOS app bundle location once. All 8 program categories then share this index via `Arc` and perform O(1) HashMap lookups instead of redundant filesystem traversals. The categories themselves run in parallel using `rayon::join` pairs (editors+utilities, language+OS package managers, TTS+terminals, headless audio+AI clients). Rayon handles the nested parallelism correctly, distributing work across its thread pool without spawning excess threads.

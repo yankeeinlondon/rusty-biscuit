@@ -25,6 +25,18 @@ pub enum SniffError {
         source: Box<dyn std::error::Error + Send + Sync + 'static>,
     },
 
+    /// A committed-tip merge would require repository-defined executable behavior.
+    #[error(
+        "unsupported merge configuration '{setting}' applies to '{}'",
+        path.display()
+    )]
+    UnsupportedMergeConfiguration {
+        /// The Git setting that would require a command or unsupported normalization.
+        setting: String,
+        /// Repository-relative path to which the setting applies.
+        path: PathBuf,
+    },
+
     /// The specified path is not a git repository.
     #[error("Not a git repository: {0}")]
     NotARepository(PathBuf),
@@ -98,6 +110,72 @@ pub enum SniffError {
     UnsupportedProvider {
         /// The remote URL that could not be resolved to a supported provider.
         url: String,
+    },
+
+    /// A requested configured remote does not exist.
+    #[error("remote `{name}` is not configured")]
+    RemoteNotConfigured {
+        /// Exact case-sensitive remote name requested by the caller.
+        name: String,
+    },
+
+    /// A configured remote has no usable fetch URL.
+    #[error("remote `{name}` has no usable URL")]
+    RemoteUrlMissing {
+        /// Remote whose URL could not be resolved.
+        name: String,
+    },
+
+    /// The remote host was rejected before network access.
+    #[error("remote host `{host}` is not allowed by network policy")]
+    RemotePolicyDenied {
+        /// Exact host rejected by the shared fetch policy.
+        host: String,
+    },
+
+    /// The requested observation cannot be performed for this transport/provider.
+    #[error("remote capability `{capability}` is unsupported for {target}")]
+    UnsupportedRemoteCapability {
+        /// Operation the caller requested.
+        capability: &'static str,
+        /// Transport or provider that cannot supply it.
+        target: String,
+    },
+
+    /// The remote endpoint could not be reached or decoded.
+    #[error("remote endpoint `{url}` is unreachable: {message}")]
+    RemoteUnreachable {
+        /// Sanitized endpoint URL without credentials.
+        url: String,
+        /// Focused transport or response error.
+        message: String,
+    },
+
+    /// The remote authenticated the request but denied the operation.
+    #[error("{provider} denied remote operation: {message}")]
+    RemoteForbidden {
+        /// Provider or transport that returned the denial.
+        provider: String,
+        /// Focused denial detail.
+        message: String,
+    },
+
+    /// A provider query is malformed before any request is issued.
+    #[error("invalid remote query field `{field}`: {message}")]
+    InvalidRemoteQuery {
+        /// Query field that failed validation.
+        field: &'static str,
+        /// Focused validation detail.
+        message: String,
+    },
+
+    /// A valid canonical filter cannot be honored exactly by the selected adapter.
+    #[error("remote filter `{field}` is unsupported by {provider}")]
+    UnsupportedRemoteFilter {
+        /// Canonical query field that is unavailable.
+        field: &'static str,
+        /// Provider and API flavor selected for the query.
+        provider: String,
     },
 
     /// Authentication credentials not configured for provider.

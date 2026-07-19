@@ -8,11 +8,14 @@
 
 use std::path::{Path, PathBuf};
 
+use gix::bstr::ByteSlice;
+
 use super::discovery::{
     DeltaKind, get_commit_by_sha_fallible, get_commit_files_fallible,
     get_commits_for_branch_fallible, get_commits_for_path_fallible,
 };
 use super::open;
+use super::merge_conflicts::merge_conflicts_between;
 use super::status::detect_merge_conflicts_fallible;
 use super::types::{BranchInfo, CommitInfo, GitHostingProvider};
 use crate::Result;
@@ -110,7 +113,12 @@ pub fn commits_for_branch_at(path: &Path, branch: &str, count: usize) -> Result<
     get_commits_for_branch_fallible(&repo, branch, count)
 }
 
-/// Paths of files in an unmerged (merge-conflict) state, empty when none.
+/// Paths currently in the repository index's unmerged stages, empty when none.
+///
+/// This observes actual merge, rebase, cherry-pick, or revert state in the live
+/// index. Use [`merge_conflicts_with_branch_at`] to predict a committed-tip
+/// branch merge without consulting that index. Returned paths are sorted,
+/// deduplicated, repository-relative paths with portable separators.
 ///
 /// ## Errors
 ///
@@ -121,6 +129,81 @@ pub fn merge_conflicts_at(path: &Path) -> Result<Vec<PathBuf>> {
         return Ok(Vec::new());
     };
     detect_merge_conflicts_fallible(&repo)
+}
+
+/// Predicts unresolved paths when `incoming_branch` is merged into the current branch.
+///
+/// Both sides are captured local commit tips. The analysis ignores the live
+/// index and worktree, performs no fetch or command execution, and keeps all
+/// synthesized objects in probe-local memory.
+///
+/// Unlike [`merge_conflicts_at`], this does not observe an in-progress operation
+/// or any staged, unstaged, untracked, or already-conflicted worktree state.
+/// Applicable external merge drivers, filters, and renormalization are rejected
+/// because command-free prediction cannot safely reproduce them.
+///
+/// `incoming_branch` accepts an exact local branch name with or without one
+/// leading `refs/heads/`. Tags, object IDs, remote-tracking refs, abbreviated
+/// names, and other revision expressions are not resolved.
+///
+/// ## Errors
+///
+/// Returns an error outside a repository, for detached or unborn HEAD, for an
+/// invalid or missing local branch, for unrelated or corrupt histories, or
+/// when an applicable external merge driver/filter or renormalization setting
+/// prevents command-free prediction.
+pub fn merge_conflicts_with_branch_at(
+    path: &Path,
+    incoming_branch: &str,
+) -> Result<Vec<PathBuf>> {
+    let Some(repo) = open_gix(path)? else {
+        return Err(crate::SniffError::NotARepository(path.to_path_buf()));
+    };
+    let mut head = repo.head().map_err(|error| crate::SniffError::git("head", error))?;
+    if head.is_detached() {
+        return Err(crate::SniffError::git(
+            "merge_current_branch",
+            std::io::Error::other("HEAD is detached"),
+        ));
+    }
+    if head.is_unborn() {
+        return Err(crate::SniffError::git(
+            "merge_current_branch",
+            std::io::Error::other("HEAD is unborn"),
+        ));
+    }
+    let current_name = head
+        .referent_name()
+        .expect("attached born HEAD has a referent")
+        .as_bstr();
+    if !current_name.starts_with_str("refs/heads/") {
+        return Err(crate::SniffError::git(
+            "merge_current_branch",
+            std::io::Error::other("HEAD is not attached to a local branch"),
+        ));
+    }
+    let ours = head
+        .peel_to_commit()
+        .map_err(|error| crate::SniffError::git("merge_current_branch", error))?
+        .id()
+        .detach();
+
+    let short = incoming_branch
+        .strip_prefix("refs/heads/")
+        .unwrap_or(incoming_branch);
+    let full = format!("refs/heads/{short}");
+    let full_name = gix::refs::FullName::try_from(full.as_str())
+        .map_err(|error| crate::SniffError::git("merge_branch_name", error))?;
+    gix::validate::reference::branch_name(full_name.as_bstr())
+        .map_err(|error| crate::SniffError::git("merge_branch_name", error))?;
+    let theirs = repo
+        .find_reference(full_name.as_bstr())
+        .map_err(|error| crate::SniffError::git("merge_branch", error))?
+        .into_fully_peeled_id()
+        .map_err(|error| crate::SniffError::git("merge_branch", error))?
+        .detach();
+
+    merge_conflicts_between(&repo, ours, theirs)
 }
 
 /// Local branch projection for the repository containing `path`.
@@ -144,7 +227,8 @@ pub fn branches_at(path: &Path, refresh_remotes: bool) -> Result<Option<Vec<Bran
 /// Trust/ownership, permission, I/O, and corruption failures surface as
 /// [`SniffError::Git`].
 pub fn preferred_remote_url(path: &Path) -> Result<Option<String>> {
-    Ok(open::trusted_discover(path)?.and_then(|repo| resolve_origin_or_first(&repo)))
+    Ok(super::remote_resolver::resolve_remote_at(path, None)?
+        .map(|remote| remote.fetch_url))
 }
 
 /// URL of the named remote, or `None` if the remote is absent or has no URL.
@@ -202,15 +286,4 @@ fn browser_url_from_url(url: &str, sha: &str) -> Option<String> {
         "{base}/{owner_repo}/{}/{sha}",
         provider.commit_path_segment()
     ))
-}
-
-/// `origin` URL if present, otherwise the first configured remote with a URL.
-fn resolve_origin_or_first(repo: &gix::Repository) -> Option<String> {
-    if let Some(url) = remote_url_from_config(repo, "origin") {
-        return Some(url);
-    }
-    // `remote_names()` is sorted, so this is the alphabetically-first remote.
-    repo.remote_names()
-        .into_iter()
-        .find_map(|name| remote_url_from_config(repo, &name.to_string()))
 }

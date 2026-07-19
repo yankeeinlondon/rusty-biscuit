@@ -17,7 +17,6 @@ use std::path::{Path, PathBuf};
 use git2::Repository;
 use tempfile::TempDir;
 
-use sniff::SniffError;
 use sniff::filesystem::detect_git_with_request;
 use sniff::filesystem::git::{
     DeltaKind, FileAction, FileStatus, GitHostingProvider, GitRepo, RefKind, get_commit_files,
@@ -399,21 +398,90 @@ fn discovery_genuine_non_repository_returns_ok_none() {
     );
 }
 
+/// Creates a bare repository with one commit on `branch`.
+fn init_bare_with_commit(parent: &Path, branch: &str) -> PathBuf {
+    let bare_path = parent.join("bare.git");
+    let repo = Repository::init_bare(&bare_path).unwrap();
+    repo.set_head(&format!("refs/heads/{branch}")).unwrap();
+    let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+    let tree_id = repo.treebuilder(None).unwrap().write().unwrap();
+    {
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+            .unwrap();
+    }
+    bare_path
+}
+
 #[test]
-fn discovery_bare_repository_surfaces_error() {
-    // A bare repository discovers successfully but has no working directory;
-    // sniff treats the missing workdir as an error rather than Ok(None). This
-    // is the only error state git2 discovery currently surfaces — Phase 2
-    // widens it to trust/permission/corruption failures under gix.
+fn discovery_bare_repository_is_a_valid_repo_with_head_queries() {
+    // A bare repository has no working directory, but its refs, HEAD, and
+    // objects are all readable — discovery must not reject it.
+    let dir = TempDir::new().unwrap();
+    let bare_path = init_bare_with_commit(dir.path(), "fixture/bare");
+
+    let handle = GitRepo::discover(&bare_path)
+        .expect("bare repo discovery must succeed")
+        .expect("bare repo must be discovered");
+
+    assert!(handle.is_bare(), "bare repo must report is_bare");
+    assert_eq!(
+        handle.current_branch(),
+        Some("fixture/bare".to_string()),
+        "bare repo with symbolic HEAD reports its attached branch"
+    );
+    assert_eq!(
+        handle.try_current_branch().unwrap(),
+        Some("fixture/bare".to_string())
+    );
+    assert_eq!(
+        handle.try_current_worktree_name().unwrap(),
+        None,
+        "bare repo must not substitute a worktree name"
+    );
+    assert_eq!(
+        handle.merge_conflicts().unwrap(),
+        Vec::<PathBuf>::new(),
+        "bare repo has no index and therefore no conflicts"
+    );
+}
+
+#[test]
+fn discovery_bare_repository_unborn_head_has_no_branch() {
     let dir = TempDir::new().unwrap();
     let bare_path: PathBuf = dir.path().join("bare.git");
     Repository::init_bare(&bare_path).unwrap();
 
-    let result = GitRepo::discover(&bare_path);
-    assert!(
-        matches!(result, Err(SniffError::NotARepository(_))),
-        "bare repo (no workdir) should surface an error, got {result:?}"
+    let handle = GitRepo::discover(&bare_path)
+        .expect("bare repo discovery must succeed")
+        .expect("bare repo must be discovered");
+
+    assert!(handle.is_bare());
+    assert_eq!(
+        handle.current_branch(),
+        None,
+        "unborn HEAD has no branch even when the ref name is set"
     );
+    assert_eq!(handle.merge_conflicts().unwrap(), Vec::<PathBuf>::new());
+}
+
+#[test]
+fn discovery_bare_repository_detached_head_has_no_branch() {
+    let dir = TempDir::new().unwrap();
+    let bare_path = init_bare_with_commit(dir.path(), "fixture/bare");
+
+    let repo = Repository::open(&bare_path).unwrap();
+    let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.set_head_detached(head_commit.id()).unwrap();
+
+    let handle = GitRepo::discover(&bare_path)
+        .expect("bare repo discovery must succeed")
+        .expect("bare repo must be discovered");
+
+    assert!(handle.is_bare());
+    assert!(handle.is_detached_head());
+    assert_eq!(handle.current_branch(), None);
+    assert_eq!(handle.try_current_branch().unwrap(), None);
 }
 
 // ---------------------------------------------------------------------------

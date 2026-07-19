@@ -133,6 +133,7 @@ pub enum DocumentCategory {
 
 /// Normalized pull request state for filtering and display.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum PullRequestState {
     /// Open pull requests.
     Open,
@@ -144,6 +145,23 @@ pub enum PullRequestState {
     Draft,
     /// All pull requests regardless of state.
     All,
+}
+
+/// A canonical query field accepting one value or an array of values.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum QueryValues<T> {
+    One(T),
+    Many(Vec<T>),
+}
+
+impl<T> QueryValues<T> {
+    pub fn as_slice(&self) -> &[T] {
+        match self {
+            Self::One(value) => std::slice::from_ref(value),
+            Self::Many(values) => values,
+        }
+    }
 }
 
 impl PullRequestState {
@@ -212,6 +230,63 @@ pub struct PullRequestInfo {
     pub merged_at: Option<String>,
     /// HTML URL to the PR.
     pub html_url: String,
+}
+
+/// Repository-qualified identity of a pull or merge request.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PullRequestReference {
+    pub provider: GitProvider,
+    pub api_flavor: String,
+    pub host: String,
+    pub namespace: String,
+    pub repository: String,
+    pub native_id: String,
+    pub display_id: String,
+    pub number: Option<u64>,
+    pub web_url: Option<String>,
+    pub api_url: Option<String>,
+    pub original_url: Option<String>,
+}
+
+/// Structured pull-request result retaining identity and normalized details.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PullRequestRecord {
+    pub identity: PullRequestReference,
+    pub details: PullRequestInfo,
+}
+
+/// Provider-neutral pull-request query vocabulary.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PullRequestQuery {
+    pub state: Option<QueryValues<PullRequestState>>,
+    pub source_branch: Option<String>,
+    pub target_branch: Option<String>,
+    pub author: Option<String>,
+    pub assignee: Option<String>,
+    pub reviewer: Option<String>,
+    pub labels: Vec<String>,
+    pub milestone: Option<String>,
+    pub search: Option<String>,
+    pub commit: Option<String>,
+    pub created_after: Option<String>,
+    pub created_before: Option<String>,
+    pub updated_after: Option<String>,
+    pub updated_before: Option<String>,
+    pub draft: Option<bool>,
+    pub sort: Option<String>,
+    pub descending: bool,
+    pub limit: Option<usize>,
+    pub cursor: Option<String>,
+}
+
+/// One cursor-addressable page of pull requests.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PullRequestPage {
+    pub items: Vec<PullRequestRecord>,
+    pub next: Option<String>,
+    pub total: Option<usize>,
+    pub warnings: Vec<String>,
 }
 
 /// Normalized issue information.
@@ -303,6 +378,95 @@ pub struct CiCdInfo {
     pub head_branch: Option<String>,
     /// Event that triggered this run (e.g., "push", "pull_request").
     pub event: Option<String>,
+}
+
+/// Identity of the workflow run or pipeline containing a CI/CD job.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CiCdParentExecution {
+    pub native_id: String,
+    pub display_id: String,
+    pub name: Option<String>,
+    pub web_url: Option<String>,
+}
+
+/// Repository-qualified identity of one provider-addressable CI/CD job.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CiCdJobReference {
+    pub provider: GitProvider,
+    pub api_flavor: String,
+    pub host: String,
+    pub namespace: String,
+    pub repository: String,
+    pub native_id: String,
+    pub display_id: String,
+    pub original_url: Option<String>,
+}
+
+/// One normalized CI/CD job, never a configuration or bare parent execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CiCdJob {
+    pub reference: CiCdJobReference,
+    pub parent: CiCdParentExecution,
+    pub name: String,
+    pub stage: Option<String>,
+    pub normalized_status: String,
+    pub native_status: String,
+    pub conclusion: Option<String>,
+    pub branch: Option<String>,
+    pub commit: Option<String>,
+    pub actor: Option<String>,
+    pub trigger: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    pub web_url: Option<String>,
+    pub api_url: Option<String>,
+    pub runner: Option<String>,
+}
+
+/// Provider-neutral CI/CD job query vocabulary.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CiCdJobQuery {
+    pub statuses: Option<QueryValues<String>>,
+    pub name: Option<String>,
+    pub stage: Option<String>,
+    pub workflow: Option<String>,
+    pub parent: Option<String>,
+    pub branch: Option<String>,
+    pub commit: Option<String>,
+    pub actor: Option<String>,
+    pub trigger: Option<String>,
+    pub created_after: Option<String>,
+    pub created_before: Option<String>,
+    pub updated_after: Option<String>,
+    pub updated_before: Option<String>,
+    pub descending: bool,
+    pub limit: Option<usize>,
+    pub cursor: Option<String>,
+}
+
+/// One cursor-addressable page of CI/CD jobs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CiCdJobPage {
+    pub items: Vec<CiCdJob>,
+    pub next: Option<String>,
+    pub total: Option<usize>,
+    pub warnings: Vec<String>,
+}
+
+/// Capabilities exposed by the normalized provider contract.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderCapabilities {
+    pub pull_requests: bool,
+    pub cicd_jobs: bool,
+    pub pagination: bool,
+    pub direct_job_listing: bool,
+    pub bounded_parent_traversal: bool,
+    pub logs: bool,
+    pub artifacts: bool,
+    pub test_reports: bool,
+    pub pull_request_filters: Vec<String>,
+    pub cicd_job_filters: Vec<String>,
 }
 
 /// A reference to another repository in the same organization.

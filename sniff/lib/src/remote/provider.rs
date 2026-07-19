@@ -7,8 +7,10 @@
 use async_trait::async_trait;
 
 use super::types::{
-    CiCdInfo, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo, OrgRepoRef, PullRequestInfo,
-    PullRequestState, RemoteReport, RepoMetadata, TagsAndReleases,
+    CiCdInfo, CiCdJob, CiCdJobPage, CiCdJobQuery, CiCdJobReference, DocumentRef, GitProvider,
+    IssueInfo, KeyUrls, OrgInfo, OrgRepoRef, ProviderCapabilities, PullRequestInfo, PullRequestPage,
+    PullRequestQuery, PullRequestRecord, PullRequestReference, PullRequestState, RemoteReport,
+    RepoMetadata, TagsAndReleases,
 };
 use crate::error::SniffError;
 
@@ -44,6 +46,22 @@ use crate::error::SniffError;
 pub trait RemoteRepoProvider: Send + Sync {
     /// Returns the provider type (GitHub, GitLab, etc.).
     fn provider(&self) -> GitProvider;
+
+    /// Normalized query capabilities available through this trait.
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            pull_requests: true,
+            cicd_jobs: false,
+            pagination: true,
+            direct_job_listing: false,
+            bounded_parent_traversal: false,
+            logs: false,
+            artifacts: false,
+            test_reports: false,
+            pull_request_filters: vec!["state".to_string(), "limit".to_string()],
+            cicd_job_filters: Vec::new(),
+        }
+    }
 
     /// Get repository metadata (stars, forks, license, description, etc.).
     async fn get_repo_metadata(&self, owner: &str, repo: &str) -> Result<RepoMetadata, SniffError>;
@@ -86,6 +104,55 @@ pub trait RemoteRepoProvider: Send + Sync {
         state: PullRequestState,
     ) -> Result<Vec<PullRequestInfo>, SniffError>;
 
+    /// Gets one pull request by exact provider identifier.
+    async fn get_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<Option<PullRequestRecord>, SniffError> {
+        let details = self
+            .list_pull_requests(owner, repo, PullRequestState::All)
+            .await?
+            .into_iter()
+            .find(|request| request.number == number);
+        Ok(details.map(|details| pr_record(self.provider(), owner, repo, details)))
+    }
+
+    /// Queries pull requests with normalized filtering, sorting, and cursor pagination.
+    async fn query_pull_requests(
+        &self,
+        owner: &str,
+        repo: &str,
+        mut query: PullRequestQuery,
+    ) -> Result<PullRequestPage, SniffError> {
+        validate_limit(query.limit)?;
+        validate_sort(query.sort.as_deref(), &["created", "updated", "provider-default"])?;
+        validate_pr_filters(self.provider(), &query)?;
+        if query.state.is_none() {
+            query.state = Some(super::types::QueryValues::One(PullRequestState::Open));
+        }
+        let state = query.state.as_ref()
+            .and_then(|states| (states.as_slice().len() == 1).then(|| states.as_slice()[0]))
+            .unwrap_or(PullRequestState::All);
+        let mut items = self.list_pull_requests(owner, repo, state).await?;
+        items.retain(|item| pr_matches(item, &query));
+        sort_prs(&mut items, query.sort.as_deref().unwrap_or("provider-default"), query.descending);
+        let total = items.len();
+        let offset = parse_cursor(query.cursor.as_deref())?;
+        let limit = query.limit.unwrap_or(20);
+        let items = items.into_iter().skip(offset).take(limit)
+            .map(|details| pr_record(self.provider(), owner, repo, details))
+            .collect::<Vec<_>>();
+        let next = offset + items.len();
+        Ok(PullRequestPage {
+            items,
+            next: (next < total).then(|| next.to_string()),
+            total: Some(total),
+            warnings: Vec::new(),
+        })
+    }
+
     /// List open issues.
     ///
     /// Note: GitHub's issues API returns both issues and pull requests.
@@ -124,6 +191,31 @@ pub trait RemoteRepoProvider: Send + Sync {
         _limit: usize,
     ) -> Result<Vec<CiCdInfo>, SniffError> {
         Ok(Vec::new())
+    }
+
+    /// Gets one CI/CD job by exact provider identity.
+    async fn get_cicd_job(
+        &self,
+        reference: &CiCdJobReference,
+    ) -> Result<Option<CiCdJob>, SniffError> {
+        Err(SniffError::UnsupportedRemoteCapability {
+            capability: "exact CI/CD job lookup",
+            target: format!("{:?}", reference.provider),
+        })
+    }
+
+    /// Queries CI/CD jobs without projecting parent executions as jobs.
+    async fn query_cicd_jobs(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        query: CiCdJobQuery,
+    ) -> Result<CiCdJobPage, SniffError> {
+        validate_limit(query.limit)?;
+        Err(SniffError::UnsupportedRemoteCapability {
+            capability: "CI/CD job query",
+            target: format!("{:?}", self.provider()),
+        })
     }
 
     /// List other repositories in the same org/group.
@@ -208,6 +300,133 @@ pub trait RemoteRepoProvider: Send + Sync {
     }
 }
 
+fn validate_limit(limit: Option<usize>) -> Result<(), SniffError> {
+    if matches!(limit, Some(0 | 101..)) {
+        return Err(SniffError::InvalidRemoteQuery {
+            field: "limit",
+            message: "must be between 1 and 100".to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_sort(sort: Option<&str>, allowed: &[&str]) -> Result<(), SniffError> {
+    if let Some(sort) = sort
+        && !allowed.contains(&sort)
+    {
+        return Err(SniffError::InvalidRemoteQuery {
+            field: "sort",
+            message: format!("expected one of: {}", allowed.join(", ")),
+        });
+    }
+    Ok(())
+}
+
+fn parse_cursor(cursor: Option<&str>) -> Result<usize, SniffError> {
+    cursor
+        .unwrap_or("0")
+        .parse()
+        .map_err(|_| SniffError::InvalidRemoteQuery {
+            field: "cursor",
+            message: "must be a non-negative decimal offset".to_string(),
+        })
+}
+
+fn validate_pr_filters(
+    provider: GitProvider,
+    query: &PullRequestQuery,
+) -> Result<(), SniffError> {
+    if query.created_after.as_ref().zip(query.created_before.as_ref())
+        .is_some_and(|(after, before)| after > before)
+    {
+        return Err(SniffError::InvalidRemoteQuery {
+            field: "created_after",
+            message: "must not be later than created_before".to_string(),
+        });
+    }
+    if query.updated_after.as_ref().zip(query.updated_before.as_ref())
+        .is_some_and(|(after, before)| after > before)
+    {
+        return Err(SniffError::InvalidRemoteQuery {
+            field: "updated_after",
+            message: "must not be later than updated_before".to_string(),
+        });
+    }
+    for (field, present) in [
+        ("assignee", query.assignee.is_some()),
+        ("reviewer", query.reviewer.is_some()),
+        ("milestone", query.milestone.is_some()),
+        ("commit", query.commit.is_some()),
+    ] {
+        if present {
+            return Err(SniffError::UnsupportedRemoteFilter {
+                field,
+                provider: format!("{provider:?}"),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn pr_record(
+    provider: GitProvider,
+    owner: &str,
+    repo: &str,
+    details: PullRequestInfo,
+) -> PullRequestRecord {
+    PullRequestRecord {
+        identity: PullRequestReference {
+            provider,
+            api_flavor: format!("{provider:?}"),
+            host: String::new(),
+            namespace: owner.to_string(),
+            repository: repo.to_string(),
+            native_id: details.number.to_string(),
+            display_id: format!("#{}", details.number),
+            number: Some(details.number),
+            web_url: Some(details.html_url.clone()),
+            api_url: None,
+            original_url: None,
+        },
+        details,
+    }
+}
+
+fn pr_matches(item: &PullRequestInfo, query: &PullRequestQuery) -> bool {
+    query.state.as_ref().is_none_or(|states| states.as_slice().iter().any(|state| match state {
+        PullRequestState::Open => item.state.eq_ignore_ascii_case("open") || item.state.eq_ignore_ascii_case("opened"),
+        PullRequestState::Closed => item.state.eq_ignore_ascii_case("closed") || item.state.eq_ignore_ascii_case("declined") || item.state.eq_ignore_ascii_case("superseded"),
+        PullRequestState::Merged => item.merged_at.is_some() || item.state.eq_ignore_ascii_case("merged"),
+        PullRequestState::Draft => item.draft,
+        PullRequestState::All => true,
+    }))
+        && query.source_branch.as_ref().is_none_or(|branch| item.source_branch.as_ref() == Some(branch))
+        && query.target_branch.as_ref().is_none_or(|branch| item.target_branch.as_ref() == Some(branch))
+        && query.author.as_ref().is_none_or(|author| item.author.eq_ignore_ascii_case(author))
+        && query.labels.iter().all(|label| item.labels.iter().any(|actual| actual.eq_ignore_ascii_case(label)))
+        && query.created_after.as_ref().is_none_or(|bound| &item.created_at >= bound)
+        && query.created_before.as_ref().is_none_or(|bound| &item.created_at <= bound)
+        && query.updated_after.as_ref().is_none_or(|bound| item.updated_at.as_ref().is_some_and(|value| value >= bound))
+        && query.updated_before.as_ref().is_none_or(|bound| item.updated_at.as_ref().is_some_and(|value| value <= bound))
+        && query.draft.is_none_or(|draft| item.draft == draft)
+        && query.search.as_ref().is_none_or(|text| {
+            let text = text.to_ascii_lowercase();
+            item.title.to_ascii_lowercase().contains(&text)
+                || item.body.as_ref().is_some_and(|body| body.to_ascii_lowercase().contains(&text))
+        })
+}
+
+fn sort_prs(items: &mut [PullRequestInfo], sort: &str, descending: bool) {
+    items.sort_by(|left, right| match sort {
+        "updated" => left.updated_at.cmp(&right.updated_at),
+        "provider-default" => std::cmp::Ordering::Equal,
+        _ => left.created_at.cmp(&right.created_at),
+    });
+    if descending {
+        items.reverse();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,6 +473,24 @@ mod tests {
             started_at: None,
             head_branch: None,
             event: None,
+        }
+    }
+
+    fn pr_entry(number: u64, title: &str, author: &str) -> PullRequestInfo {
+        PullRequestInfo {
+            number,
+            title: title.to_string(),
+            state: "open".to_string(),
+            author: author.to_string(),
+            draft: false,
+            source_branch: Some(format!("feature-{number}")),
+            target_branch: Some("main".to_string()),
+            labels: vec!["ready".to_string()],
+            body: Some(format!("body {title}")),
+            created_at: format!("2024-01-{number:02}T00:00:00Z"),
+            updated_at: Some(format!("2024-02-{number:02}T00:00:00Z")),
+            merged_at: None,
+            html_url: format!("https://github.com/owner/repo/pull/{number}"),
         }
     }
 
@@ -326,7 +563,7 @@ mod tests {
             _repo: &str,
             _state: PullRequestState,
         ) -> Result<Vec<PullRequestInfo>, SniffError> {
-            Ok(Vec::new())
+            Ok(vec![pr_entry(1, "Alpha", "alice"), pr_entry(2, "Beta", "bob")])
         }
 
         async fn list_issues(
@@ -435,4 +672,23 @@ mod tests {
         let report = provider.fetch_report("owner", "repo").await.unwrap();
         assert!(report.ci_cd.is_empty());
     }
+
+    #[tokio::test]
+    async fn structured_pr_queries_retain_identity_filter_and_page() {
+        let provider = FakeProvider { workflow_runs: vec![], runs_fail: false, detected: None };
+        let exact = provider.get_pull_request("owner", "repo", 2).await.unwrap().unwrap();
+        assert_eq!(exact.identity.number, Some(2));
+        assert_eq!(exact.identity.namespace, "owner");
+
+        let page = provider.query_pull_requests("owner", "repo", PullRequestQuery {
+            author: Some("alice".to_string()),
+            labels: vec!["ready".to_string()],
+            limit: Some(1),
+            ..Default::default()
+        }).await.unwrap();
+        assert_eq!(page.total, Some(1));
+        assert_eq!(page.items[0].details.title, "Alpha");
+        assert!(page.next.is_none());
+    }
+
 }

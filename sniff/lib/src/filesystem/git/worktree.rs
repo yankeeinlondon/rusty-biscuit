@@ -50,22 +50,24 @@ pub fn get_current_worktree_name(cwd: &Path) -> Result<Option<String>, Box<dyn E
         return Ok(None);
     };
 
+    Ok(current_worktree_name(&repo))
+}
+
+pub(crate) fn current_worktree_name(repo: &gix::Repository) -> Option<String> {
     // Not a linked worktree — either the main repo or a bare repo. A linked
     // worktree has a per-worktree git dir distinct from the common dir.
-    if !is_linked_worktree(&repo) {
-        return Ok(None);
+    if !is_linked_worktree(repo) {
+        return None;
     }
 
-    let Some(workdir) = repo.workdir() else {
-        return Ok(None);
-    };
+    let workdir = repo.workdir()?;
 
     // Canonicalize first: gix may report a relative workdir (no `file_name`).
     let canonical = std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
-    Ok(canonical
+    canonical
         .file_name()
         .and_then(|n| n.to_str())
-        .map(String::from))
+        .map(String::from)
 }
 
 /// True when `repo` is a linked worktree rather than the main worktree.

@@ -52,7 +52,7 @@ sanity:
 
 # test library and CLI
 test *args="":
-    @just _test sniff {{ args }}
+    @just _test sniff --features network {{ args }}
     @just _test sniff-cli {{ args }}
 
 # Real-terminal (Level-2) tests: CI/CD status-cell styling in sniff-cli.

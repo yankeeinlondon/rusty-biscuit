@@ -792,7 +792,10 @@ pub(crate) fn get_worktrees(
                     false
                 } else {
                     match (wt_head, base_oid) {
-                        (Some(wt), Some(base_id)) => has_merge_conflicts(&base, wt, base_id)?,
+                        (Some(wt), Some(base_id)) => {
+                            !super::merge_conflicts::merge_conflicts_between(&base, wt, base_id)?
+                                .is_empty()
+                        }
                         _ => false,
                     }
                 }
@@ -831,24 +834,6 @@ pub(crate) fn get_worktrees(
         .collect();
 
     Ok(results?.into_iter().collect())
-}
-
-/// Merge the worktree tip into the base in memory (no repository writes) and
-/// report whether the merge has unresolved conflicts — the gix equivalent of
-/// git2's `merge_commits` + `Index::has_conflicts`.
-fn has_merge_conflicts(
-    repo: &gix::Repository,
-    ours: gix::ObjectId,
-    theirs: gix::ObjectId,
-) -> crate::Result<bool> {
-    let labels = gix::merge::blob::builtin_driver::text::Labels::default();
-    repo.merge_commits(ours, theirs, labels, gix::merge::commit::Options::default())
-        .map(|outcome| {
-            outcome
-                .tree_merge
-                .has_unresolved_conflicts(gix::merge::tree::TreatAsUnresolved::git())
-        })
-        .map_err(|e| SniffError::git("merge", e))
 }
 
 #[cfg(test)]
@@ -1204,7 +1189,13 @@ mod tests {
             .has_conflicts();
         assert!(git2_conflict, "git2 oracle: ours/theirs should conflict");
         assert!(
-            has_merge_conflicts(&gix_repo, to_gix(ours), to_gix(theirs)).unwrap(),
+            !crate::filesystem::git::merge_conflicts::merge_conflicts_between(
+                &gix_repo,
+                to_gix(ours),
+                to_gix(theirs),
+            )
+            .unwrap()
+            .is_empty(),
             "gix probe must agree: ours/theirs conflict"
         );
 
@@ -1222,7 +1213,13 @@ mod tests {
             "git2 oracle: ours/clean should not conflict"
         );
         assert!(
-            !has_merge_conflicts(&gix_repo, to_gix(ours), to_gix(clean)).unwrap(),
+            crate::filesystem::git::merge_conflicts::merge_conflicts_between(
+                &gix_repo,
+                to_gix(ours),
+                to_gix(clean),
+            )
+            .unwrap()
+            .is_empty(),
             "gix probe must agree: ours/clean is conflict-free"
         );
     }
@@ -1626,7 +1623,7 @@ mod tests {
         let ours = commit_detached(&repo, "test.txt", "ours\n", "ours", &[base]);
         let theirs = commit_detached(&repo, "test.txt", "theirs\n", "theirs", &[base]);
 
-        // Corrupt one of the tip objects so merge_commits cannot read it.
+        // Corrupt one of the tip objects so the merge probe cannot read it.
         let obj_hex = ours.to_string();
         let obj_path = dir
             .path()
@@ -1648,7 +1645,11 @@ mod tests {
         std::fs::write(&obj_path, b"garbage").unwrap();
 
         let gix_repo = gix::open(dir.path()).unwrap();
-        let result = has_merge_conflicts(&gix_repo, to_gix(ours), to_gix(theirs));
+        let result = crate::filesystem::git::merge_conflicts::merge_conflicts_between(
+            &gix_repo,
+            to_gix(ours),
+            to_gix(theirs),
+        );
         assert!(
             result.is_err(),
             "corrupt object must cause merge-conflict probe to return an error, not false"

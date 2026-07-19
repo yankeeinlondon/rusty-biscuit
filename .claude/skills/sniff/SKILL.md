@@ -1,8 +1,8 @@
 ---
 name: sniff
 description: Expert knowledge for sniff-lib and sniff-cli, a cross-platform system detection library and CLI for Rust. Use when detecting OS/hardware/network/filesystem info, program detection, service detection, adding new detection capabilities, or optimizing detection performance.
-hash: 3cd50ffff2b8b5db-27ba1c39db009879
-last_updated: 2026-06-29
+hash: 3cd50ffff2b8b5db-c1a8af2ea00de21b
+last_updated: 2026-07-18
 ---
 
 # sniff
@@ -122,6 +122,41 @@ let result = detect_with_config(config)?;
 | `MonorepoStandard` | Standard-based monorepo descriptor (Cargo, pnpm, Nx, Bazel, etc.) with `BinarySpec` and advisory `InvocationTemplate`s |
 | `DetectedStandard` | Detected instance of a `MonorepoStandard`, including a `ResolvedBinary` (`Path`, `Wrapper`, or missing) and version satisfaction |
 | `MonorepoLayer` | One layer of the repo topology; includes `authority`, `orchestrators`, `provenance`, and `packages` (repo-relative path references matching `Package.relative`) |
+
+## Git Conflict APIs
+
+Keep actual conflict state distinct from prediction:
+
+- `filesystem::git::merge_conflicts_at(path)` observes non-zero stages in the
+  live index and returns `[]` when the repository is absent or clean.
+- `filesystem::git::merge_conflicts_with_branch_at(path, incoming_branch)`
+  merges the exact incoming local branch tip (`theirs`) into the attached
+  current local branch tip (`ours`) in probe-local memory. Missing repository,
+  branch, history, or safe-configuration prerequisites are errors.
+
+Committed-tip prediction ignores the live index and worktree. Its shared
+commit-pair helper enables object-memory storage before merging, derives its
+temporary index and attributes from the captured `ours` tree, and rejects
+applicable external merge drivers, filters, or renormalization. It never runs a
+hook, subprocess, fetch, credential helper, or network operation. Both the
+public prediction API and `WorktreeEntry::has_conflicts` must continue to derive
+from that one helper.
+
+## Remote Observation and Provider Queries
+
+With the `remote` feature, use `resolve_remote_at` for every configured-remote
+selection. `branch_exists_on_remote_at` is live and read-only: HTTP(S) remotes
+use Git ref advertisement, supported SSH remotes use an authoritative provider
+branch endpoint, and unsupported transports return a capability error rather
+than `false`. `remote_vendor_at` classifies locally when possible and probes an
+ambiguous self-hosted HTTP(S) host only after exact-host consent.
+
+Use `FocusedProviderClient` for bounded pull-request and CI/CD-job queries. It
+retains provider/repository/native identity, follows provider pagination within
+hard parent/page/item bounds, rejects unsupported canonical filters, disables
+redirects, and checks host policy before client construction, credential reads,
+or network I/O. Do not collapse its focused malformed, missing, credential,
+authorization, rate-limit, capability, or transport errors into empty results.
 
 ## Monorepo Topology Model
 

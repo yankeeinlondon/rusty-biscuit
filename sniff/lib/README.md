@@ -390,6 +390,8 @@ remote-tracking refresh.
 - `WorktreeInfo` - Linked worktree information
 - `WorktreeEntry` - Worktree name, branch, path, current flag, and detached-HEAD state
 - `list_worktrees` - List all worktrees including the main worktree (sorted alphabetically)
+- `merge_conflicts_at` - Actual unresolved paths from the live repository index
+- `merge_conflicts_with_branch_at` - Read-only committed-tip prediction for merging a local branch into the current branch
 
 **Detection Strategy:**
 
@@ -448,7 +450,46 @@ if let Some(worktrees) = sniff::filesystem::git::list_worktrees(Path::new("."))?
         println!("{}{} (on {})", marker, wt.name, branch);
     }
 }
+
+// Actual conflict state from an in-progress merge/rebase/cherry-pick/revert.
+let actual = sniff::filesystem::git::merge_conflicts_at(Path::new("."))?;
+
+// Predicted conflicts from merging local `feature/api` into the current branch.
+// This ignores the live index/worktree and never fetches or runs Git commands.
+let predicted = sniff::filesystem::git::merge_conflicts_with_branch_at(
+    Path::new("."),
+    "feature/api",
+)?;
 ```
+
+Conflict prediction captures both local commit tips before the merge, derives
+attributes from the current (`ours`) commit tree, and keeps synthesized merge
+objects in probe-local memory. It rejects applicable external merge drivers,
+filters, and renormalization rather than executing or silently approximating
+them. Empty output means the requested observation or prediction completed and
+found no conflict; missing prediction prerequisites remain errors.
+
+#### Live Remote Observation and Focused Provider Queries
+
+With the `remote` feature, `resolve_remote_at` is the shared configured-remote
+authority used by live branch checks and provider queries. It selects `origin`,
+then the alphabetically first URL-bearing non-`upstream` remote, then
+`upstream`; an explicitly named remote is exact and case-sensitive.
+
+`branch_exists_on_remote_at` reads an HTTP(S) Git ref advertisement without
+fetching or changing local state. Supported SSH-only remotes use an
+authoritative provider branch endpoint or the provider's canonical HTTPS Git
+endpoint; Azure DevOps accepts `AZURE_DEVOPS_TOKEN`, SourceHut accepts
+`SOURCEHUT_TOKEN`, and AWS CodeCommit HTTPS Git credentials are read from
+`AWS_CODECOMMIT_GIT_USERNAME` plus `AWS_CODECOMMIT_GIT_PASSWORD`. Unsupported
+transports return a capability error rather than a false absence.
+`FocusedProviderClient` provides bounded,
+paginated pull-request and CI/CD-job lookup for GitHub, GitLab, Gitea, Forgejo,
+and Bitbucket while preserving repository/provider identity and focused policy,
+credential, authorization, rate-limit, malformed-response, and transport
+errors. Exact-host policy is checked before credentials or requests; redirects
+are disabled, with only the official GitHub and Bitbucket API-host mappings
+accepted as cross-host provider endpoints.
 
 #### Repository Detection
 
