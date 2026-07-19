@@ -178,6 +178,24 @@ pub enum SniffError {
         provider: String,
     },
 
+    /// A bounded-traversal cap was reached before the provider exhausted the
+    /// result set, so no complete result domain exists.
+    ///
+    /// Exact canonical filters and ordering are emulated locally over the whole
+    /// domain. A partial domain would silently answer the wrong question, so the
+    /// query fails instead of returning truncated or empty items.
+    #[error(
+        "remote query against {provider} reached the bounded `{bound}` limit of {limit} before the provider was exhausted; narrow the query so a complete result domain can be traversed"
+    )]
+    IncompleteRemoteDomain {
+        /// Provider and API flavor selected for the query.
+        provider: String,
+        /// Traversal bound that stopped the walk.
+        bound: &'static str,
+        /// Configured maximum for that bound.
+        limit: usize,
+    },
+
     /// Authentication credentials not configured for provider.
     #[error("missing credentials for {provider}: set the {env_var} environment variable")]
     MissingCredentials {

@@ -7,10 +7,11 @@
 use async_trait::async_trait;
 
 use super::types::{
-    CiCdInfo, CiCdJob, CiCdJobPage, CiCdJobQuery, CiCdJobReference, DocumentRef, GitProvider,
-    IssueInfo, KeyUrls, OrgInfo, OrgRepoRef, ProviderCapabilities, PullRequestInfo, PullRequestPage,
-    PullRequestQuery, PullRequestRecord, PullRequestReference, PullRequestState, RemoteReport,
-    RepoMetadata, TagsAndReleases,
+    at_or_after, at_or_before, CanonicalPullRequestState, CiCdInfo, CiCdJob, CiCdJobPage,
+    CiCdJobQuery, CiCdJobReference, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo,
+    OrgRepoRef, ProviderCapabilities, PullRequestInfo, PullRequestPage, PullRequestQuery,
+    PullRequestRecord, PullRequestReference, PullRequestState, RemoteReport, RepoMetadata,
+    TagsAndReleases,
 };
 use crate::error::SniffError;
 
@@ -126,15 +127,20 @@ pub trait RemoteRepoProvider: Send + Sync {
         repo: &str,
         mut query: PullRequestQuery,
     ) -> Result<PullRequestPage, SniffError> {
-        validate_limit(query.limit)?;
-        validate_sort(query.sort.as_deref(), &["created", "updated", "provider-default"])?;
+        query.validate_canonical()?;
         validate_pr_filters(self.provider(), &query)?;
         if query.state.is_none() {
-            query.state = Some(super::types::QueryValues::One(PullRequestState::Open));
+            query.state = Some(super::types::QueryValues::One(CanonicalPullRequestState::Open));
         }
-        let state = query.state.as_ref()
+        let state = query
+            .state
+            .as_ref()
             .and_then(|states| (states.as_slice().len() == 1).then(|| states.as_slice()[0]))
-            .unwrap_or(PullRequestState::All);
+            .map_or(PullRequestState::All, |state| match state {
+                CanonicalPullRequestState::Open => PullRequestState::Open,
+                CanonicalPullRequestState::Closed => PullRequestState::Closed,
+                CanonicalPullRequestState::Merged => PullRequestState::Merged,
+            });
         let mut items = self.list_pull_requests(owner, repo, state).await?;
         items.retain(|item| pr_matches(item, &query));
         sort_prs(&mut items, query.sort.as_deref().unwrap_or("provider-default"), query.descending);
@@ -211,7 +217,7 @@ pub trait RemoteRepoProvider: Send + Sync {
         _repo: &str,
         query: CiCdJobQuery,
     ) -> Result<CiCdJobPage, SniffError> {
-        validate_limit(query.limit)?;
+        query.validate_canonical()?;
         Err(SniffError::UnsupportedRemoteCapability {
             capability: "CI/CD job query",
             target: format!("{:?}", self.provider()),
@@ -300,28 +306,6 @@ pub trait RemoteRepoProvider: Send + Sync {
     }
 }
 
-fn validate_limit(limit: Option<usize>) -> Result<(), SniffError> {
-    if matches!(limit, Some(0 | 101..)) {
-        return Err(SniffError::InvalidRemoteQuery {
-            field: "limit",
-            message: "must be between 1 and 100".to_string(),
-        });
-    }
-    Ok(())
-}
-
-fn validate_sort(sort: Option<&str>, allowed: &[&str]) -> Result<(), SniffError> {
-    if let Some(sort) = sort
-        && !allowed.contains(&sort)
-    {
-        return Err(SniffError::InvalidRemoteQuery {
-            field: "sort",
-            message: format!("expected one of: {}", allowed.join(", ")),
-        });
-    }
-    Ok(())
-}
-
 fn parse_cursor(cursor: Option<&str>) -> Result<usize, SniffError> {
     cursor
         .unwrap_or("0")
@@ -336,22 +320,6 @@ fn validate_pr_filters(
     provider: GitProvider,
     query: &PullRequestQuery,
 ) -> Result<(), SniffError> {
-    if query.created_after.as_ref().zip(query.created_before.as_ref())
-        .is_some_and(|(after, before)| after > before)
-    {
-        return Err(SniffError::InvalidRemoteQuery {
-            field: "created_after",
-            message: "must not be later than created_before".to_string(),
-        });
-    }
-    if query.updated_after.as_ref().zip(query.updated_before.as_ref())
-        .is_some_and(|(after, before)| after > before)
-    {
-        return Err(SniffError::InvalidRemoteQuery {
-            field: "updated_after",
-            message: "must not be later than updated_before".to_string(),
-        });
-    }
     for (field, present) in [
         ("assignee", query.assignee.is_some()),
         ("reviewer", query.reviewer.is_some()),
@@ -394,20 +362,18 @@ fn pr_record(
 
 fn pr_matches(item: &PullRequestInfo, query: &PullRequestQuery) -> bool {
     query.state.as_ref().is_none_or(|states| states.as_slice().iter().any(|state| match state {
-        PullRequestState::Open => item.state.eq_ignore_ascii_case("open") || item.state.eq_ignore_ascii_case("opened"),
-        PullRequestState::Closed => item.state.eq_ignore_ascii_case("closed") || item.state.eq_ignore_ascii_case("declined") || item.state.eq_ignore_ascii_case("superseded"),
-        PullRequestState::Merged => item.merged_at.is_some() || item.state.eq_ignore_ascii_case("merged"),
-        PullRequestState::Draft => item.draft,
-        PullRequestState::All => true,
+        CanonicalPullRequestState::Open => item.state.eq_ignore_ascii_case("open") || item.state.eq_ignore_ascii_case("opened"),
+        CanonicalPullRequestState::Closed => item.merged_at.is_none() && (item.state.eq_ignore_ascii_case("closed") || item.state.eq_ignore_ascii_case("declined") || item.state.eq_ignore_ascii_case("superseded")),
+        CanonicalPullRequestState::Merged => item.merged_at.is_some() || item.state.eq_ignore_ascii_case("merged"),
     }))
         && query.source_branch.as_ref().is_none_or(|branch| item.source_branch.as_ref() == Some(branch))
         && query.target_branch.as_ref().is_none_or(|branch| item.target_branch.as_ref() == Some(branch))
         && query.author.as_ref().is_none_or(|author| item.author.eq_ignore_ascii_case(author))
         && query.labels.iter().all(|label| item.labels.iter().any(|actual| actual.eq_ignore_ascii_case(label)))
-        && query.created_after.as_ref().is_none_or(|bound| &item.created_at >= bound)
-        && query.created_before.as_ref().is_none_or(|bound| &item.created_at <= bound)
-        && query.updated_after.as_ref().is_none_or(|bound| item.updated_at.as_ref().is_some_and(|value| value >= bound))
-        && query.updated_before.as_ref().is_none_or(|bound| item.updated_at.as_ref().is_some_and(|value| value <= bound))
+        && query.created_after.as_deref().is_none_or(|bound| at_or_after(&item.created_at, bound))
+        && query.created_before.as_deref().is_none_or(|bound| at_or_before(&item.created_at, bound))
+        && query.updated_after.as_deref().is_none_or(|bound| item.updated_at.as_deref().is_some_and(|value| at_or_after(value, bound)))
+        && query.updated_before.as_deref().is_none_or(|bound| item.updated_at.as_deref().is_some_and(|value| at_or_before(value, bound)))
         && query.draft.is_none_or(|draft| item.draft == draft)
         && query.search.as_ref().is_none_or(|text| {
             let text = text.to_ascii_lowercase();
