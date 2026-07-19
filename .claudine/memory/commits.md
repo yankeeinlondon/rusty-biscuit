@@ -107,6 +107,10 @@ do not belong here.
 - Never disable repository signing or override signing configuration (including
   `gpg.program`) to avoid or preempt signing failures. Let the repository and
   host defaults apply. If signing hangs or fails, stop and report it.
+- Never bypass repository hooks with `--no-verify`, `-c core.hooksPath=...`, or
+  equivalent overrides. An instruction not to run validations means do not
+  launch them explicitly; configured commit hooks still run normally. If a hook
+  blocks the commit, report the failure rather than suppressing it.
 - Never amend or create follow-up fixup commits after a successful commit in a
   concurrent batch. Report the issue so the orchestrator can decide whether to
   accept, revert, or coordinate a rewrite.
