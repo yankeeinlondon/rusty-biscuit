@@ -42,17 +42,31 @@ fn forced_width(default: u32) -> u32 {
         .unwrap_or(default)
 }
 
+/// Re-derive `supports_unicode` from the locale on a constructed terminal.
+///
+/// `Terminal::new_optimistic` hardcodes `supports_unicode: true` alongside the
+/// styling it forces, but styling and glyph repertoire are different axes:
+/// `FORCE_COLOR` (or plain mode) may override color, while only the locale can
+/// say whether the terminal decodes UTF-8. Without this, a `C`-locale run with
+/// forced color kept emitting Unicode markers (review-6 finding 1).
+fn with_locale_unicode(mut term: Terminal) -> Terminal {
+    term.supports_unicode =
+        biscuit_terminal::discovery::locale::env_says_utf8().unwrap_or(true);
+    term
+}
+
 fn compute_terminal() -> Terminal {
     if colors_disabled() {
         plain_terminal(forced_width(80))
     } else if force_color_enabled() {
-        // FORCE_COLOR forces styling, not geometry. Shells that export it
-        // globally still run in real terminals, so default to the detected
-        // width (which itself falls back to 80 when stdout is not a tty)
-        // rather than pinning wide terminals to 80 columns.
-        Terminal::new_optimistic(forced_width(
+        // FORCE_COLOR forces styling — not geometry, and not the glyph
+        // repertoire. Shells that export it globally still run in real
+        // terminals, so default to the detected width (which itself falls
+        // back to 80 when stdout is not a tty) rather than pinning wide
+        // terminals to 80 columns.
+        with_locale_unicode(Terminal::new_optimistic(forced_width(
             biscuit_terminal::discovery::detection::terminal_width(),
-        ))
+        )))
     } else {
         Terminal::new()
     }
@@ -83,12 +97,12 @@ pub fn optimistic_terminal(width: Option<u32>) -> Terminal {
     if colors_disabled() {
         plain_terminal(w)
     } else {
-        Terminal::new_optimistic(w)
+        with_locale_unicode(Terminal::new_optimistic(w))
     }
 }
 
 fn plain_terminal(width: u32) -> Terminal {
-    let mut term = Terminal::new_optimistic(width);
+    let mut term = with_locale_unicode(Terminal::new_optimistic(width));
     term.is_tty = false;
     term.color_depth = ColorDepth::None;
     term.color_mode = ColorMode::Dark;
@@ -198,6 +212,52 @@ mod tests {
         unsafe {
             std::env::remove_var("FORCE_COLOR");
         }
+    }
+
+    /// The review-6 finding-1 regression: forcing color must not force the
+    /// Unicode repertoire past a non-UTF-8 locale.
+    #[test]
+    #[serial]
+    fn forced_color_keeps_locale_derived_ascii_fallback() {
+        set_plain(false);
+        let _no_color = test_toolkit::EnvGuard::remove_safe("NO_COLOR");
+        let _force = test_toolkit::EnvGuard::set_safe("FORCE_COLOR", "1");
+        let _locale = test_toolkit::EnvGuard::set_safe("LC_ALL", "C");
+
+        let term = compute_terminal();
+        assert!(term.is_tty, "FORCE_COLOR still selects the optimistic path");
+        assert_eq!(term.color_depth, ColorDepth::TrueColor);
+        assert!(
+            !term.supports_unicode,
+            "a C locale must degrade to ASCII glyphs even under FORCE_COLOR"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn forced_color_keeps_unicode_under_a_utf8_locale() {
+        set_plain(false);
+        let _no_color = test_toolkit::EnvGuard::remove_safe("NO_COLOR");
+        let _force = test_toolkit::EnvGuard::set_safe("FORCE_COLOR", "1");
+        let _locale = test_toolkit::EnvGuard::set_safe("LC_ALL", "en_US.UTF-8");
+
+        let term = compute_terminal();
+        assert!(term.supports_unicode);
+    }
+
+    #[test]
+    #[serial]
+    fn plain_mode_keeps_locale_derived_ascii_fallback() {
+        set_plain(false);
+        let _no_color = test_toolkit::EnvGuard::set_safe("NO_COLOR", "1");
+        let _locale = test_toolkit::EnvGuard::set_safe("LC_ALL", "C");
+
+        let term = compute_terminal();
+        assert_eq!(term.color_depth, ColorDepth::None);
+        assert!(
+            !term.supports_unicode,
+            "a C locale must degrade to ASCII glyphs in plain mode too"
+        );
     }
 
     #[test]

@@ -1003,9 +1003,20 @@ fn level2_no_color_pane_keeps_textual_attribution_in_tmux() {
 ///
 /// The capability is locale-derived, so only a process that actually inherits
 /// the locale exercises the branch — a constructed `Terminal` sets the flag
-/// directly and proves nothing about the wiring. Note this lever works only
-/// *without* `NO_COLOR`: that path builds an optimistic terminal which hardcodes
-/// `supports_unicode`, so the two degradations cannot be tested in one run.
+/// directly and proves nothing about the wiring.
+///
+/// Every capability override that could select an optimistic terminal is
+/// pinned inline on the command, so the fixture is deterministic under both a
+/// cold and a warm tmux server (whose environments differ — a cold server
+/// inherits the harness's `FORCE_COLOR=1` export, a warm one keeps whatever it
+/// was started with):
+///
+/// - `FORCE_COLOR=1` pins the forced-color optimistic path — exactly the path
+///   review-6 caught hardcoding `supports_unicode: true` past the locale;
+/// - `NO_COLOR` is unset by `run_in_pane` (`clear_no_color`), keeping the run
+///   off the plain path so color forcing is actually in effect;
+/// - `LC_ALL`/`LANG`/`LC_CTYPE` pin the locale itself, covering the whole
+///   `LC_ALL > LC_CTYPE > LANG` precedence chain claudine's detection reads.
 #[test]
 #[serial(level2_terminal)]
 fn level2_non_utf8_locale_uses_the_ascii_header_glyph_in_tmux() {
@@ -1018,7 +1029,12 @@ fn level2_non_utf8_locale_uses_the_ascii_header_glyph_in_tmux() {
         &staged,
         100,
         50,
-        &[("LC_ALL", "C"), ("LANG", "C"), ("LC_CTYPE", "C")],
+        &[
+            ("FORCE_COLOR", "1"),
+            ("LC_ALL", "C"),
+            ("LANG", "C"),
+            ("LC_CTYPE", "C"),
+        ],
     );
 
     assert_eq!(
