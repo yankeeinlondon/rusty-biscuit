@@ -38,7 +38,6 @@ use crate::commands::wrap::composition::{CompositionPrepContext, execute_composi
 use crate::commands::schema_interactive::{collect_missing_values, resolve_interactive_options};
 use crate::log;
 
-use super::SEQUENCE_INTERRUPT_EXIT_CODE;
 use super::jit::{self, StepComposeContext};
 use super::task_run;
 
@@ -314,10 +313,7 @@ fn run_one_step(
     let request =
         build_body_request(run, &live, composed.prepared, target, env_overrides, runtime_state);
     match execute_composition_request_inner(request, run.verbose, None, run.perf_enabled) {
-        Ok(outcome)
-            if outcome.exit_code == SEQUENCE_INTERRUPT_EXIT_CODE
-                || run.interrupted.load(Ordering::SeqCst) =>
-        {
+        Ok(outcome) if super::run_was_interrupted(outcome.exit_code, run.interrupted) => {
             StepOutcome::Interrupted {
                 agent_perf: outcome.agent_perf,
                 compose_perf,

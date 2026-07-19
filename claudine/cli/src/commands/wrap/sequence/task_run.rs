@@ -368,7 +368,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         Ok(PromptRunOutcome {
             stdout: outcome.final_output.unwrap_or_default(),
             exit_code: outcome.exit_code,
-            interrupted: outcome.exit_code == super::SEQUENCE_INTERRUPT_EXIT_CODE,
+            interrupted: super::run_was_interrupted(outcome.exit_code, self.run.interrupted),
         })
     }
 }

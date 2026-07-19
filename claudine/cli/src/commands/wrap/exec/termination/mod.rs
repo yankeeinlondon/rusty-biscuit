@@ -7,6 +7,11 @@
 //!   [`CompletionTermination`]) and the projection from watchdog/detector inputs
 //!   into the [`EarlyTermination`] the wait loop carries and its resulting
 //!   [`ProcessTermination`](claudine::harness::ProcessTermination).
+//! - [`coordinator`] — process-scoped interrupt bookkeeping: which children an
+//!   interrupt fans out to, how far each one's ladder has advanced, and which
+//!   sequence interrupt flags a press must set.
+//! - [`handle`] — RAII ownership for the raw OS handles a platform wait loop
+//!   creates, so a Job Object's kill-on-close fires at its own scope's end.
 //! - [`summary`] — early-termination summary and guard-context projection.
 //! - [`message`] — human-facing early-termination message rendering.
 //! - platform wait/escalation: [`unix`] (process-group signal ladder) and
@@ -21,14 +26,33 @@
 
 use std::time::Duration;
 
+/// Compiled on every host so its bookkeeping can be unit-tested anywhere, but
+/// only the Windows wait loop instantiates it — Unix gets its process-wide
+/// interrupt semantics from the kernel's signal delivery instead.
+#[cfg_attr(unix, allow(dead_code))]
+mod coordinator;
+/// Same rationale as [`coordinator`]: compiled everywhere so the ownership and
+/// drop-order bookkeeping is unit-testable on hosts where the Win32 calls are
+/// not, but only the Windows wait loop instantiates it.
+#[cfg_attr(unix, allow(dead_code))]
+mod handle;
 mod message;
 mod reasons;
 mod summary;
 
 #[cfg(unix)]
 mod unix;
-#[cfg(not(unix))]
+#[cfg(windows)]
 mod windows;
+
+// `windows` (the crate) is a `[target.'cfg(windows)'.dependencies]` entry, so a
+// target that is neither Unix nor Windows must fail by name here rather than by
+// unresolved-import inside the module.
+#[cfg(not(any(unix, windows)))]
+compile_error!(
+    "claudine's process-termination policy supports Unix and Windows only: \
+     this target has neither a POSIX signal ladder nor Win32 Job Objects"
+);
 
 pub(crate) use message::early_termination_message;
 pub(crate) use reasons::{
@@ -43,10 +67,10 @@ pub(crate) use unix::{
     wait_with_signal_and_early_termination, wait_with_signal_early_termination_and_completion,
     wait_with_signal_handling,
 };
-#[cfg(not(unix))]
+#[cfg(windows)]
 pub(crate) use windows::{
-    wait_with_signal_and_early_termination, wait_with_signal_early_termination_and_completion,
-    wait_with_signal_handling,
+    register_sequence_interrupt_flag, wait_with_signal_and_early_termination,
+    wait_with_signal_early_termination_and_completion, wait_with_signal_handling,
 };
 
 /// Maximum time to wait for a child to reap after SIGKILL before giving up.

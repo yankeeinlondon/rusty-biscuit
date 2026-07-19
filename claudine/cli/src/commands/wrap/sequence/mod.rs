@@ -36,6 +36,20 @@ use phase1c::find_first_unsupported;
 /// Matches the standard `128 + SIGINT(2)` convention used by shells.
 pub(super) const SEQUENCE_INTERRUPT_EXIT_CODE: i32 = 130;
 
+/// Whether a finished provider run should be recorded as user-interrupted.
+///
+/// Exit code `130` is one witness, not the contract. It holds for a
+/// single-press, SIGINT-terminated child on Unix and nowhere else: the second
+/// press sends `SIGKILL` (`137`), a provider that traps `SIGINT` may exit `0`
+/// or `1`, and neither Windows rung yields `130` — `CTRL_BREAK_EVENT` gives
+/// `0xC000013A` and `TerminateJobObject` gives `1`. The sequence-scoped flag is
+/// the host-independent signal, with a SIGINT handler producing it on Unix and
+/// the console coordinator on Windows, so both the step path and the group-task
+/// path must consult it before calling a run merely failed.
+pub(super) fn run_was_interrupted(exit_code: i32, interrupted: &AtomicBool) -> bool {
+    exit_code == SEQUENCE_INTERRUPT_EXIT_CODE || interrupted.load(Ordering::SeqCst)
+}
+
 /// Approve every shell command the preflight graph can reach.
 ///
 /// The graph's own commands arrive already resolved, so what the gate approves
@@ -155,7 +169,10 @@ pub(crate) fn execute_sequence(
         log::message(&status.render(&term));
     }
 
-    // Persistent SIGINT tracker for the duration of the sequence run.
+    // Persistent interrupt tracker for the duration of the sequence run. Every
+    // step boundary and every running shell task polls this flag, so it needs a
+    // producer on both hosts: a SIGINT handler on Unix, and a registration with
+    // the process-scoped console coordinator on Windows.
     let interrupted = Arc::new(AtomicBool::new(false));
     let interrupted_handler = interrupted.clone();
     let _sigint_guard = {
@@ -170,8 +187,9 @@ pub(crate) fn execute_sequence(
         }
         #[cfg(not(unix))]
         {
-            let _ = interrupted_handler;
-            Option::<()>::None
+            Some(super::exec::termination::register_sequence_interrupt_flag(
+                &interrupted_handler,
+            ))
         }
     };
 
