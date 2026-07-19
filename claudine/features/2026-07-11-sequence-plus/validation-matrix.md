@@ -13,19 +13,24 @@ recorded with a reason rather than omitted.
 | `just test` (from `darkmatter/`) | L1 — `set(…)`, name coercion, `last(list)` |
 | `just test-l2 --no-fail-fast` (from `claudine/`) | L2 — real terminal (tmux) |
 | `just lint` (each of the three areas) | clippy |
+| `just check-windows` (from `claudine/`) | Windows type-check of lib + CLI **test** targets — the only gate that compiles the Windows-only suites |
 
 The bare `just test-l2` recipe fail-fasts at the first failure; `--no-fail-fast`
-is required to get real coverage of the 142-case L2 suite.
+is required to get real coverage of the 144-case L2 suite.
 
 ## Test inventory
 
 | File | Level | `#[test]` count |
 |------|-------|-----------------|
 | `claudine/lib/src/composition/sequence/tests.rs` | L1 | 103 |
-| `claudine/lib/src/composition/sequence/task/tests.rs` | L1 | 66 |
+| `claudine/lib/src/composition/sequence/task/tests.rs` | L1 | 71 |
 | `claudine/lib/src/composition/sequence/preflight/tests.rs` | L1 | 37 |
 | `claudine/lib/src/render/task_stream/tests.rs` | L1 | 18 |
 | `claudine/lib/src/composition/runtime_state/tests.rs` | L1 | 13 |
+| `claudine/cli/src/commands/wrap/exec/termination/coordinator.rs` | L1 | 15 |
+| `claudine/cli/src/commands/wrap/exec/termination/handle.rs` | L1 | 4 |
+| `claudine/cli/tests/test_placement.rs` | L1 (guard) | 11 |
+| `claudine/cli/src/commands/wrap/sequence/tests.rs` | L1 | 7 |
 | `claudine/cli/src/commands/wrap/sequence/jit/tests.rs` | L1 | 6 |
 | `claudine/cli/tests/sequence_errors_cli.rs` | CLI E2E | 29 |
 | `claudine/cli/tests/sequence_cli.rs` | CLI E2E | 28 |
@@ -34,7 +39,9 @@ is required to get real coverage of the 142-case L2 suite.
 | `claudine/cli/tests/composition_outputs.rs` | CLI E2E | 14 |
 | `claudine/cli/tests/sequence_jit.rs` | CLI E2E | 13 |
 | `claudine/cli/tests/sequence_overlay_pty.rs` | L1 (PTY) | 7 |
-| `claudine/cli/tests/level2_sequence_task_stream_capture.rs` | L2 | 5 |
+| `claudine/cli/tests/level2_sequence_task_stream_capture.rs` | L2 | 7 |
+| `claudine/cli/tests/level2_windows_sequence_ctrl_c.rs` | L2 (Windows host) | 1 — type-checked by `just check-windows`, **never executed** |
+| `claudine/cli/src/commands/wrap/exec/termination/windows.rs` | L1 (Windows host) | 2 — type-checked by `just check-windows`, **never executed** |
 | `claudine/cli/tests/level3_sequence_ctrl_c.rs` | L3 | 1 |
 | `biscuit-file/lib/src/list_format.rs` | L1 | 22 (+3 doctests) |
 
@@ -52,9 +59,8 @@ missing-property aggregation, dry-run, Ctrl+C exit `130`.
   key set (Phase 1 characterization, updated in Phase 3)
 - `sequence_cli.rs` — dry-run target behavior, aggregate missing properties
 - Ctrl+C `130`: `task/tests.rs::parallel_groups` signal fan-out cases +
-  `level3_wrap_ctrl_c.rs` (pre-existing) +
-  `level3_sequence_ctrl_c.rs` (review-2 finding 5 — see "Level-3 sequence
-  Ctrl+C fan-out" below for its honest, not-yet-passing status)
+  `level3_wrap_ctrl_c.rs` (pre-existing) + `level3_sequence_ctrl_c.rs`
+  (review-2 finding 5 — passing; see "Level-3 sequence Ctrl+C fan-out")
 
 ### AC2 — Typed errors for every rejected construct
 
@@ -147,10 +153,14 @@ a real-kernel `cargo check` + L1 run under Docker, and Windows by a successful
 for the verbatim results and for the pre-existing Windows *test*-target failures.
 
 The "identical semantics on all three platforms" claim above holds for the
-**task spawner**, but not for **interruption**: `wrap/exec/termination/windows.rs`
-has no Ctrl+C handling on the simple wait path, so AC1's Ctrl+C/exit-`130`
-behavior is currently Unix-only. Recorded as an open Windows defect in the gate-runs
-section rather than treated as satisfied.
+**task spawner**. For **interruption** it is now design-complete on both hosts
+but unequally evidenced: `wrap/exec/termination/windows.rs` routes
+`wait_with_signal_handling` through `windows_wait_loop`, and
+`register_sequence_interrupt_flag` gives `execute_sequence`'s shared
+`interrupted` flag a Windows producer. Neither has ever executed — see "Gate
+runs" for what Windows evidence exists (production cross-compile plus source
+audit) and review-4 finding 1 for why the Windows test suites cannot yet be
+compiled.
 
 ### AC9 — Test placement
 
@@ -183,9 +193,14 @@ See "Commands" above and "Known failures and skips" below.
 
 ## Level-2 task-stream coverage
 
-`claudine/cli/tests/level2_sequence_task_stream_capture.rs` — 5 tmux tests,
-~6 s wall clock, gated by `require_level!(Level::L2, TmuxHarness::available(),
-"tmux")` so the suite skips cleanly on a host without tmux.
+`claudine/cli/tests/level2_sequence_task_stream_capture.rs` — 7 tmux tests,
+gated by `require_level!(Level::L2, TmuxHarness::available(), "tmux")` so the
+suite skips cleanly on a host without tmux.
+
+Six of the seven finish in ~2–3 s each. The seventh,
+`level2_prompt_idle_flush_keeps_the_task_bar_in_tmux`, costs `77.744s` on its
+own and is the whole L2 tier's critical path — see "The L2 tier's cost profile
+changed this round" under "Gate runs".
 
 L2 **complements** the L1 tests; it does not replace them. The exact-byte and
 SGR assertions for frame atomicity stay in `sequence_groups.rs` and
@@ -201,6 +216,8 @@ is sized to fit the visible pane, because `capture()` never sees scrollback.
 | `level2_no_color_pane_keeps_textual_attribution_in_tmux` | `NO_COLOR` chosen by a real capability handshake rather than a constructed `Terminal`: no bar is painted, and every task still announces and closes by name. |
 | `level2_non_utf8_locale_uses_the_ascii_header_glyph_in_tmux` | `supports_unicode` is locale-derived, so only a process that actually inherits `LC_ALL=C` exercises the ASCII (`>`) fallback. |
 | `level2_zero_step_sequence_renders_a_styled_notice_in_tmux` | The "resolved to 0 steps" notice carries styling and exits `0` when rendered by a real terminal. |
+| `level2_parallel_prompt_streams_keep_task_attribution_in_tmux` | A `prompt:` task's provider text never passes through `TaskLiveOutput`; it is framed at the stream end instead. Stubs `claude` (not `goose`, which has no `stream_protocol`) so the semantic spawn actually runs, then requires the bar set painting each assistant/reasoning/tool marker to equal the task-header bar set. |
+| `level2_prompt_idle_flush_keeps_the_task_bar_in_tmux` | An assistant block held open past the silence window is flushed by the idle ticker, not by `close()`. Only a post-stall marker discriminates the two, and only a real pane advances the ticker — which is why the test must actually wait. |
 
 ### Defect this coverage found
 
@@ -257,31 +274,55 @@ skip-clean with `RUN_LEVEL3` unset: `skipping: set RUN_LEVEL3=1 to enable Level 
 (L1) and `just test-l2` filtersets — confirmed by `cargo nextest list`, which
 matches it under `test(/level3_/)` and not under the L1 expression.
 
-### Execution status — NOT yet observed passing
+### Execution status — PASSING (2026-07-18)
 
-Run for real on the authoring host (macOS, WezTerm + cliclick both present).
-Every stage up to and including the keystroke works: the pane spawns, claudine
-launches, the group announces all three children, and the pids publish. The
-`cliclick` chord then fails to reach WezTerm, no SIGINT is delivered, and the
-test fails honestly at its 15s termination assertion (4 consecutive attempts).
+Observed green on the authoring host (macOS, WezTerm + cliclick): all three
+children reported `interrupted`, `step 1/2 interrupted by Ctrl+C` printed,
+`later-step-ran.txt` absent, and the pane's exit marker read `L3SEQ_0rc=130`.
 
-This is the focus-transfer reliability limit already documented in
-`level3_wrap_ctrl_c.rs`, **not** a fan-out defect. Control experiment: the
-pre-existing `level3_ctrl_c_terminates_wrapped_child` fails the same way on the
-same host in the same session, echoing a bare `c` into its pane — while its
-sibling `…_with_timeout_configured` passed, showing the chord lands
-intermittently rather than never.
+This supersedes an earlier record in this file stating the test had never
+passed. That was accurate when written — the `cliclick` chord failed to reach
+WezTerm across four consecutive runs, matching the focus-transfer limit
+documented in `level3_wrap_ctrl_c.rs`. Two `biscuit-test-harness` changes fixed
+delivery:
 
-The behavior under test *is* confirmed one tier down. Driving this exact fixture
-through `tmux send-keys C-c`, claudine reports each task `interrupted`, prints
-`step 1/2 interrupted by Ctrl+C`, leaves `later-step-ran.txt` absent, kills every
-published pid, and exits `130`. So the fixture and the product path are sound;
-what remains unproven from this host is only the OS-keyboard leg.
+- `wezterm.rs` — `focus_spawned_pane` now polls until a WezTerm process is
+  actually the frontmost macOS application (`wait_until_wezterm_frontmost`,
+  5s budget) instead of sleeping a fixed 200ms and hoping. `AXRaise` returns
+  before the WindowServer has necessarily made the window key.
+- `cliclick.rs` — `click_then_ctrl_chord` / `click_then_alt_chord` now issue the
+  chord through AppleScript `keystroke … using <modifier> down` rather than
+  cliclick's `kd:ctrl t:c ku:ctrl`. cliclick cannot express a modified letter as
+  one event, so the modifier flag raced the letter: measured 7/10 delivery
+  versus 24/24 for the System Events path.
 
-The test is **not** loosened to force a pass. Its deadlines are sized (30s
-readiness, 15s termination) so the whole run finishes in ~23–25s — inside
-nextest's 30s termination budget — meaning a chord that never lands reports as a
-clean assertion failure with a full pane dump rather than an opaque `TMT`.
+**Both changes are still uncommitted on this branch.** The green run depends on
+them; a checkout without them reproduces the original failure.
+
+The behavior is independently corroborated one tier down. Driving the same
+fixture through `tmux send-keys C-c`, claudine reports each task `interrupted`,
+prints `step 1/2 interrupted by Ctrl+C`, leaves `later-step-ran.txt` absent,
+kills every published pid, and exits `130`.
+
+Deadlines are sized (30s readiness, 15s termination) so a full run finishes in
+~23–25s — inside nextest's 30s termination budget — meaning a chord that fails
+to land reports as a clean assertion failure with a full pane dump rather than
+an opaque `TMT`.
+
+### Focus-stealing containment
+
+This test raises a GUI terminal over every other window and injects real OS
+keystrokes into whatever holds focus. Two guards bound that blast radius:
+
+- `test_placement.rs::focus_stealing_apis_stay_in_keyboard_tier_files` (L1)
+  fails if `SpawnVisibility::Foreground` or `focus_spawned_pane` appears as
+  executable code in any Claudine test file not named `level3_*`, keeping the
+  APIs behind the `level3_` filterset and the `RUN_LEVEL3=1` opt-in. Module docs
+  naming the APIs do not trip it — the scan runs on comment-stripped bytes.
+- `just/devops.just::_test_l3` refuses to start unattended: without a TTY it
+  exits non-zero unless `BISCUIT_L3_TAKE_FOCUS=1` authorizes the run, so an
+  agent, hook, or CI job cannot hijack an active desktop. From a terminal it
+  prompts before proceeding.
 
 ## Known failures and skips
 
@@ -289,18 +330,26 @@ clean assertion failure with a full pane dump rather than an opaque `TMT`.
 |------|--------|--------|
 | `level2_context_{default,values,side_effects}_at_140_fills_cap_in_tmux` | **Pre-existing fail (3)** | `claudine context` renders 140 visible cells on this host where the contract wants 138–139. Unrelated to sequences; Phase 2's checkpoint recorded the identical three failures, including the untouched default report. |
 | Windows runtime execution | **Not run** | No Windows host and no emulation available. Windows evidence is a successful `--target x86_64-pc-windows-gnu` *compile* of lib+bin plus a source audit — not an executed run. See "Gate runs (review-2 finding 6)". |
-| Windows **test-target** compilation | **Pre-existing fail** | `cargo check -p claudine --tests --target x86_64-pc-windows-gnu` fails with 7 errors, all Unix-only APIs inside `#[cfg(test)]` code. All three sites exist identically on `main` (`git grep os::unix main -- …`), so this is pre-existing, not sequence-plus work. |
-| Level-2 suite | **Run, green modulo the 3 pre-existing `context` fails** | `just test-l2 --no-fail-fast`: `142 tests run: 139 passed (4 slow), 3 failed`. The 3 are the `level2_context_*_at_140` row above. The prior "Level-2 omitted" framing is superseded. |
+| Windows **test suites** | **Compiled, not executed** | Both Windows suites — `termination/windows.rs`'s `#[cfg(all(test, windows))]` Job-object regressions and `cli/tests/level2_windows_sequence_ctrl_c.rs` — now type-check under `just check-windows`. That closes the "invisible to every gate" half of review-4 finding 1: a typo or signature drift is now caught. It does **not** make them executed evidence; only a native Windows run does. |
+| Windows **test-target** compilation | **Fixed — green** | Was 7 errors (Unix-only APIs in `#[cfg(test)]` code) plus a `duckdb-sys`/mingw wall. Both cleared at review 4; `just check-windows` now type-checks lib **and** CLI test targets for `x86_64-pc-windows-gnu`, exit `0`. See "Windows test targets: how the wall came down". |
+| Level-2 suite | **Run, green modulo the 3 pre-existing `context` fails** | `just test-l2 --no-fail-fast`: `144 tests run: 141 passed (2 slow), 3 failed` (re-run at review 4). The 3 are the `level2_context_*_at_140` row above. The prior "Level-2 omitted" framing is superseded. |
 | L2 for task-stream rendering | **Added** (review-2 finding 4) | See "Level-2 task-stream coverage" below. The prior "deliberately omitted" rationale was wrong in one respect: the contract is *not* a pure function of capability flags, because the flags themselves are chosen by a real handshake and the pane — not the renderer — decides what folding failure looks like. |
-| `level3_sequence_ctrl_c_fans_out_to_parallel_children` | **Added, not yet passing** | The cliclick chord does not reach WezTerm on this host, so no SIGINT is delivered. Environment limit, not a product defect — the pre-existing `level3_ctrl_c_terminates_wrapped_child` fails identically here, and the same fixture driven by `tmux send-keys C-c` exits `130` with every child interrupted and the next step suppressed. See "Level-3 sequence Ctrl+C fan-out". |
+| `level3_sequence_ctrl_c_fans_out_to_parallel_children` | **Passing** | Green on the authoring host: every child interrupted, next step suppressed, exit `130`. Depends on the (still uncommitted) `biscuit-test-harness` focus and chord-delivery fixes — see "Execution status". |
 | `#[ignore]`d perf harnesses | **Pre-existing** | `compose_ttff_perf.rs`, `completion_perf.rs`, `system_prompt_perf_bench.rs` — diagnostic, not gates. |
 
 ## Gate runs (review-2 finding 6)
 
-Recorded 2026-07-18 on the authoring host (macOS, Apple Silicon). **Host load was
-80–160 throughout** — every timing-shaped result below is bracketed accordingly.
-Nothing in this section is reported green unless a command was run to completion
-and its summary line is quoted verbatim.
+Recorded on the authoring host (macOS, Apple Silicon). Nothing in this section is
+reported green unless a command was run to completion and its summary line is
+quoted verbatim.
+
+The macOS table below was **re-run at review 4** (2026-07-18, load 8–16) against
+the tree that carries the review-3 Windows rebuild, the two new L2 tests, the
+coordinator/handle L1 suites, and the review-4 finding-2 interrupt-derivation
+fix. It supersedes the review-3 run (load 80–160), whose two timeouts and
+`146 slow` count were load artifacts that do not reproduce at this bracket. The
+Linux and Windows subsections still date from the review-3 round and are **not**
+re-run here; each is marked accordingly.
 
 ### Status legend
 
@@ -311,31 +360,59 @@ and its summary line is quoted verbatim.
 
 ### macOS (host) — `claudine/`
 
+Re-run 2026-07-18 at review 4, against the final tree — **after** findings 2, 5,
+6 and finding 1's steps 1–2 all landed. Load bracket: `12.56` entering L2,
+`13.02` on L2 exit; L1 ran at `18`–`67` (the upper end is the build, not the
+tests). Two earlier runs of the same gates, at load `8`–`12` and mid-way through
+the findings, returned the same verdicts.
+
 | Gate | Verdict | Verbatim |
 |------|---------|----------|
 | `just lint` | **Green** | `JUST_LINT_EXIT=0`; all five crates `Finished dev profile`. Includes the `lifecycle-doc-facets` guard: `✅ lifecycle-doc-facets guard: lifecycle docs use the faceted err.* contract.` |
-| `just test --no-fail-fast` | **Green modulo load flake** | `Summary [ 125.121s] 3773 tests run: 3771 passed (146 slow), 2 timed out, 7 skipped` → `JUST_TEST_EXIT=1` |
-| `just test-l2 --no-fail-fast` | **Green modulo known** | `Summary [  43.629s] 142 tests run: 139 passed (4 slow), 3 failed, 2156 skipped` → `JUST_L2_EXIT=100` |
-| `just test-l3` | **Not run here** | Environment-limited; see "Level-3 sequence Ctrl+C fan-out". |
+| `just test --no-fail-fast` | **Green** | `JUST_TEST_EXIT=0`, all five crates — `claudine-catalog-types`: `Summary [   0.017s] 21 tests run: 21 passed, 0 skipped` · `claudine`: `Summary [  38.230s] 3773 tests run: 3773 passed (6 slow), 7 skipped` · `claudine-contract`: `Summary [   0.098s] 47 tests run: 47 passed, 5 skipped` · `claudine-cli`: `Summary [ 118.901s] 2151 tests run: 2151 passed (74 slow), 172 skipped` · `claudine-gen`: `Summary [   1.768s] 152 tests run: 152 passed, 4 skipped` |
+| `just test-l2 --no-fail-fast` | **Green modulo known** | `Summary [ 103.815s] 144 tests run: 141 passed (2 slow), 3 failed, 2179 skipped` → `JUST_L2_EXIT=100`; **106 s wall clock** |
+| `just test-l3` | **Not run / blocked** | `_test_l3` refuses an unattended run: no TTY on stdin and `BISCUIT_L3_TAKE_FOCUS` unset. Deliberately not overridden — the override hijacks an active desktop. Last recorded result is the review-3 round's green; see "Level-3 sequence Ctrl+C fan-out". **This gate is the developer's step and is outstanding for this round.** |
 
-**The 2 `just test` timeouts are load artifacts, not failures.** Both are
-`TRY 4 TMT [ 30.0s]`:
-`composition::interpolation_conformance::loop_and_lifecycle_agree_on_shared_syntax`
-and
-`composition::looping::engine::tests::seed_state::seeded_loop_repro_runs_to_completion_with_live_derived_variable`.
-Re-run in isolation at load 158.83 both pass:
-`Summary [  16.938s] 2 tests run: 2 passed (2 slow), 3778 skipped`.
-The `146 slow` count in the same run — with ordinarily sub-second tests taking
-7 s — corroborates load, not a product regression.
+**The two `just test` timeouts from the review-3 run did not reproduce.** At this
+load the whole tier is green with zero timeouts, and the L1 wall clock for the
+`claudine` crate fell from `125.121s` to `38.230s` — confirming the earlier
+`2 timed out` / `146 slow` reading was the host, not the product.
+
+**Two spurious `LKFAIL`s appeared in the earlier of the two review-4 runs and not
+in the final one**, which is the expected signature of the nextest leak-timeout
+artifact rather than behavior:
+`claudine composition::schema::tests::top_level_pointer_segment_handles_escaped_keys`
+and `claudine-cli::sequence_prompt_property sequence_rejects_interactive_true_frontmatter_via_cli`,
+each `TRY 1 LKFAIL` then `FLAKY 2/4` with the retry passing in ~0.03 s. A test
+binary that spawns a CLI child needs a leak timeout. Both runs returned
+`JUST_TEST_EXIT=0`.
 
 **The 3 `test-l2` failures are exactly the pre-existing trio**, confirmed by
 name: `level2_context_default_at_140_fills_cap_in_tmux`,
 `level2_context_values_at_140_fills_cap_in_tmux`,
 `level2_context_side_effects_at_140_fills_cap_in_tmux`. No sequence-plus L2 test
-failed. Note the bare `just test-l2` fail-fasts at the first of these
-(`38/142 tests run`), which is why `--no-fail-fast` is the recipe of record.
+failed. Note the bare `just test-l2` fail-fasts at the first of these, which is
+why `--no-fail-fast` is the recipe of record.
+
+**The L2 tier's cost profile changed this round** (review-4 finding 3). The tier
+went from `142 tests / 43.629s` to `144 tests / 103.815s` — a 2.4× wall-clock
+increase from two added tests. Effectively all of it is one test:
+`level2_prompt_idle_flush_keeps_the_task_bar_in_tmux` at **`PASS [  77.744s]`**,
+which stalls by construction (a 30 s `SILENCE_WINDOW` and ticker cadence, cleared
+only on the *second* tick) and trips both the `> 30.000s` and `> 60.000s` SLOW
+thresholds. It is the tier's critical path; the remaining 143 tests overlap
+within the other ~26 s. The bespoke `.config/nextest.toml` `terminate-after = 6`
+grant is what keeps it from being killed. The expense is real and now measured —
+budget for it before adding another stall-shaped L2 test.
+
+**Every sequence-plus L2 test passed**, including both new this round:
+`level2_parallel_prompt_streams_keep_task_attribution_in_tmux` (`PASS [ 2.992s]`)
+and `level2_prompt_idle_flush_keeps_the_task_bar_in_tmux` (`PASS [ 77.744s]`).
 
 ### Linux — real kernel via Docker
+
+**Not re-run at review 4.** Recorded at the review-3 round; no product change
+since then is Linux-specific.
 
 Host is macOS; Linux evidence obtained under `rust:latest` on
 `Linux 6.12.76-linuxkit aarch64 GNU/Linux`, `cargo 1.97.1 (c980f4866 2026-06-30)`,
@@ -366,12 +443,19 @@ each was falsified individually rather than assumed:
 The `duckdb-sys` + mingw blocker recorded in prior notes was re-tested rather
 than inherited, and it **does not apply to claudine's lib or binary**.
 
+**Partially re-run at review 4.** The production cross-compile was repeated
+against the finding-2 fix:
+`RUSTC_WRAPPER="" CARGO_TARGET_DIR=… cargo check -p claudine-cli --target x86_64-pc-windows-gnu`
+→ `Finished dev profile [unoptimized + debuginfo] target(s) in 54.84s`, exit `0`,
+with the same 2 pre-existing `never used` warnings at `cli/src/output/mod.rs:618,644`
+(review-4 finding 8). The `--tests` legs below were **not** re-run; they remain
+blocked for the reasons stated, which is review-4 finding 1.
+
 | Gate | Verdict | Verbatim |
 |------|---------|----------|
-| `cargo check -p claudine -p claudine-cli --target x86_64-pc-windows-gnu` | **Green** | `Finished dev profile [unoptimized + debuginfo] target(s) in 2m 43s` |
-| `cargo check -p claudine --tests --target …-gnu` | **Pre-existing fail** | `error: could not compile claudine (lib test) due to 7 previous errors` |
-| `cargo check -p claudine -p claudine-cli --tests --target …-gnu` | **Blocked** | `duckdb-sys` unity build: `x86_64-w64-mingw32-as: … too many sections (54084)` / `Fatal error: … file too big` |
-| `x86_64-pc-windows-msvc` | **Not run** | Target not installed; requires the MSVC toolchain and Windows SDK, neither available on this host. |
+| `cargo check -p claudine -p claudine-cli --target x86_64-pc-windows-gnu` | **Green** | `Finished dev profile [unoptimized + debuginfo] target(s) in 2m 43s`; re-verified at review 4 in `54.84s` |
+| `just check-windows` (lib **and** CLI, `--tests`) | **Green** *(new at review 4)* | `JUST_CHECK_WINDOWS_EXIT=0`, `Finished dev profile [unoptimized + debuginfo] target(s) in 15.44s`. Supersedes the two rows below, which recorded this as blocked. |
+| `x86_64-pc-windows-msvc` | **Not run** | Target *is* installed, but `cargo check` runs dependency build scripts, and `aws-lc-sys` needs an MSVC-targeting C compiler this host lacks: `error occurred in cc-rs: … "cc" … "--target=x86_64-pc-windows-msvc"`. Reachable with `cargo-xwin` (downloads the MSVC SDK); not attempted. |
 
 Two host-configuration traps had to be cleared first, and are recorded so the
 next run does not mistake them for product breakage:
@@ -384,22 +468,81 @@ next run does not mistake them for product breakage:
    `target/` cause `error: output file … is not writeable`. Use a separate
    `CARGO_TARGET_DIR`.
 
-**The 7 Windows test-compile errors are pre-existing.** All are Unix-only APIs
-inside test code: `std::os::unix::process::ExitStatusExt` /
-`ExitStatus::from_raw` at `claudine/lib/src/dispatch/runner/mappers.rs:146,153,166,182,198`,
-and `std::os::unix::fs::symlink` at `claudine/lib/src/protect/path.rs:402` and
-`claudine/lib/src/protect/service/tests.rs:318`. `mappers.rs` and `protect/path.rs`
-are **byte-identical to `main`** (`git diff main...HEAD` empty); the third is a
-Phase-13 test *extraction* whose Unix call already existed at
-`main:claudine/lib/src/protect/service.rs:515`. Sequence-plus introduced none of them.
+### Windows test targets: how the wall came down
 
-**The `--tests` duckdb block is a dev-dependency artifact, not product code.**
-`cargo tree -i duckdb` resolves to
-`duckdb → rendezvous-daemon → [dev-dependencies] → claudine-cli`. Neither
-`claudine` nor `claudine-cli` depends on duckdb to build or ship; it is reachable
-only when compiling `claudine-cli`'s test targets. The failure is COFF's
-`too many sections` limit against duckdb's unity build under mingw — an upstream
-toolchain limit, unrelated to this feature.
+Both blockers recorded above turned out to be softer than they read, and
+removing them exposed two real defects that no gate could previously see.
+Closed at review 4 (finding 1, steps 1–2); step 3, a native Windows *run*,
+remains open.
+
+**1. The 7 Unix-only test APIs — fixed, and not by deleting tests.**
+`mappers.rs` used `ExitStatusExt::from_raw` in 4 tests. Gating the module
+`#[cfg(unix)]` would have silently dropped those 4 from Windows, so instead a
+local `exit_status(code)` helper absorbs the platform difference — Unix takes a
+`wait(2)` status (code in the second byte), Windows takes the exit code itself —
+and the tests now run on both. The two `std::os::unix::fs::symlink` sites
+(`protect/path.rs`, `protect/service/tests.rs`) *are* gated `#[cfg(unix)]`,
+because creating a symlink on Windows needs `SeCreateSymbolicLinkPrivilege`,
+which a test host cannot assume. The behavior under test is cross-platform; only
+the fixture is not.
+
+**2. The duckdb/mingw block was a missing assembler flag, not an upstream wall.**
+The prior note called COFF's `too many sections` limit "an upstream toolchain
+limit". It is a *default*: mingw's `as` supports a big-object COFF format that
+lifts the 32767-section cap, and duckdb's unity-build blobs need it. Setting
+`CFLAGS_x86_64_pc_windows_gnu` / `CXXFLAGS_x86_64_pc_windows_gnu` to
+`-Wa,-mbig-obj` builds `libduckdb-sys` cleanly — 0 section errors. **The
+dev-dependency never needed breaking or feature-gating.** The flag now lives in
+the `check-windows` recipe rather than in one person's shell history.
+
+**3. Behind duckdb sat a real Windows compile error in `rendezvous-daemon`.**
+`local_transport/windows.rs` handed `NamedPipeServer` straight to
+`serve_local_incoming`, whose bound requires `tonic::transport::server::Connected`
+— which tonic implements for `TcpStream` and `UnixStream` but not for named
+pipes. **The Windows local control plane could not compile at all**, and the
+duckdb wall had been hiding it. Fixed with a `PipeConnection` newtype
+implementing `Connected` + `AsyncRead` + `AsyncWrite` by delegation. Its
+`ConnectInfo` is `()` deliberately: a pipe has no peer address, nothing in the
+daemon reads connection identity, and the local threat boundary is the DACL
+applied at instance creation.
+
+**4. And one in `claudine-cli` itself.** `commands::init` is a `#[cfg(test)]`
+module whose reference helpers call `shellexpand`, declared only under
+`[target.'cfg(unix)'.dependencies]` — so the Windows *test* target failed while
+the bin target passed. Fixed by adding `shellexpand` as a dev-dependency, the
+same remedy the neighbouring `url` entry already documents.
+
+**The gate was verified to bite, not merely to pass.** A deliberate type error
+(`let _: u32 = "not a u32";`) appended to `level2_windows_sequence_ctrl_c.rs` is
+caught by `just check-windows` — `error[E0308]: mismatched types` — and the file
+was restored immediately (`git diff --stat` clean). Without that probe, "exit 0"
+would be indistinguishable from "the file was skipped", which is precisely the
+failure mode finding 1 named.
+
+`cargo tree -i duckdb` still resolves to
+`duckdb → rendezvous-daemon → [dev-dependencies] → claudine-cli`: neither
+`claudine` nor `claudine-cli` depends on duckdb to build or ship.
+
+### Two Windows gaps deliberately left open
+
+Both are review-4 Low findings, and both are recorded rather than fixed.
+
+- **Interrupt feedback bypasses the synchronized render sink** (finding 7).
+  `emit_interrupt_feedback` writes straight to stderr because the console handler
+  is a context-free `extern "system" fn` on a Windows-owned thread while
+  `StreamOutput` is per-run state behind an `Arc<Mutex<…>>`. Reaching it would
+  mean a global handle to the live run's sink for the sake of one static byte
+  string. The cost is bounded — a single newline-terminated `write_all` under
+  `Stderr`'s internal lock, so no torn line, only cursor bookkeeping that misses
+  one row. **Closed as a deliberate choice, now recorded at the function.**
+- **`install_user_interrupt_guard` is a no-op on Windows** (finding 8). Real gap:
+  `claudine compose` gets no `USER_INTERRUPTED` marking and no second-press
+  force-exit there. Split out to
+  [`fixes/_unscheduled/1-windows-compose-interrupt-guard/spec.md`](../../fixes/_unscheduled/1-windows-compose-interrupt-guard/spec.md)
+  because it is on the *compose* path rather than the sequence path, needs new
+  coordinator surface rather than reuse, and cannot be runtime-verified from this
+  host — closing a Low finding by adding more never-executed Windows code would
+  deepen finding 1.
 
 ### Windows source audit
 
@@ -421,38 +564,43 @@ touched were audited in production code (`#[cfg(test)]` excluded).
   `spawn/setup.rs:74/79`, `wrap/sequence/mod.rs:162/171`,
   `compose/interrupt.rs:15/22/56/93`. `linking/symlink.rs:119` degrades to a typed
   `LinkingError` ("symlink creation is only supported on Unix").
-- **Process spawn/termination — gated correctly, with one behavioral gap (below).**
-  `termination/mod.rs:28-50` gates `unix`/`windows` modules; `spawn/setup.rs:73-84`
+- **Process spawn/termination — gated correctly.** The three defects this audit
+  found are all fixed in source (below).
+  `termination/mod.rs` gates `unix`/`windows` modules; `spawn/setup.rs:73-84`
   pairs `cfg(unix)` `process_group(0)` with `cfg(windows)`
   `CREATE_NEW_PROCESS_GROUP`; `Cargo.toml` scopes `libc`/`signal-hook` to
   `cfg(unix)` and `windows` 0.62 to `cfg(windows)`.
 
-#### Open Windows defects found by this audit (not fixed here)
+#### Windows defects found by this audit — all three now fixed in source
 
-These are **product** findings surfaced while closing the gate. They are recorded
-rather than silently folded into a green claim.
+These are **product** findings surfaced while closing the gate. All three have
+since been fixed, but **no fix has executed on a Windows host**: each is "fixed in
+source, no executed evidence" until review-4 finding 1 makes the Windows test
+targets compilable. The status below is deliberately neither "open" nor "closed".
 
-1. **Windows Ctrl+C is a no-op on the simple wait path.**
-   `wrap/exec/termination/windows.rs:24-34` — `wait_with_signal_handling` is a
-   bare `child.wait()`: no console handler, no press tracking, and it
-   unconditionally returns `ProcessTermination::Completed`. The Unix counterpart
-   (`unix.rs:78-135`) runs the full SIGINT → SIGTERM → SIGKILL ladder. This path
-   is reachable in production — `spawn/semantic.rs:523` selects it whenever
-   `needs_advanced_wait` is false. Because the child is spawned into
-   `CREATE_NEW_PROCESS_GROUP`, it does not receive the terminal's Ctrl+C either,
-   so on Windows the chord terminates nothing and an interrupted run is reported
-   as `Completed`. This qualifies AC1's Ctrl+C/exit-`130` claim on Windows.
-2. **Job-object handle leak.** `windows.rs:195` —
-   `CreateJobObjectW` yields a bare `HANDLE` (no `Drop`; the RAII wrapper is
-   `windows::core::Owned<HANDLE>`), and no path calls `CloseHandle`. One handle
-   leaks per wrapped child, so a `sequence` leaks one per step. The doc comment at
-   `windows.rs:192-194` is correspondingly wrong: it claims descendants die when
-   the handle closes "by normal Drop", which never happens.
-3. **Module gate vs dependency gate mismatch.** `termination/mod.rs:31` gates
-   `mod windows` on `#[cfg(not(unix))]`, but `claudine/cli/Cargo.toml:62` supplies
-   the `windows` crate only under `[target.'cfg(windows)'.dependencies]`. Real
-   Windows is fine; a target that is neither unix nor windows fails on the missing
-   crate.
+1. **Windows Ctrl+C was a no-op on the simple wait path** — *fixed in source,
+   unverified.* Was: `wait_with_signal_handling` was a bare `child.wait()` that
+   unconditionally returned `ProcessTermination::Completed`, while the child sat in
+   `CREATE_NEW_PROCESS_GROUP` and never saw the terminal's Ctrl+C. Now: it runs the
+   same `windows_wait_loop` as the channel-driven paths, and
+   `register_sequence_interrupt_flag` gives `execute_sequence`'s shared flag a
+   Windows producer. Fixed at review 3.
+2. **Job-object handle leak** — *fixed in source, unverified.* Was: `CreateJobObjectW`
+   yielded a bare `HANDLE` no path closed, leaking one per wrapped child (one per
+   step in a sequence). Now: a `HandleCloser`-parameterised `OwnedRawHandle` owns
+   it, so kill-on-close fires at the wait scope's end. Drop order is pinned
+   cross-platform by `handle.rs::a_later_declared_guard_releases_before_the_handle_closes`;
+   the two Windows-host regressions in `termination/windows.rs` remain uncompilable.
+   Fixed at review 3.
+3. **Module gate vs dependency gate mismatch** — *fixed.* Was: `mod windows` gated
+   on `#[cfg(not(unix))]` while the `windows` crate is a
+   `[target.'cfg(windows)'.dependencies]` entry, so a target that is neither failed
+   on an unresolved crate rather than a stated non-support. Now: `mod windows` is
+   gated on `#[cfg(windows)]`, and a
+   `#[cfg(not(any(unix, windows)))] compile_error!` names the unsupported platform
+   directly. Fixed at review 4 (finding 5). Unlike 1 and 2 this one **is** verified:
+   both `cargo check -p claudine-cli` (macOS) and
+   `--target x86_64-pc-windows-gnu` are green after the change.
 
 ### Dispatch inventory
 
