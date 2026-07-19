@@ -607,3 +607,12 @@ The files changed during this implementation cycle:
 - `docs/testing-strategy.md`
 - `.github/workflows/test.yml`
 - `.github/workflows/claudine-tests.yml`
+
+## Review-19 Planning (2026-07-19)
+
+- `review-plan-19.md` created: 7 phases, 1:1 with review-19's findings (5 High, 2 Medium).
+- Sequencing constraints recorded in the plan:
+        - `ResolvedRemote` carries a CRITICAL GitNexus blast radius (41 symbols, 4 direct callers), so the self-hosted resolution rework (Phase 2) precedes the two dependent sniff phases: query-boundary DTOs (Phase 3) and API-URL parsing (Phase 4), which may then run in parallel.
+        - Phase 1 (frontmatter/body fatality parity) is darkmatter-only and independent of the sniff track.
+        - Phase 5 (Windows/Linux evidence) is gate-only — no source changes — and is blocked on explicit authorization to trigger CI; prior cycles recorded that authorization as outside session scope, so the plan makes it an explicit checkpoint rather than assuming it.
+- Planning-time observation (not a new review finding): the focused-provider error classification is currently destroyed at the memoization boundary in `resolve_ctx.rs` (failures stored as `String`), so Phase 1's fix must change the cache-slot representation, not just the fatality predicate.

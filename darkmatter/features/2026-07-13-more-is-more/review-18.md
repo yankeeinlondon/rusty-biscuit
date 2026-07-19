@@ -10,6 +10,7 @@ implemented_by: claude/default
 description: "A **feature** review of `2026-07-13-more-is-more/spec.md`"
 feature: 2026-07-13-more-is-more/review-18.md
 previous: 2026-07-13-more-is-more/review-17.md
+next: 2026-07-13-more-is-more/review-19.md
 ---
 
 # Review 18
