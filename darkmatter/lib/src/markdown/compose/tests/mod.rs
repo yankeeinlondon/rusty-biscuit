@@ -11,6 +11,7 @@ mod caching;
 mod fixtures;
 mod frontmatter;
 mod preflight;
+mod provider_network;
 mod rendering;
 mod schema;
 mod shell;

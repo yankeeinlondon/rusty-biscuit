@@ -118,10 +118,7 @@ impl ResolutionContext {
         if let Some(remote_fetch) = &self.remote_fetch {
             return remote_fetch
                 .cached_provider_query(key, || query().map_err(|error| error.to_string()))
-                .map_err(|message| ExpressionError::Other {
-                    function: function.to_string(),
-                    message,
-                });
+                .map_err(|message| Self::cached_query_error(function, message));
         }
         let slot = {
             let mut queries = self.provider_queries.lock().map_err(|_| ExpressionError::Other {
@@ -132,10 +129,21 @@ impl ResolutionContext {
         };
         slot.get_or_init(|| query().map_err(|error| error.to_string()))
             .clone()
-            .map_err(|message| ExpressionError::Other {
-                function: function.to_string(),
-                message,
-            })
+            .map_err(|message| Self::cached_query_error(function, message))
+    }
+
+    /// Rebuilds a provider-query failure from its memoized text.
+    ///
+    /// The cache stores failures as `String` so a slot stays cloneable, which
+    /// means the function prefix an inner `ExpressionError::Other` already
+    /// rendered is baked into that text. Re-wrapping it unconditionally emits
+    /// `pr(): pr(): …`, so an already-prefixed message is adopted as-is.
+    fn cached_query_error(function: &str, message: String) -> ExpressionError {
+        let prefix = format!("{function}(): ");
+        ExpressionError::Other {
+            function: function.to_string(),
+            message: message.strip_prefix(&prefix).map(str::to_string).unwrap_or(message),
+        }
     }
 
     /// Returns the executing agent name.

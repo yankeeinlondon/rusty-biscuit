@@ -7,7 +7,9 @@
 
 #[cfg(test)]
 use std::collections::HashSet;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
 
@@ -147,6 +149,7 @@ impl RemoteFetchInner {
     fn runtime(&self) -> Option<&tokio::runtime::Runtime> {
         self.runtime
             .get_or_init(|| {
+                count_executor_build();
                 tokio::runtime::Builder::new_multi_thread()
                     .worker_threads(self.concurrency.max(1))
                     .enable_all()
@@ -183,6 +186,118 @@ impl Drop for RemoteFetchInner {
         }
     }
 }
+
+thread_local! {
+    /// Handle to the compose run's shared executor, installed for the duration
+    /// of one provider-query closure.
+    ///
+    /// The expression evaluator is synchronous and `provider::run` takes no
+    /// context argument, so the run's executor reaches the sync bridge through
+    /// this scoped slot rather than through a parameter.
+    static RUN_PROVIDER_EXECUTOR: RefCell<Option<tokio::runtime::Handle>> =
+        const { RefCell::new(None) };
+}
+
+/// Process-wide executor for provider queries issued outside any compose run
+/// that owns a `RemoteFetchRuntime`.
+///
+/// Never dropped. `Runtime`'s own `Drop` shuts down blockingly and panics when
+/// that happens inside an async context; a `static` is never dropped, so the
+/// hazard cannot arise. `None` means the build failed.
+static FALLBACK_PROVIDER_EXECUTOR: OnceLock<Option<tokio::runtime::Runtime>> = OnceLock::new();
+
+/// Counts every provider-executor runtime constructed in this process.
+///
+/// The whole point of the shared executor is that this stays flat across a
+/// run's provider queries, which is only observable with a counter.
+#[cfg(test)]
+static EXECUTOR_BUILDS: AtomicUsize = AtomicUsize::new(0);
+
+fn count_executor_build() {
+    #[cfg(test)]
+    EXECUTOR_BUILDS.fetch_add(1, Ordering::SeqCst);
+}
+
+/// Number of provider-executor runtimes constructed so far in this process.
+#[cfg(test)]
+pub(crate) fn executor_builds() -> usize {
+    EXECUTOR_BUILDS.load(Ordering::SeqCst)
+}
+
+/// Restores the previously scoped provider executor when dropped, so nested
+/// compose runs do not leak one run's executor into another.
+struct ProviderExecutorScope(Option<tokio::runtime::Handle>);
+
+impl ProviderExecutorScope {
+    fn enter(handle: Option<tokio::runtime::Handle>) -> Self {
+        Self(RUN_PROVIDER_EXECUTOR.with(|cell| cell.replace(handle)))
+    }
+}
+
+impl Drop for ProviderExecutorScope {
+    fn drop(&mut self) {
+        let previous = self.0.take();
+        RUN_PROVIDER_EXECUTOR.with(|cell| cell.replace(previous));
+    }
+}
+
+/// Why a provider future produced no value.
+pub(crate) enum SharedExecutorError {
+    /// No executor could be built, so the future was never polled.
+    Unavailable,
+    /// The future panicked, or its executor shut down before it completed.
+    Panicked,
+}
+
+/// Runs `future` to completion on the compose run's shared executor.
+///
+/// The future is `spawn`ed onto a *foreign* runtime and the calling thread
+/// blocks on a channel for its result. This never calls `block_on`, so a caller
+/// that is itself inside a Tokio runtime does not hit the "cannot start a
+/// runtime from within a runtime" panic — the property the previous
+/// thread-per-query bridge existed to provide.
+///
+/// ## Errors
+///
+/// Returns [`SharedExecutorError::Panicked`] when the task drops its sender
+/// without sending, which covers both an unwinding future and a shut-down
+/// executor. A panic therefore surfaces as a value rather than unwinding into
+/// the compose run.
+pub(crate) fn block_on_shared_executor<T>(
+    future: impl Future<Output = T> + Send + 'static,
+) -> Result<T, SharedExecutorError>
+where
+    T: Send + 'static,
+{
+    let handle = RUN_PROVIDER_EXECUTOR
+        .with(|cell| cell.borrow().clone())
+        .or_else(fallback_executor_handle)
+        .ok_or(SharedExecutorError::Unavailable)?;
+
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    handle.spawn(async move {
+        let _ = sender.send(future.await);
+    });
+    receiver.recv().map_err(|_| SharedExecutorError::Panicked)
+}
+
+fn fallback_executor_handle() -> Option<tokio::runtime::Handle> {
+    FALLBACK_PROVIDER_EXECUTOR
+        .get_or_init(|| {
+            count_executor_build();
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(DEFAULT_PROVIDER_CONCURRENCY)
+                .enable_all()
+                .build()
+                .ok()
+        })
+        .as_ref()
+        .map(|runtime| runtime.handle().clone())
+}
+
+/// Worker count for the fallback executor, matching the default remote
+/// concurrency cap used by `RemoteFetchRuntime`.
+const DEFAULT_PROVIDER_CONCURRENCY: usize = 4;
 
 impl std::fmt::Debug for RemoteFetchInner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -345,6 +460,12 @@ impl RemoteFetchRuntime {
         };
         slot.get_or_init(|| {
             let _permit = self.acquire_provider_permit()?;
+            // Provider futures run on the same executor as this run's URL
+            // fetches, so provider work shares the run's executor lifecycle
+            // instead of standing up a runtime of its own.
+            let _executor = ProviderExecutorScope::enter(
+                self.inner.runtime().map(|runtime| runtime.handle().clone()),
+            );
             query()
         })
         .clone()
@@ -647,6 +768,42 @@ mod tests {
         rt.register_and_fetch(url);
         let urls = rt.registered_urls();
         assert!(urls.contains("https://example.com/doc.md"));
+    }
+
+    /// A provider query must execute on the run's own executor, not on the
+    /// process-wide fallback, so provider work follows the run's lifecycle.
+    ///
+    /// Enumerating the run executor's worker threads and asserting membership
+    /// is not sound: tokio work-stealing migrates a task between workers across
+    /// an await point. The build counter is the deterministic discriminator —
+    /// falling through to the fallback would construct a second executor.
+    #[test]
+    fn provider_queries_run_on_the_runs_own_executor() {
+        let runtime = RemoteFetchRuntime::with_policy(FetchPolicy::deny_all());
+        let builds_before = executor_builds();
+
+        let observed = runtime
+            .cached_provider_query("probe".to_string(), || {
+                let id = block_on_shared_executor(async {
+                    format!("{:?}", std::thread::current().id())
+                })
+                .unwrap_or_else(|_| panic!("shared executor is available"));
+                Ok(serde_json::json!(id))
+            })
+            .expect("query succeeds");
+
+        assert_eq!(
+            executor_builds() - builds_before,
+            1,
+            "exactly one executor — the run's own — may be built; a second \
+             build means the provider future fell through to the process-wide \
+             fallback instead of using the run's executor"
+        );
+        assert_ne!(
+            observed.as_str().expect("thread id string"),
+            format!("{:?}", std::thread::current().id()),
+            "the future must run on the executor, not inline on the caller"
+        );
     }
 
     #[test]
