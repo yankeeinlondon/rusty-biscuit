@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use claudine::stream::parser::{SemanticStreamParser, StreamParseError};
+use claudine::stream::parser::SemanticStreamParser;
 use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
 
@@ -186,9 +186,7 @@ struct ErrorParser {
 }
 
 impl SemanticStreamParser for ErrorParser {
-    fn feed_line(&mut self, _line: &str) -> std::result::Result<(), StreamParseError> {
-        Ok(())
-    }
+    fn feed_line(&mut self, _line: &str) {}
 
     fn finish(self: Box<Self>, _exit_code: i32) -> StreamExecutionSummary {
         StreamExecutionSummary {

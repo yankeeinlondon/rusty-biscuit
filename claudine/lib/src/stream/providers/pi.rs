@@ -29,7 +29,7 @@
 
 use serde_json::{Map, Value};
 
-use super::parser::{SemanticStreamParser, StreamParseError};
+use super::parser::SemanticStreamParser;
 use super::protocol::pi::{
     PiAssistantMessageEvent, PiAutoRetryEnd, PiAutoRetryStart, PiCompactionEnd, PiEvent,
     PiMessageEnvelope, PiSession, PiToolEnd, PiToolStart,
@@ -286,14 +286,14 @@ impl<S: SemanticEventSink> PiSemanticStreamParser<S> {
 }
 
 impl<S: SemanticEventSink> SemanticStreamParser for PiSemanticStreamParser<S> {
-    fn feed_line(&mut self, line: &str) -> Result<(), StreamParseError> {
+    fn feed_line(&mut self, line: &str) {
         self.line_num += 1;
         // Pi's RPC docs warn clients to split on LF only; feed_line already
         // receives a single LF-delimited record, so trimming trailing CR/space
         // is all that remains.
         let line = line.trim();
         if line.is_empty() {
-            return Ok(());
+            return;
         }
 
         match serde_json::from_str::<PiEvent>(line) {
@@ -335,7 +335,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for PiSemanticStreamParser<S> {
                     Err(e) => {
                         super::trace_malformed_line(Provider::Pi, self.line_num, &e.to_string());
                         self.emit_malformed_warning(&e.to_string());
-                        return Ok(());
+                        return;
                     }
                 };
                 let raw_kind = raw
@@ -347,7 +347,6 @@ impl<S: SemanticEventSink> SemanticStreamParser for PiSemanticStreamParser<S> {
                 self.emit_provider_extension(&raw_kind, Value::Object(raw));
             }
         }
-        Ok(())
     }
 
     fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {

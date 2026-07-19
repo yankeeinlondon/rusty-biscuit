@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use chrono::Local;
 use serde_json::{Map, Value};
 
-use super::parser::{SemanticStreamParser, StreamParseError};
+use super::parser::SemanticStreamParser;
 use super::protocol::claude::{
     ClaudeApiRetry, ClaudeAssistant, ClaudeContentBlockDelta, ClaudeContentBlockStart,
     ClaudeErrorEvent, ClaudeEvent, ClaudeInit, ClaudeRateLimit, ClaudeResult, ClaudeTaskEvent,
@@ -806,11 +806,11 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
 }
 
 impl<S: SemanticEventSink> SemanticStreamParser for ClaudeSemanticStreamParser<S> {
-    fn feed_line(&mut self, line: &str) -> Result<(), StreamParseError> {
+    fn feed_line(&mut self, line: &str) {
         self.line_num += 1;
         let line = line.trim();
         if line.is_empty() {
-            return Ok(());
+            return;
         }
 
         // Try typed deserialization first to avoid `serde_json::Value` DOM
@@ -882,7 +882,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for ClaudeSemanticStreamParser<S
                             &e.to_string(),
                         );
                         self.emit_malformed_warning(&e.to_string());
-                        return Ok(());
+                        return;
                     }
                 };
                 let raw_kind = raw
@@ -894,8 +894,6 @@ impl<S: SemanticEventSink> SemanticStreamParser for ClaudeSemanticStreamParser<S
                 self.emit_provider_extension(&raw_kind, Value::Object(raw));
             }
         }
-
-        Ok(())
     }
 
     fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {

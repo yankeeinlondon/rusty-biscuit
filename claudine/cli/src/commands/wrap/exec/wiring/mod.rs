@@ -42,7 +42,7 @@ use claudine::events::{AgenticEvent, EnvironmentContext, EventMeta};
 
 use claudine::provider::Provider;
 use claudine::stream::logs::EarlyTermination;
-use claudine::stream::parser::{SemanticStreamParser, StreamParseError};
+use claudine::stream::parser::SemanticStreamParser;
 use claudine::stream::progress::LiveMetrics;
 use claudine::stream::protocol::kimi::{
     KimiEnvelope, KimiHookRequest, KimiJsonRpcError, KimiWireRequest,

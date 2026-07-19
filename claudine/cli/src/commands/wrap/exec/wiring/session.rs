@@ -149,24 +149,15 @@ pub(crate) fn run_kimi_wire_session(
                     Some(captured_pid),
                 );
 
-                match parser.feed_line(&line) {
-                    Ok(()) => {}
-                    Err(StreamParseError::MalformedLine { .. }) => {
-                        debug!("skipping malformed kimi wire line: {line}");
-                    }
-                    Err(StreamParseError::Fatal(error)) => {
-                        warn!(error = %error, "kimi wire parser fatal error; continuing");
-                    }
-                }
+                parser.feed_line(&line);
 
                 // Feed any synthetic diagnostic envelope produced by the
                 // request-dispatch path (e.g. hook dispatch failures) so
                 // the semantic parser surfaces it as a `SemanticEvent::Warning`.
                 if let Some(envelope) = synthetic
                     && let Ok(serialized) = serde_json::to_string(&envelope)
-                    && let Err(error) = parser.feed_line(&serialized)
                 {
-                    debug!(?error, "failed to feed synthetic warning envelope");
+                    parser.feed_line(&serialized);
                 }
 
                 // Signal the wait loop the moment the prompt response

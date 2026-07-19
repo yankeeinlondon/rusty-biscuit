@@ -95,18 +95,6 @@ fn plain_terminal(width: u32) -> Terminal {
     term
 }
 
-/// Strip ANSI escape codes if plain mode is active, otherwise return as-is.
-///
-/// Use this for output that was already rendered by code you don't control
-/// (e.g. child process output or third-party rendering).
-pub fn maybe_strip(text: &str) -> String {
-    if is_plain() {
-        biscuit_terminal::prelude::strip_escape_codes(text)
-    } else {
-        text.to_string()
-    }
-}
-
 /// Write a message to stderr (always visible, no verbose flag required).
 pub fn message(msg: &str) {
     let _ = writeln!(std::io::stderr(), "{msg}");

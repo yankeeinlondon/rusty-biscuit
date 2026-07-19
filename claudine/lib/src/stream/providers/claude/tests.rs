@@ -51,8 +51,7 @@ fn init_emits_session_start() {
     parser
         .feed_line(
             r#"{"type":"init","session_id":"s1","model":"claude","apiKeySource":"none"}"#,
-        )
-        .unwrap();
+        );
     let events = sink.snapshot();
     assert_eq!(events.len(), 1);
     match &events[0] {
@@ -76,11 +75,9 @@ fn init_emits_session_start() {
 fn assistant_text_emits_output_text_and_accumulates() {
     let (sink, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"assistant","content":[{"type":"text","text":"Hello"}]}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"assistant","content":[{"type":"text","text":"Hello"}]}"#);
     parser
-        .feed_line(r#"{"type":"assistant","content":[{"type":"text","text":", world"}]}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"assistant","content":[{"type":"text","text":", world"}]}"#);
     let kinds = sink.kinds();
     assert_eq!(kinds, vec!["output_text", "output_text"]);
     let summary = parser.finish(0);
@@ -93,8 +90,7 @@ fn thinking_delta_emits_reasoning() {
     parser
         .feed_line(
             r#"{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"pondering"}}"#,
-        )
-        .unwrap();
+        );
     let events = sink.snapshot();
     assert!(matches!(
         events[0],
@@ -111,8 +107,7 @@ fn text_delta_emits_output_text() {
     parser
         .feed_line(
             r#"{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}}"#,
-        )
-        .unwrap();
+        );
     let events = sink.snapshot();
     assert!(matches!(
         events[0],
@@ -124,11 +119,9 @@ fn text_delta_emits_output_text() {
 fn tool_use_and_result_emit_typed_events() {
     let (sink, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls"}}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls"}}"#);
     parser
-        .feed_line(r#"{"type":"tool_result","tool_use_id":"t1","content":"ok"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"tool_result","tool_use_id":"t1","content":"ok"}"#);
 
     let events = sink.snapshot();
     assert_eq!(events.len(), 2);
@@ -163,8 +156,7 @@ fn content_block_start_tool_use_dispatches_as_tool_call() {
     parser
         .feed_line(
             r#"{"type":"content_block_start","content_block":{"type":"tool_use","id":"t2","name":"bash","input":{"cmd":"ls -la"}}}"#,
-        )
-        .unwrap();
+        );
     let events = sink.snapshot();
     assert!(matches!(events[0], SemanticEvent::ToolCall { .. }));
 }
@@ -175,13 +167,11 @@ fn content_block_start_and_delta_emit_tool_call_with_merged_input() {
     parser
         .feed_line(
             r#"{"type":"content_block_start","content_block":{"type":"tool_use","id":"t3","name":"bash"}}"#,
-        )
-        .unwrap();
+        );
     parser
         .feed_line(
             r#"{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{\"command\":\"ls -la\"}"}}"#,
-        )
-        .unwrap();
+        );
     let events = sink.snapshot();
     assert_eq!(events.len(), 1);
     match &events[0] {
@@ -202,8 +192,7 @@ fn assistant_envelope_tool_use_preface_becomes_reasoning_then_tool_call() {
     parser
         .feed_line(
             r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Checking tests."},{"type":"tool_use","id":"tu_1","name":"Bash","input":{"command":"cargo test -p claudine"}}]}}"#,
-        )
-        .unwrap();
+        );
     let events = sink.snapshot();
     assert_eq!(events.len(), 2);
     match &events[0] {
@@ -239,8 +228,7 @@ fn rate_limit_emits_warning_with_original_message() {
     parser
         .feed_line(
             r#"{"type":"rate_limit_event","is_throttled":true,"retry_after_ms":5000,"message":"Rate limited"}"#,
-        )
-        .unwrap();
+        );
     let events = sink.snapshot();
     match &events[0] {
         SemanticEvent::Warning { message, extra } => {
@@ -259,8 +247,7 @@ fn approaching_rate_limit_without_message_renders_reset_window_warning() {
     parser
         .feed_line(
             r#"{"type":"rate_limit_event","rate_limit_info":{"status":"approaching_limit","resetsAt":1712000000,"rateLimitType":"usage","overageStatus":"allowed"}}"#,
-        )
-        .unwrap();
+        );
     let events = sink.snapshot();
     match &events[0] {
         SemanticEvent::Warning { message, extra } => {
@@ -304,8 +291,7 @@ fn allowed_warning_status_renders_soft_notice_with_correct_window() {
     parser
         .feed_line(
             r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","resetsAt":1712000000,"rateLimitType":"seven_day","overageStatus":"allowed"}}"#,
-        )
-        .unwrap();
+        );
     let events = sink.snapshot();
     match &events[0] {
         SemanticEvent::Warning { message, extra } => {
@@ -338,8 +324,7 @@ fn allowed_warning_status_renders_soft_notice_with_correct_window() {
 fn non_throttled_rate_limit_without_message_or_status_emits_no_warning() {
     let (sink, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"rate_limit_event","is_throttled":false}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"rate_limit_event","is_throttled":false}"#);
     assert!(sink.snapshot().is_empty());
     let summary = parser.finish(0);
     assert_eq!(summary.rate_limit.and_then(|rl| rl.message), None);
@@ -351,8 +336,7 @@ fn error_event_emits_terminal_error() {
     parser
         .feed_line(
             r#"{"type":"error","error":{"type":"billing_error","message":"Insufficient credits"}}"#,
-        )
-        .unwrap();
+        );
     let events = sink.snapshot();
     match &events[0] {
         SemanticEvent::Error {
@@ -403,8 +387,7 @@ fn result_emits_turn_complete_and_populates_summary() {
     parser
         .feed_line(
             r#"{"type":"result","duration_ms":12345,"num_turns":1,"stop_reason":"end_turn","cost_usd":0.0042,"usage":{"input_tokens":1000,"output_tokens":500}}"#,
-        )
-        .unwrap();
+        );
     let events = sink.snapshot();
     match &events[0] {
         SemanticEvent::TurnComplete {
@@ -430,10 +413,9 @@ fn result_emits_turn_complete_and_populates_summary() {
 }
 
 #[test]
-fn malformed_json_emits_warning_and_returns_ok() {
+fn malformed_json_emits_warning() {
     let (sink, mut parser) = new_parser();
-    let result = parser.feed_line("not json {{{");
-    assert!(result.is_ok(), "malformed line must not return Err");
+    parser.feed_line("not json {{{");
     let events = sink.snapshot();
     assert!(matches!(events[0], SemanticEvent::Warning { .. }));
 }
@@ -442,8 +424,7 @@ fn malformed_json_emits_warning_and_returns_ok() {
 fn unknown_event_becomes_provider_extension() {
     let (sink, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"some_future_event","foo":"bar"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"some_future_event","foo":"bar"}"#);
     let events = sink.snapshot();
     match &events[0] {
         SemanticEvent::ProviderExtension {
@@ -463,8 +444,7 @@ fn unknown_event_becomes_provider_extension() {
 fn task_started_becomes_subagent_start() {
     let (sink, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"task_started","task_id":"sa_1","name":"researcher"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"task_started","task_id":"sa_1","name":"researcher"}"#);
     let events = sink.snapshot();
     match &events[0] {
         SemanticEvent::SubagentStart { name, id, .. } => {
@@ -481,8 +461,7 @@ fn task_completed_becomes_subagent_stop() {
     parser
         .feed_line(
             r#"{"type":"task_completed","task_id":"sa_1","name":"researcher","status":"success"}"#,
-        )
-        .unwrap();
+        );
     let events = sink.snapshot();
     match &events[0] {
         SemanticEvent::SubagentStop {
@@ -500,8 +479,7 @@ fn task_completed_becomes_subagent_stop() {
 fn task_progress_becomes_info() {
     let (sink, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"task_progress","message":"working on it"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"task_progress","message":"working on it"}"#);
     let events = sink.snapshot();
     match &events[0] {
         SemanticEvent::Info { message, .. } => {
@@ -514,9 +492,9 @@ fn task_progress_becomes_info() {
 #[test]
 fn empty_and_whitespace_lines_emit_nothing() {
     let (sink, mut parser) = new_parser();
-    parser.feed_line("").unwrap();
-    parser.feed_line("  ").unwrap();
-    parser.feed_line("\t").unwrap();
+    parser.feed_line("");
+    parser.feed_line("  ");
+    parser.feed_line("\t");
     assert!(sink.snapshot().is_empty());
 }
 
@@ -524,11 +502,9 @@ fn empty_and_whitespace_lines_emit_nothing() {
 fn multi_turn_concatenation() {
     let (sink, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"assistant","content":[{"type":"text","text":"First. "}]}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"assistant","content":[{"type":"text","text":"First. "}]}"#);
     parser
-        .feed_line(r#"{"type":"assistant","content":[{"type":"text","text":"Second."}]}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"assistant","content":[{"type":"text","text":"Second."}]}"#);
     assert_eq!(sink.kinds(), vec!["output_text", "output_text"]);
     let summary = parser.finish(0);
     assert_eq!(summary.assistant_text, "First. Second.");
@@ -538,11 +514,9 @@ fn multi_turn_concatenation() {
 fn large_init_arrays_not_stored_in_raw_summary() {
     let (_, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"init","session_id":"s","model":"m","tools":[{"name":"a"}]}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"init","session_id":"s","model":"m","tools":[{"name":"a"}]}"#);
     parser
-        .feed_line(r#"{"type":"result","duration_ms":1,"tools":["a"],"skills":["s"],"agents":["x"],"mcp_servers":["m"]}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"result","duration_ms":1,"tools":["a"],"skills":["s"],"agents":["x"],"mcp_servers":["m"]}"#);
     let summary = parser.finish(0);
     let raw = summary.raw_summary.unwrap();
     assert!(raw.get("tools").is_none());
@@ -556,13 +530,11 @@ fn large_init_arrays_not_stored_in_raw_summary() {
 fn badges_derived_on_billing_error() {
     let (_, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"init","session_id":"s","model":"m"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"init","session_id":"s","model":"m"}"#);
     parser
         .feed_line(
             r#"{"type":"error","error":{"type":"billing_error","message":"Insufficient credits"}}"#,
-        )
-        .unwrap();
+        );
     let summary = parser.finish(1);
     assert_eq!(summary.badges.len(), 1);
     assert_eq!(
@@ -577,11 +549,9 @@ fn user_event_routes_tool_result_to_semantic_tool_result() {
     parser
         .feed_line(
             r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu_1","name":"Bash","input":{"command":"echo hello"}}]}}"#,
-        )
-        .unwrap();
+        );
     parser
-        .feed_line(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_1","content":"hello","is_error":false}]},"session_id":"s1"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_1","content":"hello","is_error":false}]},"session_id":"s1"}"#);
     let events = sink.snapshot();
     assert!(matches!(events[1], SemanticEvent::ToolResult { .. }));
     let SemanticEvent::ToolResult { name, status, .. } = &events[1] else {
@@ -601,8 +571,7 @@ fn user_event_routes_tool_result_to_semantic_tool_result() {
 fn billing_error_on_assistant_surfaces_terminal_error_not_rate_limit() {
     let (sink, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"Credit balance is too low"}]},"session_id":"s1","error":"billing_error"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"Credit balance is too low"}]},"session_id":"s1","error":"billing_error"}"#);
     let events = sink.snapshot();
     let terminal_errors: Vec<_> = events
         .iter()
@@ -653,11 +622,9 @@ fn hook_events_without_init_do_not_fabricate_session_start() {
     // either case, nothing should synthesize a session_start.
     let (sink, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"system","subtype":"hook_started","hook_name":"SessionStart:startup","session_id":"s1"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"system","subtype":"hook_started","hook_name":"SessionStart:startup","session_id":"s1"}"#);
     parser
-        .feed_line(r#"{"type":"system","subtype":"hook_response","hook_id":"x","output":"ok","exit_code":0,"session_id":"s1"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"system","subtype":"hook_response","hook_id":"x","output":"ok","exit_code":0,"session_id":"s1"}"#);
     let kinds = sink.kinds();
     assert!(
         !kinds.contains(&"session_start"),
@@ -669,14 +636,11 @@ fn hook_events_without_init_do_not_fabricate_session_start() {
 fn hook_events_emitted_after_session_start() {
     let (sink, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"system","subtype":"hook_started","hook_name":"SessionStart:startup","session_id":"s1"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"system","subtype":"hook_started","hook_name":"SessionStart:startup","session_id":"s1"}"#);
     parser
-        .feed_line(r#"{"type":"system","subtype":"hook_response","hook_id":"x","output":"ok","exit_code":0,"session_id":"s1"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"system","subtype":"hook_response","hook_id":"x","output":"ok","exit_code":0,"session_id":"s1"}"#);
     parser
-        .feed_line(r#"{"type":"init","session_id":"s1","model":"claude-opus-4-6"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"init","session_id":"s1","model":"claude-opus-4-6"}"#);
     let kinds: Vec<&'static str> = sink.kinds();
     let session_idx = kinds
         .iter()
@@ -702,11 +666,9 @@ fn hook_events_after_session_start_emit_inline() {
     // pass through inline to preserve live streaming semantics.
     let (sink, mut parser) = new_parser();
     parser
-        .feed_line(r#"{"type":"init","session_id":"s1","model":"claude-opus-4-6"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"init","session_id":"s1","model":"claude-opus-4-6"}"#);
     parser
-        .feed_line(r#"{"type":"system","subtype":"hook_started","hook_name":"PreToolUse","session_id":"s1"}"#)
-        .unwrap();
+        .feed_line(r#"{"type":"system","subtype":"hook_started","hook_name":"PreToolUse","session_id":"s1"}"#);
     let kinds: Vec<&'static str> = sink.kinds();
     // Order: session_start, then immediately provider_extension.
     assert_eq!(kinds.first(), Some(&"session_start"));
@@ -720,8 +682,7 @@ fn pre_init_hook_buffer_flushes_when_oversized() {
     let (sink, mut parser) = new_parser();
     for _ in 0..40 {
         parser
-            .feed_line(r#"{"type":"system","subtype":"hook_started","hook_name":"X","session_id":"s1"}"#)
-            .unwrap();
+            .feed_line(r#"{"type":"system","subtype":"hook_started","hook_name":"X","session_id":"s1"}"#);
     }
     let kinds: Vec<&'static str> = sink.kinds();
     let provider_ext_count = kinds.iter().filter(|k| **k == "provider_extension").count();
@@ -740,14 +701,12 @@ fn claude_fixture_full_replay_produces_no_provider_extensions() {
     .expect("claude.ndjson must exist");
 
     let (sink, mut parser) = new_parser();
-    for (i, line) in fixture.lines().enumerate() {
+    for line in fixture.lines() {
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
-        parser
-            .feed_line(line)
-            .unwrap_or_else(|e| panic!("line {}: {:?}", i + 1, e));
+        parser.feed_line(line);
     }
     let events = sink.snapshot();
     // Hook events (`system/hook_started`, `system/hook_response`, etc.)
@@ -776,8 +735,7 @@ fn unterminated_input_json_delta_is_bounded() {
     parser
         .feed_line(
             r#"{"type":"content_block_start","content_block":{"type":"tool_use","id":"t1","name":"bash"}}"#,
-        )
-        .unwrap();
+        );
 
     // Craft a chunk larger than the cap to trigger the overflow path
     // in a single delta.
@@ -787,7 +745,7 @@ fn unterminated_input_json_delta_is_bounded() {
         "delta": {"type": "input_json_delta", "partial_json": junk},
     })
     .to_string();
-    parser.feed_line(&line).unwrap();
+    parser.feed_line(&line);
 
     let events = sink.snapshot();
     let overflow: Vec<&SemanticEvent> = events
@@ -811,7 +769,7 @@ fn unterminated_input_json_delta_is_bounded() {
 #[test]
 fn missing_discriminator_falls_through_to_provider_extension() {
     let (sink, mut parser) = new_parser();
-    parser.feed_line(r#"{"payload":{"k":1}}"#).unwrap();
+    parser.feed_line(r#"{"payload":{"k":1}}"#);
     let events = sink.snapshot();
     assert_eq!(events.len(), 1);
     match &events[0] {
@@ -842,7 +800,7 @@ fn round_trip_fidelity_across_mixed_events() {
         r#"{"type":"some_future_event","x":1}"#,
         r#"{"type":"result","duration_ms":1}"#,
     ] {
-        parser.feed_line(line).unwrap();
+        parser.feed_line(line);
     }
     let events = sink.snapshot();
     assert!(!events.is_empty());
