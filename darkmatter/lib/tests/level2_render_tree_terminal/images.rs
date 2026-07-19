@@ -113,79 +113,9 @@ fn pixel_classification_distinguishes_magenta_from_black() {
     assert_eq!(non_black, 0, "black capture must read as blocked/empty");
 }
 
-#[test]
-#[serial(level2_terminal)]
-fn level2_tree_rich_image_node_paints_distinctive_pixels() {
-    match wezterm_decision() {
-        LevelDecision::Run => {}
-        LevelDecision::Skip(msg) => {
-            eprintln!("{msg}");
-            return;
-        }
-        LevelDecision::Panic(msg) => panic!("{msg}"),
-    }
-
-    const MAGENTA: [u8; 3] = [255, 0, 255];
-
-    let dir = tempdir().unwrap();
-    let png_path = dir.path().join("probe.png");
-    write_solid_png(&png_path, 240, MAGENTA);
-
-    let source = SourceDescriptor::Virtual {
-        name: "rich_image_pixels".into(),
-    };
-    let (doc, diags) = fold_markdown_to_document(source, "![probe](probe.png)\n");
-    assert!(diags.is_empty(), "image fixture must fold cleanly: {diags:?}");
-
-    let mut term = Terminal::new_optimistic(120);
-    term.image_support = ImageSupport::ITerm;
-    term.is_tty = true;
-    let mut context = TerminalRenderContext::from_terminal(&term);
-    context.graphics_mode = renderable::tree::GraphicsMode::Rich;
-    context.image_base_path = Some(dir.path().to_path_buf());
-    let opts = TerminalRenderOptions {
-        context,
-        strictness: RenderStrictness::Warn,
-        code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
-    };
-    let rendered = render_terminal_document(&doc, &opts).expect("tree terminal render");
-    assert!(
-        rendered.output.contains("\u{1b}]1337;File="),
-        "Rich image node must emit the iTerm2 image protocol",
-    );
-
-    let path = dir.path().join("rich_image_pixels.ansi");
-    fs::write(&path, rendered.output).unwrap();
-
-    let mut guard = SHARED_HARNESS
-        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
-    let harness = guard.as_mut().unwrap();
-    run_with_sentinel(harness, "clear");
-    let _ = run_with_sentinel(harness, &format!("cat {}", path.display()));
-
-    let Some(png) = harness.capture_window_png().expect("screen-capture call") else {
-        eprintln!(
-            "skipping pixel assertion: window-region capture unavailable (non-macOS or screencapture failed)"
-        );
-        return;
-    };
-
-    let (magenta, non_black, total) = classify_pixels(&png, MAGENTA, 60);
-    // A near-black capture means screen recording is blocked (no permission); we
-    // cannot tell that from a paint failure, so skip rather than hard-fail.
-    if non_black * 100 < total {
-        eprintln!(
-            "skipping pixel assertion: capture is essentially black ({non_black}/{total} non-black) \
-             — Screen Recording permission likely not granted to the parent terminal"
-        );
-        return;
-    }
-
-    // A real, non-black capture with no magenta means the image did not paint.
-    assert!(
-        magenta > 1000,
-        "Rich image node did not paint: only {magenta} magenta pixels in a {total}-pixel \
-         capture ({non_black} non-black). The image protocol bytes were emitted but the \
-         terminal did not render the decoded image.",
-    );
-}
+// The pixel-readback companion (`level3_rich_image_node_paints_distinctive_pixels`)
+// lives in `darkmatter/lib/tests/level3_image_painting.rs`. It calls
+// `WezTermHarness::capture_window_png`, which raises the WezTerm window to
+// the foreground and invokes `screencapture` — a focus-stealing, OS-level
+// operation that the `biscuit-test-harness` contract reserves for L3. Keeping
+// it in the L2 suite broke the "L2 never steals focus" invariant.

@@ -758,9 +758,13 @@ pub(super) const TINY_PNG: &[u8] = &[
 /// `wezterm cli get-text` strips image-protocol bytes, so the pane assertion is
 /// the **absence** of the alt-text fallback — which a malformed, ignored, or
 /// zero-visible image payload could also satisfy. Proof that the image is
-/// actually decoded and painted lives in
-/// [`level2_tree_rich_image_node_paints_distinctive_pixels`], which screen-
-/// captures the pane and samples the rendered pixels.
+/// actually decoded and painted lives in the Level-3 test
+/// `level3_rich_image_node_paints_distinctive_pixels`
+/// (`darkmatter/lib/tests/level3_image_painting.rs`), which screen-captures
+/// the pane and samples the rendered pixels. Pixel-readback is gated to L3
+/// because `screencapture` requires raising the WezTerm window to the
+/// foreground, which the harness contract reserves for L3.
+///
 /// Encodes a `size`×`size` opaque PNG filled with a single RGB color.
 pub(super) fn write_solid_png(path: &std::path::Path, size: u32, rgb: [u8; 3]) {
     let img = image::RgbImage::from_pixel(size, size, image::Rgb(rgb));
@@ -793,7 +797,8 @@ pub(super) fn classify_pixels(png: &[u8], target: [u8; 3], tol: i32) -> (u64, u6
 }
 
 // Validates the pixel-classification pipeline used by
-// [`level2_tree_rich_image_node_paints_distinctive_pixels`] without a terminal:
+// `level3_rich_image_node_paints_distinctive_pixels`
+// (`darkmatter/lib/tests/level3_image_painting.rs`) without a terminal:
 // a solid-magenta PNG must classify as (near-)all magenta and all non-black,
 // while a solid-black PNG must register as near-zero non-black (the signature
 // the paint test treats as "capture blocked → skip"). This guards the decode +
