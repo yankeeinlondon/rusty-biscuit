@@ -243,11 +243,10 @@ fn error_text<T>(result: crate::markdown::MarkdownResult<T>) -> String {
 
 /// Wraps `expression` so it is evaluated on the frontmatter surface.
 ///
-/// Frontmatter interpolation is the surface that propagates a focused provider
-/// failure out of `compose_with`; the body surface downgrades the same failure
-/// to a warning (see `body_surface_downgrades_focused_failures_to_warnings`).
+/// The scalar is single-quoted so expressions containing double quotes (an
+/// object-literal query) still parse as one YAML string.
 fn frontmatter_document(expression: &str) -> String {
-    format!("---\nvalue: \"{{{{ {expression} }}}}\"\n---\nunused\n")
+    format!("---\nvalue: '{{{{ {expression} }}}}'\n---\nunused\n")
 }
 
 // ---------------------------------------------------------------------------
@@ -598,49 +597,224 @@ async fn a_successful_empty_query_is_still_an_empty_list() {
     assert_eq!(composed.content(), "PRs: ");
 }
 
-/// The body surface downgrades a focused provider failure to a warning.
+// ---------------------------------------------------------------------------
+// 4b. Cross-surface failure parity (AC26 / AC27)
+// ---------------------------------------------------------------------------
+
+/// The three expression surfaces a provider call can be authored on.
 ///
-/// This is the compose-wide policy for non-authoring-fatal expression errors,
-/// not something specific to providers: `is_authoring_fatal` covers unknown
-/// functions and broken file references, and `ExpressionError::Other` — which
-/// is what every focused provider failure becomes — is outside that set. The
-/// consequence is a real asymmetry against AC26's frontmatter/body parity
-/// claim: the identical call aborts the compose from frontmatter but leaves the
-/// unevaluated expression text in the body with only a report warning.
+/// AC26 requires function availability and failure semantics not to vary by
+/// document region, and AC27 requires a focused provider failure to stay an
+/// actionable error — never an empty string, never an empty array, never an
+/// unevaluated `{{ … }}` with a warning. Every failure kind below is run
+/// through all three surfaces and must abort composition identically on each.
+#[derive(Clone, Copy)]
+enum Surface {
+    /// Whole-value frontmatter interpolation (`value: '{{ pr(123) }}'`).
+    Frontmatter,
+    /// Body interpolation (`Outcome: {{ pr(123) }}`).
+    Body,
+    /// A frontmatter `$()` ternary condition (`$(pr(123) ? … : …)`).
+    ShellTernary,
+}
+
+impl Surface {
+    const ALL: [Surface; 3] = [Surface::Frontmatter, Surface::Body, Surface::ShellTernary];
+
+    fn name(self) -> &'static str {
+        match self {
+            Surface::Frontmatter => "frontmatter",
+            Surface::Body => "body",
+            Surface::ShellTernary => "$()",
+        }
+    }
+
+    fn document(self, expression: &str) -> String {
+        match self {
+            Surface::Frontmatter => frontmatter_document(expression),
+            Surface::Body => format!("Outcome: {{{{ {expression} }}}}\n"),
+            // Single-quoted YAML: an object-literal condition contains `": "`,
+            // which a plain (unquoted) YAML scalar cannot carry.
+            Surface::ShellTernary => {
+                format!("---\nresolved: '$({expression} ? echo found : echo missing)'\n---\nunused\n")
+            }
+        }
+    }
+}
+
+/// Asserts one failing provider call aborts composition on all three
+/// surfaces, carrying the same focused detail on each.
 ///
-/// The value is at least never an empty string or empty array, so the spec's
-/// "focused errors are never replaced with empty values" bullet holds on both
-/// surfaces. This test pins the behavior that actually ships so a future change
-/// to provider-error fatality is a deliberate, visible decision.
+/// A compose that succeeds at all — with an empty string, an empty array, or
+/// the unevaluated expression text — fails here via `error_text`, which is
+/// what keeps the spec's "focused errors are never replaced with empty
+/// values" bullet asserted on every surface rather than only frontmatter.
+/// `fragments` are alternative discriminating substrings (a kind can surface
+/// through more than one message shape); at least one must appear.
+async fn assert_fatal_on_every_surface(
+    fixture: &Fixture,
+    expression: &str,
+    fragments: &[&str],
+    denied: bool,
+) {
+    let function = expression.split('(').next().unwrap_or(expression);
+    for surface in Surface::ALL {
+        let approved: HashSet<String> = match surface {
+            Surface::ShellTernary => ["echo found".to_string(), "echo missing".to_string()]
+                .into_iter()
+                .collect(),
+            _ => HashSet::new(),
+        };
+        let allowed_hosts = if denied { Vec::new() } else { vec!["127.0.0.1".to_string()] };
+        let result = fixture.compose_full(&surface.document(expression), allowed_hosts, approved);
+
+        let message = error_text(result);
+        let lowered = message.to_lowercase();
+        assert!(
+            fragments.iter().any(|fragment| lowered.contains(&fragment.to_lowercase())),
+            "{} surface lost the focused detail ({fragments:?}): {message}",
+            surface.name()
+        );
+        assert!(
+            !message.contains(&format!("{function}(): {function}()")),
+            "{} surface applied the function prefix twice: {message}",
+            surface.name()
+        );
+    }
+}
+
+/// A genuine 404 is the focused not-found kind on every surface.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial_test::serial(provider_transport)]
-async fn body_surface_downgrades_focused_failures_to_warnings() {
+async fn not_found_is_fatal_on_all_three_surfaces() {
+    let fixture = Fixture::start().await;
+    fixture.mount_status(PR_PATH, 404, "{}").await;
+
+    assert_fatal_on_every_surface(&fixture, "pr(123)", &["not found"], false).await;
+}
+
+/// A policy-denied host aborts before any byte leaves the process, on every
+/// surface.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(provider_transport)]
+async fn denied_host_is_fatal_on_all_three_surfaces() {
+    let fixture = Fixture::start().await;
+    fixture.mount_json(PR_PATH, pr_body(123, "Fix the parser")).await;
+
+    assert_fatal_on_every_surface(&fixture, "pr(123)", &["127.0.0.1"], true).await;
+    assert_eq!(
+        fixture.request_count().await,
+        0,
+        "a denied provider call reached the network anyway"
+    );
+}
+
+/// A missing credential is the authentication kind on every surface.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(provider_transport)]
+async fn authentication_failure_is_fatal_on_all_three_surfaces() {
+    let fixture = Fixture::start().await;
+    fixture.mount_status(PR_PATH, 401, "{\"message\":\"auth required\"}").await;
+
+    assert_fatal_on_every_surface(&fixture, "pr(123)", &["credential", "token", "401"], false)
+        .await;
+}
+
+/// A rejected token is the same authentication kind, distinct from an absent
+/// one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(provider_transport)]
+async fn rejected_credentials_are_fatal_on_all_three_surfaces() {
+    let fixture = Fixture::start_with_credential(Some("not-a-real-token")).await;
+    fixture.mount_status(PR_PATH, 401, "{\"message\":\"bad credentials\"}").await;
+
+    assert_fatal_on_every_surface(&fixture, "pr(123)", &["401", "unauthor", "credential"], false)
+        .await;
+}
+
+/// A 429 is the rate-limit kind on every surface.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(provider_transport)]
+async fn rate_limit_is_fatal_on_all_three_surfaces() {
+    let fixture = Fixture::start().await;
+    fixture.mount_status(PR_PATH, 429, "{\"message\":\"slow down\"}").await;
+
+    assert_fatal_on_every_surface(&fixture, "pr(123)", &["rate limited"], false).await;
+}
+
+/// A canonical filter the selected flavor cannot honor is the
+/// unsupported-capability kind on every surface — raised before any I/O, and
+/// never silently approximated as an empty list.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(provider_transport)]
+async fn unsupported_capability_is_fatal_on_all_three_surfaces() {
+    let fixture = Fixture::start().await;
+    fixture.mount_json(PR_LIST_PATH, json!([pr_body(123, "Fix the parser")])).await;
+
+    assert_fatal_on_every_surface(
+        &fixture,
+        "pr_list({\"assignee\": \"alice\"})",
+        &["unsupported"],
+        false,
+    )
+    .await;
+}
+
+/// A traversal that hits its safety cap is the incomplete-domain kind on
+/// every surface, never a truncated-or-empty list.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(provider_transport)]
+async fn incomplete_domain_is_fatal_on_all_three_surfaces() {
+    let fixture = Fixture::start().await;
+    let runs: Vec<Value> = (1..=21).map(|id| json!({"id": id})).collect();
+    fixture.mount_json(RUNS_PATH, json!({"workflow_runs": runs})).await;
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path_regex(
+            r"^/api/v1/repos/acme/widgets/actions/runs/\d+/jobs$",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"jobs": []})))
+        .mount(&fixture.server)
+        .await;
+
+    assert_fatal_on_every_surface(&fixture, "cicd_list(5)", &["incomplete", "parent executions"], false)
+        .await;
+}
+
+/// A 5xx response is the transport-failure kind on every surface.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(provider_transport)]
+async fn transport_failure_is_fatal_on_all_three_surfaces() {
     let fixture = Fixture::start().await;
     fixture.mount_status(PR_PATH, 500, "{\"message\":\"boom\"}").await;
 
-    let (composed, report) =
-        fixture.compose_reported("PR: {{ pr(123) }}\n").expect("the body surface does not abort");
+    assert_fatal_on_every_surface(&fixture, "pr(123)", &["500"], false).await;
+}
 
-    let text = composed.content().to_string();
-    assert_ne!(text, "PR: ", "a focused failure must not render as an empty value");
+/// A generic (non-provider) expression failure keeps its lenient body
+/// behavior: the provider fatality rule must not widen `ExpressionError::Other`.
+///
+/// `min(1)` is an arity failure — it still downgrades to a warning with the
+/// unevaluated text left behind, proving the parity work classified provider
+/// failures distinctly rather than making every error fatal.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(provider_transport)]
+async fn generic_expression_failures_still_warn_on_the_body_surface() {
+    let fixture = Fixture::start().await;
+
+    let (composed, report) = fixture
+        .compose_reported("Outcome: {{ min(1) }}\n")
+        .expect("a generic arity failure stays a body-surface warning");
+
     assert!(
-        text.contains("{{ pr(123) }}"),
-        "the unevaluated expression is what currently survives: {text}"
+        composed.content().contains("{{ min(1) }}"),
+        "the lenient body behavior changed for a non-provider failure: {}",
+        composed.content()
     );
     assert!(
-        report
-            .warnings
-            .iter()
-            .any(|warning| warning.message.contains("500") || warning.message.contains("pr(123)")),
-        "the focused failure left no warning behind: {:?}",
+        report.warnings.iter().any(|warning| warning.message.contains("min(1)")),
+        "the generic failure left no warning behind: {:?}",
         report.warnings
     );
-
-    // The same call from frontmatter aborts, which is the asymmetry itself.
-    let fixture = Fixture::start().await;
-    fixture.mount_status(PR_PATH, 500, "{\"message\":\"boom\"}").await;
-    let message = error_text(fixture.compose(&frontmatter_document("pr(123)")));
-    assert!(message.contains("500"), "{message}");
 }
 
 // ---------------------------------------------------------------------------

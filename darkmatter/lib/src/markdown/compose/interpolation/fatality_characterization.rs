@@ -10,12 +10,18 @@
 //! ## The ratified policy this matrix locks
 //!
 //! - **Body interpolation** ([`interpolate_text`]): under `fail_fast = true`
-//!   every failure is fatal. In lenient (`fail_fast = false`) mode, **two**
-//!   classes are fatal — an **unknown function** and a **present file reference
-//!   that fails to resolve** (missing file or malformed path). A present file
+//!   every failure is fatal. In lenient (`fail_fast = false`) mode, **three**
+//!   classes are fatal — an **unknown function**, a **present file reference
+//!   that fails to resolve** (missing file or malformed path), and a **focused
+//!   provider failure** ([`ExpressionError::Provider`]). A present file
 //!   reference that does not resolve is treated as a real authoring mistake
-//!   rather than a tolerated absence (real-errors finding #1, ratified). The
-//!   remaining failures (arity, arg-type, parse) are demoted to a
+//!   rather than a tolerated absence (real-errors finding #1, ratified), and a
+//!   provider failure is actionable state the spec forbids demoting to a
+//!   warning. The provider class is exercised end-to-end in
+//!   `compose/tests/provider_network.rs` (it needs a repository fixture and a
+//!   mock transport, which this harness deliberately does not build); the six
+//!   cells below pin the purely local failure kinds.
+//!   The remaining failures (arity, arg-type, parse) are demoted to a
 //!   `ComposeWarning` with the original `{{ … }}` left in place.
 //! - **Frontmatter whole-value span** ([`interpolate_value`]): a value whose
 //!   trimmed content is exactly one `{{ expr }}` is executable state, so *every*

@@ -19,6 +19,7 @@ use url::Url;
 
 use super::cache::FileStore;
 use super::cache::remote_cache::{RemoteCacheConfig, RemoteOutcomeEvent, fetch_with_cache};
+use super::expression::ExpressionError;
 use super::remote::{RemoteReadConfig, RemoteReadError};
 
 /// Default cache config for test constructors: no TTL override, no forced
@@ -137,8 +138,22 @@ struct RemoteFetchInner {
     cache_config: RemoteCacheConfig,
 }
 
+/// Provider query slots store the typed expression error so a focused
+/// provider classification survives memoization; see
+/// [`ResolutionContext::cached_provider_query`].
+///
+/// [`ResolutionContext::cached_provider_query`]: super::expression::ResolutionContext
 type ProviderQueryCache =
-    Mutex<HashMap<String, Arc<OnceLock<Result<serde_json::Value, String>>>>>;
+    Mutex<HashMap<String, Arc<OnceLock<Result<serde_json::Value, ExpressionError>>>>>;
+
+/// A provider-query cache infrastructure failure (poisoned lock, concurrency
+/// gate). Not a provider failure, so it stays the generic catch-all.
+fn provider_cache_infrastructure_error(message: &str) -> ExpressionError {
+    ExpressionError::Other {
+        function: "provider_query".to_string(),
+        message: message.to_string(),
+    }
+}
 
 impl RemoteFetchInner {
     /// Returns the shared fetch runtime, building it on first use.
@@ -448,14 +463,14 @@ impl RemoteFetchRuntime {
     pub(crate) fn cached_provider_query(
         &self,
         key: String,
-        query: impl FnOnce() -> Result<serde_json::Value, String>,
-    ) -> Result<serde_json::Value, String> {
+        query: impl FnOnce() -> Result<serde_json::Value, ExpressionError>,
+    ) -> Result<serde_json::Value, ExpressionError> {
         let slot = {
             let mut queries = self
                 .inner
                 .provider_queries
                 .lock()
-                .map_err(|_| "provider query cache lock was poisoned".to_string())?;
+                .map_err(|_| provider_cache_infrastructure_error("provider query cache lock was poisoned"))?;
             queries.entry(key).or_default().clone()
         };
         slot.get_or_init(|| {
@@ -471,18 +486,18 @@ impl RemoteFetchRuntime {
         .clone()
     }
 
-    fn acquire_provider_permit(&self) -> Result<ProviderPermit<'_>, String> {
+    fn acquire_provider_permit(&self) -> Result<ProviderPermit<'_>, ExpressionError> {
         let mut in_flight = self
             .inner
             .provider_in_flight
             .lock()
-            .map_err(|_| "provider concurrency lock was poisoned".to_string())?;
+            .map_err(|_| provider_cache_infrastructure_error("provider concurrency lock was poisoned"))?;
         while *in_flight >= self.inner.concurrency {
             in_flight = self
                 .inner
                 .provider_notify
                 .wait(in_flight)
-                .map_err(|_| "provider concurrency lock was poisoned".to_string())?;
+                .map_err(|_| provider_cache_infrastructure_error("provider concurrency lock was poisoned"))?;
         }
         *in_flight += 1;
         Ok(ProviderPermit { runtime: self })

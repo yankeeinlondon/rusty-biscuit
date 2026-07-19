@@ -3,7 +3,7 @@ use sniff::remote::{PullRequestQuery, PullRequestRecord};
 
 use super::escape::collapse_and_escape;
 use super::{EvaluationMode, FunctionBinding, FunctionHandler, ResolutionContext};
-use crate::markdown::compose::expression::ExpressionError;
+use crate::markdown::compose::expression::{ExpressionError, ProviderFailureKind};
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
     FunctionBinding { canonical: "pr", aliases: &[], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(pr_fn)) },
@@ -26,7 +26,7 @@ fn pr_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, Expressio
         let record = super::provider::run("pr", async move {
             client.get_pull_request(&query_id).await
         })?
-        .ok_or_else(|| other("pr", format!("pull request {id} was not found")))?;
+        .ok_or_else(|| not_found("pr", format!("pull request {id} was not found")))?;
         Ok(Value::String(format_pr(&record)))
     })
 }
@@ -100,6 +100,17 @@ fn positive_identifier(function: &str, value: &Value) -> Result<String, Expressi
     }
 }
 fn other(function: &str, message: impl Into<String>) -> ExpressionError { ExpressionError::Other { function: function.to_string(), message: message.into() } }
+
+/// A genuine provider 404: the addressed item does not exist. Classified
+/// distinctly from a transport failure so the surface rule can treat a
+/// confirmed absence as the focused not-found kind.
+fn not_found(function: &str, message: impl Into<String>) -> ExpressionError {
+    ExpressionError::Provider {
+        function: function.to_string(),
+        kind: ProviderFailureKind::NotFound,
+        message: message.into(),
+    }
+}
 
 #[cfg(test)]
 mod tests {

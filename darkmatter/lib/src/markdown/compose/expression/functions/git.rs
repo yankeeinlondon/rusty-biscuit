@@ -105,10 +105,7 @@ fn branch_exists_on_remote_fn(
             &context.remote_policy(),
         )
         .map(Value::Bool)
-        .map_err(|error| ExpressionError::Other {
-            function: "branch_exists_on_remote".to_string(),
-            message: error.to_string(),
-        })
+        .map_err(|error| super::provider::provider_error("branch_exists_on_remote", error))
     })
 }
 
@@ -128,10 +125,7 @@ fn remote_vendor_fn(
             &context.remote_policy(),
         )
         .map(Value::String)
-        .map_err(|error| ExpressionError::Other {
-            function: "remote_vendor".to_string(),
-            message: error.to_string(),
-        })
+        .map_err(|error| super::provider::provider_error("remote_vendor", error))
     })
 }
 

@@ -83,7 +83,9 @@ pub use catalog::{
     DataType, ExpressionFunctionDescriptor, ParamType, ReturnType, ReturnValueType,
 };
 pub use ctx::CtxLookup;
-pub use error::{ArityBound, ExpressionError, FileRefFailure, FileReferenceDiagnostic};
+pub use error::{
+    ArityBound, ExpressionError, FileRefFailure, FileReferenceDiagnostic, ProviderFailureKind,
+};
 pub use file_suggestions::{collect_sibling_candidates, suggest_sibling_files};
 pub(crate) use path_projection::{make_portable_relative, make_relative};
 pub use resolve_ctx::ResolutionContext;

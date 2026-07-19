@@ -154,6 +154,14 @@ deny-by-default, exact-host allowlisted, redirect-disabled, concurrency-bounded,
 and memoized through the compose run's shared remote runtime. Frontmatter
 interpolation, body interpolation, and `$()` evaluation attach that same
 runtime; DMLS only consumes authored descriptors and never executes a call.
+A focused provider failure (not-found, denied host, authentication, rate
+limit, unsupported capability, incomplete domain, transport failure) is the
+typed `ExpressionError::Provider` carrying a `ProviderFailureKind`; the
+classification survives run-local memoization (cache slots store the typed
+error, not rendered text) and is authoring-fatal on every expression
+surface — composition aborts with the actionable message rather than
+substituting an empty value or leaving an unevaluated `{{ … }}` behind.
+Generic `ExpressionError::Other` stays non-fatal in lenient body mode.
 
 The expression grammar supports immutable JSON-like array and object literals.
 The authored catalog may use `enum(...)` only for return values; variants are

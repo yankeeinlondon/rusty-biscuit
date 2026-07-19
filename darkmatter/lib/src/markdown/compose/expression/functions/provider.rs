@@ -5,7 +5,7 @@ use sniff::filesystem::git::{ResolvedRemote, resolve_remote_at};
 use sniff::remote::FocusedProviderClient;
 
 use super::ResolutionContext;
-use crate::markdown::compose::expression::ExpressionError;
+use crate::markdown::compose::expression::{ExpressionError, ProviderFailureKind};
 use crate::markdown::compose::remote_fetch::{SharedExecutorError, block_on_shared_executor};
 
 pub(super) fn client(
@@ -180,8 +180,44 @@ where
     }
 }
 
-fn provider_error(function: &str, error: sniff::SniffError) -> ExpressionError {
-    ExpressionError::Other { function: function.to_string(), message: error.to_string() }
+/// Converts a Sniff provider failure into the focused provider error variant.
+///
+/// Every provider-facing function funnels Sniff errors through here so the
+/// [`ProviderFailureKind`] classification is attached in exactly one place.
+/// The classification (not the message) is what makes the failure
+/// authoring-fatal on all three expression surfaces; the message keeps
+/// Sniff's actionable detail verbatim.
+pub(super) fn provider_error(function: &str, error: sniff::SniffError) -> ExpressionError {
+    ExpressionError::Provider {
+        function: function.to_string(),
+        kind: classify_provider_failure(&error),
+        message: error.to_string(),
+    }
+}
+
+/// Maps a [`sniff::SniffError`] onto the focused failure vocabulary.
+///
+/// The remote-provider variants carry the distinction natively; everything
+/// else reaching this boundary (I/O, Git, client initialization, a non-404
+/// HTTP status) is a transport-class failure: the provider could not produce
+/// a usable answer and the cause is neither an authoring mistake nor a
+/// capability gap.
+fn classify_provider_failure(error: &sniff::SniffError) -> ProviderFailureKind {
+    use sniff::SniffError as E;
+    match error {
+        E::RemotePolicyDenied { .. } => ProviderFailureKind::DeniedHost,
+        E::MissingCredentials { .. }
+        | E::InvalidCredentials { .. }
+        | E::RemoteForbidden { .. } => ProviderFailureKind::Authentication,
+        E::RateLimited { .. } => ProviderFailureKind::RateLimit,
+        E::UnsupportedProvider { .. }
+        | E::UnsupportedRemoteCapability { .. }
+        | E::UnsupportedRemoteFilter { .. } => ProviderFailureKind::UnsupportedCapability,
+        E::IncompleteRemoteDomain { .. } => ProviderFailureKind::IncompleteDomain,
+        E::ShorthandNotFound { .. } => ProviderFailureKind::NotFound,
+        E::RemoteApi { status: 404, .. } => ProviderFailureKind::NotFound,
+        _ => ProviderFailureKind::Transport,
+    }
 }
 
 #[cfg(test)]
@@ -194,15 +230,19 @@ mod tests {
 
     fn message(error: &ExpressionError) -> String {
         match error {
-            ExpressionError::Other { message, .. } => message.clone(),
-            other => panic!("expected ExpressionError::Other, got {other:?}"),
+            ExpressionError::Other { message, .. } | ExpressionError::Provider { message, .. } => {
+                message.clone()
+            }
+            other => panic!("expected a message-carrying error, got {other:?}"),
         }
     }
 
     fn function_name(error: &ExpressionError) -> String {
         match error {
-            ExpressionError::Other { function, .. } => function.clone(),
-            other => panic!("expected ExpressionError::Other, got {other:?}"),
+            ExpressionError::Other { function, .. } | ExpressionError::Provider { function, .. } => {
+                function.clone()
+            }
+            other => panic!("expected a function-carrying error, got {other:?}"),
         }
     }
 
@@ -276,5 +316,139 @@ mod tests {
 
         assert_eq!(function_name(&error), "cicd");
         assert_eq!(message(&error), "provider query worker panicked");
+    }
+
+    /// Every Sniff remote-provider variant must land on its documented focused
+    /// kind; the classification — not string matching on the message — is what
+    /// downstream surfaces and tests key on.
+    #[test]
+    fn sniff_errors_classify_into_the_focused_vocabulary() {
+        use sniff::SniffError as E;
+
+        let cases: Vec<(E, ProviderFailureKind)> = vec![
+            (
+                E::RemotePolicyDenied { host: "git.example".to_string() },
+                ProviderFailureKind::DeniedHost,
+            ),
+            (
+                E::MissingCredentials {
+                    provider: "GitHub".to_string(),
+                    env_var: "GITHUB_TOKEN".to_string(),
+                },
+                ProviderFailureKind::Authentication,
+            ),
+            (
+                E::InvalidCredentials {
+                    provider: "GitHub".to_string(),
+                    message: "bad token".to_string(),
+                },
+                ProviderFailureKind::Authentication,
+            ),
+            (
+                E::RemoteForbidden {
+                    provider: "GitLab".to_string(),
+                    message: "denied".to_string(),
+                },
+                ProviderFailureKind::Authentication,
+            ),
+            (
+                E::RateLimited { provider: "Gitea".to_string(), retry_after: None },
+                ProviderFailureKind::RateLimit,
+            ),
+            (
+                E::UnsupportedProvider { url: "https://sr.ht/x".to_string() },
+                ProviderFailureKind::UnsupportedCapability,
+            ),
+            (
+                E::UnsupportedRemoteCapability {
+                    capability: "provider queries",
+                    target: "SelfHosted".to_string(),
+                },
+                ProviderFailureKind::UnsupportedCapability,
+            ),
+            (
+                E::UnsupportedRemoteFilter {
+                    field: "assignee",
+                    provider: "Gitea".to_string(),
+                },
+                ProviderFailureKind::UnsupportedCapability,
+            ),
+            (
+                E::IncompleteRemoteDomain {
+                    provider: "Gitea".to_string(),
+                    bound: "parent executions",
+                    limit: 20,
+                },
+                ProviderFailureKind::IncompleteDomain,
+            ),
+            (
+                E::ShorthandNotFound {
+                    owner: "a".to_string(),
+                    repo: "b".to_string(),
+                    providers_tried: "GitHub".to_string(),
+                },
+                ProviderFailureKind::NotFound,
+            ),
+            (
+                E::RemoteApi {
+                    provider: "GitHub".to_string(),
+                    status: 404,
+                    message: "missing".to_string(),
+                },
+                ProviderFailureKind::NotFound,
+            ),
+            (
+                E::RemoteApi {
+                    provider: "GitHub".to_string(),
+                    status: 500,
+                    message: "boom".to_string(),
+                },
+                ProviderFailureKind::Transport,
+            ),
+            (
+                E::RemoteUnreachable {
+                    url: "https://git.example".to_string(),
+                    message: "connection refused".to_string(),
+                },
+                ProviderFailureKind::Transport,
+            ),
+            (
+                E::RemoteInit {
+                    provider: "runtime".to_string(),
+                    message: "no executor".to_string(),
+                },
+                ProviderFailureKind::Transport,
+            ),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(
+                classify_provider_failure(&error),
+                expected,
+                "{error} classified incorrectly"
+            );
+        }
+    }
+
+    /// The converted error is the typed provider variant (fatal on every
+    /// surface), never the generic catch-all.
+    #[test]
+    fn provider_error_produces_the_typed_provider_variant() {
+        let error = provider_error(
+            "pr",
+            sniff::SniffError::RateLimited {
+                provider: "Gitea".to_string(),
+                retry_after: Some(30),
+            },
+        );
+        match error {
+            ExpressionError::Provider { function, kind, message } => {
+                assert_eq!(function, "pr");
+                assert_eq!(kind, ProviderFailureKind::RateLimit);
+                assert!(message.contains("rate limited"), "{message}");
+                assert!(message.contains("30s"), "{message}");
+            }
+            other => panic!("expected ExpressionError::Provider, got {other:?}"),
+        }
     }
 }

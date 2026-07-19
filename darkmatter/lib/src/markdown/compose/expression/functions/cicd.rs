@@ -3,7 +3,7 @@ use sniff::remote::{CiCdJob, CiCdJobQuery, CiCdJobReference, GitProvider};
 
 use super::escape::collapse_and_escape;
 use super::{EvaluationMode, FunctionBinding, FunctionHandler, ResolutionContext};
-use crate::markdown::compose::expression::ExpressionError;
+use crate::markdown::compose::expression::{ExpressionError, ProviderFailureKind};
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
     FunctionBinding { canonical: "cicd", aliases: &[], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(cicd_fn)) },
@@ -18,7 +18,7 @@ fn cicd_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, Express
         let job = super::provider::run("cicd", async move {
             client.get_cicd_job(&reference).await
         })?
-        .ok_or_else(|| other("cicd", format!("CI/CD job {id} was not found")))?;
+        .ok_or_else(|| not_found("cicd", format!("CI/CD job {id} was not found")))?;
         Ok(Value::String(format_job(&job)))
     })
 }
@@ -118,6 +118,15 @@ pub(super) fn format_job(job: &CiCdJob) -> String {
 
 fn identifier(value: &Value) -> Result<String, ExpressionError> { value.as_u64().map(|id| id.to_string()).or_else(|| value.as_str().map(str::to_string)).filter(|id| !id.is_empty() && id != "0").ok_or_else(|| other("cicd", "identifier must be a positive integer or provider-native string")) }
 fn other(function: &str, message: impl Into<String>) -> ExpressionError { ExpressionError::Other { function: function.to_string(), message: message.into() } }
+
+/// A genuine provider 404: the addressed job does not exist.
+fn not_found(function: &str, message: impl Into<String>) -> ExpressionError {
+    ExpressionError::Provider {
+        function: function.to_string(),
+        kind: ProviderFailureKind::NotFound,
+        message: message.into(),
+    }
+}
 
 #[cfg(test)]
 mod tests {
