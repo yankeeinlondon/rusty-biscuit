@@ -111,3 +111,50 @@ jobs:
       - name: Run Claudine tests
         working-directory: claudine
         run: just ${{ matrix.recipe }}
+
+  # Compile-only coverage for the two OSes the `test` job above does not run on.
+  # Claudine is a downstream consumer of the sniff provider surface (via
+  # `darkmatter`, which depends on `sniff` with `features = ["remote"]`), so a
+  # provider-side type or enum change that breaks on Windows or macOS has, until
+  # now, had nowhere to fail. See docs/testing-strategy.md → "Platform Coverage
+  # (CI)".
+  #
+  # Deliberately a compile check and not a full `just test` leg. The CLI test
+  # jobs depend on PATH stubs written as `#!/usr/bin/env bash` scripts with no
+  # extension, which Windows PATHEXT resolution will not execute, and claudine's
+  # Windows Ctrl+C handling is a known unimplemented gap with its own dedicated
+  # workflow (`claudine-windows-ctrl-c.yml`). A full Windows test leg would be
+  # red for reasons unrelated to the code it is supposed to be guarding.
+  cross-platform-check:
+    name: Claudine compile check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    # Matches the `soft-os` convention in `_area-ci.yml`: the Windows leg
+    # publishes evidence but does not gate merges, so it can be lit up before
+    # the latent cross-platform backlog it reveals has been burned down.
+    # Promoting it to a required check is a separate, deliberate decision.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: claudine-tests-check-${{ matrix.os }}
+
+      - name: cargo check --all-targets
+        run: cargo check --color=never --all-targets -p claudine -p claudine-cli
