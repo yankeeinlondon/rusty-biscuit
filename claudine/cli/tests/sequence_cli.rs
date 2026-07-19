@@ -1237,3 +1237,74 @@ fn well_formed_graph_passes_preflight() {
         );
     }
 }
+
+// ============================================================================
+// Pre-flight status ordering (review-5 finding 5)
+// ============================================================================
+
+/// "Starting pre-flight checks" must reach the user *before* Phase 1c, not
+/// after it.
+///
+/// Phase 1c does the sequence-wide schema validation and shell approval, and it
+/// is the part that can stall or prompt. A status emitted after it would be
+/// describing finished work while the user stared at nothing throughout.
+///
+/// The proof is a run that never survives Phase 1c: a `$schema` requiring a
+/// property no step supplies aborts the sequence there. If the status still
+/// appears, it can only have been written before Phase 1c ran.
+#[cfg(unix)]
+#[test]
+fn starting_preflight_status_precedes_phase_1c_work() {
+    let workspace = tempdir().unwrap();
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        "---\n$schema:\n  topic: 'string(required)'\nsequence:\n    - alpha\n---\nStep about {{topic}}.\n",
+    )
+    .unwrap();
+
+    let (stderr, launched) = run_preflight(workspace.path(), &md_file, &[]);
+    assert!(
+        stderr.to_lowercase().contains("sequence missing properties"),
+        "the fixture must abort inside Phase 1c for this test to prove \
+         anything; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Starting pre-flight checks"),
+        "Phase 1c aborted without the starting status ever being rendered, so \
+         the status is still emitted after pre-flight; stderr:\n{stderr}"
+    );
+    assert!(!launched, "no provider session may launch; stderr:\n{stderr}");
+}
+
+/// The two pre-flight statuses bracket the work rather than both trailing it.
+#[cfg(unix)]
+#[test]
+fn preflight_statuses_bracket_phase_1c() {
+    let workspace = tempdir().unwrap();
+    fs::write(
+        workspace.path().join(".darkmatter-shell-whitelist"),
+        "prefix echo\n",
+    )
+    .unwrap();
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        "---\nsequence:\n    - name: one\n      shell: echo hello\n---\nBody.\n",
+    )
+    .unwrap();
+
+    let (stderr, _) = run_preflight(workspace.path(), &md_file, &["--dry-run"]);
+    let starting = stderr
+        .find("Starting pre-flight checks")
+        .unwrap_or_else(|| panic!("no starting status; stderr:\n{stderr}"));
+    // Just the label: the sentence after it folds at the terminal width, so a
+    // longer needle would match nothing on a narrow host.
+    let approved = stderr
+        .find("Preflight:")
+        .unwrap_or_else(|| panic!("no preflight-complete status; stderr:\n{stderr}"));
+    assert!(
+        starting < approved,
+        "the starting status must precede the approval status; stderr:\n{stderr}"
+    );
+}
