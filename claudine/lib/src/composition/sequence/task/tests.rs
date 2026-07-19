@@ -1304,6 +1304,78 @@ mod prompt_tasks {
         assert_eq!(runtime.output_count(), 0);
     }
 
+    /// The `interrupted` flag decides the status; the exit code does not get a
+    /// vote. `130` is a Unix single-press accident, not the contract: the second
+    /// press yields `137`, `CTRL_BREAK_EVENT` yields `0xC000013A`,
+    /// `TerminateJobObject` yields `1`, and a provider that traps `SIGINT` and
+    /// shuts down cleanly yields `0`. Each of those must still be recorded as an
+    /// interruption rather than a failure (or, for `0`, rather than a success
+    /// that commits output). The sibling test above pins `130` with the flag
+    /// set, so it cannot tell the two signals apart — this one can.
+    #[test]
+    fn an_interrupted_provider_is_recorded_as_interrupted_whatever_its_exit_code() {
+        for exit_code in [137, 1, 0xC000_013A_u32 as i32, 0] {
+            let (dir, source) = prompt_fixture(json!({}));
+            let fixture = Fixture::build(dir, &source).unwrap();
+            let recorder = Recorder::default();
+            let shell = FakeTaskShell::default();
+            let prompt = FakePrompt::with(PromptRunOutcome {
+                stdout: "partial".to_string(),
+                exit_code,
+                interrupted: true,
+            });
+            let runtime = Arc::new(RuntimeState::new());
+            let mut wiring = Wiring::new(&recorder, &shell);
+            wiring.prompt = &prompt;
+            wiring.runtime = Some(&runtime);
+
+            let outcome = fixture.execute(&wiring);
+
+            assert_eq!(
+                outcome.status,
+                TaskStatus::Interrupted,
+                "exit {exit_code} with the interrupt flag set must be an interruption",
+            );
+            assert!(outcome.error.is_none(), "exit {exit_code}");
+            assert_eq!(
+                runtime.output_count(),
+                0,
+                "an interrupted task commits nothing, even on exit {exit_code}",
+            );
+        }
+    }
+
+    /// The mirror of the case above: this contract reads only the flag, so a
+    /// bare `130` arriving with the flag clear is an ordinary failure here. The
+    /// `130`-as-witness rule lives one layer up, in the CLI's
+    /// `run_was_interrupted`, which folds it into the flag before this point —
+    /// keeping the exit-code heuristic out of the library contract entirely.
+    #[test]
+    fn exit_130_without_the_interrupt_flag_is_an_ordinary_failure_here() {
+        let (dir, source) = prompt_fixture(json!({}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let prompt = FakePrompt::with(PromptRunOutcome {
+            stdout: "partial".to_string(),
+            exit_code: 130,
+            interrupted: false,
+        });
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.prompt = &prompt;
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(
+            failure_message(&outcome).contains("exited with code 130"),
+            "{}",
+            failure_message(&outcome),
+        );
+    }
+
     /// A reference authored inside a task file resolves from *that* file's
     /// directory, and the resolved path travels to the runner untouched.
     #[test]
