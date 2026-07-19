@@ -1548,7 +1548,11 @@ functions:
     - name: pr_list
       category: Pull Requests
       order: 94
-      description: Queries pull or merge requests with the canonical bounded filter vocabulary.
+      description:
+          Queries pull or merge requests with the canonical bounded filter vocabulary.
+          See the [provider query
+          vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys,
+          enum values, defaults, and bounds.
       overloads:
           - parameters:
                 - name: query
@@ -1593,7 +1597,11 @@ functions:
     - name: cicd_list
       category: CI/CD
       order: 96
-      description: Queries CI/CD jobs with bounded direct listing or parent-execution traversal.
+      description:
+          Queries CI/CD jobs with bounded direct listing or parent-execution traversal.
+          See the [provider query
+          vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys,
+          enum values, defaults, and bounds.
       overloads:
           - parameters:
                 - name: query

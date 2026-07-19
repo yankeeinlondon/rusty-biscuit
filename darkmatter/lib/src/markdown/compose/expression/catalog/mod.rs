@@ -752,6 +752,66 @@ functions:
         );
     }
 
+    /// The `pr_list`/`cicd_list` catalog descriptions carry the query-vocabulary
+    /// link that DMLS hover and completion surface, so a dead link would be
+    /// worse than no link at all. Asserts the link target file exists and that
+    /// its fragment resolves to a real heading whose GitHub-style slug matches.
+    #[test]
+    fn query_vocabulary_link_resolves_to_an_existing_doc_anchor() {
+        const LINK: &str =
+            "(darkmatter-expressions.md#provider-query-vocabulary)";
+        const ANCHOR: &str = "provider-query-vocabulary";
+
+        let linking: Vec<&str> = expression_function_descriptors()
+            .iter()
+            .filter(|d| d.description.contains(LINK))
+            .map(|d| d.signature)
+            .collect();
+        for signature in ["pr_list(query)", "pr_list(count)", "cicd_list(query)", "cicd_list(count)"] {
+            assert!(
+                linking.contains(&signature),
+                "`{signature}` must link to the query vocabulary; linking: {linking:?}"
+            );
+        }
+
+        // The link is authored sibling-relative, so it resolves against the
+        // topic doc's own directory.
+        let doc_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../darkmatter/docs/topics/darkmatter-expressions.md");
+        let content = std::fs::read_to_string(&doc_path)
+            .expect("darkmatter-expressions.md should be readable");
+
+        let has_anchor = content.lines().filter_map(|line| line.strip_prefix("## ")).any(|heading| {
+            let slug: String = heading
+                .trim()
+                .to_ascii_lowercase()
+                .chars()
+                .filter_map(|c| match c {
+                    ' ' => Some('-'),
+                    c if c.is_ascii_alphanumeric() || c == '-' => Some(c),
+                    _ => None,
+                })
+                .collect();
+            slug == ANCHOR
+        });
+        assert!(has_anchor, "`#{ANCHOR}` must resolve to a heading in darkmatter-expressions.md");
+
+        // The section must actually document the vocabulary, not just exist.
+        for required in [
+            "`pr_list(query)` keys",
+            "`cicd_list(query)` keys",
+            "Closed enum values",
+            "RFC 3339",
+            "the hard maximum is 100",
+            "newest-first",
+        ] {
+            assert!(
+                content.contains(required),
+                "query-vocabulary section is missing `{required}`"
+            );
+        }
+    }
+
     /// Claudine anti-drift: every function added by this feature must remain
     /// present in the exported expression catalog (`claudine context --expressions`).
     ///
