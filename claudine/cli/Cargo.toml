@@ -95,6 +95,10 @@ toml = "1.0"
 # `ClaudineError::UrlError` → `io.network`. `url` is a cfg(unix) *runtime*
 # dependency, so a dev-dependency is what keeps the corpus building on Windows.
 url = "2"
+# Same reason as `url`: `commands::init` is a `#[cfg(test)]` module, so its
+# reference helpers compile on every test target while `shellexpand` itself is
+# declared only for `cfg(unix)`.
+shellexpand = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 # The daemon-spawning fixtures below boot through `spawn_local_server`, which
