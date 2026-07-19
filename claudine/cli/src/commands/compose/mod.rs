@@ -28,7 +28,10 @@ use color_eyre::eyre::{Result, WrapErr};
 
 use crate::provider_values::provider_value_parser;
 
-mod interrupt;
+// `pub(crate)` because the Windows console-control handler in
+// `wrap::exec::termination::windows` drives the compose ladder from a thread
+// that owns no part of the compose run.
+pub(crate) mod interrupt;
 mod loop_run;
 mod prep;
 mod setters;

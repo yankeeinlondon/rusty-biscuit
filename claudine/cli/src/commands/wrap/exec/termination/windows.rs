@@ -25,8 +25,8 @@ use color_eyre::eyre::Result;
 
 use super::super::exit::exit_code_from_status;
 use super::coordinator::{
-    ChildToken, FlagToken, InstallRefcount, InterruptRegistry, PressAction, PressTarget,
-    RefcountTransition,
+    ChildToken, FlagToken, HandlerGuard, InstallRefcount, InterruptRegistry, PressAction,
+    PressTarget, ProcessHandler,
 };
 use super::handle::{HandleCloser, OwnedRawHandle};
 use super::reasons::{
@@ -169,6 +169,10 @@ unsafe extern "system" fn claudine_console_ctrl_handler(ctrl_type: u32) -> windo
         for target in &outcome.targets {
             apply_press(target);
         }
+        // Runs after child fan-out because its forceful rung ends the process:
+        // a compose run's second press must not pre-empt the Job terminations
+        // above.
+        crate::commands::compose::interrupt::on_console_interrupt(outcome.count);
         windows::core::BOOL(1) // TRUE — suppress default
     } else {
         // Close, Logoff, Shutdown — let the default handler decide.
@@ -184,32 +188,34 @@ static CONSOLE_HANDLER_REFCOUNT: InstallRefcount = InstallRefcount::new();
 /// would multiply-count a single chord once a parallel group is running. The
 /// handler is installed on the first guard and removed on the last, which also
 /// restores the default Ctrl+C disposition once Claudine owns no children.
-struct ConsoleHandlerGuard;
+///
+/// Holders are not only wait loops: a sequence run
+/// ([`register_sequence_interrupt_flag`]) and a compose run
+/// ([`register_compose_interrupt_handler`]) hold one for their whole duration,
+/// which is what gives both a press producer before any child exists.
+struct ConsoleHandler;
 
-impl ConsoleHandlerGuard {
-    fn acquire() -> Self {
+impl ProcessHandler for ConsoleHandler {
+    fn refcount() -> &'static InstallRefcount {
+        &CONSOLE_HANDLER_REFCOUNT
+    }
+
+    fn install() {
         use windows::Win32::System::Console::SetConsoleCtrlHandler;
-
-        if CONSOLE_HANDLER_REFCOUNT.acquire() == RefcountTransition::Install {
-            unsafe {
-                let _ = SetConsoleCtrlHandler(Some(claudine_console_ctrl_handler), true);
-            }
+        unsafe {
+            let _ = SetConsoleCtrlHandler(Some(claudine_console_ctrl_handler), true);
         }
-        Self
+    }
+
+    fn remove() {
+        use windows::Win32::System::Console::SetConsoleCtrlHandler;
+        unsafe {
+            let _ = SetConsoleCtrlHandler(Some(claudine_console_ctrl_handler), false);
+        }
     }
 }
 
-impl Drop for ConsoleHandlerGuard {
-    fn drop(&mut self) {
-        use windows::Win32::System::Console::SetConsoleCtrlHandler;
-
-        if CONSOLE_HANDLER_REFCOUNT.release() == RefcountTransition::Remove {
-            unsafe {
-                let _ = SetConsoleCtrlHandler(Some(claudine_console_ctrl_handler), false);
-            }
-        }
-    }
-}
+type ConsoleHandlerGuard = HandlerGuard<ConsoleHandler>;
 
 /// Deregisters one child from the process-scoped registry on every exit path.
 struct ChildRegistration {
@@ -260,6 +266,25 @@ pub(crate) fn register_sequence_interrupt_flag(flag: &Arc<AtomicBool>) -> Sequen
     SequenceInterruptGuard {
         token: registry().register_flag(flag),
         _handler: handler,
+    }
+}
+
+/// Keeps the console handler installed for a compose run's whole duration.
+///
+/// A compose run owns no child during prep, so without this the handler would
+/// not be installed until the first provider child spawned and a Ctrl+C during
+/// the (slow) prep window would take the console's default disposition. The
+/// compose ladder itself is driven from
+/// [`crate::commands::compose::interrupt::on_console_interrupt`]; this type
+/// carries only the installation.
+pub(crate) struct ComposeInterruptHandlerGuard {
+    _handler: ConsoleHandlerGuard,
+}
+
+/// Install (or join) the process-wide console handler on behalf of a compose run.
+pub(crate) fn register_compose_interrupt_handler() -> ComposeInterruptHandlerGuard {
+    ComposeInterruptHandlerGuard {
+        _handler: ConsoleHandlerGuard::acquire(),
     }
 }
 

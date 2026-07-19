@@ -69,6 +69,7 @@ pub(crate) use unix::{
 };
 #[cfg(windows)]
 pub(crate) use windows::{
+    ComposeInterruptHandlerGuard, register_compose_interrupt_handler,
     register_sequence_interrupt_flag, wait_with_signal_and_early_termination,
     wait_with_signal_early_termination_and_completion, wait_with_signal_handling,
 };
