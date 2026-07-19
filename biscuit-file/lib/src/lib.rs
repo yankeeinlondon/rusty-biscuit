@@ -96,6 +96,10 @@
 mod detect;
 mod error;
 mod format;
+mod span;
+
+// Re-export the shared byte-offset span vocabulary
+pub use span::SourceSpan;
 
 #[cfg(feature = "toml")]
 pub mod toml_impl;
@@ -126,7 +130,16 @@ pub use format::DataFormat;
 pub use self::toml_impl::{Toml, TomlError, TomlSource};
 
 #[cfg(feature = "yaml")]
-pub use self::yaml::{Yaml, YamlError, YamlSource};
+pub use self::yaml::{
+    EditAudit, EditRejection, EditSetOutcome, RejectedEdit, Yaml, YamlAnalysis, YamlCertainty,
+    YamlDiagnostic, YamlDiagnosticCode, YamlError, YamlLocation, YamlParseFailure,
+    YamlParseOutcome, YamlPathSegment, YamlRepair, YamlSource, YamlValueLocation, analyze_yaml,
+    apply_edit_set, locate_yaml_key, locate_yaml_value,
+};
+
+#[cfg(feature = "yaml")]
+#[doc(hidden)]
+pub use self::yaml::{analyze_parse_count, reset_analyze_parse_count};
 
 #[cfg(feature = "json5")]
 pub use self::json5::{Json5, Json5Error, Json5Source};
