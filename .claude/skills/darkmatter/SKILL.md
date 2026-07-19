@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-aaf0f9d0d4aac708
-last_updated: 2026-07-15
+hash: 87f17662fa397abe-7b030c5a6ebabb92
+last_updated: 2026-07-18
 ---
 
 # darkmatter
@@ -33,12 +33,16 @@ Other entry points:
 - Use the compose pipeline for source transformations before rendering.
 - Use `Markdown::cleanup`, `cleanup_compact`, `cleanup_loose`, and
   `cleanup_with_indent*` for canonical cleanup. These strip incidental
-  single newlines in prose by default before the existing whitespace/list
-  cleanup. Use `Markdown::strip_incidental_newlines` directly for only that
-  pass, or `Markdown::cleanup_with_fixed_width(width)` to clean and then
-  reflow prose to a display-column width. The `md clean` CLI exposes the same
-  behavior with `--fixed-width <#>` and can preserve source single newlines
-  with `--ignore-incidental-newlines`; those two flags conflict.
+  single newlines in top-level and list-item prose by default before the
+  existing whitespace/list cleanup. List soft-break collapse removes
+  source-only continuation indentation. Use
+  `Markdown::strip_incidental_newlines` directly for only that pass, or
+  `Markdown::cleanup_with_fixed_width(width)` to clean and then reflow complete
+  logical prose blocks to a display-column width. Newly wrapped list
+  continuations use a hanging prefix that retains every enclosing list and
+  blockquote container. The `md clean` CLI exposes the same behavior with
+  `--fixed-width <#>` and can preserve source single newlines with
+  `--ignore-incidental-newlines`; those two flags conflict.
 - Use `darkmatter::style` for document `style:` frontmatter.
 - Use `biscuit-terminal` components for rich terminal UI outside ordinary
   parsed Markdown rendering.
@@ -625,9 +629,11 @@ The compose pipeline runs in four phases:
 **Inline Post** (serial):
 
 - Cleanup and normalization. Cleanup strips incidental single newlines by
-  default, applies list/indent normalization, and can reflow prose with
-  `ComposeOptions::with_fixed_width(...)`. Programmatic callers can preserve
-  source single newlines with
+  default from top-level and list-item prose, removes source-only list
+  continuation indentation, applies list/indent normalization, and can reflow
+  complete logical prose blocks with `ComposeOptions::with_fixed_width(...)`.
+  Reflowed list continuations retain their full list/blockquote container
+  prefix. Programmatic callers can preserve source single newlines with
   `ComposeOptions::with_incidental_newline_mode(IncidentalNewlineMode::Preserve)`.
 
 **Finalization** (root-only):

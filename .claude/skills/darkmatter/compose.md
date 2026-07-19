@@ -1,5 +1,6 @@
 ---
-hash: ef46db3751d8e999-2a2e765356bc2232
+hash: ef46db3751d8e999-fd3fb8e6e2ed5d86
+last_updated: 2026-07-18
 ---
 # Compose Pipeline
 
@@ -34,8 +35,11 @@ Inline Pre, Transclusion, Inline Post, and Finalization.
 **Inline Post** (serial):
 
 - **Cleanup** - Normalizes markdown formatting. It strips incidental single
-  newlines by default, then applies list/indent cleanup, and can reflow prose
-  with `ComposeOptions::with_fixed_width(...)`. Use
+  newlines from top-level and list-item prose by default, removing source-only
+  list continuation indentation before applying list/indent cleanup. It can
+  reflow complete logical prose blocks with
+  `ComposeOptions::with_fixed_width(...)`; newly wrapped list continuations
+  retain their complete list and blockquote container prefix. Use
   `ComposeOptions::with_incidental_newline_mode(IncidentalNewlineMode::Preserve)`
   to keep source single newlines.
 - **Normalization** - Adjusts heading levels
