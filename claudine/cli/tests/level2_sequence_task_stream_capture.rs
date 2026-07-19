@@ -71,7 +71,7 @@ use std::time::{Duration, Instant};
 use test_toolkit::{Level, require_level};
 
 mod common;
-use common::{TestWorkspace, augmented_path, write, write_executable};
+use common::{TestWorkspace, augmented_path, clear_no_color, write, write_executable};
 
 /// A parallel group of two named tasks, each printing one identifiable line.
 ///
@@ -90,6 +90,35 @@ sequence:
           shell: \"printf 'fetched\\n'\"
         - name: render-page
           shell: \"printf 'rendered\\n'\"
+---
+
+Body.
+";
+
+/// Two concurrent shell tasks that alternate *delayed* stdout and stderr.
+///
+/// The delays are the fixture's whole point (review-5 finding 2). With the old
+/// buffered runner both tasks were silent until they exited, so the pane showed
+/// each task's output as one block ordered by completion. Staggering the sleeps
+/// makes the correct arrival order differ from every completion order: the
+/// interleave `alpha-out`, `beta-err`, `alpha-err`, `beta-out` is reachable only
+/// if each line is framed as it arrives.
+///
+/// stderr is on both tasks because it is the channel that used to bypass the
+/// sink entirely — `Stdio::inherit()` put it on the terminal with no bar, no
+/// label, and no coordination with a sibling's writes.
+const INTERLEAVED_DOC: &str = "\
+---
+sequence:
+  - name: alpha
+    group:
+      name: bundle
+      execution: parallel
+      tasks:
+        - name: emit-one
+          shell: \"printf 'alpha-out\\n'; sleep 1.2; printf 'alpha-err\\n' >&2\"
+        - name: emit-two
+          shell: \"sleep 0.6; printf 'beta-err\\n' >&2; sleep 1.2; printf 'beta-out\\n'\"
 ---
 
 Body.
@@ -279,6 +308,18 @@ struct Capture {
 /// Bracket- and glob-free exit marker (see `level2_typed_error_render_capture`).
 const EXIT_MARKER: &str = "claudine_rc:";
 
+/// The last status Claudine emits before the first step runs.
+///
+/// Deliberately *not* "Starting pre-flight checks": that one now precedes
+/// Phase 1c, so it no longer marks the end of pre-flight. This one does, which
+/// is what the frame-slicing helpers need — everything after it is rendered
+/// task output.
+///
+/// Just the label, not the sentence: the narrow-pane fixture folds
+/// "Preflight: shell commands approved for all N step(s)…" mid-phrase, so any
+/// longer needle silently matches nothing and the region comes back empty.
+const PREFLIGHT_DONE_MARKER: &str = "Preflight:";
+
 fn parse_exit_marker(plain: &str) -> Option<i32> {
     plain.lines().find_map(|line| {
         let rest = line.trim_start().strip_prefix(EXIT_MARKER)?;
@@ -337,6 +378,13 @@ fn run_in_pane_within(
     let path = augmented_path(&staged.bin_dir);
     let path = path.to_string_lossy().into_owned();
 
+    // A fixture that does not itself select `NO_COLOR` is asserting the *colored*
+    // contract, so an ambient `NO_COLOR` on the host must not reach it. See
+    // `common::clear_no_color` for why `extra_env` cannot express this.
+    if !extra_env.iter().any(|(key, _)| *key == "NO_COLOR") {
+        clear_no_color(harness);
+    }
+
     harness.send_text(b"clear\n").expect("clear pane");
     let _ = biscuit_test_harness::wait_for_prompt(harness);
     harness
@@ -383,7 +431,7 @@ fn column_of(line: &str, needle: &str) -> Option<usize> {
     line.find(needle).map(|byte| line[..byte].chars().count())
 }
 
-/// Every visible line of the run, from the command echo to the exit marker.
+/// Every visible line of the run, from the end of pre-flight to the exit marker.
 ///
 /// Bounding the region matters: the shell prompt and the echoed command line
 /// both contain the task names, and an unbounded search would let them satisfy
@@ -391,7 +439,7 @@ fn column_of(line: &str, needle: &str) -> Option<usize> {
 fn framed_region(plain: &str) -> Vec<&str> {
     plain
         .lines()
-        .skip_while(|line| !line.contains("Starting pre-flight checks"))
+        .skip_while(|line| !line.contains(PREFLIGHT_DONE_MARKER))
         .take_while(|line| !line.trim_start().starts_with(EXIT_MARKER))
         .collect()
 }
@@ -402,6 +450,176 @@ fn framed_region_raw<'a>(raw: &'a str, plain_marker: &str) -> Vec<&'a str> {
         .skip_while(|line| !line.contains(plain_marker))
         .take_while(|line| !line.contains(EXIT_MARKER))
         .collect()
+}
+
+/// The four markers `INTERLEAVED_DOC` emits, in the order they are *produced*.
+const INTERLEAVED_ARRIVALS: [&str; 4] = ["alpha-out", "beta-err", "alpha-err", "beta-out"];
+
+/// Which task owns each marker, and which channel it came from.
+const INTERLEAVED_OWNERS: [(&str, &str); 4] = [
+    ("alpha-out", "emit-one"),
+    ("beta-err", "emit-two"),
+    ("alpha-err", "emit-one"),
+    ("beta-out", "emit-two"),
+];
+
+/// The single pane line carrying `marker`, asserting it is carried exactly once
+/// and shares that line with no other marker.
+///
+/// Both halves are the tearing assertion. A marker on two lines means a frame
+/// was split mid-line; two markers on one line means two writers spliced into
+/// one. Neither can happen while every frame goes through the synchronized sink
+/// as a whole line.
+fn sole_line_with<'a>(lines: &[&'a str], marker: &str) -> &'a str {
+    let carrying: Vec<&&str> = lines.iter().filter(|line| line.contains(marker)).collect();
+    assert_eq!(
+        carrying.len(),
+        1,
+        "`{marker}` should occupy exactly one line, saw {}: {carrying:#?}",
+        carrying.len()
+    );
+    let line = *carrying[0];
+    for other in INTERLEAVED_ARRIVALS {
+        assert!(
+            other == marker || !line.contains(other),
+            "`{marker}` and `{other}` were spliced into one torn line: {line:?}"
+        );
+    }
+    line
+}
+
+/// Two concurrent shell tasks alternating delayed stdout and stderr must reach
+/// the pane live, in arrival order, each line attributed to its own task.
+///
+/// This is the review-5 finding-2 regression, and the pane is the only place it
+/// is decidable. The old runner inherited stderr — so half of this output never
+/// entered the sink at all — and emitted stdout only after each command
+/// returned, so the pane showed two blocks ordered by completion rather than
+/// four lines ordered by arrival. Separated pipes cannot show either defect:
+/// they have no merged stream to order and no terminal for an un-sunk stderr to
+/// tear against.
+#[test]
+#[serial(level2_terminal)]
+fn level2_interleaved_shell_streams_arrive_live_and_attributed_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let staged = stage("claudine-l2-taskstream-interleaved", INTERLEAVED_DOC);
+    let capture = run_in_pane(&mut harness, &staged, 100, 50, &[]);
+
+    assert_eq!(
+        capture.exit_code, 0,
+        "the interleaved group must succeed.\nplain:\n{}",
+        capture.frame.plain
+    );
+
+    let lines = framed_region_raw(&capture.frame.raw, PREFLIGHT_DONE_MARKER);
+
+    // Arrival order, which is also the only order a live stream can produce.
+    // A completion-ordered stream groups by task — `alpha-out alpha-err
+    // beta-err beta-out` — and fails here.
+    let positions: Vec<usize> = INTERLEAVED_ARRIVALS
+        .iter()
+        .map(|marker| {
+            lines
+                .iter()
+                .position(|line| line.contains(marker))
+                .unwrap_or_else(|| panic!("`{marker}` never reached the pane.\nregion:\n{lines:#?}"))
+        })
+        .collect();
+    assert!(
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "concurrent output is grouped by completion rather than line arrival: \
+         {INTERLEAVED_ARRIVALS:?} landed at {positions:?}\nregion:\n{lines:#?}"
+    );
+
+    // Attribution, including for stderr — the channel that used to reach the
+    // terminal with no bar at all.
+    for (marker, task) in INTERLEAVED_OWNERS {
+        let header = lines
+            .iter()
+            .find(|line| line.contains('▶') && line.contains(task))
+            .unwrap_or_else(|| panic!("no header for `{task}`.\nregion:\n{lines:#?}"));
+        let header_color = bar_color(header)
+            .unwrap_or_else(|| panic!("header for `{task}` drew no colored bar: {header:?}"));
+        let line = sole_line_with(&lines, marker);
+        let line_color = bar_color(line)
+            .unwrap_or_else(|| panic!("`{marker}` reached the pane with no bar: {line:?}"));
+        assert_eq!(
+            header_color, line_color,
+            "`{marker}` is attributed to a different task than `{task}`, whose \
+             command produced it"
+        );
+    }
+}
+
+/// The same interleave with color gone: attribution and ordering must survive
+/// on the text alone.
+///
+/// Color is the redundant channel. Under `NO_COLOR` a reader has only the
+/// header and footer naming each task and the arrival order of the lines
+/// between them, so both have to hold without a single escape in the region.
+#[test]
+#[serial(level2_terminal)]
+fn level2_interleaved_shell_streams_keep_order_and_names_without_color_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let staged = stage("claudine-l2-taskstream-interleaved-nocolor", INTERLEAVED_DOC);
+    let capture = run_in_pane(&mut harness, &staged, 100, 50, &[("NO_COLOR", "1")]);
+
+    assert_eq!(
+        capture.exit_code, 0,
+        "the interleaved group must succeed under NO_COLOR.\nplain:\n{}",
+        capture.frame.plain
+    );
+
+    let raw_region = framed_region_raw(&capture.frame.raw, PREFLIGHT_DONE_MARKER);
+    for line in &raw_region {
+        assert!(
+            bar_color(line).is_none(),
+            "a bar was still painted under NO_COLOR: {line:?}"
+        );
+    }
+
+    let lines = framed_region(&capture.frame.plain);
+    let positions: Vec<usize> = INTERLEAVED_ARRIVALS
+        .iter()
+        .map(|marker| {
+            lines
+                .iter()
+                .position(|line| line.contains(marker))
+                .unwrap_or_else(|| {
+                    panic!("`{marker}` never reached the pane without color.\nregion:\n{lines:#?}")
+                })
+        })
+        .collect();
+    assert!(
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "arrival order was lost without color: {INTERLEAVED_ARRIVALS:?} landed \
+         at {positions:?}\nregion:\n{lines:#?}"
+    );
+
+    // Each marker still occupies one whole, unspliced line.
+    for marker in INTERLEAVED_ARRIVALS {
+        sole_line_with(&lines, marker);
+    }
+
+    // The attribution that has to carry the whole load once color is gone.
+    for task in ["emit-one", "emit-two"] {
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains('▶') && line.contains(task)),
+            "`{task}` has no named header without color.\nregion:\n{lines:#?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains(task) && line.contains("succeeded")),
+            "`{task}` has no named outcome footer without color.\nregion:\n{lines:#?}"
+        );
+    }
 }
 
 /// The body a task actually printed must carry that task's own bar color,
@@ -428,7 +646,7 @@ fn level2_parallel_task_bodies_carry_their_own_bar_color_in_tmux() {
         capture.frame.plain
     );
 
-    let lines = framed_region_raw(&capture.frame.raw, "Starting pre-flight checks");
+    let lines = framed_region_raw(&capture.frame.raw, PREFLIGHT_DONE_MARKER);
     let mut colors = Vec::new();
     for (task, payload) in [("fetch-data", "fetched"), ("render-page", "rendered")] {
         let header = lines
@@ -496,7 +714,7 @@ fn level2_parallel_prompt_streams_keep_task_attribution_in_tmux() {
         capture.frame.plain
     );
 
-    let lines = framed_region_raw(&capture.frame.raw, "Starting pre-flight checks");
+    let lines = framed_region_raw(&capture.frame.raw, PREFLIGHT_DONE_MARKER);
     let mut header_colors = Vec::new();
     for task in ["task-one", "task-two"] {
         let header = lines
@@ -595,7 +813,7 @@ fn level2_prompt_idle_flush_keeps_the_task_bar_in_tmux() {
         capture.frame.plain
     );
 
-    let lines = framed_region_raw(&capture.frame.raw, "Starting pre-flight checks");
+    let lines = framed_region_raw(&capture.frame.raw, PREFLIGHT_DONE_MARKER);
     let header = lines
         .iter()
         .find(|line| line.contains('▶') && line.contains("slow-task"))
@@ -747,7 +965,7 @@ fn level2_no_color_pane_keeps_textual_attribution_in_tmux() {
         capture.frame.plain
     );
 
-    let raw_region = framed_region_raw(&capture.frame.raw, "Starting pre-flight checks");
+    let raw_region = framed_region_raw(&capture.frame.raw, PREFLIGHT_DONE_MARKER);
     for line in &raw_region {
         assert!(
             bar_color(line).is_none(),
