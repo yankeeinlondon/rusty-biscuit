@@ -10,6 +10,7 @@ log: darkmatter/features/2026-07-13-more-is-more/log.md
 description: "A **feature** review of `2026-07-13-more-is-more/spec.md`"
 feature: 2026-07-13-more-is-more/review-17.md
 previous: 2026-07-13-more-is-more/review-16.md
+next: 2026-07-13-more-is-more/review-18.md
 ---
 
 # Review 17

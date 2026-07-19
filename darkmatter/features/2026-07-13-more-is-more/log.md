@@ -1,6 +1,7 @@
 ---
 implementation_15: "2026-07-18T01:11:14-07:00"
 implementation_17: "2026-07-19T08:49:09-07:00"
+implementation_18: "2026-07-19T10:23:12-07:00"
 deferred_perf_measurement: false
 ---
 
@@ -283,3 +284,326 @@ The files changed during this implementation cycle were:
 - `claudine/lib/src/composition/lifecycle/validate.rs`
 - `claudine/lib/src/composition/lifecycle/tests.rs`
 - `claudine/lib/src/composition/lifecycle/executor/tests.rs`
+
+## Implementation of Review Findings #18
+
+> **started at:** 2026-07-19T10:23:12-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-13-more-is-more/review-18.md'
+- this is iteration 18 of the review-to-implement cycle
+- review 18 contains eight findings:
+        - **Critical** — provider list adapters do not implement complete, correctly ordered canonical queries
+        - **High** — canonical query validation and defaults disagree with the public contract
+        - **High** — CI/CD normalization drops fields the structured-record contract promises to retain
+        - **High** — the provider expression surface has no end-to-end Level-1 network verification
+        - **High** — required Windows and Linux compile verification is absent
+        - **Medium** — "Markdown-escaped" provider text still permits Markdown formatting injection
+        - **Medium** — DMLS hover and authored docs do not expose or link the query vocabulary
+        - **Medium** — each provider expression creates a thread and Tokio runtime instead of using the run-local executor
+- impacted package areas: `sniff` (lib), `darkmatter` (lib + dmls + docs)
+- host load at start: `load averages: 20.39 38.61 34.73` — no performance findings in this review, so load affects gate wall-clock only, not measurement validity
+- ordering decision: findings are implemented serially in severity order, except that the **Critical** adapter finding and the **High** canonical-validation finding both touch `sniff/lib/src/remote/types.rs` + `focused.rs` and are therefore sequenced adjacently to avoid conflicting edits
+
+### Finding 1 (Critical) — provider list adapters do not implement complete, correctly ordered canonical queries
+
+- starting the work on 'complete-ordered-canonical-queries' at 10:26:41-07:00
+        - scope confirmed by reading `sniff/lib/src/remote/focused.rs` directly; four distinct defects behind one finding:
+                - `query_pull_requests` breaks out of the page loop at `normalized.len() == limit` and only then calls `sort_prs`, so the returned page is the first-`limit`-encountered set re-ordered, not the globally newest/oldest `limit`
+                - `direct_jobs` / `jobs_via_parents` return early at `limit` and at `MAX_JOBS_INSPECTED` / `MAX_PARENT_EXECUTIONS`, then `query_cicd_jobs` sorts the partial subset — same defect plus a silent cap
+                - exhausting `MAX_PAGES` with fewer than `limit` matches yields `exhausted == false`, `next == None`, and `items == []` — a silent incomplete-domain empty result, which the spec forbids
+                - `pr_page_params` forwards the canonical state token nearly verbatim, so GitLab receives `open` (needs `opened`), GitHub receives `merged` (accepts only `open`/`closed`/`all`), and Bitbucket receives `ALL`/`CLOSED` (needs `OPEN`/`MERGED`/`DECLINED`, repeated)
+        - **complete-domain traversal.** `query_pull_requests`, `direct_jobs`, and `jobs_via_parents` no longer early-exit on match count. Each walks to provider exhaustion, and only then does the caller sort and `truncate(limit)`. Local emulation of exact filters and ordering is only sound over a complete domain, which is precisely what the early exit destroyed
+        - **page size decoupled from `limit`.** A new `PAGE_SIZE = 100` constant replaces `limit.clamp(1, 100)`. Once the walk always reaches exhaustion, sizing pages by the caller's `limit` only multiplies the number of round-trips and burns the `MAX_PAGES` budget faster — a `limit: 2` query previously requested 2-row pages and could exhaust 20 pages after seeing only 40 rows
+        - **error variant chosen: a new `SniffError::IncompleteRemoteDomain { provider, bound, limit }`.** Both existing candidates were rejected as dishonest: `UnsupportedRemoteCapability` claims the provider cannot do the thing at all, when in fact the capability exists and only *this query's* domain was too large; `RemoteApi` claims the provider returned a failure, when every response was a well-formed 200. The new variant names the bound that stopped the walk (`pull-request pages`, `job pages`, `parent executions`, `inspected jobs`) so the message is actionable — the user learns to narrow the query. Blast radius checked: no `match` on `SniffError` anywhere in the repo is exhaustive, and Darkmatter maps Sniff errors through `Display` (`expression/functions/provider.rs:47`), so no mapping site needed changing. `cargo check -p darkmatter --tests` confirms this
+        - **flavor-specific state projection** via a new `pr_state_params(flavor, states)`. GitHub/Gitea/Forgejo get `open`/`closed`/`all` only — canonical `merged` widens to `closed` because those services surface merged PRs there. GitLab gets `opened`/`closed`/`merged`/`all`. Bitbucket gets repeated `state=` pairs (`OPEN`/`MERGED`/`DECLINED`/`SUPERSEDED`) and omits `state` entirely for "any", since it has no `ALL` token to send. A canonical multi-state set with no single wire token widens to the provider's `all`
+        - widening is only safe because `pr_matches` stays authoritative; this was verified rather than assumed, and is now pinned by `widened_provider_state_is_narrowed_by_the_exact_local_filter` (canonical `merged` sends `state=closed`, and the closed-but-unmerged row is dropped locally)
+        - **defect found that the review did not name:** `MAX_JOBS_INSPECTED` (2 000) is unreachable on the GitLab direct-listing path, because `MAX_PAGES × PAGE_SIZE` is exactly 2 000, so the page bound always trips first. It remains genuinely reachable through parent traversal, where many cleanly-exhausted parents accumulate past it, so the guard was kept rather than deleted — it is bound-independent and would matter if either constant changed. Recorded here so a future reader does not mistake the direct-path branch for live code
+        - **the two existing tests the review called non-discriminating were both confirmed non-discriminating.** `pull_request_query_paginates_until_filtered_limit` was replaced outright; `declared_filters_match_the_filters_the_client_actually_honors` still treats an empty 200 as proof a filter is honored, but that is the review's separate High finding on validation, not this one, so it was left alone
+        - **discrimination was proved, not asserted.** Each new test was run against the *old* implementation restored in place (PR path and CI/CD path in two separate passes) to confirm it actually fails there. 10 of the 11 new tests fail against the old code. The exception is `pull_request_filters_reach_matches_beyond_the_first_page`, which passes both before and after — the old code did paginate, its defect was the early exit and post-hoc sort — so it is an honest regression guard rather than a discriminator, and is recorded as such
+        - `PullRequestPage.total` / `CiCdJobPage.total` now carry the **domain-wide match count before truncation**, which can exceed `items.len()`. `next` is `None` on both: the previous `"provider-next"` string was a placeholder token no code could resolve, and with a complete domain there is nothing further to page to. The stale `"provider did not expose an authoritative total"` warning was dropped, since the total is now authoritative
+        - **verification gates** (macOS, from `sniff/`):
+                - `just lint` — **pass**, clippy clean across `sniff` + `sniff-cli` with `--features remote`
+                - `just test` — **pass**: `sniff` 1 576 run / 1 576 passed / 3 skipped; `sniff-cli` 769 run / 769 passed / 3 skipped
+                - one `LKFAIL` on `remote::tests::test_git_remote_from_url_invalid` retried green; this is the known spurious nextest leak-timeout on CLI-spawning binaries, unrelated to this change
+                - `cargo check -p darkmatter --tests` — **pass**, confirming the new error variant breaks no downstream consumer
+                - `just test-l2` not run: it targets `sniff-cli` CI/CD status-cell styling and no glyph, SGR, or terminal behavior is touched here
+- work completed for 'complete-ordered-canonical-queries' at 10:41:36-07:00
+
+### Finding 2 (High) — canonical query validation and defaults disagree with the public contract
+
+- starting the work on 'canonical-query-validation-defaults' at 10:41:36-07:00
+        - five sub-defects named by the review, all on the authored-input boundary rather than the wire boundary
+        - deliberately sequenced immediately after Finding 1 because both edit `sniff/lib/src/remote/types.rs` and `focused.rs`; Finding 1's subagent explicitly left the `Default`-derived `descending: false` and the non-discriminating `declared_filters_match_the_filters_the_client_actually_honors` test alone as belonging here
+        - **design decision — no dedicated Darkmatter input-type layer.** The review recommends parsing into Darkmatter-owned input types and translating into Sniff queries after validation. Rejected as disproportionate: the canonical vocabulary and the Sniff query struct are field-for-field identical, so a parallel type would be a rename with a hand-written 19-field `From` impl, and it would create two places where the vocabulary can drift. Instead the vocabulary is single-sourced on the Sniff query structs, which now carry `validate_canonical()`. Darkmatter calls it in `parse_query()` — before `provider::client(...)`, so before any repository or client resolution — and `FocusedProviderClient::query_*` calls it again before its first request. The invariant "no invalid canonical input reaches the network" therefore holds at both entry points, and it is tested at both (Darkmatter parser unit tests plus `sniff/lib/tests/focused_provider.rs`).
+        - **defect 1 — `remote` coercion.** New `provider::authored_remote()` in `darkmatter/lib/src/markdown/compose/expression/functions/provider.rs`; both `pr_list` and `cicd_list` route the removed `remote` key through it. Absent is `None`; a non-blank string is the remote; everything else — wrong type, empty string, whitespace-only, explicit `null` — is an invalid-query error naming the field. Whitespace-only was not in the review's list but is the same defect: `"   "` passed the old `!value.is_empty()` filter and would have been sent as a remote name.
+        - **defect 2 — closed `state` vocabulary.** Chose the "split the enum" option over a custom `Deserialize` on `PullRequestState`, because the review's premise that `Draft`/`All` are an "internal superset" is false for the focused client: `query.state` is only ever populated from authored input or the `Open` default, so closing the vocabulary makes those two `pr_matches` arms unreachable rather than merely unspellable. New 3-variant `CanonicalPullRequestState` in `types.rs` is now the type of `PullRequestQuery.state`. Legacy `PullRequestState` is untouched and keeps `Draft`/`All`, which the Stage-1 report API, the four Stage-1 provider adapters, and the `sniff repo --status` CLI flag all still need. `provider.rs` (Stage-1) gained an explicit canonical→legacy state projection at the one place it calls `list_pull_requests`.
+                - **not named by the review:** `pr_matches` treated a merged PR as matching `closed`, in both `focused.rs` and `provider.rs`. The spec defines `closed` as "closed pull requests (not merged)", and canonical `closed` widens to the provider's `closed` token which returns merged rows on GitHub/Gitea, so `state: closed` was over-matching. Both matchers now require `merged_at.is_none()`.
+        - **defect 3 — `parent` integer form.** `deserialize_parent_identity` in `types.rs`: an untagged `String | u64` normalized to the string form `job_matches` compares against. Serialization is unchanged (`Option<String>`), so Darkmatter's `serde_json::to_string(&query)` cache key stays stable and `{"parent": 1234}` and `{"parent": "1234"}` share one cache entry.
+        - **defect 4 — datetime validation.** `chrono` was already a direct dependency of both `sniff/lib` and `darkmatter/lib`, so no dependency was added and no `docs/dependencies.md` needed updating. `parse_query_timestamp()` accepts offset-bearing RFC 3339 first, then falls back to a bare `YYYY-MM-DDTHH:MM:SS` / `YYYY-MM-DD HH:MM:SS` / `YYYY-MM-DD` read as UTC, so an authored window bound does not have to carry a zone. Validation happens in `validate_time_window()`, which compares the **parsed instants**; the four matcher comparisons in `focused.rs` and `provider.rs` now go through `at_or_after`/`at_or_before`, and `sort_prs`/`query_cicd_jobs` order through `timestamp_order`/`optional_timestamp_order`.
+                - the matcher helper deliberately falls back to byte order when *either* side fails to parse: query bounds are known-good post-validation, but provider payloads are not, and silently dropping an unparseable row would corrupt the complete-domain guarantee Finding 1 just established
+                - consolidation side effect: `focused.rs`'s `validate_limit`, and `provider.rs`'s `validate_limit`/`validate_sort` and its two lexical range checks, are all gone — every rule now lives once in `validate_canonical()`
+        - **defect 5 — newest-first default.** Hand-wrote `Default` for both query structs with `descending: true`, which is also what container-level `#[serde(default)]` fills in for an absent key, so the object, empty-object, and count forms all agree without any of them setting the flag explicitly. Removed the now-redundant `descending: true` from `cicd_list`'s count overload so the default is single-sourced.
+                - **not named by the review, and the substantive half of this defect:** flipping the flag alone does *not* deliver D24. `sort_prs` did `sort.unwrap_or("provider-default")`, which conflates an absent `sort` with an explicit `provider-default`, and `provider-default` applies no ordering key at all — it just reverses whatever the provider returned. Against GitHub, whose list endpoint is already newest-first, `descending: true` would have produced **oldest**-first. `sort_prs` now treats `None` as `created` and reserves order-preservation for an explicit `provider-default`. `CiCdJobQuery` has no `sort` field and already ordered by `created_at`, so it needed only the flag.
+        - **`deny_unknown_fields` confirmed in force** on both structs. Verified rather than assumed, because the Darkmatter parser mutates the object before deserializing: it removes `remote` and rewrites `direction` into `descending`, both of which would otherwise trip the unknown-key check. `canonical_query_deserialization_rejects_out_of_vocabulary_input` asserts that a raw `{"remote": ...}` reaching the struct *is* rejected, which pins the parser's removal as load-bearing rather than incidental.
+        - **`declared_filters_match_the_filters_the_client_actually_honors` rewritten.** Was mounted against an empty `200`, so "the request did not error" was the whole assertion and a filter that was parsed but never applied passed. Replaced the fixture with `filter_probe_domain()` — three PRs differing on every filterable dimension — and `single_filter_query` became `single_filter_case`, returning the query *and* the PR numbers that filter must select. A filter that is accepted but not applied now returns the whole domain and fails. Two cases needed care: the canonical `open` default applies whenever `state` is absent, so only the `state` case can see the merged PR; and `sort`/`direction` are ordering controls, so their expectation is an order over the default set rather than a subset.
+        - **discrimination verified empirically, not by assertion.** Each new behavior was temporarily reverted in place and the suites re-run:
+                - byte-order `timestamp_order` → `datetime_filters_compare_instants_not_strings` FAILED
+                - lexical `validate_time_window` → `canonical_validation_rejects_unparseable_and_inverted_datetimes` FAILED, and both Darkmatter `datetime_bounds_are_parsed_rather_than_compared_lexically` and `query_validation_rejects_bad_shapes_before_repository_resolution` FAILED
+                - `descending: false` defaults → `canonical_queries_default_to_newest_first`, `pull_request_filters_reach_matches_beyond_the_first_page`, `declared_filters_match_the_filters_the_client_actually_honors`, and both `every_call_form_defaults_to_newest_first` FAILED
+                - all probes reverted; `grep -r DISCRIMINATION-PROBE sniff darkmatter` returns nothing
+        - **two new assertions do not discriminate and are regression guards only**, stated plainly rather than claimed as coverage:
+                - `canonical_state_accepts_exactly_the_three_authored_tokens` — the old 5-variant enum also accepted `open`/`closed`/`merged`
+                - the `json!(5)` element of `cicd_list`'s `every_call_form_defaults_to_newest_first` — the count overload was the one form that already forced `descending: true`; the two object forms in that same test are what discriminate
+                - the review's own suggested inverted-range example (`created_after: 2026-07-01T00:00:00Z`, `created_before: 2026-06-30T19:00:00-04:00`) is **also** inverted lexically, so it would have passed against the old code. Replaced with `2026-06-30T23:00:00-05:00` → `2026-07-01T00:00:00Z`, which is 04:00Z vs 00:00Z as instants but ascending as bytes, plus its mirror (`2026-07-01T23:00:00+14:00` → `2026-07-01T10:00:00Z`) for the over-rejection direction.
+        - one pre-existing test needed its expectation updated for the new default: `pull_request_filters_reach_matches_beyond_the_first_page` asserted `["201", "202", "203"]` with no `sort` or `direction`, which is now `["203", "202", "201"]`. This is the D24 behavior change, not a regression, and the test's doc comment now says so.
+        - `claudine` needs no change: `grep -rl 'PullRequestQuery\|CiCdJobQuery\|PullRequestState' claudine/` is empty, so the public type changes have no downstream consumer beyond `sniff-cli` (legacy enum only, untouched) and `darkmatter`.
+        - gates, macOS, exit code checked directly rather than through a pipe:
+                - `cd sniff && just test` → `Summary [12.897s] 1581 tests run: 1581 passed (1 slow, 1 flaky), 3 skipped` then `Summary [23.972s] 769 tests run: 769 passed (19 slow), 3 skipped`
+                - `cd sniff && just lint` → `Finished dev profile [unoptimized + debuginfo] target(s) in 2.37s`, no diagnostics
+                - `cd darkmatter && just test` → `Summary [168.234s] 5856 tests run: 5856 passed (46 slow), 140 skipped`, `Summary [11.874s] 561 tests run: 561 passed (9 slow), 71 skipped`, `Summary [1.090s] 591 tests run: 591 passed, 3 skipped`
+                - `cd darkmatter && just lint` → `Finished dev profile [unoptimized + debuginfo] target(s) in 3.01s`, no diagnostics
+                - the single `sniff` flaky is `sniff-cli output::tests::docs_filter::readme_flag_is_case_insensitive`, which is unrelated to this change and was already flaky in the pre-change baseline run of the same recipe
+        - deferred, and named here so it is not mistaken for done: `capabilities().pull_request_filters` still advertises `sort` and `direction`, which are ordering controls rather than filters; the probe table special-cases them. Tightening that list is a `capabilities()` contract question, not a validation one, and belongs with Finding 1's adapter work.
+- work completed for 'canonical-query-validation-defaults' at 11:19:45-07:00
+
+### Finding 3 (High) — CI/CD normalization drops fields the structured-record contract promises to retain
+
+- starting the work on 'cicd-normalization-field-retention' at 11:19:45-07:00
+        - the last finding that edits `sniff/lib/src/remote/focused.rs`; after this the remaining five findings are Darkmatter-side or verification-side and can proceed without contending for that file
+- projection design: three flavor-specific projections replace the one key-probing normalizer
+        - `project_actions_job` (GitHub, Gitea, Forgejo — one shared Actions wire shape), `project_gitlab_job`, `project_bitbucket_job`, dispatched from `normalize_job` on `self.remote.api_flavor`
+        - each returns an internal `JobProjection` struct rather than a typed serde DTO per flavor; the providers disagree on the *type* of a field, not just its name (Bitbucket's `state` is an object where GitLab's is a string), so a DTO per flavor would have been three `Deserialize` impls feeding the same flattening step with no extra safety and a new failure mode — a strict DTO rejects the whole job when a provider adds a field
+        - `JobProjection` carries `normalized_source` separately from `native_status` because the token answering "did this succeed" is not always the one the provider calls its status: a GitHub job's `status` is `completed` whether it passed or failed, and Bitbucket's verdict is `state.result.name`
+- parent metadata propagation: internal `ParentContext`, not a widened `CiCdParentExecution`
+        - `CiCdParentExecution` stays exactly as it was; widening it would publish a second copy of branch/commit/trigger/actor next to the job's own and force every consumer to decide which wins
+        - `parent_context()` reads run-level metadata flavor-aware (`head_branch`/`head_sha`/`event`/`triggering_actor` for the Actions family; `target.ref_name`/`target.commit.hash`/`trigger.name`/`creator.nickname` for Bitbucket) at the one point in `jobs_via_parents` where the parent JSON is still in scope
+        - merge is strictly `job.or(parent)` per field, so nothing is invented and a job-level value is never overwritten; `absent_metadata_is_not_invented_from_the_parent` guards that direction
+- `CiCdJob` gained `started_at` and `finished_at` (`updated_at` retained, and falls back to `finished_at` on providers that expose no separate modification instant, which keeps the `updated_*` filters working)
+        - blast radius is two constructors: `normalize_job` and the `format_job` test fixture in `darkmatter/lib/src/markdown/compose/expression/functions/cicd.rs`; `sniff-cli` renders the unrelated `CiCdInfo`, not `CiCdJob`, so no CLI surface changed
+- not named by the review, found while writing the fixtures
+        - **a GitHub job that failed normalized to `success`.** `status` is `completed` for every finished job and the verdict lives in `conclusion`, but the old normalizer folded the literal `completed` to `success`. Same defect on Bitbucket, where `COMPLETED` + `state.result.name: FAILED` also read as a success. Both flavors now resolve the verdict before normalizing; `normalize_status` keeps the `completed → success` arm only for providers with no separate verdict
+        - **Bitbucket `state` was read as a string.** It is always an object, so `value_string(&["status", "state"])` returned `None` and every Bitbucket step normalized to `unknown`. The two pre-existing Bitbucket fixtures encoded the wrong shape (`"state": "success"`) and so could not see this; both were corrected to the real object form
+        - **Bitbucket UUIDs are brace-wrapped and braces are not path-safe**, so the request that actually reaches the provider is percent-encoded (`%7Bp1%7D`). Client behavior is correct and unchanged; the new mocks assert the encoded path
+        - GitLab `pipeline.id` is a JSON *number*, so the existing `nested_string` helper could not read it; added `nested_id` alongside it
+- tests added to `sniff/lib/tests/focused_provider.rs`
+        - realistic per-flavor fixture builders: `github_actions_job`, `github_workflow_run`, `gitlab_job`, `bitbucket_step`, `bitbucket_pipeline`
+        - `exact_jobs_retain_every_field_the_record_promises` — every promised field for all five flavors
+        - `parent_run_metadata_reaches_the_jobs_beneath_it` — GitHub run → job and Bitbucket pipeline → step inheritance
+        - `absent_metadata_is_not_invented_from_the_parent` — the negative direction
+- discrimination verified by reverting, not assumed: the legacy union-probe normalizer was restored verbatim in place (with `started_at`/`finished_at` forced to `None`, which is what "nowhere to live" means) and the suite re-run
+        - three tests failed under the legacy normalizer, including the pre-existing `exact_jobs_are_normalized_for_every_initial_flavor` once its Bitbucket fixture was made realistic (`left: "unknown"`, `right: "success"`)
+        - discriminating assertions: GitLab `parent.native_id` / `commit` / `trigger` / `started_at` / `finished_at` / `runner`; Bitbucket `native_status` / `normalized_status` / `conclusion` / `started_at` / `finished_at`; Actions-family `normalized_status` / `started_at` / `finished_at` / `runner`; parent-inheritance `branch` / `trigger` / `actor` and the whole Bitbucket branch/commit/trigger/actor set
+        - assertions that do **not** discriminate, and are kept deliberately as retention guards rather than as evidence: GitLab `name` / `stage` / `native_status` / `branch` / `actor` / `created_at` / `web_url`; Bitbucket `name` / `parent.native_id` / `created_at` / `runner`; Actions-family `name` / `parent.native_id` / `native_status` / `conclusion` / `commit` / `created_at` / `web_url` / `api_url`; and the entirety of `absent_metadata_is_not_invented_from_the_parent`, which by design passes both before and after
+- gate results (macOS, this branch)
+        - `cd sniff && just test` → `Summary [12.949s] 1584 tests run: 1584 passed (1 slow), 3 skipped` and `Summary [32.208s] 769 tests run: 769 passed (15 slow), 3 skipped`
+        - `cd sniff && just lint` → `Finished \`dev\` profile [unoptimized + debuginfo] target(s) in 45.89s`, no clippy or fmt diagnostics
+        - `cd darkmatter && just test` → `Summary [180.368s] 5856 tests run: 5856 passed (99 slow, 2 flaky), 140 skipped`, `Summary [12.934s] 561 tests run: 561 passed (10 slow), 71 skipped`, `Summary [1.584s] 591 tests run: 591 passed, 3 skipped`; the one retried flake is `schema::schema_validation_integration::baseline_cache_does_not_reuse_across_distinct_baselines`, unrelated to this finding
+        - `cd darkmatter && just lint` → clean across `darkmatter`, `darkmatter-cli`, and `dmls`
+        - Darkmatter gates were required, not optional: the `CiCdJob` field additions touch its `format_job` test fixture
+- work completed for 'cicd-normalization-field-retention' at 11:39:29-07:00
+
+### Findings 6, 7, and 8 (Medium) — run concurrently
+
+- starting the work on 'markdown-escaping', 'query-vocabulary-docs', and 'run-local-executor' at 11:39:29-07:00
+        - these three findings touch disjoint files (`functions/{pull_requests,cicd}.rs` formatters; `dmls/src/overlay/expressions.rs` + `docs/topics/`; `functions/provider.rs`), so they are dispatched in parallel rather than serially
+        - the three sniff-side findings above all contended for `focused.rs`/`types.rs` and had to be serial; nothing here does
+        - orchestrator holds each subagent's log items and writes them as one grouped block per subagent below
+        - `cargo check -p darkmatter --tests` confirmed green before dispatch, so any compile failure the subagents hit is their own
+
+#### Finding 6 (Medium) — Markdown-escaped provider text still permits Markdown formatting injection
+
+- root cause: `pull_requests.rs` and `cicd.rs` each carried a private `clean()` that collapsed whitespace then escaped only `\`, `[`, `]`; provider titles such as `**urgent**`, `` `code` ``, `_name_`, `<img onerror=...>` survived with active Markdown, and the two copies could drift
+- added one shared helper `collapse_and_escape` in a new `functions/escape.rs`; deleted both private `clean()` copies and routed `format_pr` / `format_job` through it
+- escaping rule chosen, documented as a contract comment at the helper: escape unconditionally and **only** the 16 ASCII punctuation characters that can begin, end, or alter an _inline_ construct at any column — `\` `` ` `` `*` `_` `~` `^` `[` `]` `<` `>` `&` `|` `$` `{` `}` `!`
+        - the set is sized to the **widest** option set in the crate, not the narrowest: `markdown::cleanup` parses with `Options::all()` minus smart-punctuation and definition-lists, so `$` (math), `{`/`}` (heading attributes), `^` (superscript) and `~` (strikethrough/subscript) are live there even though `render_tree_parser_options()` does not enable them; escaping them unconditionally keeps correctness independent of which parser sees the output
+        - deliberately **not** escaped — block starters `#`, `-`, `+`, `=`, `:`, and `1.`/`1)` markers: these only open a block at column zero, and both formatters emit a single collapsed line where every escaped value sits after a literal prefix (`[`, `PR `, `CI job `, or a ` · ` separator); escaping them would put a backslash before every `.` and `-` in ordinary prose for no rendered difference, against the spec's compact, noise-free projection
+        - deliberately **not** escaped — `(`, `)`, `"`, `'`: only live inside a link destination or title, and since every `[`/`]` is escaped no destination context can form around them
+        - relied on the CommonMark rule that a backslash is honored only before ASCII punctuation, so no non-punctuation character is ever prefixed
+- **defect not named by the review, fixed in the same pass:** `record.identity.display_id` and `job.reference.display_id` were interpolated into the link label raw — same provider trust boundary, same defect class; now routed through the helper, with zero output change for the canonical `#123`/`456` shapes
+- URLs confirmed untouched: the new formatter tests assert the parsed link destination equals `web_url` exactly
+- testing approach: replaced hand-written expected strings with a **CommonMark round-trip harness**
+        - `escape::harness::parse_literal` re-parses the output with `Options::all() - ENABLE_SMART_PUNCTUATION` and panics on any event other than paragraph/link/text — that panic is the discriminating half, since a surviving code span contributes the same _characters_ as literal text and a text-only comparison would pass
+        - `every_punctuation_class_renders_as_literal_text` and `every_punctuation_class_survives_a_link_label` over a 23-case hostile corpus (bold, code, emphasis, strikethrough, superscript, `<script>`, `<img onerror=...>`, entities, table pipes, math, heading attributes, images, links, unbalanced `[` and `]`, trailing backslash, pre-escaped text, list markers, indented code, autolink, footnote reference)
+        - `arbitrary_provider_text_round_trips` — a proptest over `[ -~\t\n]{0,48}` asserting both running-text and link-label round-trips; ASCII-printable is the whole attack surface because CommonMark backslash escapes are ASCII-punctuation-only
+        - `already_escaped_text_is_not_double_mangled`, `whitespace_collapses_to_single_spaces`, and `prose_punctuation_is_left_unescaped` — the last guards the _anti-over-escaping_ half of the rule so a future "escape everything" change fails loudly
+        - `hostile_provider_text_renders_as_literal_text` and `already_escaped_provider_text_is_not_double_mangled` added to both `pull_requests::tests` and `cicd::tests`
+        - `formatter_is_deterministic_collapsed_and_markdown_escaped` updated rather than deleted in both files; expected string unchanged (its fixtures only exercise `[`/`]`, escaped identically under the new rule) and the double-call determinism assertion retained
+- open for reviewer judgment, no code change made: the "block starters cannot reach column zero" argument is an invariant of the two current callers, stated in the helper's docs but not mechanically enforced
+
+#### Finding 7 (Medium) — DMLS hover and authored docs do not expose or link the query vocabulary
+
+- authored a `## Provider Query Vocabulary` section in `darkmatter/docs/topics/darkmatter-expressions.md`
+        - covers D24 defaults/bounds (limit 20, hard max 100, PR `state` defaults `open`, CI/CD `statuses` defaults to all, both newest-first), D25 (no provider-native escape hatch; unsupported canonical fields fail explicitly), and D26 (repository-only scope)
+        - full key tables for `pr_list` and `cicd_list`, a closed-enum table, the RFC 3339 datetime contract, and integer-overload semantics
+        - the normalized CI/CD status vocabulary was sourced from `sniff/lib/src/remote/focused.rs::normalize_status`; the spec names only `failed`/`cancelled` by example
+- **single-sourced the link** in the `description` field of `pr_list`/`cicd_list` in `darkmatter/docs/schemas/expression-functions.yaml`
+        - that one field already flows to the generated doc table, `format_function_block()` (hover), and `ExprCompletion::documentation` (completion), so no new plumbing was added
+        - this deliberately avoided threading a new `see_also` field through the YAML `$schema` → `RawFunction` → AST → projection → descriptor → generator → hover chain
+        - verified every DMLS hover surface emits `MarkupKind::Markdown`, so the link actually renders
+- the topic doc is **partly generated**: prose is hand-authored, the function table between `<!-- BEGIN/END GENERATED FUNCTION TABLE -->` comes from `darkmatter/lib/examples/expression_doc_generator.rs`; the vocabulary went in the authored region and the table was regenerated with `--write`
+- no `hash:` frontmatter on the topic doc, so no `md hash` regeneration was required
+- no Git or remote-provider access introduced into the DMLS path — the change is passive text only, as the spec requires
+- tests added, both Level 1:
+        - `catalog::tests::query_vocabulary_link_resolves_to_an_existing_doc_anchor` — link present on all four signatures, target file exists, fragment resolves to a real `##` heading by GitHub-style slugification, and the section actually contains the vocabulary content; a dead link now fails the build
+        - `overlay::expressions::tests::list_query_functions_link_to_the_vocabulary_in_hover_and_completion` — link reaches both the hover block and every completion documentation string
+- **open question deferred to Ken:** the link is authored sibling-relative (`darkmatter-expressions.md#provider-query-vocabulary`), which is clickable inside the doc but only a precise pointer in DMLS hover, where there is no base URI
+        - no precedent for doc links in DMLS hover was found to follow, and the two surfaces have incompatible bases — a repo-root-relative path would render broken inside the doc, which itself lives in `docs/topics/`
+        - making hover navigation genuinely clickable would require DMLS to rewrite the relative target into a workspace-root `file://` URI at hover-render time; judged out of scope for a Medium documentation finding rather than decided silently
+
+#### Finding 8 (Medium) — each provider expression creates a thread and Tokio runtime instead of using the run-local executor
+
+- root cause: `provider::run` called `std::thread::spawn` + `Builder::new_current_thread().build().block_on(future)` on **every** cache miss; the thread spawn existed to avoid `block_on` inside a caller's active runtime, but paid thread + runtime construction per provider expression and divorced provider work from the shared executor lifecycle
+- fix: reused the lazily-built shared multi-thread runtime already owned by `RemoteFetchInner` (worker count = `remote_concurrency`), per the spec's `RemoteFetchRuntime` precedent, rather than inventing a second pattern
+        - new `block_on_shared_executor` in `remote_fetch.rs`: `Handle::spawn` onto the runtime, calling thread blocks on a `std::sync::mpsc` receiver
+        - **deliberately avoided `Handle::block_on`** — it panics on a tokio worker thread regardless of which runtime owns the handle; this is precisely the recorded Claudine Antigravity buffered-JSON `block_on` panic, and blocking a plain channel is legal anywhere while the work runs on a different runtime, so there is no self-deadlock
+        - the run's `Handle` reaches the sync bridge through a scoped thread-local (`RUN_PROVIDER_EXECUTOR`) installed by `RemoteFetchRuntime::cached_provider_query` with restore-on-drop
+        - process-wide `OnceLock` fallback executor for contexts with no `RemoteFetchRuntime` — still shared, never per-call, and never dropped, which sidesteps `Runtime::drop`'s blocking-shutdown panic entirely
+        - `provider::run`'s signature left **byte-identical**, which is what kept this finding from colliding with the two concurrent sibling subagents
+- behavior preserved: focused `SniffError`s still map through `provider_error` to the same `ExpressionError::Other { function, message }` and are never degraded to empty values; a panicking future drops its sender so `recv()` errors and still yields the unchanged `"provider query worker panicked"` message; runtime-unavailability still surfaces as a `SniffError::RemoteInit`-shaped error; the `cached_provider_query` memoization/single-flight layer was left untouched
+- tests: `provider_runs_share_one_executor`, `provider_run_works_inside_an_active_runtime`, `provider_run_works_inside_a_multi_thread_runtime`, `sniff_errors_surface_as_focused_expression_errors`, `panicking_query_becomes_an_error_rather_than_unwinding` in `provider.rs`; `provider_queries_run_on_the_runs_own_executor` in `remote_fetch.rs`, backed by a new `#[cfg(test)]` `EXECUTOR_BUILDS` counter at both runtime-construction sites
+        - **flake caught and fixed inside the cycle:** the first version of `provider_queries_run_on_the_runs_own_executor` enumerated the executor's worker threads and asserted membership; it failed 1-of-1 on the first run because tokio work-stealing migrates a task across an await point, so worker-set membership is not a sound discriminator — replaced with the deterministic build-counter assertion and verified stable across five runs
+- follow-up worth considering: the thread-local is a hidden channel, accepted only because `run`'s signature was pinned for sibling-collision avoidance; now that the sibling edits have landed, threading the `Handle` (or `&ResolutionContext`) through `run` explicitly would be the cleaner end state
+
+#### Gates for the parallel batch
+
+- each subagent ran `cd darkmatter && just test` and `just lint` independently; because they overlapped, the individually reported runs each raced at least one sibling's in-flight edit
+        - the docs subagent was hard-blocked mid-run by `E0425: cannot find function count_executor_build` from the executor subagent's partial edit, and separately saw `reference_integration::validate_missing_file_in_child` and `validate_missing_toc_linking_target` fail only under the full parallel run while passing in isolation — pre-existing interference flakes, not caused by this batch
+        - the executor subagent's run, which finished last and therefore saw all three change sets, was fully green: darkmatter 5873/5873, darkmatter-cli 561/561, dmls 592/592, zero flaky
+- orchestrator re-ran `cd darkmatter && just lint` after all three subagents returned, against the merged tree: **clean** across `darkmatter`, `darkmatter-cli`, and `dmls`
+- a merged-tree `just test` is folded into Finding 4's gate run below rather than run twice
+- work completed for 'markdown-escaping', 'query-vocabulary-docs', and 'run-local-executor' at 12:00:24-07:00
+
+### Finding 4 (High) — the provider expression surface has no end-to-end Level-1 network verification
+
+- starting the work on 'provider-expression-e2e-verification' at 12:00:24-07:00
+        - this is a pure verification-gap finding: AC23/AC25/AC26 promise cross-surface identity, exact-host policy, error preservation, and single-flight, but nothing composes a document containing a provider function against Wiremock
+        - the existing cross-surface cache test calls `cached_provider_query` with a manufactured closure rather than a provider expression, and the one-request frontmatter/body integration exercises the unrelated remote `frontmatter(url)` function
+        - sequenced after Finding 8 deliberately — the executor rework changed how provider futures reach a runtime, so an end-to-end test written before it would have been exercising the retired thread-per-call bridge
+        - test placement: in-crate module `darkmatter/lib/src/markdown/compose/tests/provider_network.rs`, registered from `tests/mod.rs`
+                - an integration binary under `darkmatter/lib/tests/` was rejected: the compose path builds its client through `pub(super)` helpers, so reaching them from a separate binary would have required making the provider seam part of the public API
+                - matches the existing precedent — the remote `frontmatter(url)` one-request integration also lives in-crate, in `tests/transclusion.rs`
+                - hermetic by construction: each fixture starts its own Wiremock server, initializes a throwaway `git2` repository whose `origin` points at loopback, and clears `GITEA_TOKEN`/`FORGEJO_TOKEN` through `EnvGuard` so no ambient developer token can reach the mock; the one credential test sets its own token explicitly
+        - seam added — `provider::test_transport`, a `#[cfg(test)]`-only override of the provider API base and API flavor
+                - required, not a convenience: `FocusedProviderClient::new` derives `https://{host}/api/...` from `ResolvedRemote::host`, which is stored without a port, so neither the scheme nor the port of a `127.0.0.1:<port>` server can be expressed; and `ApiFlavor` is derived purely from host-name patterns, so a numeric loopback host is always `SelfHosted`/`Unknown` and no provider flavor can ever be selected for it
+                - a friendly hostname does not help either: `get_json` re-checks that the endpoint host equals the remote host, so the mock cannot be reached under a name that would pass flavor detection
+                - narrowest available shape — neither the module nor the branch reading it is compiled into a non-test build, so there is no public API, no production-only binary, and no environment variable; flavor detection and API-base derivation keep their own unit coverage in Sniff
+                - the override cell is process-wide rather than thread-local because compose evaluates its surfaces on whichever thread the caller supplies; every test that installs one is `#[serial_test::serial(provider_transport)]`
+                - two small refactors fell out of it: `provider::build_client` and `provider::resolve` now own client construction and remote resolution for both `pr*` and `cicd*`, replacing three duplicated `FocusedProviderClient::new` call sites
+        - real defects the end-to-end tests caught
+                - **provider error messages were double-prefixed** — `pr(): pr(): rate limited by Gitea API`. The memoization layer stores failures as `String` so a slot stays cloneable, which bakes in the prefix an inner `ExpressionError::Other` already rendered; `cached_provider_query` then re-wrapped it unconditionally. Fixed in `resolve_ctx.rs` via `cached_query_error`, which adopts an already-prefixed message as-is, and pinned by an assertion in the focused-failure test
+                - **frontmatter/body parity is broken for focused provider failures** — the identical call aborts the compose from frontmatter but leaves the unevaluated `{{ pr(123) }}` text in the body with only a report warning. Not a provider-specific bug: `is_authoring_fatal` covers unknown functions and broken file references, and `ExpressionError::Other` is deliberately outside that set (`other_is_not_authoring_fatal` asserts it). Left as-is rather than fixed — changing expression-error fatality is a ratified design axis, not a test-enablement decision — but pinned by `body_surface_downgrades_focused_failures_to_warnings` so a future change is deliberate and visible. The spec's narrower "focused errors are never replaced with empty values" bullet does hold on both surfaces, which the test also asserts. **Flagged for review: this is an AC26 parity gap.**
+        - limitation observed, not fixed — provider functions are unreachable for most self-hosted instances
+                - `canonical_api_base` hard-codes `https://` and `ResolvedRemote::host` drops the port, and `ApiFlavor` comes only from host-name patterns, so the practical reach of `pr*`/`cicd*` is `github.com`, `gitlab.com`, `bitbucket.org`, `codeberg.org`, and hosts literally named `gitea.*` / `gitlab.*` / `forgejo.*`
+                - a GitHub Enterprise or self-hosted GitLab at `git.company.com`, or anything on a non-443 port, resolves to `Unknown` and fails with an unsupported-flavor error
+                - fixing it needs a configuration surface (an authored API base and/or flavor per remote) plus a decision about how the exact-host policy treats ports — out of proportion for this finding, and `FocusedProviderClient::with_api_base` already exists as the constructor such a feature would call
+        - coverage delivered — 16 tests, all Level 1 against Wiremock
+                - cross-surface identity: `pr_renders_identically_in_frontmatter_and_body`, `pr_list_renders_identically_in_frontmatter_and_body`, `cicd_renders_identically_in_frontmatter_and_body`, `cicd_list_renders_identically_in_frontmatter_and_body`, `provider_functions_are_available_in_frontmatter_shell_ternary`
+                - the list functions keep their JSON array shape in frontmatter while body interpolation flattens to text, so those two compare entry-by-entry rather than by string equality; the `$()` surface yields the chosen command's output rather than the provider string, so it carries the availability and shared-cache claim while the interpolation tests carry value identity
+                - single-flight / memoization: `identical_provider_calls_reach_the_server_exactly_once` (four call sites across frontmatter and body, `expect(1)` plus explicit `verify()`), `differently_normalized_calls_do_not_share_a_cache_slot`, `list_queries_with_different_shapes_are_not_memoized_together` (bare-count and object forms collapse onto one slot; an ordering flip does not — exactly 2 requests)
+                - exact-host policy: `denied_host_fails_without_contacting_the_provider` asserts both the focused denial naming the host and `received_requests().len() == 0`, so an implementation that sent the request and discarded the response would still fail
+                - focused error preservation: `focused_failures_surface_as_errors_rather_than_empty_values` (404/403/429/500/malformed JSON), `missing_credentials_surface_as_a_credential_error`, `invalid_credentials_surface_as_an_authorization_error`, `incomplete_domain_surfaces_rather_than_a_truncated_list` (21 workflow runs trips `MAX_PARENT_EXECUTIONS`), and `a_successful_empty_query_is_still_an_empty_list` as the discriminating counter-case
+                - 403 and 429 are mapped to named states rather than carrying the numeric status, so those two assert on the state word; the assertions were relaxed to the real contract rather than the status code
+                - rendered values: `hostile_provider_titles_stay_literal_in_the_composed_document` parses the composed output as CommonMark+GFM and asserts the canonical link destination survives while an attacker-supplied `[click](https://evil.example)` in the title comes back as literal text — a substring search would have been the wrong assertion, since escaping preserves those characters by design
+        - gates — scope is `darkmatter` only; **no `sniff` file was touched**, so the sniff gates were not required and were not run
+                - `just test` (darkmatter area): `darkmatter` 5889 passed / 140 skipped, `darkmatter-cli` 561 passed / 71 skipped, `dmls` 592 passed / 3 skipped — all green
+                - `just lint` (darkmatter area): clean for `darkmatter`, `darkmatter-cli`, and `dmls`; separately confirmed with `cargo clippy -p darkmatter --all-targets` from cold so the `#[cfg(test)]` module is genuinely covered
+                - neither known pre-existing flake (`reference_integration::validate_missing_file_in_child`, `validate_missing_toc_linking_target`) appeared, and no spurious nextest `LKFAIL` was seen
+
+### Finding 5 (High) — required Windows and Linux compile verification is absent
+
+- starting the work on 'windows-linux-compile-verification' at 12:40:55-0700
+        - no local cross-compile evidence is obtainable on this host, and this was not re-litigated
+                - `x86_64-unknown-linux-gnu` is not an installed rustup target; `rustup target add` and `docker` are both blocked by the session sandbox
+                - the Windows targets (`x86_64-pc-windows-msvc`, `-gnu`) are installed but die in `aws-lc-sys v0.43.0`'s build script, which needs an MSVC or mingw C toolchain that does not exist on macOS
+                - the finding is therefore closable as **CI configuration**, not as delivered Windows/Linux evidence — see the closing bullet
+        - the review's premise was partly stale; measured facts on this tree, corrected before changing anything
+                - `sniff/justfile`'s `test` recipe **already** passes `--features remote` (`@just _test sniff --features remote`), and `lint` already passes it too. So `cd sniff && just test` in the existing `sniff-cross-platform` job already *executes* the provider Wiremock suites on macOS, Linux, and Windows. This was the single most important correction: the provider tests were not uncovered
+                - `sniff/cli/Cargo.toml` declares `sniff = { path = "../lib", features = ["network", "remote"] }`, so the existing `cargo check -p sniff-cli --all-targets` step compiles the provider library *source* on all three OSes as a dependency
+                - `darkmatter/lib/Cargo.toml:101` declares `sniff = { path = "../../sniff/lib", features = ["remote"] }`. Darkmatter's `_area-ci.yml` legs (`full-os: ubuntu-latest, windows-latest`; `check-os: macos-latest`) therefore already build the provider source on all three platforms. **No Darkmatter change was needed** and none was made
+                - `claudine/lib` and `claudine/cli` depend on `sniff` *without* `remote`, but on `darkmatter` (`claudine/lib/Cargo.toml:20`), so they reach the provider surface transitively. `claudine-tests.yml` ran `ubuntu-latest` only — no Windows and no macOS leg at all
+        - the residual, real gap: `--all-targets` under `remote` is built by nothing cross-platform
+                - `remote = ["network"]` with `default = []`, so `cargo check -p sniff --all-targets` (the job's self-described "compile guard" for test *code*) `cfg`s the `focused_provider` and `remote_observation` binaries down to empty targets. The guard guarded everything except the surface this feature added
+                - nextest builds test targets but not benches, so the `network`-gated `perf` bench and the profiling examples were compiled on no platform at all
+        - changes made
+                - `.github/workflows/test.yml` — added a `Check sniff library with remote provider surface (all targets)` step running `cargo check --color=never -p sniff --all-targets --features remote` to the `sniff-cross-platform` matrix. Kept as a **separate** step from the default-feature check so "default builds, remote does not" stays a distinguishable failure
+                - same file — corrected the two misleading comments: the compile-guard comment now says what the default-feature check does *not* cover, and the `just test` comment records that the recipe carries `--features remote` and that removing it would silently empty the suites
+                - `.github/workflows/claudine-tests.yml` — added a `cross-platform-check` job (`macos-latest`, `windows-latest`) running `cargo check --color=never --all-targets -p claudine -p claudine-cli`. Linux is already covered by the existing four test jobs
+                - `docs/testing-strategy.md` → "Platform Coverage (CI)" — added a `Feature-gated surfaces` subsection stating the general rule (`--all-targets` resolves *default* features only, so a gated surface compiles nowhere unless a step names it) with `sniff`'s `remote` as the worked case, plus a bullet making the `soft-os` semantics explicit in the policy list. The file's frontmatter carries no `hash:` property, so no `md hash` regeneration was required
+        - the claudine decision — compile check, deliberately not a test leg
+                - a full Windows `just test` leg would be red for reasons unrelated to the code it is meant to guard: the `claudine-cli` job installs AI-provider PATH stubs written as extensionless `#!/usr/bin/env bash` scripts, which Windows PATHEXT resolution will not execute, and claudine's Windows Ctrl+C handling is a known unimplemented gap with its own dedicated `claudine-windows-ctrl-c.yml`
+                - AC16/AC29 ask for *compile* checks, so a compile check is the proportionate instrument; it also happens to be the non-flaky one
+                - the Windows leg is `continue-on-error`, matching the `soft-os` convention in `_area-ci.yml`
+        - the Windows soft-fail caveat — reported, **not** changed
+                - `_area-ci.yml`'s `soft-os` input defaults to `'["windows-latest"]'`, making every Windows *test* leg `continue-on-error`. Its own doc comment says this is intentional: light a platform up, burn down the revealed backlog, then promote
+                - consequence for this feature: Darkmatter's Windows evidence is **advisory**. A Windows-only provider regression would be visible in the run but would not block a merge. Flipping this is a repo-wide policy decision with consequences well beyond this feature, so it was left alone and is raised here for a human
+                - the `sniff-cross-platform` job in `test.yml` is *not* affected — it has no `continue-on-error`, so its Windows leg (including the new `--features remote` check) is genuinely gating
+        - local validation performed
+                - `cargo check --color=never -p sniff --all-targets --features remote` — **passes** on this macOS host (`Finished dev profile ... in 6.94s`). This is the macOS half of AC16/AC29 for the provider surface, including the Wiremock test binaries and the `network`-gated bench/example targets
+                - `cargo check --color=never --all-targets -p claudine -p claudine-cli` — **passes** on macOS, exit 0. Confirms the new claudine job's command is real and green on at least one of its two OSes
+                - all four touched-or-referenced workflow files parse: `yaml.safe_load` clean on `test.yml`, `claudine-tests.yml`, `darkmatter-tests.yml`, `_area-ci.yml`
+                - `just --list` in `sniff/` confirms the `test` and `test-l2` recipes the job invokes exist
+        - what remains unobtainable in this session, stated plainly
+                - **AC16 and AC29 are not satisfied.** What is delivered is the configuration that will produce Windows and Linux compile evidence, plus macOS evidence obtained locally. The Windows and Linux evidence itself does not exist yet
+                - only a CI run on `windows-latest` and `ubuntu-latest` runners can produce it. Triggering CI is outside this session's authorization, so no run was started
+                - the run that would produce it: any pull request to `main` (fires `test.yml`'s `sniff-cross-platform` matrix) plus a push touching `claudine/**` (fires the new `cross-platform-check` job). A `workflow_dispatch` on `test.yml` would cover the sniff half on demand
+- work completed for 'provider-expression-e2e-verification' at 13:00:41-07:00
+- work completed for 'windows-linux-compile-verification' at 13:20:12-07:00
+
+### Merged-Tree Verification
+
+- every subagent ran its own gates, but several overlapped or raced a sibling's in-flight edit, so the orchestrator re-ran all four gates against the final merged tree
+        - `cd sniff && just test` — **pass**: `sniff` 1 584 run / 1 584 passed / 3 skipped; `sniff-cli` 769 run / 769 passed / 3 skipped
+        - `cd sniff && just lint` — **pass**, clippy clean
+        - `cd darkmatter && just test` — **pass**: `darkmatter` 5 889 run / 5 889 passed / 140 skipped; `darkmatter-cli` 561 run / 561 passed / 71 skipped; `dmls` 592 run / 592 passed / 3 skipped
+        - `cd darkmatter && just lint` — **pass**, clippy clean across `darkmatter`, `darkmatter-cli`, `dmls`
+- zero flaky and zero failures on the merged run; the two pre-existing `reference_integration` interference flakes reported mid-cycle did not reproduce
+- the darkmatter suite grew from 5 856 to 5 889 tests across this cycle, and sniff from 1 576 to 1 584
+
+### Successful Completion
+
+The implementation of review cycle 18 has completed successfully in 2h 58m. During this implementation all 8 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 7 were fixed, 1 was deferred (see reasons below):
+
+- **Finding 5 (High) — required Windows and Linux compile verification is absent** — deferred, and the deferral is a hard environmental limit rather than a judgment call
+        - **not** a performance-measurement deferral, so the `deferred_perf_measurement` frontmatter stays `false`
+        - local cross-compilation was attempted and is impossible on this host:
+                - `x86_64-unknown-linux-gnu` is not an installed rustup target; `rustup target add` and `docker` are both blocked by this session's permission sandbox
+                - both Windows targets **are** installed, but each dies in `aws-lc-sys v0.43.0`'s build script, which needs a Windows C toolchain (MSVC or mingw) that cannot exist on macOS — this independently reconfirms the previously recorded "Windows cross-compile blocked" finding, now with a second root cause beyond `duckdb-sys`
+        - what **was** delivered is the configuration that will produce the evidence, plus a correction to the review's premise:
+                - the review recommended "add the affected packages to real Windows and Linux CI jobs"; investigation showed most of that CI already existed — `sniff-cross-platform` in `test.yml` already ran the full macOS/Linux/Windows matrix, and `darkmatter-tests.yml` already ran full L1 on Linux + Windows
+                - the orchestrator's own hypothesis — that `remote` being a non-default feature meant the provider code was never compiled cross-platform — was **half wrong**, and the subagent corrected it: `sniff/justfile`'s `test` recipe already passes `--features remote`, and `sniff-cli` declares `sniff = { features = ["network", "remote"] }`, so the provider library source and its Wiremock suites were already built and run on all three OSes
+                - the genuine residual gap was narrower: `cargo check -p sniff --all-targets` resolves default features only, so the job's self-described test-code compile guard silently `cfg`'d `focused_provider.rs` and `remote_observation.rs` down to empty targets, and the `network`-gated bench and profiling examples were compiled on **no** platform at all
+                - fixed by adding a distinct `cargo check -p sniff --all-targets --features remote` step, kept separate so "default builds, remote does not" stays a distinguishable failure
+                - added a `cross-platform-check` job to `claudine-tests.yml` (macOS + Windows); claudine is a downstream consumer in this review's impact scope and previously had neither
+                - `docs/testing-strategy.md` → "Platform Coverage (CI)" updated per the drift-maintenance rule
+        - **caveat that limits the strength of the future evidence:** `_area-ci.yml`'s `soft-os` defaults to `["windows-latest"]`, making every Windows *test* leg `continue-on-error`, so Darkmatter's Windows evidence will be advisory rather than merge-gating; this was left alone deliberately as a repo-wide policy decision beyond this feature's scope, and is flagged for Ken. The `sniff-cross-platform` job carries no `continue-on-error`, so its Windows leg — including the new step — genuinely gates.
+        - **AC16 and AC29 remain unsatisfied.** Only a CI run on Windows and Linux runners produces the required evidence; triggering CI is an outward-facing action outside this session's authorization, and none was triggered. A PR to `main` fires the sniff matrix, a push touching `claudine/**` fires the new claudine job, and `workflow_dispatch` on `test.yml` covers the sniff half on demand.
+
+Three items surfaced during implementation that need Ken's decision rather than more code:
+
+- **AC26 frontmatter/body parity is broken for focused provider failures.** The end-to-end tests added for Finding 4 discovered that an identical failing call aborts the compose from frontmatter but leaves the unevaluated `{{ pr(123) }}` in the body with only a report warning. This is not provider-specific — `is_authoring_fatal` deliberately excludes `ExpressionError::Other`, with an existing `other_is_not_authoring_fatal` test pinning that choice. Changing expression-error fatality is a ratified design axis, so it was pinned by a new test (`body_surface_downgrades_focused_failures_to_warnings`) rather than changed. The spec's narrower "focused errors are never replaced with empty values" bullet does hold on both surfaces.
+- **`pr*`/`cicd*` are effectively unreachable for self-hosted providers.** Between a hard-coded `https://`, a port dropped from `ResolvedRemote::host`, and pattern-only `ApiFlavor` detection, practical reach is github.com, gitlab.com, bitbucket.org, codeberg.org, and hosts literally named `gitea.*`/`gitlab.*`/`forgejo.*`. GitHub Enterprise at `git.company.com` fails with unsupported-flavor. Fixing this needs a configuration surface plus a port/policy decision.
+- **The query-vocabulary link is sibling-relative**, so it is clickable inside the generated doc but only a precise pointer in DMLS hover, which has no base URI. No precedent existed to follow and the two surfaces have incompatible bases; making hover navigation real would require DMLS to rewrite the target into a workspace-root `file://` URI.
+
+The files changed during this implementation cycle:
+
+- `sniff/lib/src/error.rs`
+- `sniff/lib/src/remote/focused.rs`
+- `sniff/lib/src/remote/types.rs`
+- `sniff/lib/src/remote/provider.rs`
+- `sniff/lib/tests/focused_provider.rs`
+- `darkmatter/lib/src/markdown/compose/remote_fetch.rs`
+- `darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs`
+- `darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs`
+- `darkmatter/lib/src/markdown/compose/expression/functions/mod.rs`
+- `darkmatter/lib/src/markdown/compose/expression/functions/escape.rs`
+- `darkmatter/lib/src/markdown/compose/expression/functions/provider.rs`
+- `darkmatter/lib/src/markdown/compose/expression/functions/pull_requests.rs`
+- `darkmatter/lib/src/markdown/compose/expression/functions/cicd.rs`
+- `darkmatter/lib/src/markdown/compose/tests/mod.rs`
+- `darkmatter/lib/src/markdown/compose/tests/provider_network.rs`
+- `darkmatter/dmls/src/overlay/expressions.rs`
+- `darkmatter/docs/schemas/expression-functions.yaml`
+- `darkmatter/docs/topics/darkmatter-expressions.md`
+- `docs/testing-strategy.md`
+- `.github/workflows/test.yml`
+- `.github/workflows/claudine-tests.yml`
