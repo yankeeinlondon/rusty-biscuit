@@ -15,6 +15,7 @@
 //! - **Headless Audio**: Background audio players (afplay, pacat, aplay, etc.)
 //! - **AI CLI Tools**: AI-powered coding assistants (claude, aider, goose, etc.)
 //! - **Notification Helpers**: Desktop notification utilities (terminal-notifier, alerter, snoretoast, burnttoast, dunstify, notify-send)
+//! - **Test Runners**: Project test runners (cargo test, vitest, pytest, go test, etc.)
 //!
 //! ## Usage
 //!
@@ -165,7 +166,7 @@ pub use types::ProgramDetector;
 ///
 /// Contains detection results for all supported program categories:
 /// editors, utilities, package managers, TTS clients, terminal apps, headless audio players,
-/// AI CLI tools, and test runners.
+/// AI CLI tools, notification helpers, and test runners.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ProgramsInfo {
     /// Text editors and IDEs installed on the system.

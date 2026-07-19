@@ -144,7 +144,7 @@ sniff/
 ├── network/        # Network interfaces
 ├── filesystem/     # Git, monorepo, languages, file types, docs, blast radius, just
 ├── package/        # Package manager abstraction (110+)
-├── programs/       # Installed program detection and install (10 categories)
+├── programs/       # Program detection (10 categories; 8 installable)
 ├── remote/         # Remote repo inspection (GitHub, GitLab, Gitea, Bitbucket)
 ├── services/       # System service and init system detection
 ├── request         # Fine-grained detection control (DetectionPlan, request types)

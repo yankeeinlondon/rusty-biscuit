@@ -226,12 +226,12 @@ sniff software test-runners               # Test runners with availability detai
 
 **Program Installation:**
 
-Each program category supports an `install` subcommand:
+Eight of the ten detectable program categories support `install` and `install-plan`. Notification helpers and test runners are report-only and expose neither action.
 
 ```bash
 sniff software editors install          # Interactive picker
 sniff software editors install nvim     # Install a specific program
-sniff software install                  # Pick from all categories
+sniff software install                  # Pick from all installable categories
 ```
 
 Each install attempt runs under a deadline. If the package manager is still
@@ -853,7 +853,7 @@ sniff/
 │   │   │   ├── file_types/   # Broad file type classification
 │   │   │   └── ...           # languages, docs, formatting, blast_radius, just
 │   │   ├── package/          # Package manager abstraction (110+)
-│   │   ├── programs/         # Program detection and install (10 categories)
+│   │   ├── programs/         # Program detection (10 categories; 8 installable)
 │   │   ├── remote/           # Remote repo inspection (GitHub, GitLab, Gitea, Bitbucket)
 │   │   └── services/         # Init system and service detection
 │   └── Cargo.toml

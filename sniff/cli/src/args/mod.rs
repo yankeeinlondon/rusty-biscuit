@@ -246,8 +246,9 @@ fn all_program_candidates() -> Vec<clap_complete::engine::CompletionCandidate> {
 /// Subcommands under `sniff software`.
 ///
 /// The bare command (`sniff software`) shows every installed-program category.
-/// Each category can also be invoked directly for a focused view and supports
-/// `install` / `install-plan` like the aggregate.
+/// Each category can also be invoked directly for a focused view. Eight categories
+/// support `install` / `install-plan`; notification helpers and test runners are
+/// report-only.
 #[derive(Subcommand, Debug, Clone)]
 pub enum SoftwareSubcommand {
     /// Install a program (interactive picker if no name given)
