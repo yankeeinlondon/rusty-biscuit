@@ -1,7 +1,7 @@
 ---
 status: ready for planning
 reviewed: true
-review_iterations: 16
+review_iterations: 17
 rulings: index fallback/order plus initial Git and remote-query surfaces supplied by Ken 2026-07-13/14; branch existence is live and authoritative with zero/branch/branch-plus-remote overloads; ambiguous remote vendors are actively probed; expression catalogs gain lowercase snake_case enum returns including the explicit no-remote empty value; object string values stay quoted and bare identifiers stay variables; exact PR/CI lookup accepts scoped/native IDs and canonical URLs without shorthand; list defaults are 20/max 100, open PRs, all CI job statuses, newest first, and positive counts; PR/CI lists expose one repository-scoped canonical provider-neutral query model with explicit unsupported-filter errors; CI/CD records are jobs; exact/list output uses deterministic compact Markdown links; all expression functions have frontmatter/body parity
 inputs:
   - ./git-pr.md

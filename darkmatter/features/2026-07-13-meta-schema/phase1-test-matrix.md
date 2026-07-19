@@ -1,11 +1,12 @@
 # Phase 1 Test Matrix
 
-Phase 1 establishes executable contracts before production changes. Future
-contracts are `#[ignore]` so the normal suite remains green; an explicit
-ignored-only run proves that they compile and currently fail at the missing
-semantic behavior. Test assertions use public parser, validator, resolver,
-filesystem round-trip, CLI, and LSP session surfaces rather than private
-implementation details.
+Phase 1 established executable contracts before production changes. Future
+contracts were initially `#[ignore]` so the normal suite remained green; an
+explicit ignored-only run proved that they compiled and failed at the missing
+semantic behavior. Those contracts were enabled as their production surfaces
+landed. Test assertions use public parser, validator, resolver, filesystem
+round-trip, CLI, and LSP session surfaces rather than private implementation
+details.
 
 ## Acceptance criteria
 
@@ -37,11 +38,11 @@ real server session, opens a document, and requests hover through LSP.
 
 ## Phase 1 expected-failure evidence
 
-The ignored-only library run executes six contracts. All six fail at intended
+The Phase 1 ignored-only library run executed six contracts. All six failed at intended
 missing behavior: unknown `type-definition`, unknown `schema`, absent native
 mapping depth enforcement, or absent `x-darkmatter-schema` compilation. The
-ignored DMLS session fails because the observable hover is still
-`Type: **any**`. The two non-ignored Phase 1 regressions pass.
+ignored DMLS session failed because the observable hover was still
+`Type: **any**`. The two non-ignored Phase 1 regressions passed.
 
 ## Validation results
 

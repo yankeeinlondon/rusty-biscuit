@@ -14,8 +14,8 @@ the completed phases; representative unrelated behavior remains unchanged.
 Focused replay commands:
 
 ```text
-cargo nextest run -p darkmatter --test meta_schema_phase1 -E 'test(=shipped_base_schema_retypes_schema_and_preserves_resolution_acceptance)' --run-ignored ignored-only
-cargo nextest run -p dmls --test lsp_session -E 'test(=meta_schema_phase1_schema_hover_uses_nominal_type)' --run-ignored ignored-only
+cargo nextest run -p darkmatter --test meta_schema_phase1 -E 'test(=shipped_base_schema_retypes_schema_and_preserves_resolution_acceptance)'
+cargo nextest run -p dmls --test lsp_session -E 'test(=meta_schema_phase1_schema_hover_uses_nominal_type)'
 cargo nextest run -p darkmatter --test base_schema_end_to_end
 cargo nextest run -p darkmatter-cli --test schema_about
 ```

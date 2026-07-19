@@ -4,10 +4,11 @@ ready: false
 agent: codex/default
 created: 2026-07-18T02:26:16-07:00
 spec: 2026-07-13-more-is-more/spec.md
-implemented: false
+implemented: true
 description: "A **feature** review of `2026-07-13-more-is-more/spec.md`"
 feature: 2026-07-13-more-is-more/review-16.md
 previous: 2026-07-13-more-is-more/review-15.md
+next: 2026-07-13-more-is-more/review-17.md
 ---
 
 # Review 16

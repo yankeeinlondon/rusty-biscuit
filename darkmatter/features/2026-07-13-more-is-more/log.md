@@ -110,3 +110,92 @@ The files changed during this implementation cycle were:
 - `sniff/docs/sniff-library-architecture.md`
 - `darkmatter/lib/src/markdown/compose/context/capture/snapshot.rs`
 - `darkmatter/lib/tests/git_context_integration.rs`
+
+## Implementation of Review Findings #17
+
+> **started at:** 2026-07-18T11:18:36-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-13-more-is-more/review-17.md'
+- this is iteration 17 of the review-to-implement cycle
+- review 17 contains one finding:
+        - **Critical** — acceptance criteria 17–30 remain explicitly deferred and unimplemented
+- impacted package areas (from the specification and plan `packages:` frontmatter): `sniff`, `darkmatter` (library + CLI), and `dmls`
+- ordering decision: the sole finding is implemented as one serial work item because AC17–30 form the single remediation requested by review 17
+- starting the work on 'ac17-30-full-implementation' at 11:19:53-07:00
+        - mandatory skills loaded before implementation: `darkmatter`, `rust`, `rust-testing`, `sniff`, `gitnexus-impact-analysis`, and `rust-devops` with its gitoxide reference
+        - repository discovery completed with `sniff repo packages`, `sniff repo package-areas`, and `sniff repo package-dependencies`
+                - executable scope is `sniff` (`sniff`, `sniff-cli`) and `darkmatter` (`darkmatter`, `darkmatter-cli`, `dmls`); Schematic remains excluded unless provider-definition changes become necessary
+                - all verification added by this finding is Level 1; no terminal, browser, device, or live-provider resource is required
+        - pre-edit GitNexus impact analysis completed for the existing shared symbols the implementation must extend
+                - `preferred_remote_url`: LOW, 3 direct callers, 1 affected CLI execution process
+                - `preferred_remote`: HIGH, 2 direct callers, 0 affected execution processes; the shared resolver change will preserve the existing projection contract and add discriminating selection tests
+                - `Lexer::next_token`: MEDIUM, 2 direct callers, 0 affected execution processes
+                - `Parser::parse_primary`: LOW, 1 direct caller, 0 affected execution processes
+                - `SpannedExpr::erase`: LOW, 2 direct callers, 0 affected execution processes
+                - `evaluate`: CRITICAL, 39 direct callers, 1 affected compose-pipeline execution process; the edit will be limited to evaluation of the two new immutable literal variants
+                - `ExpressionFunctionDescriptor::typed_signature`: LOW, 0 direct callers in the indexed graph, 0 affected execution processes
+                - `project_descriptors`: CRITICAL, 1 direct caller, 0 affected execution processes; the edit will preserve data-return behavior and add only closed-enum projection
+                - `parse_expression_function_catalog`: CRITICAL, 6 direct callers, 0 affected execution processes; malformed, duplicate, empty-member, array, fallible, and parameter-rejection cases will be covered directly
+                - `ResolutionContext::fetch_remote_text`: HIGH, 4 direct callers, 0 affected execution processes; no change is planned unless frontmatter parity inspection proves one is necessary
+                - `RemoteRepoProvider::list_pull_requests`: MEDIUM, 5 direct implementations/callers, 0 affected execution processes
+                - `RemoteRepoProvider::list_workflow_runs`: LOW, 2 direct implementations/callers, 0 affected execution processes
+        - the orchestrator was warned immediately about all HIGH and CRITICAL impact results before production edits began
+        - AC17 and AC18 implementation added the two indexed-file family functions and immutable array/object expression literals with focused unit coverage
+                - the first compile exposed four exhaustive AST consumers that must traverse literal children to preserve their existing semantics
+                - follow-up impact analysis: the frontmatter interpolation walker, subtree strict walker, and error excerpt walker are LOW risk; the remote URL discovery child walker is HIGH risk because it feeds compose and transclusion flows
+                - the orchestrator was warned about the HIGH-risk remote discovery traversal before its constrained recursive arm was added
+        - AC17/AC18 verification checkpoint passed
+                - `cargo check --color=never -p darkmatter --tests`
+                - focused Nextest: 3/3 literal-and-index integration tests passed
+        - AC30 added return-only closed enums to the catalog descriptor, parser, projection, and typed-signature surfaces
+                - variants are retained as `ReturnValueType::Enum`, including a quoted empty-string member
+                - array and fallible flags remain orthogonal; enum parameters and empty, malformed, or duplicate return enums are rejected
+                - focused Nextest: 2/2 enum catalog tests passed
+        - AC19 added Sniff's shared `ResolvedRemote` resolver
+                - selection ignores URL-less remotes and follows `origin`, alphabetic non-`upstream`, then `upstream`
+                - exact case-sensitive missing and URL-less names produce distinct typed errors
+                - fetch URL, push URL, host, nested namespace, repository, and API flavor are projected from configured Git state
+                - Sniff test compilation passed and the exact built integration-test binary passed 3/3 tests
+                - the initial Nextest wrapper exceeded the non-interactive 60-second ceiling during a cold profile build; no process remained, so the already-built exact test binary was used without rerunning the cold orchestration
+        - AC20 and AC21 added live remote branch observation and canonical vendor detection
+                - HTTP(S) remotes use read-only Git smart-protocol ref advertisement and match only exact `refs/heads/*`; local refs and configuration remain unchanged
+                - supported non-HTTP GitHub, GitLab, Gitea, Forgejo, and Bitbucket remotes use authoritative branch endpoints; missing branches are `false`, while policy, authentication, authorization, rate-limit, protocol, and transport failures remain typed errors
+                - deterministic provider URLs are classified locally; ambiguous allowlisted HTTP(S) hosts receive bounded GitLab/Gitea/Forgejo version probes
+                - focused Sniff remote-observation tests passed 5/5, including exact ref parsing, no local mutation, deny-before-request, redirect/rate-limit distinctions, and ambiguous vendor probing
+        - AC22 through AC25 added a concrete focused-provider contract and the four Darkmatter query functions
+                - provider-neutral PR and CI/CD job records retain provider, API flavor, host, nested namespace, repository, native/display identity, parent execution identity, normalized/raw state, and canonical URLs
+                - GitHub, GitLab, Gitea, Forgejo, and Bitbucket exact lookups, canonical URL parsing, authoritative not-found behavior, bounded pagination, direct-job listing, and bounded parent-to-job traversal are covered by Wiremock
+                - canonical query objects reject unknown keys, wrong types, invalid enum values, inverted ranges, non-positive or over-100 limits, and unsupported exact filters before network access
+                - PR and CI/CD formatters are pure, deterministic, whitespace-collapsing, Markdown-escaping, and shared by exact/list results
+                - focused Sniff provider tests pass 6/6; focused Darkmatter handler/catalog tests pass 7/7
+        - AC26 installed one run-wide provider-query single-flight cache in the shared remote runtime
+                - normalized keys include operation plus selected remote/reference/query; typed successes and focused error strings are memoized only for the compose run
+                - frontmatter interpolation, body interpolation, and `$()` evaluation now attach the same authorized runtime; existing remote file functions gained the same frontmatter behavior
+                - distinct provider calls share the existing remote-concurrency cap; exact-host consent is checked before credentials or requests, redirects are disabled, and cross-host API routing is limited to `github.com` → `api.github.com` and `bitbucket.org` → `api.bitbucket.org`
+                - AC26 focused Darkmatter tests pass 5/5, including one-request frontmatter/body parity; host-policy/provider tests pass 7/7
+        - AC27 preserved focused malformed, missing/not-found, missing/invalid credential, forbidden, rate-limited, unsupported filter/capability, policy-denied, malformed-response, redirect, and unreachable states without converting them to neutral results
+        - AC28 and AC30 catalog/DMLS parity completed
+                - catalog orders 88–96, aliases, overloads, runtime registrations, enum typed signatures, generated expression docs, and passive DMLS completion/hover all derive from the authored catalog
+                - DMLS recursively traverses new object/array literals while remaining passive; focused DMLS tests pass 2/2
+        - explicit AC17–30 gap audit at 12:55:44-07:00 found one partial implementation gap
+                - Azure DevOps, AWS CodeCommit, and SourceHut HTTP(S) remotes are supported by vendor-neutral Git ref advertisement
+                - SSH-only remotes for those three providers return `UnsupportedRemoteCapability` instead of a false absence because their credentialed provider branch transports are not implemented in this cycle
+                - this maps to AC20 only; it will be reported as a partial deferral rather than claiming the review finding wholly fixed
+        - documentation updated through the authored catalog generator, the Sniff library README, and the `sniff`/`darkmatter` skills; skill hashes were recomputed with `md hash`
+
+## Implementation of Review Findings #17
+
+> **started at:** 2026-07-18T18:00:56-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-13-more-is-more/review-17.md'
+- this is iteration 17 of the review-to-implement cycle
+- starting the work on 'ac17-30-full-implementation-continuation' at 18:02:50-07:00
+        - review 17 contains one Critical finding covering acceptance criteria 17–30
+        - an earlier unfinished iteration-17 attempt is present in the worktree; this continuation will audit and complete that existing implementation without discarding unrelated user changes
+        - package discovery confirms the directly affected package areas are `sniff` and `darkmatter`; `darkmatter`, `darkmatter-cli`, and `dmls` consume the changed surface
+        - GitNexus cannot resolve the new untracked remote-observation symbols, so their pre-edit impact is UNKNOWN; no HIGH or CRITICAL indexed blast-radius warning was returned
+        - the continuation audit confirmed the previously logged AC20 gap for SSH-only Azure DevOps, AWS CodeCommit, and SourceHut remotes
+        - the continuation audit found two further AC20/AC29 gaps in the partial implementation
+                - branch names were not normalized and validated at Sniff's public live-observation boundary
+                - Sniff's area `just test` recipe did not enable the `network` feature, so the new Wiremock suites were not part of the required full Level-1 gate
+        - focused Sniff network-feature compilation and remote unit tests passed before the continuation edits
