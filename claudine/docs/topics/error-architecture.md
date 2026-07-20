@@ -42,7 +42,8 @@ not require a cross-area contract in biscuit-terminal.
 
 Stable Rust cannot upcast an arbitrary `&dyn Error` to `&dyn Diagnostic`, so
 `claudine::diagnostics::as_diagnostic` is a **hand-authored downcast allowlist**
-over concrete types (`CompositionError`, `ClaudineError`, `HarnessError` today).
+over concrete types (`CompositionError`, `ClaudineError`, `HarnessError`, and
+`RestoredDiagnostic` today).
 It is `pub` because `claudine-cli` is a separate crate, and it is the CLI's *only*
 Claudine allowlist.
 
@@ -126,6 +127,54 @@ Widening to recursion later is additive if it is ever ratified.
 `schema_version` moves only for a **non-additive** change (a removed or re-typed
 field). A new facet value, detail key, or code is additive by construction,
 because both sides already tolerate values they do not know.
+
+### Projecting from an erased boundary
+
+A boundary that holds a `color_eyre::eyre::Report` rather than a concrete type is
+**not** a boundary that lost its provenance. `Report` cannot be a `#[source]`
+(it does not implement `std::error::Error`), but it *boxes* its source rather
+than discarding it, so the typed diagnostic is still reachable by downcast.
+
+`DiagnosticSnapshot::select(report.as_ref())` is the seam: it runs the same
+`select_effective_diagnostic` walk the CLI renders through and returns the
+projection, or `None` when the chain genuinely only ever held prose. A record at
+such a boundary stores that projection **beside** its existing prose field —
+never instead of it, because the prose is often load-bearing (`SequenceStepResult.error`
+is compared against the `interrupted by SIGINT` sentinel to select exit code 130).
+
+Storing the snapshot as data, rather than attaching a restored diagnostic as a
+`#[source]`, is deliberate: a source field would change what
+`next_registered_cause` finds and therefore make `err.cause.*` appear where it
+was previously absent — an authored-matching-surface change §D10 reserves for a
+versioned migration. It would also publish a `Box<RegisteredDiagnostic>` to the
+chain, which the boxed-diagnostic guard exists to reject.
+
+### Coming back the other way
+
+Some snapshots are taken *early* and acted on much later. `CompositionPrepContext`
+projects the launch-detection failure at prep time because the prep record is
+`Clone` and a concrete error is not; `--repo` decides whether that failure is
+fatal several stages further on. At that point the snapshot has to become an
+error again, and lifting `snapshot.message` into an `eyre!` string is a **second
+erasure** — at the one boundary that still held the code, category, disposition,
+origin, detail, and cause.
+
+`RestoredDiagnostic` is what such a boundary returns instead. Its facets are read
+from the catalog row for the snapshot's `code`, so the failure re-enters
+`select_effective_diagnostic` and renders a `StatusBlock` with the identity it
+was projected with. Restoration is a fixed point: projecting a `RestoredDiagnostic`
+yields the snapshot it was built from, cause included.
+
+Two rules go with it:
+
+- **Framing goes on `with_context`, not into the message.** "`--repo` requires
+  startup repo detection" is context the snapshot cannot know; it prefixes the
+  human message and leaves every facet untouched. Framing that deserves its own
+  classification deserves its own typed error, not a restored one.
+- **An unknown code degrades, it does not fail.** `Diagnostic::code` returns
+  `&'static str`, so a code this build's catalog cannot name falls back to
+  `internal.bug` while `detail` and `message` carry through. In-process
+  restoration cannot reach that path; it exists so the seam is total.
 
 ### Evolving the machine surface
 
@@ -229,7 +278,7 @@ The guards live in `cli/tests/error_guards.rs`, backed by a `syn` reader over
 
 | Guard | Fails when |
 |-------|-----------|
-| `no_unallowlisted_typed_error_collapses` | a typed error is flattened to prose — formatted report, `to_string()` `map_err`, prose `reason`/`message` field, pre-return `format!`, log-then-return-another |
+| `no_unallowlisted_typed_error_collapses` | a typed error is flattened to prose — formatted report, `to_string()` `map_err`, prose `reason`/`message` field, pre-return `format!`, log-then-return-another, or a `DiagnosticSnapshot` facet re-erased into a report/prose field |
 | `registry_lists_every_diagnostic_impl` | an `impl Diagnostic` is missing from `as_diagnostic`, or vice versa |
 | `no_registered_diagnostic_is_reachable_only_through_a_box` | a registered diagnostic sits behind a `Box` in a `#[source]`/`#[from]` field or a `Result<_, Box<T>>` return |
 | `detail_projections_write_only_declared_keys` | a `detail` projection writes a key its codes do not declare |
