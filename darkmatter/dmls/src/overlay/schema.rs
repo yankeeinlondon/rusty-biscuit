@@ -283,23 +283,32 @@ fn block_top_level_entries(text: &str) -> Vec<(String, String)> {
     let mut quote: Option<char> = None;
     for line in text.lines() {
         let line = line.trim_end_matches('\r');
-        // A line that begins inside a quoted scalar is that scalar's
-        // continuation, not a mapping entry: `description: 'multi` followed by
-        // a literal `kind: schema` line is one ordinary key, and reading the
-        // continuation as structure would tag the document as an envelope the
-        // authoritative parser refuses.
-        let continuation = quote.is_some();
-        advance_quote_state(line, &mut quote);
-        if continuation {
+        // A line typed while a top-level quoted scalar is still open is that
+        // scalar's continuation, not a mapping entry: `description: 'multi`
+        // followed by a literal `kind: schema` line is one ordinary key, and
+        // reading the continuation as structure would tag the document as an
+        // envelope the authoritative parser refuses. Only such an already-open
+        // continuation advances cross-line quote state.
+        if quote.is_some() {
+            advance_quote_state(line, &mut quote);
             continue;
         }
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') || trimmed == "---" || trimmed == "..." {
             continue;
         }
+        // An indented line is nested payload, never a top-level entry. With no
+        // top-level quote open it must not advance quote state either: a quote
+        // inside the nested value (`  title: foo-"bar`) is that value's own
+        // business, and letting it open top-level quote state would swallow the
+        // following top-level key and drop a genuine envelope's retained model.
         if line.chars().next().is_some_and(char::is_whitespace) {
             continue;
         }
+        // A top-level line advances quote state so its own value may open a
+        // multi-line quoted scalar (`description: "multi`) whose following
+        // continuation lines close it.
+        advance_quote_state(line, &mut quote);
         let Some((key, value)) = line.split_once(':') else {
             continue;
         };
@@ -353,10 +362,11 @@ fn step_quoted(
 /// Advances cross-line quoted-scalar state by one physical line of a block
 /// mapping.
 ///
-/// A quote character opens a scalar only where a scalar may begin (line start,
-/// or after `:`, `,`, `-`, `[`, `{`). Elsewhere it is ordinary text: the plain
-/// scalar `don't` must not open a quote that swallows every following line and
-/// drops a genuine envelope's retained model.
+/// A quote character opens a scalar only where a scalar may begin — line start,
+/// or immediately after a structural indicator (see [`is_scalar_boundary`]).
+/// Elsewhere it is ordinary text: the plain scalars `don't` and `foo-"bar` must
+/// not open a quote that swallows every following line and drops a genuine
+/// envelope's retained model.
 fn advance_quote_state(line: &str, quote: &mut Option<char>) {
     let mut chars = line.chars().peekable();
     let mut escaped = false;
@@ -376,7 +386,23 @@ fn advance_quote_state(line: &str, quote: &mut Option<char>) {
         }
         previous_space = ch.is_whitespace();
         at_scalar_start =
-            matches!(ch, ':' | ',' | '-' | '[' | '{') || (at_scalar_start && previous_space);
+            is_scalar_boundary(ch, chars.peek().copied()) || (at_scalar_start && previous_space);
+    }
+}
+
+/// Whether `ch` is a structural indicator that begins a fresh scalar position,
+/// judged by the character `next` that follows it.
+///
+/// YAML indicators are context-sensitive. `-` and `:` open a scalar position
+/// only at a token boundary — followed by whitespace or end of line; a `-` or
+/// `:` inside a plain scalar (`foo-"bar`, `http://x`) is content, so a quote
+/// after it must not open a quoted scalar. `[`, `{`, and `,` are flow
+/// indicators that always begin one.
+fn is_scalar_boundary(ch: char, next: Option<char>) -> bool {
+    match ch {
+        '[' | '{' | ',' => true,
+        '-' | ':' => next.is_none_or(char::is_whitespace),
+        _ => false,
     }
 }
 
@@ -1202,6 +1228,88 @@ mod tests {
                 standalone_envelope_claim(tagged),
                 Some(StandaloneSchemaEnvelope::Tagged),
                 "{presentation}: {tagged:?}"
+            );
+        }
+    }
+
+    /// A quote opened inside a nested (indented) payload must not leak into
+    /// top-level quote state and hide a later top-level key.
+    ///
+    /// `title: foo-"bar` is a valid YAML plain scalar (a `"` mid-plain-scalar
+    /// is literal), so the authoritative parser recognizes the tagged envelope
+    /// and returns `Err` for the invalid `title` definition. The lexical claim
+    /// must agree — returning `Some(Tagged)` so DMLS retains last-good
+    /// completion/hover/diagnostics — regardless of authored key order.
+    #[test]
+    fn envelope_claim_agrees_with_parser_on_nested_plain_scalar_quote() {
+        // Both tagged key orders: the indented poison line must not poison the
+        // top-level scan (part 1 — indented lines do not advance quote state).
+        for carrier in [
+            concat!("types:\n", "  title: foo-\"bar\n", "kind: schema\n"),
+            concat!("kind: schema\n", "types:\n", "  title: foo-\"bar\n"),
+        ] {
+            assert!(
+                darkmatter::markdown::schemas::parse_standalone_schema_document(
+                    carrier,
+                    Path::new("/w/schema.yaml"),
+                )
+                .is_err(),
+                "the authoritative parser recognizes the envelope and rejects the type: {carrier:?}"
+            );
+            assert_eq!(
+                standalone_envelope_claim(carrier),
+                Some(StandaloneSchemaEnvelope::Tagged),
+                "{carrier:?}"
+            );
+        }
+
+        // Part 2 — a `-"` mid-plain-scalar on a *top-level* line must not open a
+        // cross-line quote that swallows the deciding `kind` key. The extra
+        // top-level `description` key makes the parser reject the recognized
+        // envelope, so `Some(Tagged)` still agrees with it.
+        let top_level_poison =
+            concat!("description: foo-\"bar\n", "kind: schema\n", "types:\n", "  x: string\n");
+        assert!(
+            darkmatter::markdown::schemas::parse_standalone_schema_document(
+                top_level_poison,
+                Path::new("/w/schema.yaml"),
+            )
+            .is_err(),
+            "the parser recognizes the tagged envelope (and rejects the stray key)"
+        );
+        assert_eq!(
+            standalone_envelope_claim(top_level_poison),
+            Some(StandaloneSchemaEnvelope::Tagged),
+            "{top_level_poison:?}"
+        );
+
+        // Part 1 isolation: an indented value that legitimately opens an
+        // unclosed quoted scalar (`  title: "str`) makes the whole buffer
+        // unparseable, but the top-level `kind`/`types` structure must still be
+        // read so the last-good tagged model is retained. A quote opened inside
+        // indented payload must not advance top-level quote state. (The
+        // authoritative parser cannot adjudicate an unparseable buffer;
+        // retaining last-good is the claim's own job, so no parity assert here.)
+        let indented_open_quote = concat!("types:\n", "  title: \"str\n", "kind: schema\n");
+        assert_eq!(
+            standalone_envelope_claim(indented_open_quote),
+            Some(StandaloneSchemaEnvelope::Tagged),
+            "{indented_open_quote:?}"
+        );
+
+        // The inert direction: ordinary YAML carrying the same mid-scalar quote
+        // and no envelope tag must stay unclaimed, in agreement with the parser.
+        for inert in ["title: foo-\"bar\n", concat!("types:\n", "  title: foo-\"bar\n")] {
+            assert_eq!(standalone_envelope_claim(inert), None, "{inert:?}");
+            assert!(
+                matches!(
+                    darkmatter::markdown::schemas::parse_standalone_schema_document(
+                        inert,
+                        Path::new("/w/schema.yaml"),
+                    ),
+                    Ok(None)
+                ),
+                "the authoritative parser must also decline {inert:?}"
             );
         }
     }

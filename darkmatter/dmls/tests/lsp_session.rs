@@ -3768,6 +3768,87 @@ fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnost
     fixture.shutdown();
 }
 
+/// A block tagged document authored `types` first must retain its last-good
+/// model when edited into a buffer whose nested payload holds a valid YAML
+/// plain scalar with a mid-scalar quote (`  title: foo-"bar`).
+///
+/// The block scanner used to run that indented line through cross-line quote
+/// tracking, where a token-blind `-` boundary let the `"` open a quote that
+/// swallowed the following top-level `kind: schema` line — so the activation
+/// claim returned `None`, the overlay was dropped, and diagnostics, completion,
+/// and hover all went dark on exactly the keystroke last-good exists for
+/// (violating AC9). The authoritative parser instead recognizes the tagged
+/// envelope and reports the invalid `title` definition, so DMLS must keep
+/// serving the last-good model.
+#[test]
+fn meta_schema_standalone_types_first_retains_last_good_across_nested_quote_edit() {
+    let workspace = tempfile::tempdir().unwrap();
+    let valid = "types:\n  title: string\nkind: schema\n";
+    let malformed = "types:\n  title: foo-\"bar\nkind: schema\n";
+    let path = workspace.path().join("types-first.yaml");
+    std::fs::write(&path, valid).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), valid);
+    assert!(fixture.wait_for_diagnostics(uri.as_str()).is_empty());
+
+    // The `title` key declares a type-definition in the valid buffer.
+    let hover = hover_markup(&mut fixture, uri.as_str(), 1, 3);
+    assert!(
+        hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+        "valid tagged envelope activates semantic intelligence: {hover}"
+    );
+
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": malformed } ]
+        }),
+    );
+
+    // Diagnostics stay available: the current malformed buffer owns them.
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_type_definition")),
+        "the current malformed definition owns diagnostics: {diagnostics:?}"
+    );
+
+    // Completion stays available from the retained last-good model.
+    let completion = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 1, "character": 9 }
+            }),
+        )
+        .result
+        .expect("last-good completion");
+    assert!(
+        completion
+            .as_array()
+            .expect("completion array")
+            .iter()
+            .any(|item| item["label"] == json!("string")),
+        "last-good tagged state keeps completion alive: {completion:?}"
+    );
+
+    // Hover stays available: still the last-good `string`, not the buffer's
+    // current `foo-"bar`.
+    let hover = hover_markup(&mut fixture, uri.as_str(), 1, 3);
+    assert!(
+        hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+        "the retained tagged model survives the malformed edit: {hover}"
+    );
+
+    fixture.shutdown();
+}
+
 /// Flow presentation is not a second dialect: the authoritative standalone
 /// parser accepts a YAML mapping however it is written, so a flow-authored
 /// envelope seeds the same last-good model a block one does. The activation
