@@ -76,7 +76,7 @@ escapee.
 The cycle-7 implementation log stops immediately after “starting the work” and has no actions,
 verification, deferral, or completion record ([log.md:12](log.md#L12)), even though cycle-7 source
 landed in HEAD. Phase 8 also still calls the synthetic large-service Criterion workload deferred
-([phases/08-cross-platform-validation/spec.md:288](phases/08-cross-platform-validation/spec.md#L288)),
+([phases/_completed/08-cross-platform-validation/spec.md:288](phases/_completed/08-cross-platform-validation/spec.md#L288)),
 while the maintained deferral record says review cycle 4 resolved it with 500- and 2,000-service
 workloads ([deferred-perf-tests.md:73](deferred-perf-tests.md#L73)). These contradictions make the
 performance evidence difficult to audit and violate the specification's documentation-maintenance

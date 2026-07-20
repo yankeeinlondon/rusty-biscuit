@@ -137,12 +137,12 @@ stable runner, or narrow the specification through a reviewed spec change.
 
 The feature records were not updated after the review fixes. Phase 4 still says the manifest store is
 lockfile-only and the ownership index is not built
-([04-package-enrichment-and-ownership/spec.md:281](phases/04-package-enrichment-and-ownership/spec.md#L281),
-[04-package-enrichment-and-ownership/spec.md:301](phases/04-package-enrichment-and-ownership/spec.md#L301));
+([04-package-enrichment-and-ownership/spec.md:281](phases/_completed/04-package-enrichment-and-ownership/spec.md#L281),
+[04-package-enrichment-and-ownership/spec.md:301](phases/_completed/04-package-enrichment-and-ownership/spec.md#L301));
 Phase 8 still lists R5, R6.4, and R9.5/R9.6 as open
-([08-cross-platform-validation/spec.md:236](phases/08-cross-platform-validation/spec.md#L236)); and
+([08-cross-platform-validation/spec.md:236](phases/_completed/08-cross-platform-validation/spec.md#L236)); and
 Phase 2 still documents the now-removed aggregate canonicalization allowance
-([02-reuse-and-scope/spec.md:262](phases/02-reuse-and-scope/spec.md#L262)). Update these records to
+([02-reuse-and-scope/spec.md:262](phases/_completed/02-reuse-and-scope/spec.md#L262)). Update these records to
 separate implemented work from the narrower remaining gaps above. Performance baselines and future
 reviews should not need to guess whether source or a stale completion claim is authoritative.
 

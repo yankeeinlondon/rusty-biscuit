@@ -20,7 +20,7 @@ feature: 2026-07-16-performance/review-9.md
 The production completion boundary still requires native macOS, Linux, and Windows tests plus
 comparable per-OS work-count artifacts ([spec.md:397](spec.md#L397)). The current completion record
 explicitly says those Linux and Windows runs and the matched artifact set remain absent
-([phases/08-cross-platform-validation/spec.md:305](phases/08-cross-platform-validation/spec.md#L305)).
+([phases/_completed/08-cross-platform-validation/spec.md:305](phases/_completed/08-cross-platform-validation/spec.md#L305)).
 `git branch -r --contains af4751810e9bc66f3e3dbe5b883c864ce76c77a0` also returns no branch, so
 the hosted matrices cannot have run for the final cycle-8 implementation.
 

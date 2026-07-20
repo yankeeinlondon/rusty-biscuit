@@ -9,6 +9,7 @@ implementation_7: "2026-07-18T08:12:07-07:00"
 implementation_8: "2026-07-18T09:46:42-07:00"
 implementation_9: "2026-07-18T11:40:37-07:00"
 implementation_10: "2026-07-19T20:25:49-07:00"
+implementation_11: "2026-07-20T10:44:30-07:00"
 deferred_perf_measurement: true
 ---
 
@@ -630,7 +631,7 @@ The files changed cover the aggregate request's removal of unrequested docs and 
                 - per repo convention the code is correct and the doc is wrong, so both claims were rewritten to record cycle 4 as the resolution and to name the structural acceptance bound (`1 + ceil(N / 128)` runner calls, `process.spawns`), keeping the honest "no wall timing claimed" qualifier
                 - Phase 8's "remaining limitations" list was rewritten so the native-platform item is stated as still open as of cycle 8 — macOS-only host, reviewed commit on no remote — with cross-compilation, Docker, WSL, and workflow definitions explicitly ruled out as substitutes; Phase 8 now makes no claim that this evidence exists
                 - Phase 8's "Post-review verification" block (1,657 / 777) now leads with a note that those are historical cycle-3 phase-boundary figures, not current counts
-        - **Part C — one further contradiction found.** `phases/06-remote-network-and-subprocess/spec.md:188` stated unqualified that cleanup "terminate[s] the whole group/job", which cycles 5–7 disproved on Unix
+        - **Part C — one further contradiction found.** `phases/_completed/06-remote-network-and-subprocess/spec.md:188` stated unqualified that cleanup "terminate[s] the whole group/job", which cycles 5–7 disproved on Unix
                 - added a paragraph recording that the preceding text is the cycle-3 boundary and that the guarantee is asymmetric: Windows total, Unix layered with a real `setsid()` between-samples escape, reachable through the install boundary, now disclosed via `InstallCapturedResult::timed_out` and `SniffInstallationError::InstallationTimedOut`, with `process.rs` module docs as the authority
                 - checked and deliberately left alone: Phase 4's "Not done at the Phase 4 boundary" and Phase 6's "Deferred, with reasons" are already past-tense and boundary-scoped, and Phase 5:308 already records its deferred reuse items as implemented
                 - the umbrella `spec.md:313` already carried this cycle's installer timeout contract and its four accepted source breaks, so no further edit was needed there
@@ -782,4 +783,70 @@ The files changed by this cycle are records only: this log, `sniff/features/2026
 
 - final verification passed with exit code 0 in both affected areas: **playa** — 19/19 `playa-cli` tests passed (0 skipped), `just lint` exit 0; **sniff** — 1,677 `sniff-lib` tests passed (19 skipped) and 782 `sniff-cli` tests passed (3 skipped), `just lint` exit 0
 - both medium findings were resolved by post-review commits that predate this session; this cycle's contribution is the audit against the current tree, the composed command-boundary regression's continued green run, and the deferral record for the recurring cross-platform High finding
+- no commit, push, external workflow trigger, VM startup, package installation, or write-mode formatting command was run
+
+## Implementation of Review Findings #11
+
+> **started at:** 2026-07-20T10:44:30-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'sniff/features/2026-07-16-performance/review-11.md'
+- this is iteration 11 of the review-to-implement cycle
+- review-11 contains 2 findings (1 High, 1 Medium):
+        1. High: native Linux and Windows execution and matched work-count artifacts remain absent
+        2. Medium: deleting the completed phase records broke live design and performance-evidence references
+- the Medium finding is the actionable one this cycle; it is a documentation-integrity regression introduced by `c2a188379`, which deleted 2,503 lines of phase records that eight live consumers still link to
+- starting the work on 'restore deleted phase records and repair live references (review-11 Medium)' at 10:45:19
+        - **restored all 9 deleted files** from `c2a188379^` into `phases/_completed/`, applying the repo's documented `_completed` lifecycle convention at the `phases/` level so the records stay inside the umbrella feature they belong to: `01-work-accounting/{log.md,spec.md}`, `02-reuse-and-scope/spec.md`, `03-observation-index/spec.md`, `04-package-enrichment-and-ownership/spec.md`, `05-git-observation/spec.md`, `06-remote-network-and-subprocess/spec.md`, `07-profile-guided-cleanup/spec.md`, `08-cross-platform-validation/spec.md` (2,503 lines, byte-identical to the pre-deletion tree apart from the link repairs below)
+        - **archiving the tree as a unit is what makes the links cheap.** Every sibling-relative `depends-on:`/cross-phase link (`../03-observation-index/spec.md` and the 13 others) still resolves untouched, because all eight phases moved together. Only links pointing *out* of `phases/` gained a directory of depth, and those were re-pointed:
+                - `../../spec.md` → `../../../spec.md` (umbrella spec) in `01/spec.md:3` (`depends-on:`), `06/spec.md:5`, `07/spec.md:6`, `08/spec.md:11`
+                - `../../log.md` → `../../../log.md` in `08/spec.md:274`
+                - `../../deferred-perf-tests.md` → `../../../deferred-perf-tests.md` in `08/spec.md:313`
+                - `../../../../lib/benches/README.md` → `../../../../../lib/benches/README.md` in `08/spec.md:217`
+        - **live consumers repaired — 8 files, 17 references** re-pointed from `phases/NN-…` to `phases/_completed/NN-…`:
+                - `.claude/skills/sniff/SKILL.md` (3): the Phase 1 baseline table, the Phase 3/Phase 4 counter-baseline caveat, and the Phase 7 R14 keep/defer table — the authoritative evidence the skill tells future performance work to use
+                - `.github/workflows/sniff-performance.yml:150` (1, comment naming the harness the archived baselines were captured with)
+                - production rustdoc (3): `sniff/lib/src/process.rs:7` (`//!`), `sniff/lib/src/remote/snapshot.rs:10` (`//!`), `sniff/lib/src/filesystem/git/discovery.rs:578` (`///`)
+                - `plan.md` (18 path references), `log.md:633` (1), and prior reviews `review-1/2/3/8/9/10` (10 link targets; review-8/9/10 also carry the path as link *text*, updated so label and target agree)
+                - review prose and findings were not rewritten — only path tokens changed
+        - **`plan.md:489` stale claim corrected.** It asserted "No `phases/_completed` convention exists, and moving individual records would break their relative dependency links". Replaced with an accurate note that the tree is archived under `phases/_completed/`, why (live consumers cite it as authoritative evidence the umbrella `spec.md` does not reproduce), and that moving the tree *as a unit* is precisely what preserves the sibling-relative links. The parent line 487 "Decision: nothing was moved. No files changed location." was corrected to match. `plan.md:333`'s quoted `depends-on: ../../spec.md` was updated to `../../../spec.md` so it matches the restored file's actual frontmatter
+        - **deliberately left verbatim:** the restored `01-work-accounting/log.md` references to `phases/01-work-accounting/review-1.md`. `git log --all -- <path>` is empty — that file was never committed in any revision, and that log is the record of a review cycle that could not start *because* the file was absent. Its `spec.md` mentions (same document, moved) were re-pointed; the `review-1.md` mentions are quoted history, not navigation, so rewriting them would be revisionist
+        - **`.claude/skills/sniff/SKILL.md` frontmatter refreshed** per the skill convention: `last_updated` 2026-07-17 → 2026-07-20 and `hash` re-generated with `md hash` to `3cd50ffff2b8b5db-c51c4b28dba7d590`, verified a fixed point on re-run
+        - **link-integrity check** written as a TypeScript script (`/tmp/link-check.ts`, run with `npx tsx`; TS per the stated no-Python preference). It walks every tracked *and* untracked `.md`/`.rs`/`.ya?ml`/`.toml` file in the repo, extracts phase-record references in all three forms that occur here — markdown link targets `](path)`, backticked code spans, and bare rustdoc/YAML paths — normalizes off `#anchor` and `:LINE` suffixes, and resolves each against the filesystem (relative links inside the restored tree are resolved against their own directory, not the repo root). The single never-existed `review-1.md` path is an explicit, commented exemption rather than a silent skip:
+                - `files scanned: 9380`, `references checked: 84`, `exempt (never existed): 4`, `dangling references: 0`, exit code `0`
+                - the first run of this check caught 3 sites my initial pass missed — the review-8/9/10 link *labels* and the phase-01 log's `spec.md` mentions — so it was load-bearing, not ceremonial
+        - **`just test` in `sniff/` — exit code 0.** `sniff` 1,677 passed / 19 skipped (11 slow); `sniff-cli` 782 passed / 3 skipped (16 slow). Matches review-11's recorded baseline exactly, as expected for a docs-and-comments change
+        - **`just lint` in `sniff/` — exit code 0**
+        - **the three Rust diffs are comment-only.** `git diff -U0` on `process.rs`, `remote/snapshot.rs`, and `filesystem/git/discovery.rs` shows exactly one changed line each, all inside `//!`/`///` doc comments, with no behavior change
+        - **pre-existing rustfmt drift noted, not touched.** `cargo fmt --check` (read-only) reports diffs in 67 sniff files — including files this change never opened — which is the known local-rustfmt-vs-`main` drift documented in `CLAUDE.md`. Critically, none of the reported hunks fall on my edited lines (`process.rs:7`, `snapshot.rs:10`, `discovery.rs:578`); `process.rs` drift is at 173/225/506/864/938/990/1190/1393/1401/1416 and `discovery.rs` at 139/967. No write-mode formatting command was run
+        - the High finding (native Linux/Windows execution and matched work-count artifacts) was **not** addressed this cycle: it requires native non-macOS hosts and an immutable published implementation identifier, neither of which this macOS-only, non-interactive session can produce
+- work completed for 'restore deleted phase records and repair live references (review-11 Medium)' at 11:07:12
+- starting the work on 'native Linux and Windows execution and matched work-count artifacts (review-11 High)' at 11:07:30
+        - re-verified the constraint rather than inheriting cycle 10's conclusion:
+                - `uname -a` → native arm64 macOS (Darwin 25.5.0, `xnu-12377.121.10~1/RELEASE_ARM64_T6041`)
+                - `rustup target list --installed` → `aarch64-apple-darwin`, `wasm32-wasip1`, `wasm32-wasip2`, `x86_64-pc-windows-gnu`, `x86_64-pc-windows-msvc`; **no Linux target at all**, and neither Windows target can execute on macOS
+                - `git branch -r --contains c2a188379d1be770bfa3638f412552cb05310839` → no remote branch contains the reviewed tree, re-confirming review-11's own observation for the exact commit it named
+        - **deferred** as a platform and execution-authority constraint, not a CPU-load deferral; structurally unchanged from cycles 5 through 10. This session is prohibited from committing, pushing, invoking credential helpers, starting VMs, and triggering external workflows, so no authorized native Linux or Windows execution path exists from this workspace
+        - cross-compilation proves compilation only, Docker was ruled inadmissible for this finding by review-7, and a workflow definition is not an execution record
+        - relevance note for this cycle: **no production behavior was changed** — the only Rust edits are three single-line rustdoc path corrections, so the native-platform risk surface is unchanged from cycle 10
+        - full detail and the closure procedure appended to `sniff/features/2026-07-16-performance/deferred-perf-tests.md` under "Review 11 deferred items"; `deferred_perf_measurement: true` remains set in this log's frontmatter
+- work completed for 'native Linux and Windows execution and matched work-count artifacts (review-11 High)' at 11:09:40
+- no commit, push, external workflow trigger, VM startup, package installation, or write-mode formatting command was run
+
+### Successful Completion
+
+The implementation of review cycle 11 has completed successfully in 26 minutes and 40 seconds (10:44:30–11:11:10 local time). During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 was fixed, 1 was deferred (see reasons below):
+
+- **Finding 1, native Linux and Windows execution and matched three-OS work-count artifacts** — deferred because this native arm64 macOS host has no authorized native Linux or Windows execution path. The constraint was re-verified rather than inherited: `rustup target list --installed` carries no Linux target at all, neither installed Windows target can execute on macOS, and `git branch -r --contains c2a188379d1be770bfa3638f412552cb05310839` returns no remote branch for the exact commit review-11 named. This session is prohibited from committing, pushing, invoking credential helpers, starting VMs, and triggering external workflows. Cross-compilation proves compilation only, Docker was ruled inadmissible by review-7, and a workflow definition is not an execution record. This is a platform and execution-authority constraint, not a CPU-load deferral. Full detail and the closure procedure are recorded in `sniff/features/2026-07-16-performance/deferred-perf-tests.md` under "Review 11 deferred items".
+
+The files changed by this cycle are the restored phase archive `sniff/features/2026-07-16-performance/phases/_completed/` (9 files, 2,503 lines: phases 01–08 specs plus the phase-01 log), eight files carrying repaired live references (`.claude/skills/sniff/SKILL.md`, `.github/workflows/sniff-performance.yml`, `sniff/lib/src/process.rs`, `sniff/lib/src/remote/snapshot.rs`, `sniff/lib/src/filesystem/git/discovery.rs`, `plan.md`, `log.md`, and reviews 1/2/3/8/9/10), plus the records `deferred-perf-tests.md` and `review-11.md` metadata.
+
+- the Medium finding was resolved by **archiving rather than re-deleting**: the completed phase tree was restored from `c2a188379^` into `phases/_completed/`, applying the repo's documented `_completed` lifecycle convention at the `phases/` level so the records stay inside the umbrella feature that cites them
+- moving the tree **as a unit** is what kept the change cheap — all 14 sibling-relative `depends-on:`/cross-phase links resolve untouched; only the 7 links that escape `phases/` needed re-pointing for the extra directory of depth
+- **17 live references across 8 files** were repaired, including the three the review named as design-authoritative: the Phase 1 counter baseline, the Phase 3/4 corrected-baseline caveat, and the Phase 7 R14 keep/defer table in the required Sniff skill
+- `plan.md`'s stale assertion that "No `phases/_completed` convention exists" was corrected in the same change, along with two adjacent statements it had made inconsistent
+- a **link-integrity checker** (TypeScript, run via `tsx`) was written to verify the result: 9,380 files scanned, 84 phase references checked, 4 exempt, **0 dangling**. It earned its keep — its first run caught 3 sites the manual pass had missed, including link *labels* in reviews 8/9/10 that disagreed with their own targets
+- one deliberate non-change: the restored `01-work-accounting/log.md` references to a `review-1.md` that `git log --all` shows was **never committed** were left verbatim, because that log is the record of a cycle which could not start precisely because the file was absent; rewriting them would be revisionist. The checker exempts that path explicitly and in comment, not silently
+- the three Rust edits are **one doc-comment line each** with no behavior change, confirmed by inspecting `git diff` for those files
+- final verification passed with exit code 0 in the impacted area: **sniff** — 1,677 `sniff-lib` tests passed (19 skipped) and 782 `sniff-cli` tests passed (3 skipped), matching review-11's own baseline exactly; `just lint` exit 0
+- read-only `cargo fmt --check` reports drift in 67 sniff files, none of whose hunks land on this cycle's edited lines. This is the known local-rustfmt-vs-`main` drift documented in `CLAUDE.md`; it is pre-existing, `just lint` does not gate on it, and no write-mode formatting was run
 - no commit, push, external workflow trigger, VM startup, package installation, or write-mode formatting command was run

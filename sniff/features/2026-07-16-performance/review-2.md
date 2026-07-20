@@ -125,11 +125,11 @@ for timing, or explicitly narrow the specification before declaring completion.
 
 Several feature records remain materially stale after the review-1 fixes. Phase 4 still says the
 `ManifestStore` is lockfile-only and the ownership index is not built
-([04-package-enrichment-and-ownership/spec.md:279](phases/04-package-enrichment-and-ownership/spec.md#L279));
+([04-package-enrichment-and-ownership/spec.md:279](phases/_completed/04-package-enrichment-and-ownership/spec.md#L279));
 Phase 8 still lists R5, R6.4, and R9.5/R9.6 as open
-([08-cross-platform-validation/spec.md:236](phases/08-cross-platform-validation/spec.md#L236)); and
+([08-cross-platform-validation/spec.md:236](phases/_completed/08-cross-platform-validation/spec.md#L236)); and
 Phase 2 still carries the aggregate canonicalization allowance that should have been closed by R6
-([02-reuse-and-scope/spec.md:262](phases/02-reuse-and-scope/spec.md#L262)). Some of those source
+([02-reuse-and-scope/spec.md:262](phases/_completed/02-reuse-and-scope/spec.md#L262)). Some of those source
 features now exist, while the narrower gaps above remain. Update the records to distinguish what
 landed from what is still incomplete so future reviews and performance baselines do not rely on
 obsolete implementation claims.

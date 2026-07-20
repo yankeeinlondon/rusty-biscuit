@@ -383,3 +383,39 @@ close without external execution or unrelated public API expansion.
   macOS, Linux, and Windows; run the `work_counts` example natively on each; and retain all
   three tables plus the test and lint run links under that same identifier. Cross-compilation,
   Docker, WSL, or results from a different tree do not close this finding.
+
+## Review 11 deferred items
+
+### Finding 1: native Linux and Windows execution and matched work-count artifacts
+
+- **Review mapping:** "High: native Linux and Windows execution and matched work-count
+  artifacts remain absent" ([review-11.md](review-11.md)). Structurally the same finding
+  carried by review cycles 5 through 10.
+- **Why deferred:** re-verified in cycle 11 rather than inherited from cycle 10.
+  `uname -a` reports native arm64 macOS (Darwin 25.5.0,
+  `xnu-12377.121.10~1/RELEASE_ARM64_T6041`). `rustup target list --installed` carries
+  **no Linux target at all**, and neither installed Windows target
+  (`x86_64-pc-windows-gnu`, `x86_64-pc-windows-msvc`) can execute on macOS.
+  `git branch -r --contains c2a188379d1be770bfa3638f412552cb05310839` returns no remote
+  branch. This session is additionally prohibited from committing, pushing, invoking
+  credential helpers, starting VMs, and triggering external workflows, so no authorized
+  native Linux or Windows execution path exists from this workspace. This is a **platform
+  and execution-authority constraint, not a CPU-load deferral.**
+- **Admissibility, restated:** cross-compilation proves compilation only; Docker was ruled
+  inadmissible for this finding by review-7; a workflow definition is future coverage, not
+  an execution record.
+- **Cycle-11 relevance note:** this cycle changed **no production behavior**. Its Rust
+  edits are three single-line rustdoc path corrections
+  (`sniff/lib/src/process.rs:7`, `sniff/lib/src/remote/snapshot.rs:10`,
+  `sniff/lib/src/filesystem/git/discovery.rs:578`); everything else is restored or
+  re-linked documentation. The native-platform risk surface is therefore unchanged from
+  cycle 10.
+- **Identifier note:** the identifier to publish is a **new SHA** — current HEAD
+  `c2a188379` plus this cycle's uncommitted record and link restoration — not `c2a188379`
+  itself. The three-OS evidence must be gathered against that final tree.
+- **To close:** commit and push one immutable cycle-11 implementation identifier to
+  `origin`; obtain green native `cd sniff && just test` and `cd sniff && just lint` runs on
+  macOS, Linux, and Windows; run the `work_counts` example natively on each; and retain all
+  three `sniff-work-counts-{os}` artifacts plus the test and lint run links under that same
+  identifier. Cross-compilation, Docker, WSL, or results from a different tree do not close
+  this finding.

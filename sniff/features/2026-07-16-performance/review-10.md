@@ -20,7 +20,7 @@ feature: 2026-07-16-performance/review-10.md
 The production completion boundary still requires native macOS, Linux, and Windows tests plus
 comparable per-OS work-count artifacts ([spec.md:397](spec.md#L397)). The current completion record
 still says the Linux and Windows native runs and matched artifact set are absent
-([phases/08-cross-platform-validation/spec.md:307](phases/08-cross-platform-validation/spec.md#L307)),
+([phases/_completed/08-cross-platform-validation/spec.md:307](phases/_completed/08-cross-platform-validation/spec.md#L307)),
 and `git branch -r --contains 77b3ea5ed0b9fffbc8a88bcca1fcd2bcd9302023` returns no branch. Therefore
 neither the three-OS test workflow nor the scheduled work-count matrix could have executed the final
 reviewed tree.

@@ -94,14 +94,14 @@ source_code:
 documentation:
   - .claude/skills/sniff/SKILL.md
   - sniff/docs/sniff-library-architecture.md
-  - sniff/features/2026-07-16-performance/phases/01-work-accounting/spec.md
-  - sniff/features/2026-07-16-performance/phases/02-reuse-and-scope/spec.md
-  - sniff/features/2026-07-16-performance/phases/03-observation-index/spec.md
-  - sniff/features/2026-07-16-performance/phases/04-package-enrichment-and-ownership/spec.md
-  - sniff/features/2026-07-16-performance/phases/05-git-observation/spec.md
-  - sniff/features/2026-07-16-performance/phases/06-remote-network-and-subprocess/spec.md
-  - sniff/features/2026-07-16-performance/phases/07-profile-guided-cleanup/spec.md
-  - sniff/features/2026-07-16-performance/phases/08-cross-platform-validation/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/01-work-accounting/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/02-reuse-and-scope/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/03-observation-index/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/04-package-enrichment-and-ownership/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/05-git-observation/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/06-remote-network-and-subprocess/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/07-profile-guided-cleanup/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/08-cross-platform-validation/spec.md
   - sniff/features/2026-07-16-performance/plan.md
   - sniff/lib/README.md
   - sniff/lib/benches/README.md
@@ -120,14 +120,14 @@ docs_updated_during_phase_8:
   - sniff/lib/benches/README.md
   - sniff/features/2026-07-16-performance/plan.md
 docs_created_during_phase_8:
-  - sniff/features/2026-07-16-performance/phases/08-cross-platform-validation/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/08-cross-platform-validation/spec.md
 skills_files_updated_during_phase_8:
   - .claude/skills/sniff/SKILL.md
 source_files_during_phase_7: []
 docs_updated_during_phase_7:
   - sniff/features/2026-07-16-performance/plan.md
 docs_created_during_phase_7:
-  - sniff/features/2026-07-16-performance/phases/07-profile-guided-cleanup/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/07-profile-guided-cleanup/spec.md
 skills_files_updated_during_phase_7:
   - .claude/skills/sniff/SKILL.md
 packages_during_phase_7:
@@ -159,7 +159,7 @@ source_files_during_phase_6:
 docs_updated_during_phase_6:
   - sniff/features/2026-07-16-performance/plan.md
 docs_created_during_phase_6:
-  - sniff/features/2026-07-16-performance/phases/06-remote-network-and-subprocess/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/06-remote-network-and-subprocess/spec.md
 skills_files_updated_during_phase_6:
   - .claude/skills/sniff/SKILL.md
 source_files_during_phase_5:
@@ -176,7 +176,7 @@ source_files_during_phase_5:
 docs_updated_during_phase_5:
   - sniff/features/2026-07-16-performance/plan.md
 docs_created_during_phase_5:
-  - sniff/features/2026-07-16-performance/phases/05-git-observation/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/05-git-observation/spec.md
 skills_files_updated_during_phase_5:
   - .claude/skills/sniff/SKILL.md
 source_files_during_phase_4:
@@ -199,7 +199,7 @@ source_files_during_phase_4:
 docs_updated_during_phase_4:
   - sniff/features/2026-07-16-performance/plan.md
 docs_created_during_phase_4:
-  - sniff/features/2026-07-16-performance/phases/04-package-enrichment-and-ownership/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/04-package-enrichment-and-ownership/spec.md
 skills_files_updated_during_phase_4:
   - .claude/skills/sniff/SKILL.md
 source_files_during_phase_3:
@@ -219,7 +219,7 @@ source_files_during_phase_3:
 docs_updated_during_phase_3:
   - sniff/features/2026-07-16-performance/plan.md
 docs_created_during_phase_3:
-  - sniff/features/2026-07-16-performance/phases/03-observation-index/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/03-observation-index/spec.md
 skills_files_updated_during_phase_3:
   - .claude/skills/sniff/SKILL.md
 source_files_during_phase_2:
@@ -250,7 +250,7 @@ source_files_during_phase_2:
 docs_updated_during_phase_2:
   - sniff/features/2026-07-16-performance/plan.md
 docs_created_during_phase_2:
-  - sniff/features/2026-07-16-performance/phases/02-reuse-and-scope/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/02-reuse-and-scope/spec.md
 skills_files_updated_during_phase_2:
   - .claude/skills/sniff/SKILL.md
 source_files_during_phase_1:
@@ -307,7 +307,7 @@ source_files_during_phase_1:
 docs_updated_during_phase_1:
   - sniff/lib/benches/README.md
 docs_created_during_phase_1:
-  - sniff/features/2026-07-16-performance/phases/01-work-accounting/spec.md
+  - sniff/features/2026-07-16-performance/phases/_completed/01-work-accounting/spec.md
 skills_files_updated_during_phase_1:
   - .claude/skills/sniff/SKILL.md
 ---
@@ -330,7 +330,7 @@ Implement the umbrella performance specification through independently reviewabl
 
 Establish R1 before evaluating any optimization. This phase must not intentionally change detection results.
 
-- [x] Create `phases/01-work-accounting/spec.md` with `sub-spec: true` and `depends-on: ../../spec.md`; enumerate stable counter names, owned instrumentation boundaries, test-access strategy, representative fixtures, and the pre-change baseline procedure.
+- [x] Create `phases/_completed/01-work-accounting/spec.md` with `sub-spec: true` and `depends-on: ../../../spec.md`; enumerate stable counter names, owned instrumentation boundaries, test-access strategy, representative fixtures, and the pre-change baseline procedure.
 - [x] Update `sniff/lib/src/performance.rs` so an active `PerformanceCollector` can be installed in `ignore::build_parallel()` worker closures and every worker flushes its stage/counter buffers before exiting or returning to the pool.
 - [x] Update `sniff/lib/src/filesystem/system_view.rs` `WorkerBuffers` and parallel-walker setup so directory-entry and classification work performed by every worker appears exactly once in the request's report, including early-stop paths.
 - [x] Gate per-entry clocks, TLS access, and counter bookkeeping out of the default hot path whenever neither structured performance collection nor the `metrics` feature is active; add a test or benchmark assertion proving the disabled path records no work.
@@ -350,7 +350,7 @@ Establish R1 before evaluating any optimization. This phase must not intentional
 
 Implement R2, R3, R7, and the eager-index portions of R13. After the Phase 2 sub-spec fixes shared contracts, the four labeled lanes can proceed in parallel in separate worktrees because they touch distinct primary modules; coordinate final assembly changes in `request.rs` and filesystem orchestration.
 
-- [x] Create `phases/02-reuse-and-scope/spec.md` with `sub-spec: true` and `depends-on: ../01-work-accounting/spec.md`; pin aggregate JSON goldens, walk-scope truth tables, inventory serialization migration, and eager-index counter expectations.
+- [x] Create `phases/_completed/02-reuse-and-scope/spec.md` with `sub-spec: true` and `depends-on: ../01-work-accounting/spec.md`; pin aggregate JSON goldens, walk-scope truth tables, inventory serialization migration, and eager-index counter expectations.
 - [x] **[Parallel lane A — aggregate]** Extend the aggregate library request/result only for facts currently missing from `GitInfo`/`RepoInfo`—including conflicts, current worktree identity, branches/worktrees, root-package fallback, and one commit-family history observation—without adding CLI-side detection.
 - [x] **[Parallel lane A — aggregate]** Refactor `sniff/cli/src/output/repo_json.rs::build_aggregate_value` into a pure projection over `SniffResult` plus explicit render options; remove calls that discover repositories, collect changed paths, query worktrees/branches/conflicts, or walk history.
 - [x] **[Parallel lane A — aggregate]** Derive dirty, staged, unstaged, and untracked file/source/document/package/package-area buckets from the single detected `file_changes` collection and a library-owned attribution projection over the detected package catalog; retain current serializer ordering and schema, then let Phase 4 replace the attribution projection's internals with the shared deepest-prefix index.
@@ -374,7 +374,7 @@ Implement R2, R3, R7, and the eager-index portions of R13. After the Phase 2 sub
 
 Implement R4 so integrated full filesystem requests and standalone full repo detection share the same compact evidence model.
 
-- [x] Create `phases/03-observation-index/spec.md` with `sub-spec: true` and `depends-on: ../02-reuse-and-scope/spec.md`; list every evidence kind, root-marker exception, ignore/prune rule, case behavior, and allowed specialized fallback.
+- [x] Create `phases/_completed/03-observation-index/spec.md` with `sub-spec: true` and `depends-on: ../02-reuse-and-scope/spec.md`; list every evidence kind, root-marker exception, ignore/prune rule, case behavior, and allowed specialized fallback.
 - [x] Evolve `FilesystemSystemView` in `sniff/lib/src/filesystem/system_view.rs` into a request-scoped observation index that conditionally retains manifest path/kind/owner, nested marker and parent, solution/leaf evidence, capped classifications, Markdown metadata, and already-available entry metadata—never full `DirEntry` values or file bodies.
 - [x] Match nested workspace markers during the shared walk and make `sniff/lib/src/filesystem/repo/nested.rs` consume supplied evidence instead of invoking `walk_for_nested_markers` when the tree has already been observed.
 - [x] Route standalone full `detect_repo` and integrated full filesystem detection through the same observation builder, while keeping structure-only free to use the smallest evidence set established in Phase 2.
@@ -392,7 +392,7 @@ Implement R4 so integrated full filesystem requests and standalone full repo det
 
 Implement R5 and R6 on top of the observation index. Discovery must finish and deduplicate boundaries before enrichment begins.
 
-- [x] Create `phases/04-package-enrichment-and-ownership/spec.md` with `sub-spec: true` and `depends-on: ../03-observation-index/spec.md`; define `PackageSeed`, detail-level enrichment, `ManifestStore`, normalized-key semantics, and the structure-only migration.
+- [x] Create `phases/_completed/04-package-enrichment-and-ownership/spec.md` with `sub-spec: true` and `depends-on: ../03-observation-index/spec.md`; define `PackageSeed`, detail-level enrichment, `ManifestStore`, normalized-key semantics, and the structure-only migration.
 - [x] Introduce a cheap internal `PackageSeed` containing the normalized absolute path key, owning `MonorepoStandard`, provenance, and matched evidence kinds; make workspace and nested detectors return seeds before resolving enrichment fields.
 - [x] Merge seeds by whole-component normalized `PathBuf` key before name/version resolution, language/framework scans, test-runner detection, feature extraction, dependency parsing, or file association.
 - [x] Add one per-detection `ManifestStore` keyed by normalized native paths for parsed/raw Cargo, Node, Python, Go, lockfile, inherited-version, and root-scoped test-runner/config inputs; count and test one parse per unique input. **Completed after the Phase 4 boundary:** the request-scoped store now covers typed and raw manifests, Cargo/pnpm/uv lockfiles, inherited workspace manifests, and root configuration. Review cycle 3 added replayable failure caching and detection-level one-parse coverage for npm, pnpm, and uv.
@@ -413,7 +413,7 @@ Implement R5 and R6 on top of the observation index. Discovery must finish and d
 
 Implement R8–R10. Rich status, metadata controls, and history/containment can be developed as parallel lanes after the Phase 5 public request/result contracts are fixed; merge through shared `gix` request context tests.
 
-- [x] Create `phases/05-git-observation/spec.md` with `sub-spec: true` and `depends-on: ../04-package-enrichment-and-ownership/spec.md`; finalize Option A, validate or revise the 10,000-commit default, list every in-repo source migration, and pin existing preset JSON and result values.
+- [x] Create `phases/_completed/05-git-observation/spec.md` with `sub-spec: true` and `depends-on: ../04-package-enrichment-and-ownership/spec.md`; finalize Option A, validate or revise the 10,000-commit default, list every in-repo source migration, and pin existing preset JSON and result values.
 - [x] **[Parallel lane A — rich status]** Add one status-call context holding the index, HEAD tree, worktree, object cache, and reusable diff resources; preserve status-provided object IDs and enable object caching for file-change-only requests.
 - [x] **[Parallel lane A — rich status]** Load each staged/unstaged blob or worktree side once, run one diff per side, and derive both statistics and optional unified hunks from that diff; keep identity, dirty-flag, and counts-only requests free of blob loads and diffs.
 - [x] **[Parallel lane B — metadata controls]** Add optional `GitMetadataRequest` controls and builders for commits, ref decorations, branches, divergence, remotes, tracking, config, and worktrees; absence during deserialization must derive legacy behavior and legacy presets must omit the field when serialized.
@@ -433,7 +433,7 @@ Implement R8–R10. Rich status, metadata controls, and history/containment can 
 
 Implement R11 and R12. The remote snapshot, WAN client, NTP default, and subprocess lanes are parallelizable after the Phase 6 sub-spec fixes shared error/counter policies; provider files can proceed independently once the snapshot contract is stable.
 
-- [x] Create `phases/06-remote-network-and-subprocess/spec.md` with `sub-spec: true` and dependencies on `../05-git-observation/spec.md` and the umbrella spec; pin provider truncation semantics, HTTP counters, timeout defaults, partial-result behavior, diagnostics, and child-reaping tests.
+- [x] Create `phases/_completed/06-remote-network-and-subprocess/spec.md` with `sub-spec: true` and dependencies on `../05-git-observation/spec.md` and the umbrella spec; pin provider truncation semantics, HTTP counters, timeout defaults, partial-result behavior, diagnostics, and child-reaping tests.
 - [x] **[Parallel lane A — remote]** Add a provider-private `RemoteRepoSnapshot` or additive defaulted trait hook so `fetch_report` resolves metadata/default branch once and makes at most one equivalent root recursive-tree request per report without adding a required downstream trait method. **`remote/snapshot.rs`** + three **defaulted** hooks (`snapshot`, `list_documents_with`, `detect_cicd_with`). No required trait method added: the defaults re-enter the existing `list_documents`/`detect_cicd`, so a downstream provider that adopts nothing still works (R11.4).
 - [x] **[Parallel lane A — remote]** Make GitHub, GitLab, Gitea, and Bitbucket document/CI projections consume shared metadata/tree evidence; run independent Bitbucket continuation listings concurrently only after the shared branch input is available. **All four adopted.** Per report: GitHub 3 metadata + 2 tree → **1 + 1**; Gitea 3 + 2 → **1 + 1**; GitLab **3 tree → 1** (its metadata call *is* a tree fetch whose result was discarded); Bitbucket 3 metadata + 2 root listings → **1 + 1**. Bitbucket's `docs/` and `doc/` listings now run under one `tokio::join!` once the branch is known (R11.3). Sharing the projection also collapsed **four byte-identical copies** of `categorize_document`/`is_documentation_file` (and their four duplicate test suites) into one in `snapshot.rs`.
 - [x] **[Parallel lane A — remote]** Detect provider-reported truncation and perform bounded pagination/subtree continuation needed for correctness; preserve required-metadata and optional-section graceful degradation when the shared tree fails. **`truncated` was deserialized by GitHub and Gitea and read nowhere**, and Bitbucket's `response.next` was explicitly ignored ("For MVP, just return the first page") — so a >100k-entry or multi-page repository reported "no docs, no CI" with full confidence. Now: GitHub/Gitea continue the document/CI prefixes as `branch:prefix` subtrees; Bitbucket follows pagination to `MAX_LISTING_PAGES`. `RemoteTree::available` keeps "fetch failed" distinguishable from "observed and empty", so a failed tree degrades the optional sections while metadata survives (R11.6).
@@ -457,7 +457,7 @@ Implement R11 and R12. The remote snapshot, WAN client, NTP default, and subproc
 
 Implement only measured R13/R14 candidates. This phase is optional per candidate and must not create speculative abstractions.
 
-- [x] Create `phases/07-profile-guided-cleanup/spec.md` with `sub-spec: true` and dependencies on `../05-git-observation/spec.md` and `../06-remote-network-and-subprocess/spec.md`; include post-structural profiles and a keep/defer decision for every R14 item.
+- [x] Create `phases/_completed/07-profile-guided-cleanup/spec.md` with `sub-spec: true` and dependencies on `../05-git-observation/spec.md` and `../06-remote-network-and-subprocess/spec.md`; include post-structural profiles and a keep/defer decision for every R14 item.
 - [x] Re-run representative cold-ish and warm profiles after Phases 2–6 and rank residual costs by work count and sampled time; establish a materiality threshold in the sub-spec before editing. **Threshold fixed before editing: ≥5% of a dominant counter or ≥5% of sampled time, repeatable, byte-identical results.** Two workloads profiled (`detect_repo` on the 375-package fixture; `ProgramsInfo::detect` on the live PATH) — the R14 filesystem items and the R13.3/R13.4/L9/L14 programs items live in different paths, so one profile could not have judged both. **Cold-ish profiles not run** (`purge` needs `sudo`); the sub-spec argues this only strengthens a defer decision, since cold caches raise the syscall share and every candidate is a userspace micro-optimization.
 - [x] **[Parallelizable by independent measured hotspot]** Implement only supported candidates among classification fast paths, bounded framework prefix reads, walker metadata reuse, static regex/maps, path-list merge allocation reduction, rate-limit matching, interface-cache clone reduction, and local-bin ancestor memoization. **No candidate is supported by the measurement; none implemented, no production code changed.** Repo detection is ~71% syscalls with its largest userspace bucket at ~2.9%; the programs path is ~96% Rayon park/spin. **The leading hypothesis was disconfirmed by measurement:** `metadata_probes` (13,275 vs 4,685 walked entries) looked like the dominant reuse defect, but per-path attribution shows **12,675 distinct / 600 redundant (4.5%)** — 95.5% are first-and-only marker checks that *are* the detection contract. R13.3/R13.4 are conditional on their targets being "visible"/"justified by measurement"; both are **absent** from the profile, so deferring is compliance with R13.
 - [x] For every implemented candidate, add a focused benchmark and parity test; for every deferred candidate, record evidence that its cost is negligible or its contract risk exceeds measured benefit. **Nine-row keep/defer table in the sub-spec, one row per candidate.** Two premises turned out **stale**: L6's `standard.rs:608` is now `#[cfg(test)]`-only (production leaves `version: None` for the no-subprocess boundary, so the "~50×/run" claim no longer describes production), and L12's `merge_path_lists` **no longer exists** — Phase 4 deleted it. Two are deferred on **contract risk over benefit** (bounded framework prefix reads against a 50 KB total read volume; walker-metadata lifetime coupling for 182 probes); the rest on negligible cost.
@@ -471,7 +471,7 @@ Implement only measured R13/R14 candidates. This phase is optional per candidate
 
 Complete verification, documentation maintenance, and ongoing regression visibility. R14 candidates do not block completion when Phase 7 evidence defers them.
 
-- [x] Create `phases/08-cross-platform-validation/spec.md` with `sub-spec: true` and dependencies on all completed phase sub-specs; enumerate final acceptance criteria, platform jobs, artifact names, and parity fixtures.
+- [x] Create `phases/_completed/08-cross-platform-validation/spec.md` with `sub-spec: true` and dependencies on all completed phase sub-specs; enumerate final acceptance criteria, platform jobs, artifact names, and parity fixtures.
 - [x] Update `sniff/docs/sniff-library-architecture.md`, library/CLI READMEs, rustdoc, benchmark manifest, and `.claude/skills/sniff/` to document request-scoped observation, structure/full semantics, inventory truncation, bounded path history, focused Git metadata, default NTP policy, subprocess deadlines, and qualified benchmark evidence. **Architecture doc gained seven sections** (Request-Scoped Observation Index, Structure-Only Contract, Package Discovery vs. Enrichment, Inventory Saturation, Focused Git Metadata, Bounded Path History, Subprocess Deadlines, Remote Snapshot, Performance Evidence) and its shared-work intro now states the governing "observe once, project many times" rule. Rustdoc updated at the four sites carrying the multiplier. Benchmark manifest gained a "What These Timings Are Worth" section. **CLI README needed no change** — this phase altered no CLI behavior, and its NTP/`sntp` platform line was already accurate.
 - [x] Correct known drift alongside its owning behavior: `.editorconfig` lookup semantics, `filter_inventory` copy/sharing language, capped inventory determinism, the 375-package benchmark name/count, the unsupported general 10–50× claim, and NTP timeout/platform wording. **Four of six were live; two were already fixed by the phase that owned them** (`filter_inventory` and capped-inventory determinism, both rewritten in Phase 2 — verified, not re-touched), and the 375-package rename landed in Phase 1 (verified; added the "never compare against an archived `huge_500` result" note). Live and fixed: (1) `detect_formatting`'s docblock claimed parent-directory traversal that `find_editorconfig` has never done; (2) `os/time.rs` claimed a 5-second NTP timeout and the architecture doc/skill claimed "up to 10s (Linux `timedatectl`)" — the real bound is `timeouts::NTP` = **3s**, and the Linux path makes no network round trip at all, so the 10s figure described a cost that never existed; (3) the 10–50× claim, in 6 sites. **The 10–50× claim was worse than "unsupported"** — see below. Drift found but deliberately not fixed: `benches/README.md` and the architecture doc say `ProgramsInfo::detect()` fans out over **8** categories while the type and skill say **9**; that belongs to the phase owning program detection, not to a completion phase whose diff must contain no behavior.
     - **The historical 10–50× correction, in detail.** At the original Phase 8 capture, the 375-package fixture put `structure()` and `full()` near **1×** by discovery counters because R5.6 was still blocked and structure also paid a nested-marker fallback walk. That table remains valid historical evidence but predates the completed shallow-structure migration and must not be used as a current structure-mode bound. **No replacement timing ratio was published:** the host was heavily loaded and the sequential case order warmed full mode's page cache.
@@ -484,9 +484,9 @@ Complete verification, documentation maintenance, and ongoing regression visibil
     - **Three counters that cannot be compared naively, all documented in the sub-spec:** Phase 1's `file_opens`/`bytes_read` **under-report** every manifest-index case (`ManifestIndex::build`'s workers carried no collector until Phase 3), so `bytes_read` +6% is the counter getting *honest*, not work being added; and `git.file_diffs` under-reports before Phase 5, so it **does not move while the real work halves** — `blob_loads` is what shows R8.
     - **Subprocess/timeout and HTTP counters have no row**: `work_counts`'s fixtures are local synthetic trees that spawn no children and make no requests, so those counters are legitimately zero. Their bounds are asserted in-process by the Phase 6 tests (argv-logging `systemctl` shim, per-provider `expect(1)` wiremock bounds, the `expect(0)` second-endpoint WAN assertion) — stronger evidence than a fixture row, because it fails the build instead of printing a number.
     - **A Phase 4 prediction did not hold:** `filesystem.io.canonicalizations` was projected to fall 600 → 300 "with the enrichment halving". The historical Phase 8 result remained 600, proving the mechanism was mis-modeled. Current source implements R6.2/R6.4 through `PackageOwnershipIndex`, whose hot-lookup fixture requires zero canonicalizations; the archived table is not retroactively rewritten.
-- [x] Move each finished phase sub-spec to its completed lifecycle location independently; move the umbrella feature only when R1–R13, all preserved/intentional compatibility checks, and macOS/Linux/Windows correctness are complete. **Decision: nothing was moved. No files changed location.** Both halves are deliberate.
+- [x] Move each finished phase sub-spec to its completed lifecycle location independently; move the umbrella feature only when R1–R13, all preserved/intentional compatibility checks, and macOS/Linux/Windows correctness are complete. **Decision: the phase sub-specs were archived together under `phases/_completed/`; the umbrella feature did not move.** Both halves are deliberate.
     - **The historical implementation blockers are closed.** R5.5/R5.6, R6.4, and R9.5/R9.6 are implemented and tested. Remaining limitations are evidence and benchmark scope: native Linux/Windows Level-1 execution and retained non-macOS artifacts were not produced on this macOS host, and the synthetic large-service Criterion row is deferred for the API-surface reason above. R14 remains a measured, permitted deferral rather than a blocker.
-    - **The phase sub-specs stay in place.** No `phases/_completed` convention exists, and moving individual records would break their relative dependency links. The records now distinguish their historical phase-boundary measurements from current post-review semantics.
+    - **The phase sub-specs are archived under `phases/_completed/`.** They were briefly deleted by `c2a188379` and restored by review cycle 11, because live consumers — the `sniff` skill's counter-baseline and R14 keep/defer tables, the scheduled work-count workflow, and production rustdoc in `process.rs`, `remote/snapshot.rs`, and `filesystem/git/discovery.rs` — cite them as authoritative evidence that the umbrella `spec.md` does not reproduce. Archiving the whole tree in one move (rather than phase by phase) preserves every sibling-relative `depends-on:` link; only links pointing out of `phases/` gained a level. The records still distinguish their historical phase-boundary measurements from current post-review semantics.
 
 **Validation checkpoint — feature complete**
 

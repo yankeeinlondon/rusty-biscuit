@@ -32,7 +32,7 @@ behavior rather than the specified shallow contract.
 This is user-visible as both a performance contract violation and a request-semantics violation. The
 phase record explicitly says the change was blocked because three CLI commands currently depend on
 accidentally enriched structure results
-([04-package-enrichment-and-ownership/spec.md:151](phases/04-package-enrichment-and-ownership/spec.md#L151)).
+([04-package-enrichment-and-ownership/spec.md:151](phases/_completed/04-package-enrichment-and-ownership/spec.md#L151)).
 Resolve that API decision rather than keeping the accidental coupling: use a focused detail request
 for package managers/dependencies/test runners, migrate those CLI commands, and add an L1 work-count
 test proving structure mode performs zero enrichment-only probes/parses.
@@ -78,7 +78,7 @@ query and every candidate package during each lookup
 ([types.rs:273](../../lib/src/filesystem/repo/types.rs#L273)), while other consumers retain separate
 ownership logic. The final counter record confirms that canonicalizations stayed at 600 and attributes
 the missed reduction to the unimplemented R6 work
-([08-cross-platform-validation/spec.md:163](phases/08-cross-platform-validation/spec.md#L163)).
+([08-cross-platform-validation/spec.md:163](phases/_completed/08-cross-platform-validation/spec.md#L163)).
 
 Current L1 tests establish correct deepest-prefix behavior, but there is no work-count test proving
 shared lookup reuse. Build the request-scoped component-aware index, route all three consumers through
@@ -95,7 +95,7 @@ iterates remote names and peels matching refs ([remote_refresh.rs:326](../../lib
 linked worktree as a full repository
 ([remote_refresh.rs:809](../../lib/src/filesystem/git/remote_refresh.rs#L809)). The Phase 5 record
 explicitly marks both requirements and their counter tests as not done
-([05-git-observation/spec.md:294](phases/05-git-observation/spec.md#L294)).
+([05-git-observation/spec.md:294](phases/_completed/05-git-observation/spec.md#L294)).
 
 These are performance rather than result-correctness failures, so Level-1 counter tests are the right
 verification level. Add a request-scoped ref snapshot and direct worktree-metadata projection, then
@@ -110,7 +110,7 @@ failure is recorded as pre-existing, but the acceptance gate remains red. `just 
 
 The implementation plan says the current host is macOS-only and relies on future scheduled artifacts
 ([plan.md:493](plan.md#L493)); Phase 8 expressly states that the umbrella completion boundary is not
-met ([08-cross-platform-validation/spec.md:236](phases/08-cross-platform-validation/spec.md#L236)). Before
+met ([08-cross-platform-validation/spec.md:236](phases/_completed/08-cross-platform-validation/spec.md#L236)). Before
 production readiness, make the L1 suite deterministic, run the changed implementation on all three OS
 legs, and retain the work-count artifacts. The required Criterion fixture families and `just bench`
 were also deferred; either add/run them or narrow the specification's verification commitments.
