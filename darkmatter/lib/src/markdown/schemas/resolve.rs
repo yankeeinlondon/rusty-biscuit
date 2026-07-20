@@ -39,7 +39,7 @@ use super::{
         SchemaReferenceKind, classify_schema_reference, is_bare_schema_name,
     },
     simplified::{
-        parse_standalone_schema_document, parse_yaml_schema, to_json_schema,
+        SchemaDeclaration, parse_standalone_schema_document, parse_yaml_schema, to_json_schema,
         types::{
             Constraint, PatternKeyDef, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr,
         },
@@ -379,7 +379,18 @@ fn parse_yaml_referenced_file(
         path: path.to_path_buf(),
     })?;
     if let Some(document) = parse_standalone_schema_document(text, path)? {
-        return resolve_standalone_schema(document.schema, path, schema_roots);
+        return match document.declaration {
+            SchemaDeclaration::Schema(schema) => {
+                resolve_standalone_schema(schema, path, schema_roots)
+            }
+            // A whole-file reference document delegates to another file, so it
+            // resolves through the same path as a root-union `FileRef` arm and
+            // reports the *target* as its origin and dependency edge.
+            SchemaDeclaration::Reference(reference) => {
+                let file_dir = path.parent().unwrap_or_else(|| Path::new("."));
+                resolve_reference(reference.file_reference().raw(), file_dir, schema_roots)
+            }
+        };
     }
 
     // Treat the file's contents as a raw JSON Schema serialised in YAML.
@@ -921,11 +932,17 @@ fn load_named_types(path: &Path) -> Result<IndexMap<String, PropertyDef>, Schema
             path: path.to_path_buf(),
         });
     };
-    match document.schema {
-        SimplifiedSchema::Single(shape) => Ok(shape.properties),
-        SimplifiedSchema::Union(_) => Err(SchemaError::SchemaDocument {
+    match document.declaration {
+        SchemaDeclaration::Schema(SimplifiedSchema::Single(shape)) => Ok(shape.properties),
+        SchemaDeclaration::Schema(SimplifiedSchema::Union(_)) => Err(SchemaError::SchemaDocument {
             path: path.to_path_buf(),
             message: "root-union schema documents cannot supply named imports".into(),
+        }),
+        // A whole-file reference declares no named types of its own; imports
+        // are defined only among a file's own top-level entries.
+        SchemaDeclaration::Reference(_) => Err(SchemaError::SchemaDocument {
+            path: path.to_path_buf(),
+            message: "whole-file reference schema documents cannot supply named imports".into(),
         }),
     }
 }

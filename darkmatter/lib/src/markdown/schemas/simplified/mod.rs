@@ -54,7 +54,7 @@ use crate::markdown::schemas::{
 };
 
 /// The passive semantic product of one complete `$schema` declaration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SchemaDeclaration {
     /// An inline mapping or non-empty root union parsed as SimplifiedSchema.
     Schema(SimplifiedSchema),

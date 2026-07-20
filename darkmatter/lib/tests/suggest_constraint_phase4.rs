@@ -34,8 +34,8 @@ fn content_classifier_recognizes_only_the_two_envelopes() {
     assert_eq!(pure_document.envelope, StandaloneSchemaEnvelope::Pure);
     assert_eq!(tagged_document.envelope, StandaloneSchemaEnvelope::Tagged);
     assert_eq!(
-        to_json_schema(&pure_document.schema).unwrap(),
-        to_json_schema(&tagged_document.schema).unwrap()
+        to_json_schema(pure_document.schema().expect("mapping payload")).unwrap(),
+        to_json_schema(tagged_document.schema().expect("mapping payload")).unwrap()
     );
 
     for ordinary in [
@@ -56,17 +56,37 @@ fn content_classifier_recognizes_only_the_two_envelopes() {
 #[test]
 fn claimed_malformed_envelopes_are_schema_document_errors() {
     for source in [
-        "$schema: string\n",
         "kind: schema\n",
         "kind: schema\ntypes: []\n",
         "kind: schema\ntypes: {}\ndescription: unsupported\n",
         "kind: schema\ntypes: {}\nextra: value\n",
+        // A tagged `types` payload is a named-type mapping, so — unlike a pure
+        // payload — a reference scalar is still malformed here.
+        "kind: schema\ntypes: ./other.yaml\n",
     ] {
         let error = parse_standalone_schema_document(source, "claimed.yaml").unwrap_err();
         assert!(
             matches!(error, SchemaError::SchemaDocument { .. }),
             "recognized malformed envelope must not fall back: {error:?}"
         );
+    }
+}
+
+/// A pure scalar payload is a whole-file reference, parsed by the shared
+/// declaration authority — so it accepts exactly the strings an inline
+/// `$schema` scalar accepts, including a bare name.
+///
+/// `$schema: string` reads like a type name, but the declaration authority has
+/// no notion of type names at declaration position; it is a bare-name schema
+/// reference resolved against the schema roots, and rejecting it here would put
+/// standalone parsing back out of parity with inline parsing.
+#[test]
+fn pure_scalar_payloads_are_whole_file_references() {
+    for source in ["$schema: string\n", "$schema: ./other.yaml\n", "$schema: darkmatter.yaml\n"] {
+        let document = parse_standalone_schema_document(source, "claimed.yaml")
+            .expect("a scalar payload is a reference declaration")
+            .expect("the pure envelope claims the document");
+        assert!(document.schema().is_none(), "{source:?} declares no inline schema");
     }
 }
 

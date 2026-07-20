@@ -12,9 +12,14 @@
 //! - **Tagged**: a YAML mapping containing exactly `kind: schema` and a
 //!   `types` mapping.
 //!
-//! Both mapping envelopes behave identically for whole-file schema references
-//! and `Name@fileref` named imports. A pure sequence payload is a root-level
-//! schema union for whole-file use only.
+//! Both mapping envelopes behave identically for `Name@fileref` named
+//! imports. A pure sequence payload is a root-level schema union for
+//! whole-file use only, and a pure scalar payload is a whole-file schema
+//! reference. Every pure payload is parsed by the shared
+//! [`parse_schema_declaration`](super::parse_schema_declaration) authority —
+//! the same parser that classifies an inline `$schema` value — so reference
+//! arms are syntax-checked and remote references rejected without I/O. A
+//! tagged `types` payload must remain a mapping.
 //!
 //! Once an envelope is recognized, a malformed payload is a
 //! [`SchemaError::SchemaDocument`] — the library never silently reinterprets
@@ -33,7 +38,7 @@ use serde_yaml_ng::Value as YamlValue;
 use crate::markdown::schemas::errors::SchemaError;
 
 use super::{
-    SchemaSourceMap, SimplifiedSchema, SuggestionLintProblem, lint_suggestions,
+    SchemaDeclaration, SchemaSourceMap, SimplifiedSchema, SuggestionLintProblem, lint_suggestions,
     project_suggestion_spans, source::parse_standalone_schema_payload_with_source,
 };
 
@@ -48,10 +53,10 @@ pub enum StandaloneSchemaEnvelope {
 
 /// A parsed standalone SimplifiedSchema authoring document.
 ///
-/// Produced by [`parse_standalone_schema_document`]. Carries the parsed
-/// [`SimplifiedSchema`] payload, structural source map, the content envelope
-/// that claimed the document, and suggestion lint problems with byte spans
-/// relative to `source`.
+/// Produced by [`parse_standalone_schema_document`]. Carries the shared
+/// [`SchemaDeclaration`] product for the envelope payload, structural source
+/// map, the content envelope that claimed the document, and suggestion lint
+/// problems with byte spans relative to `source`.
 ///
 /// Candidate spans are byte ranges in the authoring source, and lint problems
 /// retain those same authoring-document ranges. Parsing and linting perform no
@@ -62,8 +67,10 @@ pub struct StandaloneSchemaDocument {
     pub path: PathBuf,
     /// Content envelope that claimed the document.
     pub envelope: StandaloneSchemaEnvelope,
-    /// Source-aware parsed SimplifiedSchema payload.
-    pub schema: SimplifiedSchema,
+    /// The shared declaration product for the envelope payload: an inline
+    /// schema (mapping or root-union sequence) or a syntax-checked whole-file
+    /// reference. A tagged `types` payload is always an inline schema.
+    pub declaration: SchemaDeclaration,
     /// Structural authored spans for the parsed schema payload.
     pub source_map: SchemaSourceMap,
     /// Invalid advisory suggestion metadata in declaration order.
@@ -73,6 +80,17 @@ pub struct StandaloneSchemaDocument {
     pub suggestion_lints: Vec<SuggestionLintProblem>,
 }
 
+impl StandaloneSchemaDocument {
+    /// Borrows the parsed inline schema when the payload is a mapping or a
+    /// root-union sequence; `None` when the payload is a whole-file reference.
+    pub fn schema(&self) -> Option<&SimplifiedSchema> {
+        match &self.declaration {
+            SchemaDeclaration::Schema(schema) => Some(schema),
+            SchemaDeclaration::Reference(_) => None,
+        }
+    }
+}
+
 /// Classifies and parses a standalone YAML SimplifiedSchema document.
 ///
 /// Returns `Ok(None)` for ordinary YAML and raw JSON Schema documents. Once
@@ -80,10 +98,17 @@ pub struct StandaloneSchemaDocument {
 /// key of a pure document, malformed envelope content is returned as a
 /// [`SchemaError::SchemaDocument`] instead of falling back to raw JSON Schema.
 ///
+/// Every pure payload — mapping, root-union sequence, or whole-file reference
+/// scalar — is parsed by the shared
+/// [`parse_schema_declaration`](super::parse_schema_declaration) authority, so
+/// reference arms are syntax-checked and HTTP(S) references rejected without
+/// I/O. A tagged `types` payload must be a mapping.
+///
 /// ## Errors versus lint
 ///
 /// A malformed recognized envelope (missing/malformed `types`, unsupported
-/// tagged-envelope keys, unparseable SimplifiedSchema payload) returns
+/// tagged-envelope keys, unparseable SimplifiedSchema payload, invalid or
+/// remote reference) returns
 /// `Err(SchemaError::SchemaDocument)`. Invalid `suggest(...)` candidates
 /// within a valid envelope are returned as
 /// [`StandaloneSchemaDocument::suggestion_lints`] — they are lint data, not
@@ -142,12 +167,6 @@ pub fn parse_standalone_schema_document(
         (StandaloneSchemaEnvelope::Tagged, payload)
     } else if map.len() == 1 && map.contains_key(&schema_key) {
         let payload = map.get(&schema_key).expect("key presence checked above");
-        if !matches!(payload, YamlValue::Mapping(_) | YamlValue::Sequence(_)) {
-            return Err(schema_document_error(
-                path,
-                "pure schema document `$schema` must be a mapping or sequence",
-            ));
-        }
         (StandaloneSchemaEnvelope::Pure, payload)
     } else {
         return Ok(None);
@@ -161,16 +180,22 @@ pub fn parse_standalone_schema_document(
         .map_err(|error| {
             schema_document_error(path, format!("invalid SimplifiedSchema payload: {error}"))
         })?;
-    project_suggestion_spans(&mut parsed.value, source, 0).map_err(|error| {
-        schema_document_error(path, format!("invalid SimplifiedSchema payload: {error}"))
-    })?;
-    let suggestion_lints = lint_suggestions(&parsed.value).map_err(|error| {
-        schema_document_error(path, format!("could not lint SimplifiedSchema payload: {error}"))
-    })?;
+    let suggestion_lints = match &mut parsed.value {
+        SchemaDeclaration::Schema(schema) => {
+            project_suggestion_spans(schema, source, 0).map_err(|error| {
+                schema_document_error(path, format!("invalid SimplifiedSchema payload: {error}"))
+            })?;
+            lint_suggestions(schema).map_err(|error| {
+                schema_document_error(path, format!("could not lint SimplifiedSchema payload: {error}"))
+            })?
+        }
+        // A whole-file reference carries no suggestion metadata to lint.
+        SchemaDeclaration::Reference(_) => Vec::new(),
+    };
     Ok(Some(StandaloneSchemaDocument {
         path: path.to_path_buf(),
         envelope,
-        schema: parsed.value,
+        declaration: parsed.value,
         source_map: parsed.source_map,
         suggestion_lints,
     }))

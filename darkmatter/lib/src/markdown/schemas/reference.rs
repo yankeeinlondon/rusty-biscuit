@@ -39,6 +39,15 @@ impl SchemaReference {
     }
 }
 
+// Identity is the canonical trimmed string plus the resolution policy; the
+// resolution-time state a `FileReference` may accumulate (magic paths, vault
+// roots) is absent from a freshly classified reference.
+impl PartialEq for SchemaReference {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind && self.file_reference.raw() == other.file_reference.raw()
+    }
+}
+
 /// Classifies one authored schema reference without resolving it.
 ///
 /// The authored string is trimmed once here, and every downstream product —

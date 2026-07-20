@@ -169,8 +169,8 @@ pub(super) fn parse_standalone_schema_payload_with_source(
     value: &YamlValue,
     yaml_source: &str,
     payload_key: &str,
-) -> Result<SourceAware<SimplifiedSchema>, SchemaError> {
-    let value = parse_yaml_schema(value)?;
+) -> Result<SourceAware<SchemaDeclaration>, SchemaError> {
+    let value = parse_schema_declaration(value)?;
     let located = locate_yaml_value(yaml_source)?;
     let LocatedKind::Mapping(pairs) = &located.kind else {
         return Err(projection_error());
@@ -181,12 +181,16 @@ pub(super) fn parse_standalone_schema_payload_with_source(
         .map(|pair| &pair.value)
         .ok_or_else(projection_error)?;
     let mut source_map = SchemaSourceMap::default();
-    source_map.insert(
-        &SchemaSourcePath::root(),
-        SchemaSpanKind::Declaration,
-        payload.span.clone(),
-    );
-    project_schema_source(&value, payload, 0, &mut source_map)?;
+    let root = SchemaSourcePath::root();
+    source_map.insert(&root, SchemaSpanKind::Declaration, payload.span.clone());
+    match &value {
+        SchemaDeclaration::Reference(_) => {
+            record_scalar_content(payload, &root, SchemaSpanKind::FileReference, 0, &mut source_map)?;
+        }
+        SchemaDeclaration::Schema(schema) => {
+            project_schema_source(schema, payload, 0, &mut source_map)?;
+        }
+    }
     Ok(SourceAware { value, source_map })
 }
 
