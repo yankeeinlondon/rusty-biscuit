@@ -5,10 +5,11 @@ agent: codex/default
 created: 2026-07-19T13:08:17-07:00
 spec: 2026-07-13-more-is-more/spec.md
 log: darkmatter/features/2026-07-13-more-is-more/log.md
-implemented: false
+implemented: true
 description: "A **feature** review of `2026-07-13-more-is-more/spec.md`"
 feature: 2026-07-13-more-is-more/review-19.md
 previous: 2026-07-13-more-is-more/review-18.md
+next: 2026-07-13-more-is-more/review-20.md
 ---
 
 # Review 19
