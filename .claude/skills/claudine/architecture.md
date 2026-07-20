@@ -488,11 +488,23 @@ second/third composers in `harness_orch/prompt.rs` (`materialize_harness_prompt`
 hand-rolled `compose_with` calls and `preflight_proxy_target`'s option builder)
 now route through the canonical service.
 
-**Known gap.** Launch inputs (provider, model, MCP, argv, child env/CWD, system
-prompt, interactivity) and document-loop recognition are still computed once
-before the loop from the originally-invoked document, so a proxied target does
-not yet select its authored `model:` or acquire its own `loop:`. Tracked in
-`features/2026-07-13-proxy-with/notes/acceptance-map.md` (AC 7, 9, 10, 15).
+**Launch identity is rebuilt per active document.** Launch inputs (provider,
+model, MCP, argv, child env/CWD, system prompt, interactivity) and document-loop
+recognition are computed for whichever document is active, not frozen from the
+originally-invoked one. `materialize_attempt_prompt_phase`
+(`harness_orch/loop_control.rs`) re-materializes the active document at each
+fresh-read boundary and `target_launch::rebuild_launch_identity` derives the
+whole launch bundle from that read, so a proxied target selects its authored
+`model:`, acquires its own `loop:`, and launches under the same rebuild a direct
+invocation performs (R6/R7).
+
+The boundary is **ownership**. A surfaced composition command — `compose`,
+`inline-compose`, and each contained `sequence` step — re-enters the
+command-owned preparation and launch pipeline through its coordinator, which
+re-prepares the resolved target canonically. A direct provider wrapper
+(`claudine claude`, `claudine goose`, …) prepares no active document, so
+`surface_or_adopt_terminal_proxy` refuses an otherwise unowned handoff with a
+typed diagnostic rather than adopting it under the invocation's own bundle.
 
 `LifecycleCatchProtocol` in `lib/src/composition/lifecycle/runtime.rs` is the
 single provider-neutral owner of setup catch routing, terminal-slot
