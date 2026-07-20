@@ -1,10 +1,86 @@
 mod common;
 
 use common::level2::{
-    CODE_DOC, is_sentinel_line, max_bg_luma_on_line, max_fg_luma_on_line, min_fg_luma_on_line,
-    raw_line_is_blank, rendered_region, rtrim, run_md, run_md_after_shell_prefix, run_md_env,
+    CODE_DOC, is_sentinel_line, max_bg_luma_on_line, max_fg_luma_on_line, md_shim,
+    min_fg_luma_on_line, raw_line_is_blank, rendered_region, rtrim, run_md, run_md_env,
 };
+use biscuit_test_harness::shared::SharedHarness;
+use biscuit_test_harness::tmux::TmuxHarness;
+use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
+use std::fs;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{Duration, Instant};
+use tempfile::tempdir;
+use test_toolkit::{Level, require_level};
+
+static SHARED_CODE_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
+static TMUX_SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
+const TMUX_SENTINEL_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn wait_for_tmux_sentinel(
+    harness: &mut TmuxHarness,
+    sentinel: &str,
+) -> Result<CapturedFrame, CapturedFrame> {
+    let deadline = Instant::now() + TMUX_SENTINEL_TIMEOUT;
+    let mut last = CapturedFrame::from_raw(String::new());
+    while Instant::now() < deadline {
+        if let Ok(frame) = harness.capture() {
+            if frame.plain.lines().any(|line| line.trim() == sentinel) {
+                return Ok(frame);
+            }
+            last = frame;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    Err(last)
+}
+
+fn run_tmux_command(
+    harness: &mut TmuxHarness,
+    command: &str,
+    env: &[(&str, &str)],
+) -> CapturedFrame {
+    let id = TMUX_SENTINEL_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let sentinel = format!("__DM_CODE_TMUX_DONE_{id}__");
+    let wrapped = format!("{command}; printf '\\n{sentinel}\\n'");
+    harness
+        .send_command_with_env(&wrapped, env)
+        .expect("send_command_with_env failed");
+    match wait_for_tmux_sentinel(harness, &sentinel) {
+        Ok(frame) => {
+            std::thread::sleep(Duration::from_millis(250));
+            harness.capture().unwrap_or(frame)
+        }
+        Err(last) => panic!(
+            "timed out waiting for sentinel {sentinel} after {TMUX_SENTINEL_TIMEOUT:?}. \
+             last plain capture:\n{}",
+            last.plain
+        ),
+    }
+}
+
+fn run_md_in_tmux(
+    file_body: &str,
+    shell_prefix: Option<&str>,
+    extra_args: &str,
+    env: &[(&str, &str)],
+) -> CapturedFrame {
+    let dir = tempdir().expect("create markdown fixture directory");
+    let file_path = dir.path().join("layout.md");
+    fs::write(&file_path, file_body).expect("write markdown fixture");
+
+    let mut guard = SHARED_CODE_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("tmux harness present");
+
+    run_tmux_command(harness, "clear", &[]);
+    let md_command = format!("{} {} {extra_args}", md_shim(), file_path.display());
+    let command = shell_prefix
+        .map(|prefix| format!("{prefix}; {md_command}"))
+        .unwrap_or(md_command);
+    run_tmux_command(harness, &command, env)
+}
 
 #[test]
 #[serial(level2_terminal)]
@@ -116,13 +192,13 @@ fn level2_align_code_block_center_indents_more_than_left() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_code_block_inverts_to_light_in_dark_terminal() {
-    let Some((frame, _)) = run_md_env(
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let frame = run_md_in_tmux(
         CODE_DOC,
+        None,
         "--code-theme github --max-width 60",
         &[("COLORFGBG", "15;0")], // bg index 0 => dark terminal
-    ) else {
-        return;
-    };
+    );
 
     let code_luma = max_bg_luma_on_line(&frame.raw, "rust").unwrap_or_else(|| {
         panic!(
@@ -141,19 +217,19 @@ fn level2_code_block_inverts_to_light_in_dark_terminal() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_default_code_block_inverts_background_and_foreground() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
     let mut captured = None;
     let mut bg: Option<f32> = None;
     let mut min_fg: Option<f32> = None;
     let mut max_fg: Option<f32> = None;
 
     for _ in 0..3 {
-        let Some((frame, _)) = run_md_env(
+        let frame = run_md_in_tmux(
             CODE_DOC,
+            None,
             "--max-width 60",
             &[("COLORFGBG", "15;0")], // bg index 0 => dark terminal
-        ) else {
-            return;
-        };
+        );
 
         bg = max_bg_luma_on_line(&frame.raw, "FooBar");
         min_fg = min_fg_luma_on_line(&frame.raw, "FooBar");
@@ -207,16 +283,16 @@ fn level2_default_code_block_inverts_background_and_foreground() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_code_block_clears_inherited_dim_before_theme_colors() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
     let mut captured = None;
     let mut bg = None;
     for _ in 0..3 {
-        let Some((frame, _)) = run_md_after_shell_prefix(
+        let frame = run_md_in_tmux(
             CODE_DOC,
-            "printf '\\033[2m'; COLORFGBG='15;0'",
+            Some("printf '\\033[2m'"),
             "--max-width 60",
-        ) else {
-            return;
-        };
+            &[("COLORFGBG", "15;0")],
+        );
         bg = max_bg_luma_on_line(&frame.raw, "FooBar");
         captured = Some(frame);
         if bg.is_some() {
