@@ -8,6 +8,7 @@ implementation_6: "2026-07-18T05:34:55-07:00"
 implementation_7: "2026-07-18T08:12:07-07:00"
 implementation_8: "2026-07-18T09:46:42-07:00"
 implementation_9: "2026-07-18T11:40:37-07:00"
+implementation_10: "2026-07-19T20:25:49-07:00"
 deferred_perf_measurement: true
 ---
 
@@ -729,4 +730,56 @@ The files changed cover the Playa command-boundary migration of the installer ti
 - the drift was also **wider than the finding reported**: eleven live sites in total across five files, not the one the finding named. Each site was verified individually rather than swept with find-and-replace, which is what caught `sniff/README.md:47` (listing 10 vs installing 8 — two different quantities in one sentence) and `sniff/cli/src/output/programs.rs:612` (a correct "eight" that a blanket replace would have broken)
 - the downstream migration of the cycle-8 `TimedOut`/`Failed` split is now **complete across all four consumers** — `sniff/lib`, `sniff/cli`, `biscuit-speaks/cli`, and `playa/cli` — confirmed by `grep -rn InstallInterviewOutcome --include=*.rs` returning no fifth site
 - one orchestrator process defect occurred and was corrected in-cycle: a persisted working directory sent the finding-3 log block to a stray path one level too deep. The subagent found it, verified the content was absent from the real log rather than duplicated, and declined to delete it; the content was merged back and the stray tree removed
+- no commit, push, external workflow trigger, VM startup, package installation, or write-mode formatting command was run
+
+## Implementation of Review Findings #10
+
+> **started at:** 2026-07-19T20:25:49-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'sniff/features/2026-07-16-performance/review-10.md'
+- this is iteration 10 of the review-to-implement cycle
+- review-10 contains 3 findings (1 High, 2 Medium):
+        1. High: native Linux and Windows execution and matched work-count artifacts remain absent
+        2. Medium: Playa's timeout regression tests stop short of the command boundary
+        3. Medium: the category migration still leaves authoritative and public documentation contradictory
+- starting the work on 'Playa timeout regression stops short of the command boundary (review-10 Medium)' at 20:30:04
+        - audit first, per the retry convention: the finding was recorded by `1bff42855` (review cycle 10 findings), and two later commits — `6a2a00d4d test(playa-cli): strengthen install command boundary regression` and `4cf06917e docs(sniff): reconcile program category counts in docs and rustdoc` — landed on 2026-07-18 at 18:03:51, after the review; this cycle therefore verifies rather than re-implements
+        - the fix is exactly the seam the review prescribed: `run_install_command` (`playa/cli/src/main.rs:1036`) is an injectable interview-runner seam returning `Result<(), InstallCommandFailure>` (message + exit code), and `install_players` (`main.rs:1009`) now routes `Ok(outcome)`/`Err(e)` through it into `error_exit`, so the selected-install loop can no longer discard the verdict
+        - the composed Level-1 regression `install_command_timeout_warns_and_returns_nonzero_verdict` (`main.rs:1870`) drives the seam with a delegate that receives a `Status` error plus a `TimeoutWarning` event and returns `InstallInterviewOutcome::TimedOut`; it asserts exit code 1, a deadline-naming message distinct from plain failure, and that the warning prose survives through the delegate into the captured writer
+        - the weak seams the review named are gone: `timeout_warning_prose_reaches_the_rendered_line` was deleted from `install_ui.rs`, and `CliInstallUi` is now generic over `W: Write` with a `#[cfg(test)]` `with_writer`/`into_writer` capture seam, so the event path itself is what the test exercises — removing the `TimeoutWarning` event arm would now fail the composed test
+        - `install_verdict_timeout_fails_and_names_the_deadline` (`main.rs:1855`) remains as the pure-verdict helper pin, now a sibling of the composed boundary test rather than the only coverage
+        - `install_verdict_timeout_fails_and_names_the_deadline` (`main.rs:1855`) remains as the pure-verdict helper pin, now a sibling of the composed boundary test rather than the only coverage
+        - verification gate results recorded below under the cycle verification entries
+        - a note on the review's residual-risk framing: the review worried the weak render test "would remain green if the `TimeoutWarning` event arm were removed"; in the current source that arm is one member of an exhaustive or-pattern (`install_ui.rs:72-77`), so removing it is a compile error rather than a silent green, and the composed test additionally guards the loop-discards-verdict regression the review actually named
+- work completed for 'Playa timeout regression stops short of the command boundary (review-10 Medium)' at 20:37:42 (verified as already implemented by `6a2a00d4d`; no additional source change required)
+- starting the work on 'category migration documentation drift (review-10 Medium)' at 20:37:58
+        - this finding was also already implemented after the review was recorded, by `4cf06917e docs(sniff): reconcile program category counts in docs and rustdoc` (8 files: the Sniff skill entry and its `extending.md`/`programs.md` companions, `sniff/README.md`, `sniff/cli/README.md`, `sniff/cli/src/args/mod.rs`, `sniff/lib/README.md`, `sniff/lib/src/programs/mod.rs`)
+        - verified both live surfaces the review named against the current tree:
+                - `.claude/skills/sniff/SKILL.md:33` — the Programs row now reads "10 categories … Eight categories support installation with remote-bash consent; notification helpers and test runners are report-only", matching the source (10 `ProgramsInfo` fields, 8 `*Action::Install` enums)
+                - `sniff/cli/README.md:229` — the installation section now leads with "Eight of the ten detectable program categories support `install` and `install-plan`. Notification helpers and test runners are report-only and expose neither action."
+        - the authoritative contract the review stated — ten detectable categories, eight installable — is now what both surfaces say; no residual contradiction found
+- work completed for 'category migration documentation drift (review-10 Medium)' at 20:39:20 (verified as already implemented by `4cf06917e`; no additional source change required)
+- starting the work on 'native Linux and Windows execution and matched work-count artifacts (review-10 High)' at 20:39:31
+        - re-verified the constraint rather than inheriting cycle 9's conclusion:
+                - `uname -a` → native arm64 macOS (Darwin 25.5.0, `xnu-12377.121.10~1/RELEASE_ARM64_T6041`)
+                - `rustup target list --installed` → `aarch64-apple-darwin`, `wasm32-wasip1`, `wasm32-wasip2`, `x86_64-pc-windows-gnu`, `x86_64-pc-windows-msvc`; **no Linux target at all**, and neither Windows target can execute on macOS
+                - `git branch -r --contains 77b3ea5ed0b9fffbc8a88bcca1fcd2bcd9302023` → no remote branch against a fetched `origin`, re-confirming review-10's own observation for the exact commit it named
+        - **deferred** as a platform and execution-authority constraint, not a CPU-load deferral; structurally unchanged from cycles 5 through 9. This session is prohibited from committing, pushing, invoking credential helpers, starting VMs, and triggering external workflows, so no authorized native Linux or Windows execution path exists from this workspace
+        - cross-compilation proves compilation only, Docker was ruled inadmissible for this finding by review-7, and a workflow definition is not an execution record
+        - relevance note for this cycle: **no production source was changed at all** — the two implemented findings were verified as already landed (one test-only seam in playa-cli, one documentation commit), so the native-platform risk surface is unchanged from cycle 9
+        - the identifier to publish will be a *new* SHA (current HEAD `8e4520645` plus this cycle's record edits), not `77b3ea5ed`; the three-OS evidence must be gathered against that final tree
+        - full detail and the closure procedure appended to `sniff/features/2026-07-16-performance/deferred-perf-tests.md` under "Review 10 deferred items"; `deferred_perf_measurement: true` remains set in this log's frontmatter
+- work completed for 'native Linux and Windows execution and matched work-count artifacts (review-10 High)' at 20:46:08
+- no commit, push, external workflow trigger, VM startup, package installation, or write-mode formatting command was run
+
+### Successful Completion
+
+The implementation of review cycle 10 has completed successfully in 21 minutes and 37 seconds (20:25:49–20:47:26 local time). During this implementation all 3 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed (both verified as already implemented by commits `6a2a00d4d` and `4cf06917e`, which landed after the review was recorded; this cycle audited them against the current tree and re-ran both package areas' gates), 1 was deferred (see reasons below):
+
+- **Finding 1, native Linux and Windows execution and matched three-OS work-count artifacts** — deferred because this native arm64 macOS host has no authorized native Linux or Windows execution path. The constraint was re-verified rather than inherited from cycle 9: `rustup target list --installed` carries no Linux target at all, neither installed Windows target can execute on macOS, and `git branch -r --contains 77b3ea5ed0b9fffbc8a88bcca1fcd2bcd9302023` returns no remote branch for the exact commit review-10 named. This session is prohibited from committing, pushing, invoking credential helpers, starting VMs, and triggering external workflows. Cross-compilation proves compilation only, Docker was ruled inadmissible for this finding by review-7, and a workflow definition is not an execution record. This is a platform and execution-authority constraint, not a CPU-load deferral. Full detail and the closure procedure are recorded in `sniff/features/2026-07-16-performance/deferred-perf-tests.md` under "Review 10 deferred items".
+
+The files changed by this cycle are records only: this log, `sniff/features/2026-07-16-performance/deferred-perf-tests.md` (the Review 10 deferral entry), and `sniff/features/2026-07-16-performance/review-10.md` (implementation metadata). The verified-already-landed fixes themselves live in `6a2a00d4d` (`playa/cli/src/main.rs`, `playa/cli/src/install_ui.rs`) and `4cf06917e` (the Sniff skill docs, both READMEs, and two rustdoc sites).
+
+- final verification passed with exit code 0 in both affected areas: **playa** — 19/19 `playa-cli` tests passed (0 skipped), `just lint` exit 0; **sniff** — 1,677 `sniff-lib` tests passed (19 skipped) and 782 `sniff-cli` tests passed (3 skipped), `just lint` exit 0
+- both medium findings were resolved by post-review commits that predate this session; this cycle's contribution is the audit against the current tree, the composed command-boundary regression's continued green run, and the deferral record for the recurring cross-platform High finding
 - no commit, push, external workflow trigger, VM startup, package installation, or write-mode formatting command was run

@@ -336,3 +336,50 @@ close without external execution or unrelated public API expansion.
   macOS, Linux, and Windows; run the `work_counts` example natively on each; and retain all
   three tables plus the test and lint run links under that same identifier. Cross-compilation,
   Docker, WSL, or results from a different tree do not close this finding.
+
+## Review 10 deferred items
+
+### Finding 1 (High) — native Linux and Windows execution and matched work-count artifacts remain absent
+
+- **Maps back to:** [review-10.md](review-10.md), the single High finding titled
+  "native Linux and Windows execution and matched work-count artifacts remain absent";
+  umbrella [spec.md:397](spec.md#L397) acceptance criterion "Cross-platform tests pass on
+  macOS, Linux, and Windows, and the scheduled benchmark matrix emits comparable work-count
+  artifacts."
+- **Requirement:** one immutable final implementation identifier, retained green native
+  `just test` and `just lint` runs on all three operating systems, and three matched
+  `work_counts` artifacts published under that identifier.
+- **Host evidence:** `uname -a` reports native arm64 macOS (Darwin 25.5.0,
+  `xnu-12377.121.10~1/RELEASE_ARM64_T6041`). `rustup target list --installed` reports
+  `aarch64-apple-darwin`, `wasm32-wasip1`, `wasm32-wasip2`, `x86_64-pc-windows-gnu`, and
+  `x86_64-pc-windows-msvc` — **no Linux target at all**, and neither Windows target can
+  execute on macOS.
+- **Publication evidence:** `git branch -r --contains 77b3ea5ed0b9fffbc8a88bcca1fcd2bcd9302023`
+  returned no remote branch against a fetched `origin` (`git@github.com:yankeeinlondon/rusty-biscuit.git`).
+  That is the exact commit review-10 named, so the review's own observation is re-confirmed
+  rather than inherited: no hosted matrix can have executed the reviewed tree.
+- **Why deferred:** an execution-authority and platform constraint, not a CPU-load
+  deferral. It is structurally unchanged from cycles 5 through 9. This session is
+  prohibited from committing, pushing, invoking credential helpers, starting VMs, and
+  triggering external workflows, so no authorized path to native Linux or Windows
+  execution exists from this workspace. Cross-compilation proves compilation only; Docker
+  was ruled inadmissible for this finding by review-7; a workflow definition is not an
+  execution record.
+- **Cycle-10 relevance note:** this cycle changed no production source at all. The two
+  implemented findings were verified as already landed by `6a2a00d4d` (playa-cli command
+  boundary regression, test-only seam) and `4cf06917e` (documentation and rustdoc
+  corrections); the only new writes this cycle are this feature's own records. The
+  native-platform risk surface is therefore unchanged from cycle 9 — the deterministic
+  between-samples sampler hook and its `getppid()` portability claim have still been
+  exercised natively on **macOS only** and still need a native Linux run where descendant
+  discovery goes through `/proc`.
+- **Implementation identifier:** the final tree is HEAD
+  `8e4520645` ("docs(sniff): record blocked phase 01 review cycle") plus this cycle's
+  uncommitted record edits to `sniff/features/2026-07-16-performance/log.md`,
+  `deferred-perf-tests.md`, and `review-10.md`. The three-OS evidence must be gathered
+  against that final tree, not against any earlier reviewed commit.
+- **To close:** commit and push one immutable cycle-10 implementation identifier to
+  `origin`; obtain green native `cd sniff && just test` and `cd sniff && just lint` runs on
+  macOS, Linux, and Windows; run the `work_counts` example natively on each; and retain all
+  three tables plus the test and lint run links under that same identifier. Cross-compilation,
+  Docker, WSL, or results from a different tree do not close this finding.
