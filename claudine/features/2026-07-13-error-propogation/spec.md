@@ -4,7 +4,7 @@ status: draft
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-07-16
-review_iterations: 4
+review_iterations: 5
 depends_on:
     - ../_completed/2026-06-28-real-errors/spec.md
 related:

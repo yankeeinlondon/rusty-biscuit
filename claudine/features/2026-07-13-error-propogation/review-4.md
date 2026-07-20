@@ -4,10 +4,11 @@ ready: false
 agent: codex/default
 created: 2026-07-20T14:14:35-07:00
 spec: 2026-07-13-error-propogation/spec.md
-implemented: false
+implemented: true
 description: A **feature** review of `2026-07-13-error-propogation/spec.md`
 feature: 2026-07-13-error-propogation/review-4.md
 previous: 2026-07-13-error-propogation/review-3.md
+next: 2026-07-13-error-propogation/review-5.md
 ---
 
 # Review 4: End-to-End Typed Error Propagation
