@@ -190,8 +190,9 @@ pub fn cleanup_content_loose(content: &str) -> String {
 
 /// Cleans up markdown content and enforces a consistent list indentation width.
 ///
-/// When `indent_size` is provided, every nested list level is normalized to that
-/// number of spaces.
+/// `indent_size` is the preferred column step between nested levels. When that
+/// column would not represent the same list structure in CommonMark, cleanup
+/// uses the nearest valid child column instead.
 ///
 /// ## Examples
 ///

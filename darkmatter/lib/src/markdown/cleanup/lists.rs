@@ -233,14 +233,90 @@ pub(super) fn detect_list_indentation(content: &str) -> usize {
     2
 }
 
-/// Fixes list indentation in the output to match the original style.
+/// Maximum digit count for a CommonMark ordered-list marker.
 ///
-/// `pulldown-cmark-to-cmark` uses 2-space indentation by default. This function
-/// converts it to the specified indentation size (e.g., 4 spaces).
+/// See <https://spec.commonmark.org/0.31.2/#ordered-list-marker>: a run of ten
+/// or more digits is paragraph prose, not a marker. Mirrors
+/// `crate::markdown::cleanup::reflow::MAX_ORDERED_MARKER_DIGITS` — that helper
+/// is private to a sibling module, so this constant is duplicated here rather
+/// than widening the reflow module just to share one number.
+const MAX_ORDERED_MARKER_DIGITS: usize = 9;
+
+/// Returns the byte width of the list marker starting at `trimmed`, or `None`
+/// when `trimmed` does not begin with a list marker.
+///
+/// The width includes the trailing space and any task-list bracket:
+/// `"- "` = 2, `"* "` = 2, `"+ "` = 2, `"1. "` = 3, `"10. "` = 4,
+/// `"- [ ] "` = 6, `"- [x] "` = 6. Digit runs longer than
+/// `MAX_ORDERED_MARKER_DIGITS` are not markers.
+fn list_marker_byte_width(trimmed: &str) -> Option<usize> {
+    let bytes = trimmed.as_bytes();
+    if bytes.len() < 2 {
+        return None;
+    }
+    if matches!(bytes[0], b'*' | b'-' | b'+') && bytes[1] == b' ' {
+        let marker = 2;
+        return Some(marker + task_marker_byte_width(&trimmed[marker..]).unwrap_or(0));
+    }
+    if bytes[0].is_ascii_digit() {
+        for (idx, &byte) in bytes.iter().enumerate().skip(1) {
+            // `idx` is also the length of the digit run scanned so far.
+            if idx > MAX_ORDERED_MARKER_DIGITS {
+                return None;
+            }
+            if byte == b'.' || byte == b')' {
+                return (bytes.get(idx + 1) == Some(&b' ')).then_some(idx + 2);
+            }
+            if !byte.is_ascii_digit() {
+                return None;
+            }
+        }
+    }
+    None
+}
+
+/// Width of the `[ ] ` / `[x] ` / `[X] ` task-list bracket suffix.
+fn task_marker_byte_width(rest: &str) -> Option<usize> {
+    let bytes = rest.as_bytes();
+    if bytes.len() >= 4
+        && bytes[0] == b'['
+        && matches!(bytes[1], b' ' | b'x' | b'X')
+        && bytes[2] == b']'
+        && bytes[3] == b' '
+    {
+        Some(4)
+    } else {
+        None
+    }
+}
+
+/// Rescales nested list indentation in `output` to step by `target_indent`
+/// columns per nesting level.
+///
+/// Stack-based rather than `current_indent / 2` because the prior formula
+/// silently destroyed list structure whenever a marker was wider than one
+/// character. Under a `10. ` parent, for instance, `pulldown-cmark-to-cmark`
+/// correctly indents a depth-1 child to column 4 (the parent's content
+/// column); `4 / 2 = 2` then synthesized depth 2 and pushed the child to
+/// column 8 under `--indent 4`, which pulldown-cmark reads as lazy
+/// continuation prose on the next parse and absorbs into the parent.
+///
+/// The algorithm tracks each open list level's original and rescaled
+/// item/content columns. A child is recognized as depth N+1 only when its
+/// marker column is at least its parent's content column (the CommonMark
+/// rule), so depth is derived from actual nesting rather than from the
+/// absolute column divided by two. Requested columns are constrained to the
+/// parent's CommonMark-valid child range, and continuation prose or indented
+/// code preserves its offset relative to the rescaled content column.
 pub(super) fn fix_list_indentation(output: &mut String, target_indent: usize) {
     if target_indent == 2 {
-        return; // Already correct
+        return; // cmark's default for narrow markers is already 2-space.
     }
+
+    // (orig_item_col, orig_content_col, new_item_col, new_content_col) per
+    // open list level. `orig_*` is the column in the cmark-serialized input;
+    // `new_*` is the rescaled column written to the output.
+    let mut stack: Vec<(usize, usize, usize, usize)> = Vec::new();
 
     let mut result = String::with_capacity(output.len());
     let mut lines = output.lines().peekable();
@@ -249,7 +325,10 @@ pub(super) fn fix_list_indentation(output: &mut String, target_indent: usize) {
     while let Some(line) = lines.next() {
         let trimmed = line.trim_start();
 
-        // Track code blocks
+        // Fenced code blocks and their contents are passed through verbatim.
+        // The list-nesting stack is unchanged: cleanup has already serialized
+        // a fence at the correct column for its containing item, and a
+        // top-level fence does not reset anything.
         if trimmed.starts_with("```") {
             in_code_block = !in_code_block;
             result.push_str(line);
@@ -258,8 +337,6 @@ pub(super) fn fix_list_indentation(output: &mut String, target_indent: usize) {
             }
             continue;
         }
-
-        // Don't process code block content
         if in_code_block {
             result.push_str(line);
             if lines.peek().is_some() {
@@ -268,36 +345,78 @@ pub(super) fn fix_list_indentation(output: &mut String, target_indent: usize) {
             continue;
         }
 
-        // Check if this is a list item
-        let is_list_item = trimmed.starts_with("- ")
-            || trimmed.starts_with("* ")
-            || trimmed.starts_with("+ ")
-            || is_ordered_list_start(trimmed);
+        let current_indent = line.len() - trimmed.len();
 
-        if is_list_item {
-            let current_indent = line.len() - trimmed.len();
-            if current_indent > 0 {
-                // Calculate nesting level (assuming 2-space input)
-                let nesting_level = current_indent / 2;
-                // Apply target indentation
-                let new_indent = nesting_level * target_indent;
+        if let Some(marker_width) = list_marker_byte_width(trimmed) {
+            // Pop every level whose item column is at or past the current
+            // column: those are siblings or shallower levels we have exited.
+            while stack
+                .last()
+                .is_some_and(|(orig_item, _, _, _)| *orig_item >= current_indent)
+            {
+                stack.pop();
+            }
+
+            let depth = stack.len();
+            let new_item_col = if depth == 0 {
+                0
+            } else {
+                let (_, _, _, parent_new_content) = stack[depth - 1];
+                // A child marker is valid from its parent's content column
+                // through three columns beyond it. Constraining the preferred
+                // column prevents both wide parents and large requested steps
+                // from turning a nested child into continuation prose or code.
+                (target_indent * depth)
+                    .clamp(parent_new_content, parent_new_content.saturating_add(3))
+            };
+            let new_content_col = new_item_col + marker_width;
+
+            result.push_str(&" ".repeat(new_item_col));
+            result.push_str(trimmed);
+            stack.push((
+                current_indent,
+                current_indent + marker_width,
+                new_item_col,
+                new_content_col,
+            ));
+        } else if current_indent > 0 {
+            // Continuation prose or indented content belonging to the deepest
+            // open item. A continuation line at column C cannot belong to an
+            // item whose own marker was at column ≥ C, so those levels are
+            // popped before the offset is computed.
+            while stack
+                .last()
+                .is_some_and(|(orig_item, _, _, _)| *orig_item >= current_indent)
+            {
+                stack.pop();
+            }
+
+            if stack.is_empty() {
+                // Top-level indented content that is not inside any list.
+                result.push_str(line);
+            } else {
+                let (_, orig_content, _, new_content) = *stack.last().unwrap();
+                // `target_indent * depth` mirrors how list-item markers are
+                // rescaled, so a `- Alpha\n  beta` parent-then-continuation
+                // at cmark's content column lands at `target_indent` rather
+                // than the bare marker-width content column. The `max`
+                // guarantees the result is at least the parent's rescaled
+                // content column, which wide markers (`1234. `, content col
+                // 6) need to stay CommonMark-valid.
+                let depth = stack.len();
+                let base = (target_indent * depth).max(new_content);
+                // Preserve the relative offset from the containing item's
+                // original content column: indented code (typically +4) keeps
+                // its extra indentation, plain continuation prose keeps offset 0.
+                let offset = current_indent.saturating_sub(orig_content);
+                let new_indent = base + offset;
                 result.push_str(&" ".repeat(new_indent));
                 result.push_str(trimmed);
-            } else {
-                result.push_str(line);
             }
         } else {
-            // For non-list content that's indented (like continuation text),
-            // apply the same scaling
-            let current_indent = line.len() - trimmed.len();
-            if current_indent > 0 && current_indent % 2 == 0 {
-                let nesting_level = current_indent / 2;
-                let new_indent = nesting_level * target_indent;
-                result.push_str(&" ".repeat(new_indent));
-                result.push_str(trimmed);
-            } else {
-                result.push_str(line);
-            }
+            // Top-level non-list line: clear the stack and pass through.
+            stack.clear();
+            result.push_str(line);
         }
 
         if lines.peek().is_some() {
@@ -311,23 +430,6 @@ pub(super) fn fix_list_indentation(output: &mut String, target_indent: usize) {
     }
 
     *output = result;
-}
-
-/// Checks if a line starts with an ordered list marker (e.g., "1. " or "1) ").
-fn is_ordered_list_start(line: &str) -> bool {
-    let mut chars = line.chars().peekable();
-    let mut has_digit = false;
-
-    while let Some(c) = chars.next() {
-        if c.is_ascii_digit() {
-            has_digit = true;
-        } else if has_digit && (c == '.' || c == ')') {
-            return chars.peek() == Some(&' ');
-        } else {
-            return false;
-        }
-    }
-    false
 }
 
 /// Unescapes unnecessarily escaped brackets in the output.
