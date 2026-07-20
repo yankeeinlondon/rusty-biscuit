@@ -65,9 +65,13 @@
 //!
 //! ## Execution status
 //!
-//! **Not yet run.** Authored and type-checked only; no Linux Level-3 execution
-//! evidence exists for this test. It requires an attended X11 desktop session,
-//! which the environment it was written in does not have. See
+//! **Executed green once, headless-container X11 only** (2026-07-19, revision
+//! `baba83844` + the uncommitted harness injector modules): Docker Linux
+//! (aarch64, kernel 6.12.76), Xvfb + Openbox + WezTerm GUI, XTEST injection —
+//! 1 passed, no retries, under `BISCUIT_TEST_LEVEL_REQUIRED=3`. See
+//! `features/2026-07-11-sequence-plus/gate-run-2026-07-19-l3-linux.md`. An
+//! **attended native-desktop Linux run is still owed** — the container has no
+//! real desktop, focus contention, or WM variety. See
 //! `features/2026-07-11-sequence-plus/l3-ctrl-c-runbook.md` for the procedure
 //! and the four observations to record.
 //!

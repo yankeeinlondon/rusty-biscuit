@@ -5,11 +5,14 @@ Procedure for producing the Level-3 evidence review 6 finding 3 requires
 passed once on 2026-07-18, but **that pass is stale** — it predates the
 task-shell process-tree ownership rewrite (fail-closed `ProcessTree` with
 reap-on-completion in `lib/src/composition/sequence/task/shell.rs`) and the
-descendant-cleanup assertion the macOS fixture now carries. The Linux and
-Windows tests have **never been run** on any host. All three must be run at the
-current revision. Only an attended desktop session can produce this evidence,
-because each test raises a GUI terminal to frontmost and injects real OS
-keystrokes into whatever holds focus.
+descendant-cleanup assertion the macOS fixture now carries. The Linux test
+passed once on 2026-07-19 at the current revision, but in a
+**headless-container X11 session** (Docker + Xvfb + Openbox + WezTerm, XTEST
+injection — see `gate-run-2026-07-19-l3-linux.md`), not an attended desktop.
+The Windows test has **never been run** on any host. Attended runs of all
+three at the current revision are still owed. Only an attended desktop session
+can produce that evidence, because each test raises a GUI terminal to
+frontmost and injects real OS keystrokes into whatever holds focus.
 
 ## The requirement being discharged
 
