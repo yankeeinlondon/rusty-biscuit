@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use super::launch_workspace::LaunchWorkspaceContext;
 use super::lifecycle::LifecycleConfig;
+use crate::diagnostics::DiagnosticSnapshot;
 use crate::harness::shell::CachedApprovalDecision;
 use crate::provider::Provider;
 
@@ -814,7 +815,21 @@ pub struct SequenceStepResult {
     /// Whether the step succeeded (exit code 0).
     pub success: bool,
     /// Error message if the step failed.
+    ///
+    /// Load-bearing beyond display: `run_sequence_steps` compares it against
+    /// the `interrupted by SIGINT` sentinel to select exit code 130, so its
+    /// text is a contract, not prose.
     pub error: Option<String>,
+    /// The failure's diagnostic identity, when the step's error chain carried
+    /// one.
+    ///
+    /// Beside [`error`](Self::error) rather than replacing it: the prose is
+    /// matched for the interrupt sentinel and rendered verbatim, while this
+    /// carries the `code`, `category`, `detail`, and one-level cause the
+    /// string discards (spec §D9). `None` for an interrupt, a success, or a
+    /// chain that held only prose.
+    /// Boxed to match the `StepOutcome` variant it is moved from.
+    pub error_snapshot: Option<Box<DiagnosticSnapshot>>,
     /// Wall-clock duration of the step.
     pub duration: std::time::Duration,
     /// When the step ran a group, one entry per member task that ran, in

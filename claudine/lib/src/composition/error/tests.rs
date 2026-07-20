@@ -274,6 +274,7 @@ fn loop_iteration_failed_display_surfaces_reason_and_iteration() {
         exit_code: 1,
         reason: "step_timeout after 30m of stream silence".to_string(),
         exit_reason: Some("step_timeout".to_string()),
+        snapshot: None,
     };
     let rendered = err.to_string();
     assert!(
@@ -340,6 +341,7 @@ fn loop_iteration_failed_falls_back_when_no_exit_reason() {
         exit_code: 1,
         reason: "provider exited non-zero".to_string(),
         exit_reason: None,
+        snapshot: None,
     };
     let rendered = err.to_string();
     assert!(
@@ -2128,4 +2130,114 @@ fn every_batch_3_variant_projects_a_catalog_shaped_detail() {
             err.code()
         );
     }
+}
+
+// -- carried diagnostic snapshots (spec §D9) -------------------------------
+//
+// `LoopIterationFailed` and `SequenceTaskPromptLaunch` are both raised at a
+// boundary whose upstream returns an erased `color_eyre::eyre::Report`. The
+// prose field records what failed; the snapshot records *which diagnostic*
+// failed, so the facets survive a boundary no error value crosses.
+
+/// The projection the CLI sites build from the erased wiring error.
+fn carried_snapshot() -> DiagnosticSnapshot {
+    DiagnosticSnapshot::from_diagnostic(&CompositionError::FileNotFound("missing.md".to_string()))
+}
+
+#[test]
+fn loop_iteration_failed_carries_the_wiring_diagnostic_facets() {
+    let err = CompositionError::LoopIterationFailed {
+        iteration: 1,
+        prompt_path: PathBuf::from("plan.md"),
+        exit_code: 1,
+        reason: "could not resolve provider binary".to_string(),
+        exit_reason: None,
+        snapshot: Some(Box::new(carried_snapshot())),
+    };
+
+    let CompositionError::LoopIterationFailed { snapshot, .. } = &err else {
+        panic!("constructed variant");
+    };
+    let snapshot = snapshot.as_ref().expect("the wiring chain carried one");
+    assert_eq!(snapshot.code, "composition.invalid_file_reference");
+    assert_eq!(snapshot.category, "composition");
+    assert_eq!(snapshot.detail["reference"], "missing.md");
+}
+
+#[test]
+fn sequence_task_prompt_launch_carries_the_wrapper_diagnostic_facets() {
+    let err = CompositionError::SequenceTaskPromptLaunch {
+        task: "review".to_string(),
+        path: PathBuf::from("tasks/review.md"),
+        message: "could not resolve provider binary".to_string(),
+        snapshot: Some(Box::new(carried_snapshot())),
+    };
+
+    let CompositionError::SequenceTaskPromptLaunch { snapshot, .. } = &err else {
+        panic!("constructed variant");
+    };
+    let snapshot = snapshot.as_ref().expect("the wrapper chain carried one");
+    assert_eq!(snapshot.code, "composition.invalid_file_reference");
+    assert_eq!(snapshot.detail["reference"], "missing.md");
+}
+
+#[test]
+fn carrying_a_snapshot_does_not_change_the_rendered_prose() {
+    // Spec §D10: the snapshot is additive. Every existing surface — `Display`,
+    // and therefore the summary text and status-block body built from it —
+    // must read byte-for-byte the same with and without it.
+    let without = CompositionError::LoopIterationFailed {
+        iteration: 2,
+        prompt_path: PathBuf::from("fixes/plan.md"),
+        exit_code: 1,
+        reason: "step_timeout".to_string(),
+        exit_reason: Some("step_timeout".to_string()),
+        snapshot: None,
+    };
+    let with = CompositionError::LoopIterationFailed {
+        iteration: 2,
+        prompt_path: PathBuf::from("fixes/plan.md"),
+        exit_code: 1,
+        reason: "step_timeout".to_string(),
+        exit_reason: Some("step_timeout".to_string()),
+        snapshot: Some(Box::new(carried_snapshot())),
+    };
+    assert_eq!(with.to_string(), without.to_string());
+
+    let launch_without = CompositionError::SequenceTaskPromptLaunch {
+        task: "review".to_string(),
+        path: PathBuf::from("tasks/review.md"),
+        message: "boom".to_string(),
+        snapshot: None,
+    };
+    let launch_with = CompositionError::SequenceTaskPromptLaunch {
+        task: "review".to_string(),
+        path: PathBuf::from("tasks/review.md"),
+        message: "boom".to_string(),
+        snapshot: Some(Box::new(carried_snapshot())),
+    };
+    assert_eq!(launch_with.to_string(), launch_without.to_string());
+}
+
+#[test]
+fn carrying_a_snapshot_does_not_move_the_variants_own_identity() {
+    // The carried snapshot is data on the record, not a `#[source]`. Selection
+    // must still stop at the variant itself, so `err.code` — an authored
+    // matching surface — cannot shift under a `when:` clause (spec §D10).
+    let with = CompositionError::LoopIterationFailed {
+        iteration: 1,
+        prompt_path: PathBuf::from("plan.md"),
+        exit_code: 1,
+        reason: "boom".to_string(),
+        exit_reason: None,
+        snapshot: Some(Box::new(carried_snapshot())),
+    };
+
+    assert_eq!(with.code(), "composition.failed");
+    assert_eq!(
+        crate::diagnostics::DiagnosticSnapshot::select(&with)
+            .map(|selected| selected.code)
+            .as_deref(),
+        Some("composition.failed"),
+    );
 }

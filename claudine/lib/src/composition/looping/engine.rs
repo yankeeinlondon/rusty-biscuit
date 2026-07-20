@@ -601,6 +601,9 @@ where
                         exit_code: last_exit_code,
                         reason: "iteration failed".to_string(),
                         exit_reason,
+                        // The fail-fast fallback: no iteration error was
+                        // attached, so there is no chain to project from.
+                        snapshot: None,
                     }
                 }),
             ));

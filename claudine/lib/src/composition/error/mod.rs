@@ -24,7 +24,8 @@ use super::frontmatter_excerpt::FrontmatterExcerpt;
 use super::sequence::task::RunawayTrip;
 use super::types::{ResolutionMode, ResolvedCompositionSource, SessionInteractivitySource};
 use crate::diagnostics::{
-    Category, Diagnostic, DiagnosticRole, Disposition, Origin, code_spec, null_detail_for,
+    Category, Diagnostic, DiagnosticRole, DiagnosticSnapshot, Disposition, Origin, code_spec,
+    null_detail_for,
 };
 use crate::provider::Provider;
 use thiserror::Error;
@@ -1375,6 +1376,17 @@ pub enum CompositionError {
         path: PathBuf,
         /// What the wrapper reported.
         message: String,
+        /// The launch failure's own diagnostic identity, when the wrapper's
+        /// error chain carried one.
+        ///
+        /// The wrapper returns an erased `Report`, which cannot become a
+        /// `#[source]`. Projecting the chain's selected diagnostic here keeps
+        /// `code`, `category`, `detail`, and the one-level cause that `message`
+        /// alone would discard (spec §D9). `None` when the chain held only
+        /// prose.
+        /// Boxed to keep `CompositionError` small — it is the `Err` type of
+        /// most composition `Result`s.
+        snapshot: Option<Box<DiagnosticSnapshot>>,
     },
 
     /// A step has neither an executable nor a body to run.
@@ -1848,6 +1860,18 @@ pub enum CompositionError {
         /// one is present (e.g. `step_timeout`, `wall_clock_timeout`,
         /// `signal`, `usage_limit_reached`). `None` when no row was written.
         exit_reason: Option<String>,
+        /// The iteration failure's own diagnostic identity, when the wiring
+        /// error chain carried one.
+        ///
+        /// Pre-spawn wiring returns an erased `Report`, which cannot become a
+        /// `#[source]`. Projecting the chain's selected diagnostic here keeps
+        /// `code`, `category`, `detail`, and the one-level cause that `reason`
+        /// alone would discard (spec §D9). `None` for the provider-exited
+        /// path, whose `reason` is assembled from session_end fields rather
+        /// than from a typed error.
+        /// Boxed to keep `CompositionError` small — it is the `Err` type of
+        /// most composition `Result`s.
+        snapshot: Option<Box<DiagnosticSnapshot>>,
     },
 
     // -- Schema errors --------------------------------------------------------
