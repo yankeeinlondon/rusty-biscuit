@@ -70,8 +70,20 @@ do not belong here.
 
 - Follow recent repository history and the prompt's Conventional Commit format.
   Subjects use lowercase after the colon and stay under 72 characters.
-- Use `planning` for physical moves into `_completed` or out of `_unscheduled`.
-  An in-place planning-document edit is normally `docs`, not `planning`.
+- Use `planning` for physical moves into `_completed` or out of `_unscheduled`,
+  AND for review-cycle doc commits inside a fix/review directory: a cycle-N→N+1
+  in-place edit (`log.md` verification entry, `review-N.md` flipping
+  `implemented: true` and pointing at `next`, the new `review-(N+1).md`,
+  `spec.md` bumping `review_iterations`) ships as
+  `planning(<area>): close <fix> cycle N, open cycle N+1`. `main` is the
+  authority — this is the established convention for the `redundant-walk`
+  and `invalid-frontmatter` fix cycles (see `4c903c586`, `152ea6b84`,
+  `690b2ecc3`); follow the most recent sibling commits, not a generic
+  "in-place edits are docs" rule.
+- `planning` commits may have zero source diff. The fix-review pattern uses
+  verification iterations to re-audit a prior cycle's implementation rather than
+  redo it, so a cycle-N log/spec/review update can ship with no Rust changes.
+  Treat such commits as valid cycle iterations, not no-ops.
 - Describe the semantic change, not Git's similarity score or mechanics.
 
 ## Concurrency
