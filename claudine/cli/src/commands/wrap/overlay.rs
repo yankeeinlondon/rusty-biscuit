@@ -63,5 +63,11 @@ pub(crate) fn materialize_passthrough_harness_seed(
         inline_closure_plan: None,
         lifecycle: None,
         live_frontmatter,
+        // A direct-wrapper passthrough records `mcp_body_tags: Vec::new()` as its
+        // whole invocation facet set (`wrapper_stages::passthrough_launch_intent`)
+        // — its MCP set comes from `--mcp-use`, not from a document body. Lexing
+        // the provider memory file it wraps would fabricate a moved facet and
+        // send this path into a replay it recorded no inputs for.
+        mcp_body_tags: Vec::new(),
     })
 }

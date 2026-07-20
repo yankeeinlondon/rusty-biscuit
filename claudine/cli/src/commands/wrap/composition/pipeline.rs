@@ -125,6 +125,27 @@ struct CommandPhase {
     launch_plan_inputs: crate::commands::wrap::launch_plan::LaunchPlanInputs,
     use_structured: bool,
     stream_verbosity: Verbosity,
+    /// The temp files this phase's own system-prompt delivery wrote.
+    ///
+    /// [`Self::args_before_prompt`] and the recorded environment overlay carry
+    /// only their *paths* — Gemini's `GEMINI_SYSTEM_MD`, Claude's file flag, and
+    /// Codex's `model_instructions_file` all hand the child a path, never the
+    /// content. Holding the artifacts here binds their RAII cleanup to the
+    /// phase, which outlives [`provider_run_handoff`] and therefore every
+    /// attempt the invocation spawns. Dropping them at the end of
+    /// [`construct_argv_and_system_prompt`] unlinked the file before the first
+    /// child started, so the provider silently received no system prompt
+    /// (review-11 finding 1).
+    ///
+    /// This is the invocation-level counterpart of
+    /// [`RebuiltLaunchIdentity::system_prompt_artifacts`]: a retry whose facets
+    /// are unchanged takes the verbatim shortcut, which re-uses this phase's
+    /// argv and so keeps naming *these* files. They therefore cannot be handed
+    /// to a per-attempt owner.
+    ///
+    /// [`RebuiltLaunchIdentity::system_prompt_artifacts`]: crate::commands::wrap::harness_orch::loop_control::target_launch::RebuiltLaunchIdentity::system_prompt_artifacts
+    #[allow(dead_code)]
+    system_prompt_artifacts: Vec<super::super::system_prompt::SystemPromptArtifact>,
 }
 
 struct LifecyclePhase {
@@ -909,7 +930,6 @@ fn construct_argv_and_system_prompt(
                 }
             }
         }
-        let _ = &sp_artifacts;
         let system_prompt_args = child_args[argv_after_output..].to_vec();
 
         // Universal --sandbox flag
@@ -1131,6 +1151,7 @@ fn construct_argv_and_system_prompt(
             launch_plan_inputs,
             use_structured,
             stream_verbosity,
+            system_prompt_artifacts: sp_artifacts,
         })
     })())
 }
@@ -1475,6 +1496,9 @@ fn provider_run_handoff(
         launch_plan_inputs,
         use_structured,
         stream_verbosity,
+        // Borrowed, never moved: the caller owns the phase for the whole run, so
+        // the files the argv/environment name stay on disk past every spawn.
+        system_prompt_artifacts: _,
     } = command;
     let use_structured = *use_structured;
     let stream_verbosity = *stream_verbosity;

@@ -343,6 +343,9 @@ struct AttemptPromptPreparation<'a> {
     show_checks: bool,
     detail_requested: bool,
     silent: bool,
+    /// The command's `--silent`/`--quiet` policy, as the same `Verbosity` the
+    /// direct command derives. Read by [`emit_launch_warnings`].
+    stream_verbosity: Verbosity,
 }
 
 struct AttemptLifecycleExecution<'a, 'guard> {
@@ -424,6 +427,7 @@ fn prepare_attempt_phase(
         show_checks: state.run.show_checks,
         detail_requested: state.run.detail_requested,
         silent: state.run.silent,
+        stream_verbosity: state.run.stream_verbosity,
     };
     let mut lifecycle = AttemptLifecycleExecution {
         guard: state.run.lifecycle_guard,
@@ -1026,10 +1030,10 @@ fn launch_plan_failure(
     repo_root: Option<&Path>,
     term: &Terminal,
     effect_engine: &EffectEngine,
-    error: &dyn std::fmt::Display,
+    error: &crate::commands::wrap::launch_plan::LaunchPlanError,
     loop_start: std::time::Instant,
 ) -> color_eyre::eyre::Report {
-    let err_info = LifecycleErrorInfo::from_action_failure("launch_plan", error.to_string());
+    let err_info = launch_plan_err_info(error);
     match emit_failure_finalize_with_err(
         lifecycle_guard,
         materialized,
@@ -1042,6 +1046,40 @@ fn launch_plan_failure(
     ) {
         Some(composition) => composition.into(),
         None => eyre!("{error}"),
+    }
+}
+
+/// The `err.*` a rebuild failure publishes to the catching lifecycle stacks.
+///
+/// A provider the invocation's snapshot cannot run is not a launch-plan
+/// *assembly* failure: it is the ordinary selection diagnostic a direct
+/// invocation of the refreshed document raises, so it keeps that identity —
+/// same `err.category`/`err.code` on both routes (review-11 finding 2).
+fn launch_plan_err_info(
+    error: &crate::commands::wrap::launch_plan::LaunchPlanError,
+) -> LifecycleErrorInfo {
+    match error {
+        crate::commands::wrap::launch_plan::LaunchPlanError::ProviderUnavailable(composition) => {
+            LifecycleErrorInfo::from_composition_error(composition)
+        }
+        other => LifecycleErrorInfo::from_action_failure("launch_plan", other.to_string()),
+    }
+}
+
+/// Carry a rebuild failure out as a report the caller can still downcast.
+///
+/// A selection refusal is unwrapped back to its own `CompositionError` rather
+/// than reported as a `LaunchPlanError` wrapper: the caller's `downcast_ref`
+/// is what preserves the typed identity and attaches the frontmatter excerpt a
+/// direct invocation of the same document gets.
+fn launch_plan_report(
+    error: crate::commands::wrap::launch_plan::LaunchPlanError,
+) -> color_eyre::eyre::Report {
+    match error {
+        crate::commands::wrap::launch_plan::LaunchPlanError::ProviderUnavailable(composition) => {
+            (*composition).into()
+        }
+        other => other.into(),
     }
 }
 
@@ -1104,6 +1142,7 @@ fn empty_materialized_prompt() -> MaterializedHarnessPrompt {
         inline_closure_plan: None,
         lifecycle: None,
         live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&serde_json::Value::Null),
+        mcp_body_tags: Vec::new(),
     }
 }
 
@@ -1160,6 +1199,37 @@ fn preflight_pending_proxy_phase(
     Ok(())
 }
 
+/// The rebuilt bundle's warnings this run is allowed to show.
+///
+/// The direct command gates its own capability warnings on `!silent && !quiet`
+/// (`composition::pipeline`), and `stream_verbosity` is that same pair already
+/// folded into one value — so reading it here is what makes the two routes share
+/// a policy rather than agree by coincidence.
+fn launch_warnings_to_render(
+    launch: &RebuiltLaunchIdentity,
+    verbosity: Verbosity,
+) -> &[crate::commands::wrap::launch_plan::LaunchWarning] {
+    if verbosity == Verbosity::Normal {
+        &launch.warnings
+    } else {
+        &[]
+    }
+}
+
+/// Render a rebuilt bundle's provider-capability warnings under the command's
+/// own output policy.
+///
+/// The equivalence contract makes warnings observable output, so a retry,
+/// resume, or proxy target that lands on a different provider owes the operator
+/// the same unsupported-model/output/sandbox/system-prompt notices the direct
+/// command writes at its capability stages — through the same `crate::log::warn`
+/// renderer (review-11 finding 4).
+fn emit_launch_warnings(launch: &RebuiltLaunchIdentity, verbosity: Verbosity) {
+    for warning in launch_warnings_to_render(launch, verbosity) {
+        crate::log::warn(&warning.message);
+    }
+}
+
 fn materialize_attempt_prompt_phase(
     prompt: &mut AttemptPromptPreparation<'_>,
     lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
@@ -1193,14 +1263,17 @@ fn materialize_attempt_prompt_phase(
     // environment overlay below, the spawn, and the session-compatibility key —
     // reads this single value, so the plan the key describes is by construction
     // the plan the attempt runs with (R8).
+    let stream_verbosity = prompt.stream_verbosity;
     let rebuild = |materialized: &MaterializedHarnessPrompt| {
-        rebuild_launch_identity(
+        let launch = rebuild_launch_identity(
             launch_intent,
             cli_model,
             repo_root,
             materialized,
             Some(source_path.as_path()),
-        )
+        )?;
+        emit_launch_warnings(&launch, stream_verbosity);
+        Ok(launch)
     };
     if let Some(seed) = initial_materialized.take() {
         // The seeded first attempt keeps the environment overlay the command
@@ -1257,7 +1330,7 @@ fn materialize_attempt_prompt_phase(
         )
     })
     .and_then(|mut materialized| {
-        let launch = rebuild(&materialized).map_err(color_eyre::eyre::Report::from)?;
+        let launch = rebuild(&materialized).map_err(launch_plan_report)?;
         apply_target_env_overrides(&mut materialized, &launch.env_overrides);
         Ok(AttemptDocument {
             materialized,

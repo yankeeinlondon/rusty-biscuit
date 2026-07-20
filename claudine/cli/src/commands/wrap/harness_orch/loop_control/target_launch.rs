@@ -40,9 +40,23 @@
 //! resume protocol that profile supports, model (frontmatter `model:` under
 //! explicit `--model`), interactivity (frontmatter `interactive:`), the
 //! permission mode `--yolo` actually achieves in that mode for that provider,
-//! the structured-output mode the pair implies, and the MCP tag set lexed from
-//! the refreshed body. It is the input both sides of the R8 session-compatibility
-//! comparison are derived from — see [`super::super::session_key`].
+//! the structured-output mode the pair implies, and the MCP tag set the
+//! refreshed document composed. It is the input both sides of the R8
+//! session-compatibility comparison are derived from — see
+//! [`super::super::session_key`].
+//!
+//! What it does **not** do is re-read the document. Every document-derived value
+//! it consumes arrives on the prepared [`MaterializedHarnessPrompt`], because
+//! the bytes on disk are raw authored Markdown: a second read resolves none of
+//! `proxy.with`, the caller overrides, or the frontmatter interpolation
+//! canonical preparation already applied, and so cannot see the servers a
+//! composed body selects (review-11 finding 3).
+//!
+//! Provider selection is not a second rule of its own: it runs the refreshed
+//! `agent:` through the canonical picker-less gate a direct non-interactive
+//! invocation uses, so a document naming a provider the invocation's snapshot
+//! cannot run refuses here — with that route's typed diagnostic, before any
+//! spawn — rather than dying at `exec` (see [`select_rebuilt_provider`]).
 //!
 //! ### Why a deterministic function of the document is the right contract
 //!
@@ -272,6 +286,15 @@ pub(crate) struct RebuiltLaunchIdentity {
     #[allow(dead_code)]
     pub(crate) system_prompt_artifacts:
         Vec<crate::commands::wrap::system_prompt::SystemPromptArtifact>,
+    /// Provider-capability warnings the rebuilt plan produced, still structured.
+    ///
+    /// The attempt that launches under this bundle renders them through
+    /// `crate::log::warn` under the command's `silent`/`quiet` policy, so a
+    /// provider switch surfaces the same unsupported-model/output/sandbox/
+    /// system-prompt notices a direct invocation of the refreshed document
+    /// would (review-11 finding 4). Empty whenever the document moved no launch
+    /// facet — the invocation already rendered its own.
+    pub(crate) warnings: Vec<launch_plan::LaunchWarning>,
 }
 
 /// Recompute the full launch identity from one refreshed read of a document.
@@ -285,15 +308,11 @@ pub(crate) fn rebuild_launch_identity(
     document: &MaterializedHarnessPrompt,
     source_path: Option<&Path>,
 ) -> Result<RebuiltLaunchIdentity, crate::commands::wrap::launch_plan::LaunchPlanError> {
-    let snapshot = intent.installed_snapshot.as_ref();
-    let provider = intent
-        .explicit_provider
-        .or_else(|| provider_from_hints(&document.selection_hints, snapshot))
-        .unwrap_or(intent.fallback_provider);
+    let provider = select_rebuilt_provider(intent, document, source_path)?;
     let profile = profile_for_provider(provider)
         .or_else(|| profile_for_provider(intent.fallback_provider))
         .expect("the invocation's own provider always has a wrapper profile");
-    let binary_path = resolve_binary_for(provider, profile, intent);
+    let binary_path = resolve_binary_for(provider, profile, intent)?;
 
     // Frontmatter `interactive:` is the only document surface over session mode;
     // absent (or explicitly null) it keeps whatever the invocation resolved.
@@ -302,20 +321,18 @@ pub(crate) fn rebuild_launch_identity(
         .interactive
         .map_or(intent.default_non_interactive, |interactive| !interactive);
 
-    // Lexed from the document on disk, not from `document.prompt`: a resume
-    // attempt deliberately substitutes the follow-up message for the composed
-    // body (R8), so the prompt field carries the follow-up rather than the text
-    // whose `#tag`s select servers. Reading the source is also what keeps the
-    // signal stable for an unchanged document — same bytes, same tags.
-    let mcp_tags = match (intent.mcp_enabled, source_path) {
-        (true, Some(path)) => {
-            let body = std::fs::read_to_string(path).unwrap_or_default();
-            let (_cleaned, mut tags) = claudine::mcp::session::lex_tags(&body);
-            tags.sort();
-            tags.dedup();
-            tags
-        }
-        _ => Vec::new(),
+    // Taken from the prepared document, which captured its tag set from the
+    // canonically composed body before the resume substitution replaced the
+    // provider input (`MaterializedHarnessPrompt::mcp_body_tags`). This rebuild
+    // deliberately performs no read of its own: a second read would see raw
+    // authored Markdown, losing every tag `proxy.with`, a caller override, or
+    // frontmatter interpolation produced, and — silently defaulting a read
+    // failure to an empty body — could erase the set outright (review-11
+    // finding 3).
+    let mcp_tags = if intent.mcp_enabled {
+        document.mcp_body_tags.clone()
+    } else {
+        Vec::new()
     };
 
     let (model, model_reason) = resolve_launch_model(provider, cli_model, repo_root, document);
@@ -445,27 +462,65 @@ pub(crate) fn rebuild_launch_identity(
         args: plan.args,
         launch_env,
         system_prompt_artifacts: plan.system_prompt_artifacts,
+        warnings: plan.warnings,
     })
 }
 
-/// Pick the provider a frontmatter `agent:` hint names.
+/// The provider the refreshed document launches, under the *same* selection rule
+/// a direct non-interactive invocation of that document applies.
 ///
-/// Mirrors `composition::select`'s non-TTY agent resolution: a list prefers its
-/// first runnable entry and otherwise falls back to its first entry, so a hint
-/// that names only uninstalled providers still registers as a *changed* identity
-/// rather than silently collapsing onto the previous one.
-fn provider_from_hints(
-    hints: &claudine::composition::EffectiveSelectionHints,
-    snapshot: Option<&InstalledProviderSnapshot>,
-) -> Option<Provider> {
-    match hints.agent.as_ref()? {
-        AgentHint::Single(provider) => Some(*provider),
-        AgentHint::List(providers) => providers
-            .iter()
-            .copied()
-            .find(|p| snapshot.is_none_or(|s| s.runnable.contains(p)))
-            .or_else(|| providers.first().copied()),
+/// A retry or resume has no operator, so the canonical picker-less gate
+/// ([`crate::commands::wrap::composition::provider_for_state_non_tty`]) is the
+/// only correct authority: an `agent:` scalar naming an unavailable provider is
+/// `SingleNotInstalled`, and a list with no runnable member is
+/// `ZeroInstalledList`. Both refuse here — before `start` reaches a spawn — with
+/// the identical typed diagnostic the direct route renders.
+///
+/// This replaced a permissive rule that accepted every scalar unchecked and
+/// deliberately fell back to a list's first *unavailable* entry, which let a
+/// refreshed document run canonical preparation and then die at process spawn
+/// (review-11 finding 2).
+///
+/// Two inputs deliberately bypass the gate:
+///
+/// - an explicit `--claude`/`--codex`/… is immutable invocation intent that no
+///   frontmatter can move, and the invocation already resolved its binary;
+/// - a document with no `agent:` at all keeps the invocation's own provider,
+///   whose provenance (picker, favorite) the gate cannot re-derive.
+///
+/// With no recorded snapshot there is nothing to classify against. Only the
+/// direct wrapper passthrough is in that state, and it always pins
+/// `explicit_provider`, so the permissive arm below is unreachable from
+/// production selection.
+fn select_rebuilt_provider(
+    intent: &LaunchRebuildIntent,
+    document: &MaterializedHarnessPrompt,
+    source_path: Option<&Path>,
+) -> Result<Provider, crate::commands::wrap::launch_plan::LaunchPlanError> {
+    if let Some(provider) = intent.explicit_provider {
+        return Ok(provider);
     }
+    let hints = &document.selection_hints;
+    let Some(hint) = hints.agent.as_ref() else {
+        return Ok(intent.fallback_provider);
+    };
+    let Some(snapshot) = intent.installed_snapshot.as_ref() else {
+        return Ok(match hint {
+            AgentHint::Single(provider) => *provider,
+            AgentHint::List(providers) => {
+                providers.first().copied().unwrap_or(intent.fallback_provider)
+            }
+        });
+    };
+    let state = claudine::composition::classify_agent_resolution(hints, snapshot);
+    crate::commands::wrap::composition::provider_for_state_non_tty(
+        &state,
+        snapshot,
+        source_path.unwrap_or_else(|| Path::new("")),
+    )
+    .map_err(|error| {
+        crate::commands::wrap::launch_plan::LaunchPlanError::ProviderUnavailable(Box::new(error))
+    })
 }
 
 /// The binary the rebuilt provider launches.
@@ -473,19 +528,24 @@ fn provider_from_hints(
 /// Landing back on the invocation's own provider reuses its already-resolved
 /// path verbatim — an unchanged document must reproduce the invocation's binary
 /// identity exactly, not re-derive it and risk a `which` result that drifted.
-/// A rebuilt *different* provider resolves through the snapshot, falling back to
-/// the profile's bare binary name so the facet still moves when that provider is
-/// not installed.
+///
+/// A rebuilt *different* provider resolves through the same
+/// snapshot-then-`which` lookup the direct launch performs, and keeps that
+/// lookup's actionable "not installed or not on PATH" failure. Substituting the
+/// profile's bare binary name here instead deferred the failure to `exec`, long
+/// after `start` had fired (review-11 finding 2).
 fn resolve_binary_for(
     provider: Provider,
     profile: &'static dyn WrapperProfile,
     intent: &LaunchRebuildIntent,
-) -> PathBuf {
+) -> Result<PathBuf, crate::commands::wrap::launch_plan::LaunchPlanError> {
     if provider == intent.fallback_provider {
-        return intent.fallback_binary.clone();
+        return Ok(intent.fallback_binary.clone());
     }
     crate::commands::wrap::resolve_binary_path_direct(profile, intent.installed_snapshot.as_ref())
-        .unwrap_or_else(|_| PathBuf::from(profile.binary()))
+        .map_err(|error| {
+            crate::commands::wrap::launch_plan::LaunchPlanError::Producer(error.to_string())
+        })
 }
 
 /// The recomputed launch identity for a freshly adopted proxy target.
@@ -557,14 +617,18 @@ pub(super) fn rebuild_target_launch(
     launch_area: &Path,
     target: &MaterializedHarnessPrompt,
 ) -> Result<TargetLaunchRebuild, crate::commands::wrap::launch_plan::LaunchPlanError> {
-    // Passes no source path: the environment overlay has no MCP component, and
-    // only the compatibility key reads [`RebuiltLaunchIdentity::mcp_tags`].
+    // Passes no source path: it is only the diagnostic an unavailable-provider
+    // refusal names, and this route's target was already selected above the
+    // harness.
     //
     // The rest of the bundle is discarded on purpose — this route's target was
     // already re-prepared through the production pipeline above the harness, so
     // its argv, and any system-prompt temp file a provider move would have
     // re-delivered, come from there. Nothing here names those paths, so
     // dropping the artifacts frees them rather than orphaning a live reference.
+    // The capability warnings are dropped for the same reason: that pipeline
+    // already rendered the target's own, and re-emitting them here would double
+    // every line.
     let env_overrides =
         rebuild_launch_identity(intent, cli_model, repo_root, target, None)?.env_overrides;
 

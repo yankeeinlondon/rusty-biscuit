@@ -23,6 +23,10 @@ pub(crate) fn materialized_harness_prompt_from_prepared(
         MaterializedHarnessPrompt::live_cell_from(&prepared.effective_frontmatter);
     MaterializedHarnessPrompt {
         frontmatter: prepared.effective_frontmatter.clone(),
+        // The same composed text the invocation pipeline lexes for its own
+        // recorded launch facets, so a seeded first attempt rebuilds to the
+        // facet set the invocation recorded.
+        mcp_body_tags: MaterializedHarnessPrompt::lex_body_mcp_tags(&prepared.prompt),
         prompt: prepared.prompt.clone(),
         env_overrides: Vec::new(),
         selection_hints: prepared.selection_hints.clone(),
@@ -210,13 +214,29 @@ pub(crate) fn materialize_harness_prompt(
     let selection_hints = prepared.selection_hints;
     let env_overrides: Vec<(String, String)> = Vec::new();
 
+    for tail in &state.prompt_tail {
+        prompt.push_str("\n\n");
+        prompt.push_str(tail);
+    }
+
+    // R3/R5/R8 — the MCP tag set belongs to the *composed* document, so it is
+    // taken here, while `prompt` still holds the composed body, and before the
+    // resume substitution below replaces the provider input with the follow-up
+    // message. Re-lexing later from either the substituted prompt or the raw
+    // source on disk loses every tag that composition produced.
+    //
+    // Passthrough is the exception: it wraps a provider memory file whose body is
+    // context rather than the request, and its invocation records an empty facet
+    // set for exactly that reason (`wrapper_stages::passthrough_launch_intent`).
+    let mcp_body_tags = match state.mode {
+        HarnessPromptMode::Passthrough => Vec::new(),
+        HarnessPromptMode::Compose | HarnessPromptMode::Inline => {
+            MaterializedHarnessPrompt::lex_body_mcp_tags(&prompt)
+        }
+    };
+
     if let Some(override_prompt) = resume_followup {
         prompt = override_prompt.to_string();
-    } else {
-        for tail in &state.prompt_tail {
-            prompt.push_str("\n\n");
-            prompt.push_str(tail);
-        }
     }
 
     let live_frontmatter = MaterializedHarnessPrompt::live_cell_from(&frontmatter);
@@ -228,6 +248,7 @@ pub(crate) fn materialize_harness_prompt(
         inline_closure_plan,
         lifecycle: Some(lifecycle),
         live_frontmatter,
+        mcp_body_tags,
     })
 }
 

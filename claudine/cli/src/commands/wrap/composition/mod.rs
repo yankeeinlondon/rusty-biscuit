@@ -61,8 +61,8 @@ pub(crate) use selection::{
 };
 pub(crate) use target::{
     agent_prompt_message, composition_dispatch_context, eagerly_resolve_target,
-    install_agent_env_for_composition, refresh_for_model_validation, resolve_execution_target,
-    scoped_picker_plan_for_state,
+    install_agent_env_for_composition, provider_for_state_non_tty, refresh_for_model_validation,
+    resolve_execution_target, scoped_picker_plan_for_state,
 };
 pub(crate) use timeouts::{
     TimeoutResolutionInput, build_prompt_timing_context, format_interactive_timeout_conflict,

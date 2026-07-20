@@ -68,6 +68,17 @@
 //! unsanitized ambient values so a rebuilt provider can re-run the same
 //! allow-list for itself, in both directions.
 //!
+//! ## Capability warnings are data, not output
+//!
+//! The capability stages a replay re-runs — model validation, `--output`,
+//! `--sandbox`, system-prompt delivery — each answer for the *rebuilt* provider,
+//! so their warnings are as provider-shaped as the argv is. They are collected
+//! into [`LaunchPlan::warnings`] and rendered by the caller under the command's
+//! own `silent`/`quiet` policy, which is the equivalence contract's requirement
+//! that a proxied or retried target emit what invoking it directly emits.
+//! Discarding them here — on the theory that a retry has no operator — lost a
+//! notice that non-interactive direct composition writes to stderr too.
+//!
 //! ## System-prompt delivery
 //!
 //! *Resolution* — finding the file, composing its body — is
@@ -127,6 +138,38 @@ impl EnvChange {
     }
 }
 
+/// Which capability stage produced a [`LaunchWarning`].
+///
+/// Kept as a discriminant rather than folded into the message so a caller can
+/// tell the four stages apart without matching on prose the profiles own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LaunchWarningSource {
+    Model,
+    OutputFormat,
+    SystemPrompt,
+    Sandbox,
+}
+
+/// A provider-capability warning a rebuilt plan produced.
+///
+/// The equivalence contract counts warnings as observable output, and R3 puts
+/// them under canonical preparation. A replay that lands on a different provider
+/// therefore has to *keep* what its capability stages said — an unsupported
+/// model, an output format the rebuilt provider cannot render, a `--sandbox` it
+/// does not implement, a system-prompt mechanism it delivers differently — so
+/// the caller can render it exactly as the direct command does. Dropping them
+/// let a provider switch silently lose a notice a direct invocation of the same
+/// refreshed document shows (review-11 finding 4).
+///
+/// Carried as `(source, message)` rather than pre-rendered text: the
+/// `warning:` prefix, color, and channel are the log layer's, and duplicating
+/// that formatting here would fork it from the direct path's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LaunchWarning {
+    pub(crate) source: LaunchWarningSource,
+    pub(crate) message: String,
+}
+
 /// A launch plan could not be rebuilt for the refreshed document's facets.
 #[derive(Debug)]
 pub(crate) enum LaunchPlanError {
@@ -138,6 +181,16 @@ pub(crate) enum LaunchPlanError {
     Producer(String),
     /// The document moved a facet on a path that recorded no replay slices.
     ReplayUnavailable,
+    /// The refreshed document's `agent:` selects no provider the invocation's
+    /// installed snapshot can run.
+    ///
+    /// Carries the direct route's own typed diagnostic rather than a message,
+    /// so a retry/resume of a document presents the identity a direct
+    /// invocation of it presents — see
+    /// [`crate::commands::wrap::composition::provider_for_state_non_tty`].
+    /// Boxed because `CompositionError` is large and this variant is the rare
+    /// one.
+    ProviderUnavailable(Box<claudine::composition::CompositionError>),
 }
 
 impl std::fmt::Display for LaunchPlanError {
@@ -156,6 +209,7 @@ impl std::fmt::Display for LaunchPlanError {
                 "the refreshed document changes the launch plan, but this invocation did not \
                  record the inputs needed to rebuild one"
             ),
+            Self::ProviderUnavailable(error) => write!(f, "{error}"),
         }
     }
 }
@@ -423,6 +477,11 @@ pub(crate) struct LaunchPlan {
     /// they are moved into the per-attempt bundle so their RAII cleanup runs
     /// after the child exits, not when the plan is consumed.
     pub(crate) system_prompt_artifacts: Vec<super::system_prompt::SystemPromptArtifact>,
+    /// What this plan's capability stages had to say about the rebuilt provider.
+    /// Empty for the verbatim shortcut: identical facets ran the identical
+    /// stages the invocation already rendered warnings for. See
+    /// [`LaunchWarning`].
+    pub(crate) warnings: Vec<LaunchWarning>,
 }
 
 /// Re-derive the launch plan for one set of document facets.
@@ -455,6 +514,7 @@ pub(crate) fn build_launch_plan(
             structured_codex: inputs.invocation.structured_codex,
             replayed: false,
             system_prompt_artifacts: Vec::new(),
+            warnings: Vec::new(),
         });
     }
     replay(inputs, facets)
@@ -491,6 +551,10 @@ fn replay(
 
     let mut args = inputs.provider_args_tail.clone();
     let mut env_overlay: Vec<(OsString, OsString)> = Vec::new();
+    // Collected, not rendered: this builder has no output policy. The caller
+    // that owns the attempt applies the command's `silent`/`quiet` gate and
+    // logs them through the same path the direct command uses.
+    let mut warnings: Vec<LaunchWarning> = Vec::new();
 
     // R6/AC10 — credential admission belongs to the provider that actually runs.
     // The base child environment was sanitized for the opening profile, so a
@@ -538,9 +602,12 @@ fn replay(
         facets.non_interactive,
         inputs.has_model_env,
         &mut |key, value| model_env.push((key, value)),
-        // A rebuild has no operator to warn. The invocation already surfaced
-        // any unsupported-model warning for this document.
-        &mut |_warning| {},
+        &mut |warning| {
+            warnings.push(LaunchWarning {
+                source: LaunchWarningSource::Model,
+                message: warning,
+            });
+        },
     )
     .map_err(|e| LaunchPlanError::Producer(e.into_report().to_string()))?;
     for (key, value) in model_env {
@@ -551,11 +618,15 @@ fn replay(
     // The *request* is fixed; the flag shape is not. A rebuild renders it
     // through its own profile so a Goose-to-Gemini retry gains
     // `--output-format json` and the reverse does not carry Gemini's bytes to a
-    // provider that rejects them. Any unsupported-format warning is dropped:
-    // there is no operator at a retry boundary, and the invocation already
-    // surfaced its own.
-    if let Some(format) = inputs.output_format {
-        let _ = profile.apply_output_format(&mut args, format);
+    // provider that rejects them. An unsupported-format warning belongs to the
+    // *rebuilt* provider, so the invocation's own cannot stand in for it.
+    if let Some(format) = inputs.output_format
+        && let Some(warning) = profile.apply_output_format(&mut args, format)
+    {
+        warnings.push(LaunchWarning {
+            source: LaunchWarningSource::OutputFormat,
+            message: warning,
+        });
     }
 
     // System-prompt delivery: replayed verbatim while the provider holds still,
@@ -588,10 +659,19 @@ fn replay(
             }
         }
         artifacts = application.artifacts;
+        warnings.extend(application.warnings.into_iter().map(|message| LaunchWarning {
+            source: LaunchWarningSource::SystemPrompt,
+            message,
+        }));
     }
 
-    if inputs.sandbox_requested {
-        let _ = profile.apply_sandbox(&mut args);
+    if inputs.sandbox_requested
+        && let Some(warning) = profile.apply_sandbox(&mut args)
+    {
+        warnings.push(LaunchWarning {
+            source: LaunchWarningSource::Sandbox,
+            message: warning,
+        });
     }
 
     // -- MCP runtime injection ---------------------------------------------
@@ -653,6 +733,7 @@ fn replay(
         structured_codex,
         replayed: true,
         system_prompt_artifacts: artifacts,
+        warnings,
     })
 }
 

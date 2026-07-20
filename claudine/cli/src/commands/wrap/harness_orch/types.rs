@@ -85,9 +85,33 @@ pub(crate) struct MaterializedHarnessPrompt {
     /// event fires" contract. Re-created each loop iteration (a retry
     /// re-materializes from disk), giving the correct per-attempt lifetime.
     pub(crate) live_frontmatter: std::cell::RefCell<serde_json::Map<String, serde_json::Value>>,
+    /// The MCP `#tag`s this document's **canonically composed** body selects,
+    /// sorted and deduped.
+    ///
+    /// Captured here rather than re-lexed downstream because neither surviving
+    /// text can stand in for it. [`Self::prompt`] is the provider input, which a
+    /// resume deliberately replaces with the follow-up message; the document on
+    /// disk is raw authored Markdown, so it predates `proxy.with`, caller
+    /// overrides, and frontmatter interpolation — a body of `#{{ mcp_server }}`
+    /// names a server there only after composition. The launch rebuild reads
+    /// this field so retry and resume select the same servers a direct
+    /// invocation of the composed document selects (review-11 finding 3).
+    pub(crate) mcp_body_tags: Vec<String>,
 }
 
 impl MaterializedHarnessPrompt {
+    /// The sorted, deduped MCP tag set of a composed body.
+    ///
+    /// Single-sources the normalization the invocation pipeline applies when it
+    /// records its own launch facets (`composition::pipeline`), so a rebuilt
+    /// facet set compares equal to the recorded one for an unchanged document.
+    pub(crate) fn lex_body_mcp_tags(body: &str) -> Vec<String> {
+        let (_cleaned, mut tags) = claudine::mcp::session::lex_tags(body);
+        tags.sort();
+        tags.dedup();
+        tags
+    }
+
     /// Build the per-attempt live-frontmatter cell from a frontmatter value.
     ///
     /// A non-object frontmatter (e.g. the synthesized `Null` used when
