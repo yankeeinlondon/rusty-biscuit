@@ -377,6 +377,31 @@ fn assert_lines_within_width(content: &str, width: usize) {
     }
 
     #[test]
+    fn cleanup_preserve_mode_is_idempotent_for_authored_list_soft_breaks() {
+        let source = concat!(
+            "- Alpha beta gamma\n",
+            "    delta epsilon.\n",
+            "- [x] Checked item\n",
+            "      authored continuation.\n"
+        );
+        let expected = concat!(
+            "- Alpha beta gamma\n",
+            "    delta epsilon.\n",
+            "\n",
+            "- [x] Checked item\n",
+            "      authored continuation.\n"
+        );
+
+        let first = cleanup_content_with_indent_preserving_incidental(source, DEFAULT_INDENT);
+        assert_eq!(first, expected);
+        assert_structure_preserved(source, &first);
+
+        let second =
+            cleanup_content_with_indent_preserving_incidental(&first, DEFAULT_INDENT);
+        assert_eq!(second, first);
+    }
+
+    #[test]
     fn strip_incidental_newlines_normalizes_list_line_endings_identically() {
         let lf = "- Alpha\n    beta\n\nAfter";
         let expected = "- Alpha beta\n\nAfter";
@@ -757,6 +782,30 @@ fn assert_lines_within_width(content: &str, width: usize) {
     }
 
     #[test]
+    fn configured_indent_8_preserves_structure_through_fixed_width_and_second_pass() {
+        let source = "- Parent alpha beta gamma delta.\n  - Child alpha beta gamma delta epsilon.";
+        let cleaned = cleanup_content_with_indent(source, 8);
+
+        assert_eq!(
+            cleaned,
+            "- Parent alpha beta gamma delta.\n     - Child alpha beta gamma delta epsilon.\n"
+        );
+        assert_structure_preserved(source, &cleaned);
+
+        let fixed = reflow_to_width(&cleaned, 24);
+        assert_eq!(
+            fixed,
+            "- Parent alpha beta\n  gamma delta.\n     - Child alpha beta\n       gamma delta\n       epsilon.\n"
+        );
+        assert_structure_preserved(source, &fixed);
+        assert_lines_within_width(&fixed, 24);
+
+        let second = reflow_to_width(&cleanup_content_with_indent(&fixed, 8), 24);
+        assert_eq!(second, fixed);
+        assert_structure_preserved(source, &second);
+    }
+
+    #[test]
     fn reflow_to_width_composes_blockquote_list_prefix_families() {
         let cases = [
             (
@@ -953,10 +1002,16 @@ fn assert_lines_within_width(content: &str, width: usize) {
 
     /// Eight-space nesting reached through the parent marker's own width rather than through
     /// `--indent 8`. `cleanup_content_with_indent` cannot deliver a *configured* eight-space
-    /// nesting: `fix_list_indentation` derives depth from the absolute column, and eight spaces
-    /// under a one-character marker is lazy paragraph continuation, not a nested list. The
-    /// property under test is unchanged either way — reflow must read the indentation actually
-    /// present after cleanup instead of assuming two or four.
+    /// nesting: `fix_list_indentation` derives depth from the actual open-level stack, and
+    /// eight spaces under a one-character marker is lazy paragraph continuation, not a nested
+    /// list. The property under test is unchanged either way — reflow must read the indentation
+    /// actually present after cleanup instead of assuming two or four.
+    ///
+    /// Note: `--indent 8` is now rejected at the CLI (see `parse_indent_size`) because
+    /// eight-space nesting is not CommonMark-portable for narrow markers. This library-level
+    /// test remains the canonical proof that reflow consumes actual indentation without
+    /// hard-coding — it exercises a wide parent marker (`123456. `, content col 8) under
+    /// which eight-column nesting *is* CommonMark-valid.
     #[test]
     fn reflow_to_width_derives_prefixes_from_actual_eight_space_nesting() {
         fn hanging_indent(reflowed: &str) -> usize {
@@ -1136,5 +1191,63 @@ fn assert_lines_within_width(content: &str, width: usize) {
                 "Wrapped prose continues here\nwith more words.\n\n",
                 "- first item that is long and\n  wrapped\n",
             )
+        );
+    }
+
+    /// Regression for the wide-marker defect reviewed in H1 of
+    /// `fixes/2026-07-13-fixed-width-lists/review-2.md`. Under a wide ordered
+    /// parent (`1234. `, `123456. `), the pre-stack `fix_list_indentation`
+    /// miscounted depth as `current_indent / 2` and over-indented the child
+    /// on every cleanup pass, so the cleanup was not idempotent. The
+    /// stack-based replacement keeps the child at cmark's canonical column
+    /// and stays byte-identical across cleanup passes.
+    #[test]
+    fn cleanup_content_with_indent_4_is_idempotent_for_wide_ordered_markers() {
+        let content = "1234. Parent alpha beta gamma delta epsilon zeta.\n      - Child alpha beta gamma delta epsilon.";
+        let first = cleanup_content_with_indent(content, 4);
+
+        // The structural fingerprint proves cleanup did not silently collapse
+        // the nested child into the parent's prose (the H1 failure mode).
+        assert_structure_preserved(content, &first);
+
+        let second = cleanup_content_with_indent(&first, 4);
+        assert_eq!(
+            first, second,
+            "cleanup_content_with_indent(_, 4) must be idempotent on `1234. ` markers\n\
+             first:\n{first}\nsecond:\n{second}"
+        );
+
+        // Repeat for a wider parent (`123456. `, content col 8) — also a
+        // CommonMark-valid eight-space child position.
+        let content_wide = "123456. Parent alpha beta gamma delta epsilon zeta.\n        - Child alpha beta gamma delta epsilon.";
+        let first_wide = cleanup_content_with_indent(content_wide, 4);
+        assert_structure_preserved(content_wide, &first_wide);
+
+        let second_wide = cleanup_content_with_indent(&first_wide, 4);
+        assert_eq!(
+            first_wide, second_wide,
+            "cleanup_content_with_indent(_, 4) must be idempotent on `123456. ` markers\n\
+             first:\n{first_wide}\nsecond:\n{second_wide}"
+        );
+    }
+
+    /// The H1 review found that `--indent 4` under a wide ordered parent
+    /// (`10. `) collapsed the nested child into the parent's prose on the
+    /// second cleanup pass. The stack-based `fix_list_indentation` keeps the
+    /// child recognized as a nested list across cleanup passes.
+    #[test]
+    fn cleanup_content_with_indent_4_preserves_nested_list_structure_under_wide_parent() {
+        let content = "10. Parent alpha beta gamma delta epsilon zeta.\n    - Child alpha beta gamma delta epsilon.";
+        let first = cleanup_content_with_indent(content, 4);
+
+        // Structural fingerprint must show two nested lists, not one
+        // flat-item-with-absorbed-prose.
+        assert_structure_preserved(content, &first);
+
+        // Sanity-check the child is still emitted as a nested list marker
+        // rather than absorbed into the parent's prose.
+        assert!(
+            first.contains("\n    - Child"),
+            "depth-1 child under `10. ` must stay at column 4, got:\n{first}"
         );
     }
