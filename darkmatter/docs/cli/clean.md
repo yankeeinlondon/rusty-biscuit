@@ -41,7 +41,7 @@ md README.md --save
 
 - `[INPUT]`: Markdown file path (supports `@` file references). Use `-` for stdin. If omitted, reads from stdin.
 - `--save`: Clean in place and print a delta-style change report (same report format used by `md delta`).
-- `--indent <#>`: Normalize nested list indentation width to a consistent number of spaces (`2`, `4`, or `8`).
+- `--indent <#>`: Normalize nested list indentation width to a consistent number of spaces (`2` or `4`). `8` is rejected because eight-space nesting is not CommonMark-portable for narrow markers (`-`, `*`, `+`, single-digit ordered).
 - `--fixed-width <#>`: Collapse incidental single newlines, then re-wrap prose, including list-item paragraphs, to the target display width.
 - `--ignore-incidental-newlines`: Preserve source single newlines instead of collapsing fixed-column wrapping.
 
@@ -52,7 +52,7 @@ Fixed-width reflow starts by removing the source wrapping that
 Shell completion notes:
 
 - `[INPUT]` completes markdown files (`.md`, `.dm`) and traversable directories.
-- `--indent` completes to `2`, `4`, or `8`.
+- `--indent` completes to `2` or `4`.
 - `--fixed-width` completes common prose widths (`40`, `60`, `80`, `100`, `120`) and accepts any value from `1` through `1000`.
 
 ### Output Modes

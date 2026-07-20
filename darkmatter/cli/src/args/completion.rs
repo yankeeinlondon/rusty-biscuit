@@ -117,9 +117,12 @@ pub fn complete_markdown_files_from(
 }
 
 /// Completes supported list indentation widths.
+///
+/// Mirrors `parse_indent_size`: `8` is deliberately absent because configured
+/// eight-space nesting is not CommonMark-portable for narrow markers.
 pub fn complete_indent_values(current: &OsStr) -> Vec<CompletionCandidate> {
     let current_str = current.to_string_lossy();
-    let mut candidates: Vec<_> = ["2", "4", "8"]
+    let mut candidates: Vec<_> = ["2", "4"]
         .into_iter()
         .filter(|value| value.starts_with(current_str.as_ref()))
         .map(CompletionCandidate::new)
@@ -177,7 +180,7 @@ mod tests {
     #[test]
     fn complete_indent_values_lists_valid_widths() {
         let values = completion_values(complete_indent_values(OsStr::new("")));
-        assert_eq!(values, vec!["2", "4", "8"]);
+        assert_eq!(values, vec!["2", "4"]);
 
         let values = completion_values(complete_indent_values(OsStr::new("4")));
         assert_eq!(values, vec!["4"]);

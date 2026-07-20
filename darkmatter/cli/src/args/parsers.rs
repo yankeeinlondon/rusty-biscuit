@@ -3,14 +3,28 @@ use darkmatter::markdown::highlighting::ThemePair;
 use renderable::layout::Length;
 
 /// Parses and validates list indentation width.
+///
+/// `8` is rejected on purpose: a configured eight-space nesting is not
+/// CommonMark-portable for narrow markers (`-`, `*`, `+`, and any
+/// single-digit ordered marker). pulldown-cmark reads a child marker at
+/// column 8 under such a parent as lazy continuation prose (tight list) or
+/// indented code (loose list), never as a nested list, so the child gets
+/// silently absorbed into the parent's prose on the next parse. The
+/// library entry point `cleanup_content_with_indent` still accepts a
+/// `usize` and constrains each child marker to a CommonMark-valid column.
 pub fn parse_indent_size(s: &str) -> Result<usize, String> {
     let value = s
         .parse::<usize>()
         .map_err(|_| format!("'{s}' is not a valid integer"))?;
 
     match value {
-        2 | 4 | 8 => Ok(value),
-        _ => Err("indent must be one of: 2, 4, 8".to_string()),
+        2 | 4 => Ok(value),
+        8 => Err(
+            "indent 8 is not supported: eight-space nesting is not CommonMark-portable \
+             for narrow list markers (`-`, `*`, `+`, single-digit ordered); use 2 or 4"
+                .to_string(),
+        ),
+        _ => Err("indent must be one of: 2, 4".to_string()),
     }
 }
 
@@ -131,12 +145,12 @@ mod tests {
     fn parse_indent_size_accepts_valid_values() {
         assert_eq!(parse_indent_size("2"), Ok(2));
         assert_eq!(parse_indent_size("4"), Ok(4));
-        assert_eq!(parse_indent_size("8"), Ok(8));
     }
 
     #[test]
     fn parse_indent_size_rejects_invalid() {
         assert!(parse_indent_size("3").is_err());
+        assert!(parse_indent_size("8").is_err());
         assert!(parse_indent_size("abc").is_err());
     }
 
