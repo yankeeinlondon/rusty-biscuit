@@ -3,8 +3,6 @@ use pulldown_cmark::{CowStr, Event};
 use std::ops::Range;
 use unicode_script::{Script, UnicodeScript};
 
-use super::lists::is_list_item_start;
-
 mod semantic;
 
 pub(super) fn collapse_incidental_soft_break_events<'a>(
@@ -47,7 +45,13 @@ pub fn strip_incidental_newlines(content: &str) -> String {
     };
     let metadata = LineMetadata::scan(&lines[..line_count], 0, None);
     let semantic = semantic::SoftBreakModel::from_content(&normalized);
-    let mut edits: Vec<StripEdit> = semantic
+    // Boundaries arrive in event order, which is source order, so these edits are
+    // sorted by `range.start` by construction. The binding is deliberately not
+    // `mut`: the legacy pass below binary-searches it to decide ownership, and
+    // appending to a vector mid-search destroys the sort order the search
+    // requires. Collecting the legacy edits separately makes that class of bug
+    // unrepresentable rather than merely avoided.
+    let semantic_edits: Vec<StripEdit> = semantic
         .boundaries
         .iter()
         .filter(|boundary| boundary.eligible && boundary.item_depth > 0)
@@ -56,19 +60,26 @@ pub fn strip_incidental_newlines(content: &str) -> String {
             separator: boundary.join_separator,
         })
         .collect();
+    debug_assert!(
+        semantic_edits
+            .windows(2)
+            .all(|pair| pair[0].range.start < pair[1].range.start),
+        "the ownership probe below requires strictly ascending semantic edit starts"
+    );
 
+    let mut legacy_edits: Vec<StripEdit> = Vec::new();
     let mut line_start = 0usize;
     for idx in 0..line_count {
         let line = lines[idx];
         if idx + 1 < line_count {
             let newline_offset = line_start + line.len();
-            let has_semantic_edit = edits
+            let owned_by_semantic = semantic_edits
                 .binary_search_by_key(&newline_offset, |edit| edit.range.start)
                 .is_ok();
 
             // The parser model is authoritative for list prose. The legacy
             // classifier remains the compatibility path for non-list prose.
-            if !has_semantic_edit
+            if !owned_by_semantic
                 && let NewlineBoundary::Collapse { skip_next_prefix } =
                     newline_boundary(&metadata[idx], &metadata[idx + 1])
             {
@@ -78,7 +89,7 @@ pub fn strip_incidental_newlines(content: &str) -> String {
                 } else {
                     next_line
                 };
-                edits.push(StripEdit {
+                legacy_edits.push(StripEdit {
                     range: newline_offset..newline_offset + 1 + skip_next_prefix,
                     separator: join_separator(line, next_body),
                 });
@@ -91,6 +102,8 @@ pub fn strip_incidental_newlines(content: &str) -> String {
         }
     }
 
+    let mut edits = semantic_edits;
+    edits.extend(legacy_edits);
     apply_strip_edits(&normalized, edits)
 }
 
@@ -100,13 +113,32 @@ struct StripEdit {
     separator: Option<char>,
 }
 
+/// Applies `edits` to `content` by walking them from the end of the document
+/// into a pre-sized buffer, replacing each removed range with its separator.
+///
+/// ## Notes
+///
+/// Callers must supply non-overlapping edits; the `debug_assert` below is the
+/// real contract, and a violation is a caller bug worth failing loudly on in
+/// tests. An overlap that survives to a release build is nonetheless dropped
+/// rather than applied, because slicing `content` backwards would panic — and a
+/// formatter that aborts on a document it was asked to format is a worse outcome
+/// than one collapse boundary going unapplied.
 fn apply_strip_edits(content: &str, mut edits: Vec<StripEdit>) -> String {
     if edits.is_empty() {
         return content.to_string();
     }
 
-    edits.sort_unstable_by_key(|edit| edit.range.start);
+    // Widest-first on ties so the retained edit is deterministic when the
+    // overlap guard below has to choose between two edits at one offset.
+    edits.sort_unstable_by(|left, right| {
+        left.range
+            .start
+            .cmp(&right.range.start)
+            .then_with(|| right.range.end.cmp(&left.range.end))
+    });
     debug_assert!(edits.windows(2).all(|pair| pair[0].range.end <= pair[1].range.start));
+    edits.dedup_by(|later, earlier| later.range.start < earlier.range.end);
 
     let removed = edits.iter().map(|edit| edit.range.len()).sum::<usize>();
     let inserted = edits
@@ -138,9 +170,10 @@ fn apply_strip_edits(content: &str, mut edits: Vec<StripEdit>) -> String {
 /// Reflows Markdown prose blocks to `width` display columns.
 ///
 /// Protected Markdown blocks such as fences, indented code, tables, HTML
-/// blocks, and transclusion directive lines are emitted unchanged. Existing
-/// soft breaks inside list-item paragraphs are unwrapped before list, task-list,
-/// and blockquote container prefixes are applied to the newly wrapped lines.
+/// blocks, link-reference definitions, and transclusion directive lines are
+/// emitted unchanged. Existing soft breaks inside list-item paragraphs are
+/// unwrapped before list, task-list, and blockquote container prefixes are
+/// applied to the newly wrapped lines.
 ///
 /// # Panics
 ///
@@ -319,7 +352,9 @@ impl LineMetadata {
             let starts_html = html_block.is_none().then(|| html_block_end(trimmed)).flatten();
             let starts_shell_block = directive_trimmed.starts_with("::shell-block");
             let ends_shell_block = directive_trimmed.starts_with("::end-block");
-            let list_item = is_list_item_start(trimmed);
+            // Uses this module's marker parser rather than `lists::is_list_item_start` so the
+            // nine-digit ordinal cap applies to soft-break boundaries as well as reflow prefixes.
+            let list_item = list_marker_prefix_len(trimmed).is_some();
             let line_span = line_offset..line_offset + line.len();
             let parsed_protected = parsed_protected_spans.is_some_and(|spans| {
                 spans.iter().any(|span| {
@@ -776,6 +811,13 @@ fn unordered_marker_prefix_len(trimmed: &str) -> Option<usize> {
     (space == ' ').then_some(space_idx + space.len_utf8())
 }
 
+/// Ordinal digit runs longer than this are not CommonMark list markers.
+///
+/// See <https://spec.commonmark.org/0.31.2/#ordered-list-marker>. A wider run such as
+/// `1234567890.` parses as ordinary paragraph text, so treating it as a marker would give prose a
+/// synthesized hanging indent during fixed-width reflow.
+const MAX_ORDERED_MARKER_DIGITS: usize = 9;
+
 fn ordered_marker_prefix_len(trimmed: &str) -> Option<usize> {
     let bytes = trimmed.as_bytes();
     if bytes.is_empty() || !bytes[0].is_ascii_digit() {
@@ -783,6 +825,10 @@ fn ordered_marker_prefix_len(trimmed: &str) -> Option<usize> {
     }
 
     for (idx, &byte) in bytes.iter().enumerate().skip(1) {
+        // `idx` is also the length of the digit run scanned so far.
+        if idx > MAX_ORDERED_MARKER_DIGITS {
+            return None;
+        }
         if byte == b'.' || byte == b')' {
             return (bytes.get(idx + 1) == Some(&b' ')).then_some(idx + 2);
         }

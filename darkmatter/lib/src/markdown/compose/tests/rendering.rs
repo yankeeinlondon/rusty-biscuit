@@ -169,6 +169,36 @@ fn test_compose_cleanup_list_modes_match_direct_library_cleanup() {
 }
 
 #[test]
+fn test_compose_cleanup_fixed_width_keeps_reference_definitions_intact() {
+    use crate::markdown::cleanup::reflow_to_width;
+
+    let source = concat!(
+        "- Before [label][ref] alpha beta gamma delta.\n",
+        "\n",
+        "[ref]: https://example.com/a/very/long/path \"A descriptive title\"\n"
+    );
+
+    let options = ComposeOptions::new()
+        .only(&[ComposeOperation::Cleanup])
+        .with_fixed_width(24);
+    let (fixed, _) = Markdown::from(source).compose_with(options).unwrap();
+
+    let mut direct: Markdown = source.into();
+    direct.cleanup();
+    assert_eq!(fixed.content(), reflow_to_width(direct.content(), 24));
+    assert_eq!(
+        fixed.content(),
+        concat!(
+            "- Before [label][ref]\n",
+            "  alpha beta gamma\n",
+            "  delta.\n",
+            "\n",
+            "[ref]: https://example.com/a/very/long/path \"A descriptive title\"\n"
+        )
+    );
+}
+
+#[test]
 fn test_compose_normalization_stage_no_change() {
     let content = "# Hello\n\n## World";
     let md: Markdown = content.into();

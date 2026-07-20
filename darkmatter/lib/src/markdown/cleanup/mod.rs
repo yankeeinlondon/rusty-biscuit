@@ -38,6 +38,46 @@ fn cleanup_parser_options() -> Options {
     Options::all() - Options::ENABLE_SMART_PUNCTUATION - Options::ENABLE_DEFINITION_LIST
 }
 
+/// Constructs the Markdown parser for a cleanup-path pass.
+///
+/// Every cleanup-path parse is funneled through this one constructor so the
+/// parse count per public entry point is a measurable property rather than an
+/// assumption. Spec acceptance criterion 15 caps that count; `tests::parse_count`
+/// asserts it. Adding a `Parser::new_ext` call to the cleanup path without
+/// routing it here would make that assertion silently under-count.
+fn cleanup_parser(content: &str) -> Parser<'_> {
+    #[cfg(test)]
+    parse_count::record();
+    Parser::new_ext(content, cleanup_parser_options())
+}
+
+/// Thread-local tally of cleanup-path Markdown parses, for acceptance-criterion
+/// 15's structural budget.
+///
+/// Thread-local rather than global so the count is unaffected by tests running
+/// concurrently in one process.
+#[cfg(test)]
+pub(super) mod parse_count {
+    use std::cell::Cell;
+
+    thread_local! {
+        static COUNT: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// Records one cleanup-path parse.
+    pub(crate) fn record() {
+        COUNT.with(|count| count.set(count.get() + 1));
+    }
+
+    /// Runs `operation` and returns its value alongside the number of
+    /// cleanup-path Markdown parses it performed.
+    pub(crate) fn measure<T>(operation: impl FnOnce() -> T) -> (T, usize) {
+        let before = COUNT.with(Cell::get);
+        let value = operation();
+        (value, COUNT.with(Cell::get) - before)
+    }
+}
+
 /// Emphasis style used for italics in markdown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmphasisStyle {
@@ -260,7 +300,7 @@ fn cleanup_content_internal(
 ) -> String {
     // Parse with source ranges to preserve list markers and emphasis styles
     // Use custom options that exclude ENABLE_SMART_PUNCTUATION to preserve original quotes
-    let parser = Parser::new_ext(content, cleanup_parser_options());
+    let parser = cleanup_parser(content);
     let events_with_ranges: Vec<(Event, Range<usize>)> = parser.into_offset_iter().collect();
 
     // Extract list markers from source for each list

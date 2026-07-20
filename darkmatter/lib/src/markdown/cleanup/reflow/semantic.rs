@@ -1,11 +1,11 @@
-use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+use pulldown_cmark::{Event, Tag, TagEnd};
 use std::ops::Range;
 
 use super::{
     directive_trimmed, fence_marker, html_block_end, is_structural_line, join_separator,
     HtmlBlockEnd,
 };
-use super::super::cleanup_parser_options;
+use super::super::cleanup_parser;
 
 #[derive(Debug, Clone)]
 pub(super) struct SoftBreakModel {
@@ -52,9 +52,7 @@ pub(super) struct SemanticSoftBreak {
 
 impl SoftBreakModel {
     pub(super) fn from_content(content: &str) -> Self {
-        let events: Vec<_> = Parser::new_ext(content, cleanup_parser_options())
-            .into_offset_iter()
-            .collect();
+        let events: Vec<_> = cleanup_parser(content).into_offset_iter().collect();
         Self::from_events(content, &events)
     }
 
@@ -99,9 +97,19 @@ impl ReflowMap {
         let mut implicit = ImplicitBlock::default();
         let mut blocks = Vec::new();
         let mut breaks = Vec::new();
-        let mut protected = Vec::new();
 
-        for (event, span) in Parser::new_ext(content, cleanup_parser_options()).into_offset_iter() {
+        let events = cleanup_parser(content).into_offset_iter();
+        // Link-reference definitions are consumed by the first pass and never
+        // reach the event stream, so their source ranges must be collected from
+        // the parser's definition table or word wrapping would shred them into
+        // invalid Markdown.
+        let mut protected: Vec<Range<usize>> = events
+            .reference_definitions()
+            .iter()
+            .map(|(_, definition)| prose_block_span(content, definition.span.clone()))
+            .collect();
+
+        for (event, span) in events {
             match event {
                 Event::Start(tag) => {
                     if matches!(tag, Tag::CodeBlock(_) | Tag::Table(_) | Tag::HtmlBlock) {

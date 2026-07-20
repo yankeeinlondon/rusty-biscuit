@@ -1314,6 +1314,28 @@ title: Test
         );
     }
 
+    /// Wrapped top-level prose followed by a wrapped list once produced two
+    /// overlapping strip edits for the list's soft break and panicked in both
+    /// debug and release. See `cleanup::reflow`'s mixed prose/list regressions.
+    #[test]
+    fn test_cleanup_with_fixed_width_method_mixes_prose_and_wrapped_list() {
+        let content = concat!(
+            "Wrapped prose\ncontinues here with more words.\n\n",
+            "- first item that is long\n  and wrapped\n",
+        );
+        let mut md: Markdown = content.into();
+
+        md.cleanup_with_fixed_width(30);
+
+        assert_eq!(
+            md.content(),
+            concat!(
+                "Wrapped prose continues here\nwith more words.\n\n",
+                "- first item that is long and\n  wrapped\n",
+            )
+        );
+    }
+
     #[test]
     fn test_markdown_into_parts() {
         let mut md = Markdown::new("# Hi");

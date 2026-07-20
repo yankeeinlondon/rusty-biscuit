@@ -34,7 +34,10 @@ fn structural_fingerprint(content: &str) -> Vec<String> {
                 close_implicit_paragraph!();
                 list_depth += 1;
                 let kind = if start.is_some() { "ordered" } else { "unordered" };
-                fingerprint.push(format!("start-list:{kind}:{list_depth}"));
+                // `TagEnd::List` carries only the ordered flag, so the starting ordinal is pinned
+                // here or nowhere.
+                let ordinal = start.map_or_else(|| "none".to_string(), |start| start.to_string());
+                fingerprint.push(format!("start-list:{kind}:{ordinal}:{list_depth}"));
             }
             Event::End(TagEnd::List(ordered)) => {
                 close_implicit_paragraph!();
@@ -87,13 +90,16 @@ fn structural_fingerprint(content: &str) -> Vec<String> {
                 fingerprint.push(format!("start-html:{list_depth}"));
             }
             Event::End(TagEnd::HtmlBlock) => fingerprint.push(format!("end-html:{list_depth}")),
+            Event::TaskListMarker(checked) => {
+                open_implicit_paragraph!();
+                fingerprint.push(format!("task:{checked}:{list_depth}"));
+            }
             Event::Text(_)
             | Event::Code(_)
             | Event::InlineHtml(_)
             | Event::InlineMath(_)
             | Event::DisplayMath(_)
-            | Event::FootnoteReference(_)
-            | Event::TaskListMarker(_) => open_implicit_paragraph!(),
+            | Event::FootnoteReference(_) => open_implicit_paragraph!(),
             Event::Start(
                 Tag::Emphasis
                 | Tag::Strong
@@ -113,6 +119,25 @@ fn assert_structure_preserved(source: &str, output: &str) {
         structural_fingerprint(source),
         "cleanup changed semantic block structure\nsource:\n{source}\noutput:\n{output}"
     );
+}
+
+/// Reparses `content` and asserts that `label` is still a link-reference
+/// definition pointing at `destination`, and that some inline link in the
+/// document resolves through it.
+fn assert_reference_resolves(content: &str, label: &str, destination: &str, title: &str) {
+    let parser = Parser::new_ext(content, cleanup_parser_options());
+    let definition = parser
+        .reference_definitions()
+        .get(label)
+        .unwrap_or_else(|| panic!("`{label}` is no longer a reference definition:\n{content}"));
+    assert_eq!(definition.dest.as_ref(), destination);
+    assert_eq!(definition.title.as_deref(), Some(title));
+
+    let resolved = Parser::new_ext(content, cleanup_parser_options()).any(|event| match event {
+        Event::Start(Tag::Link { dest_url, .. }) => dest_url.as_ref() == destination,
+        _ => false,
+    });
+    assert!(resolved, "the reference link no longer resolves:\n{content}");
 }
 
 fn assert_lines_within_width(content: &str, width: usize) {
@@ -234,7 +259,9 @@ fn assert_lines_within_width(content: &str, width: usize) {
         ];
 
         for (content, expected) in cases {
-            assert_eq!(strip_incidental_newlines(content), expected, "{content:?}");
+            let stripped = strip_incidental_newlines(content);
+            assert_eq!(stripped, expected, "{content:?}");
+            assert_structure_preserved(content, &stripped);
         }
     }
 
@@ -246,7 +273,9 @@ fn assert_lines_within_width(content: &str, width: usize) {
         ];
 
         for (content, expected) in cases {
-            assert_eq!(strip_incidental_newlines(content), expected, "{content:?}");
+            let stripped = strip_incidental_newlines(content);
+            assert_eq!(stripped, expected, "{content:?}");
+            assert_structure_preserved(content, &stripped);
         }
     }
 
@@ -613,6 +642,81 @@ fn assert_lines_within_width(content: &str, width: usize) {
             "9. Alpha beta gamma\n   delta epsilon.\n10. Alpha beta\n    gamma delta\n    epsilon."
         );
         assert_lines_within_width(&reflowed, 19);
+        assert_structure_preserved(content, &reflowed);
+    }
+
+    #[test]
+    fn reflow_to_width_treats_nine_digit_ordinal_as_an_ordered_marker() {
+        let content = "123456789. Alpha beta gamma delta epsilon.";
+        assert!(
+            structural_fingerprint(content)
+                .iter()
+                .any(|entry| entry.starts_with("start-list:ordered")),
+            "pulldown-cmark must parse a nine-digit ordinal as an ordered list"
+        );
+
+        let reflowed = cleanup_to_fixed_width(content, 24);
+
+        assert_eq!(
+            reflowed,
+            "123456789. Alpha beta\n           gamma delta\n           epsilon."
+        );
+        assert_lines_within_width(&reflowed, 24);
+    }
+
+    #[test]
+    fn reflow_to_width_treats_ten_digit_ordinal_as_prose() {
+        let content = "1234567890. Alpha beta gamma delta epsilon zeta.";
+        assert!(
+            structural_fingerprint(content)
+                .iter()
+                .all(|entry| !entry.starts_with("start-list")),
+            "pulldown-cmark must parse a ten-digit ordinal as a paragraph"
+        );
+
+        let reflowed = cleanup_to_fixed_width(content, 24);
+
+        // No hanging indent: the digit run is prose, so continuation lines start at column zero.
+        assert_eq!(
+            reflowed,
+            "1234567890. Alpha beta\ngamma delta epsilon\nzeta."
+        );
+        assert_lines_within_width(&reflowed, 24);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_collapses_ten_digit_run_after_prose() {
+        // pulldown-cmark parses both lines as one paragraph, so the line scanner must not treat
+        // the ten-digit run as an item boundary and preserve the break.
+        let content = "Some prose\n1234567890. more prose";
+        assert!(
+            structural_fingerprint(content)
+                .iter()
+                .all(|entry| !entry.starts_with("start-list")),
+            "pulldown-cmark must parse a ten-digit run after prose as one paragraph"
+        );
+
+        assert_eq!(
+            strip_incidental_newlines(content),
+            "Some prose 1234567890. more prose"
+        );
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_nine_digit_run_after_prose() {
+        // Pins current line-scanner output, which is NOT parser-backed: CommonMark only lets an
+        // ordered list interrupt a paragraph when it starts at 1, so pulldown-cmark reads this as
+        // one paragraph while the scanner still sees an item boundary. That divergence predates
+        // the nine-digit cap and is deliberately left alone here.
+        let content = "Some prose\n123456789. more prose";
+        assert!(
+            structural_fingerprint(content)
+                .iter()
+                .all(|entry| !entry.starts_with("start-list")),
+            "an ordered list may only interrupt a paragraph when it starts at 1"
+        );
+
+        assert_eq!(strip_incidental_newlines(content), content);
     }
 
     #[test]
@@ -625,6 +729,7 @@ fn assert_lines_within_width(content: &str, width: usize) {
             "- [ ] Alpha beta gamma\n      delta epsilon.\n- [x] Alpha beta gamma\n      delta epsilon."
         );
         assert_lines_within_width(&reflowed, 24);
+        assert_structure_preserved(content, &reflowed);
     }
 
     #[test]
@@ -741,11 +846,40 @@ fn assert_lines_within_width(content: &str, width: usize) {
             "- Before\n\n    | A | B |\n    |---|---|\n    | a long cell | another long cell |",
             "- Before\n\n    <div>\n    html one stays long\n    html two stays long\n    </div>",
             "- Before\n\n    ::shell-block\n    echo one stays long\n    echo two stays long\n    ::end-block",
+            "- Before\n\n    [ref]: https://example.com/a/very/long/path \"A descriptive title\"",
         ];
 
         for content in cases {
             assert_eq!(reflow_to_width(content, 12), content, "{content:?}");
         }
+    }
+
+    #[test]
+    fn reflow_to_width_keeps_used_reference_definitions_resolvable() {
+        let content = concat!(
+            "- Before [label][ref] alpha beta gamma delta.\n",
+            "\n",
+            "[ref]: https://example.com/a/very/long/path \"A descriptive title\"\n"
+        );
+        let reflowed = reflow_to_width(content, 24);
+
+        assert_eq!(
+            reflowed,
+            concat!(
+                "- Before [label][ref]\n",
+                "  alpha beta gamma\n",
+                "  delta.\n",
+                "\n",
+                "[ref]: https://example.com/a/very/long/path \"A descriptive title\"\n"
+            )
+        );
+        assert_structure_preserved(content, &reflowed);
+        assert_reference_resolves(
+            &reflowed,
+            "ref",
+            "https://example.com/a/very/long/path",
+            "A descriptive title",
+        );
     }
 
     #[test]
@@ -817,8 +951,190 @@ fn assert_lines_within_width(content: &str, width: usize) {
         assert_eq!(reflowed, content);
     }
 
+    /// Eight-space nesting reached through the parent marker's own width rather than through
+    /// `--indent 8`. `cleanup_content_with_indent` cannot deliver a *configured* eight-space
+    /// nesting: `fix_list_indentation` derives depth from the absolute column, and eight spaces
+    /// under a one-character marker is lazy paragraph continuation, not a nested list. The
+    /// property under test is unchanged either way — reflow must read the indentation actually
+    /// present after cleanup instead of assuming two or four.
+    #[test]
+    fn reflow_to_width_derives_prefixes_from_actual_eight_space_nesting() {
+        fn hanging_indent(reflowed: &str) -> usize {
+            let last = reflowed.lines().last().expect("reflowed output has lines");
+            last.len() - last.trim_start().len()
+        }
+
+        let content = "123456. Parent\n        - Alpha beta gamma delta epsilon.";
+        let normalized = cleanup_content_with_indent(content, 2);
+
+        assert_eq!(
+            normalized,
+            "123456. Parent\n        - Alpha beta gamma delta epsilon.\n"
+        );
+        assert_structure_preserved(content, &normalized);
+
+        let reflowed = reflow_to_width(&normalized, 22);
+
+        assert_eq!(
+            reflowed,
+            "123456. Parent\n        - Alpha beta\n          gamma delta\n          epsilon.\n"
+        );
+        assert_lines_within_width(&reflowed, 22);
+        assert_structure_preserved(&normalized, &reflowed);
+
+        let two_space = reflow_to_width(
+            &cleanup_content_with_indent("- Parent\n  - Alpha beta gamma delta epsilon.", 2),
+            22,
+        );
+        let four_space = reflow_to_width(
+            &cleanup_content_with_indent("- Parent\n  - Alpha beta gamma delta epsilon.", 4),
+            22,
+        );
+
+        // A hard-coded continuation width would collapse these three into one value.
+        assert_eq!(
+            [
+                hanging_indent(&two_space),
+                hanging_indent(&four_space),
+                hanging_indent(&reflowed),
+            ],
+            [4, 6, 10]
+        );
+    }
+
+    #[test]
+    fn reflow_to_width_keeps_hard_break_suffix_on_an_indivisible_overflowing_line() {
+        let cases = [
+            (
+                "- [ ] supercalifragilisticexpialidocious  \n      tail here",
+                "- [ ] supercalifragilisticexpialidocious  \n      tail\n      here",
+                "  ",
+            ),
+            (
+                "- [ ] supercalifragilisticexpialidocious\\\n      tail here",
+                "- [ ] supercalifragilisticexpialidocious\\\n      tail\n      here",
+                "\\",
+            ),
+        ];
+        let prefix = "- [ ] ";
+        let width = 12;
+
+        for (content, expected, suffix) in cases {
+            let reflowed = reflow_to_width(content, width);
+
+            assert_eq!(reflowed, expected, "{content:?}");
+            assert_structure_preserved(content, &reflowed);
+
+            let mut lines = reflowed.lines();
+            let atom = lines.next().expect("reflowed output has lines");
+            let body = atom
+                .strip_prefix(prefix)
+                .and_then(|rest| rest.strip_suffix(suffix))
+                .unwrap_or_else(|| panic!("hard-break suffix was dropped: {atom:?}"));
+
+            // Prefix, one whitespace-free token, and the suffix form a single indivisible atom
+            // that has no narrower representation, so this line is allowed to overflow.
+            assert!(!body.contains(char::is_whitespace), "{body:?}");
+            assert!(
+                UnicodeWidthStr::width(prefix)
+                    + UnicodeWidthStr::width(body)
+                    + UnicodeWidthStr::width(suffix)
+                    > width,
+                "the fixture must make the overflow unavoidable: {atom:?}"
+            );
+
+            // The documented exception covers that atom and nothing else.
+            for line in lines {
+                assert!(
+                    UnicodeWidthStr::width(line) <= width,
+                    "line exceeded width {width}: {line:?}\n{reflowed}"
+                );
+            }
+        }
+    }
+
     #[test]
     #[should_panic(expected = "fixed-width cleanup requires a width greater than 0")]
     fn cleanup_to_fixed_width_rejects_zero_width() {
         let _ = cleanup_to_fixed_width("content", 0);
+    }
+
+    // ==================== Mixed Prose/List Collapse Regression ====================
+    //
+    // Semantic (list) and legacy (non-list) collapse decisions are produced by two
+    // different passes. When a legacy collapse lands at a *lower* byte offset than a
+    // list collapse, an earlier revision appended legacy edits into the same vector
+    // the semantic-ownership probe was binary-searching, which unsorted it, let one
+    // soft break receive two overlapping edits, and sliced the source backwards
+    // (debug: overlap assertion; release: "byte range starts at 42 but ends at 39").
+
+    #[test]
+    fn strip_incidental_newlines_collapses_prose_before_wrapped_list() {
+        let content = "Prose across\ntwo lines.\n\n- item wrapped\n  across lines\n";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "Prose across two lines.\n\n- item wrapped across lines\n");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_collapses_prose_then_multi_item_list() {
+        let content = concat!(
+            "Wrapped prose\ncontinues here.\n\n",
+            "- first item\n  wrapped body\n",
+            "- second item\n  wrapped body\n",
+        );
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(
+            stripped,
+            concat!(
+                "Wrapped prose continues here.\n\n",
+                "- first item wrapped body\n",
+                "- second item wrapped body\n",
+            )
+        );
+    }
+
+    #[test]
+    fn strip_incidental_newlines_collapses_wrapped_list_before_prose() {
+        let content = "- first item\n  wrapped body\n\nWrapped prose\ncontinues here.\n";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(
+            stripped,
+            "- first item wrapped body\n\nWrapped prose continues here.\n"
+        );
+    }
+
+    #[test]
+    fn strip_incidental_newlines_collapses_alternating_prose_and_list_sections() {
+        let content = concat!(
+            "Alpha prose\nwraps on.\n\n",
+            "- alpha item\n  wraps on.\n\n",
+            "Beta prose\nwraps on.\n\n",
+            "- beta item\n  wraps on.\n",
+        );
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(
+            stripped,
+            concat!(
+                "Alpha prose wraps on.\n\n",
+                "- alpha item wraps on.\n\n",
+                "Beta prose wraps on.\n\n",
+                "- beta item wraps on.\n",
+            )
+        );
+    }
+
+    #[test]
+    fn cleanup_to_fixed_width_wraps_prose_before_wrapped_list() {
+        let content = concat!(
+            "Wrapped prose\ncontinues here with more words.\n\n",
+            "- first item that is long\n  and wrapped\n",
+        );
+        let reflowed = cleanup_to_fixed_width(content, 30);
+        assert_eq!(
+            reflowed,
+            concat!(
+                "Wrapped prose continues here\nwith more words.\n\n",
+                "- first item that is long and\n  wrapped\n",
+            )
+        );
     }

@@ -4,6 +4,7 @@ mod blockquote;
 mod brackets;
 mod emphasis;
 mod lists;
+mod parse_count;
 mod reflow;
 mod tables;
 
