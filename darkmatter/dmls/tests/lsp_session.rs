@@ -3407,6 +3407,122 @@ fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
     fixture.shutdown();
 }
 
+/// Hover activates over every region a semantic owner activates, not only the
+/// owner's own key.
+///
+/// Completion routes through the longest semantic owner prefix, so a nested
+/// entry inside any property declared `schema` or `type-definition` is one
+/// complete type definition. Hover previously required the hovered entry to be
+/// the owner itself and to be declared `type-definition`, so both nested forms
+/// below offered completion but no hover.
+#[test]
+fn meta_schema_hover_covers_entries_nested_under_semantic_owners() {
+    let workspace = tempfile::tempdir().unwrap();
+
+    // (file, text, hover line, hover character, expected `Declares:` value)
+    let cases = [
+        (
+            "schema-owner.md",
+            concat!(
+                "---\n",
+                "$schema:\n",
+                "  config: schema\n",
+                "config:\n",
+                "  title: string(required)\n",
+                "---\n\nbody\n",
+            ),
+            4u32,
+            3u32,
+            "string",
+        ),
+        (
+            "type-definition-owner.md",
+            concat!(
+                "---\n",
+                "$schema:\n",
+                "  definition: type-definition\n",
+                "definition:\n",
+                "  nested: number(required)\n",
+                "---\n\nbody\n",
+            ),
+            4u32,
+            3u32,
+            "number",
+        ),
+    ];
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    for (name, text, line, character, declares) in cases {
+        let path = workspace.path().join(name);
+        std::fs::write(&path, text).unwrap();
+        let uri = url::Url::from_file_path(path).unwrap();
+        open(&fixture, uri.as_str(), text);
+        let hover = hover_markup(&mut fixture, uri.as_str(), line, character);
+        assert!(hover.contains("Type: **type-definition**"), "{name}: {hover}");
+        assert!(hover.contains(&format!("Declares: **{declares}**")), "{name}: {hover}");
+        assert!(hover.contains("Required"), "{name}: {hover}");
+    }
+    fixture.shutdown();
+}
+
+/// Every pattern-key form is a complete definition with hover, in both inline
+/// and standalone schemas.
+///
+/// The shared schema model keeps pattern keys on `SchemaShape::pattern_keys`,
+/// separate from the literal `properties` map, and the source projector spans
+/// both. The region walk that feeds hover previously read only `properties`,
+/// so `<string>` and friends parsed and had spans but never became hoverable.
+#[test]
+fn meta_schema_hover_covers_pattern_keys_inline_and_standalone() {
+    let workspace = tempfile::tempdir().unwrap();
+
+    const BODY: &str = concat!(
+        "  \"<string>\": string(required)\n",
+        "  \"<starting::x-509>\": number\n",
+        "  \"<ending::.md>\": boolean\n",
+        "  \"<pattern::[0-9_]$>\": string\n",
+    );
+    // Each pattern-key line, paired with the type it declares. Line numbers are
+    // resolved per document below because the two envelopes differ in prelude.
+    let expected = ["string", "number", "boolean", "string"];
+
+    let inline = format!("---\n$schema:\n{BODY}---\n\nbody\n");
+    // A standalone schema body is not fenced off from the Markdown link layer,
+    // which claims hover before the frontmatter provider and reads the three
+    // `<scheme::…>` forms as autolinks. That ordering is a separate concern;
+    // `<string>` is unambiguous and proves the same projection here.
+    let standalone = "$schema:\n  \"<string>\": string(required)\n";
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let inline_path = workspace.path().join("inline.md");
+    std::fs::write(&inline_path, &inline).unwrap();
+    let inline_uri = url::Url::from_file_path(inline_path).unwrap();
+    open(&fixture, inline_uri.as_str(), &inline);
+    for (index, declares) in expected.iter().enumerate() {
+        let line = 2 + index as u32;
+        // Character 4 sits inside the quoted `<…>` key on every line.
+        let hover = hover_markup(&mut fixture, inline_uri.as_str(), line, 4);
+        assert!(hover.contains("Type: **type-definition**"), "inline line {line}: {hover}");
+        assert!(
+            hover.contains(&format!("Declares: **{declares}**")),
+            "inline line {line}: {hover}"
+        );
+    }
+
+    let standalone_path = workspace.path().join("standalone.yaml");
+    std::fs::write(&standalone_path, standalone).unwrap();
+    let standalone_uri = url::Url::from_file_path(standalone_path).unwrap();
+    open(&fixture, standalone_uri.as_str(), standalone);
+    let hover = hover_markup(&mut fixture, standalone_uri.as_str(), 1, 4);
+    assert!(hover.contains("Type: **type-definition**"), "standalone: {hover}");
+    assert!(hover.contains("Declares: **string**"), "standalone: {hover}");
+
+    fixture.shutdown();
+}
+
 #[test]
 fn meta_schema_phase7_standalone_pure_and_tagged_completion() {
     let workspace = tempfile::tempdir().unwrap();
@@ -3615,6 +3731,80 @@ fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnost
     let hover = hover_markup(&mut fixture, uri.as_str(), 1, 3);
     assert!(hover.contains("Type: **type-definition**"), "{hover}");
     assert!(hover.contains("Declares: **string**"), "{hover}");
+
+    fixture.shutdown();
+}
+
+/// Flow presentation is not a second dialect: the authoritative standalone
+/// parser accepts a YAML mapping however it is written, so a flow-authored
+/// envelope seeds the same last-good model a block one does. The activation
+/// claim consulted during a malformed edit must agree, or the overlay is
+/// dropped and the retained model dies on exactly the keystroke it exists for.
+///
+/// Completion is deliberately not asserted here: its cursor is line- and
+/// indent-oriented, so it does not activate inside a flow mapping in the valid
+/// state either. That is a separate gap, not something this claim can retain.
+#[test]
+fn meta_schema_standalone_flow_envelopes_retain_last_good_across_malformed_edit() {
+    // (file, valid, malformed, character inside the `title` key token)
+    let cases = [
+        (
+            "flow-pure.yaml",
+            "{\"$schema\": {\"title\": \"string\"}}\n",
+            "{\"$schema\": {\"title\": \"str\"}}\n",
+            16u32,
+        ),
+        (
+            "flow-tagged.yaml",
+            "{kind: schema, types: {title: string}}\n",
+            "{kind: schema, types: {title: str}}\n",
+            25,
+        ),
+    ];
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    for (name, valid, malformed, hover_character) in cases {
+        let path = workspace.path().join(name);
+        std::fs::write(&path, valid).unwrap();
+        let uri = url::Url::from_file_path(path).unwrap();
+        open(&fixture, uri.as_str(), valid);
+        assert!(
+            fixture.wait_for_diagnostics(uri.as_str()).is_empty(),
+            "{name}: a valid flow envelope is clean"
+        );
+        let hover = hover_markup(&mut fixture, uri.as_str(), 0, hover_character);
+        assert!(
+            hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+            "{name}: flow presentation activates semantic intelligence: {hover}"
+        );
+
+        fixture.notify(
+            "textDocument/didChange",
+            json!({
+                "textDocument": { "uri": uri.as_str(), "version": 2 },
+                "contentChanges": [ { "text": malformed } ]
+            }),
+        );
+        let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic["code"] == json!("dm.schema.invalid_type_definition")
+            }),
+            "{name}: the current malformed buffer owns diagnostics: {diagnostics:?}"
+        );
+
+        // A dropped overlay answers hover with nothing, so this is the retained
+        // last-good model talking — it still declares `string`, not the `str`
+        // the buffer now says.
+        let hover = hover_markup(&mut fixture, uri.as_str(), 0, hover_character);
+        assert!(
+            hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+            "{name}: the retained flow model survives a malformed edit: {hover}"
+        );
+    }
 
     fixture.shutdown();
 }

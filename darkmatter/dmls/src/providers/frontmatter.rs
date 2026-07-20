@@ -35,7 +35,7 @@ use crate::graph::normalize_join;
 use crate::overlay::{
     FmEntry, FmValueKind, FrontmatterAst, SchemaAuthoringState, doc_links, expressions,
 };
-use crate::overlay::schema::{MetaSchemaKind, semantic_type_regions};
+use crate::overlay::schema::{FrontmatterSchemaValue, MetaSchemaKind, semantic_type_regions};
 use crate::workspace::file_path_to_uri;
 
 /// Frontmatter/schema diagnostics (delegated to the diagnostics module).
@@ -207,42 +207,55 @@ fn meta_schema_kinds_for_line(
                 };
             }
 
-            // The complete structural key path of the value being authored,
-            // matched against each recorded pointer segment-by-segment. Both
-            // sides must be decoded: a recorded pointer is RFC 6901-encoded
-            // (`/a~1b`), an authored key is not, and only the whole path — not
-            // its first segment — can address a nested value like
-            // `/parameter/type`.
             let mut path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
             if !sequence_item && !key.is_empty() {
                 path.push(key);
             }
-            if path.is_empty() {
-                return None;
-            }
-            let (owner_len, owner) = values
-                .iter()
-                .filter_map(|value| {
-                    let pointer = JsonPointer::parse(&value.pointer);
-                    let segments = pointer.segments();
-                    (!segments.is_empty()
-                        && segments.len() <= path.len()
-                        && segments.iter().zip(&path).all(|(recorded, authored)| {
-                            recorded.as_str() == *authored
-                        }))
-                    .then_some((segments.len(), value))
-                })
-                .max_by_key(|(len, _)| *len)?;
-            // A strict ancestor means the cursor sits *inside* that owner's
-            // definition, where every nested entry is one complete type
-            // definition regardless of the owner's own kind.
-            if owner_len < path.len() {
-                return Some(vec![MetaSchemaKind::TypeDefinition]);
-            }
-            Some(owner.kinds.clone())
+            semantic_owner_kinds(values, &path)
         }
         SchemaAuthoringState::Inactive => None,
     }
+}
+
+/// The meta-schema grammar activated at one structural frontmatter key path by
+/// the longest recorded semantic owner covering it.
+///
+/// `path` is matched against each recorded pointer segment-by-segment. Both
+/// sides must be decoded: a recorded pointer is RFC 6901-encoded (`/a~1b`), an
+/// authored key is not, and only the whole path — not its first segment — can
+/// address a nested value like `/parameter/type`.
+///
+/// Shared by completion and hover so both activate over exactly the same
+/// region: hovering inside a `schema`-typed property must describe the same
+/// definitions completion offers there.
+fn semantic_owner_kinds(
+    values: &[FrontmatterSchemaValue],
+    path: &[&str],
+) -> Option<Vec<MetaSchemaKind>> {
+    if path.is_empty() {
+        return None;
+    }
+    let (owner_len, owner) = values
+        .iter()
+        .filter_map(|value| {
+            let pointer = JsonPointer::parse(&value.pointer);
+            let segments = pointer.segments();
+            (!segments.is_empty()
+                && segments.len() <= path.len()
+                && segments
+                    .iter()
+                    .zip(path)
+                    .all(|(recorded, authored)| recorded.as_str() == *authored))
+            .then_some((segments.len(), value))
+        })
+        .max_by_key(|(len, _)| *len)?;
+    // A strict ancestor means the cursor sits *inside* that owner's definition,
+    // where every nested entry is one complete type definition regardless of
+    // the owner's own kind.
+    if owner_len < path.len() {
+        return Some(vec![MetaSchemaKind::TypeDefinition]);
+    }
+    Some(owner.kinds.clone())
 }
 
 /// Completion for a cursor inside a `type-definition` value, dispatched on the
@@ -1034,21 +1047,8 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
 fn meta_schema_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     let overlay = ctx.overlay?;
 
-    if let Some(ast) = overlay.ast.as_deref()
-        && let Some(entry) = ast.entry_at_offset(offset)
-        && let SchemaAuthoringState::Frontmatter(values) = &overlay.schema_authoring
-        && let Some(value) = values.iter().find(|value| value.pointer == entry.pointer)
-        && value.kinds.contains(&MetaSchemaKind::TypeDefinition)
-    {
-        let source = ctx.text.get(entry.value_span.clone())?;
-        let source = dedent_spanned_yaml(source, source_column(ctx.text, entry.value_span.start));
-        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&source).ok()?;
-        let definition = parse_property_definition(&entry.key, &yaml).ok()?;
-        return markup_hover(
-            ctx,
-            entry.key_span.clone(),
-            meta_schema_definition_hover_body(&entry.key, &definition),
-        );
+    if let Some(hover) = frontmatter_definition_hover(ctx, overlay, offset) {
+        return Some(hover);
     }
 
     if let SchemaAuthoringState::Standalone { model: Some(model), .. } =
@@ -1093,6 +1093,41 @@ fn meta_schema_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
         ctx,
         region.key_span,
         meta_schema_definition_hover_body(&region.name, &region.definition),
+    )
+}
+
+/// Hover for one complete type definition authored in Markdown frontmatter,
+/// routed through the same semantic-owner activation completion uses.
+///
+/// Entries under the reserved `$schema` key are deliberately left to the
+/// declaration reparse in [`meta_schema_hover`]: that path also covers pattern
+/// keys and cursors that fall inside a definition the frontmatter AST records
+/// no entry for.
+fn frontmatter_definition_hover(
+    ctx: &DocumentContext,
+    overlay: &crate::overlay::DocumentOverlay,
+    offset: usize,
+) -> Option<Hover> {
+    let SchemaAuthoringState::Frontmatter(values) = &overlay.schema_authoring else {
+        return None;
+    };
+    let entry = overlay.ast.as_deref()?.entry_at_offset(offset)?;
+    let pointer = JsonPointer::parse(&entry.pointer);
+    let path: Vec<&str> = pointer.segments().iter().map(String::as_str).collect();
+    if path.first() == Some(&"$schema") {
+        return None;
+    }
+    if !semantic_owner_kinds(values, &path)?.contains(&MetaSchemaKind::TypeDefinition) {
+        return None;
+    }
+    let source = ctx.text.get(entry.value_span.clone())?;
+    let source = dedent_spanned_yaml(source, source_column(ctx.text, entry.value_span.start));
+    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&source).ok()?;
+    let definition = parse_property_definition(&entry.key, &yaml).ok()?;
+    markup_hover(
+        ctx,
+        entry.key_span.clone(),
+        meta_schema_definition_hover_body(&entry.key, &definition),
     )
 }
 

@@ -19,8 +19,8 @@ use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::compose::find_git_root_from;
 use darkmatter::markdown::schemas::resolve::{merge_baseline, resolve_schema};
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, PropertyAtom, PropertyDef, SchemaArm, SchemaError,
-    SchemaShape, SchemaSourceMap, SchemaSourcePath, SchemaSpanKind, SimplifiedSchema,
+    DarkmatterSchemas, EffectiveSchema, PatternKey, PropertyAtom, PropertyDef, SchemaArm,
+    SchemaError, SchemaShape, SchemaSourceMap, SchemaSourcePath, SchemaSpanKind, SimplifiedSchema,
     SimplifiedType, StandaloneSchemaDocument, StandaloneSchemaEnvelope, TypeExpr,
     darkmatter_base_json_schema_ref, darkmatter_base_schema, triggers::TriggerRegistry,
 };
@@ -106,8 +106,8 @@ fn collect_semantic_type_regions(
     source_map: &SchemaSourceMap,
     regions: &mut Vec<SemanticTypeRegion>,
 ) {
-    for (name, definition) in &shape.properties {
-        let path = parent.property(name);
+    for (name, definition) in shape_definitions(shape) {
+        let path = parent.property(&name);
         if let (Some(key_span), Some(definition_span)) = (
             source_map.spans(&path, SchemaSpanKind::MappingKey).first(),
             source_map.spans(&path, SchemaSpanKind::Definition).first(),
@@ -133,6 +133,37 @@ fn collect_semantic_type_regions(
             };
             collect_semantic_type_regions(nested, &nested_path, source_map, regions);
         }
+    }
+}
+
+/// Every complete definition on a shape, paired with the authored mapping key
+/// the schema source map indexes it under.
+///
+/// Literal properties and pattern keys are stored on separate
+/// [`SchemaShape`] fields, but the source projector records both under the
+/// verbatim authored key, so a region walk that reads only `properties` would
+/// silently drop every `<string>` / `<starting::…>` definition.
+fn shape_definitions(shape: &SchemaShape) -> Vec<(String, &PropertyDef)> {
+    shape
+        .properties
+        .iter()
+        .map(|(name, definition)| (name.clone(), definition))
+        .chain(
+            shape
+                .pattern_keys
+                .iter()
+                .map(|pattern| (pattern_key_source(&pattern.key), &pattern.def)),
+        )
+        .collect()
+}
+
+/// The `<…>` mapping key a pattern key was authored as.
+fn pattern_key_source(key: &PatternKey) -> String {
+    match key {
+        PatternKey::CatchAll => "<string>".to_string(),
+        PatternKey::Starting(prefix) => format!("<starting::{prefix}>"),
+        PatternKey::Ending(suffix) => format!("<ending::{suffix}>"),
+        PatternKey::Pattern(regex) => format!("<pattern::{regex}>"),
     }
 }
 
@@ -199,11 +230,36 @@ pub fn frontmatter_authoring(
 
 /// Returns the standalone envelope lexically claimed by the current text.
 ///
-/// This deliberately recognizes only top-level YAML mapping entries. It keeps
-/// a previous semantic model alive while the current YAML cannot be parsed,
-/// without letting a filename, directory, or raw JSON Schema activate DMLS.
+/// This recognizes only top-level YAML mapping entries, in either block or
+/// flow presentation — the authoritative parser
+/// ([`parse_standalone_schema_document`](darkmatter::markdown::schemas::parse_standalone_schema_document))
+/// accepts a mapping regardless of presentation, so a claim that saw only
+/// block style would drop the retained model of a flow-authored document at
+/// the first malformed keystroke.
+///
+/// A real YAML parse is unavailable here by construction: this runs on text
+/// that is *already known* to be unparseable, on every keystroke. The
+/// recognizer is therefore lexical — one linear scan, no backtracking — and
+/// tolerant of truncated or otherwise broken input. It still refuses ordinary
+/// YAML and raw JSON Schema, which carry top-level keys beyond a sole
+/// `$schema` and never carry `kind: schema`.
 pub fn standalone_envelope_claim(text: &str) -> Option<StandaloneSchemaEnvelope> {
-    let mut top_level = Vec::new();
+    let top_level = match flow_mapping_start(text) {
+        Some(start) => flow_top_level_entries(&text[start + 1..]),
+        None => block_top_level_entries(text),
+    };
+    if top_level.iter().any(|(key, value)| {
+        key == "kind" && lexical_scalar(value).as_deref() == Some("schema")
+    }) {
+        return Some(StandaloneSchemaEnvelope::Tagged);
+    }
+    (top_level.len() == 1 && top_level[0].0 == "$schema")
+        .then_some(StandaloneSchemaEnvelope::Pure)
+}
+
+/// Top-level `key: value` entries of a block mapping: one per unindented line.
+fn block_top_level_entries(text: &str) -> Vec<(String, String)> {
+    let mut entries = Vec::new();
     for line in text.lines() {
         let line = line.trim_end_matches('\r');
         let trimmed = line.trim();
@@ -219,15 +275,107 @@ pub fn standalone_envelope_claim(text: &str) -> Option<StandaloneSchemaEnvelope>
         let Some(key) = lexical_scalar(key.trim()) else {
             continue;
         };
-        top_level.push((key, value.trim().to_string()));
+        entries.push((key, value.trim().to_string()));
     }
-    if top_level.iter().any(|(key, value)| {
-        key == "kind" && lexical_scalar(value).as_deref() == Some("schema")
-    }) {
-        return Some(StandaloneSchemaEnvelope::Tagged);
+    entries
+}
+
+/// Byte offset of the `{` opening a whole-document flow mapping, skipping
+/// leading blank lines, comments, and document markers. `None` when the first
+/// content is anything else, which leaves block scanning in charge.
+fn flow_mapping_start(text: &str) -> Option<usize> {
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed == "---" || trimmed == "..." {
+            offset += line.len();
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+        return trimmed.starts_with('{').then_some(offset + indent);
     }
-    (top_level.len() == 1 && top_level[0].0 == "$schema")
-        .then_some(StandaloneSchemaEnvelope::Pure)
+    None
+}
+
+/// Top-level `key: value` entries of a flow mapping. `inner` starts
+/// immediately after the opening `{`.
+///
+/// Only depth-0 `:` and `,` delimit entries, so nested flow collections and
+/// quoted scalars (which is where a raw JSON Schema hides its `://` and its
+/// commas) cannot be mistaken for top-level structure. Unterminated input
+/// yields whatever entries were complete, which is exactly what a mid-edit
+/// buffer needs.
+fn flow_top_level_entries(inner: &str) -> Vec<(String, String)> {
+    let mut entries = Vec::new();
+    let mut depth = 0usize;
+    let mut quote: Option<char> = None;
+    let mut in_comment = false;
+    let mut previous_space = true;
+    let mut key: Option<String> = None;
+    let mut token = String::new();
+
+    for ch in inner.chars() {
+        if in_comment {
+            if ch == '\n' {
+                in_comment = false;
+                previous_space = true;
+            }
+            continue;
+        }
+        if let Some(open) = quote {
+            token.push(ch);
+            if ch == open {
+                quote = None;
+            }
+            previous_space = false;
+            continue;
+        }
+        match ch {
+            '\'' | '"' => {
+                token.push(ch);
+                quote = Some(ch);
+            }
+            '#' if previous_space => in_comment = true,
+            '{' | '[' => {
+                depth += 1;
+                token.push(ch);
+            }
+            '}' | ']' if depth > 0 => {
+                depth -= 1;
+                token.push(ch);
+            }
+            // The outermost `}` closes the mapping; anything after it belongs
+            // to a second document and is not this envelope's business.
+            '}' => {
+                push_flow_entry(&mut entries, &mut key, &mut token);
+                break;
+            }
+            ':' if depth == 0 && key.is_none() => key = Some(std::mem::take(&mut token)),
+            ',' if depth == 0 => push_flow_entry(&mut entries, &mut key, &mut token),
+            _ => token.push(ch),
+        }
+        previous_space = ch.is_whitespace();
+    }
+    push_flow_entry(&mut entries, &mut key, &mut token);
+    entries
+}
+
+/// Records one flow entry and resets the scanner's per-entry state. A fragment
+/// with no `:` separator, or whose key is not a readable scalar, is dropped
+/// rather than guessed at — over-claiming here would activate DMLS on text the
+/// authoritative parser would refuse.
+fn push_flow_entry(
+    entries: &mut Vec<(String, String)>,
+    key: &mut Option<String>,
+    token: &mut String,
+) {
+    let value = std::mem::take(token);
+    let Some(key) = key.take() else {
+        return;
+    };
+    if let Some(key) = lexical_scalar(key.trim()) {
+        entries.push((key, value.trim().to_string()));
+    }
 }
 
 fn lexical_scalar(source: &str) -> Option<String> {
@@ -682,6 +830,85 @@ mod tests {
             assert!(!region.definition_span.is_empty(), "{region:#?}");
             assert!(!region.key_span.is_empty(), "{region:#?}");
             assert_eq!(&source[region.key_span.clone()], region.name);
+        }
+    }
+
+    /// The claim must track the authoritative parser, which accepts a mapping
+    /// in either presentation. A block-only claim silently drops the retained
+    /// model of every flow-authored envelope the moment it is mid-edit.
+    #[test]
+    fn envelope_claim_recognizes_block_and_flow_presentation() {
+        for pure in [
+            "$schema:\n  title: string\n",
+            "{\"$schema\":{\"title\":\"string\"}}",
+            "{$schema: {title: string}}\n",
+            "---\n{ \"$schema\": { \"title\": \"str\" } }\n",
+            // Truncated mid-edit: the closing braces are not typed yet.
+            "{\"$schema\": {\"title\": \"str",
+        ] {
+            assert_eq!(
+                standalone_envelope_claim(pure),
+                Some(StandaloneSchemaEnvelope::Pure),
+                "{pure:?}"
+            );
+        }
+
+        for tagged in [
+            "kind: schema\ntypes:\n  title: string\n",
+            "{kind: schema, types: {title: string}}",
+            "{\"types\": {\"title\": \"str\"}, \"kind\": \"schema\"}",
+        ] {
+            assert_eq!(
+                standalone_envelope_claim(tagged),
+                Some(StandaloneSchemaEnvelope::Tagged),
+                "{tagged:?}"
+            );
+        }
+
+        for inert in [
+            "title: ordinary yaml\n",
+            "{\"title\": \"ordinary flow yaml\"}",
+            // Raw JSON Schema: `$schema` is present but not the sole key, and
+            // its `://` and `,` are inside quoted scalars.
+            "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"type\":\"object\"}",
+            "{kind: config, types: {title: string}}",
+            "[1, 2, 3]\n",
+        ] {
+            assert_eq!(standalone_envelope_claim(inert), None, "{inert:?}");
+        }
+    }
+
+    /// Pattern keys live on `SchemaShape::pattern_keys`, not in the literal
+    /// `properties` map, so a region walk reading only `properties` projects
+    /// none of them despite the source projector spanning both.
+    #[test]
+    fn semantic_type_regions_project_every_pattern_key_form() {
+        let source = concat!(
+            "$schema:\n",
+            "  \"<string>\": string(required)\n",
+            "  \"<starting::x-509>\": number\n",
+            "  \"<ending::.md>\": boolean\n",
+            "  \"<pattern::[0-9_]$>\": string\n",
+        );
+        let model = darkmatter::markdown::schemas::parse_standalone_schema_document(
+            source,
+            Path::new("/w/schema.yaml"),
+        )
+        .expect("classification")
+        .expect("standalone schema");
+
+        let schema = model.schema().expect("mapping payload is an inline schema");
+        let regions = semantic_type_regions(schema, &model.source_map);
+        let names: Vec<&str> = regions.iter().map(|region| region.name.as_str()).collect();
+        for expected in
+            ["<string>", "<starting::x-509>", "<ending::.md>", "<pattern::[0-9_]$>"]
+        {
+            assert!(names.contains(&expected), "missing {expected}: {regions:#?}");
+        }
+        for region in regions {
+            assert!(!region.definition_span.is_empty(), "{region:#?}");
+            assert!(!region.key_span.is_empty(), "{region:#?}");
+            assert_eq!(region.kind, MetaSchemaKind::TypeDefinition);
         }
     }
 }

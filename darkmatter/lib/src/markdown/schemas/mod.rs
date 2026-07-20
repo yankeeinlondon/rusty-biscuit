@@ -90,7 +90,8 @@ pub use errors::SchemaError;
 pub use reference::{SchemaReference, SchemaReferenceKind, classify_schema_reference};
 pub use rewrite::NormalizationOutcome;
 pub use simplified::{
-    Constraint, DRAFT_2020_12, DecodedScalar, PropertyAtom, PropertyDef, SchemaArm,
+    Constraint, DRAFT_2020_12, DecodedScalar, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef,
+    SchemaArm,
     SchemaCursor, SchemaCursorRole, SchemaDeclaration, SchemaShape, SchemaSourceMap,
     SchemaSourcePath, SchemaSourcePathSegment,
     SchemaSpanKind, SchemaValueEntry, SchemaValueKind, SchemaValueNode, SimplifiedSchema,
