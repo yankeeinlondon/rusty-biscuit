@@ -143,7 +143,7 @@ pub trait RemoteRepoProvider: Send + Sync {
             });
         let mut items = self.list_pull_requests(owner, repo, state).await?;
         items.retain(|item| pr_matches(item, &query));
-        sort_prs(&mut items, query.sort.as_deref().unwrap_or("provider-default"), query.descending);
+        sort_prs(&mut items, query.sort.as_deref(), query.descending);
         let total = items.len();
         let offset = parse_cursor(query.cursor.as_deref())?;
         let limit = query.limit.unwrap_or(20);
@@ -382,12 +382,16 @@ fn pr_matches(item: &PullRequestInfo, query: &PullRequestQuery) -> bool {
         })
 }
 
-fn sort_prs(items: &mut [PullRequestInfo], sort: &str, descending: bool) {
-    items.sort_by(|left, right| match sort {
-        "updated" => left.updated_at.cmp(&right.updated_at),
-        "provider-default" => std::cmp::Ordering::Equal,
-        _ => left.created_at.cmp(&right.created_at),
-    });
+/// Same ordering contract as the focused client: an absent `sort` means the
+/// ratified newest-first `created` key, and an explicit `provider-default`
+/// keeps the provider's own order verbatim — never reversed, because
+/// `descending` only has meaning relative to a sort key.
+fn sort_prs(items: &mut [PullRequestInfo], sort: Option<&str>, descending: bool) {
+    match sort {
+        None | Some("created") => items.sort_by(|left, right| left.created_at.cmp(&right.created_at)),
+        Some("updated") => items.sort_by(|left, right| left.updated_at.cmp(&right.updated_at)),
+        _ => return,
+    }
     if descending {
         items.reverse();
     }

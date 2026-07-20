@@ -75,7 +75,11 @@ pub fn remote_vendor_at(
     let Some(resolved) = resolve_remote_at(path, remote)? else {
         return Ok(String::new());
     };
-    let token = match resolved.api_flavor {
+    let flavor = match resolved.api_flavor {
+        ApiFlavor::Unknown => probe_self_hosted_flavor(&resolved.fetch_url, policy)?,
+        flavor => flavor,
+    };
+    let token = match flavor {
         ApiFlavor::GitHub => "github",
         ApiFlavor::GitLab => "gitlab",
         ApiFlavor::Gitea => "gitea",
@@ -84,7 +88,10 @@ pub fn remote_vendor_at(
         ApiFlavor::AzureDevOps => "azure_devops",
         ApiFlavor::AwsCodeCommit => "aws_code_commit",
         ApiFlavor::SourceHut => "source_hut",
-        ApiFlavor::Unknown => return probe_ambiguous_vendor(&resolved.fetch_url, policy),
+        // The probe never returns `Unknown`; it errors instead.
+        ApiFlavor::Unknown => {
+            return Err(SniffError::UnsupportedProvider { url: resolved.fetch_url });
+        }
     };
     Ok(token.to_string())
 }
@@ -243,17 +250,31 @@ fn advertises_branch(body: &[u8], branch: &str) -> bool {
     false
 }
 
-fn probe_ambiguous_vendor(remote: &str, policy: &FetchPolicy) -> Result<String> {
-    let remote = url::Url::parse(remote).map_err(|_| SniffError::UnsupportedRemoteCapability {
-        capability: "provider detection",
-        target: "non-HTTP Git transport".to_string(),
-    })?;
+/// Detects a self-managed server family behind an ambiguous HTTP(S) host.
+///
+/// This is the single bounded discovery probe: `remote_vendor_at` projects its
+/// result to a vendor token, and the focused provider client reuses it to
+/// select a flavor for a neutral-hostname endpoint. The exact host must pass
+/// `policy` before any request; the transport is the deny-by-default,
+/// redirect-disabled `PolicyClient`. Blocking — callers inside an async
+/// runtime must move it to a blocking thread.
+pub(crate) fn probe_self_hosted_flavor(remote: &str, policy: &FetchPolicy) -> Result<ApiFlavor> {
+    let remote = url::Url::parse(remote)
+        .ok()
+        .filter(|url| matches!(url.scheme(), "http" | "https"))
+        .ok_or(SniffError::UnsupportedRemoteCapability {
+            capability: "provider detection",
+            target: "non-HTTP Git transport".to_string(),
+        })?;
     let host = remote.host_str().unwrap_or_default();
     if !policy.is_allowed(host) {
         return Err(SniffError::RemotePolicyDenied { host: host.to_string() });
     }
     let client = PolicyClient::new().map_err(|error| unreachable(&remote, error))?;
-    for (path, token) in [("/api/v4/version", "gitlab"), ("/api/v1/version", "gitea")] {
+    for (path, flavor) in [
+        ("/api/v4/version", ApiFlavor::GitLab),
+        ("/api/v1/version", ApiFlavor::Gitea),
+    ] {
         let mut endpoint = remote.clone();
         endpoint.set_path(path);
         endpoint.set_query(None);
@@ -263,10 +284,16 @@ fn probe_ambiguous_vendor(remote: &str, policy: &FetchPolicy) -> Result<String> 
             Err(error) => return Err(map_fetch_error(&endpoint, ApiFlavor::Unknown, error)),
         };
         if response.is_success() {
-            if token == "gitea" && String::from_utf8_lossy(&response.body).to_ascii_lowercase().contains("forgejo") {
-                return Ok("forgejo".to_string());
+            // Forgejo serves Gitea's API surface; only its version body tells
+            // the two apart.
+            if flavor == ApiFlavor::Gitea
+                && String::from_utf8_lossy(&response.body)
+                    .to_ascii_lowercase()
+                    .contains("forgejo")
+            {
+                return Ok(ApiFlavor::Forgejo);
             }
-            return Ok(token.to_string());
+            return Ok(flavor);
         }
     }
     Err(SniffError::UnsupportedProvider { url: remote.to_string() })
@@ -456,6 +483,7 @@ mod tests {
             namespace: Some("group/nested".to_string()),
             repository: Some("project".to_string()),
             api_flavor,
+            endpoint: None,
         }
     }
 

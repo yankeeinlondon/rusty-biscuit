@@ -16,7 +16,7 @@ pub use api::{
     commits_for_path_at, merge_conflicts_at, merge_conflicts_with_branch_at, preferred_remote_url,
     remote_url, repo_root,
 };
-pub use remote_resolver::{ApiFlavor, ResolvedRemote, resolve_remote_at};
+pub use remote_resolver::{ApiFlavor, RemoteEndpoint, ResolvedRemote, resolve_remote_at};
 #[cfg(feature = "network")]
 pub use remote_observation::{branch_exists_on_remote_at, remote_vendor_at};
 

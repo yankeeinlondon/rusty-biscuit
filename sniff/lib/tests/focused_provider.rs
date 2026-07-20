@@ -2,7 +2,7 @@
 
 use biscuit_file::FetchPolicy;
 use sniff::SniffError;
-use sniff::filesystem::git::{ApiFlavor, ResolvedRemote};
+use sniff::filesystem::git::{ApiFlavor, RemoteEndpoint, ResolvedRemote, resolve_remote_at};
 use sniff::remote::{
     CiCdJobQuery, CiCdJobReference, FocusedProviderClient, GitProvider, PullRequestQuery,
     CanonicalPullRequestState, QueryValues,
@@ -27,7 +27,7 @@ fn pr_item(number: u64, author: &str) -> serde_json::Value {
         "state": "open",
         "user": {"login": author},
         "created_at": ts(number),
-        "html_url": format!("https://example/pr/{number}"),
+        "html_url": format!("https://127.0.0.1/pr/{number}"),
     })
 }
 
@@ -68,15 +68,25 @@ async fn recorded_state_params(server: &MockServer) -> Vec<String> {
         .collect()
 }
 
+/// Host every fixture in this file lives on.
+///
+/// Two independent controls key off it: the API endpoint a client may contact
+/// must belong to the repository's host, and a projected web link must too. A
+/// fixture that publishes links elsewhere therefore proves nothing — the link
+/// would be correctly dropped and the assertion would pass vacuously — so the
+/// loopback provider serves its web UI here as well.
+const FIXTURE_HOST: &str = "127.0.0.1";
+
 fn remote(flavor: ApiFlavor) -> ResolvedRemote {
     ResolvedRemote {
         name: "origin".to_string(),
         fetch_url: "git@127.0.0.1:acme/project.git".to_string(),
         push_url: "git@127.0.0.1:acme/project.git".to_string(),
-        host: Some("127.0.0.1".to_string()),
+        host: Some(FIXTURE_HOST.to_string()),
         namespace: Some("acme".to_string()),
         repository: Some("project".to_string()),
         api_flavor: flavor,
+        endpoint: None,
     }
 }
 
@@ -111,53 +121,279 @@ fn reference(flavor: ApiFlavor, id: &str) -> CiCdJobReference {
     }
 }
 
+/// Repository identity a canonical URL is expected to resolve to.
+///
+/// Compared as a whole so a route that recovers the right ID but the wrong
+/// flavor, namespace, or host fails loudly instead of passing on the ID alone.
+#[derive(Debug, PartialEq, Eq)]
+struct UrlIdentity {
+    flavor: ApiFlavor,
+    host: String,
+    namespace: String,
+    repository: String,
+    native_id: String,
+}
+
+fn pr_identity(url: &str) -> Result<UrlIdentity, SniffError> {
+    let (client, native_id) =
+        FocusedProviderClient::from_pull_request_url(url, FetchPolicy::deny_all())?;
+    Ok(identity_of(client.remote(), &native_id))
+}
+
+fn job_identity(url: &str) -> Result<UrlIdentity, SniffError> {
+    let (remote, reference) = FocusedProviderClient::job_reference_from_url(url)?;
+    assert_eq!(reference.original_url.as_deref(), Some(url));
+    assert_eq!(reference.native_id, reference.display_id);
+    Ok(identity_of(&remote, &reference.native_id))
+}
+
+fn identity_of(remote: &ResolvedRemote, native_id: &str) -> UrlIdentity {
+    UrlIdentity {
+        flavor: remote.api_flavor,
+        host: remote.host.clone().unwrap_or_default(),
+        namespace: remote.namespace.clone().unwrap_or_default(),
+        repository: remote.repository.clone().unwrap_or_default(),
+        native_id: native_id.to_string(),
+    }
+}
+
+fn expected(flavor: ApiFlavor, host: &str, namespace: &str, native_id: &str) -> UrlIdentity {
+    UrlIdentity {
+        flavor,
+        host: host.to_string(),
+        namespace: namespace.to_string(),
+        repository: "project".to_string(),
+        native_id: native_id.to_string(),
+    }
+}
+
 #[test]
-fn canonical_pr_and_job_urls_preserve_repository_scoped_identity() {
-    for (url, id) in [
-        ("https://github.com/acme/project/pull/7", "7"),
-        ("https://gitlab.com/group/sub/project/-/merge_requests/8", "8"),
-        ("https://forgejo.example/acme/project/pulls/9", "9"),
-        ("https://bitbucket.org/acme/project/pull-requests/10", "10"),
+fn canonical_web_urls_resolve_every_supported_provider() {
+    for (url, wanted) in [
+        ("https://github.com/acme/project/pull/7",
+         expected(ApiFlavor::GitHub, "github.com", "acme", "7")),
+        ("https://gitlab.com/group/sub/project/-/merge_requests/8",
+         expected(ApiFlavor::GitLab, "gitlab.com", "group/sub", "8")),
+        ("https://gitea.example/acme/project/pulls/9",
+         expected(ApiFlavor::Gitea, "gitea.example", "acme", "9")),
+        ("https://forgejo.example/acme/project/pulls/9",
+         expected(ApiFlavor::Forgejo, "forgejo.example", "acme", "9")),
+        ("https://codeberg.org/acme/project/pulls/9",
+         expected(ApiFlavor::Forgejo, "codeberg.org", "acme", "9")),
+        ("https://bitbucket.org/acme/project/pull-requests/10",
+         expected(ApiFlavor::Bitbucket, "bitbucket.org", "acme", "10")),
     ] {
-        let (_, parsed) = FocusedProviderClient::from_pull_request_url(
-            url,
-            FetchPolicy::deny_all(),
-        )
-        .unwrap();
-        assert_eq!(parsed, id);
+        assert_eq!(pr_identity(url).unwrap(), wanted, "{url}");
     }
 
-    for (url, native_id, namespace) in [
-        ("https://github.com/acme/project/actions/runs/20/job/21", "21", "acme"),
-        ("https://gitlab.com/group/sub/project/-/jobs/22", "22", "group/sub"),
-        (
-            "https://bitbucket.org/acme/project/pipelines/results/p1/steps/s1",
-            "p1/s1",
-            "acme",
-        ),
+    for (url, wanted) in [
+        ("https://github.com/acme/project/actions/runs/20/job/21",
+         expected(ApiFlavor::GitHub, "github.com", "acme", "21")),
+        ("https://gitlab.com/group/sub/project/-/jobs/22",
+         expected(ApiFlavor::GitLab, "gitlab.com", "group/sub", "22")),
+        ("https://gitea.example/acme/project/actions/runs/20/jobs/23",
+         expected(ApiFlavor::Gitea, "gitea.example", "acme", "23")),
+        ("https://forgejo.example/acme/project/actions/runs/20/jobs/23",
+         expected(ApiFlavor::Forgejo, "forgejo.example", "acme", "23")),
+        ("https://bitbucket.org/acme/project/pipelines/results/p1/steps/s1",
+         expected(ApiFlavor::Bitbucket, "bitbucket.org", "acme", "p1/s1")),
     ] {
-        let (remote, reference) = FocusedProviderClient::job_reference_from_url(url).unwrap();
-        assert_eq!(reference.native_id, native_id);
-        assert_eq!(reference.original_url.as_deref(), Some(url));
-        assert_eq!(remote.namespace.as_deref(), Some(namespace));
-        assert_eq!(remote.repository.as_deref(), Some("project"));
+        assert_eq!(job_identity(url).unwrap(), wanted, "{url}");
+    }
+}
+
+/// The API half of the input contract: every supported provider's own API route
+/// for both item kinds, including the official API hostnames, which must map
+/// back to the repository's web host.
+#[test]
+fn canonical_api_urls_resolve_every_supported_provider() {
+    for (url, wanted) in [
+        ("https://api.github.com/repos/acme/project/pulls/7",
+         expected(ApiFlavor::GitHub, "github.com", "acme", "7")),
+        ("https://gitlab.com/api/v4/projects/group%2Fsub%2Fproject/merge_requests/8",
+         expected(ApiFlavor::GitLab, "gitlab.com", "group/sub", "8")),
+        ("https://gitea.example/api/v1/repos/acme/project/pulls/9",
+         expected(ApiFlavor::Gitea, "gitea.example", "acme", "9")),
+        ("https://forgejo.example/api/v1/repos/acme/project/pulls/9",
+         expected(ApiFlavor::Forgejo, "forgejo.example", "acme", "9")),
+        ("https://api.bitbucket.org/2.0/repositories/acme/project/pullrequests/10",
+         expected(ApiFlavor::Bitbucket, "bitbucket.org", "acme", "10")),
+    ] {
+        assert_eq!(pr_identity(url).unwrap(), wanted, "{url}");
     }
 
-    assert!(FocusedProviderClient::from_pull_request_url(
-        "https://github.com/acme/project/issues/7",
-        FetchPolicy::deny_all(),
+    for (url, wanted) in [
+        ("https://api.github.com/repos/acme/project/actions/jobs/21",
+         expected(ApiFlavor::GitHub, "github.com", "acme", "21")),
+        ("https://gitlab.com/api/v4/projects/group%2Fsub%2Fproject/jobs/22",
+         expected(ApiFlavor::GitLab, "gitlab.com", "group/sub", "22")),
+        ("https://gitea.example/api/v1/repos/acme/project/actions/jobs/23",
+         expected(ApiFlavor::Gitea, "gitea.example", "acme", "23")),
+        ("https://forgejo.example/api/v1/repos/acme/project/actions/jobs/23",
+         expected(ApiFlavor::Forgejo, "forgejo.example", "acme", "23")),
+        ("https://api.bitbucket.org/2.0/repositories/acme/project/pipelines/p1/steps/s1",
+         expected(ApiFlavor::Bitbucket, "bitbucket.org", "acme", "p1/s1")),
+    ] {
+        assert_eq!(job_identity(url).unwrap(), wanted, "{url}");
+    }
+}
+
+/// Enterprise and self-managed endpoints keep the origin the caller addressed
+/// them by, which is what lets the derived API base reach a non-default port.
+#[test]
+fn enterprise_and_self_managed_urls_retain_scheme_and_non_default_port() {
+    for (url, flavor, host, namespace) in [
+        ("https://ghe.example:8443/api/v3/repos/acme/project/pulls/7", ApiFlavor::GitHub, "ghe.example", "acme"),
+        ("http://ghe.example:8080/acme/project/pull/7", ApiFlavor::GitHub, "ghe.example", "acme"),
+        ("https://git.example:8443/api/v4/projects/group%2Fproject/merge_requests/8", ApiFlavor::GitLab, "git.example", "group"),
+        ("http://git.example:8080/group/project/-/merge_requests/8", ApiFlavor::GitLab, "git.example", "group"),
+        ("https://gitea.example:3000/api/v1/repos/acme/project/pulls/9", ApiFlavor::Gitea, "gitea.example", "acme"),
+        ("https://forgejo.example:3000/acme/project/pulls/9", ApiFlavor::Forgejo, "forgejo.example", "acme"),
+    ] {
+        let (client, _) =
+            FocusedProviderClient::from_pull_request_url(url, FetchPolicy::deny_all()).unwrap();
+        let remote = client.remote();
+        let parsed = url::Url::parse(url).unwrap();
+        assert_eq!(remote.api_flavor, flavor, "{url}");
+        assert_eq!(remote.host.as_deref(), Some(host), "{url}");
+        assert_eq!(remote.namespace.as_deref(), Some(namespace), "{url}");
+        let endpoint = remote.endpoint.as_ref().unwrap();
+        assert_eq!(endpoint.scheme, parsed.scheme(), "{url}");
+        assert_eq!(endpoint.port, parsed.port(), "{url}");
+        assert_eq!(
+            remote.http_origin().as_deref(),
+            Some(parsed.origin().ascii_serialization().as_str()),
+            "{url}"
+        );
+    }
+
+    let (remote, _) = FocusedProviderClient::job_reference_from_url(
+        "https://git.example:8443/api/v4/projects/group%2Fproject/jobs/22",
     )
-    .is_err());
+    .unwrap();
+    assert_eq!(remote.http_origin().as_deref(), Some("https://git.example:8443"));
+}
+
+/// A host that pins a provider accepts only that provider's routes, so a route
+/// shape borrowed from another forge is rejected rather than mis-flavored.
+#[test]
+fn cross_flavor_route_shapes_are_rejected() {
+    for url in [
+        // GitLab shapes on GitHub and Bitbucket hosts.
+        "https://github.com/group/project/-/merge_requests/8",
+        "https://github.com/api/v4/projects/group%2Fproject/merge_requests/8",
+        "https://bitbucket.org/group/project/-/merge_requests/8",
+        // GitHub shapes on GitLab and Bitbucket hosts.
+        "https://gitlab.com/acme/project/pull/7",
+        "https://bitbucket.org/acme/project/pull/7",
+        // Gitea's `/pulls/` shape on GitHub, GitLab, and Bitbucket hosts.
+        "https://github.com/acme/project/pulls/7",
+        "https://gitlab.com/api/v1/repos/acme/project/pulls/9",
+        "https://bitbucket.org/acme/project/pulls/9",
+        // Bitbucket's API shape on the GitHub API host.
+        "https://api.github.com/2.0/repositories/acme/project/pullrequests/10",
+        // GitHub's shape on Codeberg, which is definitively Forgejo.
+        "https://codeberg.org/acme/project/pull/7",
+    ] {
+        assert!(pr_identity(url).is_err(), "expected rejection: {url}");
+    }
+
+    for url in [
+        "https://github.com/group/project/-/jobs/22",
+        "https://gitlab.com/acme/project/actions/runs/20/job/21",
+        "https://bitbucket.org/acme/project/actions/runs/20/jobs/23",
+        "https://api.github.com/2.0/repositories/acme/project/pipelines/p1/steps/s1",
+    ] {
+        assert!(job_identity(url).is_err(), "expected rejection: {url}");
+    }
+}
+
+/// The two item kinds do not share a route grammar, so asking for a job with a
+/// PR URL is a parse failure rather than a lookup that later 404s.
+#[test]
+fn item_kinds_do_not_accept_each_others_routes() {
+    for url in [
+        "https://github.com/acme/project/pull/7",
+        "https://api.github.com/repos/acme/project/pulls/7",
+        "https://gitlab.com/api/v4/projects/group%2Fproject/merge_requests/8",
+        "https://bitbucket.org/acme/project/pull-requests/10",
+    ] {
+        assert!(job_identity(url).is_err(), "expected rejection: {url}");
+    }
+    for url in [
+        "https://github.com/acme/project/actions/runs/20/job/21",
+        "https://api.github.com/repos/acme/project/actions/jobs/21",
+        "https://gitlab.com/api/v4/projects/group%2Fproject/jobs/22",
+        "https://bitbucket.org/acme/project/pipelines/results/p1/steps/s1",
+    ] {
+        assert!(pr_identity(url).is_err(), "expected rejection: {url}");
+    }
+}
+
+#[test]
+fn malformed_provider_urls_are_rejected() {
+    for url in [
+        // Not a supported route at all.
+        "https://github.com/acme/project/issues/7",
+        "not-a-url",
+        // Transport and addressing the contract forbids.
+        "ftp://github.com/acme/project/pull/7",
+        "https://github.com/acme/project/pull/7?state=open",
+        "https://github.com/acme/project/pull/7#discussion",
+        // Truncated or over-long routes.
+        "https://api.github.com/repos/acme/project/pulls",
+        "https://api.github.com/repos/acme/project/pulls/7/files",
+        "https://github.com/acme/project/pull",
+        "https://gitlab.com/project/-/merge_requests/8",
+        "https://gitlab.com/group/project/merge_requests/8",
+        // A GitLab API project identity that decodes to no namespace at all.
+        "https://gitlab.com/api/v4/projects/project/merge_requests/8",
+        // An encoded separator smuggled into a flat owner/repository identity.
+        "https://api.github.com/repos/acme%2Fevil/project/pulls/7",
+        // Zero is not a provider identifier.
+        "https://api.github.com/repos/acme/project/pulls/0",
+        "https://github.com/acme/project/pull/0",
+    ] {
+        assert!(pr_identity(url).is_err(), "expected rejection: {url}");
+    }
+
+    for url in [
+        "https://api.github.com/repos/acme/project/actions/jobs",
+        // A web route under an API prefix is not an API route.
+        "https://api.github.com/repos/acme/project/actions/runs/20/job/21",
+        "https://gitlab.com/api/v4/projects/group%2Fproject/jobs",
+        "https://bitbucket.org/acme/project/pipelines/results/p1/steps",
+        "https://gitea.example/acme/project/actions/runs/20/jobs/0",
+    ] {
+        assert!(job_identity(url).is_err(), "expected rejection: {url}");
+    }
+}
+
+/// An official API hostname resolves to the repository's web host, so the
+/// derived endpoint reaches the API host through the allowlist rather than by
+/// the remote host having been rewritten.
+#[test]
+fn official_api_hostnames_resolve_to_the_repository_web_host() {
+    for (url, api_host, web_host) in [
+        ("https://api.github.com/repos/acme/project/pulls/7", "api.github.com", "github.com"),
+        ("https://api.bitbucket.org/2.0/repositories/acme/project/pullrequests/10",
+         "api.bitbucket.org", "bitbucket.org"),
+    ] {
+        let (client, _) =
+            FocusedProviderClient::from_pull_request_url(url, FetchPolicy::deny_all()).unwrap();
+        assert_eq!(client.remote().host.as_deref(), Some(web_host), "{url}");
+        assert_ne!(client.remote().host.as_deref(), Some(api_host), "{url}");
+    }
 }
 
 #[tokio::test]
 async fn exact_pull_requests_preserve_identity_and_authoritative_not_found() {
     let cases = [
-        (ApiFlavor::GitHub, "/api/repos/acme/project/pulls/7", "/api/repos/acme/project/pulls/8", serde_json::json!({"number": 7, "title": "Fix", "state": "open", "user": {"login": "alice"}, "created_at": "2024-01-01", "html_url": "https://github.example/pr/7", "url": "https://api.example/pr/7"})),
-        (ApiFlavor::GitLab, "/api/projects/acme%2Fproject/merge_requests/7", "/api/projects/acme%2Fproject/merge_requests/8", serde_json::json!({"iid": 7, "title": "Fix", "state": "opened", "author": {"username": "alice"}, "created_at": "2024-01-01", "web_url": "https://gitlab.example/mr/7"})),
-        (ApiFlavor::Gitea, "/api/repos/acme/project/pulls/7", "/api/repos/acme/project/pulls/8", serde_json::json!({"number": 7, "title": "Fix", "state": "open", "user": {"login": "alice"}, "created_at": "2024-01-01", "html_url": "https://gitea.example/pr/7"})),
-        (ApiFlavor::Forgejo, "/api/repos/acme/project/pulls/7", "/api/repos/acme/project/pulls/8", serde_json::json!({"number": 7, "title": "Fix", "state": "open", "user": {"login": "alice"}, "created_at": "2024-01-01", "html_url": "https://forgejo.example/pr/7"})),
-        (ApiFlavor::Bitbucket, "/api/repositories/acme/project/pullrequests/7", "/api/repositories/acme/project/pullrequests/8", serde_json::json!({"id": 7, "title": "Fix", "state": "OPEN", "author": {"display_name": "alice"}, "created_on": "2024-01-01", "links": {"html": {"href": "https://bitbucket.example/pr/7"}}})),
+        (ApiFlavor::GitHub, "/api/repos/acme/project/pulls/7", "/api/repos/acme/project/pulls/8", serde_json::json!({"number": 7, "title": "Fix", "state": "open", "user": {"login": "alice"}, "created_at": "2024-01-01", "html_url": "https://127.0.0.1/pr/7", "url": "https://api.example/pr/7"})),
+        (ApiFlavor::GitLab, "/api/projects/acme%2Fproject/merge_requests/7", "/api/projects/acme%2Fproject/merge_requests/8", serde_json::json!({"iid": 7, "title": "Fix", "state": "opened", "author": {"username": "alice"}, "created_at": "2024-01-01", "web_url": "https://127.0.0.1/mr/7"})),
+        (ApiFlavor::Gitea, "/api/repos/acme/project/pulls/7", "/api/repos/acme/project/pulls/8", serde_json::json!({"number": 7, "title": "Fix", "state": "open", "user": {"login": "alice"}, "created_at": "2024-01-01", "html_url": "https://127.0.0.1/pr/7"})),
+        (ApiFlavor::Forgejo, "/api/repos/acme/project/pulls/7", "/api/repos/acme/project/pulls/8", serde_json::json!({"number": 7, "title": "Fix", "state": "open", "user": {"login": "alice"}, "created_at": "2024-01-01", "html_url": "https://127.0.0.1/pr/7"})),
+        (ApiFlavor::Bitbucket, "/api/repositories/acme/project/pullrequests/7", "/api/repositories/acme/project/pullrequests/8", serde_json::json!({"id": 7, "title": "Fix", "state": "OPEN", "author": {"display_name": "alice"}, "created_on": "2024-01-01", "links": {"html": {"href": "https://127.0.0.1/pr/7"}}})),
     ];
     for (flavor, found_path, missing_path, body) in cases {
         let server = MockServer::start().await;
@@ -229,14 +465,16 @@ async fn job_listing_uses_direct_or_bounded_parent_strategy_for_every_flavor() {
 ///
 /// Runner identity is the two flat `runner_*` keys, never a nested `runner`
 /// object, and the job carries no `event` and no actor at all — those exist only
-/// on the workflow run.
+/// on the workflow run. Only the link hosts depart from a verbatim capture:
+/// they sit on [`FIXTURE_HOST`] because a link off the repository's own host is
+/// dropped before any assertion can see it.
 fn github_actions_job() -> serde_json::Value {
     serde_json::json!({
         "id": 399444496,
         "run_id": 29679449,
         "run_attempt": 1,
         "url": "https://api.github.com/repos/acme/project/actions/jobs/399444496",
-        "html_url": "https://github.com/acme/project/actions/runs/29679449/job/399444496",
+        "html_url": "https://127.0.0.1/acme/project/actions/runs/29679449/job/399444496",
         "head_sha": "f83a4d2b8e5c1907cafe1234567890abcdef0123",
         "status": "completed",
         "conclusion": "failure",
@@ -265,7 +503,7 @@ fn github_workflow_run() -> serde_json::Value {
         "event": "pull_request",
         "status": "completed",
         "conclusion": "failure",
-        "html_url": "https://github.com/acme/project/actions/runs/29679449",
+        "html_url": "https://127.0.0.1/acme/project/actions/runs/29679449",
         "actor": {"login": "alice"},
         "triggering_actor": {"login": "bob"},
         "created_at": "2024-01-01T00:09:00Z"
@@ -304,7 +542,7 @@ fn gitlab_job() -> serde_json::Value {
             "source": "merge_request_event",
             "status": "failed"
         },
-        "web_url": "https://gitlab.example/acme/project/-/jobs/7742",
+        "web_url": "https://127.0.0.1/acme/project/-/jobs/7742",
         "runner": {"id": 32, "description": "shared-runner-linux-01", "name": null, "active": true},
         "failure_reason": "script_failure"
     })
@@ -346,7 +584,7 @@ fn bitbucket_pipeline() -> serde_json::Value {
         "trigger": {"name": "PUSH", "type": "pipeline_trigger_push"},
         "creator": {"display_name": "Alice Example", "nickname": "alice"},
         "created_on": "2024-01-01T00:09:00.000Z",
-        "links": {"html": {"href": "https://bitbucket.org/acme/project/pipelines/results/42"}}
+        "links": {"html": {"href": "https://127.0.0.1/acme/project/pipelines/results/42"}}
     })
 }
 
@@ -394,7 +632,7 @@ async fn exact_jobs_retain_every_field_the_record_promises() {
     );
     assert_eq!(
         job.web_url.as_deref(),
-        Some("https://gitlab.example/acme/project/-/jobs/7742")
+        Some("https://127.0.0.1/acme/project/-/jobs/7742")
     );
     assert_eq!(
         job.runner.as_deref(),
@@ -469,7 +707,7 @@ async fn exact_jobs_retain_every_field_the_record_promises() {
         );
         assert_eq!(
             job.web_url.as_deref(),
-            Some("https://github.com/acme/project/actions/runs/29679449/job/399444496")
+            Some("https://127.0.0.1/acme/project/actions/runs/29679449/job/399444496")
         );
         assert_eq!(
             job.api_url.as_deref(),
@@ -512,7 +750,7 @@ async fn parent_run_metadata_reaches_the_jobs_beneath_it() {
     assert_eq!(job.parent.name.as_deref(), Some("CI"));
     assert_eq!(
         job.parent.web_url.as_deref(),
-        Some("https://github.com/acme/project/actions/runs/29679449")
+        Some("https://127.0.0.1/acme/project/actions/runs/29679449")
     );
     assert_eq!(
         job.branch.as_deref(),
@@ -825,8 +1063,8 @@ async fn widened_provider_state_is_narrowed_by_the_exact_local_filter() {
     Mock::given(method("GET"))
         .and(path("/api/repos/acme/project/pulls"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            {"number": 1, "title": "declined", "state": "closed", "user": {"login": "alice"}, "created_at": ts(1), "html_url": "https://example/pr/1"},
-            {"number": 2, "title": "landed", "state": "closed", "merged_at": ts(2), "user": {"login": "alice"}, "created_at": ts(2), "html_url": "https://example/pr/2"}
+            {"number": 1, "title": "declined", "state": "closed", "user": {"login": "alice"}, "created_at": ts(1), "html_url": "https://127.0.0.1/pr/1"},
+            {"number": 2, "title": "landed", "state": "closed", "merged_at": ts(2), "user": {"login": "alice"}, "created_at": ts(2), "html_url": "https://127.0.0.1/pr/2"}
         ])))
         .mount(&server)
         .await;
@@ -1032,21 +1270,21 @@ fn filter_probe_domain() -> serde_json::Value {
             "user": {"login": "alice"}, "head": {"ref": "feature/a"}, "base": {"ref": "main"},
             "labels": [{"name": "bug"}],
             "created_at": ts(1), "updated_at": ts(1),
-            "html_url": "https://example/pr/1"
+            "html_url": "https://127.0.0.1/pr/1"
         },
         {
             "number": 2, "title": "beta", "state": "open", "draft": false,
             "user": {"login": "bob"}, "head": {"ref": "feature/b"}, "base": {"ref": "develop"},
             "labels": [{"name": "chore"}],
             "created_at": ts(50), "updated_at": ts(50),
-            "html_url": "https://example/pr/2"
+            "html_url": "https://127.0.0.1/pr/2"
         },
         {
             "number": 3, "title": "gamma", "state": "closed", "draft": false,
             "user": {"login": "carol"}, "head": {"ref": "feature/c"}, "base": {"ref": "main"},
             "labels": [],
             "created_at": ts(30), "updated_at": ts(30), "merged_at": ts(30),
-            "html_url": "https://example/pr/3"
+            "html_url": "https://127.0.0.1/pr/3"
         }
     ])
 }
@@ -1059,31 +1297,59 @@ fn filter_probe_domain() -> serde_json::Value {
 /// Every other case leaves `state` absent, which means the canonical `open`
 /// default also applies and PR 3 is out of scope.
 fn single_filter_case(field: &str) -> (PullRequestQuery, Vec<&'static str>) {
-    let (value, expected): (serde_json::Value, Vec<&'static str>) = match field {
-        "direction" => {
-            return (
-                serde_json::from_value(
-                    serde_json::json!({"sort": "created", "descending": false}),
-                )
-                .unwrap(),
-                vec!["1", "2"],
-            );
-        }
-        "sort" => (serde_json::json!("created"), vec!["2", "1"]),
-        "state" => (serde_json::json!(["merged"]), vec!["3"]),
-        "draft" => (serde_json::json!(true), vec!["1"]),
-        "source_branch" => (serde_json::json!("feature/a"), vec!["1"]),
-        "target_branch" => (serde_json::json!("develop"), vec!["2"]),
-        "author" => (serde_json::json!("bob"), vec!["2"]),
-        "labels" => (serde_json::json!(["chore"]), vec!["2"]),
-        "search" => (serde_json::json!("alpha"), vec!["1"]),
-        "created_after" | "updated_after" => (serde_json::json!(ts(10)), vec!["2"]),
-        "created_before" | "updated_before" => (serde_json::json!(ts(10)), vec!["1"]),
-        "limit" => (serde_json::json!(1), vec!["2"]),
+    let base = PullRequestQuery::default;
+    let (query, expected): (PullRequestQuery, Vec<&'static str>) = match field {
+        "direction" => (
+            PullRequestQuery {
+                sort: Some("created".to_string()),
+                descending: false,
+                ..base()
+            },
+            vec!["1", "2"],
+        ),
+        "sort" => (PullRequestQuery { sort: Some("created".to_string()), ..base() }, vec!["2", "1"]),
+        "state" => (
+            PullRequestQuery {
+                state: Some(QueryValues::Many(vec![CanonicalPullRequestState::Merged])),
+                ..base()
+            },
+            vec!["3"],
+        ),
+        "draft" => (PullRequestQuery { draft: Some(true), ..base() }, vec!["1"]),
+        "source_branch" => (
+            PullRequestQuery { source_branch: Some("feature/a".to_string()), ..base() },
+            vec!["1"],
+        ),
+        "target_branch" => (
+            PullRequestQuery { target_branch: Some("develop".to_string()), ..base() },
+            vec!["2"],
+        ),
+        "author" => (PullRequestQuery { author: Some("bob".to_string()), ..base() }, vec!["2"]),
+        "labels" => (
+            PullRequestQuery { labels: vec!["chore".to_string()], ..base() },
+            vec!["2"],
+        ),
+        "search" => (PullRequestQuery { search: Some("alpha".to_string()), ..base() }, vec!["1"]),
+        "created_after" => (
+            PullRequestQuery { created_after: Some(ts(10)), ..base() },
+            vec!["2"],
+        ),
+        "updated_after" => (
+            PullRequestQuery { updated_after: Some(ts(10)), ..base() },
+            vec!["2"],
+        ),
+        "created_before" => (
+            PullRequestQuery { created_before: Some(ts(10)), ..base() },
+            vec!["1"],
+        ),
+        "updated_before" => (
+            PullRequestQuery { updated_before: Some(ts(10)), ..base() },
+            vec!["1"],
+        ),
+        "limit" => (PullRequestQuery { limit: Some(1), ..base() }, vec!["2"]),
         other => panic!("declared filter {other} has no discriminating probe"),
     };
-    let query = serde_json::json!({ field: value });
-    (serde_json::from_value(query).unwrap(), expected)
+    (query, expected)
 }
 
 /// AC22: `capabilities()` is a public promise, not documentation. Every filter
@@ -1119,13 +1385,15 @@ async fn declared_filters_match_the_filters_the_client_actually_honors() {
             !declared.iter().any(|declared| declared == field),
             "{field} is rejected at runtime but still advertised"
         );
+        let query = match field {
+            "assignee" => PullRequestQuery { assignee: Some("x".to_string()), ..Default::default() },
+            "reviewer" => PullRequestQuery { reviewer: Some("x".to_string()), ..Default::default() },
+            "milestone" => PullRequestQuery { milestone: Some("x".to_string()), ..Default::default() },
+            _ => PullRequestQuery { commit: Some("x".to_string()), ..Default::default() },
+        };
         assert!(
             matches!(
-                adapter
-                    .query_pull_requests(
-                        serde_json::from_value(serde_json::json!({ field: "x" })).unwrap(),
-                    )
-                    .await,
+                adapter.query_pull_requests(query).await,
                 Err(SniffError::UnsupportedRemoteFilter { .. })
             ),
             "{field} was silently ignored instead of refused"
@@ -1199,90 +1467,211 @@ async fn denial_validation_and_provider_failures_remain_distinct() {
     assert!(matches!(unavailable.get_pull_request("1").await, Err(SniffError::RemoteUnreachable { .. })));
 }
 
-/// The canonical vocabulary is closed, and the closure has to survive the
-/// deserialization Darkmatter performs before it ever resolves a repository.
-#[test]
-fn canonical_query_deserialization_rejects_out_of_vocabulary_input() {
-    for value in [
-        serde_json::json!({"state": "draft"}),
-        serde_json::json!({"state": "all"}),
-        serde_json::json!({"state": ["open", "draft"]}),
-        serde_json::json!({"unknown": true}),
-        serde_json::json!({"remote": "origin"}),
-    ] {
-        assert!(
-            serde_json::from_value::<PullRequestQuery>(value.clone()).is_err(),
-            "PullRequestQuery accepted {value}"
-        );
-    }
-    for state in ["open", "closed", "merged"] {
-        serde_json::from_value::<PullRequestQuery>(serde_json::json!({ "state": state }))
-            .unwrap_or_else(|error| panic!("rejected canonical state {state}: {error}"));
-    }
-    assert!(serde_json::from_value::<CiCdJobQuery>(serde_json::json!({"unknown": true})).is_err());
-}
-
-/// The spec spells `parent` as "number(integer) or string"; both must land on
-/// the string form the job matcher compares against.
-#[test]
-fn cicd_parent_accepts_integer_and_string_identities() {
-    let numeric: CiCdJobQuery =
-        serde_json::from_value(serde_json::json!({"parent": 1234})).unwrap();
-    let textual: CiCdJobQuery =
-        serde_json::from_value(serde_json::json!({"parent": "1234"})).unwrap();
-    assert_eq!(numeric.parent.as_deref(), Some("1234"));
-    assert_eq!(numeric.parent, textual.parent);
-}
-
-/// D24: newest-first is the default for both queries, including the
-/// `#[serde(default)]` fill-in an absent `direction` relies on.
+/// D24: newest-first is the default for both queries; Darkmatter's authored
+/// DTO fills `descending` from `Default` when `direction` is absent, so the
+/// hand-written `Default` is the contract carrier.
 #[test]
 fn canonical_queries_default_to_newest_first() {
     assert!(PullRequestQuery::default().descending);
     assert!(CiCdJobQuery::default().descending);
-    assert!(
-        serde_json::from_value::<PullRequestQuery>(serde_json::json!({}))
-            .unwrap()
-            .descending
-    );
-    assert!(
-        serde_json::from_value::<CiCdJobQuery>(serde_json::json!({"limit": 5}))
-            .unwrap()
-            .descending
-    );
 }
 
 /// Bounds are validated where Darkmatter validates them: before any client
 /// exists, so an unparseable datetime can never reach the network.
 #[test]
 fn canonical_validation_rejects_unparseable_and_inverted_datetimes() {
-    let unparseable: PullRequestQuery =
-        serde_json::from_value(serde_json::json!({"created_after": "not-a-date"})).unwrap();
+    let unparseable = PullRequestQuery {
+        created_after: Some("not-a-date".to_string()),
+        ..Default::default()
+    };
     assert!(matches!(
         unparseable.validate_canonical(),
         Err(SniffError::InvalidRemoteQuery { field: "created_after", .. })
     ));
 
     // 23:00-05:00 is 04:00Z the next day, so byte order calls this ascending.
-    let inverted: CiCdJobQuery = serde_json::from_value(serde_json::json!({
-        "created_after": "2026-06-30T23:00:00-05:00",
-        "created_before": "2026-07-01T00:00:00Z"
-    }))
-    .unwrap();
+    let inverted = CiCdJobQuery {
+        created_after: Some("2026-06-30T23:00:00-05:00".to_string()),
+        created_before: Some("2026-07-01T00:00:00Z".to_string()),
+        ..Default::default()
+    };
     assert!(matches!(
         inverted.validate_canonical(),
         Err(SniffError::InvalidRemoteQuery { field: "created_after", .. })
     ));
 
     // The mirror: byte order rejects this window, instant order accepts it.
-    let ascending: PullRequestQuery = serde_json::from_value(serde_json::json!({
-        "created_after": "2026-07-01T23:00:00+14:00",
-        "created_before": "2026-07-01T10:00:00Z"
-    }))
-    .unwrap();
+    let ascending = PullRequestQuery {
+        created_after: Some("2026-07-01T23:00:00+14:00".to_string()),
+        created_before: Some("2026-07-01T10:00:00Z".to_string()),
+        ..Default::default()
+    };
     ascending
         .validate_canonical()
         .expect("offsets order this window ascending");
+}
+
+/// The legacy Stage-1 `cursor` is not canonical vocabulary: the focused client
+/// paginates internally and must refuse it before any I/O rather than accept
+/// and ignore it.
+#[tokio::test]
+async fn cursor_is_refused_by_the_focused_client_before_io() {
+    let server = MockServer::start().await;
+    let error = client(&server, ApiFlavor::GitHub)
+        .query_pull_requests(PullRequestQuery {
+            cursor: Some("20".to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(error, SniffError::InvalidRemoteQuery { field: "cursor", .. }));
+
+    let error = client(&server, ApiFlavor::GitLab)
+        .query_cicd_jobs(CiCdJobQuery {
+            cursor: Some("20".to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(error, SniffError::InvalidRemoteQuery { field: "cursor", .. }));
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+/// `stage` is a GitLab-only fact: no other flavor's job objects carry stage
+/// data, so matching there would approximate the filter as an empty result.
+/// The refusal must land before any request leaves the process, and the
+/// capabilities advertisement must agree with it flavor by flavor.
+#[tokio::test]
+async fn stage_filter_is_refused_before_io_on_flavors_without_stage_data() {
+    for flavor in [ApiFlavor::GitHub, ApiFlavor::Gitea, ApiFlavor::Forgejo, ApiFlavor::Bitbucket] {
+        let server = MockServer::start().await;
+        let adapter = client(&server, flavor);
+        assert!(
+            !adapter.capabilities().cicd_job_filters.iter().any(|field| field == "stage"),
+            "{flavor:?} advertises stage but cannot honor it"
+        );
+        let error = adapter
+            .query_cicd_jobs(CiCdJobQuery {
+                stage: Some("test".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, SniffError::UnsupportedRemoteFilter { field: "stage", .. }),
+            "{flavor:?} did not refuse stage: {error:?}"
+        );
+        assert!(
+            server.received_requests().await.unwrap().is_empty(),
+            "{flavor:?} contacted the provider before refusing stage"
+        );
+    }
+
+    // GitLab both advertises and honors the filter.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/projects/acme%2Fproject/jobs"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"id": 1, "name": "unit", "stage": "test", "status": "success", "pipeline_id": 1, "created_at": ts(1)},
+            {"id": 2, "name": "publish", "stage": "deploy", "status": "success", "pipeline_id": 1, "created_at": ts(2)}
+        ])))
+        .mount(&server)
+        .await;
+    let adapter = client(&server, ApiFlavor::GitLab);
+    assert!(adapter.capabilities().cicd_job_filters.iter().any(|field| field == "stage"));
+    let page = adapter
+        .query_cicd_jobs(CiCdJobQuery { stage: Some("deploy".to_string()), ..Default::default() })
+        .await
+        .unwrap();
+    assert_eq!(
+        ids(page.items.iter().map(|job| job.reference.native_id.clone())),
+        ["2"]
+    );
+}
+
+/// The `workflow` filter promises name, definition ID, *and* definition path;
+/// the parent run is the only object that knows the latter two.
+#[tokio::test]
+async fn workflow_filter_matches_definition_id_and_path() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/repos/acme/project/actions/runs"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "workflow_runs": [
+                {"id": 1, "name": "CI", "path": ".github/workflows/ci.yml", "workflow_id": 777},
+                {"id": 2, "name": "Deploy", "path": ".github/workflows/deploy.yml", "workflow_id": 888}
+            ]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/repos/acme/project/actions/runs/1/jobs"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "jobs": [job_item(10)]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/repos/acme/project/actions/runs/2/jobs"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "jobs": [job_item(20)]
+        })))
+        .mount(&server)
+        .await;
+    let adapter = client(&server, ApiFlavor::GitHub);
+    for (workflow, expected) in [
+        (".github/workflows/ci.yml", "10"),
+        ("888", "20"),
+        ("CI", "10"),
+    ] {
+        let page = adapter
+            .query_cicd_jobs(CiCdJobQuery {
+                workflow: Some(workflow.to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            ids(page.items.iter().map(|job| job.reference.native_id.clone())),
+            [expected],
+            "workflow filter {workflow} selected the wrong jobs"
+        );
+    }
+}
+
+/// `provider-default` means the provider's order verbatim — in *both*
+/// directions of the internal flag, because `descending` orders a sort key
+/// and provider-default has none. The fixture's provider order (2, 3, 1)
+/// deliberately disagrees with every timestamp order so a stray key sort or
+/// reversal cannot pass unnoticed.
+#[tokio::test]
+async fn provider_default_sort_preserves_provider_order_in_both_directions() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/repos/acme/project/pulls"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            pr_item(2, "alice"),
+            pr_item(3, "alice"),
+            pr_item(1, "alice"),
+        ])))
+        .mount(&server)
+        .await;
+    let adapter = client(&server, ApiFlavor::GitHub);
+    for descending in [true, false] {
+        let page = adapter
+            .query_pull_requests(PullRequestQuery {
+                sort: Some("provider-default".to_string()),
+                descending,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            ids(page.items.iter().map(|item| item.identity.native_id.clone())),
+            ["2", "3", "1"],
+            "provider order was not preserved with descending={descending}"
+        );
+    }
 }
 
 /// A window bound and an item timestamp written in different offsets must be
@@ -1294,7 +1683,7 @@ async fn datetime_filters_compare_instants_not_strings() {
         .and(path("/api/repos/acme/project/pulls"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
             {"number": 1, "title": "in range", "state": "open", "user": {"login": "alice"},
-             "created_at": "2024-01-01T00:30:00Z", "html_url": "https://example/pr/1"}
+             "created_at": "2024-01-01T00:30:00Z", "html_url": "https://127.0.0.1/pr/1"}
         ])))
         .mount(&server)
         .await;
@@ -1310,5 +1699,359 @@ async fn datetime_filters_compare_instants_not_strings() {
     assert_eq!(
         ids(page.items.iter().map(|item| item.identity.native_id.clone())),
         ["1"]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Neutral-host self-managed servers (production discovery path)
+// ---------------------------------------------------------------------------
+
+/// Points a throwaway repository's `origin` at a loopback mock provider, so
+/// resolution runs against real configured Git state rather than a hand-built
+/// `ResolvedRemote`.
+fn loopback_repository(remote_url: &str) -> tempfile::TempDir {
+    let directory = tempfile::tempdir().unwrap();
+    let repository = git2::Repository::init(directory.path()).unwrap();
+    repository.remote("origin", remote_url).unwrap();
+    directory
+}
+
+fn gitlab_pr_body() -> serde_json::Value {
+    serde_json::json!({
+        "iid": 7, "title": "Fix", "state": "opened",
+        "author": {"username": "alice"},
+        "created_at": "2024-01-01T00:00:00Z",
+        "web_url": "https://127.0.0.1/mr/7",
+    })
+}
+
+fn actions_pr_body() -> serde_json::Value {
+    serde_json::json!({
+        "number": 7, "title": "Fix", "state": "open",
+        "user": {"login": "alice"},
+        "created_at": "2024-01-01T00:00:00Z",
+        "html_url": "https://127.0.0.1/pr/7",
+    })
+}
+
+/// An ordinary self-managed GitLab on a neutral host (no vendor token in the
+/// hostname, non-default port) must work through the production constructor:
+/// configured remote → resolution → bounded discovery → flavored API base.
+#[tokio::test]
+async fn neutral_host_self_managed_gitlab_resolves_through_the_production_path() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/version"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"version": "17.0.1"})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/acme%2Fproject/merge_requests/7"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(gitlab_pr_body()))
+        .mount(&server)
+        .await;
+
+    let directory = loopback_repository(&format!("{}/acme/project.git", server.uri()));
+    let resolved = resolve_remote_at(directory.path(), None).unwrap().expect("remote resolved");
+    assert_eq!(
+        resolved.api_flavor,
+        ApiFlavor::Unknown,
+        "a loopback host must be ambiguous before discovery"
+    );
+    let endpoint = resolved.endpoint.clone().expect("endpoint captured");
+    assert_eq!(endpoint.scheme, "http");
+    assert!(
+        endpoint.port.is_some(),
+        "the mock server's non-default port must be retained"
+    );
+
+    let client = FocusedProviderClient::discover(
+        resolved,
+        FetchPolicy::deny_all().allow_host("127.0.0.1"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(client.remote().api_flavor, ApiFlavor::GitLab);
+
+    let record = client.get_pull_request("7").await.unwrap().expect("PR found");
+    assert_eq!(record.identity.provider, GitProvider::GitLab);
+    assert_eq!(record.details.title, "Fix");
+    assert_eq!(record.details.author, "alice");
+}
+
+/// Gitea and Forgejo share one API surface; only the version body tells them
+/// apart, and both must query successfully after discovery.
+#[tokio::test]
+async fn neutral_host_gitea_and_forgejo_are_distinguished_by_the_discovery_probe() {
+    for (version_body, expected_flavor) in [
+        (serde_json::json!({"version": "1.22.3"}), ApiFlavor::Gitea),
+        (serde_json::json!({"version": "9.0.0+forgejo-1.0"}), ApiFlavor::Forgejo),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v4/version"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/version"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(version_body))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/repos/acme/project/pulls/7"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(actions_pr_body()))
+            .mount(&server)
+            .await;
+
+        let directory = loopback_repository(&format!("{}/acme/project.git", server.uri()));
+        let resolved = resolve_remote_at(directory.path(), None).unwrap().expect("remote resolved");
+        let client = FocusedProviderClient::discover(
+            resolved,
+            FetchPolicy::deny_all().allow_host("127.0.0.1"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(client.remote().api_flavor, expected_flavor);
+
+        let record = client.get_pull_request("7").await.unwrap().expect("PR found");
+        assert_eq!(record.details.author, "alice");
+    }
+}
+
+/// Discovery is deny-by-default: an unlisted host fails before any byte
+/// leaves the process.
+#[tokio::test]
+async fn neutral_host_discovery_is_denied_before_any_request() {
+    let server = MockServer::start().await;
+    let directory = loopback_repository(&format!("{}/acme/project.git", server.uri()));
+    let resolved = resolve_remote_at(directory.path(), None).unwrap().expect("remote resolved");
+
+    let error = FocusedProviderClient::discover(resolved, FetchPolicy::deny_all())
+        .await
+        .unwrap_err();
+    assert!(matches!(error, SniffError::RemotePolicyDenied { .. }));
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+/// A deterministically classified flavor never probes, and its API base keeps
+/// the configured scheme and non-default port instead of assuming
+/// `https://{host}`.
+#[tokio::test]
+async fn known_flavor_clients_derive_the_api_base_from_the_configured_origin() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/acme%2Fproject/merge_requests/7"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(gitlab_pr_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut resolved = remote(ApiFlavor::GitLab);
+    resolved.fetch_url = format!("{}/acme/project.git", server.uri());
+    resolved.endpoint = Some(RemoteEndpoint {
+        scheme: "http".to_string(),
+        host: "127.0.0.1".to_string(),
+        port: Some(server.address().port()),
+    });
+
+    let client = FocusedProviderClient::new(
+        resolved,
+        FetchPolicy::deny_all().allow_host("127.0.0.1"),
+    )
+    .unwrap();
+    let record = client.get_pull_request("7").await.unwrap().expect("PR found");
+    assert_eq!(record.details.title, "Fix");
+    // `.expect(1)` above: the exact PR request and nothing else — a known
+    // flavor must not spend version probes.
+    server.verify().await;
+}
+
+// --- Provider-supplied link destinations ---------------------------------
+
+/// Link destinations no provider is entitled to publish for its own repository.
+///
+/// Each is a distinct escape from the repository's origin: a scheme a renderer
+/// would execute or read from disk, an inlined document, a different site, a
+/// look-alike host, and a credentialed authority whose rendered host disagrees
+/// with the one it resolves to.
+const HOSTILE_LINKS: &[&str] = &[
+    "javascript:alert(document.domain)",
+    "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==",
+    "file:///etc/passwd",
+    "ftp://127.0.0.1/acme/project/pull/7",
+    "https://evil.example/acme/project/pull/7",
+    "https://127.0.0.1.evil.example/acme/project/pull/7",
+    "https://127.0.0.1@evil.example/acme/project/pull/7",
+    "//evil.example/acme/project/pull/7",
+    "not a url",
+    "",
+];
+
+/// A same-site link whose bytes would still break a Markdown destination if
+/// they reached one verbatim: a closing paren, spaces, a tab, a newline, and a
+/// control character.
+const DELIMITER_BEARING_LINK: &str =
+    "https://127.0.0.1/acme/project/pull/7?title=a (b) c\td\ne\u{1}f";
+
+#[tokio::test]
+async fn hostile_pull_request_links_are_dropped_on_exact_and_list_surfaces() {
+    for hostile in HOSTILE_LINKS {
+        let server = MockServer::start().await;
+        let body = serde_json::json!({
+            "number": 7, "title": "Fix", "state": "open",
+            "user": {"login": "alice"}, "created_at": "2024-01-01",
+            "html_url": hostile,
+        });
+        Mock::given(method("GET"))
+            .and(path("/api/repos/acme/project/pulls/7"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body.clone()))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/repos/acme/project/pulls"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::Value::Array(vec![body])),
+            )
+            .mount(&server)
+            .await;
+
+        let adapter = client(&server, ApiFlavor::GitHub);
+        let exact = adapter.get_pull_request("7").await.unwrap().unwrap();
+        assert_eq!(exact.identity.web_url, None, "exact accepted {hostile:?}");
+        assert!(exact.details.html_url.is_empty(), "exact leaked {hostile:?}");
+
+        let listed = adapter
+            .query_pull_requests(PullRequestQuery { limit: Some(1), ..Default::default() })
+            .await
+            .unwrap();
+        assert_eq!(listed.items[0].identity.web_url, None, "list accepted {hostile:?}");
+        // The record itself still projects: a hostile link costs the link, not
+        // the item.
+        assert_eq!(listed.items[0].identity.native_id, "7");
+    }
+}
+
+#[tokio::test]
+async fn hostile_cicd_job_links_are_dropped_on_exact_and_list_surfaces() {
+    for hostile in HOSTILE_LINKS {
+        let server = MockServer::start().await;
+        let body = serde_json::json!({
+            "id": 10, "name": "test", "status": "success",
+            "pipeline_id": 1, "created_at": ts(10),
+            "web_url": hostile,
+        });
+        Mock::given(method("GET"))
+            .and(path("/api/projects/acme%2Fproject/jobs/10"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body.clone()))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/projects/acme%2Fproject/jobs"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::Value::Array(vec![body])),
+            )
+            .mount(&server)
+            .await;
+
+        let adapter = client(&server, ApiFlavor::GitLab);
+        let exact = adapter
+            .get_cicd_job(&reference(ApiFlavor::GitLab, "10"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(exact.web_url, None, "exact accepted {hostile:?}");
+
+        let listed = adapter
+            .query_cicd_jobs(CiCdJobQuery { limit: Some(1), ..Default::default() })
+            .await
+            .unwrap();
+        assert_eq!(listed.items[0].web_url, None, "list accepted {hostile:?}");
+        // The listed reference is the one the projection built, so it is the
+        // surface where a refused link could still leak through `original_url`.
+        // (`get_cicd_job` overwrites the reference with the caller's.)
+        assert_eq!(
+            listed.items[0].reference.original_url, None,
+            "the reference retained what the projection refused: {hostile:?}"
+        );
+        assert_eq!(listed.items[0].reference.native_id, "10");
+    }
+}
+
+/// A same-site link survives, but only after WHATWG normalization: tabs and
+/// newlines are stripped and spaces and control characters percent-encoded, so
+/// nothing that reaches a consumer can still carry whitespace.
+#[tokio::test]
+async fn same_site_links_survive_normalized_on_both_item_kinds() {
+    // Tabs and newlines are *removed* by the URL parser rather than encoded;
+    // the space and the control character survive as percent-escapes.
+    let expected = "https://127.0.0.1/acme/project/pull/7?title=a%20(b)%20cde%01f";
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/repos/acme/project/pulls/7"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "number": 7, "title": "Fix", "state": "open",
+            "user": {"login": "alice"}, "created_at": "2024-01-01",
+            "html_url": DELIMITER_BEARING_LINK,
+        })))
+        .mount(&server)
+        .await;
+    let record = client(&server, ApiFlavor::GitHub)
+        .get_pull_request("7")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(record.identity.web_url.as_deref(), Some(expected));
+    assert_eq!(record.details.html_url, expected);
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/repos/acme/project/actions/jobs/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 10, "name": "test", "status": "success", "run_id": 1,
+            "html_url": DELIMITER_BEARING_LINK,
+        })))
+        .mount(&server)
+        .await;
+    let job = client(&server, ApiFlavor::GitHub)
+        .get_cicd_job(&reference(ApiFlavor::GitHub, "10"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(job.web_url.as_deref(), Some(expected));
+}
+
+/// The parent run publishes a link of its own through a separate projection
+/// path, so it needs its own proof that the same policy applies there.
+#[tokio::test]
+async fn parent_run_links_obey_the_same_origin_policy() {
+    let server = MockServer::start().await;
+    let mut run = github_workflow_run();
+    run["html_url"] = serde_json::json!("https://evil.example/acme/project/actions/runs/29679449");
+    Mock::given(method("GET"))
+        .and(path("/api/repos/acme/project/actions/runs"))
+        .respond_with(ResponseTemplate::new(200)
+            .set_body_json(serde_json::json!({"workflow_runs": [run]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/repos/acme/project/actions/runs/29679449/jobs"))
+        .respond_with(ResponseTemplate::new(200)
+            .set_body_json(serde_json::json!({"jobs": [github_actions_job()]})))
+        .mount(&server)
+        .await;
+
+    let page = client(&server, ApiFlavor::GitHub)
+        .query_cicd_jobs(CiCdJobQuery { limit: Some(1), ..Default::default() })
+        .await
+        .unwrap();
+    let job = &page.items[0];
+    assert_eq!(job.parent.web_url, None, "a cross-site run link must not be published");
+    assert_eq!(job.parent.name.as_deref(), Some("CI"), "the run itself still projects");
+    assert_eq!(
+        job.web_url.as_deref(),
+        Some("https://127.0.0.1/acme/project/actions/runs/29679449/job/399444496"),
+        "the job's own same-site link is unaffected"
     );
 }

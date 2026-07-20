@@ -6,7 +6,9 @@ use serde_json::Value;
 use crate::filesystem::git::{ApiFlavor, ResolvedRemote};
 use crate::SniffError;
 
+use super::provider_url::{parse_provider_url, ReferenceKind};
 use super::types::{at_or_after, at_or_before, optional_timestamp_order, timestamp_order};
+use super::web_link::trusted_web_link;
 use super::{
     CanonicalPullRequestState, CiCdJob, CiCdJobPage, CiCdJobQuery, CiCdJobReference,
     CiCdParentExecution, GitProvider, ProviderCapabilities, PullRequestInfo, PullRequestPage,
@@ -35,9 +37,58 @@ pub struct FocusedProviderClient {
 
 impl FocusedProviderClient {
     /// Creates a focused client using the provider's canonical API base URL.
+    ///
+    /// The base is derived from the remote's configured endpoint origin, so a
+    /// self-managed server's scheme and non-default port are preserved. An
+    /// `ApiFlavor::Unknown` remote errors here; use [`Self::discover`] to let
+    /// the bounded discovery probe identify a neutral-hostname server first.
     pub fn new(remote: ResolvedRemote, policy: FetchPolicy) -> Result<Self, SniffError> {
         let base = canonical_api_base(&remote)?;
         Self::with_api_base(remote, policy, &base)
+    }
+
+    /// Creates a focused client, probing an ambiguous self-hosted endpoint.
+    ///
+    /// Known flavors behave exactly like [`Self::new`] with no network I/O. An
+    /// `ApiFlavor::Unknown` remote runs the same allowlisted, bounded discovery
+    /// probe `remote_vendor` uses (exact-host consent before any request,
+    /// redirect-disabled transport, GitLab/Gitea/Forgejo version endpoints
+    /// only) and constructs the client for the detected flavor. This is the
+    /// production path for ordinary self-managed servers on neutral hostnames.
+    ///
+    /// ## Errors
+    ///
+    /// Propagates the probe's policy, transport, and
+    /// [`SniffError::UnsupportedProvider`] failures for hosts that cannot be
+    /// identified, and [`Self::new`]'s errors for the constructed client.
+    pub async fn discover(remote: ResolvedRemote, policy: FetchPolicy) -> Result<Self, SniffError> {
+        if remote.api_flavor != ApiFlavor::Unknown {
+            return Self::new(remote, policy);
+        }
+        let mut remote = remote;
+        let fetch_url = remote.fetch_url.clone();
+        let probe_policy = policy.clone();
+        // The probe is blocking (it drives its own current-thread runtime), so
+        // it must leave the async worker before it can block.
+        let flavor = tokio::task::spawn_blocking(move || {
+            crate::filesystem::git::remote_observation::probe_self_hosted_flavor(
+                &fetch_url,
+                &probe_policy,
+            )
+        })
+        .await
+        .map_err(|error| SniffError::RemoteInit {
+            provider: "discovery".to_string(),
+            message: error.to_string(),
+        })??;
+        remote.api_flavor = flavor;
+        Self::new(remote, policy)
+    }
+
+    /// The resolved remote this client is bound to, including any flavor
+    /// detected by [`Self::discover`].
+    pub fn remote(&self) -> &ResolvedRemote {
+        &self.remote
     }
 
     /// Creates a focused client with an explicit enterprise/test API base.
@@ -121,13 +172,17 @@ impl FocusedProviderClient {
             .into_iter()
             .map(str::to_string)
             .collect(),
+            // `stage` is advertised only where validation accepts it: GitLab is
+            // the sole flavor whose job objects carry stage data, so every
+            // other flavor rejects the filter instead of matching nothing.
             cicd_job_filters: [
-                "statuses", "name", "stage", "workflow", "parent", "branch", "commit",
+                "statuses", "name", "workflow", "parent", "branch", "commit",
                 "actor", "trigger", "created_after", "created_before", "updated_after",
                 "updated_before", "direction", "limit",
             ]
             .into_iter()
             .map(str::to_string)
+            .chain(matches!(self.remote.api_flavor, ApiFlavor::GitLab).then(|| "stage".to_string()))
             .collect(),
         }
     }
@@ -244,7 +299,7 @@ impl FocusedProviderClient {
         &self,
         query: CiCdJobQuery,
     ) -> Result<CiCdJobPage, SniffError> {
-        validate_job_query(&query)?;
+        validate_job_query(&query, self.remote.api_flavor)?;
         let limit = query.limit.unwrap_or(20);
         let mut jobs = if self.remote.api_flavor == ApiFlavor::GitLab {
             self.direct_jobs(&query).await?
@@ -334,8 +389,12 @@ impl FocusedProviderClient {
                     ));
                 }
                 let parent_id = string_id(&parent, &["id", "uuid"])?;
-                let parent_identity =
-                    parent_context(&parent, &parent_id, self.remote.api_flavor);
+                let parent_identity = parent_context(
+                    &parent,
+                    &parent_id,
+                    self.remote.api_flavor,
+                    self.remote.host.as_deref().unwrap_or_default(),
+                );
                 let path = self.parent_jobs_path(&parent_id)?;
                 let mut jobs_exhausted = false;
                 for job_page in 1..=MAX_PAGES {
@@ -508,6 +567,12 @@ impl FocusedProviderClient {
 
     fn normalize_pr(&self, value: Value) -> Result<PullRequestRecord, SniffError> {
         let number = value_u64(&value, &["number", "iid", "id"])?;
+        let host = self.remote.host.clone().unwrap_or_default();
+        let web_url = trusted_web_link(
+            nested_string(&value, &[&["links", "html", "href"]])
+                .or_else(|| value_string(&value, &["html_url", "web_url"])),
+            &host,
+        );
         let details = PullRequestInfo {
             number,
             title: value_string(&value, &["title"]).unwrap_or_default(),
@@ -521,17 +586,17 @@ impl FocusedProviderClient {
             created_at: value_string(&value, &["created_at", "created_on"]).unwrap_or_default(),
             updated_at: value_string(&value, &["updated_at", "updated_on"]),
             merged_at: value_string(&value, &["merged_at"]),
-            html_url: nested_string(&value, &[&["links", "html", "href"]]).or_else(|| value_string(&value, &["html_url", "web_url"])).unwrap_or_default(),
+            html_url: web_url.clone().unwrap_or_default(),
         };
         Ok(PullRequestRecord {
             identity: PullRequestReference {
                 provider: git_provider(self.remote.api_flavor),
                 api_flavor: format!("{:?}", self.remote.api_flavor),
-                host: self.remote.host.clone().unwrap_or_default(),
+                host,
                 namespace: self.remote.namespace.clone().unwrap_or_default(),
                 repository: self.remote.repository.clone().unwrap_or_default(),
                 native_id: number.to_string(), display_id: format!("#{number}"), number: Some(number),
-                web_url: (!details.html_url.is_empty()).then(|| details.html_url.clone()),
+                web_url,
                 api_url: value_string(&value, &["url"]),
                 original_url: self.original_reference.clone(),
             },
@@ -561,13 +626,15 @@ impl FocusedProviderClient {
         let parent = parent.unwrap_or_else(|| {
             ParentContext::identity_only(projected.parent_id.clone().unwrap_or_default())
         });
+        let host = self.remote.host.clone().unwrap_or_default();
+        let web_url = trusted_web_link(projected.web_url, &host);
         Ok(CiCdJob {
             reference: CiCdJobReference {
                 provider: git_provider(self.remote.api_flavor), api_flavor: format!("{:?}", self.remote.api_flavor),
-                host: self.remote.host.clone().unwrap_or_default(), namespace: self.remote.namespace.clone().unwrap_or_default(),
+                host, namespace: self.remote.namespace.clone().unwrap_or_default(),
                 repository: self.remote.repository.clone().unwrap_or_default(),
                 native_id: projected.id.clone(), display_id: projected.id,
-                original_url: projected.web_url.clone(),
+                original_url: web_url.clone(),
             },
             parent: parent.identity,
             name: projected.name.unwrap_or_else(|| "unnamed job".to_string()),
@@ -583,7 +650,7 @@ impl FocusedProviderClient {
             started_at: projected.started_at,
             finished_at: projected.finished_at.clone(),
             updated_at: projected.updated_at.or(projected.finished_at),
-            web_url: projected.web_url,
+            web_url,
             api_url: projected.api_url,
             runner: projected.runner,
         })
@@ -641,6 +708,8 @@ impl ParentContext {
                 display_id: id,
                 name: None,
                 web_url: None,
+                definition_id: None,
+                definition_path: None,
             },
             branch: None,
             commit: None,
@@ -744,158 +813,21 @@ fn project_bitbucket_job(value: &Value) -> Result<JobProjection, SniffError> {
     })
 }
 
-#[derive(Clone, Copy)]
-enum ReferenceKind {
-    PullRequest,
-    CiCdJob,
-}
-
-fn parse_provider_url(
-    raw: &str,
-    kind: ReferenceKind,
-) -> Result<(ResolvedRemote, String), SniffError> {
-    let url = url::Url::parse(raw).map_err(|error| SniffError::InvalidRemoteQuery {
-        field: "id",
-        message: format!("expected a positive native ID or canonical provider URL: {error}"),
-    })?;
-    if !matches!(url.scheme(), "http" | "https") || url.query().is_some() || url.fragment().is_some() {
-        return Err(SniffError::InvalidRemoteQuery {
-            field: "id",
-            message: "canonical provider URLs must be HTTP(S) URLs without query or fragment"
-                .to_string(),
-        });
-    }
-    let host = url.host_str().ok_or_else(|| SniffError::InvalidRemoteQuery {
-        field: "id",
-        message: "canonical provider URL is missing a host".to_string(),
-    })?;
-    let segments = url
-        .path_segments()
-        .into_iter()
-        .flatten()
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>();
-    let parsed = match kind {
-        ReferenceKind::PullRequest => parse_pr_segments(host, &segments),
-        ReferenceKind::CiCdJob => parse_job_segments(host, &segments),
-    }
-    .ok_or_else(|| SniffError::InvalidRemoteQuery {
-        field: "id",
-        message: "URL is not a canonical supported-provider reference".to_string(),
-    })?;
-    let (api_flavor, namespace, repository, native_id) = parsed;
-    positive_id(&native_id, "id")?;
-    let repository_url = format!(
-        "{}://{}/{}/{}.git",
-        url.scheme(),
-        host,
-        namespace,
-        repository
-    );
-    Ok((
-        ResolvedRemote {
-            name: raw.to_string(),
-            fetch_url: repository_url.clone(),
-            push_url: repository_url,
-            host: Some(host.to_string()),
-            namespace: Some(namespace),
-            repository: Some(repository),
-            api_flavor,
-        },
-        native_id,
-    ))
-}
-
-fn parse_pr_segments(
-    host: &str,
-    segments: &[&str],
-) -> Option<(ApiFlavor, String, String, String)> {
-    let (marker, flavor, repository_offset) = if host.eq_ignore_ascii_case("bitbucket.org") {
-        ("pull-requests", ApiFlavor::Bitbucket, 1)
-    } else if segments.windows(2).any(|window| window == ["-", "merge_requests"]) {
-        ("merge_requests", ApiFlavor::GitLab, 2)
-    } else if segments.contains(&"pull") {
-        ("pull", ApiFlavor::GitHub, 1)
-    } else if segments.contains(&"pulls") {
-        let flavor = if host.to_ascii_lowercase().contains("forgejo") {
-            ApiFlavor::Forgejo
-        } else {
-            ApiFlavor::Gitea
-        };
-        ("pulls", flavor, 1)
-    } else {
-        return None;
-    };
-    let marker_index = segments.iter().position(|segment| *segment == marker)?;
-    let repository_index = marker_index.checked_sub(repository_offset)?;
-    let repository = segments.get(repository_index)?.to_string();
-    let namespace = segments.get(..repository_index)?.join("/");
-    let native_id = segments.get(marker_index + 1)?.to_string();
-    (!namespace.is_empty()).then_some((flavor, namespace, repository, native_id))
-}
-
-fn parse_job_segments(
-    host: &str,
-    segments: &[&str],
-) -> Option<(ApiFlavor, String, String, String)> {
-    if let Some(marker) = segments.iter().position(|segment| *segment == "jobs")
-        && marker >= 2 && segments[marker - 1] == "-"
-    {
-        return Some((
-            ApiFlavor::GitLab,
-            segments[..marker - 2].join("/"),
-            segments[marker - 2].to_string(),
-            segments.get(marker + 1)?.to_string(),
-        ));
-    }
-    if let Some(actions) = segments.iter().position(|segment| *segment == "actions") {
-        let flavor = if host.eq_ignore_ascii_case("github.com")
-            || segments.contains(&"job")
-        {
-            ApiFlavor::GitHub
-        } else if host.to_ascii_lowercase().contains("forgejo") {
-            ApiFlavor::Forgejo
-        } else {
-            ApiFlavor::Gitea
-        };
-        let native_id = segments.last()?.to_string();
-        return (actions >= 2).then(|| {
-            (
-                flavor,
-                segments[..actions - 1].join("/"),
-                segments[actions - 1].to_string(),
-                native_id,
-            )
-        });
-    }
-    if host.eq_ignore_ascii_case("bitbucket.org") {
-        let pipelines = segments.iter().position(|segment| *segment == "pipelines")?;
-        let steps = segments.iter().position(|segment| *segment == "steps")?;
-        let parent = if segments.get(pipelines + 1) == Some(&"results") {
-            segments.get(pipelines + 2)?
-        } else {
-            segments.get(pipelines + 1)?
-        };
-        let job = segments.get(steps + 1)?;
-        return (pipelines >= 2).then(|| {
-            (
-                ApiFlavor::Bitbucket,
-                segments[..pipelines - 1].join("/"),
-                segments[pipelines - 1].to_string(),
-                format!("{parent}/{job}"),
-            )
-        });
-    }
-    None
-}
-
+/// Derives the API base from the remote's configured endpoint origin.
+///
+/// Self-managed servers keep the scheme and non-default port their remote URL
+/// was configured with; SSH-configured remotes fall back to the provider's
+/// canonical HTTPS assumption because an SSH port is not an API port.
 fn canonical_api_base(remote: &ResolvedRemote) -> Result<String, SniffError> {
     let host = remote.host.as_deref().unwrap_or_default();
+    let origin = remote
+        .http_origin()
+        .unwrap_or_else(|| format!("https://{host}"));
     Ok(match remote.api_flavor {
         ApiFlavor::GitHub if host == "github.com" => "https://api.github.com/".to_string(),
-        ApiFlavor::GitHub => format!("https://{host}/api/v3/"),
-        ApiFlavor::GitLab => format!("https://{host}/api/v4/"),
-        ApiFlavor::Gitea | ApiFlavor::Forgejo => format!("https://{host}/api/v1/"),
+        ApiFlavor::GitHub => format!("{origin}/api/v3/"),
+        ApiFlavor::GitLab => format!("{origin}/api/v4/"),
+        ApiFlavor::Gitea | ApiFlavor::Forgejo => format!("{origin}/api/v1/"),
         ApiFlavor::Bitbucket => "https://api.bitbucket.org/2.0/".to_string(),
         _ => return Err(unsupported("provider queries", remote.api_flavor)),
     })
@@ -913,14 +845,35 @@ fn provider_endpoint_allowed(remote_host: &str, endpoint_host: &str, flavor: Api
 
 fn validate_pr_query(query: &PullRequestQuery, flavor: ApiFlavor) -> Result<(), SniffError> {
     query.validate_canonical()?;
+    if query.cursor.is_some() {
+        return Err(SniffError::InvalidRemoteQuery {
+            field: "cursor",
+            message: "not part of the canonical query vocabulary; focused queries paginate internally".to_string(),
+        });
+    }
     for (field, present) in [("assignee", query.assignee.is_some()), ("reviewer", query.reviewer.is_some()), ("milestone", query.milestone.is_some()), ("commit", query.commit.is_some())] {
         if present { return Err(SniffError::UnsupportedRemoteFilter { field, provider: format!("{flavor:?}") }); }
     }
     Ok(())
 }
 
-fn validate_job_query(query: &CiCdJobQuery) -> Result<(), SniffError> {
-    query.validate_canonical()
+fn validate_job_query(query: &CiCdJobQuery, flavor: ApiFlavor) -> Result<(), SniffError> {
+    query.validate_canonical()?;
+    if query.cursor.is_some() {
+        return Err(SniffError::InvalidRemoteQuery {
+            field: "cursor",
+            message: "not part of the canonical query vocabulary; focused queries paginate internally".to_string(),
+        });
+    }
+    // Only GitLab job objects carry stage data; matching `stage` anywhere else
+    // would approximate the filter as "no matches" instead of refusing it.
+    if query.stage.is_some() && flavor != ApiFlavor::GitLab {
+        return Err(SniffError::UnsupportedRemoteFilter {
+            field: "stage",
+            provider: format!("{flavor:?}"),
+        });
+    }
+    Ok(())
 }
 
 fn positive_id(id: &str, field: &'static str) -> Result<(), SniffError> {
@@ -1029,12 +982,14 @@ fn pr_matches(item: &PullRequestInfo, query: &PullRequestQuery) -> bool {
 /// ratified default is newest-first, which needs a real ordering key, whereas
 /// `provider-default` is an author asking to keep whatever order the provider
 /// returned. Collapsing the two would leave `pr_list({})` at the mercy of each
-/// provider's own default ordering.
+/// provider's own default ordering. A provider-default result is never
+/// reversed — `descending` only has meaning relative to a sort key, so
+/// provider order is preserved verbatim whichever way the flag points.
 fn sort_prs(items: &mut [PullRequestRecord], sort: Option<&str>, descending: bool) {
     match sort {
         None | Some("created") => items.sort_by(|a, b| timestamp_order(&a.details.created_at, &b.details.created_at)),
         Some("updated") => items.sort_by(|a, b| optional_timestamp_order(a.details.updated_at.as_deref(), b.details.updated_at.as_deref())),
-        _ => {}
+        _ => return,
     }
     if descending { items.reverse(); }
 }
@@ -1043,7 +998,12 @@ fn job_matches(job: &CiCdJob, query: &CiCdJobQuery) -> bool {
     query.statuses.as_ref().is_none_or(|statuses| statuses.as_slice().iter().any(|s| s.eq_ignore_ascii_case(&job.normalized_status)))
         && query.name.as_ref().is_none_or(|v| &job.name == v)
         && query.stage.as_ref().is_none_or(|v| job.stage.as_ref() == Some(v))
-        && query.workflow.as_ref().is_none_or(|v| job.parent.name.as_ref() == Some(v) || &job.parent.native_id == v)
+        && query.workflow.as_ref().is_none_or(|v| {
+            job.parent.name.as_ref() == Some(v)
+                || &job.parent.native_id == v
+                || job.parent.definition_id.as_ref() == Some(v)
+                || job.parent.definition_path.as_ref() == Some(v)
+        })
         && query.parent.as_ref().is_none_or(|v| &job.parent.native_id == v)
         && query.branch.as_ref().is_none_or(|v| job.branch.as_ref() == Some(v))
         && query.commit.as_ref().is_none_or(|v| job.commit.as_ref() == Some(v))
@@ -1061,13 +1021,20 @@ fn job_matches(job: &CiCdJob, query: &CiCdJobQuery) -> bool {
 /// carries no branch or commit at all; both live on the parent the traversal
 /// already holds. Reading them here is the only point at which they are still
 /// in scope.
-fn parent_context(value: &Value, id: &str, flavor: ApiFlavor) -> ParentContext {
+fn parent_context(value: &Value, id: &str, flavor: ApiFlavor, host: &str) -> ParentContext {
     let identity = CiCdParentExecution {
         native_id: id.to_string(),
         display_id: id.to_string(),
         name: value_string(value, &["name"]),
-        web_url: nested_string(value, &[&["links", "html", "href"]])
-            .or_else(|| value_string(value, &["html_url", "web_url"])),
+        web_url: trusted_web_link(
+            nested_string(value, &[&["links", "html", "href"]])
+                .or_else(|| value_string(value, &["html_url", "web_url"])),
+            host,
+        ),
+        // Actions-family runs carry their workflow definition (`workflow_id`,
+        // `path`); Bitbucket pipelines have neither, so the probes miss there.
+        definition_id: value_id(value, &["workflow_id"]),
+        definition_path: value_string(value, &["path"]),
     };
     if flavor == ApiFlavor::Bitbucket {
         return ParentContext {

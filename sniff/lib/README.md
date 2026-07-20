@@ -474,7 +474,11 @@ found no conflict; missing prediction prerequisites remain errors.
 With the `remote` feature, `resolve_remote_at` is the shared configured-remote
 authority used by live branch checks and provider queries. It selects `origin`,
 then the alphabetically first URL-bearing non-`upstream` remote, then
-`upstream`; an explicitly named remote is exact and case-sensitive.
+`upstream`; an explicitly named remote is exact and case-sensitive. The
+resolved remote retains the configured endpoint origin (scheme, host, and any
+non-default port) so self-managed servers on `http://` or a custom port derive
+a correct API base; SSH transports keep the canonical `https://{host}`
+assumption.
 
 `branch_exists_on_remote_at` reads an HTTP(S) Git ref advertisement without
 fetching or changing local state. Supported SSH-only remotes use an
@@ -487,9 +491,40 @@ transports return a capability error rather than a false absence.
 paginated pull-request and CI/CD-job lookup for GitHub, GitLab, Gitea, Forgejo,
 and Bitbucket while preserving repository/provider identity and focused policy,
 credential, authorization, rate-limit, malformed-response, and transport
-errors. Exact-host policy is checked before credentials or requests; redirects
-are disabled, with only the official GitHub and Bitbucket API-host mappings
-accepted as cross-host provider endpoints.
+errors. `FocusedProviderClient::discover` is the production constructor for
+ordinary self-managed servers: a neutral-hostname remote is identified through
+the same allowlisted, bounded version-endpoint probe `remote_vendor_at` uses
+(GitLab/Gitea/Forgejo, exact-host consent before any request) and then queried
+against the endpoint origin its remote URL was configured with. Exact-host
+policy is checked before credentials or requests; redirects are disabled, with
+only the official GitHub and Bitbucket API-host mappings accepted as cross-host
+provider endpoints.
+
+`FocusedProviderClient::from_pull_request_url` and
+`job_reference_from_url` accept a canonical provider **web or API** URL. Route
+grammars are matched per flavor rather than by scanning for a shared marker
+segment, because several providers spell the same token at different positions —
+GitHub's API `/repos/{owner}/{repo}/pulls/{n}` and Gitea's web
+`/{owner}/{repo}/pulls/{n}` are otherwise indistinguishable. GitHub is
+recognized by `api.github.com` or an `/api/v3/` prefix, GitLab by `/api/v4/`,
+Gitea/Forgejo by `/api/v1/`, and Bitbucket Cloud by `/2.0/`; GitLab's encoded
+API project path is decoded exactly once and split into namespace and
+repository. A hostname that pins a provider (`github.com`, `gitlab.com`,
+`bitbucket.org`, and their API hosts) accepts only that provider's routes, so a
+route shape borrowed from another forge is rejected instead of resolving to the
+wrong flavor. Official API hostnames resolve back to the repository's web host,
+and the URL's own scheme and non-default port are retained so an enterprise or
+self-managed reference derives the API base it was addressed by.
+
+Link fields a provider *returns* pass the opposite direction of the same trust
+boundary. A projected `web_url` (on pull requests, jobs, and parent runs) is
+published only when it parses as an absolute `http(s)` URL, carries no
+credentials, and sits on the repository's own host — the same relation the API
+endpoint must satisfy. Look-alike, subdomain, and suffix hosts are refused, and
+the surviving value is WHATWG-normalized, so whitespace and control characters
+cannot reach a consumer. A link that fails any check is dropped rather than
+raised as an error: an absent link is a supported projection shape, so one
+unusable URL in a page costs the link and not the query.
 
 #### Repository Detection
 

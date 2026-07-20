@@ -38,6 +38,37 @@ impl From<GitHostingProvider> for ApiFlavor {
     }
 }
 
+/// Normalized transport origin of a configured remote URL.
+///
+/// Captures what the configured URL actually said — scheme, host, and any
+/// explicitly configured non-default port (`url::Url::port()` semantics, so a
+/// default port normalizes to `None`). Self-managed servers routinely live on
+/// `http://` or a non-default port, and provider API bases must be derived
+/// from this origin rather than from the bare hostname.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteEndpoint {
+    pub scheme: String,
+    pub host: String,
+    pub port: Option<u16>,
+}
+
+impl RemoteEndpoint {
+    /// The configured HTTP(S) origin (`scheme://host[:port]`), when there is one.
+    ///
+    /// `None` for non-HTTP transports: an `ssh://` port is an SSH port, not an
+    /// API port, so those remotes keep the canonical `https://{host}` API
+    /// assumption instead of inheriting a transport port.
+    pub fn http_origin(&self) -> Option<String> {
+        if !matches!(self.scheme.as_str(), "http" | "https") {
+            return None;
+        }
+        Some(match self.port {
+            Some(port) => format!("{}://{}:{port}", self.scheme, self.host),
+            None => format!("{}://{}", self.scheme, self.host),
+        })
+    }
+}
+
 /// Fully resolved identity of one configured Git remote.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolvedRemote {
@@ -48,6 +79,16 @@ pub struct ResolvedRemote {
     pub namespace: Option<String>,
     pub repository: Option<String>,
     pub api_flavor: ApiFlavor,
+    /// Transport origin of `fetch_url`; `None` when no host could be parsed.
+    #[serde(default)]
+    pub endpoint: Option<RemoteEndpoint>,
+}
+
+impl ResolvedRemote {
+    /// The configured HTTP(S) origin of the fetch URL, if any.
+    pub fn http_origin(&self) -> Option<String> {
+        self.endpoint.as_ref().and_then(RemoteEndpoint::http_origin)
+    }
 }
 
 /// Resolves either an exact configured remote or the repository's preferred remote.
@@ -123,35 +164,47 @@ fn resolve_named(repo: &gix::Repository, name: String) -> Result<ResolvedRemote>
         .map(|value| value.to_string())
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| fetch_url.clone());
-    let (host, namespace, repository) = parse_identity(&fetch_url);
+    let (endpoint, namespace, repository) = parse_identity(&fetch_url);
     let api_flavor = GitHostingProvider::from_url(&fetch_url).into();
     Ok(ResolvedRemote {
         name,
         fetch_url,
         push_url,
-        host,
+        host: endpoint.as_ref().map(|endpoint| endpoint.host.clone()),
         namespace,
         repository,
         api_flavor,
+        endpoint,
     })
 }
 
-fn parse_identity(remote: &str) -> (Option<String>, Option<String>, Option<String>) {
-    let (host, path) = if let Ok(url) = url::Url::parse(remote) {
+fn parse_identity(remote: &str) -> (Option<RemoteEndpoint>, Option<String>, Option<String>) {
+    let (endpoint, path) = if let Ok(url) = url::Url::parse(remote) {
         (
-            url.host_str().map(str::to_string),
+            url.host_str().map(|host| RemoteEndpoint {
+                scheme: url.scheme().to_string(),
+                host: host.to_string(),
+                port: url.port(),
+            }),
             url.path().trim_matches('/').to_string(),
         )
     } else if let Some((_, after_at)) = remote.split_once('@') {
         let Some((host, path)) = after_at.split_once(':') else {
             return (None, None, None);
         };
-        (Some(host.to_string()), path.trim_matches('/').to_string())
+        (
+            Some(RemoteEndpoint {
+                scheme: "ssh".to_string(),
+                host: host.to_string(),
+                port: None,
+            }),
+            path.trim_matches('/').to_string(),
+        )
     } else {
         return (None, None, None);
     };
     let mut segments = path.split('/').filter(|segment| !segment.is_empty()).collect::<Vec<_>>();
     let repository = segments.pop().map(|segment| segment.trim_end_matches(".git").to_string());
     let namespace = (!segments.is_empty()).then(|| segments.join("/"));
-    (host, namespace, repository)
+    (endpoint, namespace, repository)
 }

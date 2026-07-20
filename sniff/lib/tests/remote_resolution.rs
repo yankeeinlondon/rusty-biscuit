@@ -81,6 +81,55 @@ fn aggregate_projection_and_resolver_agree_when_origin_has_no_url() {
     );
 }
 
+/// The resolved remote must retain the configured endpoint origin — scheme,
+/// host, and a genuinely non-default port — because self-managed servers
+/// derive their API base from it rather than from a bare `https://{host}`
+/// assumption.
+#[test]
+fn resolution_retains_the_configured_scheme_and_non_default_port() {
+    let (directory, repository) = repository();
+    repository
+        .remote("origin", "https://git.example:8443/team/project.git")
+        .unwrap();
+
+    let resolved = resolve_remote_at(directory.path(), None).unwrap().unwrap();
+    assert_eq!(resolved.host.as_deref(), Some("git.example"));
+    let endpoint = resolved.endpoint.as_ref().expect("endpoint captured");
+    assert_eq!(endpoint.scheme, "https");
+    assert_eq!(endpoint.host, "git.example");
+    assert_eq!(endpoint.port, Some(8443));
+    assert_eq!(resolved.http_origin().as_deref(), Some("https://git.example:8443"));
+}
+
+/// A default port normalizes away, and non-HTTP transports never contribute an
+/// HTTP origin: an `ssh://` port is an SSH port, not an API port.
+#[test]
+fn default_ports_normalize_and_ssh_transports_have_no_http_origin() {
+    let (directory, repository) = repository();
+    repository
+        .remote("https", "https://git.example:443/team/project.git")
+        .unwrap();
+    repository
+        .remote("scp", "git@git.example:team/project.git")
+        .unwrap();
+    repository
+        .remote("ssh", "ssh://git@git.example:2222/team/project.git")
+        .unwrap();
+
+    let https = resolve_remote_at(directory.path(), Some("https")).unwrap().unwrap();
+    let endpoint = https.endpoint.as_ref().expect("endpoint captured");
+    assert_eq!(endpoint.port, None);
+    assert_eq!(https.http_origin().as_deref(), Some("https://git.example"));
+
+    let scp = resolve_remote_at(directory.path(), Some("scp")).unwrap().unwrap();
+    assert_eq!(scp.endpoint.as_ref().map(|endpoint| endpoint.scheme.as_str()), Some("ssh"));
+    assert_eq!(scp.http_origin(), None);
+
+    let ssh = resolve_remote_at(directory.path(), Some("ssh")).unwrap().unwrap();
+    assert_eq!(ssh.endpoint.as_ref().and_then(|endpoint| endpoint.port), Some(2222));
+    assert_eq!(ssh.http_origin(), None);
+}
+
 #[test]
 fn explicit_missing_and_url_less_remotes_are_distinct_errors() {
     let (directory, repository) = repository();

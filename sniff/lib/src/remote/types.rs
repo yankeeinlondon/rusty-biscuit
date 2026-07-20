@@ -310,12 +310,18 @@ pub struct PullRequestRecord {
 
 /// Provider-neutral pull-request query vocabulary.
 ///
+/// This is an internal, programmatically constructed type: it deliberately
+/// does not implement `Deserialize`, so authored objects can never land on it
+/// directly. Darkmatter parses the authored catalog vocabulary (which spells
+/// ordering as `direction`) into its own strict DTO and translates it here,
+/// which is what keeps `descending` and the legacy-pagination `cursor` out of
+/// the authoring surface. `cursor` is consumed only by the Stage-1
+/// [`crate::remote::RemoteRepoProvider`] path; the focused client rejects it.
+///
 /// `Default` is hand-written rather than derived because the ratified contract
 /// makes newest-first the default order; a derived `descending: false` would
-/// silently invert every unordered query, including the `#[serde(default)]`
-/// fill-in used for absent keys.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+/// silently invert every unordered query.
+#[derive(Debug, Clone, Serialize)]
 pub struct PullRequestQuery {
     pub state: Option<QueryValues<CanonicalPullRequestState>>,
     pub source_branch: Option<String>,
@@ -513,6 +519,15 @@ pub struct CiCdParentExecution {
     pub display_id: String,
     pub name: Option<String>,
     pub web_url: Option<String>,
+    /// Provider workflow-definition identity (GitHub/Gitea/Forgejo
+    /// `workflow_id`). GitLab pipelines and Bitbucket Pipelines have no
+    /// workflow definitions, so it stays `None` there.
+    #[serde(default)]
+    pub definition_id: Option<String>,
+    /// Repository-relative workflow-definition path (GitHub/Gitea/Forgejo
+    /// `path`, e.g. `.github/workflows/ci.yml`).
+    #[serde(default)]
+    pub definition_path: Option<String>,
 }
 
 /// Repository-qualified identity of one provider-addressable CI/CD job.
@@ -567,10 +582,13 @@ pub const CICD_JOB_STATUSES: &[&str] = &[
 
 /// Provider-neutral CI/CD job query vocabulary.
 ///
+/// Like [`PullRequestQuery`], this is an internal, programmatically
+/// constructed type with no `Deserialize` implementation; Darkmatter's strict
+/// authored DTO is the only path from authored objects to this struct.
+///
 /// `Default` is hand-written for the same reason as [`PullRequestQuery`]:
 /// newest-first is the ratified default order.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CiCdJobQuery {
     pub statuses: Option<QueryValues<String>>,
     pub name: Option<String>,
@@ -581,7 +599,6 @@ pub struct CiCdJobQuery {
     /// Providers spell this as an integer (GitHub, GitLab, Gitea) or an opaque
     /// UUID (Bitbucket), so authors may write either and both land here as the
     /// string the job matcher compares against.
-    #[serde(default, deserialize_with = "deserialize_parent_identity")]
     pub parent: Option<String>,
     pub branch: Option<String>,
     pub commit: Option<String>,
@@ -653,25 +670,6 @@ impl CiCdJobQuery {
             ("updated_before", self.updated_before.as_deref()),
         )
     }
-}
-
-fn deserialize_parent_identity<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum ParentIdentity {
-        Text(String),
-        Number(u64),
-    }
-
-    Ok(
-        Option::<ParentIdentity>::deserialize(deserializer)?.map(|identity| match identity {
-            ParentIdentity::Text(text) => text,
-            ParentIdentity::Number(number) => number.to_string(),
-        }),
-    )
 }
 
 fn validate_limit(limit: Option<usize>) -> Result<(), SniffError> {
