@@ -3954,6 +3954,90 @@ fn standalone_outer_declaration_errors_are_shape_coded_and_precisely_ranged() {
     fixture.shutdown();
 }
 
+/// Standalone reference declarations must reach the same declaration parser an
+/// inline `$schema` value does.
+///
+/// A scalar payload is a whole-file reference — a valid, *active* standalone
+/// schema document — while an invalid or remote reference arm is rejected on
+/// the arm's own range. Before declaration-parser parity the library stored
+/// union arms unchecked, so the two invalid-arm cases published nothing at all,
+/// and it rejected every scalar payload, so the valid case published
+/// `document_malformed`.
+#[test]
+fn standalone_reference_declarations_match_the_shared_declaration_parser() {
+    // (file, text, offending substring — `None` = a valid, active document)
+    let cases: [(&str, &str, Option<&str>); 5] = [
+        // None of these targets exist on disk: classification is passive, so a
+        // valid reference must not depend on the file being present.
+        ("valid-scalar-reference.yaml", "$schema: ./other.yaml\n", None),
+        (
+            "whitespace-arm.yaml",
+            "$schema: [\"   \"]\n",
+            Some("\"   \""),
+        ),
+        (
+            "remote-arm.yaml",
+            "$schema: [https://example.com/schema.yaml]\n",
+            Some("https://example.com/schema.yaml"),
+        ),
+        (
+            // The valid first arm must not launder the invalid second one.
+            "mixed-union.yaml",
+            "$schema:\n  - ./valid.yaml\n  - https://example.com/schema.yaml\n",
+            Some("https://example.com/schema.yaml"),
+        ),
+        ("valid-reference-union.yaml", "$schema:\n  - ./a.yaml\n  - ./b.yaml\n", None),
+    ];
+    let schema_codes = [
+        "dm.schema.invalid_schema_shape",
+        "dm.schema.document_malformed",
+        "dm.schema.invalid_type_definition",
+    ];
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    for (file, text, offending) in cases {
+        let path = workspace.path().join(file);
+        std::fs::write(&path, text).unwrap();
+        let uri = url::Url::from_file_path(path).unwrap();
+        open(&fixture, uri.as_str(), text);
+        let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+
+        let published = codes(&diagnostics);
+        let owned: Vec<&String> = published
+            .iter()
+            .filter(|code| schema_codes.contains(&code.as_str()))
+            .collect();
+
+        let Some(needle) = offending else {
+            assert!(
+                owned.is_empty(),
+                "{file}: a syntactically valid reference declaration is an active \
+                 standalone schema document, not a malformed one: {diagnostics:?}"
+            );
+            continue;
+        };
+
+        assert_eq!(
+            owned,
+            vec![&"dm.schema.invalid_schema_shape".to_string()],
+            "{file}: an unchecked reference arm must not be silently accepted: {diagnostics:?}"
+        );
+        let reported = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_schema_shape"))
+            .expect("the asserted diagnostic");
+        assert_eq!(
+            reported["range"],
+            range_of(text, needle),
+            "{file}: the range must cover only the offending arm: {reported:?}"
+        );
+    }
+
+    fixture.shutdown();
+}
+
 // ── Query-vocabulary documentation links ────────────────────────────────────
 
 /// Installs a copy of the real topic doc at its repository-relative location
@@ -4152,6 +4236,254 @@ fn an_unshipped_topic_doc_yields_no_dead_link_on_either_surface() {
         assert!(
             !documentation.contains("darkmatter-expressions.md"),
             "an unresolvable relative target must not reach the client: {documentation}"
+        );
+    }
+
+    fixture.shutdown();
+}
+
+/// Requests `textDocument/completion` and returns the item labels.
+fn completion_labels(
+    fixture: &mut ClientFixture,
+    uri: &str,
+    line: u32,
+    character: u32,
+) -> Vec<String> {
+    let result = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character }
+            }),
+        )
+        .result
+        .expect("completion result");
+    result
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item["label"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Semantic activation, completion ancestors, and hover must be addressed by the
+/// structural frontmatter AST, not by dotted strings, line indentation, or a raw
+/// `:` search.
+///
+/// Every key here is one a text-derived path cannot spell. `build.target` was
+/// split into a nested `build` → `target` lookup that resolves to nothing, so
+/// its declared `type-definition` never activated. `host: port` was truncated at
+/// its embedded colon. `a/b` and `c~d` are the RFC 6901 escape characters, so
+/// they prove the pointer encoding round-trips (`~1` / `~0`) rather than
+/// colliding with a real path separator.
+#[test]
+fn structural_paths_survive_quoted_and_punctuated_frontmatter_keys() {
+    let workspace = tempfile::tempdir().unwrap();
+    let text = concat!(
+        "---\n",
+        "\"$schema\":\n",
+        "  \"build.target\": type-definition\n",
+        "  \"a/b\": string\n",
+        "  \"c~d\": number\n",
+        "  \"host: port\": string\n",
+        "  outer:\n",
+        "    inner: string\n",
+        "\"build.target\": string(required)\n",
+        "\"a/b\": alpha\n",
+        "\"c~d\": 3\n",
+        "\"host: port\": beta\n",
+        "outer:\n",
+        "  inner: gamma\n",
+        "---\n\nbody\n",
+    );
+    let path = workspace.path().join("punctuated.md");
+    std::fs::write(&path, text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    // The `.`-bearing key resolves to its own declaration, so its semantic
+    // meta-type activates.
+    let dotted = hover_markup(&mut fixture, uri.as_str(), 8, 3);
+    assert!(
+        dotted.contains("type-definition"),
+        "`build.target` must resolve as one key, not a nested `build` → `target` \
+         path: {dotted}"
+    );
+
+    // The remaining punctuation classes each resolve to a declared property.
+    for (line, character, key) in [(9, 2, "a/b"), (10, 2, "c~d"), (11, 3, "host: port")] {
+        let hover = hover_markup(&mut fixture, uri.as_str(), line, character);
+        assert!(!hover.is_empty(), "`{key}` must resolve to its declaration: {hover:?}");
+    }
+
+    // Nested mappings still resolve through the structural parent chain.
+    let nested = hover_markup(&mut fixture, uri.as_str(), 13, 3);
+    assert!(!nested.is_empty(), "`outer.inner` must resolve: {nested:?}");
+
+    fixture.shutdown();
+}
+
+/// Completion must take its owner key and ancestor chain from the AST.
+///
+/// A quoted ancestor is the sharpest case: `"$schema"` written with quotes is
+/// the reserved `$schema` path, but a `split(':')` reconstruction keeps the
+/// quotes and matches nothing. The `.`-bearing owner key is the same failure one
+/// level down. Both are exercised with LF and CRLF, since a line-scanning
+/// implementation is where line-ending handling goes wrong.
+#[test]
+fn meta_schema_completion_owner_and_ancestors_come_from_the_ast() {
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    // (file stem, source, completion line, completion character, why)
+    let cases: [(&str, &str, u32, u32, &str); 2] = [
+        (
+            "quoted-schema",
+            "---\n\"$schema\":\n  title: str\n---\n\nbody\n",
+            2,
+            12,
+            "a quoted `\"$schema\"` ancestor is still the reserved `$schema` path",
+        ),
+        (
+            "dotted-owner",
+            concat!(
+                "---\n\"$schema\":\n  \"build.target\": type-definition\n",
+                "\"build.target\": str\n---\n\nbody\n",
+            ),
+            3,
+            19,
+            "the owner key is `build.target`, not the text before the first `:`",
+        ),
+    ];
+
+    for (stem, lf_text, line, character, why) in cases {
+        for (ending, suffix) in [("\n", "lf"), ("\r\n", "crlf")] {
+            let text = lf_text.replace('\n', ending);
+            let path = workspace.path().join(format!("{stem}-{suffix}.md"));
+            std::fs::write(&path, &text).unwrap();
+            let uri = url::Url::from_file_path(&path).unwrap();
+            open(&fixture, uri.as_str(), &text);
+
+            let labels = completion_labels(&mut fixture, uri.as_str(), line, character);
+            assert!(
+                labels.iter().any(|label| label == "string"),
+                "{stem} ({suffix}): {why}; got {labels:?}"
+            );
+        }
+    }
+
+    fixture.shutdown();
+}
+
+/// A malformed edit elsewhere in the block must not cost the line being authored
+/// its semantic ownership.
+///
+/// The last-good tree is consulted per entry — its key token is re-read at the
+/// span it recorded — so an unrelated broken value leaves untouched keys
+/// structurally owned instead of surrendering every one of them at once.
+#[test]
+fn malformed_buffer_retains_structural_ownership_of_untouched_keys() {
+    let workspace = tempfile::tempdir().unwrap();
+    let good = concat!(
+        "---\n",
+        "\"$schema\":\n",
+        "  \"build.target\": type-definition\n",
+        "\"build.target\": str\n",
+        "---\n\nbody\n",
+    );
+    let path = workspace.path().join("last-good.md");
+    std::fs::write(&path, good).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), good);
+    assert!(
+        completion_labels(&mut fixture, uri.as_str(), 3, 19).iter().any(|l| l == "string"),
+        "baseline: the valid buffer completes"
+    );
+
+    // Break the YAML on a *later* line, leaving lines 0-3 byte-identical.
+    let head = &good[..good.find("---\n\nbody").unwrap()];
+    let broken = format!("{head}bad: [unclosed\n---\n\nbody\n");
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": broken } ]
+        }),
+    );
+
+    let labels = completion_labels(&mut fixture, uri.as_str(), 3, 19);
+    assert!(
+        labels.iter().any(|label| label == "string"),
+        "a malformed value on a later line must not cost `build.target` its \
+         declared `type-definition` ownership; got {labels:?}"
+    );
+
+    fixture.shutdown();
+}
+
+/// A standalone inner property definition whose key contains punctuation must
+/// keep its specific `dm.schema.invalid_type_definition` code and its own range.
+///
+/// A dotted lookup string cannot distinguish the property `build.target` from
+/// the nested path `build` → `target`, so with both authored it resolved to
+/// whichever appeared first — ranging a *valid* sibling definition instead of
+/// the rejected one. The nested/flat pair is deliberate: it is the collision the
+/// dotted spelling is blind to.
+#[test]
+fn standalone_inner_definition_diagnostics_address_punctuated_keys() {
+    // (file, text, offending substring)
+    let cases: [(&str, &str, &str); 3] = [
+        (
+            "pure-dotted.yaml",
+            "$schema:\n  build:\n    target: number\n  \"build.target\": str\n",
+            "str",
+        ),
+        (
+            "pure-slash.yaml",
+            "$schema:\n  a:\n    b: number\n  \"a/b\": str\n",
+            "str",
+        ),
+        (
+            "tagged-colon.yaml",
+            "kind: schema\ntypes:\n  \"host: port\": str\n",
+            "str",
+        ),
+    ];
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    for (file, text, offending) in cases {
+        let path = workspace.path().join(file);
+        std::fs::write(&path, text).unwrap();
+        let uri = url::Url::from_file_path(path).unwrap();
+        open(&fixture, uri.as_str(), text);
+        let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+
+        assert!(
+            codes(&diagnostics).iter().any(|code| code == "dm.schema.invalid_type_definition"),
+            "{file}: a punctuated key must keep the inner-definition code rather \
+             than falling through to the document-malformed fallback: {diagnostics:?}"
+        );
+        let reported = diagnostics
+            .iter()
+            .find(|d| d["code"] == json!("dm.schema.invalid_type_definition"))
+            .expect("the inner-definition diagnostic");
+        assert_eq!(
+            reported["range"],
+            range_of(text, offending),
+            "{file}: the range must cover only the offending value: {reported:?}"
         );
     }
 

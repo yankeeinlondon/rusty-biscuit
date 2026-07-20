@@ -166,14 +166,18 @@ pub fn frontmatter_authoring(
     };
     let shape = effective_shape(outcome);
     let mut values = Vec::new();
-    for entry in ast.entries() {
-        if entry.pointer.starts_with("/$schema/") {
+    for (index, entry) in ast.entries().iter().enumerate() {
+        // The authored key chain, not `dotted.split('.')`: a property named
+        // `build.target` is one key, and splitting it would look up a nested
+        // `build` → `target` path that does not exist, silently dropping the
+        // property's declared semantic meta-type.
+        let path = ast.key_path_at(index);
+        if path.len() > 1 && path[0] == "$schema" {
             continue;
         }
-        let kinds = if entry.pointer == "/$schema" {
+        let kinds = if path == ["$schema"] {
             vec![MetaSchemaKind::Schema]
         } else {
-            let path: Vec<&str> = entry.dotted.split('.').collect();
             def_at_path(&shape, &path)
                 .map(|definition| meta_schema_kinds(&definition))
                 .unwrap_or_default()
@@ -665,7 +669,8 @@ mod tests {
         .expect("classification")
         .expect("standalone schema");
 
-        let regions = semantic_type_regions(&model.schema, &model.source_map);
+        let schema = model.schema().expect("mapping payload is an inline schema");
+        let regions = semantic_type_regions(schema, &model.source_map);
         let names: Vec<&str> = regions.iter().map(|region| region.name.as_str()).collect();
         assert!(names.contains(&"scalar"), "{regions:#?}");
         assert!(names.contains(&"native"), "{regions:#?}");

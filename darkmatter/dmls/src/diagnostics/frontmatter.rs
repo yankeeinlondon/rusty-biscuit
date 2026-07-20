@@ -116,7 +116,7 @@ fn schema_prepare_diagnostic(
     let (code_value, message, span) = match error {
         SchemaError::Grammar { property, .. } if property != "<root>" => {
             let span = ast
-                .and_then(|ast| ast.entry_by_dotted(&format!("$schema.{property}")))
+                .and_then(|ast| ast.entry_by_key_path(&["$schema", property]))
                 .map(|entry| entry.value_span.clone())
                 .or_else(|| fallback_span.clone());
             (code::SCHEMA_INVALID_TYPE_DEFINITION, error.to_string(), span)
@@ -497,7 +497,7 @@ fn semantic_problem_range(
         let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(raw).ok()?;
         match parse_property_definition(&entry.key, &yaml) {
             Err(SchemaError::Grammar { property, .. }) if property != entry.key => ast
-                .entry_by_dotted(&format!("{}.{}", entry.dotted, property))
+                .child_entry(&entry.pointer, property.as_str())
                 .map(|nested| nested.value_span.clone())
                 .unwrap_or_else(|| entry.value_span.clone()),
             _ => entry.value_span.clone(),
@@ -793,10 +793,13 @@ fn standalone_type_definition_diagnostic(ctx: &DocumentContext) -> Option<Diagno
         let Err(error) = parse_property_definition(key, value) else {
             continue;
         };
-        let entry = ast.entry_by_dotted(&format!("{payload_key}.{key}"))?;
+        // Key segments, not a dotted join: a property name containing `.` would
+        // otherwise miss its entry and fall through to the whole-document
+        // `dm.schema.document_malformed` fallback.
+        let entry = ast.entry_by_key_path(&[payload_key, key])?;
         let span = match &error {
             SchemaError::Grammar { property, .. } if property != key => ast
-                .entry_by_dotted(&format!("{payload_key}.{key}.{property}"))
+                .entry_by_key_path(&[payload_key, key, property])
                 .map(|nested| nested.value_span.clone())
                 .unwrap_or_else(|| entry.value_span.clone()),
             _ => entry.value_span.clone(),

@@ -762,7 +762,7 @@ mod tests {
                 .first()
                 .expect("type-keyword span");
             assert!(matches!(&text[type_span.clone()], "string" | "number"));
-            assert!(matches!(model.schema, SimplifiedSchema::Single(_)));
+            assert!(matches!(model.schema(), Some(SimplifiedSchema::Single(_))));
         }
     }
 

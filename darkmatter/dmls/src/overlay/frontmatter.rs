@@ -166,8 +166,108 @@ impl FrontmatterAst {
     }
 
     /// The entry at an exact dotted path.
+    ///
+    /// ## Notes
+    ///
+    /// `dotted` is the *authored spelling* joined by `.`, so it cannot address a
+    /// key that itself contains `.`. Callers composing a path from known key
+    /// segments must use [`entry_by_key_path`](Self::entry_by_key_path), which
+    /// is unambiguous for every key. This accessor exists for the library
+    /// contracts that already hand DMLS a dotted string (`style:` warnings).
     pub fn entry_by_dotted(&self, dotted: &str) -> Option<&FmEntry> {
         self.entries.iter().find(|entry| entry.dotted == dotted)
+    }
+
+    /// The entry addressed by a chain of **decoded** key segments, outermost
+    /// first.
+    ///
+    /// Unlike [`entry_by_dotted`](Self::entry_by_dotted) this round-trips every
+    /// key: `.`, `:`, `/`, and `~` in a segment address exactly the authored
+    /// key, because the lookup goes through RFC 6901 escaping rather than a
+    /// dotted join.
+    pub fn entry_by_key_path(&self, path: &[&str]) -> Option<&FmEntry> {
+        self.entry_by_pointer(&pointer_for(path))
+    }
+
+    /// The chain of **decoded** key segments from the root down to the entry at
+    /// arena `index`, outermost first.
+    ///
+    /// This is the structural replacement for splitting
+    /// [`FmEntry::dotted`](FmEntry::dotted) on `.`: it walks the authored
+    /// [`parent`](FmEntry::parent) chain, so a key such as `build.target` stays
+    /// one segment.
+    pub fn key_path_at(&self, index: usize) -> Vec<&str> {
+        let mut path = Vec::new();
+        let mut cursor = self.entries.get(index);
+        while let Some(entry) = cursor {
+            path.push(entry.key.as_str());
+            cursor = entry.parent.and_then(|parent| self.entries.get(parent));
+        }
+        path.reverse();
+        path
+    }
+
+    /// The key segments of `entry`, outermost first.
+    ///
+    /// Convenience over [`key_path_at`](Self::key_path_at) for callers holding a
+    /// borrowed entry rather than its arena index.
+    pub fn key_path(&self, entry: &FmEntry) -> Vec<&str> {
+        self.index_of(entry).map(|index| self.key_path_at(index)).unwrap_or_default()
+    }
+
+    /// The arena index of `entry`, identified by its pointer.
+    pub fn index_of(&self, entry: &FmEntry) -> Option<usize> {
+        self.entries.iter().position(|candidate| candidate.pointer == entry.pointer)
+    }
+
+    /// The innermost authored mapping whose **value** subtree encloses `offset`
+    /// — the container a line being authored at `offset` is a child of.
+    ///
+    /// Key tokens are deliberately excluded: a cursor inside `page:`'s own key
+    /// belongs to `page`'s *parent*, not to `page`.
+    pub fn container_at_offset(&self, offset: usize) -> Option<&FmEntry> {
+        self.entries
+            .iter()
+            .filter(|entry| entry.kind == FmValueKind::Mapping)
+            .filter(|entry| entry.value_span.contains(&offset))
+            .max_by_key(|entry| entry.depth)
+    }
+
+    /// The ancestor key chain enclosing `offset`, outermost first — the
+    /// structural answer to "which mapping is this line a child of".
+    ///
+    /// Empty at the top level, and empty when no authored mapping encloses
+    /// `offset` (a blank line the parser saw no container for).
+    pub fn enclosing_key_path(&self, offset: usize) -> Vec<&str> {
+        self.container_at_offset(offset)
+            .map(|entry| self.key_path(entry))
+            .unwrap_or_default()
+    }
+
+    /// The direct children of the mapping addressed by `path`.
+    pub fn children_of_key_path(&self, path: &[&str]) -> Vec<&FmEntry> {
+        let pointer = pointer_for(path);
+        let Some(parent) = self.entries.iter().position(|entry| entry.pointer == pointer) else {
+            return if path.is_empty() {
+                self.entries.iter().filter(|entry| entry.parent.is_none()).collect()
+            } else {
+                Vec::new()
+            };
+        };
+        self.entries.iter().filter(|entry| entry.parent == Some(parent)).collect()
+    }
+
+    /// The entry whose **key token** lies on the cursor's line and ends at or
+    /// before `offset` — the key whose value the cursor is authoring.
+    ///
+    /// Returning the authored entry (rather than the text before the first raw
+    /// `:`) is what makes a quoted key correct: `"build.target": …` and
+    /// `"host: port": …` both report their whole decoded key.
+    pub fn key_entry_on_line(&self, line_start: usize, offset: usize) -> Option<&FmEntry> {
+        self.entries
+            .iter()
+            .filter(|entry| entry.key_span.start >= line_start && entry.key_span.end <= offset)
+            .max_by_key(|entry| entry.key_span.start)
     }
 
     /// The entry at `pointer`, else its nearest existing ancestor (R-5 mapping
@@ -210,11 +310,16 @@ impl FrontmatterAst {
             .unwrap_or_else(|| self.root_span.clone())
     }
 
+    /// The entry for a child `key` under `parent_pointer`.
+    pub fn child_entry(&self, parent_pointer: &str, key: &str) -> Option<&FmEntry> {
+        let pointer = format!("{parent_pointer}/{}", encode_pointer_segment(key));
+        self.entry_by_pointer(&pointer)
+    }
+
     /// The key-token span for a child `key` under `parent_pointer` — the
     /// precise range for an unknown-key diagnostic.
     pub fn key_span_for(&self, parent_pointer: &str, key: &str) -> Option<SourceSpan> {
-        let pointer = format!("{parent_pointer}/{}", encode_pointer_segment(key));
-        self.entry_by_pointer(&pointer).map(|entry| entry.key_span.clone())
+        self.child_entry(parent_pointer, key).map(|entry| entry.key_span.clone())
     }
 
     /// The `$schema` top-level entry, if present.
@@ -362,8 +467,21 @@ fn load_error_to_diagnostic(error: &LoadError, base: usize, block_span: &SourceS
 }
 
 /// RFC 6901 escapes a pointer segment (`~` → `~0`, `/` → `~1`).
+///
+/// `~` must be escaped before `/` so an authored `~1` is not confused with the
+/// encoding of `/`.
 fn encode_pointer_segment(segment: &str) -> String {
     segment.replace('~', "~0").replace('/', "~1")
+}
+
+/// Builds an RFC 6901 pointer from decoded key segments.
+fn pointer_for(path: &[&str]) -> String {
+    let mut pointer = String::new();
+    for segment in path {
+        pointer.push('/');
+        pointer.push_str(&encode_pointer_segment(segment));
+    }
+    pointer
 }
 
 /// Splits a pointer into its raw (still-escaped) segments.

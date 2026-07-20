@@ -73,12 +73,10 @@ fn schema_completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem
     let indent = prefix.len() - prefix.trim_start().len();
     let trimmed = prefix.trim_start();
 
-    match trimmed.find(':') {
-        Some(colon) => {
-            let key = trimmed[..colon].trim().to_string();
-            let value_partial = trimmed[colon + 1..].trim_start();
-            let ancestors = enclosing_path(ctx.text, line_start, indent);
-            value_completions(ctx, offset, &ancestors, &key, value_partial)
+    match value_cursor(ctx, offset, line_start, trimmed) {
+        Some((key, value_partial)) => {
+            let ancestors = enclosing_path(ctx, offset, line_start, indent);
+            value_completions(ctx, offset, &ancestors, &key, &value_partial)
         }
         None if indent == 0 => top_level_key_completions(ctx, ast, offset, trimmed),
         None => {
@@ -103,12 +101,13 @@ fn meta_schema_completion(ctx: &DocumentContext, offset: usize) -> Option<Vec<Co
     let (line_start, prefix) = line_prefix(ctx.text, offset);
     let indent = prefix.len() - prefix.trim_start().len();
     let trimmed = prefix.trim_start();
-    let ancestors = enclosing_path(ctx.text, line_start, indent);
+    let ancestors = enclosing_path(ctx, offset, line_start, indent);
 
-    let (value_start, kinds) = if let Some(colon) = trimmed.find(':') {
-        let key = trimmed[..colon].trim();
-        let kinds = meta_schema_kinds_for_line(overlay, &ancestors, key, false)?;
-        (semantic_value_start(ctx, offset, trimmed, colon), kinds)
+    let (value_start, kinds) = if let Some((key, partial)) =
+        value_cursor(ctx, offset, line_start, trimmed)
+    {
+        let kinds = meta_schema_kinds_for_line(overlay, &ancestors, &key, false)?;
+        (semantic_value_start(ctx, offset, line_start, partial.len()), kinds)
     } else if let Some(after_dash) = trimmed.strip_prefix("- ") {
         let kinds = meta_schema_kinds_for_line(overlay, &ancestors, "", true)?;
         (offset - after_dash.len(), kinds)
@@ -150,17 +149,19 @@ fn meta_schema_completion(ctx: &DocumentContext, offset: usize) -> Option<Vec<Co
 ///
 /// The frontmatter AST's value span is authoritative whenever the buffer's YAML
 /// still parses; a value being typed into a not-yet-parseable buffer (an open
-/// `{`, a half-written flow sequence) has no entry, so the line's own
-/// `key:`-relative start is the fallback.
+/// `{`, a half-written flow sequence) has no entry, so the start implied by
+/// `partial_len` (the already-typed value text before the cursor) is the
+/// fallback.
 fn semantic_value_start(
     ctx: &DocumentContext,
     offset: usize,
-    trimmed: &str,
-    colon: usize,
+    line_start: usize,
+    partial_len: usize,
 ) -> usize {
-    let fallback = offset - trimmed[colon + 1..].trim_start().len();
+    let fallback = offset - partial_len;
     overlay_ast(ctx)
-        .and_then(|ast| ast.entry_at_offset(offset))
+        .and_then(|ast| ast.key_entry_on_line(line_start, offset))
+        .filter(|entry| still_placed(ctx, entry))
         .filter(|entry| entry.value_span.start <= offset && entry.value_span.start >= fallback)
         .map(|entry| entry.value_span.start)
         .unwrap_or(fallback)
@@ -391,7 +392,9 @@ fn passive_namespace_names(ctx: &DocumentContext) -> BTreeSet<String> {
         return names;
     };
     let schema = match &overlay.schema_authoring {
-        SchemaAuthoringState::Standalone { model: Some(model), .. } => Some(&model.schema),
+        // A whole-file reference document is active but declares no inline
+        // properties, so it contributes no passive namespace names.
+        SchemaAuthoringState::Standalone { model: Some(model), .. } => model.schema(),
         SchemaAuthoringState::Frontmatter(_) => None,
         _ => None,
     };
@@ -488,7 +491,7 @@ fn nested_key_completions(
     indent: usize,
     partial: &str,
 ) -> Vec<CompletionItem> {
-    let ancestors = enclosing_path(ctx.text, line_start, indent);
+    let ancestors = enclosing_path(ctx, offset, line_start, indent);
     let ancestor_refs: Vec<&str> = ancestors.iter().map(String::as_str).collect();
     let shape = known_shape(ctx);
     if let Some(nested) = nested_shape_for_completion(ctx, &shape, &ancestor_refs) {
@@ -532,15 +535,16 @@ fn shape_key_completions(
 }
 
 /// The already-authored direct child keys of the mapping at `ancestors`, so
-/// completion can exclude them. The dotted-prefix guard keeps a same-named
-/// mapping elsewhere in the tree (e.g. under `$schema`) from leaking in.
+/// completion can exclude them.
+///
+/// Parent identity is structural, so a same-named mapping elsewhere in the tree
+/// (e.g. under `$schema`) cannot leak in and a key containing `.` is reported
+/// as itself rather than as two nested segments.
 fn present_child_keys<'a>(ast: &'a FrontmatterAst, ancestors: &[String]) -> Vec<&'a str> {
-    let depth = ancestors.len();
-    let prefix = format!("{}.", ancestors.join("."));
-    ast.entries()
-        .iter()
-        .filter(|entry| entry.depth == depth)
-        .filter_map(|entry| entry.dotted.strip_prefix(&prefix).filter(|rest| !rest.contains('.')))
+    let path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
+    ast.children_of_key_path(&path)
+        .into_iter()
+        .map(|entry| entry.key.as_str())
         .collect()
 }
 
@@ -803,11 +807,11 @@ pub(crate) fn expression_values<'a>(
 ) -> Vec<ExpressionValue<'a>> {
     let shape = known_shape(ctx);
     let mut out = Vec::new();
-    for entry in ast.entries() {
+    for (index, entry) in ast.entries().iter().enumerate() {
         if entry.kind != FmValueKind::Scalar {
             continue;
         }
-        let path: Vec<&str> = entry.dotted.split('.').collect();
+        let path = ast.key_path_at(index);
         let Some(def) = def_at_path_ctx(ctx, &shape, &path) else {
             continue;
         };
@@ -928,7 +932,7 @@ fn block_array_suggestions(
     } else {
         return None;
     };
-    let ancestors = enclosing_path(ctx.text, line_start, indent);
+    let ancestors = enclosing_path(ctx, offset, line_start, indent);
     let path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
     let item_start = line_start + indent + marker_len;
     suggestion_completions(ctx, &path, item_start, offset, after_dash)
@@ -993,11 +997,12 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     }
 
     let entry = ast.entry_at_offset(offset)?;
+    let path = ast.key_path(entry);
 
-    if entry.dotted == "ctx" || entry.dotted.starts_with("ctx.") {
+    if path.first() == Some(&"ctx") {
         return ctx_hover(ctx, entry);
     }
-    schema_hover(ctx, entry)
+    schema_hover(ctx, &path, entry)
 }
 
 fn meta_schema_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
@@ -1022,7 +1027,8 @@ fn meta_schema_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
 
     if let SchemaAuthoringState::Standalone { model: Some(model), .. } =
         &overlay.schema_authoring
-        && let Some(region) = semantic_type_regions(&model.schema, &model.source_map)
+        && let Some(schema) = model.schema()
+        && let Some(region) = semantic_type_regions(schema, &model.source_map)
             .into_iter()
             .find(|region| {
                 region.key_span.contains(&offset) || region.definition_span.contains(&offset)
@@ -1113,10 +1119,9 @@ fn meta_schema_definition_hover_body(key: &str, def: &PropertyDef) -> String {
 }
 
 /// Hover content for a schema-declared property, at any nesting depth.
-fn schema_hover(ctx: &DocumentContext, entry: &FmEntry) -> Option<Hover> {
+fn schema_hover(ctx: &DocumentContext, path: &[&str], entry: &FmEntry) -> Option<Hover> {
     let shape = known_shape(ctx);
-    let path: Vec<&str> = entry.dotted.split('.').collect();
-    let def = def_at_path_ctx(ctx, &shape, &path)?;
+    let def = def_at_path_ctx(ctx, &shape, path)?;
     let body = schema_hover_body(&entry.key, &def)?;
     markup_hover(ctx, entry.key_span.clone(), body)
 }
@@ -1251,14 +1256,14 @@ fn nav_targets(ctx: &DocumentContext, ast: &FrontmatterAst) -> Vec<(SourceSpan, 
 
     // `file(...)`-typed scalar values at any depth: a top-level key is a
     // single-segment path, a nested one resolves through the schema's inline
-    // objects. Splitting `dotted` on `.` mirrors the completion/hover path. Any
-    // union arm being a `file` type makes the value a navigable reference.
+    // objects. Any union arm being a `file` type makes the value a navigable
+    // reference.
     let shape = known_shape(ctx);
-    for entry in ast.entries() {
+    for (index, entry) in ast.entries().iter().enumerate() {
         if entry.kind != FmValueKind::Scalar {
             continue;
         }
-        let path: Vec<&str> = entry.dotted.split('.').collect();
+        let path = ast.key_path_at(index);
         if def_at_path_ctx(ctx, &shape, &path).is_some_and(|def| file_atom(&def).is_some())
             && let Some(value) = &entry.scalar
             && is_schema_file_value(value)
@@ -1738,10 +1743,84 @@ fn line_prefix(text: &str, offset: usize) -> (usize, &str) {
     (line_start, &text[line_start..offset])
 }
 
+/// The chain of ancestor keys enclosing the cursor, outermost first. Empty for
+/// a top-level line.
+///
+/// The frontmatter AST is the authority whenever it describes the *current*
+/// buffer: its containment is structural and its key segments are decoded, so a
+/// quoted ancestor (`"$schema"`) matches the reserved `$schema` path and an
+/// ancestor whose key contains `:` or `.` survives intact. This also costs no
+/// reverse line scan.
+///
+/// A cursor no authored mapping encloses (a blank line being opened), and an
+/// entry a last-good tree no longer places correctly, fall back to the
+/// indentation walk in [`enclosing_path_by_indent`].
+fn enclosing_path(
+    ctx: &DocumentContext,
+    offset: usize,
+    line_start: usize,
+    indent: usize,
+) -> Vec<String> {
+    if let Some(ast) = overlay_ast(ctx) {
+        match ast.container_at_offset(offset) {
+            Some(container) if still_placed(ctx, container) => {
+                return ast.key_path(container).into_iter().map(str::to_string).collect();
+            }
+            // No enclosing mapping at column 0 is a real answer, not a gap.
+            None if indent == 0 => return Vec::new(),
+            _ => {}
+        }
+    }
+    enclosing_path_by_indent(ctx.text, line_start, indent)
+}
+
+/// Whether `entry`'s key token is still exactly where the tree says it is.
+///
+/// A last-good tree describes an *earlier* buffer, so a blanket "is it stale"
+/// veto would surrender every structural answer the moment one key is mid-edit.
+/// Re-reading the key token at its recorded span turns staleness into a
+/// per-entry question instead: a malformed edit elsewhere in the block leaves
+/// the line being authored structurally owned, and a span that has genuinely
+/// moved is rejected rather than trusted.
+fn still_placed(ctx: &DocumentContext, entry: &FmEntry) -> bool {
+    ctx.text
+        .get(entry.key_span.clone())
+        .and_then(decode_scalar)
+        .is_some_and(|decoded| decoded.decoded() == entry.key)
+}
+
+/// The `(key, value-partial)` pair when the cursor sits in a value position.
+///
+/// Structural first: an authored entry yields the entire *decoded* key, so
+/// `"build.target": …` is one key and `"host: port": …` is not split at its
+/// embedded colon. The lexical `key:` split is the fallback for a cursor no
+/// still-placed entry describes — most often a key part-way through being
+/// typed, which leaves the buffer unparseable.
+fn value_cursor(
+    ctx: &DocumentContext,
+    offset: usize,
+    line_start: usize,
+    trimmed: &str,
+) -> Option<(String, String)> {
+    if let Some(entry) = overlay_ast(ctx)
+        .and_then(|ast| ast.key_entry_on_line(line_start, offset))
+        .filter(|entry| still_placed(ctx, entry))
+        && let Some(rest) = ctx.text.get(entry.key_span.end..offset)
+        && let Some((_, partial)) = rest.split_once(':')
+    {
+        return Some((entry.key.clone(), partial.trim_start().to_string()));
+    }
+    let colon = trimmed.find(':')?;
+    Some((
+        trimmed[..colon].trim().to_string(),
+        trimmed[colon + 1..].trim_start().to_string(),
+    ))
+}
+
 /// The full chain of ancestor keys above `line_start`, outermost first, for a
 /// line at column `indent` — one key per strictly-decreasing indent level, so
 /// nested inline-object mappings resolve. Empty for a top-level line.
-fn enclosing_path(text: &str, line_start: usize, indent: usize) -> Vec<String> {
+fn enclosing_path_by_indent(text: &str, line_start: usize, indent: usize) -> Vec<String> {
     let mut path = Vec::new();
     let mut needed = indent;
     for line in text[..line_start].lines().rev() {
@@ -3164,16 +3243,28 @@ mod tests {
     }
 
     #[test]
-    fn test_enclosing_path_builds_full_ancestor_chain() {
+    fn test_enclosing_path_by_indent_builds_full_ancestor_chain() {
         let text = "---\nstyle:\n  page:\n    ";
         // A line indented under `page:` (indent 4) has ancestors `style` →
         // `page`, outermost first.
-        assert_eq!(enclosing_path(text, text.len(), 4), vec!["style", "page"]);
+        assert_eq!(enclosing_path_by_indent(text, text.len(), 4), vec!["style", "page"]);
         // A line under `style:` (indent 2) has just `style`.
         let under_style = "---\nstyle:\n".len();
-        assert_eq!(enclosing_path(text, under_style + 2, 2), vec!["style"]);
+        assert_eq!(enclosing_path_by_indent(text, under_style + 2, 2), vec!["style"]);
         // A top-level line (indent 0) has no ancestors.
-        assert!(enclosing_path(text, under_style, 0).is_empty());
+        assert!(enclosing_path_by_indent(text, under_style, 0).is_empty());
+    }
+
+    #[test]
+    fn test_key_path_survives_dot_and_colon_in_keys() {
+        // The structural key chain never splits an authored key: `build.target`
+        // is one segment, and a quoted key carrying `:` keeps its colon.
+        let text = "---\n\"build.target\": x\nouter:\n  \"host: port\": y\n---\n";
+        let ast = FrontmatterAst::parse(text).unwrap().ast.unwrap();
+        let dotted = ast.entry_by_key_path(&["build.target"]).unwrap();
+        assert_eq!(dotted.key, "build.target");
+        let nested = ast.entry_by_key_path(&["outer", "host: port"]).unwrap();
+        assert_eq!(ast.key_path(nested), vec!["outer", "host: port"]);
     }
 
     fn nested_fixture() -> SchemaShape {
