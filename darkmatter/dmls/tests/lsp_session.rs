@@ -3488,11 +3488,11 @@ fn meta_schema_hover_covers_pattern_keys_inline_and_standalone() {
     let expected = ["string", "number", "boolean", "string"];
 
     let inline = format!("---\n$schema:\n{BODY}---\n\nbody\n");
-    // A standalone schema body is not fenced off from the Markdown link layer,
-    // which claims hover before the frontmatter provider and reads the three
-    // `<scheme::…>` forms as autolinks. That ordering is a separate concern;
-    // `<string>` is unambiguous and proves the same projection here.
-    let standalone = "$schema:\n  \"<string>\": string(required)\n";
+    // (file, text, line of the first pattern key)
+    let standalone = [
+        ("pure.yaml", format!("$schema:\n{BODY}"), 1u32),
+        ("tagged.yaml", format!("kind: schema\ntypes:\n{BODY}"), 2),
+    ];
 
     let mut fixture = ClientFixture::start();
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
@@ -3512,14 +3512,47 @@ fn meta_schema_hover_covers_pattern_keys_inline_and_standalone() {
         );
     }
 
-    let standalone_path = workspace.path().join("standalone.yaml");
-    std::fs::write(&standalone_path, standalone).unwrap();
-    let standalone_uri = url::Url::from_file_path(standalone_path).unwrap();
-    open(&fixture, standalone_uri.as_str(), standalone);
-    let hover = hover_markup(&mut fixture, standalone_uri.as_str(), 1, 4);
-    assert!(hover.contains("Type: **type-definition**"), "standalone: {hover}");
-    assert!(hover.contains("Declares: **string**"), "standalone: {hover}");
+    for (name, text, first_line) in standalone {
+        let path = workspace.path().join(name);
+        std::fs::write(&path, &text).unwrap();
+        let uri = url::Url::from_file_path(path).unwrap();
+        open(&fixture, uri.as_str(), &text);
+        for (index, declares) in expected.iter().enumerate() {
+            let line = first_line + index as u32;
+            let hover = hover_markup(&mut fixture, uri.as_str(), line, 4);
+            assert!(
+                hover.contains("Type: **type-definition**"),
+                "{name} line {line}: {hover}"
+            );
+            assert!(
+                hover.contains(&format!("Declares: **{declares}**")),
+                "{name} line {line}: {hover}"
+            );
+        }
+    }
 
+    fixture.shutdown();
+}
+
+/// Making standalone schema regions authoritative must not disturb the
+/// Markdown substrate's own autolink hover.
+///
+/// This is the exact token the arbitration hands to the schema layer inside a
+/// standalone envelope. In ordinary prose no envelope is activated, so it is
+/// nothing but an autolink and must still hover as one.
+#[test]
+fn markdown_autolink_hover_survives_standalone_schema_arbitration() {
+    let workspace = tempfile::tempdir().unwrap();
+    let text = "# Doc\n\n<starting::x-509>\n";
+    let path = workspace.path().join("doc.md");
+    std::fs::write(&path, text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), text);
+    let autolink = hover_markup(&mut fixture, uri.as_str(), 2, 5);
+    assert!(autolink.contains("Unresolved link"), "autolink hover: {autolink}");
     fixture.shutdown();
 }
 
@@ -3741,9 +3774,9 @@ fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnost
 /// claim consulted during a malformed edit must agree, or the overlay is
 /// dropped and the retained model dies on exactly the keystroke it exists for.
 ///
-/// Completion is deliberately not asserted here: its cursor is line- and
-/// indent-oriented, so it does not activate inside a flow mapping in the valid
-/// state either. That is a separate gap, not something this claim can retain.
+/// Completion inside these envelopes has its own coverage in
+/// [`meta_schema_standalone_flow_completion_locates_the_cursor_structurally`];
+/// what this test owns is the retained *model*.
 #[test]
 fn meta_schema_standalone_flow_envelopes_retain_last_good_across_malformed_edit() {
     // (file, valid, malformed, character inside the `title` key token)
@@ -3803,6 +3836,109 @@ fn meta_schema_standalone_flow_envelopes_retain_last_good_across_malformed_edit(
         assert!(
             hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
             "{name}: the retained flow model survives a malformed edit: {hover}"
+        );
+    }
+
+    fixture.shutdown();
+}
+
+/// Semantic completion locates a flow cursor structurally, not by indentation.
+///
+/// The standalone parser accepts block and flow mappings equally, so every
+/// document it recognizes owes completion. A one-line flow envelope has no
+/// `key:` line and no indentation ancestry, so the block cursor model answered
+/// nothing for any of the forms below — in the valid state as well as the
+/// malformed one the last-good model exists to serve.
+///
+/// The two sequence forms are the interesting pair: an outer array is a root
+/// union whose arms are mappings (the flow cursor must see through it to the
+/// arm's own key), while a union-valued item is a mapping entry whose *value*
+/// is a sequence (the flow cursor must stop at the entry and leave the arms to
+/// the shared type-expression cursor authority).
+#[test]
+fn meta_schema_standalone_flow_completion_locates_the_cursor_structurally() {
+    // (file, valid, malformed, character just past the authored prefix, label)
+    let cases = [
+        (
+            "pure.yaml",
+            r#"{"$schema": {"title": "string"}}"#,
+            r#"{"$schema": {"title": "str"}}"#,
+            26u32,
+            "string",
+        ),
+        (
+            "tagged.yaml",
+            "{kind: schema, types: {title: string}}",
+            "{kind: schema, types: {title: str}}",
+            33,
+            "string",
+        ),
+        (
+            "nested.yaml",
+            "{$schema: {config: {title: string}}}",
+            "{$schema: {config: {title: str}}}",
+            30,
+            "string",
+        ),
+        (
+            "outer-array.yaml",
+            "{$schema: [{title: string}, {name: number}]}",
+            "{$schema: [{title: string}, {name: num}]}",
+            38,
+            "number",
+        ),
+        (
+            "union-item.yaml",
+            "{$schema: {title: [string, number]}}",
+            "{$schema: {title: [string, num]}}",
+            30,
+            "number",
+        ),
+    ];
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    for (name, valid, malformed, character, label) in cases {
+        let path = workspace.path().join(name);
+        let valid = format!("{valid}\n");
+        let malformed = format!("{malformed}\n");
+        std::fs::write(&path, &valid).unwrap();
+        let uri = url::Url::from_file_path(path).unwrap();
+        open(&fixture, uri.as_str(), &valid);
+        assert!(
+            fixture.wait_for_diagnostics(uri.as_str()).is_empty(),
+            "{name}: the valid flow envelope must parse cleanly"
+        );
+        let labels = completion_labels(&mut fixture, uri.as_str(), 0, character);
+        assert!(
+            labels.iter().any(|offered| offered == label),
+            "{name}: a valid flow envelope owes completion: {labels:?}"
+        );
+
+        fixture.notify(
+            "textDocument/didChange",
+            json!({
+                "textDocument": { "uri": uri.as_str(), "version": 2 },
+                "contentChanges": [ { "text": malformed } ]
+            }),
+        );
+        // Which code is published depends on the envelope's shape (a root union
+        // fails as a whole declaration, a mapping entry as one definition); what
+        // matters here is that the *current* buffer owns the error while the
+        // retained model keeps answering.
+        let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic["source"] == json!("darkmatter.schema")),
+            "{name}: the current malformed buffer owns diagnostics: {diagnostics:?}"
+        );
+        let labels = completion_labels(&mut fixture, uri.as_str(), 0, character);
+        assert!(
+            labels.iter().any(|offered| offered == label),
+            "{name}: the retained flow model owes completion too: {labels:?}"
         );
     }
 

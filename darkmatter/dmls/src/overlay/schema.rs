@@ -167,6 +167,26 @@ fn pattern_key_source(key: &PatternKey) -> String {
     }
 }
 
+/// Whether `offset` falls inside a complete definition of an activated
+/// standalone schema document.
+///
+/// Pattern keys are authored as `<starting::…>`, `<ending::…>`, and
+/// `<pattern::…>`, which are also well-formed CommonMark autolinks. The
+/// substrate reads a standalone YAML buffer as Markdown like any other, so
+/// without this test it claims those keys as links before the schema layer is
+/// ever asked.
+pub fn standalone_semantic_region_covers(state: &SchemaAuthoringState, offset: usize) -> bool {
+    let SchemaAuthoringState::Standalone { model: Some(model), .. } = state else {
+        return false;
+    };
+    let Some(schema) = model.schema() else {
+        return false;
+    };
+    semantic_type_regions(schema, &model.source_map)
+        .iter()
+        .any(|region| region.key_span.contains(&offset) || region.definition_span.contains(&offset))
+}
+
 /// Parsed schema-authoring state attached to a [`super::DocumentOverlay`].
 #[derive(Debug, Clone)]
 pub enum SchemaAuthoringState {
@@ -260,8 +280,19 @@ pub fn standalone_envelope_claim(text: &str) -> Option<StandaloneSchemaEnvelope>
 /// Top-level `key: value` entries of a block mapping: one per unindented line.
 fn block_top_level_entries(text: &str) -> Vec<(String, String)> {
     let mut entries = Vec::new();
+    let mut quote: Option<char> = None;
     for line in text.lines() {
         let line = line.trim_end_matches('\r');
+        // A line that begins inside a quoted scalar is that scalar's
+        // continuation, not a mapping entry: `description: 'multi` followed by
+        // a literal `kind: schema` line is one ordinary key, and reading the
+        // continuation as structure would tag the document as an envelope the
+        // authoritative parser refuses.
+        let continuation = quote.is_some();
+        advance_quote_state(line, &mut quote);
+        if continuation {
+            continue;
+        }
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') || trimmed == "---" || trimmed == "..." {
             continue;
@@ -278,6 +309,75 @@ fn block_top_level_entries(text: &str) -> Vec<(String, String)> {
         entries.push((key, value.trim().to_string()));
     }
     entries
+}
+
+/// Advances quoted-scalar state by one character taken from inside an active
+/// quoted scalar.
+///
+/// Two YAML rules a "the same quote character closes it" scan gets wrong, both
+/// of which let an authored quote escape its scalar and expose the commas and
+/// colons the recognizer treats as structure:
+///
+/// - inside a double-quoted scalar `\` escapes the next character, so `\"` is
+///   not a terminator;
+/// - inside a single-quoted scalar `\` is *not* an escape, but `''` denotes a
+///   literal `'`.
+///
+/// ## Returns
+///
+/// Whether `next` was absorbed as the second half of a `''` pair. A caller
+/// echoing its input must then consume and echo that character too, so the
+/// scalar is kept verbatim.
+fn step_quoted(
+    quote: &mut Option<char>,
+    escaped: &mut bool,
+    ch: char,
+    next: Option<char>,
+) -> bool {
+    let Some(open) = *quote else {
+        return false;
+    };
+    if *escaped {
+        *escaped = false;
+    } else if open == '"' && ch == '\\' {
+        *escaped = true;
+    } else if ch == open {
+        if open == '\'' && next == Some('\'') {
+            return true;
+        }
+        *quote = None;
+    }
+    false
+}
+
+/// Advances cross-line quoted-scalar state by one physical line of a block
+/// mapping.
+///
+/// A quote character opens a scalar only where a scalar may begin (line start,
+/// or after `:`, `,`, `-`, `[`, `{`). Elsewhere it is ordinary text: the plain
+/// scalar `don't` must not open a quote that swallows every following line and
+/// drops a genuine envelope's retained model.
+fn advance_quote_state(line: &str, quote: &mut Option<char>) {
+    let mut chars = line.chars().peekable();
+    let mut escaped = false;
+    let mut at_scalar_start = true;
+    let mut previous_space = true;
+    while let Some(ch) = chars.next() {
+        if quote.is_some() {
+            if step_quoted(quote, &mut escaped, ch, chars.peek().copied()) {
+                chars.next();
+            }
+            continue;
+        }
+        match ch {
+            '#' if previous_space => return,
+            '\'' | '"' if at_scalar_start => *quote = Some(ch),
+            _ => {}
+        }
+        previous_space = ch.is_whitespace();
+        at_scalar_start =
+            matches!(ch, ':' | ',' | '-' | '[' | '{') || (at_scalar_start && previous_space);
+    }
 }
 
 /// Byte offset of the `{` opening a whole-document flow mapping, skipping
@@ -313,8 +413,10 @@ fn flow_top_level_entries(inner: &str) -> Vec<(String, String)> {
     let mut previous_space = true;
     let mut key: Option<String> = None;
     let mut token = String::new();
+    let mut escaped = false;
+    let mut chars = inner.chars().peekable();
 
-    for ch in inner.chars() {
+    while let Some(ch) = chars.next() {
         if in_comment {
             if ch == '\n' {
                 in_comment = false;
@@ -322,10 +424,12 @@ fn flow_top_level_entries(inner: &str) -> Vec<(String, String)> {
             }
             continue;
         }
-        if let Some(open) = quote {
+        if quote.is_some() {
             token.push(ch);
-            if ch == open {
-                quote = None;
+            if step_quoted(&mut quote, &mut escaped, ch, chars.peek().copied())
+                && let Some(doubled) = chars.next()
+            {
+                token.push(doubled);
             }
             previous_space = false;
             continue;
@@ -334,6 +438,7 @@ fn flow_top_level_entries(inner: &str) -> Vec<(String, String)> {
             '\'' | '"' => {
                 token.push(ch);
                 quote = Some(ch);
+                escaped = false;
             }
             '#' if previous_space => in_comment = true,
             '{' | '[' => {
@@ -381,6 +486,164 @@ fn push_flow_entry(
 fn lexical_scalar(source: &str) -> Option<String> {
     let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(source).ok()?;
     value.as_str().map(str::to_string)
+}
+
+/// A cursor's structural position inside a YAML **flow** collection.
+///
+/// Block presentation hands a cursor its key and its ancestry through line
+/// indentation. A flow collection has neither: `{$schema: {title: string}}` is
+/// one line at column zero. The authoritative parser accepts both
+/// presentations, so the capabilities that locate a cursor must too.
+pub(crate) struct FlowCursor {
+    /// Document byte offset of the delimiter opening the *outermost* flow
+    /// collection. A flow value can be the value of an ordinary block key, so
+    /// the block ancestry above this offset remains the caller's to resolve
+    /// with the same block helpers it already uses.
+    pub(crate) root_start: usize,
+    /// Mapping keys enclosing the cursor *within* the flow collection,
+    /// outermost first. Sequences are transparent: like a block `- ` item they
+    /// contribute nesting but no key.
+    pub(crate) ancestors: Vec<String>,
+    /// The key whose value the cursor is authoring.
+    pub(crate) key: String,
+    /// Document byte offset where that value's authored text begins.
+    pub(crate) value_start: usize,
+}
+
+/// One enclosing flow collection.
+struct FlowFrame {
+    /// Byte offset of the `{` or `[` that opened it.
+    start: usize,
+    /// Whether it is a mapping (`{`) rather than a sequence (`[`).
+    mapping: bool,
+    /// The key this collection is the value of. `None` at the flow root and for
+    /// a collection authored as a sequence element.
+    label: Option<String>,
+    /// The key whose value is currently being authored, once its `:` was read.
+    key: Option<String>,
+    /// Where that value's text begins, once a non-space character was typed.
+    value_start: Option<usize>,
+}
+
+/// Locates a cursor inside a flow collection, or `None` when `offset` is in
+/// ordinary block context (where indentation already answers the question).
+///
+/// A real parse is unavailable by construction — this runs on every keystroke,
+/// including on text that does not parse — so the walk is lexical, linear, and
+/// shares its quoted-scalar rules with [`standalone_envelope_claim`]'s scanner.
+/// A delimiter only opens a collection where a YAML scalar may begin, so a `{`
+/// inside a plain scalar (`title: a {b`) is text rather than structure.
+///
+/// The cursor's own value text is deliberately *not* interpreted here: the
+/// innermost enclosing mapping entry is reported whole, so the union arms,
+/// inline objects, and constraint lists inside it stay the business of the
+/// shared tolerant type-expression cursor authority.
+pub(crate) fn flow_value_cursor(text: &str, offset: usize) -> Option<FlowCursor> {
+    let prefix = text.get(..offset)?;
+    let mut frames: Vec<FlowFrame> = Vec::new();
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    let mut in_comment = false;
+    let mut at_scalar_start = true;
+    let mut previous_space = true;
+    let mut token = String::new();
+    let mut chars = prefix.char_indices().peekable();
+
+    while let Some((index, ch)) = chars.next() {
+        if in_comment {
+            if ch == '\n' {
+                in_comment = false;
+                previous_space = true;
+                at_scalar_start = true;
+            }
+            continue;
+        }
+        if quote.is_some() {
+            token.push(ch);
+            let next = chars.peek().map(|(_, ch)| *ch);
+            if step_quoted(&mut quote, &mut escaped, ch, next)
+                && let Some((_, doubled)) = chars.next()
+            {
+                token.push(doubled);
+            }
+            previous_space = false;
+            at_scalar_start = false;
+            continue;
+        }
+        match ch {
+            '#' if previous_space => in_comment = true,
+            '\'' | '"' if at_scalar_start => {
+                note_flow_value_start(&mut frames, index);
+                quote = Some(ch);
+                escaped = false;
+                token.push(ch);
+            }
+            '{' | '[' if at_scalar_start => {
+                note_flow_value_start(&mut frames, index);
+                let label = frames
+                    .last()
+                    .filter(|frame| frame.mapping)
+                    .and_then(|frame| frame.key.clone());
+                frames.push(FlowFrame {
+                    start: index,
+                    mapping: ch == '{',
+                    label,
+                    key: None,
+                    value_start: None,
+                });
+                token.clear();
+            }
+            '}' | ']' => {
+                frames.pop();
+                token.clear();
+            }
+            ':' if frames.last().is_some_and(|frame| frame.mapping && frame.key.is_none()) => {
+                let key = lexical_scalar(token.trim())
+                    .unwrap_or_else(|| token.trim().to_string());
+                let frame = frames.last_mut().expect("guarded above");
+                frame.key = Some(key);
+                frame.value_start = None;
+                token.clear();
+            }
+            ',' if !frames.is_empty() => {
+                let frame = frames.last_mut().expect("guarded above");
+                frame.key = None;
+                frame.value_start = None;
+                token.clear();
+            }
+            _ => {
+                if !ch.is_whitespace() {
+                    note_flow_value_start(&mut frames, index);
+                }
+                token.push(ch);
+            }
+        }
+        previous_space = ch.is_whitespace();
+        at_scalar_start =
+            matches!(ch, ':' | ',' | '-' | '[' | '{') || (at_scalar_start && previous_space);
+    }
+
+    let root_start = frames.first()?.start;
+    // Sequences carry no key of their own, so a cursor in one is authoring the
+    // value of the nearest enclosing mapping entry — the same reading block
+    // presentation gives `key: [a, b`.
+    let mapping = frames.iter().rposition(|frame| frame.mapping)?;
+    let frame = &frames[mapping];
+    Some(FlowCursor {
+        root_start,
+        ancestors: frames[..=mapping].iter().filter_map(|f| f.label.clone()).collect(),
+        key: frame.key.clone()?,
+        value_start: frame.value_start.unwrap_or(offset),
+    })
+}
+
+fn note_flow_value_start(frames: &mut [FlowFrame], index: usize) {
+    if let Some(frame) = frames.last_mut()
+        && frame.key.is_some()
+        && frame.value_start.is_none()
+    {
+        frame.value_start = Some(index);
+    }
 }
 
 fn effective_shape(outcome: &SchemaOutcome) -> SchemaShape {
@@ -875,6 +1138,71 @@ mod tests {
             "[1, 2, 3]\n",
         ] {
             assert_eq!(standalone_envelope_claim(inert), None, "{inert:?}");
+        }
+    }
+
+    /// An escaped quote must not end the scanner's quoted region early: a
+    /// prematurely closed scalar re-opens on the real closing quote and
+    /// swallows the top-level `,` that separates the document's other keys,
+    /// collapsing ordinary YAML into a sole-`$schema` pure claim.
+    ///
+    /// The claim must agree with the authoritative parser in both directions,
+    /// so each case is asserted against
+    /// `parse_standalone_schema_document`'s own classification.
+    #[test]
+    fn envelope_claim_tracks_escapes_in_quoted_scalars() {
+        for inert in [
+            // Raw JSON Schema whose `$schema` value carries an escaped quote.
+            r#"{"$schema":"https://example.com/quo\"ted","type":"object"}"#,
+            // A trailing backslash inside a *single*-quoted scalar is literal
+            // text, not an escape, so the following `,` is still a separator.
+            r#"{'$schema': 'a\', 'type': 'object'}"#,
+            // Doubled `''` is a literal quote inside a single-quoted scalar.
+            r#"{'$schema': 'quo''ted', 'type': 'object'}"#,
+            // Block presentation: a multi-line quoted value whose continuation
+            // lines look like top-level entries.
+            "description: \"some text\nkind: schema\n\"\n",
+            "description: 'multi\nkind: schema\n'\n",
+            "description: \"escaped \\\" quote\"\ntype: object\n",
+        ] {
+            assert_eq!(standalone_envelope_claim(inert), None, "{inert:?}");
+            assert!(
+                matches!(
+                    darkmatter::markdown::schemas::parse_standalone_schema_document(
+                        inert,
+                        Path::new("/w/schema.yaml"),
+                    ),
+                    Ok(None)
+                ),
+                "the authoritative parser must also decline {inert:?}"
+            );
+        }
+
+        // The false-negative direction: a genuine sole-`$schema` envelope whose
+        // value hides a `,` and a `:` behind an escaped quote must still
+        // activate.
+        for (pure, presentation) in [
+            (r#"{"$schema": "a\", b: c"}"#, "flow"),
+            (r#"{"$schema": {"title": "a \" quote"}}"#, "flow nested"),
+            ("$schema:\n  title: \"a \\\" quote\"\n", "block"),
+            ("$schema:\n  title: 'it''s a string'\n", "block doubled quote"),
+        ] {
+            assert_eq!(
+                standalone_envelope_claim(pure),
+                Some(StandaloneSchemaEnvelope::Pure),
+                "{presentation}: {pure:?}"
+            );
+        }
+
+        for (tagged, presentation) in [
+            (r#"{"kind": "schema", "title": "a\", b"}"#, "flow"),
+            ("kind: schema\ntitle: \"a\\\" quote\"\n", "block"),
+        ] {
+            assert_eq!(
+                standalone_envelope_claim(tagged),
+                Some(StandaloneSchemaEnvelope::Tagged),
+                "{presentation}: {tagged:?}"
+            );
         }
     }
 

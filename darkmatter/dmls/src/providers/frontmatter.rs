@@ -98,24 +98,11 @@ fn schema_completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem
 /// never from searching the value text for a delimiter.
 fn meta_schema_completion(ctx: &DocumentContext, offset: usize) -> Option<Vec<CompletionItem>> {
     let overlay = ctx.overlay?;
-    let (line_start, prefix) = line_prefix(ctx.text, offset);
-    let indent = prefix.len() - prefix.trim_start().len();
-    let trimmed = prefix.trim_start();
-    let ancestors = enclosing_path(ctx, offset, line_start, indent);
-
-    let (value_start, kinds) = if let Some((key, partial)) =
-        value_cursor(ctx, offset, line_start, trimmed)
-    {
-        let kinds = meta_schema_kinds_for_line(overlay, &ancestors, &key, false)?;
-        (semantic_value_start(ctx, offset, line_start, partial.len()), kinds)
-    } else if let Some(after_dash) = trimmed.strip_prefix("- ") {
-        let kinds = meta_schema_kinds_for_line(overlay, &ancestors, "", true)?;
-        (offset - after_dash.len(), kinds)
-    } else if trimmed == "-" {
-        let kinds = meta_schema_kinds_for_line(overlay, &ancestors, "", true)?;
-        (offset, kinds)
-    } else {
-        return None;
+    let (value_start, kinds) = match flow_cursor(ctx, offset) {
+        Some((value_start, ancestors, key)) => {
+            (value_start, meta_schema_kinds_for_line(overlay, &ancestors, &key, false)?)
+        }
+        None => block_cursor(ctx, overlay, offset)?,
     };
 
     let value_source = ctx.text.get(value_start..)?;
@@ -143,6 +130,57 @@ fn meta_schema_completion(ctx: &DocumentContext, offset: usize) -> Option<Vec<Co
         }
     }
     Some(dedup_completions(items))
+}
+
+/// The `(value_start, meta-schema kinds)` a block-presented cursor resolves to:
+/// a `key:` value, or a `- ` sequence item.
+fn block_cursor(
+    ctx: &DocumentContext,
+    overlay: &crate::overlay::DocumentOverlay,
+    offset: usize,
+) -> Option<(usize, Vec<MetaSchemaKind>)> {
+    let (line_start, prefix) = line_prefix(ctx.text, offset);
+    let indent = prefix.len() - prefix.trim_start().len();
+    let trimmed = prefix.trim_start();
+    let ancestors = enclosing_path(ctx, offset, line_start, indent);
+
+    if let Some((key, partial)) = value_cursor(ctx, offset, line_start, trimmed) {
+        let kinds = meta_schema_kinds_for_line(overlay, &ancestors, &key, false)?;
+        Some((semantic_value_start(ctx, offset, line_start, partial.len()), kinds))
+    } else if let Some(after_dash) = trimmed.strip_prefix("- ") {
+        let kinds = meta_schema_kinds_for_line(overlay, &ancestors, "", true)?;
+        Some((offset - after_dash.len(), kinds))
+    } else if trimmed == "-" {
+        let kinds = meta_schema_kinds_for_line(overlay, &ancestors, "", true)?;
+        Some((offset, kinds))
+    } else {
+        None
+    }
+}
+
+/// The `(value_start, ancestors, key)` a cursor inside a flow collection
+/// resolves to, or `None` in ordinary block context.
+///
+/// [`schema::flow_value_cursor`] answers only *within* the flow collection; the
+/// block ancestry above its opening delimiter still comes from the block
+/// helpers, so `types:\n  entry: {title: string}` reports the full
+/// `types → entry → title` path rather than a bare `title`.
+fn flow_cursor(ctx: &DocumentContext, offset: usize) -> Option<(usize, Vec<String>, String)> {
+    // A body offset is never frontmatter authoring: braces in prose must not
+    // reach the semantic router. A standalone schema document has no AST and is
+    // authoring everywhere.
+    if overlay_ast(ctx).is_some_and(|ast| !ast.contains_offset(offset)) {
+        return None;
+    }
+    let cursor = crate::overlay::schema::flow_value_cursor(ctx.text, offset)?;
+    let (line_start, prefix) = line_prefix(ctx.text, cursor.root_start);
+    let indent = prefix.len() - prefix.trim_start().len();
+    let mut ancestors = enclosing_path(ctx, cursor.root_start, line_start, indent);
+    if let Some((key, _)) = value_cursor(ctx, cursor.root_start, line_start, prefix.trim_start()) {
+        ancestors.push(key);
+    }
+    ancestors.extend(cursor.ancestors);
+    Some((cursor.value_start, ancestors, cursor.key))
 }
 
 /// The document byte offset where a `key:` line's value begins.

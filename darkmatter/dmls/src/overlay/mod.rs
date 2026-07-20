@@ -314,12 +314,24 @@ impl OverlayState {
                 let envelope = claim?;
                 let error = match result {
                     Err(error) => Arc::new(error),
-                    Ok(None) => Arc::new(SchemaError::SchemaDocument {
-                        path: path.to_path_buf(),
-                        message: serde_yaml_ng::from_str::<serde_yaml_ng::Value>(text)
-                            .expect_err("a lexical claim returning None must be malformed YAML")
-                            .to_string(),
-                    }),
+                    Ok(None) => {
+                        // The claim is lexical and the parser is authoritative.
+                        // When the buffer is well-formed YAML the parser has
+                        // simply declined it, so the claim over-reached: an
+                        // ordinary document stays inert rather than inheriting
+                        // an envelope's diagnostics. Only genuinely malformed
+                        // text — the mid-edit case the claim exists to serve —
+                        // keeps the last-good model alive.
+                        let Err(malformed) =
+                            serde_yaml_ng::from_str::<serde_yaml_ng::Value>(text)
+                        else {
+                            return None;
+                        };
+                        Arc::new(SchemaError::SchemaDocument {
+                            path: path.to_path_buf(),
+                            message: malformed.to_string(),
+                        })
+                    }
                     Ok(Some(_)) => unreachable!("handled above"),
                 };
                 let cache = self.inner.lock().expect("overlay lock poisoned");
@@ -922,6 +934,40 @@ mod tests {
                     )
                     .is_none(),
                 "path-only activation is forbidden for {path:?}"
+            );
+        }
+    }
+
+    /// Escape-bearing scalars once let the lexical claim over-reach on
+    /// well-formed ordinary YAML, and the resulting disagreement with the
+    /// authoritative parser reached an `expect_err` on a successful parse.
+    /// Such a disagreement must deactivate, never crash.
+    #[test]
+    fn escaped_quotes_stay_inert_without_panicking() {
+        let state = OverlayState::default();
+        let roots = [PathBuf::from("/w")];
+        for (uri_text, path, text) in [
+            (
+                "file:///w/raw.schema.json",
+                Path::new("/w/raw.schema.json"),
+                r#"{"$schema":"https://example.com/quo\"ted","type":"object"}"#,
+            ),
+            (
+                "file:///w/quoted.yaml",
+                Path::new("/w/quoted.yaml"),
+                "description: \"some text\nkind: schema\n\"\n",
+            ),
+            (
+                "file:///w/single.yaml",
+                Path::new("/w/single.yaml"),
+                "description: 'multi\nkind: schema\n'\n",
+            ),
+        ] {
+            assert!(
+                state
+                    .for_document(&uri(uri_text), text, path, &DmlsConfig::default(), &roots)
+                    .is_none(),
+                "escape-bearing ordinary YAML must stay inert: {path:?}"
             );
         }
     }

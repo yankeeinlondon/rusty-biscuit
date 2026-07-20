@@ -37,6 +37,7 @@ use crate::capabilities::ClientProfile;
 use crate::config::DmlsConfig;
 use crate::graph::{DocumentId, WorkspaceGraph};
 use crate::overlay::DocumentOverlay;
+use crate::overlay::schema::standalone_semantic_region_covers;
 use crate::source_map::SourceMap;
 
 /// Everything a provider needs to answer a request about one open document.
@@ -168,6 +169,21 @@ impl Provider for SubstrateProvider {
     }
 
     fn hover(&self, ctx: &DocumentContext, offset: usize) -> Option<Hover> {
+        // Hover arbitration is first-non-empty-wins and the substrate runs
+        // first, so a Layer-0 claim is final. Inside an activated standalone
+        // schema region that is the wrong answer — the region is a declared
+        // type, not prose — and the ordering cannot be reversed without giving
+        // the overlay precedence over Markdown everywhere. Declining here is
+        // the narrow fix: it is scoped to spans a schema document already owns,
+        // so no ordinary Markdown buffer can reach it.
+        if ctx
+            .overlay
+            .is_some_and(|overlay| {
+                standalone_semantic_region_covers(&overlay.schema_authoring, offset)
+            })
+        {
+            return None;
+        }
         hover::hover(ctx, offset)
     }
 
