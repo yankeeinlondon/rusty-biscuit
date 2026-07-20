@@ -129,6 +129,27 @@ impl DiagnosticSnapshot {
         }
     }
 
+    /// Project the diagnostic [`select_effective_diagnostic`] chooses for
+    /// `error`'s chain.
+    ///
+    /// The seam for a boundary that holds an *erased* error — a
+    /// `color_eyre::eyre::Report` (via `report.as_ref()`) or a `Box<dyn Error>`
+    /// — rather than a concrete type. A `Report` boxes its source rather than
+    /// discarding it, so the typed value is still reachable by downcast; this
+    /// runs the same selection walk the CLI renders through, so a record that
+    /// stores the result cannot disagree with what the failure printed.
+    ///
+    /// ## Returns
+    ///
+    /// `None` when nothing in the chain is a registered Claudine diagnostic —
+    /// the caller's cue that only prose was ever available.
+    ///
+    /// [`select_effective_diagnostic`]: super::select_effective_diagnostic
+    pub fn select(error: &(dyn std::error::Error + 'static)) -> Option<Self> {
+        let selected = super::select_effective_diagnostic(error)?.diagnostic()?;
+        Some(Self::from_diagnostic(selected))
+    }
+
     /// Project a snapshot from a locked catalog `code` and a `message`.
     ///
     /// The seam for a failure that reaches a boundary as a synthesized

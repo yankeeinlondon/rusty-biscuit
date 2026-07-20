@@ -28,10 +28,11 @@ use darkmatter::markdown::errors::as_block_error;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use super::Diagnostic;
+use super::{Diagnostic, RestoredDiagnostic};
 use crate::composition::CompositionError;
 use crate::error::ClaudineError;
 use crate::harness::error::HarnessError;
+use crate::reporting::IngestError;
 
 /// Maximum number of causes the selection walk visits.
 ///
@@ -122,6 +123,15 @@ pub fn as_diagnostic<'a>(
         return Some(v);
     }
     if let Some(v) = error.downcast_ref::<HarnessError>() {
+        return Some(v);
+    }
+    if let Some(v) = error.downcast_ref::<IngestError>() {
+        return Some(v);
+    }
+    // A snapshot that was captured early and restored at the boundary that
+    // finally acts on it. Unregistered it would render as a bare `Error:` line
+    // — the same incident the rest of this list exists to prevent.
+    if let Some(v) = error.downcast_ref::<RestoredDiagnostic>() {
         return Some(v);
     }
     None

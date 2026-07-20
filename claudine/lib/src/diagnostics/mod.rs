@@ -66,6 +66,7 @@ mod discovery;
 mod error_kind;
 mod facets;
 mod registry;
+mod restored;
 mod snapshot;
 
 pub use discovery::{
@@ -75,6 +76,7 @@ pub use discovery::{
 pub use error_kind::code_for_error_kind;
 pub use facets::{Category, Disposition, Origin, Severity};
 pub use registry::{CODES, CodeSpec, code_spec};
+pub use restored::RestoredDiagnostic;
 pub use snapshot::{DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION, DiagnosticCause, DiagnosticSnapshot};
 
 use std::error::Error as StdError;

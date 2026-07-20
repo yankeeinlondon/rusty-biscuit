@@ -26,7 +26,8 @@
 //! `err.category` / `err.code`.
 //!
 //! Which error in a chain answers all of this is decided by
-//! [`select_effective_diagnostic`] — the same walk the CLI renders through and
+//! [`select_effective_diagnostic`](crate::diagnostics::select_effective_diagnostic) —
+//! the same walk the CLI renders through and
 //! the snapshot serializes through, so a route cannot classify one cause while
 //! rendering another. Parse-time validation (see
 //! [`super::lifecycle::validate_no_err_in_no_error_events`]) rejects `err`
@@ -50,7 +51,7 @@ use darkmatter::markdown::compose::subtree::InjectedGlobal;
 use serde_json::{Map, Value};
 
 use super::super::error::CompositionError;
-use crate::diagnostics::{DiagnosticSnapshot, select_effective_diagnostic};
+use crate::diagnostics::DiagnosticSnapshot;
 use crate::error::ClaudineError;
 use crate::harness::concise_message;
 use crate::harness::error::HarnessError;
@@ -159,7 +160,9 @@ impl LifecycleErrorInfo {
         }
     }
 
-    /// Build from the diagnostic [`select_effective_diagnostic`] chooses (via
+    /// Build from the diagnostic
+    /// [`select_effective_diagnostic`](crate::diagnostics::select_effective_diagnostic)
+    /// chooses (via
     /// [`Self::select`]), falling back to `error`'s own prose when the chain has
     /// none.
     fn from_selection(
@@ -189,13 +192,14 @@ impl LifecycleErrorInfo {
         }
     }
 
-    /// Project the diagnostic [`select_effective_diagnostic`] chooses into the
+    /// Project the diagnostic
+    /// [`select_effective_diagnostic`](crate::diagnostics::select_effective_diagnostic)
+    /// chooses into the
     /// shared owned [`DiagnosticSnapshot`] — the one place `err.*` reads facets,
     /// so it resolves through the same selection the CLI renders and the machine
     /// surface serializes.
     fn select(error: &(dyn StdError + 'static)) -> Option<DiagnosticSnapshot> {
-        let selected = select_effective_diagnostic(error)?.diagnostic()?;
-        Some(DiagnosticSnapshot::from_diagnostic(selected))
+        DiagnosticSnapshot::select(error)
     }
 
     /// Build a snapshot for a failed lifecycle stack action (a side-effect,

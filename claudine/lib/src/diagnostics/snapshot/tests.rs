@@ -403,3 +403,102 @@ fn typed_errors() -> Vec<Box<dyn Diagnostic>> {
         }),
     ]
 }
+
+// -- selection through an erased boundary ----------------------------------
+//
+// `DiagnosticSnapshot::select` exists for the exec-wiring boundary, which
+// returns `color_eyre::eyre::Report`. The library cannot depend on color_eyre,
+// but the property that makes the seam work is `Report`'s, not its own:
+// boxing an error publishes it to the chain rather than discarding it, and the
+// selection walk reaches it by downcast. `Box<dyn Error>` exercises exactly
+// that shape.
+
+/// The erasure the exec-wiring boundary performs, in the form the library can
+/// construct: a concrete diagnostic behind a trait object.
+fn erased(error: CompositionError) -> Box<dyn std::error::Error + 'static> {
+    Box::new(error)
+}
+
+#[test]
+fn select_recovers_every_facet_through_an_erased_boundary() {
+    let erased = erased(file_not_found());
+
+    let snapshot = DiagnosticSnapshot::select(erased.as_ref())
+        .expect("a registered diagnostic in the chain projects a snapshot");
+
+    assert_eq!(snapshot.code, "composition.invalid_file_reference");
+    assert_eq!(snapshot.category, "composition");
+    assert_eq!(snapshot.origin, "author");
+    assert_eq!(snapshot.detail["reference"], "missing.md");
+}
+
+#[test]
+fn select_agrees_with_direct_projection() {
+    // The seam must not become a second, divergent derivation: recovering a
+    // diagnostic through erasure and projecting it directly are the same walk.
+    let direct = DiagnosticSnapshot::from_diagnostic(&file_not_found());
+    let through_erasure = DiagnosticSnapshot::select(erased(file_not_found()).as_ref())
+        .expect("the erased chain still carries the diagnostic");
+
+    assert_eq!(through_erasure, direct);
+}
+
+#[test]
+fn select_projects_the_one_level_cause_through_an_erased_boundary() {
+    // A transparent wrapper over a semantic cause: selection walks through the
+    // wrapper, so the *cause* is what must survive erasure with facets intact.
+    let wrapped = CompositionError::LifecycleEvaluationAlreadyEmitted {
+        inner: Box::new(file_not_found()),
+    };
+
+    let snapshot = DiagnosticSnapshot::select(erased(wrapped).as_ref())
+        .expect("the wrapper's cause is registered");
+
+    assert_eq!(snapshot.code, "composition.invalid_file_reference");
+    assert_eq!(snapshot.detail["reference"], "missing.md");
+}
+
+#[test]
+fn select_returns_none_when_the_chain_holds_only_prose() {
+    // The honest-`None` case the three record sites rely on: a boundary whose
+    // failure never was a Claudine diagnostic records prose and no snapshot,
+    // rather than a fabricated identity.
+    #[derive(Debug)]
+    struct Prose;
+    impl std::fmt::Display for Prose {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("something went wrong")
+        }
+    }
+    impl std::error::Error for Prose {}
+
+    let erased: Box<dyn std::error::Error + 'static> = Box::new(Prose);
+    assert!(DiagnosticSnapshot::select(erased.as_ref()).is_none());
+}
+
+#[test]
+fn a_selected_snapshot_round_trips_through_json() {
+    // The record types that now carry a snapshot are the reason it must
+    // survive serialization: the facets and the one-level cause are the payload.
+    let snapshot = DiagnosticSnapshot::select(erased(file_not_found()).as_ref()).unwrap();
+
+    let json = serde_json::to_string(&snapshot).expect("snapshot serializes");
+    let restored: DiagnosticSnapshot = serde_json::from_str(&json).expect("snapshot deserializes");
+
+    assert_eq!(restored, snapshot);
+}
+
+#[test]
+fn a_record_serialized_without_a_cause_still_deserializes() {
+    // Backward compatibility for a record written before its producer had a
+    // cause to project: `cause` is `skip_serializing_if`, so an older payload
+    // simply lacks the key and must not fail to parse.
+    let snapshot = DiagnosticSnapshot::select(erased(file_not_found()).as_ref()).unwrap();
+    let mut json: Value = serde_json::to_value(&snapshot).unwrap();
+    json.as_object_mut().unwrap().remove("cause");
+
+    let restored: DiagnosticSnapshot =
+        serde_json::from_value(json).expect("a payload without `cause` deserializes");
+    assert!(restored.cause.is_none());
+    assert_eq!(restored.code, snapshot.code);
+}
