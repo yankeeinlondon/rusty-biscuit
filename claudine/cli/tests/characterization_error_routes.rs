@@ -184,16 +184,16 @@ fn find_events_log(dir: &Path) -> Option<PathBuf> {
 
 /// The motivating incident (spec §"Motivating Incident").
 ///
-/// `initialize.stack` proxies to a target that does not exist.
-/// `composition::resolve_proxy_target` returns a typed
-/// `HarnessError::PathResolutionFailed`, which `pipeline.rs:1162` flattens with
-/// `eyre!("lifecycle initialize proxy: {e}")`.
+/// `initialize.stack` proxies to a target that does not exist. When
+/// `composition::resolve_proxy_target` fails, the initialize proxy hand-off
+/// returns the typed `CompositionError::InvalidFileReference` (carrying the
+/// underlying resolution error as its `#[source]`), which renders as a
+/// source-aware component block.
 ///
 /// Baseline: the resolution failure aborts the run **before** `start`, so no
-/// terminal event fires — `initialize` is the only marker. Phase 4 replaces the
-/// `eyre!` with a typed wrapper and Phase 5 renders it as a `StatusBlock`;
-/// neither may start running `failure`/`finalize` here, and neither may change
-/// the exit code.
+/// terminal event fires — `initialize` is the only marker. The typed wrapper
+/// and its block rendering must not run `failure`/`finalize` here, nor change
+/// the exit code (exit 1, surfaced exactly once).
 #[test]
 fn characterize_initialize_proxy_resolution_failure() {
     let outcome = run_route(
@@ -378,10 +378,11 @@ Body
 /// `execute_harness_attempt` — after `start`, before the provider spawns.
 ///
 /// Baseline: `start` fires, the provider never runs, and `failure` then
-/// `finalize` fire with an `err` present. Phase 5 migrates this site to pass a
-/// typed diagnostic, which flips `err.kind`/`err.variant` from the facet-less
-/// labels to the faceted `category`/`code` values — an *intended* change, so the
-/// marker values are not pinned here, only their **order and presence**.
+/// `finalize` fire with an `err` present. The site passes the typed diagnostic
+/// through `LifecycleErrorInfo::from_error_or_action`, so `err` carries the
+/// faceted `category`/`code` values rather than the facet-less labels. Those
+/// marker values are an intended, evolving surface, so they are not pinned
+/// here — only their **order and presence**.
 #[test]
 fn characterize_post_start_setup_failure() {
     let outcome = run_route(
@@ -434,15 +435,15 @@ Body
 
 /// Harness pre-flight failure carrying a typed `HarnessError`.
 ///
-/// A blacklisted `::shell` directive is rejected at pre-flight. The typed
-/// `HarnessError` is wrapped by the pre-flight boundary and surfaces today as a
-/// `CompositionError` block whose body is the *flattened* harness text — the
-/// `HarnessError`'s own richer block never renders, because `error_walker.rs`
-/// cannot discover `HarnessError` (inventory §F).
+/// A blacklisted `::shell` directive is rejected at pre-flight. The pre-flight
+/// boundary surfaces the typed `HarnessError` as a discoverable structured
+/// diagnostic block: `as_diagnostic` registers `HarnessError`, so its own
+/// structured block renders (the real-terminal pre-flight Level-2 case asserts
+/// that block).
 ///
 /// Baseline: exit 1, no lifecycle markers (pre-flight precedes `start`), one
-/// emission. Phase 5 makes the inner diagnostic discoverable, which changes the
-/// block's *content* but must not change any of the three pinned properties.
+/// emission. The block's *content* is not pinned here — only these three
+/// baseline properties are.
 #[cfg(unix)]
 #[test]
 fn characterize_preflight_shell_denial() {
