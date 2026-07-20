@@ -15,8 +15,8 @@
 //! [`available`] returns `false` when `cliclick` is not on `$PATH`.
 //! Tests that depend on it must early-return with a "skipping:
 //! requires cliclick" message rather than fail. macOS-only by
-//! construction; on Linux/Windows callers should reach for a
-//! platform-equivalent (`xdotool`, etc.) — none implemented here yet.
+//! construction; the platform equivalents are [`crate::xdotool`]
+//! (Linux/X11) and [`crate::win_input`] (Windows).
 //!
 //! [`accessibility_trusted`] is the second half of the gate: cliclick can be
 //! installed yet still drop every event when the runner lacks macOS

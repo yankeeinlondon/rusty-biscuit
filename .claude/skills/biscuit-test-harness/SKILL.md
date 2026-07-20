@@ -80,7 +80,9 @@ via `skip_with_reason("<X>")` when it returns `false`. No `#[ignore]`.
 | `WezTermHarness` | `wezterm` on `$PATH` **and** `WEZTERM_UNIX_SOCKET` set. |
 | `KittyHarness` | `kitty` on `$PATH` **and** `KITTY_LISTEN_ON` set. |
 | `AppleTerminalHarness` | macOS, `CI != 1`, `osascript` can reach Terminal.app. |
-| `cliclick` (L3) | `cliclick` on `$PATH` (macOS only). |
+| `cliclick` (L3, macOS) | `cliclick` on `$PATH` — checks neither platform nor permission. Gate *additionally* on `cliclick::accessibility_trusted()`, which covers both. |
+| `xdotool` (L3, Linux) | Linux, `xdotool` on `$PATH`, **and** `DISPLAY` set. Wayland reports unavailable and skips. |
+| `win_input` (L3, Windows) | Windows and a working `powershell`. |
 
 `BISCUIT_TEST_LEVEL_REQUIRED=2` (or `3`) flips skips into hard failures — set
 on hosts where the tooling *must* be present.
@@ -178,11 +180,21 @@ no shared resource to contend for. Default (`1`/unset) keeps the serial
 shared-pane path. Backstop: claudine-cli L2 carries a 1 s leak-grace
 override in `.config/nextest.toml` for concurrent child teardown.
 
-## Level 3 — `cliclick`
+## Level 3 — OS keyboard injection
 
-`src/cliclick.rs` wraps the `cliclick` Homebrew utility to synthesize
-real macOS Quartz keyboard events — the **only** way to verify
-"what bytes does the terminal emit when the user presses bare Ctrl?".
+One injector module per platform, each with its own `available()` that
+skips cleanly off its platform. Level 3 is the **only** way to verify
+"what bytes does the terminal emit when the user presses this chord?".
+
+| Module | Platform | Mechanism |
+|--------|----------|-----------|
+| `src/cliclick.rs` | macOS | `cliclick` (Quartz `CGEvent`), plus System Events for modified chords |
+| `src/xdotool.rs` | Linux / X11 | `xdotool key` via the XTEST extension |
+| `src/win_input.rs` | Windows | PowerShell driving `SendKeys.SendWait` |
+
+Window selection is by **unique** title match on all three: zero or
+several matches is an error, never a first-match guess — injecting
+Ctrl+C into the wrong window looks identical to a broken product.
 
 Rules:
 
@@ -193,7 +205,9 @@ Rules:
 - **Bare-modifier press** is structurally unreliable via `cliclick`.
   Chord injection (`Ctrl+R`) works; bare modifiers need an L2
   raw-kitty-bytes test instead.
-- Linux callers would need `xdotool` (not implemented).
+- `xdotool` must never be passed `--window` — that switches it from
+  XTEST to `XSendEvent`, whose flagged events terminals ignore as
+  untrusted. Focus the window first, then inject globally.
 
 ### Never steal focus outside a `level3_` file
 
