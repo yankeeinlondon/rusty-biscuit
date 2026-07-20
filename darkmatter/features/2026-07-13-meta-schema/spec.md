@@ -1,7 +1,7 @@
 ---
 status: ready for planning and implementation
 reviewed: true
-review_iterations: 8
+review_iterations: 9
 reviewed_by: codex/default
 reviewed_on: 2026-07-14
 rulings: "`type-definition` and `schema` semantic types ruled by Ken 2026-07-13"
@@ -749,29 +749,45 @@ accepts only a closed subset of bare names rather than arbitrary definitions.
     imports named `schema` or `type-definition` continue to parse.
 13. L1 and L2 coverage passes through `just test` and `just test-l2`; the
     implementation remains portable across macOS, Windows, and Linux.
-    Subject to the scoped exception below, which is **proposed and awaiting
-    ratification** — it is not yet approved and does not yet relax AC13.
+    Review cycle 9 restored the canonical Level-2 gate to 90/90 by restaging
+    the three terminal-mode tests below on tmux; no scope exception is needed.
 
-### Proposed scoped exception to AC13 (awaiting ratification)
+### AC13 Level-2 gate closure
 
-**Status: PROPOSED — not approved. Ken ratifies scope exceptions.**
+**Status: RESOLVED — the canonical gate is green and no exception is needed.**
 
-`just test` is green. `just test-l2` is red on exactly three tests, all in
+Review cycle 9 restaged the three affected tests on a focused tmux runner,
+where OSC-11 is unanswered and the staged `COLORFGBG` value remains
+authoritative. Their existing luma and foreground assertions were not changed:
+
+- `level2_code_block_inverts_to_light_in_dark_terminal`
+- `level2_default_code_block_inverts_background_and_foreground`
+- `level2_code_block_clears_inherited_dim_before_theme_colors`
+
+The final canonical `just test-l2 --no-fail-fast` run passed Darkmatter 18/18,
+Darkmatter CLI 69/69, and DMLS 3/3 — 90/90 total. The focused runner continues
+to execute the Cargo-built `md` through the compile-time `CARGO_BIN_EXE_md`
+shim, and hosts without tmux skip through the standard Level-2 gate.
+
+#### Historical pre-repair diagnosis
+
+Before review cycle 9, `just test` was green while `just test-l2` was red on
+exactly three tests, all in
 `darkmatter/cli/tests/level2_code_block_styling.rs`:
 
 - `level2_code_block_inverts_to_light_in_dark_terminal`
 - `level2_default_code_block_inverts_background_and_foreground`
 - `level2_code_block_clears_inherited_dim_before_theme_colors`
 
-The exception covers **these three named tests only**. AC13 is otherwise
-unchanged and is not weakened for any other test, tier, or crate.
+The proposed exception covered **these three named tests only**. It was never
+ratified and is now obsolete because the tests and the full gate pass.
 
-**Why they are outside meta-schema execution paths.** This feature changes
-schema parsing, lowering, validation, and DMLS semantic paths. It changes no
-rendering code: `git diff main...HEAD` reports zero changes under
+**Why they were outside meta-schema execution paths.** This feature changes
+schema parsing, lowering, validation, and DMLS semantic paths. Before the
+review-cycle-9 test repair, `git diff main...HEAD` reported zero changes under
 `darkmatter/lib/src/markdown/render/`, and
-`darkmatter/cli/tests/level2_code_block_styling.rs` is byte-identical to
-`main`. The three failures reproduce on `main` and are pre-existing.
+`darkmatter/cli/tests/level2_code_block_styling.rs` was byte-identical to
+`main`. The three failures reproduced on `main` and were pre-existing.
 
 Corrected 2026-07-20 (review-4 implementation): this paragraph previously also
 claimed zero changes under `darkmatter/lib/src/markdown/highlighting/`. That is
@@ -848,15 +864,11 @@ so a steady L2 total is again the expected result. Host load averaged 157 during
 this run; the three failures remained deterministic value mismatches rather than
 timeouts, so load does not explain them.
 
-**Repair path (deliberately not taken here).** Restage the three tests on the
-tmux harness, as `level2_schema_about` already does, or fold their coverage
-into it. That requires porting `run_md_env` / `run_md_after_shell_prefix` in
-`darkmatter/cli/tests/common/level2.rs` to tmux — a shared helper used by the
-whole 69-test CLI L2 corpus. Doing that inside this feature would violate the
-repository's surgical-changes rule and put the entire CLI L2 tier at risk for
-a defect this feature did not introduce. It belongs with the already-filed
-`darkmatter/features/_unscheduled/wezterm-sgr-race-test-fixes/spec.md`, which
-already names this test family and `max_bg_luma_on_line` as fragile.
+**Repair implemented in review cycle 9.** The three tests use a focused tmux
+runner local to `level2_code_block_styling.rs`. The shared
+`run_md_env` / `run_md_after_shell_prefix` helpers and the remainder of the
+69-test CLI Level-2 corpus remain on WezTerm, avoiding the broad helper port
+that earlier reviews rejected as disproportionate.
 
 **Previously noted as a latent hazard — repaired 2026-07-20 (review-6
 implementation).** `darkmatter/cli/tests/level2_errors.rs` ran `md compose` as a
