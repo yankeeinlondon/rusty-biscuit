@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use super::provenance::{
     ReferenceDependencyManifest, ReferenceDocumentIdentity, ReferenceGraphMode,
 };
+use super::snapshot::PreparedHeadingSnapshot;
 use super::types::{
     NodeId, ReferenceGraph, ReferenceGraphNode, ReferenceGraphOptions, ReferenceInsertion,
     ReferenceInsertionContext, ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSet,
@@ -98,6 +99,7 @@ fn build_graph_inner(
 
     // Accumulates one compact identity per unique visited local child.
     let mut dependencies = ReferenceDependencyManifest::default();
+    let mut prepared_headings = PreparedHeadingSnapshot::default();
 
     let (root, all_nodes) = build_node(
         md,
@@ -106,6 +108,7 @@ fn build_graph_inner(
         &mut runtime,
         extract_references,
         &mut dependencies,
+        &mut prepared_headings,
     )?;
 
     runtime.transclusion.exit();
@@ -117,6 +120,7 @@ fn build_graph_inner(
         root,
         all_nodes,
         dependencies,
+        prepared_headings,
     ))
 }
 
@@ -219,19 +223,23 @@ fn flatten_node(node: &ReferenceGraphNode, graph: &ReferenceGraph, out: &mut Vec
 
 /// Build a heading index from prepared content.
 ///
-/// Returns `(start_line, heading_text, heading_level)` tuples sorted by
-/// line number. Used to look up section context for transclusion directive
-/// lines.
-fn build_heading_index(prepared_content: &str) -> Vec<(usize, String, HeadingLevel)> {
+/// Returns `(start_line, heading_text, heading_level)` tuples sorted by line
+/// number for section-context lookups, plus the lowercased heading slugs in
+/// document order. Both projections come from the build's single TOC parse;
+/// the slugs are exactly the set fragment validation checks against.
+fn build_heading_index(
+    prepared_content: &str,
+) -> (Vec<(usize, String, HeadingLevel)>, Vec<String>) {
     let temp_md = Markdown::new(prepared_content);
     let toc = temp_md.toc();
-    let mut index: Vec<(usize, String, HeadingLevel)> = toc
-        .all_headings()
+    let headings = toc.all_headings();
+    let slugs: Vec<String> = headings.iter().map(|h| h.slug.to_lowercase()).collect();
+    let mut index: Vec<(usize, String, HeadingLevel)> = headings
         .into_iter()
         .map(|h| (h.line_range.0, h.title.clone(), h.level))
         .collect();
     index.sort_by_key(|(line, _, _)| *line);
-    index
+    (index, slugs)
 }
 
 /// Look up the active section for a given line number.
@@ -253,6 +261,11 @@ fn section_at_line(
 /// Returns the node itself plus all descendant nodes collected during
 /// recursive traversal. This ensures the caller can assemble a complete
 /// flat node list for the graph.
+///
+/// Every file-sourced node's prepared heading slugs are recorded into
+/// `prepared_headings`: fragment validation reads descendant headings from
+/// that snapshot rather than rereading children from disk, so a post-build
+/// heading edit cannot leak into a one-step report.
 fn build_node(
     md: &Markdown,
     source: &ComposeSource,
@@ -260,6 +273,7 @@ fn build_node(
     runtime: &mut ReferenceAnalysisRuntime,
     extract_references: bool,
     dependencies: &mut ReferenceDependencyManifest,
+    prepared_headings: &mut PreparedHeadingSnapshot,
 ) -> MarkdownResult<(ReferenceGraphNode, Vec<ReferenceGraphNode>)> {
     let node_id = source_to_id(source);
 
@@ -274,7 +288,11 @@ fn build_node(
     };
 
     // Build heading index for section context on transclusion insertions
-    let heading_index = build_heading_index(&prepared_content);
+    let (heading_index, prepared_slugs) = build_heading_index(&prepared_content);
+
+    if let ComposeSource::File(path) = source {
+        prepared_headings.record(path, prepared_slugs);
+    }
 
     // Extract local references if requested
     let mut local_references = if extract_references {
@@ -396,6 +414,7 @@ fn build_node(
                                 runtime,
                                 extract_references,
                                 dependencies,
+                                prepared_headings,
                             )?;
 
                             let (sec_text, sec_level) =
@@ -496,6 +515,7 @@ fn build_node(
                             runtime,
                             extract_references,
                             dependencies,
+                            prepared_headings,
                         )?;
 
                         child_insertions.push(ReferenceInsertion {
@@ -658,6 +678,7 @@ fn build_node(
                             runtime,
                             extract_references,
                             dependencies,
+                            prepared_headings,
                         )?;
 
                         let ref_id = make_reference_id(source, 0, idx);
@@ -738,6 +759,7 @@ fn build_node(
                             runtime,
                             extract_references,
                             dependencies,
+                            prepared_headings,
                         )?;
 
                         let (sec_text, sec_level) = heading_index
@@ -1305,6 +1327,7 @@ mod tests {
             node,
             vec![child_a, child_b],
             ReferenceDependencyManifest::default(),
+            PreparedHeadingSnapshot::default(),
         );
 
         let flat = flatten_graph(&graph);

@@ -674,6 +674,7 @@ mod tests {
         use crate::markdown::reference::provenance::{
             ReferenceDependencyManifest, ReferenceGraphMode,
         };
+        use crate::markdown::reference::snapshot::PreparedHeadingSnapshot;
         use crate::markdown::reference::types::{
             ReferenceGraph, ReferenceGraphNode, ReferenceGraphOptions, ReferenceInsertion,
             ReferenceInsertionContext, ReferenceOrigin, ReferenceRecord, ReferenceSet,
@@ -789,6 +790,7 @@ mod tests {
             root,
             vec![child_a, child_b],
             ReferenceDependencyManifest::default(),
+            PreparedHeadingSnapshot::default(),
         );
 
         let model = build_file_tree_model(&graph, None, true);
@@ -809,6 +811,7 @@ mod tests {
         use crate::markdown::reference::provenance::{
             ReferenceDependencyManifest, ReferenceGraphMode,
         };
+        use crate::markdown::reference::snapshot::PreparedHeadingSnapshot;
         use crate::markdown::reference::types::{
             ReferenceGraph, ReferenceGraphNode, ReferenceGraphOptions, ReferenceInsertion,
             ReferenceInsertionContext, ReferenceOrigin, ReferenceRecord, ReferenceSet,
@@ -861,6 +864,7 @@ mod tests {
             root,
             vec![child],
             ReferenceDependencyManifest::default(),
+            PreparedHeadingSnapshot::default(),
         );
 
         let model = build_file_tree_model(&graph, None, true);

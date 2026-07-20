@@ -4,6 +4,7 @@ use super::provenance::{
     ReferenceDependencyManifest, ReferenceDocumentIdentity, ReferenceGraphMode,
     ReferenceGraphProvenance,
 };
+use super::snapshot::PreparedHeadingSnapshot;
 use crate::markdown::Markdown;
 use crate::markdown::compose::{ComposeSource, ReferenceGraphOptionsIdentity};
 use crate::markdown::normalize::HeadingLevel;
@@ -459,6 +460,13 @@ pub struct ReferenceGraph {
     /// Never presented via `Debug` or serialization; read by prebuilt-graph
     /// validation via [`provenance`](Self::provenance).
     provenance: ReferenceGraphProvenance,
+    /// Private build-time snapshot of each visited file-sourced node's
+    /// prepared heading slugs.
+    ///
+    /// Never presented via `Debug` or serialization; read by fragment
+    /// validation via [`prepared_headings`](Self::prepared_headings) so a
+    /// post-build heading edit cannot leak into a validation report.
+    prepared_headings: PreparedHeadingSnapshot,
 }
 
 impl std::fmt::Debug for ReferenceGraph {
@@ -491,8 +499,8 @@ pub(crate) struct ReferenceGraphNodeView<'a> {
 /// Produced by [`ReferenceGraph::view`]. Its JSON is byte-for-byte
 /// shape-compatible with the prior node-view output (`file`, `source`,
 /// `references`, `transclusions`, and a nested `node` only when `follow` is
-/// set); build provenance, hashes, graph mode, and the dependency manifest
-/// never appear.
+/// set); build provenance, hashes, graph mode, the dependency manifest, and
+/// the heading snapshot never appear.
 pub struct ReferenceGraphView<'a> {
     graph: &'a ReferenceGraph,
     follow: bool,
@@ -596,8 +604,9 @@ impl ReferenceGraph {
     ///
     /// Root/source/mode/options provenance is derived from `document`,
     /// `document.source()`, `mode`, and the options identity captured from
-    /// `options.compose`; the visited-descendant `dependencies` manifest is
-    /// stored as produced by the build runtime.
+    /// `options.compose`; the visited-descendant `dependencies` manifest and
+    /// the `prepared_headings` snapshot are stored as produced by the build
+    /// runtime.
     pub(crate) fn from_build(
         document: &Markdown,
         options: &ReferenceGraphOptions,
@@ -605,6 +614,7 @@ impl ReferenceGraph {
         root: ReferenceGraphNode,
         nodes: Vec<ReferenceGraphNode>,
         dependencies: ReferenceDependencyManifest,
+        prepared_headings: PreparedHeadingSnapshot,
     ) -> ReferenceGraph {
         let provenance = ReferenceGraphProvenance::new(
             ReferenceDocumentIdentity::capture(document),
@@ -617,6 +627,7 @@ impl ReferenceGraph {
             root,
             nodes,
             provenance,
+            prepared_headings,
         }
     }
 
@@ -638,6 +649,11 @@ impl ReferenceGraph {
     /// The private build provenance, used by prebuilt-graph validation.
     pub(crate) fn provenance(&self) -> &ReferenceGraphProvenance {
         &self.provenance
+    }
+
+    /// The private build-time heading snapshot, used by fragment validation.
+    pub(crate) fn prepared_headings(&self) -> &PreparedHeadingSnapshot {
+        &self.prepared_headings
     }
 
     /// Returns a serializable, root-anchored view of this graph.
@@ -1168,6 +1184,7 @@ mod tests {
             root,
             vec![child],
             ReferenceDependencyManifest::default(),
+            PreparedHeadingSnapshot::default(),
         );
 
         let value = serde_json::to_value(graph.view(false)).unwrap();
@@ -1222,6 +1239,7 @@ mod tests {
             root,
             vec![child],
             ReferenceDependencyManifest::default(),
+            PreparedHeadingSnapshot::default(),
         );
 
         let value = serde_json::to_value(graph.view(true)).unwrap();
@@ -1251,6 +1269,7 @@ mod tests {
             root,
             vec![child],
             ReferenceDependencyManifest::default(),
+            PreparedHeadingSnapshot::default(),
         )
     }
 
@@ -1289,5 +1308,6 @@ mod tests {
         assert!(!dbg.contains("provenance"));
         assert!(!dbg.to_lowercase().contains("fingerprint"));
         assert!(!dbg.contains("dependencies"));
+        assert!(!dbg.contains("prepared_headings"));
     }
 }

@@ -11,6 +11,7 @@ pub(crate) mod html;
 pub(crate) mod local;
 pub mod meta;
 pub(crate) mod provenance;
+pub(crate) mod snapshot;
 pub mod types;
 pub mod validate;
 

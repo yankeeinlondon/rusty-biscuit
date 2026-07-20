@@ -18,6 +18,7 @@ use super::errors::{ReferenceError, ReferenceGraphMismatchError};
 use super::provenance::{
     DependencyMismatchKind, ReferenceDocumentIdentity, ReferenceGraphMismatch, ReferenceGraphMode,
 };
+use super::snapshot::heading_slug_key;
 use super::types::{
     ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceOrigin, ReferenceRecord,
     ReferenceTarget,
@@ -30,12 +31,13 @@ use crate::markdown::compose::{ComposeSource, ReferenceGraphOptionsIdentity};
 ///
 /// Fragment validation prepares (InlinePre-composes) and extracts headings from
 /// the same document once per `path#fragment` reference and once per graph node.
-/// Every entry is produced from a fresh on-disk `Markdown::try_from`, so keying
-/// by canonical path is byte-identical to recomputing: identical input file →
-/// identical prepared slugs. The document root is deliberately never inserted
-/// here — it is composed from the in-memory `Markdown` (which may carry
-/// `--set`/`--state` overrides a fresh disk load would not), so a self-referential
-/// `path#fragment` still recomputes from disk exactly as before.
+/// Graph descendants are seeded from the graph's build-time heading snapshot;
+/// every other entry is produced from a fresh on-disk `Markdown::try_from`, so
+/// for those, keying by canonical path is byte-identical to recomputing. The
+/// document root is deliberately never inserted here — it is composed from the
+/// in-memory `Markdown` (which may carry `--set`/`--state` overrides a fresh
+/// disk load would not), so a self-referential `path#fragment` still recomputes
+/// from disk exactly as before.
 type HeadingSlugCache = HashMap<PathBuf, Vec<String>>;
 
 /// Options for reference validation.
@@ -796,7 +798,10 @@ fn collect_prepared_heading_slugs(
 ///
 /// This provides the effective heading set after transclusion, so fragment
 /// validation checks against the actual composed heading list. Each node's
-/// headings are extracted from prepared content (after InlinePre).
+/// headings come from prepared content (after InlinePre): the root from the
+/// in-memory document, descendants from the graph's private build-time
+/// heading snapshot rather than a disk reread — so a post-build heading edit
+/// cannot leak into a fresh one-step report.
 ///
 /// Takes the already-built `graph` (Finding 18 — no second
 /// `build_reference_graph`) and shares `cache` with per-reference cross-doc
@@ -817,11 +822,21 @@ fn collect_composed_heading_slugs(
     // cached under its path key (see `HeadingSlugCache`).
     all_slugs.extend(collect_prepared_heading_slugs(md, &source, graph_options));
 
-    // Collect headings from all child nodes (prepared, disk-loaded, cached).
+    // Collect headings from all child nodes from the build-time snapshot and
+    // seed the run cache with them, so a `path#fragment` target naming a
+    // graph descendant resolves to the same snapshot entry. The checked path
+    // reaches this only after descendant verification has proven disk
+    // content identical to the snapshot, so seeding is coherent for both
+    // seams. Synthetic graphs built without a snapshot keep the disk-loading
+    // fallback.
     for node in graph.nodes() {
-        if let ComposeSource::File(path) = &node.source
-            && let Ok(child_md) = Markdown::try_from(path.as_path())
-        {
+        let ComposeSource::File(path) = &node.source else {
+            continue;
+        };
+        if let Some(slugs) = graph.prepared_headings().slugs_for(path) {
+            cache.insert(heading_slug_key(path), slugs.to_vec());
+            all_slugs.extend(slugs.iter().cloned());
+        } else if let Ok(child_md) = Markdown::try_from(path.as_path()) {
             all_slugs.extend(cached_prepared_heading_slugs(
                 cache,
                 &child_md,
@@ -836,7 +851,8 @@ fn collect_composed_heading_slugs(
 }
 
 /// Returns prepared heading slugs for a disk-loaded document, memoized by
-/// canonical path for the run (Finding 18).
+/// canonical path for the run (Finding 18). Shares its keying with the
+/// graph-owned heading snapshot via [`heading_slug_key`].
 fn cached_prepared_heading_slugs(
     cache: &mut HeadingSlugCache,
     md: &Markdown,
@@ -844,7 +860,7 @@ fn cached_prepared_heading_slugs(
     path: &std::path::Path,
     graph_options: &super::types::ReferenceGraphOptions,
 ) -> Vec<String> {
-    let key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let key = heading_slug_key(path);
     if let Some(hit) = cache.get(&key) {
         return hit.clone();
     }
@@ -1540,6 +1556,75 @@ mod tests {
                 .iter()
                 .any(|i| i.code == ReferenceIssueCode::MissingLocalTarget),
             "post-edit broken reference must be absent from the snapshot report: {:?}",
+            fresh_report.issues
+        );
+        assert!(fresh_report.is_valid());
+
+        let err = validate_with_graph(&md, &opts, &graph).unwrap_err();
+        match err {
+            ReferenceError::ReferenceGraphMismatch(mismatch) => match mismatch.kind() {
+                ReferenceGraphMismatchKind::Dependency { source, kind } => {
+                    assert_eq!(kind, DependencyMismatchKind::Changed);
+                    match source {
+                        ComposeSource::File(path) => assert!(
+                            path.ends_with("child.md"),
+                            "mismatch should name the edited child, got: {path:?}"
+                        ),
+                        other => panic!("expected a file child source, got: {other:?}"),
+                    }
+                }
+                other => panic!("expected a dependency-dimension mismatch, got: {other:?}"),
+            },
+            other => panic!("expected ReferenceGraphMismatch, got: {other}"),
+        }
+    }
+
+    /// Fragment-validation variant of the snapshot/checked pair above: with
+    /// `validate_fragments` enabled, the fresh seam checks same-document
+    /// fragment targets against the transcluded child's build-time headings,
+    /// while the checked seam rejects the same graph once the child's
+    /// heading changes on disk.
+    #[test]
+    fn fresh_seam_uses_heading_snapshot_while_checked_path_rejects_stale_headings() {
+        use crate::markdown::reference::errors::{
+            DependencyMismatchKind, ReferenceGraphMismatchKind,
+        };
+
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("root.md"),
+            "# Root\n\n::file child.md\n\n[link](#child-heading)\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("child.md"), "# Child Heading\n").unwrap();
+        let md = Markdown::try_from(dir.path().join("root.md").as_path()).unwrap();
+
+        // One options value feeds the build and both seams, so the checked
+        // path can only reject for the edited child — never for an options
+        // mismatch. Remote validation stays off: no network I/O.
+        let opts = ReferenceValidationOptions {
+            validate_fragments: true,
+            ..Default::default()
+        };
+        let graph = super::super::graph::build_reference_graph(&md, &opts.graph).unwrap();
+
+        // Rename the child's heading after construction. The build-time
+        // snapshot still holds `#child-heading`; disk now has
+        // `#renamed-heading`.
+        std::fs::write(dir.path().join("child.md"), "# Renamed Heading\n").unwrap();
+
+        let fresh_result = validate_fresh_graph(&md, &opts, &graph);
+        assert!(
+            !matches!(fresh_result, Err(ReferenceError::ReferenceGraphMismatch(_))),
+            "fresh seam must not run the compatibility check"
+        );
+        let fresh_report = fresh_result.unwrap();
+        assert!(
+            !fresh_report
+                .issues
+                .iter()
+                .any(|i| i.code == ReferenceIssueCode::MissingFragmentTarget),
+            "fragment link to the child's build-time heading must stay valid under the snapshot: {:?}",
             fresh_report.issues
         );
         assert!(fresh_report.is_valid());
