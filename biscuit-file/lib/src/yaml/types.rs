@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tracing::instrument;
 
-use super::analyze::{YamlDiagnostic, YamlRepair, analyze_yaml};
+use super::analyze::{YamlAnalysis, YamlDiagnostic, YamlRepair, analyze_yaml};
 use super::location::YamlLocation;
 
 /// Source tracking for YAML content.
@@ -335,22 +335,68 @@ impl Yaml {
         self.retained_source.as_deref()
     }
 
-    /// Diagnoses the authored source with the source-first analyzer.
+    /// Analyzes the authored source with the source-first analyzer.
     ///
-    /// Delegates to [`analyze_yaml`] on the retained source text. Values
-    /// constructed via [`Yaml::from_value`] have no authored source and
-    /// return no diagnostics — value-level diagnostics without source spans
-    /// are out of scope.
+    /// This is the entry point to prefer: the returned [`YamlAnalysis`] is a
+    /// single scan from which the diagnostics view
+    /// ([`YamlAnalysis::diagnostics`]), the repairs view
+    /// ([`YamlAnalysis::repairs`]), and the patched source
+    /// ([`YamlAnalysis::apply`]) are all derived without re-scanning. Callers
+    /// that want more than one of those views should retain the analysis
+    /// rather than reach for [`Yaml::diagnose`] and
+    /// [`Yaml::repair_candidates`], which scan once each.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_file::Yaml;
+    ///
+    /// let yaml = Yaml::from_str("key: value  \n")?;
+    /// if let Some(analysis) = yaml.analyze() {
+    ///     let findings = analysis.diagnostics().len();
+    ///     let offered = analysis.repairs().count();
+    ///     let patched = analysis.apply();
+    ///     assert_eq!(patched.source, "key: value\n");
+    ///     assert!(findings > 0 && offered > 0);
+    /// }
+    /// # Ok::<(), biscuit_file::YamlError>(())
+    /// ```
+    ///
+    /// ## Returns
+    ///
+    /// `None` for values built by [`Yaml::from_value`], which carry no
+    /// authored source. An empty-source analysis is deliberately not
+    /// synthesized: [`YamlAnalysis::apply`] would then report an empty
+    /// document as the patched result, which a caller writing that source
+    /// back to disk would act on destructively.
+    #[must_use]
+    pub fn analyze(&self) -> Option<YamlAnalysis> {
+        self.source_text().map(analyze_yaml)
+    }
+
+    /// Diagnoses the authored source, discarding the rest of the analysis.
+    ///
+    /// Shorthand for the diagnostics view of [`Yaml::analyze`]; it performs
+    /// its own scan, so pairing it with [`Yaml::repair_candidates`] analyzes
+    /// the same source twice. Retain a single [`YamlAnalysis`] when both
+    /// views are needed.
+    ///
+    /// Values constructed via [`Yaml::from_value`] have no authored source
+    /// and return no diagnostics — value-level diagnostics without source
+    /// spans are out of scope.
     #[must_use]
     pub fn diagnose(&self) -> Vec<YamlDiagnostic> {
-        match self.source_text() {
-            Some(source) => analyze_yaml(source).diagnostics().to_vec(),
-            None => Vec::new(),
-        }
+        self.analyze()
+            .map(|analysis| analysis.diagnostics().to_vec())
+            .unwrap_or_default()
     }
 
     /// Returns every candidate repair attached to [`Yaml::diagnose`]
     /// findings, in stable source order.
+    ///
+    /// Shorthand for the repairs view of [`Yaml::analyze`]; see
+    /// [`Yaml::diagnose`] for the duplicate-scan caveat when both views are
+    /// wanted.
     ///
     /// Candidates are only ever attached when they have satisfied their
     /// safety proof; whether a candidate is eligible for automatic
@@ -358,14 +404,9 @@ impl Yaml {
     /// constructed via [`Yaml::from_value`] return no candidates.
     #[must_use]
     pub fn repair_candidates(&self) -> Vec<YamlRepair> {
-        match self.source_text() {
-            Some(source) => analyze_yaml(source)
-                .diagnostics()
-                .iter()
-                .flat_map(|diagnostic| diagnostic.repairs.iter().cloned())
-                .collect(),
-            None => Vec::new(),
-        }
+        self.analyze()
+            .map(|analysis| analysis.repairs().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// Convert to a JSON value with default options.

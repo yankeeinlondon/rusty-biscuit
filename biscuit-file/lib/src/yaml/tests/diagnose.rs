@@ -1,6 +1,7 @@
-//! Tests for `Yaml::diagnose` and `Yaml::repair_candidates` delegation to
-//! the source-first analyzer (decision D1): parseable, source-backed values
-//! delegate; `from_value` has no authored source and returns empty results.
+//! Tests for `Yaml::analyze` and its `diagnose` / `repair_candidates`
+//! shorthands delegating to the source-first analyzer (decision D1):
+//! parseable, source-backed values delegate; `from_value` has no authored
+//! source and yields no analysis.
 
 use super::super::types::Yaml;
 use crate::yaml::YamlDiagnosticCode;
@@ -41,8 +42,30 @@ fn test_from_value_returns_empty_results() {
         serde_yaml_ng::Value::String("value".to_string()),
     );
     let yaml = Yaml::from_value(serde_yaml_ng::Value::Mapping(mapping));
+    assert!(yaml.analyze().is_none());
     assert!(yaml.diagnose().is_empty());
     assert!(yaml.repair_candidates().is_empty());
+}
+
+#[test]
+fn test_single_analysis_matches_both_shorthands() {
+    let yaml = Yaml::from_str("\u{FEFF}key :  [ 80,443 ]  \r\n").unwrap();
+    let analysis = yaml.analyze().expect("source-backed value analyzes");
+
+    assert_eq!(analysis.diagnostics(), yaml.diagnose().as_slice());
+    assert_eq!(
+        analysis.repairs().cloned().collect::<Vec<_>>(),
+        yaml.repair_candidates()
+    );
+}
+
+#[test]
+fn test_analysis_retains_source_for_apply() {
+    let yaml = Yaml::from_str("key: value  \n").unwrap();
+    let analysis = yaml.analyze().expect("source-backed value analyzes");
+
+    assert_eq!(analysis.source(), "key: value  \n");
+    assert_eq!(analysis.apply().source, "key: value\n");
 }
 
 #[test]

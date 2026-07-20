@@ -110,6 +110,24 @@ impl YamlAnalysis {
         self.diagnostics.is_empty()
     }
 
+    /// Every candidate repair attached to [`YamlAnalysis::diagnostics`], in
+    /// stable source order.
+    ///
+    /// This is the repairs view of the same scan that produced the
+    /// diagnostics — holding one `YamlAnalysis` and calling both accessors
+    /// costs a single analysis pass.
+    ///
+    /// Candidates are only ever attached once they have satisfied their
+    /// safety proof. Presence here does not imply auto-apply eligibility,
+    /// which is gated per diagnostic by
+    /// [`crate::yaml::YamlCertainty::is_auto_apply_eligible`]; use
+    /// [`YamlAnalysis::apply`] to patch only the eligible subset.
+    pub fn repairs(&self) -> impl Iterator<Item = &super::diagnostic::YamlRepair> {
+        self.diagnostics
+            .iter()
+            .flat_map(|diagnostic| diagnostic.repairs.iter())
+    }
+
     /// Applies every auto-apply-eligible candidate repair.
     ///
     /// Repairs are gathered from diagnostics whose classification passes

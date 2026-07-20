@@ -13,6 +13,15 @@
 //! - Heterogeneous arrays (TOML requires homogeneous arrays)
 //! - Non-finite floats like NaN and Infinity (JSON doesn't support them)
 //!
+//! ## Diagnostics and Repairs
+//!
+//! [`Yaml::analyze`] is the entry point for source-first diagnostics. It
+//! yields one [`YamlAnalysis`] that carries the diagnostics, the candidate
+//! repairs, and the patched source, so a caller wanting more than one of
+//! those views scans the document once. [`Yaml::diagnose`] and
+//! [`Yaml::repair_candidates`] remain as single-view shorthand, but each
+//! runs its own scan — calling both analyzes the same source twice.
+//!
 //! ## Examples
 //!
 //! ```rust
@@ -23,6 +32,20 @@
 //! // Convert to other formats
 //! let json = yaml.as_json()?;
 //! let toml = yaml.as_toml()?;
+//! # Ok::<(), biscuit_file::YamlError>(())
+//! ```
+//!
+//! ```rust
+//! use biscuit_file::Yaml;
+//!
+//! let yaml = Yaml::from_str("name: example  \n")?;
+//! if let Some(analysis) = yaml.analyze() {
+//!     for diagnostic in analysis.diagnostics() {
+//!         println!("{}: {}", diagnostic.code, diagnostic.message);
+//!     }
+//!     let cleaned = analysis.apply().source;
+//!     assert_eq!(cleaned, "name: example\n");
+//! }
 //! # Ok::<(), biscuit_file::YamlError>(())
 //! ```
 

@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 403d172bf126885f7b0616e1711b7fc5267b2a7f71e0b421ff4f8686373e5cdc # shrinks to document = "name: example\n", first = TrailingSpace(1), second = ReservedIndicator('@')
+cc d62a9267c5efd818ffd78bea4b32517b2f22c6223f96ba849228cec8c8259d05 # shrinks to document = "name: example\n", mutation = ReservedIndicator('@')

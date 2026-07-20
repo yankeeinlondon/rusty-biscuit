@@ -78,7 +78,10 @@ pub fn analyze_yaml(source: &str) -> YamlAnalysis {
                 .map(Draft::into_diagnostic)
                 .collect()
         }
-        YamlParseOutcome::Failed(failure) => recover::recover(source, &map, failure),
+        YamlParseOutcome::Failed(failure) => match bom_recovery(source) {
+            Some(diagnostic) => vec![diagnostic],
+            None => recover::recover(source, &map, failure),
+        },
     };
     diagnostics.extend(report::report(source, &map));
     diagnostics.sort_by_key(|diagnostic| (diagnostic.span.start, diagnostic.span.end));
@@ -180,6 +183,37 @@ fn parses_equal(source: &str, expected: &Value) -> bool {
         Ok(value) => value == *expected,
         Err(_) => false,
     }
+}
+
+/// Recovers a document whose *only* defect is a leading BOM.
+///
+/// The parser reads a byte-order mark as a document boundary, so a BOM
+/// followed by more than one top-level key is rejected as a multi-document
+/// stream — a single-key block happens to survive, which is why this only
+/// shows up on real frontmatter. Unparseable input never reaches
+/// [`s1_candidates`], so without this the mark is not removed *and* neither
+/// are the CRLF line endings that accompany it on every Windows-authored
+/// file, and `md clean` then fails the document outright.
+///
+/// The proof is S3's, not S1's: the stripped source parses and the original
+/// did not, so removing the mark is deterministic without a `Value`
+/// comparison (there is no original value to compare against). Only the BOM
+/// edit is emitted; the parse-equivalent tier stays unreachable on this pass
+/// and lands on the rescan `md clean` performs once an edit restores
+/// parseability.
+fn bom_recovery(source: &str) -> Option<YamlDiagnostic> {
+    let stripped = source.strip_prefix('\u{FEFF}')?;
+    parse_value(stripped).ok()?;
+    Some(
+        Draft::new(
+            YamlDiagnosticCode::Bom,
+            0..'\u{FEFF}'.len_utf8(),
+            "UTF-8 byte-order mark at stream start",
+            "",
+            "remove the byte-order mark",
+        )
+        .into_diagnostic(),
+    )
 }
 
 /// A single UTF-8 BOM at stream start is removed as a normalization.
