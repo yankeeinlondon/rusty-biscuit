@@ -4,7 +4,7 @@ status: draft
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-07-16
-review_iterations: 8
+review_iterations: 9
 depends_on:
     - ../_completed/2026-05-12-lifecycle/spec.md
     - ../_completed/2026-06-26-positional-and-key-value/spec.md
@@ -548,6 +548,13 @@ server set. Provider adapters may add provider-specific identity fields. If a
 canonical refresh changes that key, resume fails with a typed diagnostic that
 names the incompatible facets and recommends retry; it never mixes a live
 session with a newly prepared launch plan.
+
+That refusal is raised after the resumed attempt's `start` and before any
+spawn, so it is an ordinary post-`start` failure and owes the ratified
+lifecycle tail: it routes through the shared typed catch protocol, firing
+`failure` and then exactly one `finalize` with the incompatibility available as
+`err.*`. Routing it does not relax the refusal — no second provider attempt is
+launched.
 
 Two of those facets are **immutable invocation inputs**: they belong to the key
 for completeness, but no same-document resume can move them, so they are proven

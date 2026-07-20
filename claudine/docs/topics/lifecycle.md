@@ -203,7 +203,7 @@ The provider run-loop events — `start`, `success`, `failure`, `finalize` — d
 
 Launch identity is recomputed at that fresh-read boundary, against the document about to run, so a `model:` changed between attempts actually reaches the child environment rather than being pinned to an adoption-time snapshot.
 
-`resume` additionally checks a **session-compatibility key**. It retains the live provider session only when the key still matches across the refresh; when a facet moved, the resume refuses with `CompositionError::LifecycleResumeIncompatible { facets }`, names the changed facets, and recommends `retry` for a fresh session. Note the observed ordering: `start` fires before the comparison, and a refusal propagates as a hard error — `success`/`finalize` do not fire. Full facet list, reachability, and coverage: [composition.md — Retry and resume re-entry](composition.md#retry-and-resume-re-entry).
+`resume` additionally checks a **session-compatibility key**. It retains the live provider session only when the key still matches across the refresh; when a facet moved, the resume refuses with `CompositionError::LifecycleResumeIncompatible { facets }`, names the changed facets, and recommends `retry` for a fresh session. Note the ordering: `start` fires before the comparison, so a refusal is a post-`start`, pre-spawn failure and owes the ordinary lifecycle tail — `failure` then exactly one `finalize`, both seeing the refusal as `err.*`. `success` does not fire, and the provider is never spawned a second time. Full facet list, reachability, and coverage: [composition.md — Retry and resume re-entry](composition.md#retry-and-resume-re-entry).
 
 #### Lifecycle events and `--dry-run`
 
