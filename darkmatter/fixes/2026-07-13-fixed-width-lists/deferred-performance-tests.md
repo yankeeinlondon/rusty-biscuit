@@ -156,3 +156,70 @@ Check `uptime` immediately **before and after** each run, and record both.
 Per repo convention, cross-run comparison requires bracketing. Run **baseline → candidate →
 baseline again** and confirm the two baseline medians agree within 3%. If they do not, the host
 drifted mid-measurement and the run is void regardless of what the candidate numbers say.
+
+## Review 2 — H2 re-evaluation
+
+### What this maps back to
+
+- **Finding:** "High — Mandatory timing budgets still have no verdict" in
+  [`review-2.md`](review-2.md).
+- **Exact implementation-log title:** `H2 — Mandatory timing budgets still have no verdict`.
+- **Specification:** [`spec.md`](spec.md) → Test Plan → "Performance regression" and Acceptance
+  Criterion 15.
+- **Implementation log:** [`log.md`](log.md) → the section that started at
+  `2026-07-20T15:55:57-07:00` → H2.
+
+### Review 2 status and host evidence
+
+The Review 2 suggestion was evaluated on 2026-07-20. The load-independent parse-count half remains
+satisfied: the focused Nextest run passed all 8 tests. The Criterion harness remains present, but a
+bounded `cargo bench -p darkmatter --bench clean_hot_paths -- --test` smoke attempt spent its
+55-second allowance compiling the release graph and was interrupted before any benchmark case ran.
+This does not invalidate the previously recorded successful harness smoke test.
+
+Only the normative timing measurement is deferred. The host is an Apple M4 Max with 16 physical and
+logical cores and 128 GiB memory. During this re-evaluation, `uptime` reported 8 users and load
+averages of `77.23 67.44 67.80` at 16:16 local; at 16:20 it still reported 8 users and
+`61.95 72.24 70.08`. The 1-minute load was therefore 31-39 times the documented ceiling of 2.0.
+Scheduler noise at that level is larger than the tightest 10% budget, so no baseline, median,
+estimate, or pass/fail timing verdict was created. Shared Criterion target data and a baseline
+worktree were deliberately left untouched.
+
+### Quiet-host Review 2 procedure
+
+First satisfy every admissibility condition already listed above: 1-minute load at or below 2.0
+before and after each run, no other agent sessions, no concurrent Cargo builds, AC power, and
+Criterion's default profile and sampling. Prepare the baseline worktree exactly as documented in
+"Pre-fix baseline state," then use one shared absolute `CARGO_TARGET_DIR` for this bracket:
+
+```bash
+# Baseline 1, from the prepared pre-fix worktree.
+uptime
+CARGO_TARGET_DIR=<shared-absolute-target> cargo bench -p darkmatter --bench clean_hot_paths -- --save-baseline fwl-review2-baseline-1
+uptime
+
+# Candidate, from the fix worktree, on the same host and in the same session.
+uptime
+CARGO_TARGET_DIR=<shared-absolute-target> cargo bench -p darkmatter --bench clean_hot_paths -- --baseline fwl-review2-baseline-1
+uptime
+
+# Baseline 2, back in the prepared pre-fix worktree.
+uptime
+CARGO_TARGET_DIR=<shared-absolute-target> cargo bench -p darkmatter --bench clean_hot_paths -- --baseline fwl-review2-baseline-1
+uptime
+```
+
+Record every per-fixture Criterion median and calculate each verdict independently:
+
+- **Baseline drift:** for all eight cases,
+  `abs(median_baseline_2 - median_baseline_1) / median_baseline_1 <= 0.03`; otherwise void the
+  complete bracket.
+- **B1:** for each of `prose`, `flat_list`, `nested_list`, and `blockquoted_tasks`,
+  `median_candidate_default <= 1.10 * median_baseline_1_default`.
+- **B2:** for each list-heavy fixture (`flat_list`, `nested_list`, and `blockquoted_tasks`),
+  `median_candidate_fixed_width <= 1.15 * median_baseline_1_fixed_width`.
+- **B3:** for each of the four candidate fixtures,
+  `median_candidate_fixed_width < 2.00 * median_candidate_default`.
+
+All drift checks and all B1, B2, and B3 cases must pass. Do not aggregate fixtures, substitute
+means for Criterion medians, or accept a partial vector as the AC 15 verdict.

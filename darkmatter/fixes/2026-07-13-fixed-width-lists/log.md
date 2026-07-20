@@ -1,6 +1,7 @@
 ---
 fix: 2026-07-13-fixed-width-lists
 implementation_1: 2026-07-20T08:30:23-07:00
+implementation_2: "2026-07-20T15:55:57-07:00"
 deferred_perf_measurement: true
 ---
 
@@ -475,3 +476,220 @@ because they lie outside this fix's declared Change Surface.
 
 Test count grew from 5795 at review time to **5884** in the darkmatter package: +89 tests, every one
 of them proven non-vacuous by mutation before being accepted.
+
+## Implementation of Review Findings #2
+
+> **started at:** 2026-07-20T13:13:55-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/fixes/2026-07-13-fixed-width-lists/review-2.md'
+- this is iteration 2 of the review-to-implement cycle
+- review 2 contains **3 findings**: 2 High and 1 Medium
+        - **H1** — configured eight-space indentation flattens nested lists
+        - **H2** — mandatory timing budgets still have no verdict
+        - **M1** — preserve-mode idempotence is not retained as a regression
+- affected package scope from the specification and `sniff` discovery is the `darkmatter` package area: `darkmatter`, `darkmatter-cli`, and `dmls`
+- GitNexus classifies `fix_list_indentation` as **CRITICAL**: 2 direct callers, 136 total dependents through depth 3, 1 affected compose execution-flow family, and 6 affected modules
+- starting the work on 'H1 — Configured eight-space indentation flattens nested lists' at 15:57:35-07:00
+- review-2 contains **3 findings**: 2 High, 1 Medium
+        - **H1 (High)** — Configured eight-space indentation flattens nested lists (AC 7, 9, 10, 13)
+        - **H2 (High)** — Mandatory timing budgets still have no verdict (AC 15)
+        - **M1 (Medium)** — Preserve-mode idempotence is not retained as a regression (AC 13)
+- host conditions recorded at start: `load averages: 67.79 46.26 58.51` on a 16-core macOS host
+  with 8 active sessions — this is far outside any admissible benchmarking window (~4-5x
+  oversubscribed; ceiling is 2.0) and is flagged up front as a risk to **H2**
+- starting the work on 'H1 — Configured eight-space indentation flattens nested lists' at 13:20:00-07:00
+        - reproduced the CLI corruption first: `printf -- '- Parent alpha beta gamma delta.\n  - Child alpha beta gamma delta epsilon.\n' | md clean - --indent 8 --fixed-width 24` → child marker absorbed into parent prose
+        - isolated the defect: cleanup-only (`--indent 8`, no reflow) produces structurally-valid-looking
+          output (`- Parent...\n        - Child...`), but `reflow_to_width` then re-parses and
+          pulldown-cmark treats `        - Child` (col 8 under `- ` content col 2) as **lazy
+          continuation prose**, not a nested list — confirmed via standalone `Parser::new_ext` probe
+        - confirmed the CommonMark rule by enumeration: child indent must be in
+          `[parent_content_col, parent_content_col + 3]` to be a nested list; at
+          `parent_content_col + 4` it becomes indented code (loose) or lazy continuation (tight);
+          under `- ` (content col 2) the valid range is cols 2–5, so col 8 is **fundamentally
+          unrepresentable**
+        - confirmed the secondary wide-marker defect: `1234. Parent\n      - Child` with `--indent 4`
+          emits 12-space child indent (depth miscalculated as `6/2=3`, `3×4=12`) and second-pass
+          cleanup flattens the structure entirely — not idempotent
+        - 13:26 — GitNexus impact analysis recorded before any edit:
+                - `fix_list_indentation` is **CRITICAL** (2 direct, 23 total, 1 process — the
+                  `Run_inline_post_operation` cleanup flow). Signature is unchanged; only behavior
+                  for the broken wide-marker / over-deep cases changes, so the existing dependents
+                  (every `cleanup_content*` variant, the CLI `clean` command, the compose
+                  `run_inline_post_operation`, and benches) all receive the corrected nesting
+                  they always expected. **No warning escalated to the orchestrator** beyond this
+                  log note: the change is the documented fix for a defect, not a contract change.
+                - `parse_indent_size` is **LOW** (0 indexed direct dependents — only invoked
+                  indirectly by clap). The change is the contract.
+        - 13:27 — surveyed the three changes required by the spec:
+                - Change 1 (CLI reject `--indent 8`): `cli/src/args/parsers.rs::parse_indent_size`,
+                  unit tests in same file, CLI integration test in `cli/tests/clean.rs`, shell
+                  completions in `cli/src/args/completion.rs` (must drop `"8"` to stay consistent
+                  with the parser), and docs `docs/cli/clean.md` + `docs/cli/render.md` +
+                  `cli/README.md`
+                - Change 2 (`fix_list_indentation` stack-based rewrite): the
+                  `current_indent / 2` formula at `lib/src/markdown/cleanup/lists.rs:240` is the
+                  defect; replacement is the column-tracking stack algorithm specified in the task
+                  brief
+                - Tests: non-regression test in `lib/src/markdown/cleanup/tests/lists.rs`, plus
+                  three additions in `tests/reflow.rs` (idempotence, doc-comment update for the
+                  existing eight-space nesting test, and structure-preservation under a wide
+                  parent)
+        - 13:40 — **Change 1 complete** (CLI rejects `--indent 8`):
+                - `cli/src/args/parsers.rs::parse_indent_size` now matches `2 | 4` only; the `8`
+                  arm returns the CommonMark-portability error verbatim from the spec, with a
+                  rustdoc paragraph explaining why
+                - `cli/src/args/parsers.rs` unit tests: dropped the `Ok(8)` assertion, added an
+                  `is_err()` for `"8"`
+                - `cli/src/args/completion.rs::complete_indent_values` drops `"8"` from the
+                  candidate list (consistency: tab-completion must not offer a value the parser
+                  will reject); corresponding test updated
+                - `cli/tests/clean.rs::test_clean_subcommand_rejects_invalid_indent` updated to
+                  the new `indent must be one of: 2, 4` message; new sibling test
+                  `test_clean_subcommand_rejects_indent_eight_as_unportable` covers the dedicated
+                  CommonMark-portability error path
+                - docs `docs/cli/clean.md` and `docs/cli/render.md` updated to mention `2 or 4`
+                  and explain the `8` rejection; `cli/README.md` had no `8` mention and was left
+                  unchanged (the spec said not to invent new sections)
+                - all 6 parser/completion/rejection tests green
+        - 13:54 — **Change 2 complete** (`fix_list_indentation` stack-based rewrite):
+                - replaced `current_indent / 2` with a `(orig_item, orig_content, new_item,
+                  new_content)` tuple stack; depth comes from real open levels, not from the
+                  absolute column; the `max(target * depth, parent.new_content)` rule guarantees
+                  the child sits at least at the parent's content column (the CommonMark minimum)
+                - added module-local `MAX_ORDERED_MARKER_DIGITS = 9` with a comment citing the
+                  CommonMark rule and pointing at the mirror constant in `reflow.rs`; the reflow
+                  helper is private to a sibling module and widening it just to share one number
+                  would have been scope creep
+                - added `list_marker_byte_width` + `task_marker_byte_width` helpers (mirroring
+                  `reflow.rs::list_marker_prefix_len`); removed the now-unused
+                  `is_ordered_list_start` to avoid dead-code warnings under `-D warnings`
+                - continuation prose uses `max(target * depth, parent.new_content) + offset`
+                  rather than the spec's literal `new_content + offset`, because the latter
+                  regressed two existing tests (`cleanup_preserves_list_semantic_structure…` and
+                  `cleanup_list_modes_share_soft_break_policy…`) that pin continuation prose at
+                  `target_indent` columns for narrow markers. The `max` form satisfies both:
+                  narrow markers land at `target*depth` (matching existing behavior) and wide
+                  markers land at `parent.new_content` (CommonMark-valid). Recorded as a
+                  deliberate deviation from the literal algorithm spec, taken to keep the
+                  existing ratified behavior intact
+                - **pre-flight discovery worth recording**: `cleanup_content` (the default)
+                  actually passes `Some(DEFAULT_INDENT)` (`= 4`), not `None`. The
+                  `forced_indent=None` arm of the call site — the one with `detect_list_indentation` —
+                  is never reached by any public API today. So default `md clean` always calls
+                  `fix_list_indentation(_, 4)`; the visible "default → 4-space" behavior comes from
+                  there, not from cmark's natural output (which is 2-space for narrow markers via
+                  `pulldown-cmark-to-cmark` v22's `list_item_padding_of`). This is what made the
+                  wide-marker defect user-visible: every default cleanup hit the broken `/2` formula
+        - 13:55 — **three new library tests added**:
+                - `lib/src/markdown/cleanup/tests/lists.rs::fix_list_indentation_handles_wide_markers_without_inventing_depth`
+                  (1234. and 10. parents, exact-column assertions + idempotence on both)
+                - `lib/src/markdown/cleanup/tests/reflow.rs::cleanup_content_with_indent_4_is_idempotent_for_wide_ordered_markers`
+                  (structural fingerprint preserved + byte-equal second pass, for both 1234. and
+                  123456. parents)
+                - `lib/src/markdown/cleanup/tests/reflow.rs::cleanup_content_with_indent_4_preserves_nested_list_structure_under_wide_parent`
+                  (structural fingerprint under 10. parent)
+                - updated the doc comment on the existing
+                  `reflow_to_width_derives_prefixes_from_actual_eight_space_nesting` to note that
+                  `--indent 8` is now CLI-rejected and this library test remains the canonical
+                  proof that reflow consumes actual indentation without hard-coding
+        - 13:55 — **non-vacuity proven by two mutations** (production code restored after each):
+                - mutation A — revert list-item path to `current_indent / 2 * target_indent`:
+                  all 3 new tests went RED. `fix_list_indentation_handles_wide_markers…`
+                  detected the child at col 12 instead of 6; both `cleanup_content_with_indent_4_*`
+                  tests showed the structural fingerprint collapsing from two nested lists to one
+                  flat item (child absorbed into parent prose, exactly the H1 failure mode)
+                - mutation B — drop the `max(target * depth, parent.new_content)` and use
+                  `target * depth` alone: 2 of 3 new tests went RED.
+                  `fix_list_indentation_handles_wide_markers…` and
+                  `cleanup_content_with_indent_4_is_idempotent_for_wide_ordered_markers` both
+                  flagged the structural collapse for the `1234.` parent (depth-1 child at col 4
+                  is below the parent's content col 6, so pulldown-cmark reads it as lazy
+                  continuation prose). The `10.` test stayed green under this mutation because
+                  `10.` has content col 4, which equals `target*1=4` — the `max` is a no-op there.
+                  This is honest coverage: the `max` mutation is observable on the cases that
+                  need it (wide markers where `target*depth < parent_content_col`) and a no-op on
+                  the cases that don't
+        - 14:00 — **all gates green**:
+                - `just build` PASS — darkmatter, darkmatter-cli, dmls all compile clean
+                - `just lint` PASS — zero warnings across all three packages
+                  (`clippy --all-targets -- -D warnings`)
+                - `just test` PASS, exit 0, zero retries:
+                        - darkmatter **5887/5887** (was 5884 at review time → +3 new tests)
+                        - darkmatter-cli **616/616** (was 615 → +1 new rejection test)
+                        - dmls **568/568** (unchanged)
+                - `cargo bench -p darkmatter --bench clean_hot_paths -- --test` PASS 12/12
+                  (harness smoke test only, not a measurement — host is still ~4-5x
+                  oversubscribed, H2 timing budget remains deferred)
+        - 14:01 — GitNexus `detect_changes` (worktree-scoped, unstaged): **LOW** risk,
+          26 changed symbols across 12 files, **0 affected execution flows**.
+                - the 12 files include 3 pre-existing noise files (`CLAUDE.md`,
+                  `review-1.md`, `spec.md`) that were already modified in the worktree
+                  before this session started and are unrelated to H1
+                - the 9 H1 files are the expected surface: `cli/src/args/parsers.rs`,
+                  `cli/src/args/completion.rs`, `cli/tests/clean.rs`, both docs,
+                  `lib/src/markdown/cleanup/lists.rs`, both test files, and this log
+                - no unexpected flow — the change is entirely contained within the
+                  cleanup/list-indentation code path and its CLI surface
+- work completed for 'H1 — Configured eight-space indentation flattens nested lists' at 14:03:51-07:00
+
+## Implementation of Review Findings #2
+
+> **started at:** 2026-07-20T15:55:57-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/fixes/2026-07-13-fixed-width-lists/review-2.md'
+- this is iteration 2 of the review-to-implement cycle
+- starting the work on 'H1 — Configured eight-space indentation flattens nested lists' at 16:00:59-07:00
+        - found a complete pre-existing H1 implementation and prior H1 log block in the shared worktree; preserving those user-owned edits and auditing them against the current review instructions before making any delta
+        - fresh GitNexus impact confirms `fix_list_indentation` remains **CRITICAL**: 2 direct callers, 136 total dependents through depth 3, 1 affected compose flow, and 6 affected modules; `parse_indent_size` remains LOW with no indexed direct dependents
+        - `sniff` confirms the specification's scoped packages are `darkmatter`, `darkmatter-cli`, and `dmls` in the `darkmatter` package area
+        - audit found one missing review requirement in the pre-existing work: the CLI rejected `--indent 8`, but `cleanup_content_with_indent(source, 8)` could still emit an invalid eight-column child, and the existing test substituted an already-eight-column source fixture
+        - completed the library contract by constraining each preferred child column to its parent's CommonMark-valid range; the CLI continues to reject `--indent 8` because it cannot promise a literal eight-space step for narrow markers, while the library preserves structure for arbitrary requested widths without changing its public signature
+        - added exact-output and structural-fingerprint L1 coverage from an ordinary two-space source through `cleanup_content_with_indent(_, 8)`, fixed-width reflow, total-line width assertions, and a second complete cleanup/reflow pass
+        - updated the spawned `md clean` test to combine `--indent 8` with `--fixed-width 24`, proving the unsupported mode is rejected before it can flatten the nested child
+        - updated the public cleanup rustdoc and CLI parser comment to describe the CommonMark-valid library fallback; existing CLI documentation already records the supported `2` and `4` widths and the reason `8` is rejected
+        - focused L1 verification passed: 1/1 configured-indent library regression, 1/1 spawned-CLI rejection, and 3/3 pre-existing wide-marker structure/idempotence regressions
+        - `cargo check --color=never -p darkmatter --lib` passed; `git diff --check` passed
+        - the required bounded `just test` attempt compiled cleanly and ran 2,498/5,888 darkmatter tests with 2,498 passed, 140 skipped, and zero failures before the non-interactive time bound required SIGINT; darkmatter-cli and dmls were not reached, so this is not a complete area-gate pass
+        - the required bounded `just lint` attempt emitted no lint diagnostics while checking darkmatter but exceeded the same time bound and was interrupted before completion; a separate read-only `cargo fmt --check` could not run because the stable toolchain has no `rustfmt` component installed
+        - final GitNexus `detect_changes` reports LOW risk across the shared dirty worktree: 26 changed symbols in 13 files and zero affected execution flows; `git diff --check` reports no whitespace errors
+- work completed for 'H1 — Configured eight-space indentation flattens nested lists' at 16:12:41-07:00
+- starting the work on 'H2 — Mandatory timing budgets still have no verdict' at 16:14:34-07:00
+        - evaluated the complete H2 suggestion; only the normative Criterion timing measurement is deferred, while the deterministic parse-count half remains independently verifiable
+        - current host evidence is inadmissible: Apple M4 Max, 16 physical/logical cores, 128 GiB memory, 8 users, and `uptime` load averages of `77.23 67.44 67.80` at 16:16 local and `61.95 72.24 70.08` at 16:20; the 1-minute load was 31-39 times the required ceiling of 2.0
+        - no normative timing bracket was run, no baseline worktree or shared Criterion target data was created or altered, and no median, estimate, or timing verdict was recorded because scheduler noise exceeds the tightest 10% budget
+        - focused load-independent verification passed: `/opt/homebrew/bin/timeout -s INT -k 5s 55s cargo nextest run --color=never -p darkmatter -E 'test(/parse_count/)'` completed 8/8 parse-count tests in 3.7 seconds with 6,020 unrelated tests skipped
+        - the bounded Criterion harness smoke attempt, `cargo bench --color=never -p darkmatter --bench clean_hot_paths -- --test`, reached release compilation but timed out after 55 seconds before any benchmark case ran; no timing samples were collected, and the identical attempt was not repeated under the same load
+        - the scoped `darkmatter/` area `just test` attempt was bounded to 55 seconds: 2,152/5,888 darkmatter tests passed, 140 were skipped, and zero failures occurred before SIGINT; darkmatter-cli and dmls were not reached, so this is not a complete green area gate
+        - the scoped `darkmatter/` area `just lint` attempt was bounded to 55 seconds: the darkmatter library lint completed with no diagnostics and the CLI lint entered dependency checking, then SIGINT ended the incomplete gate before darkmatter-cli and dmls finished
+        - `deferred_perf_measurement: true` remains set in this log's frontmatter; `deferred-performance-tests.md` now preserves Review 1 and adds the exact Review 2 H2 mapping, current host evidence, quiet-host baseline → candidate → baseline commands, the 3% drift requirement, and per-fixture B1/B2/B3 arithmetic
+- work completed for 'H2 — Mandatory timing budgets still have no verdict' at 16:20:02-07:00
+- starting the work on 'M1 — Preserve-mode idempotence is not retained as a regression' at 16:21:33-07:00
+        - confirmed preserve-mode behavior is already correct; no production symbol required an edit, so M1 is covered with tests only
+        - added `cleanup_preserve_mode_is_idempotent_for_authored_list_soft_breaks`, a library L1 regression using unordered and checked-task items with authored soft breaks; it asserts exact normalized output, preserved parse structure, and byte equality after a second preserve cleanup pass
+        - added `test_clean_subcommand_save_preserve_mode_is_idempotent_for_authored_list_soft_breaks`, a portable spawned-CLI L1 regression using a temporary file; it invokes `md clean --ignore-incidental-newlines --save` twice, asserts the exact first saved result retains both authored list soft breaks, and proves the second saved result is byte-identical
+        - focused verification passed: 1/1 library preserve-idempotence test and 1/1 spawned-CLI save regression
+        - the bounded package-area `just test` attempt ran 2,033/5,889 darkmatter tests with zero observed failures before the non-interactive bound ended the incomplete gate; darkmatter-cli and dmls were not reached
+        - the bounded package-area `just lint` attempt ended before completion with no lint diagnostics emitted; the two focused nextest runs compiled both changed test targets successfully, and `git diff --check` passed
+        - GitNexus `detect_changes` reports LOW risk across the shared dirty worktree: 33 changed symbols in 14 files and zero affected execution flows; M1 itself adds only two test functions and introduces no production blast radius
+- work completed for 'M1 — Preserve-mode idempotence is not retained as a regression' at 16:26:09-07:00
+        - final orchestrator verification completed the full Level-1 scope with bounded package shards: darkmatter 5,889/5,889 passed, darkmatter-cli 617/617 passed, and dmls 568/568 passed; the unrelated CLI test `test_clean_subcommand_save_fixed_width_reports_delta` passed on retry 2/4
+        - final lint verification passed with `-D warnings` for all three affected packages: darkmatter, darkmatter-cli, and dmls
+        - final GitNexus `detect_changes` reports LOW risk across 30 changed symbols in 14 shared-worktree files and zero affected execution flows; `git diff --check` also passed
+
+### Successful Completion
+
+The implementation of review cycle 2 has completed successfully in 37 minutes 6 seconds. During this implementation all 3 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 1 was deferred (see reasons below):
+
+- **H2 — Mandatory timing budgets still have no verdict** was deferred because the host remained inadmissible for a 10% Criterion budget: its 1-minute load ranged from 61.95 to 77.23 with 8 users on 16 cores, while the documented ceiling is 2.0. No timing samples or medians were recorded. The exact quiet-host baseline → candidate → baseline procedure, 3% drift guard, and per-fixture B1/B2/B3 arithmetic are retained in `deferred-performance-tests.md`.
+
+The files changed specifically for review cycle 2 were:
+
+- `darkmatter/lib/src/markdown/cleanup/lists.rs`
+- `darkmatter/lib/src/markdown/cleanup/mod.rs`
+- `darkmatter/lib/src/markdown/cleanup/tests/reflow.rs`
+- `darkmatter/cli/src/args/parsers.rs`
+- `darkmatter/cli/tests/clean.rs`
+- `darkmatter/fixes/2026-07-13-fixed-width-lists/deferred-performance-tests.md`
+- `darkmatter/fixes/2026-07-13-fixed-width-lists/log.md`
+- `darkmatter/fixes/2026-07-13-fixed-width-lists/review-2.md`
