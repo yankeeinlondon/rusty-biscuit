@@ -34,6 +34,7 @@ fn requeue_materialized(prompt: &str) -> MaterializedHarnessPrompt {
         inline_closure_plan: None,
         lifecycle: None,
         live_frontmatter,
+        mcp_body_tags: Vec::new(),
     }
 }
 

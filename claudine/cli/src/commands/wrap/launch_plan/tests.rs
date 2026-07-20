@@ -585,6 +585,145 @@ fn a_provider_move_redelivers_the_system_prompt_for_the_new_provider() {
     );
 }
 
+/// A `Ready` system prompt in the given mode, delivered from `tmp`.
+fn ready_system_prompt(
+    tmp: &std::path::Path,
+    mode: claudine::system_prompt::SystemPromptMode,
+) -> ResolvedSystemPrompt {
+    ResolvedSystemPrompt::Ready(claudine::system_prompt::PreparedSystemPrompt {
+        mode,
+        source: claudine::system_prompt::SystemPromptSource::ExplicitFile {
+            path: tmp.join("system-prompt.md"),
+            mode,
+        },
+        raw_text: "stay terse".to_string(),
+        composed_markdown: "stay terse".to_string(),
+        non_interactive_appendix: None,
+    })
+}
+
+/// Review-11 finding 4 — a provider move keeps the *rebuilt* provider's
+/// system-prompt verdict instead of discarding it.
+///
+/// Codex delivers `replace` through a config-key file; Goose declares it
+/// unsupported. The replay consumed the application's args and artifacts and
+/// dropped its `warnings`, so a Codex → Goose retry silently lost a notice a
+/// direct Goose invocation of the same document prints.
+#[test]
+fn a_provider_move_keeps_the_rebuilt_system_prompt_warning() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut inputs = inputs_for(Provider::Codex);
+    inputs.system_prompt = Some(ready_system_prompt(
+        tmp.path(),
+        claudine::system_prompt::SystemPromptMode::Replace,
+    ));
+    inputs.system_prompt_cwd = tmp.path().to_path_buf();
+    inputs.system_prompt_scoped_tmp = tmp.path().to_path_buf();
+
+    let moved = DocumentLaunchFacets {
+        provider: Provider::Goose,
+        ..inputs.invocation.facets.clone()
+    };
+    let plan = build_launch_plan(&inputs, &moved).unwrap();
+
+    let warnings: Vec<&LaunchWarning> = plan
+        .warnings
+        .iter()
+        .filter(|warning| warning.source == LaunchWarningSource::SystemPrompt)
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Goose declares `replace` unsupported, so the re-delivery must produce \
+         exactly one system-prompt warning; got {:?}",
+        plan.warnings,
+    );
+    assert!(
+        warnings[0].message.contains("replace"),
+        "the warning must name the unsupported mode; got {:?}",
+        warnings[0],
+    );
+}
+
+/// Review-11 finding 4 — `--sandbox` is invocation intent, and the *refusal*
+/// belongs to whichever provider the rebuild lands on.
+///
+/// Codex implements sandboxing and Goose does not, so the switch is where the
+/// warning is born: the invocation itself had nothing to say.
+#[test]
+fn a_provider_move_keeps_the_rebuilt_sandbox_warning() {
+    let mut inputs = inputs_for(Provider::Codex);
+    inputs.sandbox_requested = true;
+    assert!(
+        replay(&inputs, &inputs.invocation.facets.clone())
+            .unwrap()
+            .warnings
+            .is_empty(),
+        "fixture check: Codex implements `--sandbox`, so the opening provider \
+         warns about nothing",
+    );
+
+    let moved = DocumentLaunchFacets {
+        provider: Provider::Goose,
+        ..inputs.invocation.facets.clone()
+    };
+    let plan = build_launch_plan(&inputs, &moved).unwrap();
+
+    assert!(
+        plan.warnings
+            .iter()
+            .any(|warning| warning.source == LaunchWarningSource::Sandbox),
+        "a rebuilt provider that cannot sandbox must say so; got {:?}",
+        plan.warnings,
+    );
+}
+
+/// Review-11 finding 4 — the same rule for an output format the rebuilt provider
+/// has no record for.
+///
+/// Goose renders `--output json`; Kimi's catalog carries no JSON offering at
+/// all, so the flag is skipped and the caller is owed the reason.
+#[test]
+fn a_provider_move_keeps_the_rebuilt_output_format_warning() {
+    let mut inputs = inputs();
+    inputs.output_format = Some(OutputFormat::Json);
+
+    let moved = DocumentLaunchFacets {
+        provider: Provider::KimiCode,
+        ..inputs.invocation.facets.clone()
+    };
+    let plan = build_launch_plan(&inputs, &moved).unwrap();
+
+    assert!(
+        plan.warnings
+            .iter()
+            .any(|warning| warning.source == LaunchWarningSource::OutputFormat),
+        "a rebuilt provider that cannot render the requested format must say so; \
+         got {:?}",
+        plan.warnings,
+    );
+}
+
+/// The verbatim shortcut carries no warnings: identical facets ran the identical
+/// capability stages the invocation already rendered its own warnings for, so
+/// re-emitting them would double every line on an ordinary retry.
+#[test]
+fn unchanged_facets_carry_no_warnings() {
+    let mut inputs = inputs();
+    inputs.sandbox_requested = true;
+    inputs.invocation.args = replay(&inputs, &inputs.invocation.facets.clone())
+        .unwrap()
+        .args;
+
+    let plan = build_launch_plan(&inputs, &inputs.invocation.facets).unwrap();
+
+    assert!(
+        plan.warnings.is_empty(),
+        "the recorded plan is returned verbatim, warnings included; got {:?}",
+        plan.warnings,
+    );
+}
+
 /// Read back the content a `*-file` system-prompt delivery actually hands the
 /// provider. The plan owns the temp file's RAII guard, so the caller must keep
 /// the plan alive across this call.

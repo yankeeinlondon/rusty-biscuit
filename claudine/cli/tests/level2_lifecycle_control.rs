@@ -609,6 +609,49 @@ fn run_provider_await_exit(staged: &Staged, provider_flag: &str) -> String {
 /// select the provider, which is what makes the provider facet movable) or add
 /// flags such as `--yolo` / `--append-system-prompt`.
 fn run_compose_await_exit_with_args(staged: &Staged, extra_args: &str) -> String {
+    run_compose_await_exit_on_path(
+        staged,
+        extra_args,
+        &augmented_path(&staged.bin_dir).to_string_lossy(),
+    )
+}
+
+/// A `PATH` carrying the row's fakes and the POSIX tools they need — and
+/// nothing else.
+///
+/// [`augmented_path`] appends the developer's own `PATH`, which is right for a
+/// row whose fakes only need to *win*. It is wrong for a row whose contract is
+/// that a provider is **absent**: a real `gemini` in the developer's
+/// `~/.local/bin` would make such a row silently vacuous, and green or red would
+/// depend on the machine. `/usr/bin:/bin` holds `sh`, `env`, `sed`, `basename`
+/// and no agentic CLI.
+fn isolated_path(bin_dir: &Path) -> String {
+    format!("{}:/usr/bin:/bin", bin_dir.display())
+}
+
+/// [`run_compose_await_exit_with_args`] with the child `PATH` spelled out.
+fn run_compose_await_exit_on_path(staged: &Staged, extra_args: &str, path: &str) -> String {
+    run_compose_await_exit_redirected(staged, extra_args, path, "")
+}
+
+/// `2>&1 | cat`: run compose with **stderr on a pipe** rather than the pane's
+/// TTY, while still showing everything it writes.
+///
+/// Provider selection is TTY-gated — with a terminal on stderr an unresolvable
+/// `agent:` opens the interactive picker instead of aborting — so a row
+/// comparing the *no-operator* diagnostic has to take the operator away. A
+/// retry has none by construction; this is how the direct arm is put in the
+/// same position.
+const NON_TTY_STDERR: &str = " 2>&1 | cat";
+
+/// [`run_compose_await_exit_on_path`] with a shell redirection appended to the
+/// compose command.
+fn run_compose_await_exit_redirected(
+    staged: &Staged,
+    extra_args: &str,
+    path: &str,
+    redirect: &str,
+) -> String {
     static SEQ: AtomicU32 = AtomicU32::new(0);
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
     let provider_flag = extra_args;
@@ -633,10 +676,9 @@ fn run_compose_await_exit_with_args(staged: &Staged, extra_args: &str) -> String
     let env_prefix = format!(
         "NO_COLOR='1' MODEL='' HOME='{home}' PATH='{path}' ",
         home = staged.workspace.path().display(),
-        path = augmented_path(&staged.bin_dir).to_string_lossy(),
     );
     let cmd = format!(
-        "cd {ws} && {env_prefix}{claudine} compose {provider_flag} {md} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} compose {provider_flag} {md}{redirect} ; echo {sentinel}",
         ws = staged.workspace.path().display(),
         md = staged.md_file.display(),
     );
@@ -1077,6 +1119,111 @@ fn level2_lifecycle_retry_delivers_a_readable_system_prompt_file_after_a_switch(
     );
 }
 
+/// A fake `codex` that echoes the content of the file its replacement config key
+/// names.
+///
+/// Codex's `replace` delivery is `ConfigKeyFile`: one argv token shaped
+/// `model_instructions_file=<path>`, so the path rides the argv rather than the
+/// environment. Same observation problem as Gemini — the content never crosses
+/// the process boundary, only the path does.
+fn write_codex_system_prompt_reader(bin_dir: &Path, events_log: &Path) {
+    write_executable(
+        &bin_dir.join("codex"),
+        &format!(
+            "#!/bin/sh\ncase \"$1\" in --version|-V|-v|version|models) exit 0;; esac\n\
+             if [ ! -t 0 ]; then cat > /dev/null 2>&1; fi\n\
+             printf 'launched-binary=%s\\n' \"$(basename \"$0\")\" >> {log}\n\
+             for a in \"$@\"; do\n  case \"$a\" in\n    \
+             model_instructions_file=*)\n      \
+             f=\"${{a#model_instructions_file=}}\"\n      \
+             printf 'sysprompt-path=%s\\n' \"$f\" >> {log}\n      \
+             if [ -f \"$f\" ]; then\n        \
+             printf 'sysprompt-read=%s\\n' \"$(tr '\\n' ' ' < \"$f\")\" >> {log}\n      \
+             fi\n      ;;\n  esac\ndone\n\
+             printf 'provider-ran\\n' >> {log}\nexit 0\n",
+            log = events_log.display(),
+        ),
+    );
+}
+
+/// A document that names its own provider and stamps a terminal marker, with no
+/// failure/retry surface at all — the direct, first-attempt launch.
+fn direct_system_prompt_doc(agent: &str) -> String {
+    format!(
+        "---\ntitle: direct system prompt\nagent: {agent}\nfinalize:\n  stack:\n    \
+         - action: {{append_line: [\"events.log\", \"finalize\"]}}\n---\nBody\n"
+    )
+}
+
+/// **Review-11 finding 1 — the *initial* launch's file-backed system prompt is
+/// still on disk when the first child starts.**
+///
+/// The sibling row above covers a *replay*-created artifact. This one covers the
+/// artifact the command phase itself writes: `CommandPhase` had no owner for it,
+/// so the `NamedTempFile` dropped when command construction returned — before
+/// `provider_run_handoff` reached the spawn — while the recorded argv and
+/// environment still named only its path. The first attempt cannot repair the
+/// loss, because its facets equal the recorded invocation and the launch-plan
+/// builder therefore takes the verbatim shortcut.
+///
+/// Both file-backed mechanisms a direct `claudine compose` can select are
+/// exercised: Gemini's `GEMINI_SYSTEM_MD` (environment) and Codex's
+/// `model_instructions_file` (argv). Each fake child echoes the *bytes* it finds
+/// at the path it was handed, so the sentinel reaches the log only if the file
+/// survived to spawn.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_direct_compose_delivers_a_readable_system_prompt_file() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    const SENTINEL: &str = "SYSPROMPT-SURVIVED-TO-FIRST-SPAWN";
+
+    let run_arm = |agent: &str, delivery_flag: &str, write_reader: fn(&Path, &Path)| {
+        let staged = stage_launch_recording(&direct_system_prompt_doc(agent));
+        write_reader(&staged.bin_dir, &staged.events_log);
+
+        let sysprompt = staged.workspace.path().join("sysprompt.txt");
+        fs::write(&sysprompt, format!("{SENTINEL}\n")).unwrap();
+        let extra = format!("{delivery_flag} '{}'", sysprompt.display());
+
+        let pane = run_provider_with_flags(&staged, "", &extra, "finalize");
+        let lines = event_lines(&staged);
+
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.as_str() == format!("launched-binary={agent}")),
+            "[{agent}] fixture check: the document's own provider must have \
+             launched; log:\n{lines:#?}\npane:\n{pane}"
+        );
+        // Without this the row would pass against a provider that silently chose
+        // an inline mechanism, where nothing about lifetimes is being tested.
+        assert!(
+            lines.iter().any(|l| l.starts_with("sysprompt-path=")),
+            "[{agent}] fixture check: delivery must have been file-backed; \
+             log:\n{lines:#?}\npane:\n{pane}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("sysprompt-read=") && l.contains(SENTINEL)),
+            "[{agent}] the first attempt must be able to read the file its launch \
+             names; log:\n{lines:#?}\npane:\n{pane}"
+        );
+    };
+
+    run_arm(
+        "gemini",
+        "--append-system-prompt",
+        write_gemini_system_prompt_reader,
+    );
+    run_arm(
+        "codex",
+        "--replace-system-prompt",
+        write_codex_system_prompt_reader,
+    );
+}
+
 /// **Review-9 finding 2 — `--output` and `--sandbox` are intent, not bytes.**
 ///
 /// Goose encodes `--output json` as no argv at all and implements no sandbox;
@@ -1116,6 +1263,109 @@ fn level2_lifecycle_retry_re_renders_output_and_sandbox_for_the_refreshed_provid
         "the retried Codex attempt must honor the requested sandbox; argv: {:?}\n\
          pane:\n{pane}",
         attempts[1].argv,
+    );
+}
+
+/// The rendered selection diagnostic, workspace paths normalized so two runs in
+/// two temporary directories can be compared byte for byte.
+///
+/// Starts at the typed identity header, which is what scopes the comparison to
+/// the diagnostic: everything a route renders before it (the execution header,
+/// the opening attempt's own output, the `failure` markers) is route-specific by
+/// design and is asserted separately.
+fn selection_diagnostic(pane: &str, staged: &Staged) -> Vec<String> {
+    let workspace = staged.workspace.path().display().to_string();
+    pane.lines()
+        .skip_while(|line| !line.contains("agent resolution failed"))
+        .take_while(|line| !line.trim().starts_with("L2_CTL_EXIT"))
+        .map(|line| line.trim().replace(&workspace, "<WS>"))
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+/// **Review-11 finding 2 — a retry into an unavailable provider refuses exactly
+/// as invoking that document directly does, and spawns nothing.**
+///
+/// The rebuild used to accept any refreshed `agent:` scalar without consulting
+/// the invocation's installed-provider snapshot, then paper over the missing
+/// binary with the profile's bare executable name. A retry into a provider that
+/// is not on `PATH` therefore passed canonical preparation, fired `start`, and
+/// died at process spawn — while invoking the same document directly refused
+/// during selection with the typed `agent resolution failed` diagnostic.
+///
+/// Both arms run the **same document bytes**: the direct arm is staged from the
+/// file the retry arm's `failure` stack actually wrote, so the frontmatter
+/// excerpt each diagnostic carries is identical by construction and the two
+/// renderings are comparable in full.
+///
+/// `PATH` is deliberately [`isolated_path`], not [`augmented_path`]: this is the
+/// one row whose contract is that `gemini` is *absent*, and the developer's own
+/// `PATH` would decide that.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_retry_to_an_unavailable_provider_matches_direct_selection() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    // Retry arm. `goose` is the only provider on PATH; it fails, the `failure`
+    // stack rewrites `agent: gemini`, and the retry must refuse.
+    let retry = stage_launch_recording(&provider_switch_retry_doc("goose", "gemini", ""));
+    write_full_launch_recorder(&retry.bin_dir, "goose", &retry.events_log, 1);
+    let retry_pane = run_compose_await_exit_redirected(
+        &retry,
+        "",
+        &isolated_path(&retry.bin_dir),
+        NON_TTY_STDERR,
+    );
+
+    let refreshed = fs::read_to_string(&retry.md_file).unwrap();
+    assert!(
+        refreshed.contains("agent: gemini"),
+        "fixture check: the failure stack must have rewritten `agent:` before the \
+         retry; document:\n{refreshed}"
+    );
+
+    // Direct arm: the very document the retry refreshed into, invoked directly.
+    let direct = stage_launch_recording(&refreshed);
+    write_full_launch_recorder(&direct.bin_dir, "goose", &direct.events_log, 1);
+    let direct_pane = run_compose_await_exit_redirected(
+        &direct,
+        "",
+        &isolated_path(&direct.bin_dir),
+        NON_TTY_STDERR,
+    );
+
+    let direct_diagnostic = selection_diagnostic(&direct_pane, &direct);
+    assert!(
+        direct_diagnostic.len() >= 2,
+        "fixture check: the direct arm must render a header and a body — without \
+         one there is nothing to compare against; pane:\n{direct_pane}"
+    );
+    assert_eq!(
+        selection_diagnostic(&retry_pane, &retry),
+        direct_diagnostic,
+        "a retry into a provider the invocation snapshot cannot run must render \
+         the same typed diagnostic as invoking that document directly; \
+         retry pane:\n{retry_pane}\n\ndirect pane:\n{direct_pane}"
+    );
+
+    // No child starts for the refused provider. Exactly one process ran — the
+    // opening `goose` attempt whose failure drove the retry — and it is not a
+    // `gemini`, bare-named or otherwise.
+    let binaries: Vec<String> = recorded_attempts(&retry)
+        .into_iter()
+        .map(|a| a.binary)
+        .collect();
+    assert_eq!(
+        binaries,
+        vec!["goose".to_string()],
+        "the refusal must happen before any spawn: only the opening attempt may \
+         have run; pane:\n{retry_pane}"
+    );
+    assert_eq!(
+        event_lines(&direct).iter().filter(|l| **l == "provider-ran").count(),
+        0,
+        "fixture check: the direct arm fails during selection, so no provider may \
+         launch on it either; pane:\n{direct_pane}"
     );
 }
 
@@ -1333,6 +1583,122 @@ fn level2_lifecycle_retry_strips_credentials_the_refreshed_provider_rejects() {
     );
 }
 
+/// Every `warning:` line the pane shows, trimmed and in order.
+///
+/// `crate::log::warn` writes `warning: <message>` to stderr, and the L2 runner
+/// exports `NO_COLOR=1`, so the prefix is a literal on the captured pane.
+fn pane_warnings(pane: &str) -> Vec<String> {
+    pane.lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("warning:"))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Run `doc` twice with the same `extra_flags`: once switching `from` → `to`
+/// across a retry, and once pinned directly to `to`. Returns
+/// `(switch_warnings, direct_warnings)`.
+///
+/// The direct run is what the comparison is *for*: the expected text is read
+/// off the route the equivalence contract defines as correct rather than
+/// duplicated as a literal here, so a reworded provider warning cannot leave the
+/// two routes agreeing with a stale assertion.
+fn warnings_from_switch_and_direct(
+    from: &str,
+    to: &str,
+    extra_flags: &dyn Fn(&Staged) -> String,
+) -> (Vec<String>, Vec<String>) {
+    let doc = provider_switch_retry_doc(from, to, "");
+
+    let switched = stage_provider_switch(&doc, from, to);
+    let flags = extra_flags(&switched);
+    let switch_pane = run_provider_with_flags(&switched, "", &flags, "finalize");
+    switched_attempts(&switched, &switch_pane, from, to);
+
+    // A fresh stage: the two runs must not share an events log, and the direct
+    // run pins `to` with an explicit flag, which no frontmatter can move — so it
+    // succeeds on its first attempt and never enters the `failure` stack.
+    let direct = stage_provider_switch(&doc, from, to);
+    let flags = extra_flags(&direct);
+    let direct_pane = run_provider_with_flags(&direct, &format!("--{to}"), &flags, "finalize");
+
+    (
+        pane_warnings(&switch_pane),
+        pane_warnings(&direct_pane),
+    )
+}
+
+/// **Review-11 finding 4 — an unsupported system-prompt delivery warns on the
+/// replay path too.**
+///
+/// Codex delivers `--replace-system-prompt` through a config-key file; Goose
+/// declares `replace` unsupported in both modes. A retry that switches Codex →
+/// Goose therefore re-applies the prompt for Goose and gets the "not supported"
+/// notice — which the replay used to consume alongside the args and artifacts
+/// and then throw away, on the theory that a retry has no operator. Invoking the
+/// refreshed document directly shows it, so the switched attempt must too.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_switch_surfaces_unsupported_system_prompt_warning() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let sysprompt_flags = |staged: &Staged| {
+        let sysprompt = staged.workspace.path().join("sysprompt.txt");
+        fs::write(&sysprompt, "REPLACEMENT SYSTEM PROMPT\n").unwrap();
+        format!("--replace-system-prompt '{}'", sysprompt.display())
+    };
+    let (switch_warnings, direct_warnings) =
+        warnings_from_switch_and_direct("codex", "goose", &sysprompt_flags);
+
+    let expected = direct_warnings
+        .iter()
+        .find(|line| line.contains("system prompt"))
+        .unwrap_or_else(|| {
+            panic!(
+                "fixture check: invoking the document directly on Goose must warn \
+                 that `replace` is unsupported; direct warnings: {direct_warnings:#?}"
+            )
+        });
+    assert!(
+        switch_warnings.contains(expected),
+        "the switched attempt must render the same system-prompt warning the \
+         direct route renders.\nexpected: {expected}\nswitch warnings: \
+         {switch_warnings:#?}\ndirect warnings: {direct_warnings:#?}"
+    );
+}
+
+/// **Review-11 finding 4 — an unsupported `--sandbox` warns on the replay path
+/// too.**
+///
+/// The mirror of the system-prompt row for a *capability flag*: Codex
+/// implements `--sandbox`, Goose does not, and the replay discarded
+/// `apply_sandbox`'s return outright. The request is invocation-fixed, so the
+/// refusal belongs to whichever provider the retry lands on.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_switch_surfaces_unsupported_sandbox_warning() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let (switch_warnings, direct_warnings) =
+        warnings_from_switch_and_direct("codex", "goose", &|_| "--sandbox".to_string());
+
+    let expected = direct_warnings
+        .iter()
+        .find(|line| line.contains("sandbox"))
+        .unwrap_or_else(|| {
+            panic!(
+                "fixture check: invoking the document directly on Goose must warn \
+                 that `--sandbox` was skipped; direct warnings: {direct_warnings:#?}"
+            )
+        });
+    assert!(
+        switch_warnings.contains(expected),
+        "the switched attempt must render the same sandbox warning the direct \
+         route renders.\nexpected: {expected}\nswitch warnings: \
+         {switch_warnings:#?}\ndirect warnings: {direct_warnings:#?}"
+    );
+}
+
 /// **Review-8 finding 2 — MCP runtime injection.** A document whose `failure`
 /// stack adds an MCP `#tag` to its own body and then retries has the retried
 /// attempt's MCP configuration rebuilt from the refreshed tag set.
@@ -1385,6 +1751,69 @@ Body with no tag
         "the first attempt's body selects no server and the retried attempt's \
          refreshed body selects one, so the injected MCP configuration must differ \
          between the two launches; pane:\n{pane}"
+    );
+}
+
+/// **Review-11 finding 3 — the MCP tag set is the *composed* document's.**
+///
+/// The row above appends a literal `#proxyprobeserver` to the file on disk, so a
+/// rebuild that re-read the raw source found the same tag a rebuild reading the
+/// prepared document finds; it cannot discriminate where the set came from. This
+/// row's tag exists **only after composition**: the body carries
+/// `#{{ probe }}` and the frontmatter carries the value, so the bytes on disk
+/// never contain the server id at all.
+///
+/// Both launches must therefore inject it — the first attempt's, whose plan the
+/// invocation recorded, and the retried attempt's, rebuilt at the fresh-read
+/// boundary. Re-lexing the source at either point yields no tag (`#{{` fails the
+/// alphabetic-first-character rule), which is exactly the `mcp-allowed=none` the
+/// pre-fix code produced while the operator's requested server silently reached
+/// neither the model as text nor the launch as configuration.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_retry_keeps_an_interpolated_mcp_tag_at_child_launch() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let doc = format!(
+        r#"---
+title: retry keeps an interpolated mcp tag
+agent: gemini
+probe: {MCP_PROBE_SERVER}
+failure:
+  stack:
+    - action: {{append_line: ["events.log", "failure"]}}
+    - action: {{retry: 1}}
+finalize:
+  stack:
+    - action: {{append_line: ["events.log", "finalize"]}}
+---
+Body whose server is named only after composition #{{{{ probe }}}} here
+"#
+    );
+    let staged = stage_launch_recording(&doc);
+    seed_mcp_catalog(staged.workspace.path());
+    write_launch_recorder(&staged.bin_dir, "gemini", &staged.events_log, 1);
+
+    let pane = run_compose_await_exit_with_args(&staged, "--mcp");
+
+    let on_disk = fs::read_to_string(&staged.md_file).unwrap();
+    let (_, body) = on_disk.rsplit_once("---\n").unwrap();
+    assert!(
+        body.contains("#{{ probe }}") && !body.contains(MCP_PROBE_SERVER),
+        "fixture check: the authored body must carry only the template, so a \
+         second raw read of this file can find no server id; body:\n{body}"
+    );
+
+    let allowed: Vec<String> = event_lines(&staged)
+        .into_iter()
+        .filter_map(|line| line.strip_prefix("mcp-allowed=").map(str::to_string))
+        .collect();
+    assert_eq!(
+        allowed,
+        vec![MCP_PROBE_SERVER.to_string(), MCP_PROBE_SERVER.to_string()],
+        "an interpolated `#tag` selects a server on the first attempt and must \
+         still select it on the retried attempt, whose launch is rebuilt at the \
+         fresh-read boundary; pane:\n{pane}"
     );
 }
 
@@ -2767,6 +3196,73 @@ Original body
         refreshed.contains("#calendar"),
         "the failure stack must have added an MCP tag to the body before the resume; \
          document:\n{refreshed}"
+    );
+
+    assert_resume_refused(&staged, &pane, &["MCP server set"]);
+}
+
+/// **Review-11 finding 3 — AC15 over a *composed* MCP tag set.**
+///
+/// The row above moves the server set by appending a literal `#calendar` to the
+/// body, which a rebuild sees whether it reads the prepared document or the raw
+/// file. This row moves it by `set_frontmatter`, leaving the body's
+/// `#{{ probe }}` template untouched: the two reads of the file on disk are
+/// byte-identical in the body, and only composition resolves the tag.
+///
+/// The refusal is therefore reachable only for an implementation that takes the
+/// tag set from the composed document. Re-lexing the raw source sees no tag
+/// before *or* after the mutation, judges the MCP facet unmoved, and admits the
+/// resume — handing the live session a launch plan built for a different server
+/// set, which is precisely what AC15 forbids.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_resume_refuses_when_refresh_changes_an_interpolated_mcp_tag() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let follow_up = "please finish the resumed work";
+    let doc = format!(
+        r#"---
+title: resume refused after interpolated mcp tag refresh
+probe: calendar
+start:
+  stack:
+    - action: {{append_line: ["events.log", "start"]}}
+failure:
+  stack:
+    - action: {{append_line: ["events.log", "failure"]}}
+    - action: {{set_frontmatter: ["doc.md", "probe", "slack"]}}
+    - action: {{resume: "{follow_up}"}}
+success:
+  stack:
+    - action: {{append_line: ["events.log", "success"]}}
+finalize:
+  stack:
+    - action: {{append_line: ["events.log", "finalize"]}}
+---
+Original body naming its server only after composition #{{{{ probe }}}} here
+"#
+    );
+    let staged = stage_resumable(&doc, "mcp-interp-refused-abc", follow_up);
+    write_resumable_codex(
+        &staged.bin_dir,
+        &staged.events_log,
+        "mcp-interp-refused-abc",
+        follow_up,
+    );
+
+    let pane = run_compose_await_exit_with_args(&staged, "--codex --mcp");
+
+    let refreshed = fs::read_to_string(&staged.md_file).unwrap();
+    let (_, body) = refreshed.rsplit_once("---\n").unwrap();
+    assert!(
+        refreshed.contains("probe: slack"),
+        "the failure stack must have moved the frontmatter value before the resume; \
+         document:\n{refreshed}"
+    );
+    assert!(
+        body.contains("#{{ probe }}") && !body.contains("slack") && !body.contains("calendar"),
+        "fixture check: the body must be unchanged and carry no literal server id, \
+         so only the composed tag set moved; body:\n{body}"
     );
 
     assert_resume_refused(&staged, &pane, &["MCP server set"]);

@@ -72,6 +72,39 @@ fn plan_inputs() -> launch_plan::LaunchPlanInputs {
     }
 }
 
+/// A snapshot in which every provider is runnable, with a synthetic binary for
+/// each.
+///
+/// The rebuild resolves a *switched* provider's binary through the snapshot and
+/// keeps the direct route's "not installed or not on PATH" failure when it finds
+/// none, so a fixture without one would run `which` against the developer's own
+/// machine — passing where a provider happens to be installed and failing where
+/// it is not. Every path is distinct, which is what the binary-movement
+/// assertions read.
+fn all_installed() -> InstalledProviderSnapshot {
+    InstalledProviderSnapshot {
+        runnable: claudine::provider::PROVIDERS_DISPLAY_ORDER.to_vec(),
+        excluded: std::collections::BTreeSet::new(),
+        all_installed: claudine::provider::PROVIDERS_DISPLAY_ORDER.to_vec(),
+        binary_paths: claudine::provider::PROVIDERS_DISPLAY_ORDER
+            .into_iter()
+            .map(|p| (p, PathBuf::from(format!("/fixture/bin/{}", p.as_slug()))))
+            .collect(),
+    }
+}
+
+/// [`all_installed`] with `absent` removed — the shape a refreshed `agent:`
+/// naming an unavailable provider resolves against.
+fn installed_without(absent: &[Provider]) -> InstalledProviderSnapshot {
+    let mut snapshot = all_installed();
+    snapshot.runnable.retain(|p| !absent.contains(p));
+    snapshot.all_installed.retain(|p| !absent.contains(p));
+    for provider in absent {
+        snapshot.binary_paths.remove(provider);
+    }
+    snapshot
+}
+
 /// The invocation intent an unchanged run resolves against: Goose,
 /// non-interactive, nothing explicit, MCP in play so a body tag counts.
 fn intent() -> LaunchRebuildIntent {
@@ -79,7 +112,7 @@ fn intent() -> LaunchRebuildIntent {
         explicit_provider: None,
         fallback_provider: Provider::Goose,
         fallback_binary: PathBuf::from("/usr/bin/goose"),
-        installed_snapshot: None,
+        installed_snapshot: Some(all_installed()),
         default_non_interactive: true,
         cli_yolo: false,
         is_inline: false,
@@ -138,6 +171,21 @@ fn document(
     frontmatter: serde_json::Value,
     prompt: &str,
 ) -> MaterializedHarnessPrompt {
+    document_with_tags(selection_hints, frontmatter, prompt, Vec::new())
+}
+
+/// A prepared document whose composed body selected `mcp_body_tags`.
+///
+/// The two are supplied separately on purpose: production captures the tag set
+/// from the *composed* body and then lets a resume overwrite `prompt` with its
+/// follow-up, so a document whose prompt and tags disagree is exactly the state
+/// a resumed attempt is in.
+fn document_with_tags(
+    selection_hints: EffectiveSelectionHints,
+    frontmatter: serde_json::Value,
+    prompt: &str,
+    mcp_body_tags: Vec<String>,
+) -> MaterializedHarnessPrompt {
     MaterializedHarnessPrompt {
         live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&frontmatter),
         frontmatter,
@@ -146,6 +194,7 @@ fn document(
         selection_hints,
         inline_closure_plan: None,
         lifecycle: None,
+        mcp_body_tags,
     }
 }
 
@@ -543,11 +592,16 @@ fn an_unchanged_document_rebuilds_to_an_identical_identity() {
 /// The attempt used to rebuild twice: once without a source path, whose
 /// `env_overrides` overlaid the child environment, and once *with* one, whose
 /// result fed the compatibility key. Collapsing them into the one call that
-/// passes the source path is only sound if the source path moves nothing but
-/// [`RebuiltLaunchIdentity::mcp_tags`] — otherwise the surviving call would
-/// hand the child a different environment than the deleted one did.
+/// passes the source path is only sound if the source path moves no launch
+/// facet — otherwise the surviving call would hand the child a different
+/// environment than the deleted one did.
+///
+/// The source path once moved [`RebuiltLaunchIdentity::mcp_tags`], because the
+/// rebuild lexed it. It no longer does: the tag set arrives on the prepared
+/// document, and the path survives only as the subject of an
+/// unavailable-provider diagnostic (review-11 findings 2 and 3).
 #[test]
-fn the_source_path_moves_only_the_mcp_tags_of_a_bundle() {
+fn the_source_path_moves_no_facet_of_a_bundle() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("doc.md");
     std::fs::write(&source, "---\ntitle: t\n---\nwork on #calendar today\n").unwrap();
@@ -571,9 +625,14 @@ fn the_source_path_moves_only_the_mcp_tags_of_a_bundle() {
         env_only.codex_output.is_some(),
         with_source.codex_output.is_some()
     );
+    assert_eq!(
+        env_only.mcp_tags, with_source.mcp_tags,
+        "the tag set is the prepared document's, so a source carrying its own \
+         `#tag` may not move it",
+    );
     assert!(
-        env_only.mcp_tags.is_empty() && with_source.mcp_tags == vec!["calendar".to_string()],
-        "the source path is what lexes the body tags, and is the only facet it moves",
+        with_source.mcp_tags.is_empty(),
+        "and that prepared set is what governs — not the `#calendar` on disk",
     );
 }
 
@@ -615,6 +674,212 @@ fn an_explicit_cli_provider_pins_the_rebuilt_provider() {
     ), None).unwrap();
 
     assert_eq!(rebuilt.provider, Provider::Goose);
+}
+
+/// **Review-11 finding 4** — the per-attempt bundle carries the rebuilt
+/// provider's capability warnings, and the command's output policy is what
+/// decides whether they are shown.
+///
+/// The rebuild is where a provider switch's warnings are *born* — the invocation
+/// asked Goose, and only the replay asks Claude — so a bundle that dropped them
+/// left the attempt with nothing to render. Both suppressing verbosities are
+/// asserted against the same populated bundle, which is what proves the gate
+/// suppresses rather than the fixture producing nothing to suppress.
+#[test]
+fn the_rebuilt_bundle_carries_warnings_that_the_output_policy_gates() {
+    // Goose implements no sandbox and Claude does not either, but the request
+    // only reaches a *rebuilt* provider's `apply_sandbox` on the replay path, so
+    // the switch below is what populates the list.
+    let mut intent = intent();
+    intent.launch_plan_inputs.sandbox_requested = true;
+
+    let switched = rebuild_launch_identity(
+        &intent,
+        None,
+        None,
+        &with_hints(EffectiveSelectionHints {
+            agent: Some(AgentHint::Single(Provider::Claude)),
+            ..EffectiveSelectionHints::default()
+        }),
+        None,
+    )
+    .unwrap();
+
+    assert!(
+        !switched.warnings.is_empty(),
+        "the switched bundle must carry the rebuilt provider's capability \
+         warnings; got {:?}",
+        switched.warnings,
+    );
+    assert_eq!(
+        super::super::launch_warnings_to_render(
+            &switched,
+            claudine::stream::stderr::Verbosity::Normal
+        ),
+        switched.warnings.as_slice(),
+        "an ordinary run renders every warning the bundle carries",
+    );
+    for suppressed in [
+        claudine::stream::stderr::Verbosity::Quiet,
+        claudine::stream::stderr::Verbosity::Silent,
+    ] {
+        assert!(
+            super::super::launch_warnings_to_render(&switched, suppressed).is_empty(),
+            "`{suppressed:?}` must suppress the replay's warnings exactly as it \
+             suppresses the direct command's",
+        );
+    }
+}
+
+// ── Review-11 finding 2: refreshed selection obeys the invocation snapshot ───
+//
+// The refreshed `agent:` used to be accepted unchecked — a scalar always, a list
+// by falling back to its first *unavailable* entry — and the missing binary was
+// then papered over with the profile's bare executable name. A retry could
+// therefore pass canonical preparation, fire `start`, and only die at `exec`,
+// where a direct invocation of the same document refuses during selection.
+//
+// These rows pin both halves: the rebuild refuses, and it refuses with the
+// diagnostic the direct non-interactive route produces for the same document.
+
+/// The `CompositionError` a direct non-interactive invocation of `hints` raises
+/// against `snapshot`.
+///
+/// Built from the same canonical gate the production direct route runs
+/// (`composition::provider_for_state_non_tty`, reached from
+/// `resolve_live_target_with_tty` with no TTY), so this is a real comparison and
+/// not a restatement of the rebuild's own behavior.
+fn direct_selection_error(
+    hints: &EffectiveSelectionHints,
+    snapshot: &InstalledProviderSnapshot,
+    source_path: &Path,
+) -> claudine::composition::CompositionError {
+    let state = claudine::composition::classify_agent_resolution(hints, snapshot);
+    crate::commands::wrap::composition::provider_for_state_non_tty(&state, snapshot, source_path)
+        .expect_err("the fixture snapshot runs none of the hinted providers")
+}
+
+/// The refusal a rebuild against `snapshot` produces for `hints`.
+fn rebuild_selection_error(
+    hints: EffectiveSelectionHints,
+    snapshot: InstalledProviderSnapshot,
+    source_path: &Path,
+) -> launch_plan::LaunchPlanError {
+    let intent = LaunchRebuildIntent {
+        installed_snapshot: Some(snapshot),
+        ..intent()
+    };
+    rebuild_launch_identity(&intent, None, None, &with_hints(hints), Some(source_path))
+        .err()
+        .expect("an unavailable provider must refuse the rebuild")
+}
+
+/// Assert the rebuild refused with the *same* typed diagnostic the direct route
+/// raises — variant, classified state, and installed list alike.
+fn assert_matches_direct_refusal(
+    hints: EffectiveSelectionHints,
+    snapshot: InstalledProviderSnapshot,
+) {
+    let source = Path::new("/fixture/doc.md");
+    let direct = direct_selection_error(&hints, &snapshot, source);
+    let rebuilt = rebuild_selection_error(hints, snapshot, source);
+
+    let launch_plan::LaunchPlanError::ProviderUnavailable(refusal) = rebuilt else {
+        panic!("the refusal must keep its selection identity, got: {rebuilt:?}");
+    };
+    let (
+        claudine::composition::CompositionError::AgentResolutionFailed {
+            source_path: got_path,
+            state: got_state,
+            installed: got_installed,
+        },
+        claudine::composition::CompositionError::AgentResolutionFailed {
+            source_path: want_path,
+            state: want_state,
+            installed: want_installed,
+        },
+    ) = (&*refusal, &direct)
+    else {
+        panic!("both routes must raise AgentResolutionFailed; got {refusal:?} vs {direct:?}");
+    };
+    assert_eq!(got_state, want_state, "the classified state must match direct selection");
+    assert_eq!(got_path, want_path);
+    assert_eq!(got_installed, want_installed);
+}
+
+/// A refreshed `agent:` scalar naming a provider the invocation's snapshot does
+/// not run refuses as `SingleNotInstalled`, exactly as invoking that document
+/// directly does — no bare-name binary, no spawn.
+#[test]
+fn a_refreshed_unavailable_scalar_agent_refuses_like_direct_selection() {
+    let hints = EffectiveSelectionHints {
+        agent: Some(AgentHint::Single(Provider::Claude)),
+        ..EffectiveSelectionHints::default()
+    };
+    let snapshot = installed_without(&[Provider::Claude]);
+
+    // Precondition: the state under comparison really is the scalar one.
+    assert!(
+        matches!(
+            claudine::composition::classify_agent_resolution(&hints, &snapshot),
+            claudine::composition::AgentResolutionState::SingleNotInstalled {
+                provider: Provider::Claude
+            }
+        ),
+        "fixture check: an unavailable scalar must classify as SingleNotInstalled",
+    );
+
+    assert_matches_direct_refusal(hints, snapshot);
+}
+
+/// A refreshed `agent:` list with no runnable member refuses as
+/// `ZeroInstalledList` rather than silently launching its first entry — the
+/// deliberate fallback that made the old rule diverge from direct selection.
+#[test]
+fn a_refreshed_agent_list_with_no_runnable_member_refuses_like_direct_selection() {
+    let hints = EffectiveSelectionHints {
+        agent: Some(AgentHint::List(vec![Provider::Claude, Provider::Codex])),
+        ..EffectiveSelectionHints::default()
+    };
+    let snapshot = installed_without(&[Provider::Claude, Provider::Codex]);
+
+    assert!(
+        matches!(
+            claudine::composition::classify_agent_resolution(&hints, &snapshot),
+            claudine::composition::AgentResolutionState::ZeroInstalledList { .. }
+        ),
+        "fixture check: a list with no runnable member must classify as ZeroInstalledList",
+    );
+
+    assert_matches_direct_refusal(hints, snapshot);
+}
+
+/// The refusal is scoped to *unavailable* providers: a list whose later entry is
+/// runnable still selects that entry, so the rows above cannot pass by refusing
+/// everything.
+#[test]
+fn a_refreshed_agent_list_still_selects_its_first_runnable_member() {
+    let rebuilt = rebuild_launch_identity(
+        &LaunchRebuildIntent {
+            installed_snapshot: Some(installed_without(&[Provider::Claude])),
+            ..intent()
+        },
+        None,
+        None,
+        &with_hints(EffectiveSelectionHints {
+            agent: Some(AgentHint::List(vec![Provider::Claude, Provider::Gemini])),
+            ..EffectiveSelectionHints::default()
+        }),
+        None,
+    )
+    .expect("a list with one runnable member must still select it");
+
+    assert_eq!(rebuilt.provider, Provider::Gemini);
+    assert_eq!(
+        rebuilt.binary_path,
+        PathBuf::from("/fixture/bin/gemini"),
+        "the selected provider's binary must come from the invocation snapshot",
+    );
 }
 
 /// Frontmatter `interactive:` moves the session mode, and the
@@ -999,22 +1264,27 @@ fn an_unchanged_document_keeps_the_invocation_dispatch_context() {
     assert_eq!(unchanged.dispatch_context, invocation_dispatch_context());
 }
 
-/// MCP `#tag`s lexed from the document **on disk** participate in the
+/// The MCP `#tag`s the **prepared document** composed participate in the
 /// identity — but only when MCP is in play for the invocation at all.
 ///
-/// Reading the source rather than `document.prompt` is what makes the signal
-/// survive a resume, whose prompt field carries the follow-up message.
+/// This test previously asserted the tags were lexed from the source path on
+/// disk. That encoded the drift review-11 finding 3 corrects: the bytes on disk
+/// are raw authored Markdown, so a tag produced by `proxy.with`, a caller
+/// override, or `#{{ … }}` interpolation is absent from them. Reading the
+/// prepared set is also what makes the signal survive a resume, whose prompt
+/// field carries the follow-up message rather than the composed body.
 #[test]
-fn body_mcp_tags_are_lexed_from_disk_and_only_when_mcp_is_enabled() {
+fn body_mcp_tags_come_from_the_prepared_document_and_only_when_mcp_is_enabled() {
+    // The prompt field deliberately carries a resume follow-up, and the source
+    // on disk deliberately carries no tag, proving the set comes from neither.
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("doc.md");
-    std::fs::write(&source, "---\ntitle: t\n---\nwork on #calendar today\n").unwrap();
-    // The prompt field deliberately carries a resume follow-up, proving the
-    // tags do not come from it.
-    let doc = document(
+    std::fs::write(&source, "---\ntitle: t\n---\nno tag in the authored text\n").unwrap();
+    let doc = document_with_tags(
         EffectiveSelectionHints::default(),
         serde_json::json!({ "title": "t" }),
         "please finish the resumed work",
+        vec!["calendar".to_string()],
     );
 
     let enabled =
@@ -1031,5 +1301,43 @@ fn body_mcp_tags_are_lexed_from_disk_and_only_when_mcp_is_enabled() {
             .mcp_tags
             .is_empty(),
         "with MCP off no body tag participates in the launch, so none may refuse a resume",
+    );
+}
+
+/// No second read of the source can move the prepared tag set.
+///
+/// The rebuild used to open the source path itself and silently treat a read
+/// failure as an empty body, so a document deleted, truncated, or rewritten
+/// between canonical composition and the rebuild lost its MCP servers — they
+/// reached neither the model as text (the child prompt has its tags removed)
+/// nor the launch as configuration. Deleting the source is the sharpest form of
+/// that race: `read_to_string` fails, and the old code answered `vec![]`.
+#[test]
+fn a_vanished_or_rewritten_source_cannot_erase_the_prepared_mcp_tags() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("doc.md");
+    let doc = document_with_tags(
+        EffectiveSelectionHints::default(),
+        serde_json::json!({ "title": "t" }),
+        "composed body",
+        vec!["calendar".to_string()],
+    );
+
+    std::fs::write(&source, "---\ntitle: t\n---\nwork on #slack today\n").unwrap();
+    let rewritten =
+        rebuild_launch_identity(&intent(), None, None, &doc, Some(source.as_path())).unwrap();
+    assert_eq!(
+        rewritten.mcp_tags,
+        vec!["calendar".to_string()],
+        "a source rewritten to name a different server must not move the prepared set",
+    );
+
+    std::fs::remove_file(&source).unwrap();
+    let vanished =
+        rebuild_launch_identity(&intent(), None, None, &doc, Some(source.as_path())).unwrap();
+    assert_eq!(
+        vanished.mcp_tags,
+        vec!["calendar".to_string()],
+        "an unreadable source must not silently empty the prepared set",
     );
 }

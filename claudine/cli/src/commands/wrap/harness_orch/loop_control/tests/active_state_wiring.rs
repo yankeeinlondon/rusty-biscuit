@@ -36,6 +36,7 @@ fn materialized_with_prompt(prompt: &str) -> MaterializedHarnessPrompt {
         inline_closure_plan: None,
         lifecycle: None,
         live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&serde_json::Value::Null),
+        mcp_body_tags: Vec::new(),
     }
 }
 
