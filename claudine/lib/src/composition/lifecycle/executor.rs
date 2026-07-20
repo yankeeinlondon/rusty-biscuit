@@ -461,6 +461,37 @@ impl StackExecutionContext<'_> {
         }
     }
 
+    /// Return a copy of this context that reuses `prepared` as its single
+    /// early-binding snapshot.
+    ///
+    /// Lets a caller that evaluates many leaves against one event (a whole
+    /// `proxy.with` overlay) capture the snapshot-less fallback context once
+    /// and reuse it, instead of re-capturing per leaf.
+    fn with_prepared_context<'b>(
+        &'b self,
+        prepared: &'b ComposeContext,
+    ) -> StackExecutionContext<'b> {
+        StackExecutionContext {
+            signal: self.signal,
+            frontmatter: self.frontmatter,
+            live_frontmatter: self.live_frontmatter,
+            err: self.err,
+            timing: self.timing,
+            current: self.current,
+            base_dir: self.base_dir,
+            ctx_base_dir: self.ctx_base_dir,
+            prepared_context: Some(prepared),
+            effect_engine: self.effect_engine,
+            shell_runner: self.shell_runner,
+            emitter: self.emitter,
+            term: self.term,
+            source_path: self.source_path,
+            repo_root: self.repo_root,
+            messaging: self.messaging,
+            settings: self.settings,
+        }
+    }
+
     /// Build the event-time injected-globals layer (`err`/`timing`/`current`)
     /// handed to Darkmatter's subtree compose and layered lookup.
     fn injected_globals(&self) -> HashMap<String, InjectedGlobal> {
@@ -1227,9 +1258,39 @@ impl StackExecutionContext<'_> {
         location: ActionLocation,
         fm: &Map<String, Value>,
     ) -> Result<IndexMap<String, Value>, LifecycleErrorInfo> {
+        // Capture the snapshot-less fallback context ONCE for the whole overlay,
+        // then walk every leaf against it. Recursive `resolve_with_value`
+        // evaluates each scalar leaf independently; without this a
+        // `prepared_context: None` caller re-runs a demand-driven capture per
+        // leaf. A prepared caller already reuses its single snapshot.
+        match self.prepared_context {
+            Some(_) => self.walk_proxy_with(self, with, target, location, fm),
+            None => {
+                let base = self
+                    .ctx_base_dir
+                    .or(self.base_dir)
+                    .unwrap_or_else(|| Path::new("."));
+                let content = proxy_with_scan_content(with);
+                let fallback = ComposeContext::capture_for_content(base, &content);
+                let walker = self.with_prepared_context(&fallback);
+                self.walk_proxy_with(&walker, with, target, location, fm)
+            }
+        }
+    }
+
+    /// Walk `with`'s leaves through `walker`, rooting a diagnostic at the exact
+    /// nested property on failure.
+    fn walk_proxy_with(
+        &self,
+        walker: &StackExecutionContext<'_>,
+        with: &ProxyWith,
+        target: &str,
+        location: ActionLocation,
+        fm: &Map<String, Value>,
+    ) -> Result<IndexMap<String, Value>, LifecycleErrorInfo> {
         let mut overlay = IndexMap::with_capacity(with.len());
         for (key, value) in with.iter() {
-            let resolved = self
+            let resolved = walker
                 .resolve_with_value(value, fm)
                 .map_err(|(suffix, message)| {
                     let err = CompositionError::LifecycleProxyWithEvaluationFailed {
@@ -1337,6 +1398,51 @@ impl StackExecutionContext<'_> {
             return Err(format!("expected a non-negative whole number, got {n}"));
         }
         Ok(Some(n as u32))
+    }
+}
+
+/// Combined `ctx.*` scan content across a whole `with:` overlay, so a single
+/// fallback [`ComposeContext`] capture covers every leaf.
+///
+/// A mixed-interpolation leaf is an [`Expr::StringLiteral`] whose raw text still
+/// holds its `{{ … }}` spans, so that text is scanned directly; a whole-value
+/// span is a parsed [`Expr`], so its variable paths are collected. The union
+/// feeds [`ComposeContext::capture_for_content`], which stays datetime-only when
+/// no leaf references `ctx.*`.
+fn proxy_with_scan_content(with: &ProxyWith) -> String {
+    let mut content = String::new();
+    for (_, value) in with.iter() {
+        push_proxy_with_scan_content(value, &mut content);
+    }
+    content
+}
+
+/// Recursively append one `with:` value's scan content to `content`.
+fn push_proxy_with_scan_content(value: &ProxyWithValue, content: &mut String) {
+    match value {
+        ProxyWithValue::Null => {}
+        ProxyWithValue::Scalar(Expr::StringLiteral(s)) => {
+            content.push(' ');
+            content.push_str(s);
+        }
+        ProxyWithValue::Scalar(expr) => {
+            let mut paths = Vec::new();
+            collect_variable_paths(expr, &mut paths);
+            for path in paths {
+                content.push(' ');
+                content.push_str(&path);
+            }
+        }
+        ProxyWithValue::Array(items) => {
+            for item in items {
+                push_proxy_with_scan_content(item, content);
+            }
+        }
+        ProxyWithValue::Object(map) => {
+            for (_, value) in map {
+                push_proxy_with_scan_content(value, content);
+            }
+        }
     }
 }
 
