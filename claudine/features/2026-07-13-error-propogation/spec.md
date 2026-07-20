@@ -388,13 +388,27 @@ Each occurrence is classified as:
 
 1. typed provenance defect — replace it;
 2. genuinely unstructured external text — retain with an explicit reason;
-3. presentation-only conversion after the final render boundary — retain.
+3. presentation-only conversion after the final render boundary — retain;
+4. deferred authored-matching-surface change — a typed error *is* in hand, but
+   typing it here would move a surface author-written `when:` clauses select on
+   (`err.kind`/`err.variant`/`err.code`), which D10 reserves for a separate
+   versioned migration. Retain, tagged distinctly from category 2/3, with a
+   reason naming the surface that would move.
+
+Category 4 is a closed set, not a burn-down. It exists because D10's
+behavior-neutrality constraint and D1's typed-transport requirement genuinely
+conflict at a site whose flattened string feeds lifecycle routing: honoring D1
+there would silently stop an authored rule from matching. The set does not
+grow — a *new* collapse with a typed source in hand is a category-1 defect and
+must be fixed, never tagged. The known category-4 site is
+`cli/src/commands/wrap/inline.rs::try_inline_closure`, whose flattened
+`CompositionError` feeds `LifecycleErrorInfo::from_action_failure`.
 
 A Rust-aware source-level drift test scans the complete in-scope production
 roots for the known lossy patterns. Exceptions use a narrow allowlist tied to
-an enclosing symbol and explain why no typed source exists. This is a
-regression guard, not the authority for correctness; typed-chain and L2 tests
-remain mandatory.
+an enclosing symbol and explain why no typed source exists — or, for category
+4, why typing it would move a matching surface. This is a regression guard, not
+the authority for correctness; typed-chain and L2 tests remain mandatory.
 
 ### D9 — Serializable diagnostic snapshots
 
@@ -580,9 +594,12 @@ emission count.
 ## Acceptance Criteria
 
 1. No known typed Claudine/Darkmatter/biscuit-file error is flattened into a
-   string while crossing an in-process production orchestration boundary; a
-   versioned diagnostic snapshot is used at process, wire, and persistence
-   boundaries.
+   string while crossing an in-process production orchestration boundary, except
+   at a ratified D8 category-4 site where typing it would move an authored
+   `when:` matching surface that D10 reserves for a separate versioned
+   migration; a versioned diagnostic snapshot is used at process, wire, and
+   persistence boundaries. Category-4 sites are enumerated in the allowlist and
+   do not grow.
 2. All Claudine `Diagnostic` implementations are discoverable through one
    Claudine registry, the CLI walker uses it, and source parity proves the
    registry is complete.
