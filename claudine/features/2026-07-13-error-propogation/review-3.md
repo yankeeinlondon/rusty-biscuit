@@ -7,6 +7,7 @@ spec: 2026-07-13-error-propogation/spec.md
 implemented: true
 description: A **feature** review of `2026-07-13-error-propogation/spec.md`
 feature: 2026-07-13-error-propogation/review-3.md
+next: 2026-07-13-error-propogation/review-4.md
 previous: 2026-07-13-error-propogation/review-2.md
 ---
 
