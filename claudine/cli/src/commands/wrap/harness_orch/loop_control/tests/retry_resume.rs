@@ -280,4 +280,80 @@ fn dispatch_resume_without_session_aborts_typed() {
     }
 }
 
+/// A resume refused by the session-compatibility comparison is a post-`start`,
+/// pre-spawn failure, so it owes the ratified lifecycle tail: `failure` then
+/// exactly one `finalize`, both able to observe the incompatibility as `err.*`.
+///
+/// The guard is put in the state a resumed attempt actually reaches — `start`
+/// spent, the previous iteration's terminal already reset — so the assertion is
+/// about the routing decision, not about a hand-built ledger.
+#[test]
+fn a_refused_resume_routes_through_failure_then_finalize_with_err() {
+    let fx = fixture(serde_json::json!({
+        "failure": {
+            "stack": [
+                {"when": "err", "action": {"append_line": ["events.log", "{{ err.msg }}"]}}
+            ]
+        },
+        "finalize": {
+            "stack": [{"when": "err", "action": {"append_line": ["events.log", "finalize-ran"]}}]
+        }
+    }));
+    let emitter = RecordingEmitter::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &fx.settings,
+        messaging: &fx.messaging,
+        term: &fx.term,
+        source_path: &fx.source_path,
+        repo_root: Some(fx._dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
+    let eng = engine(fx._dir.path());
+    // The resumed attempt re-entered at `start`; the opening attempt's terminal
+    // was reset by `reset_for_next_iteration`, so the slot is free again.
+    assert!(guard.record_event_emission(LifecycleSignal::Start));
+
+    let report = route_incompatible_resume(
+        &mut guard,
+        &fx.materialized,
+        &fx.source_path,
+        Some(fx._dir.path()),
+        &fx.term,
+        &eng,
+        CompositionError::LifecycleResumeIncompatible {
+            source_path: fx.source_path.clone(),
+            facets: vec!["model".to_string()],
+        },
+        std::time::Instant::now(),
+    );
+
+    assert_eq!(
+        guard.terminal_signal(),
+        Some(LifecycleSignal::Failure),
+        "a post-`start` refusal is a `failure`, never a pre-flight `blocked`"
+    );
+    assert!(guard.finalize_emitted(), "the owed `finalize` fired");
+    let log = std::fs::read_to_string(&fx.log_path).unwrap();
+    let lines: Vec<&str> = log.lines().collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "each stack runs exactly once; got {lines:?}"
+    );
+    assert!(
+        lines[0].contains("cannot reuse the live session") && lines[0].contains("model"),
+        "`failure` observes the refusal itself as `err`, naming the changed facet; got {:?}",
+        lines[0]
+    );
+    assert_eq!(lines[1], "finalize-ran", "`finalize` saw `err` populated");
+    assert!(
+        report
+            .downcast_ref::<CompositionError>()
+            .is_some_and(|e| matches!(e, CompositionError::LifecycleResumeIncompatible { .. })),
+        "the incompatibility stays the active error rather than being replaced"
+    );
+}
+
 

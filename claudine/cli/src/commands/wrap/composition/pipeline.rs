@@ -103,17 +103,22 @@ struct EnvironmentPhase {
     mcp_rebuild: Option<crate::commands::wrap::launch_plan::McpRebuildInputs>,
     /// `OPENCODE_CONFIG_CONTENT` as it stood before the MCP fold.
     opencode_config_base: Option<String>,
+    /// R8 — the child environment as it stood before any provider-shaped stage
+    /// wrote to it. Diffed against the final plan at the launch-plan record site
+    /// to produce [`crate::commands::wrap::launch_plan::LaunchPlanInputs::provider_env_baseline`],
+    /// the invocation-neutral base a per-attempt rebuild restores from.
+    pre_provider_env: std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
 }
 
 struct CommandPhase {
     effective_sp: claudine::system_prompt::ResolvedSystemPrompt,
     args_before_prompt: Vec<String>,
-    /// R8 — the re-entrant launch-plan builder's invocation-fixed half.
+    /// R8 — the re-entrant launch-plan builder's invocation-fixed half. The
+    /// per-attempt rebuilt bundle derives every provider-dependent execution
+    /// adapter (noise policy, stderr suppression, the Codex output artifact)
+    /// from this, so the invocation records no separate copies of them.
     launch_plan_inputs: crate::commands::wrap::launch_plan::LaunchPlanInputs,
     use_structured: bool,
-    structured_codex_output: Option<crate::commands::wrap::policy::StructuredCodexOutput>,
-    stdout_noise: &'static [&'static str],
-    stderr_noise: &'static [&'static str],
     stream_verbosity: Verbosity,
 }
 
@@ -455,6 +460,23 @@ fn prepare_environment_and_mcp(
             *last_checkpoint = std::time::Instant::now();
         }
 
+        // R8 — the invocation-neutral base a per-attempt rebuild restores the
+        // provider-owned half of the environment from. Captured here because
+        // everything that follows (MCP injection, YOLO, model, system-prompt
+        // delivery) is provider-shaped, and a refreshed document that lands on a
+        // different provider must not inherit those writes.
+        let mut pre_provider_env = env_plan.env.clone();
+        if needs_mcp_shadow_home && !needs_repo_shadow_home {
+            // `HOME` is the one provider-shaped key written before this point:
+            // `build_child_env_with_launch` materializes the MCP shadow home for
+            // the providers whose injector needs one. Under `--repo` the shadow
+            // home is invocation intent instead, and stays put.
+            match std::env::var_os("HOME") {
+                Some(home) => pre_provider_env.insert("HOME".into(), home),
+                None => pre_provider_env.remove(std::ffi::OsStr::new("HOME")),
+            };
+        }
+
         let mut effective_prompt = request.prepared.prompt.clone();
         let mut mcp_extra_args = Vec::new();
         // Captured before any fold so a per-attempt rebuild can reassemble the
@@ -606,6 +628,7 @@ fn prepare_environment_and_mcp(
             mcp_extra_args,
             mcp_rebuild,
             opencode_config_base,
+            pre_provider_env,
         })
     })())
 }
@@ -640,6 +663,7 @@ fn construct_argv_and_system_prompt(
             mcp_extra_args,
             mcp_rebuild,
             opencode_config_base,
+            pre_provider_env,
         } = environment;
         let silent = request.silent;
         let quiet = request.quiet;
@@ -752,11 +776,11 @@ fn construct_argv_and_system_prompt(
             )
             .map_err(crate::commands::exec_prep::ModelStageError::into_report)?;
 
-        // R8 — from here to the MCP fold, every append is invocation-fixed: no
-        // document surface moves `--output`, the system prompt, or `--sandbox`.
-        // Each slice is recorded at its own boundary so a per-attempt rebuild
-        // can splice them back in at the same positions.
-        let argv_after_model = child_args.len();
+        // R8 — from here to the MCP fold, no document surface moves `--output`,
+        // the system prompt, or `--sandbox`. What a per-attempt rebuild records
+        // is the *intent* for the two flags (which is what stays fixed) and the
+        // rendered slice only for the system prompt, whose already-composed
+        // content is the immutable part.
 
         // Universal --output flag
         if let Some(ref output_str) = request.output {
@@ -768,7 +792,6 @@ fn construct_argv_and_system_prompt(
                 log::warn(&warn);
             }
         }
-        let output_format_args = child_args[argv_after_model..].to_vec();
         let argv_after_output = child_args.len();
 
         record_substage(perf_collector, last_checkpoint, "argv assembly");
@@ -873,7 +896,6 @@ fn construct_argv_and_system_prompt(
         }
         let _ = &sp_artifacts;
         let system_prompt_args = child_args[argv_after_output..].to_vec();
-        let argv_after_system_prompt = child_args.len();
 
         // Universal --sandbox flag
         if request.sandbox
@@ -883,7 +905,6 @@ fn construct_argv_and_system_prompt(
         {
             log::warn(&warn);
         }
-        let sandbox_args = child_args[argv_after_system_prompt..].to_vec();
 
         record_substage(perf_collector, last_checkpoint, "system prompt");
 
@@ -929,21 +950,10 @@ fn construct_argv_and_system_prompt(
         child_args.append(mcp_extra_args);
 
         // -- Structured streaming decision ------------------------------------
-
-        let stdout_noise = if effective_non_interactive {
-            profile.stdout_noise_prefixes()
-        } else {
-            &[]
-        };
-        // Interactive TUIs (Codex, OpenCode, etc.) must inherit stderr directly.
-        // A non-empty stderr filter causes `exec::run_child` to pipe stderr,
-        // which flips `isolate_process_group` on and leaves the child in a
-        // background pgroup — it then hangs on SIGTTIN when reading the TTY.
-        let stderr_noise = if effective_non_interactive {
-            profile.stderr_noise_prefixes()
-        } else {
-            &[]
-        };
+        // The stdout/stderr noise policies are not computed here: every attempt
+        // (including the first) reads them from its rebuilt launch bundle, which
+        // derives them from the rebuilt profile and session mode
+        // (`harness_orch::loop_control::target_launch`).
 
         let use_structured = profile.supports_structured_stream() && effective_non_interactive;
         let stream_verbosity = structured_verbosity(silent, quiet);
@@ -996,15 +1006,35 @@ fn construct_argv_and_system_prompt(
                 .unwrap_or_default();
             mcp_body_tags.sort();
             mcp_body_tags.dedup();
+            // Every key whose value the provider-shaped stages added or changed,
+            // paired with what it held beforehand. A rebuild restores from here
+            // rather than laying an additive overlay over the opening provider's
+            // writes (review-9 finding 2).
+            let mut provider_env_baseline: std::collections::HashMap<
+                std::ffi::OsString,
+                Option<std::ffi::OsString>,
+            > = std::collections::HashMap::new();
+            for (key, value) in &env_plan.env {
+                if pre_provider_env.get(key) != Some(value) {
+                    provider_env_baseline.insert(key.clone(), pre_provider_env.get(key).cloned());
+                }
+            }
+            for key in pre_provider_env.keys() {
+                if !env_plan.env.contains_key(key) {
+                    provider_env_baseline
+                        .insert(key.clone(), pre_provider_env.get(key).cloned());
+                }
+            }
             lp::LaunchPlanInputs {
                 provider_args_tail: request.provider_args.clone(),
-                output_format_args,
+                output_format: request.output.map(Into::into),
                 system_prompt_args,
                 system_prompt_opencode_config,
                 system_prompt: Some(effective_sp.clone()),
                 system_prompt_cwd: launch_cwd.clone(),
                 system_prompt_scoped_tmp: scoped_tmp.clone(),
-                sandbox_args,
+                sandbox_requested: request.sandbox,
+                provider_env_baseline,
                 has_model_env: env_plan
                     .env
                     .contains_key(&std::ffi::OsString::from("MODEL")),
@@ -1084,9 +1114,6 @@ fn construct_argv_and_system_prompt(
             args_before_prompt,
             launch_plan_inputs,
             use_structured,
-            structured_codex_output,
-            stdout_noise,
-            stderr_noise,
             stream_verbosity,
         })
     })())
@@ -1431,14 +1458,9 @@ fn provider_run_handoff(
         args_before_prompt,
         launch_plan_inputs,
         use_structured,
-        structured_codex_output,
-        stdout_noise,
-        stderr_noise,
         stream_verbosity,
     } = command;
     let use_structured = *use_structured;
-    let stdout_noise = *stdout_noise;
-    let stderr_noise = *stderr_noise;
     let stream_verbosity = *stream_verbosity;
     let LifecyclePhase {
         shell_options,
@@ -1488,9 +1510,6 @@ fn provider_run_handoff(
         launch_plan_inputs,
         child_cwd,
         use_structured,
-        structured_codex_output,
-        stdout_noise,
-        stderr_noise,
         show_checks,
         stream_verbosity,
         detail_requested,

@@ -80,8 +80,13 @@
 //! The rebuilt bundle is the launch. It carries the provider, profile, and
 //! binary the harness spawns, the provider argv, the session mode and
 //! structured-output shape, the permission mode, and the MCP runtime injection —
-//! and the compatibility key is computed from that same value. There is no
-//! invocation-fixed launch state left for the key to disagree with.
+//! and the compatibility key is computed from that same value. It also owns
+//! every provider-dependent *execution adapter* the attempt runs with: the
+//! stdout/stderr noise-prefix policy and structured-stderr suppression of the
+//! rebuilt profile, the Codex `--output-last-message` artifact (present iff the
+//! rebuilt plan captures through it), and the composition dispatch context with
+//! its provider/model selection metadata. There is no invocation-fixed launch
+//! state left for the key — or the attempt's own execution — to disagree with.
 //!
 //! Argv and MCP injection come from [`super::super::super::launch_plan`], a
 //! re-entrant builder the invocation feeds once with the results of every side
@@ -127,9 +132,12 @@
 //! refuse instead — assembling a plan from empty slices would silently drop the
 //! MCP injection or system prompt the invocation performed.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use claudine::composition::{AgentHint, InstalledProviderSnapshot};
+use claudine::composition::{
+    AgentHint, InstalledProviderSnapshot, ModelResolutionReason, ProviderResolutionReason,
+};
 use claudine::model_catalog::ModelCatalogService;
 use claudine::provider::Provider;
 
@@ -172,6 +180,17 @@ pub(crate) struct LaunchRebuildIntent {
     /// MCP off no document tag participates in the launch, so none may move the
     /// MCP facet either.
     pub(crate) mcp_enabled: bool,
+    /// Why the invocation selected [`Self::fallback_provider`]. Reused when a
+    /// replayed rebuild falls back to that provider (no explicit flag, no
+    /// frontmatter `agent:`), because the rebuild cannot re-derive
+    /// picker/favorite provenance from the document alone.
+    pub(crate) fallback_provider_reason: ProviderResolutionReason,
+    /// The invocation's composition dispatch context. An unchanged document
+    /// keeps it verbatim; a rebuild that moved a facet overwrites its
+    /// provider/model selection entries from the refreshed facets. Empty for
+    /// the direct wrapper passthrough, which publishes no composition
+    /// metadata — and whose moved facets refuse before a recompute anyway.
+    pub(crate) dispatch_context: HashMap<String, serde_json::Value>,
     /// The invocation-fixed half of the re-entrant launch-plan builder: every
     /// effect the command phase performed once, recorded so a per-attempt
     /// rebuild can re-derive argv and the environment overlay without repeating
@@ -195,21 +214,39 @@ pub(crate) struct RebuiltLaunchIdentity {
     /// mode — not merely whether `--yolo` was asked for.
     pub(crate) yolo: bool,
     pub(crate) use_structured: bool,
-    pub(crate) structured_codex: bool,
+    /// The Codex `--output-last-message` artifact, present iff the rebuilt
+    /// plan carries Codex structured-output capture. Wraps the same recorded
+    /// sink path the rebuilt argv names, so a retry that lands on Codex can
+    /// recover the final message from the file its argv points at — and a
+    /// retry that leaves Codex drops the artifact with the flag.
+    pub(crate) codex_output: Option<crate::commands::wrap::policy::StructuredCodexOutput>,
     /// MCP tags lexed from the refreshed body, sorted and deduped. Empty when
     /// MCP is not enabled for the invocation.
     pub(crate) mcp_tags: Vec<String>,
+    /// Stdout noise prefixes for the rebuilt profile in the rebuilt session
+    /// mode (empty when interactive, matching the invocation's own gate).
+    pub(crate) stdout_noise: &'static [&'static str],
+    /// Stderr noise prefixes, same derivation as [`Self::stdout_noise`].
+    pub(crate) stderr_noise: &'static [&'static str],
+    /// The rebuilt profile's structured-stderr suppression policy.
+    pub(crate) suppress_stderr_on_success: bool,
+    /// The dispatch context this attempt publishes with its provider events.
+    /// The invocation's context verbatim for an unchanged document; the
+    /// provider/model selection entries are recomputed from the refreshed
+    /// facets when a facet moved.
+    pub(crate) dispatch_context: HashMap<String, serde_json::Value>,
     /// `AGENT`/`MODEL`/`YOLO` overlays for the provider child's environment.
     pub(crate) env_overrides: Vec<(String, String)>,
     /// The provider argv this attempt launches with, rebuilt from the refreshed
     /// document. Identical to the invocation's own argv whenever the document
     /// moved no launch facet — see [`crate::commands::wrap::launch_plan`].
     pub(crate) args: Vec<String>,
-    /// The environment overlay the rebuilt plan contributes (MCP runtime
-    /// injection, the OpenCode inline config, the permission mode). Applied
-    /// beneath [`Self::env_overrides`], which stays authoritative for
+    /// The environment patch the rebuilt plan contributes (MCP runtime
+    /// injection, the OpenCode inline config, the permission mode, and removals
+    /// for provider-shaped keys the refreshed document no longer wants).
+    /// Applied beneath [`Self::env_overrides`], which stays authoritative for
     /// `AGENT`/`MODEL`/`YOLO`.
-    pub(crate) launch_env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+    pub(crate) launch_env: Vec<launch_plan::EnvChange>,
 }
 
 /// Recompute the full launch identity from one refreshed read of a document.
@@ -256,7 +293,7 @@ pub(crate) fn rebuild_launch_identity(
         _ => Vec::new(),
     };
 
-    let model = resolve_launch_model(provider, cli_model, repo_root, document);
+    let (model, model_reason) = resolve_launch_model(provider, cli_model, repo_root, document);
 
     // The single re-entrant rebuild. `--yolo` is a request; whether it *applies*
     // is the profile's decision in this mode, and the plan is what makes it —
@@ -276,6 +313,81 @@ pub(crate) fn rebuild_launch_identity(
     let env_overrides =
         launch_env_overrides(provider, model.as_deref(), plan.yolo_applied);
 
+    // `env_overrides` can only *set*, and it is applied over a base child
+    // environment the invocation stamped its own resolved `MODEL` into. A
+    // refreshed document that resolves none therefore has to say so explicitly,
+    // or the child inherits the opening model (review-9 finding 2).
+    //
+    // Gated on the invocation having resolved one: with no model at either end,
+    // whatever `MODEL` the child environment carries is the caller's own ambient
+    // value — invocation-fixed, and not this rebuild's to delete.
+    let mut launch_env = plan.env_overlay;
+    let invocation_resolved_a_model = intent
+        .launch_plan_inputs
+        .invocation
+        .facets
+        .model
+        .is_some();
+    if invocation_resolved_a_model && model.is_none() {
+        launch_env.push(launch_plan::EnvChange::Remove("MODEL".into()));
+    }
+
+    // The provider-dependent execution adapters, derived from the REBUILT
+    // profile and mode: the attempt that spawns under this bundle also filters,
+    // suppresses, and recovers output with this bundle's policies — never the
+    // opening provider's (review-9 finding 1).
+    //
+    // Interactive sessions get empty noise filters. Beyond being useless for an
+    // inherited TTY, a non-empty stderr filter makes `exec::run_child` pipe
+    // stderr, which flips `isolate_process_group` on and leaves an interactive
+    // TUI in a background pgroup — it then hangs on SIGTTIN reading the TTY.
+    let stdout_noise: &'static [&'static str] = if non_interactive {
+        profile.stdout_noise_prefixes()
+    } else {
+        &[]
+    };
+    let stderr_noise: &'static [&'static str] = if non_interactive {
+        profile.stderr_noise_prefixes()
+    } else {
+        &[]
+    };
+    let codex_output = plan.structured_codex.then(|| {
+        crate::commands::wrap::policy::StructuredCodexOutput {
+            // The recorded sink is the path the plan's argv names (verbatim and
+            // replay alike), so artifact and argv cannot disagree.
+            last_message_path: intent.launch_plan_inputs.codex_last_message_path.clone(),
+        }
+    });
+    let dispatch_context = if plan.replayed {
+        let provider_reason = if intent.explicit_provider.is_some() {
+            ProviderResolutionReason::ExplicitFlag
+        } else {
+            match document.selection_hints.agent.as_ref() {
+                Some(AgentHint::Single(_)) => ProviderResolutionReason::FrontmatterSingle,
+                Some(AgentHint::List(_)) => ProviderResolutionReason::FrontmatterList,
+                None => intent.fallback_provider_reason,
+            }
+        };
+        let mut context = intent.dispatch_context.clone();
+        context.insert(
+            "provider_selection_reason".into(),
+            serde_json::Value::String(format!("{provider_reason:?}")),
+        );
+        context.insert(
+            "resolved_model".into(),
+            serde_json::Value::String(model.clone().unwrap_or_default()),
+        );
+        context.insert(
+            "model_selection_reason".into(),
+            serde_json::Value::String(format!("{model_reason:?}")),
+        );
+        context
+    } else {
+        // Verbatim: the invocation's own metadata, including selection reasons
+        // this rebuild could not reproduce (picker, favorite, sequence review).
+        intent.dispatch_context.clone()
+    };
+
     Ok(RebuiltLaunchIdentity {
         provider,
         profile,
@@ -283,11 +395,15 @@ pub(crate) fn rebuild_launch_identity(
         non_interactive,
         yolo: plan.yolo_applied,
         use_structured,
-        structured_codex: plan.structured_codex,
+        codex_output,
         mcp_tags,
+        stdout_noise,
+        stderr_noise,
+        suppress_stderr_on_success: profile.suppress_structured_stderr_on_success(),
+        dispatch_context,
         env_overrides,
         args: plan.args,
-        launch_env: plan.env_overlay,
+        launch_env,
     })
 }
 
@@ -355,20 +471,19 @@ fn resolve_launch_model(
     cli_model: Option<&str>,
     repo_root: Option<&Path>,
     document: &MaterializedHarnessPrompt,
-) -> Option<String> {
+) -> (Option<String>, ModelResolutionReason) {
     let selection_config =
         crate::commands::wrap::composition::load_selection_config_for_repo(repo_root);
     let catalog = match &selection_config {
         Some(cfg) => ModelCatalogService::with_overrides(cfg.model_overrides.clone()),
         None => ModelCatalogService::new(),
     };
-    let (model, _model_reason) = claudine::composition::resolve_model_with_hints(
+    claudine::composition::resolve_model_with_hints(
         provider,
         &document.selection_hints,
         cli_model,
         Some(&catalog),
-    );
-    model
+    )
 }
 
 /// Project a resolved provider/model/yolo triple into the `AGENT`/`MODEL`/`YOLO`

@@ -35,7 +35,6 @@ use super::preflight::{
 use super::target::composition_dispatch_context;
 use super::SingleCompositionOutcome;
 use crate::commands::wrap::env::EnvPlan;
-use crate::commands::wrap::policy::StructuredCodexOutput;
 use crate::commands::wrap::profile::WrapperProfile;
 use crate::commands::wrap::{
     HarnessPromptMode, HarnessPromptState, materialized_harness_prompt_from_prepared,
@@ -78,9 +77,6 @@ pub(super) struct CompositionRunCtx<'a> {
     pub launch_plan_inputs: &'a crate::commands::wrap::launch_plan::LaunchPlanInputs,
     pub child_cwd: &'a Path,
     pub use_structured: bool,
-    pub structured_codex_output: &'a Option<StructuredCodexOutput>,
-    pub stdout_noise: &'static [&'static str],
-    pub stderr_noise: &'static [&'static str],
     pub show_checks: bool,
     pub stream_verbosity: Verbosity,
     pub detail_requested: bool,
@@ -131,9 +127,6 @@ pub(super) fn run_composition_body(
     let launch_plan_inputs = ctx.launch_plan_inputs;
     let child_cwd = ctx.child_cwd;
     let use_structured = ctx.use_structured;
-    let structured_codex_output = ctx.structured_codex_output;
-    let stdout_noise = ctx.stdout_noise;
-    let stderr_noise = ctx.stderr_noise;
     let show_checks = ctx.show_checks;
     let stream_verbosity = ctx.stream_verbosity;
     let detail_requested = ctx.detail_requested;
@@ -419,6 +412,9 @@ pub(super) fn run_composition_body(
 
     // -- Execution --------------------------------------------------------
 
+    // Handed to the harness loop inside the launch-rebuild intent below: each
+    // attempt's rebuilt bundle either keeps it verbatim (unchanged document) or
+    // recomputes its provider/model selection entries from the refreshed facets.
     let dispatch_context = composition_dispatch_context(request, target);
 
     let harness_mode = if is_inline {
@@ -491,22 +487,19 @@ pub(super) fn run_composition_body(
             cli_yolo: request.yolo,
             is_inline,
             mcp_enabled: request.mcp || !request.mcp_use.is_empty(),
+            fallback_provider_reason: target.provider_reason,
+            dispatch_context,
             launch_plan_inputs: launch_plan_inputs.clone(),
         },
         &env_plan.env,
         &mut prompt_state,
         effective_repo_root,
         shell_options.clone(),
-        structured_codex_output.as_ref(),
-        stdout_noise,
-        stderr_noise,
-        profile.suppress_structured_stderr_on_success(),
         show_checks,
         stream_verbosity,
         detail_requested,
         silent,
         &env_context,
-        &dispatch_context,
         seed_materialized,
         term,
         guard,

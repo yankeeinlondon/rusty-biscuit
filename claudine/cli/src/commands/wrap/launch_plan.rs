@@ -26,7 +26,7 @@
 //! recorded path.
 //!
 //! The replay is exercised instead by
-//! `launch_plan_replay_reproduces_the_invocation_argv`, which forces the replay
+//! `tests::replay_reproduces_the_invocation_argv`, which forces the replay
 //! for the invocation's *own* facets and asserts it reproduces the recorded
 //! argv. That is the test that keeps the two paths honest.
 //!
@@ -38,6 +38,28 @@
 //! resolutions were recorded into, and a tag absent from that map stays
 //! ambiguous (and is dropped) rather than prompting. A per-attempt rebuild
 //! cannot reach a terminal.
+//!
+//! ## Invocation intent is stored semantically, never as provider bytes
+//!
+//! `--output` and `--sandbox` are immutable invocation intent, but their
+//! *encoding* belongs to whichever provider ends up running: Goose renders
+//! `--output json` as no argv at all while Gemini needs `--output-format json`,
+//! and Codex implements `--sandbox` where Goose does not. So the recorded inputs
+//! hold [`OutputFormat`] and a requested-sandbox flag, and every rebuild renders
+//! them through its own profile. Recording the rendered bytes instead silently
+//! dropped the requested format on one provider move and leaked an unsupported
+//! flag on the reverse one.
+//!
+//! ## The environment is a patch, not an overlay
+//!
+//! [`LaunchPlan::env_overlay`] is a list of [`EnvChange`]s, because a rebuild
+//! frequently needs to *unset* something. The invocation records what each
+//! provider-shaped environment key held before it wrote it
+//! ([`LaunchPlanInputs::provider_env_baseline`]); a replay restores every one of
+//! those keys it did not write again. That is what makes a retry that dropped
+//! `model:` actually reach the child without `MODEL`, rather than merely
+//! omitting `MODEL` from an additive overlay laid over an environment that still
+//! has it.
 //!
 //! ## System-prompt delivery
 //!
@@ -70,9 +92,30 @@ use std::path::PathBuf;
 use claudine::provider::Provider;
 use claudine::system_prompt::ResolvedSystemPrompt;
 
-use super::profile::{WrapperProfile, profile_for_provider};
+use super::profile::{OutputFormat, WrapperProfile, profile_for_provider};
 
 const OPENCODE_CONFIG: &str = "OPENCODE_CONFIG_CONTENT";
+
+/// One change a launch plan makes to the invocation's base child environment.
+///
+/// A set-only overlay cannot express "the refreshed document no longer wants
+/// this", which is how a retry that dropped `model:` kept the opening document's
+/// `MODEL`, and how a provider switch kept the old provider's
+/// `OPENCODE_CONFIG_CONTENT` or shadow `HOME`. Removal is therefore part of the
+/// vocabulary rather than something a caller has to infer from an absence.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum EnvChange {
+    Set(OsString, OsString),
+    Remove(OsString),
+}
+
+impl EnvChange {
+    pub(crate) fn key(&self) -> &OsStr {
+        match self {
+            Self::Set(key, _) | Self::Remove(key) => key,
+        }
+    }
+}
 
 /// A launch plan could not be rebuilt for the refreshed document's facets.
 #[derive(Debug)]
@@ -118,10 +161,12 @@ pub(crate) struct LaunchPlanInputs {
     /// of Claudine's own injections (`apply_entrypoint` inserts at index 0, so a
     /// tail-first base still lands after it).
     pub(crate) provider_args_tail: Vec<String>,
-    /// `--output <format>` as the invocation's profile rendered it. No document
-    /// surface moves the output format, but the *flag shape* is provider-owned,
-    /// so this is only replayable while the provider holds still.
-    pub(crate) output_format_args: Vec<String>,
+    /// The `--output <format>` the caller asked for, as semantic intent rather
+    /// than as the argv one provider happened to render it into. The intent is
+    /// invocation-fixed; its *encoding* is provider-owned (Goose renders `json`
+    /// as no argv at all, Gemini as `--output-format json`), so every rebuild
+    /// re-renders it through its own profile.
+    pub(crate) output_format: Option<OutputFormat>,
     /// The system-prompt delivery argv `profile::apply_system_prompt` composed,
     /// and the `OPENCODE_CONFIG_CONTENT` overlay it contributed (OpenCode
     /// delivers its system prompt through the same inline config the MCP and
@@ -139,8 +184,10 @@ pub(crate) struct LaunchPlanInputs {
     pub(crate) system_prompt: Option<ResolvedSystemPrompt>,
     pub(crate) system_prompt_cwd: PathBuf,
     pub(crate) system_prompt_scoped_tmp: PathBuf,
-    /// `--sandbox`, as the invocation's profile rendered it.
-    pub(crate) sandbox_args: Vec<String>,
+    /// Whether `--sandbox` was requested. Same reasoning as
+    /// [`Self::output_format`]: Codex implements it and Goose does not, so the
+    /// request is invocation-fixed and the rendering is per-rebuild.
+    pub(crate) sandbox_requested: bool,
     /// Whether the caller's env plan already carries a `MODEL` entry, which is
     /// the model stage's `has_model_env` input.
     pub(crate) has_model_env: bool,
@@ -155,6 +202,16 @@ pub(crate) struct LaunchPlanInputs {
     /// attempts rather than re-allocated, so the argv a rebuild produces for an
     /// unchanged Codex run matches the recorded one.
     pub(crate) codex_last_message_path: PathBuf,
+    /// What every provider-shaped environment key held *before* the invocation's
+    /// provider-shaped stages wrote it; `None` means the key was absent.
+    ///
+    /// This is the invocation-neutral base a replay rebuilds the provider-owned
+    /// half of the child environment from: a key recorded here that the rebuilt
+    /// plan does not set again is restored to its pre-provider value, or removed
+    /// when it had none. Without it the overlay could only ever add, so an
+    /// attempt that dropped `model:` or moved provider inherited the opening
+    /// document's `MODEL`, `OPENCODE_CONFIG_CONTENT`, and shadow `HOME`.
+    pub(crate) provider_env_baseline: HashMap<OsString, Option<OsString>>,
     /// The invocation's own facets and the plan they produced. See the module
     /// docs' verbatim shortcut.
     pub(crate) invocation: RecordedLaunch,
@@ -180,21 +237,27 @@ impl LaunchPlanInputs {
     pub(crate) fn recorded_only(
         facets: DocumentLaunchFacets,
         args: Vec<String>,
-        structured_codex: bool,
+        // The invocation's `--output-last-message` sink, when Codex
+        // structured-output capture is part of the recorded plan. Carried as
+        // the real path (not a bool) so the per-attempt rebuilt bundle can
+        // hand the attempt a working artifact for the recorded argv.
+        codex_last_message: Option<PathBuf>,
     ) -> Self {
+        let structured_codex = codex_last_message.is_some();
         Self {
             provider_args_tail: Vec::new(),
-            output_format_args: Vec::new(),
+            output_format: None,
             system_prompt_args: Vec::new(),
             system_prompt_opencode_config: None,
             system_prompt: None,
             system_prompt_cwd: PathBuf::new(),
             system_prompt_scoped_tmp: PathBuf::new(),
-            sandbox_args: Vec::new(),
+            sandbox_requested: false,
             has_model_env: false,
             mcp: None,
             opencode_config_base: None,
-            codex_last_message_path: PathBuf::new(),
+            codex_last_message_path: codex_last_message.unwrap_or_default(),
+            provider_env_baseline: HashMap::new(),
             invocation: RecordedLaunch {
                 facets,
                 args,
@@ -269,11 +332,22 @@ impl DocumentLaunchFacets {
 /// go on top of the invocation's base child environment.
 pub(crate) struct LaunchPlan {
     pub(crate) args: Vec<String>,
-    pub(crate) env_overlay: Vec<(OsString, OsString)>,
+    /// The patch this plan applies to the invocation's base child environment,
+    /// in order. A replay that no longer wants a provider-shaped key emits a
+    /// [`EnvChange::Remove`] (or a restore of its pre-provider value) for it —
+    /// see [`LaunchPlanInputs::provider_env_baseline`].
+    pub(crate) env_overlay: Vec<EnvChange>,
     /// Whether the provider's bypass actually applied in this mode.
     pub(crate) yolo_applied: bool,
     /// Whether Codex structured-output capture is part of this plan.
     pub(crate) structured_codex: bool,
+    /// `false` when the verbatim shortcut returned the recorded invocation
+    /// plan; `true` when a moved facet forced a replay. The rebuilt bundle
+    /// keys its dispatch-context recompute off this: an unchanged document
+    /// keeps the invocation's dispatch metadata (including selection reasons
+    /// the rebuild cannot reproduce, e.g. `SequenceReview`), while a moved
+    /// facet recomputes them from the refreshed facets.
+    pub(crate) replayed: bool,
     /// Temp resources a re-applied system prompt created. Never read; they exist
     /// so their RAII cleanup runs after the child exits, not when the builder
     /// returns.
@@ -296,11 +370,20 @@ pub(crate) fn build_launch_plan(
     if facets == &inputs.invocation.facets {
         return Ok(LaunchPlan {
             args: inputs.invocation.args.clone(),
-            env_overlay: inputs.invocation.env_overlay.clone(),
+            // Identical facets touched the base environment identically, so the
+            // recorded sets are the whole patch: there is nothing to remove.
+            env_overlay: inputs
+                .invocation
+                .env_overlay
+                .iter()
+                .cloned()
+                .map(|(key, value)| EnvChange::Set(key, value))
+                .collect(),
             // The invocation's own permission outcome, not a re-derivation:
             // identical facets cannot have produced a different one.
             yolo_applied: recorded_yolo_applied(inputs),
             structured_codex: inputs.invocation.structured_codex,
+            replayed: false,
             system_prompt_artifacts: Vec::new(),
         });
     }
@@ -383,8 +466,16 @@ fn replay(
         env_overlay.push((key.into(), value.into()));
     }
 
-    // -- invocation-fixed slices -------------------------------------------
-    args.extend(inputs.output_format_args.iter().cloned());
+    // -- invocation-fixed intent, re-encoded for the rebuilt provider -------
+    // The *request* is fixed; the flag shape is not. A rebuild renders it
+    // through its own profile so a Goose-to-Gemini retry gains
+    // `--output-format json` and the reverse does not carry Gemini's bytes to a
+    // provider that rejects them. Any unsupported-format warning is dropped:
+    // there is no operator at a retry boundary, and the invocation already
+    // surfaced its own.
+    if let Some(format) = inputs.output_format {
+        let _ = profile.apply_output_format(&mut args, format);
+    }
 
     // System-prompt delivery: replayed verbatim while the provider holds still,
     // re-applied for the rebuilt provider when it does not. The artifacts the
@@ -418,7 +509,9 @@ fn replay(
         artifacts = application.artifacts;
     }
 
-    args.extend(inputs.sandbox_args.iter().cloned());
+    if inputs.sandbox_requested {
+        let _ = profile.apply_sandbox(&mut args);
+    }
 
     // -- MCP runtime injection ---------------------------------------------
     let mcp_env = rebuild_mcp(inputs, facets, &mut args)?;
@@ -474,11 +567,46 @@ fn replay(
 
     Ok(LaunchPlan {
         args,
-        env_overlay,
+        env_overlay: patch_with_baseline_restores(inputs, env_overlay),
         yolo_applied,
         structured_codex,
+        replayed: true,
         system_prompt_artifacts: artifacts,
     })
+}
+
+/// Turn the sets a replay produced into the full patch against the invocation's
+/// base child environment.
+///
+/// Every provider-shaped key the invocation wrote that this rebuild did *not*
+/// write again is stale by definition, so it is returned to its pre-provider
+/// value — or removed, when it had none. `MODEL` on a document that dropped
+/// `model:`, `OPENCODE_CONFIG_CONTENT` on a retry that left OpenCode, and a
+/// shadow `HOME` on a retry that left the provider that needed one all land
+/// here.
+///
+/// Restores are appended after the sets and sorted by key so the patch is
+/// deterministic for the same inputs — the R8 comparison reads it.
+fn patch_with_baseline_restores(
+    inputs: &LaunchPlanInputs,
+    sets: Vec<(OsString, OsString)>,
+) -> Vec<EnvChange> {
+    let mut patch: Vec<EnvChange> = sets
+        .into_iter()
+        .map(|(key, value)| EnvChange::Set(key, value))
+        .collect();
+    let mut restores: Vec<EnvChange> = inputs
+        .provider_env_baseline
+        .iter()
+        .filter(|(key, _)| !patch.iter().any(|change| change.key() == key.as_os_str()))
+        .map(|(key, prior)| match prior {
+            Some(value) => EnvChange::Set(key.clone(), value.clone()),
+            None => EnvChange::Remove(key.clone()),
+        })
+        .collect();
+    restores.sort_by(|a, b| a.key().cmp(b.key()));
+    patch.extend(restores);
+    patch
 }
 
 /// Recompute MCP runtime injection for the refreshed document's tag set,

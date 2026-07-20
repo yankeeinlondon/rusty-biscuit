@@ -413,9 +413,9 @@ pub(crate) fn execute_harness_attempt(
         )?;
         let perf = Some(result.telemetry.into_agent_perf(None));
         let termination = result.termination;
-        // `structured_codex_output` is only prepared for Codex
-        // (exec_prep::prepare_codex_structured_output), so no provider
-        // check is needed here.
+        // `structured_codex_output` rides the rebuilt launch bundle and is
+        // present only when that bundle's plan captures through Codex's
+        // output file, so no provider check is needed here.
         let response = structured_codex_output
             .map(|output| output.take_last_message())
             .unwrap_or_default();

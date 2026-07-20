@@ -429,7 +429,7 @@ fn passthrough_launch_intent(
     // facet is refused rather than replayed from slices this path never
     // recorded — see [`launch_plan::LaunchPlanInputs::recorded_only`].
     harness_base_args: &[String],
-    structured_codex: bool,
+    codex_last_message: Option<PathBuf>,
 ) -> harness_orch::LaunchRebuildIntent {
     harness_orch::LaunchRebuildIntent {
         explicit_provider: Some(provider),
@@ -440,6 +440,11 @@ fn passthrough_launch_intent(
         cli_yolo: args.yolo,
         is_inline: false,
         mcp_enabled: args.mcp || !args.mcp_use.is_empty(),
+        // A passthrough is invoked *as* the provider, so this is the reason a
+        // rebuilt fallback would republish — though the empty dispatch context
+        // below means the passthrough publishes no selection metadata at all.
+        fallback_provider_reason: claudine::composition::ProviderResolutionReason::ExplicitFlag,
+        dispatch_context: std::collections::HashMap::new(),
         launch_plan_inputs: crate::commands::wrap::launch_plan::LaunchPlanInputs::recorded_only(
             crate::commands::wrap::launch_plan::DocumentLaunchFacets {
                 provider,
@@ -450,7 +455,7 @@ fn passthrough_launch_intent(
                 mcp_body_tags: Vec::new(),
             },
             harness_base_args.to_vec(),
-            structured_codex,
+            codex_last_message,
         ),
     }
 }
@@ -547,22 +552,17 @@ pub(crate) fn run_execution_stage(
                 effective_non_interactive,
                 args,
                 &harness_base_args,
-                structured_codex_output.is_some(),
+                structured_codex_output.map(|output| output.last_message_path.clone()),
             ),
             &env_plan.env,
             &mut prompt_state,
             env_plan.repo_root.as_deref(),
             shell_options,
-            structured_codex_output,
-            stdout_noise,
-            stderr_noise,
-            profile.suppress_structured_stderr_on_success(),
             stream_verbosity != Verbosity::Silent,
             stream_verbosity,
             detail_requested,
             stream_verbosity == Verbosity::Silent,
             env_context,
-            dispatch_context,
             Some(initial_materialized),
             term,
             &mut lifecycle_guard,
@@ -757,7 +757,7 @@ mod tests {
                 true,
                 &args,
                 &[],
-                false,
+                None,
             );
             assert_eq!(
                 intent.mcp_enabled, expected,

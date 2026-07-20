@@ -18,17 +18,27 @@ const RECORDED_ARGV: &str = "recorded-invocation-argv";
 fn plan_inputs() -> launch_plan::LaunchPlanInputs {
     launch_plan::LaunchPlanInputs {
         provider_args_tail: Vec::new(),
-        output_format_args: Vec::new(),
+        output_format: None,
         system_prompt_args: Vec::new(),
         system_prompt_opencode_config: None,
         system_prompt: None,
         system_prompt_cwd: PathBuf::new(),
         system_prompt_scoped_tmp: PathBuf::new(),
-        sandbox_args: Vec::new(),
+        sandbox_requested: false,
         has_model_env: false,
         mcp: None,
         opencode_config_base: None,
         codex_last_message_path: PathBuf::from("/tmp/claudine-test-last-message.txt"),
+        // The provider-shaped keys the fixture invocation wrote, none of which
+        // existed beforehand — so a rebuild that stops writing one clears it.
+        provider_env_baseline: HashMap::from([
+            (std::ffi::OsString::from("MODEL"), None),
+            (std::ffi::OsString::from("OPENCODE_CONFIG_CONTENT"), None),
+            (
+                std::ffi::OsString::from("HOME"),
+                Some(std::ffi::OsString::from("/home/real")),
+            ),
+        ]),
         invocation: launch_plan::RecordedLaunch {
             facets: launch_plan::DocumentLaunchFacets {
                 provider: Provider::Goose,
@@ -58,8 +68,34 @@ fn intent() -> LaunchRebuildIntent {
         cli_yolo: false,
         is_inline: false,
         mcp_enabled: true,
+        fallback_provider_reason: ProviderResolutionReason::FavoriteAgent,
+        dispatch_context: invocation_dispatch_context(),
         launch_plan_inputs: plan_inputs(),
     }
+}
+
+/// The composition-shaped dispatch context the fixture invocation published:
+/// the three selection entries a moved facet must recompute, plus an
+/// invocation-fixed entry a recompute must preserve.
+fn invocation_dispatch_context() -> HashMap<String, serde_json::Value> {
+    let mut context = HashMap::new();
+    context.insert(
+        "composition_file_ref".to_string(),
+        serde_json::Value::String("doc.md".to_string()),
+    );
+    context.insert(
+        "provider_selection_reason".to_string(),
+        serde_json::Value::String("FavoriteAgent".to_string()),
+    );
+    context.insert(
+        "resolved_model".to_string(),
+        serde_json::Value::String(String::new()),
+    );
+    context.insert(
+        "model_selection_reason".to_string(),
+        serde_json::Value::String("ProviderDefault".to_string()),
+    );
+    context
 }
 
 /// Build a materialized prompt carrying a target's `model:` hint plus a
@@ -155,19 +191,116 @@ fn rebuild_keeps_explicit_cli_model_authoritative() {
     );
 }
 
-/// A target with no `model:` produces no `MODEL` overlay (matching
-/// `install_agent_env_for_composition`), so the child env falls through to
-/// the provider default rather than a stale router model.
+/// The environment an attempt's child actually receives: the invocation's base,
+/// then the rebuilt plan's patch, then the document's `AGENT`/`MODEL`/`YOLO`
+/// triple — the same order [`super::super::super::build_harness_launch`] applies
+/// them in.
+///
+/// Asserting on this rather than on the overlay vector is the point: an overlay
+/// that merely *omits* a key looks identical to one that clears it, and the
+/// difference is exactly what reaches the provider process.
+fn effective_child_env(
+    base: &[(&str, &str)],
+    rebuilt: &RebuiltLaunchIdentity,
+) -> HashMap<std::ffi::OsString, std::ffi::OsString> {
+    let mut env: HashMap<std::ffi::OsString, std::ffi::OsString> = base
+        .iter()
+        .map(|(key, value)| ((*key).into(), (*value).into()))
+        .collect();
+    for change in &rebuilt.launch_env {
+        match change {
+            launch_plan::EnvChange::Set(key, value) => {
+                env.insert(key.clone(), value.clone());
+            }
+            launch_plan::EnvChange::Remove(key) => {
+                env.remove(key);
+            }
+        }
+    }
+    for (key, value) in &rebuilt.env_overrides {
+        env.insert(key.clone().into(), value.clone().into());
+    }
+    env
+}
+
+/// The fixture intent, opened with a pinned model so a refresh can drop it.
+fn intent_with_opening_model(model: &str) -> LaunchRebuildIntent {
+    let mut intent = intent();
+    intent.launch_plan_inputs.invocation.facets.model = Some(model.to_string());
+    intent
+}
+
+/// Review-9 finding 2 — a refresh that drops `model:` clears `MODEL` from the
+/// **child environment**, not merely from the overlay vector.
+///
+/// The overlay is applied over the invocation's base environment, which already
+/// carries the opening document's `MODEL`. Omitting the key therefore left the
+/// stale value in place; only a removal actually reaches the provider process
+/// without it.
 #[test]
 fn rebuild_omits_model_when_target_pins_none() {
-    let target = target_with_model(None);
-    let rebuild = rebuild_target_launch(&intent(), None, None, Path::new("."), &target).unwrap();
+    let base = [("MODEL", "llamacpp/opening-model"), ("PATH", "/usr/bin")];
+    let rebuilt = rebuild_launch_identity(
+        &intent_with_opening_model("llamacpp/opening-model"),
+        None,
+        None,
+        &target_with_model(None),
+        None,
+    )
+    .unwrap();
 
-    assert_eq!(value_of(&rebuild.env_overrides, "AGENT"), Some("goose"));
+    assert_eq!(value_of(&rebuilt.env_overrides, "AGENT"), Some("goose"));
     assert_eq!(
-        value_of(&rebuild.env_overrides, "MODEL"),
+        value_of(&rebuilt.env_overrides, "MODEL"),
         None,
         "no frontmatter model means no MODEL overlay",
+    );
+
+    let env = effective_child_env(&base, &rebuilt);
+    assert!(
+        !env.contains_key(std::ffi::OsStr::new("MODEL")),
+        "the child must not inherit the opening document's model; got {env:?}",
+    );
+    assert_eq!(
+        env.get(std::ffi::OsStr::new("PATH")).map(|v| v.as_os_str()),
+        Some(std::ffi::OsStr::new("/usr/bin")),
+        "the patch must touch only the provider-owned half of the environment",
+    );
+}
+
+/// Review-9 finding 2 — the same rule for provider-specific base values. A
+/// retry that leaves OpenCode must not hand the new provider OpenCode's inline
+/// config, and one that leaves a shadow-HOME provider must get its real home
+/// back rather than the previous provider's shadow.
+#[test]
+fn a_provider_switch_clears_the_opening_providers_environment() {
+    let base = [
+        ("OPENCODE_CONFIG_CONTENT", "{\"opening\":true}"),
+        ("HOME", "/shadow/opencode"),
+        ("PATH", "/usr/bin"),
+    ];
+    let rebuilt = rebuild_launch_identity(
+        &intent(),
+        None,
+        None,
+        &with_hints(EffectiveSelectionHints {
+            agent: Some(AgentHint::Single(Provider::Gemini)),
+            ..EffectiveSelectionHints::default()
+        }),
+        None,
+    )
+    .unwrap();
+
+    let env = effective_child_env(&base, &rebuilt);
+    assert!(
+        !env.contains_key(std::ffi::OsStr::new("OPENCODE_CONFIG_CONTENT")),
+        "OpenCode's inline config must not reach a Gemini retry; got {env:?}",
+    );
+    assert_eq!(
+        env.get(std::ffi::OsStr::new("HOME")).map(|v| v.as_os_str()),
+        Some(std::ffi::OsStr::new("/home/real")),
+        "a shadow HOME the rebuild does not re-materialize must fall back to the \
+         real one; got {env:?}",
     );
 }
 
@@ -185,9 +318,10 @@ fn an_unchanged_document_rebuilds_to_an_identical_identity() {
     assert_eq!(first.non_interactive, second.non_interactive);
     assert_eq!(first.yolo, second.yolo);
     assert_eq!(first.use_structured, second.use_structured);
-    assert_eq!(first.structured_codex, second.structured_codex);
+    assert_eq!(first.codex_output.is_some(), second.codex_output.is_some());
     assert_eq!(first.mcp_tags, second.mcp_tags);
     assert_eq!(first.env_overrides, second.env_overrides);
+    assert_eq!(first.dispatch_context, second.dispatch_context);
 }
 
 /// The single-bundle seam's safety property.
@@ -219,7 +353,10 @@ fn the_source_path_moves_only_the_mcp_tags_of_a_bundle() {
     assert_eq!(env_only.non_interactive, with_source.non_interactive);
     assert_eq!(env_only.yolo, with_source.yolo);
     assert_eq!(env_only.use_structured, with_source.use_structured);
-    assert_eq!(env_only.structured_codex, with_source.structured_codex);
+    assert_eq!(
+        env_only.codex_output.is_some(),
+        with_source.codex_output.is_some()
+    );
     assert!(
         env_only.mcp_tags.is_empty() && with_source.mcp_tags == vec!["calendar".to_string()],
         "the source path is what lexes the body tags, and is the only facet it moves",
@@ -321,6 +458,219 @@ fn the_permission_mode_records_what_yolo_achieved_not_what_was_asked() {
         !interactive.yolo,
         "OpenCode bypass is non-interactive only, so an interactive refresh drops it",
     );
+}
+
+/// Review-9 finding 1: the stdout/stderr noise policy and the
+/// structured-stderr suppression policy come from the REBUILT profile, so a
+/// provider-switch retry filters the new provider's output with the new
+/// provider's prefixes — not the opening provider's.
+#[test]
+fn noise_and_suppression_policy_come_from_the_rebuilt_profile() {
+    let base = rebuild_launch_identity(
+        &intent(),
+        None,
+        None,
+        &with_hints(EffectiveSelectionHints::default()),
+        None,
+    )
+    .unwrap();
+    let switched = rebuild_launch_identity(
+        &intent(),
+        None,
+        None,
+        &with_hints(EffectiveSelectionHints {
+            agent: Some(AgentHint::Single(Provider::Gemini)),
+            ..EffectiveSelectionHints::default()
+        }),
+        None,
+    )
+    .unwrap();
+
+    let gemini = profile_for_provider(Provider::Gemini).unwrap();
+    assert_eq!(base.stderr_noise, profile_for_provider(Provider::Goose).unwrap().stderr_noise_prefixes());
+    assert!(!base.suppress_stderr_on_success);
+    assert_eq!(
+        switched.stderr_noise,
+        gemini.stderr_noise_prefixes(),
+        "the rebuilt Gemini attempt must filter with Gemini's prefixes",
+    );
+    assert_eq!(switched.stdout_noise, gemini.stdout_noise_prefixes());
+    assert!(
+        switched.suppress_stderr_on_success,
+        "Gemini's suppression policy must ride the rebuilt bundle",
+    );
+}
+
+/// An interactive rebuild clears both noise filters regardless of the
+/// profile's prefixes, mirroring the invocation's own gate (a non-empty
+/// stderr filter would pipe an interactive TUI's stderr and hang it on
+/// SIGTTIN).
+#[test]
+fn an_interactive_rebuild_clears_the_noise_filters() {
+    let interactive = rebuild_launch_identity(
+        &intent(),
+        None,
+        None,
+        &with_hints(EffectiveSelectionHints {
+            agent: Some(AgentHint::Single(Provider::Gemini)),
+            interactive: Some(true),
+            ..EffectiveSelectionHints::default()
+        }),
+        None,
+    )
+    .unwrap();
+
+    assert!(interactive.stdout_noise.is_empty());
+    assert!(interactive.stderr_noise.is_empty());
+}
+
+/// Review-9 finding 1: the Codex `--output-last-message` artifact rides the
+/// rebuilt bundle as one coherent value — present iff the rebuilt plan
+/// captures through it, wrapping the same sink path the rebuilt argv names.
+#[test]
+fn codex_artifact_present_iff_the_rebuilt_plan_captures_through_it() {
+    let base = rebuild_launch_identity(
+        &intent(),
+        None,
+        None,
+        &with_hints(EffectiveSelectionHints::default()),
+        None,
+    )
+    .unwrap();
+    assert!(
+        base.codex_output.is_none(),
+        "a non-Codex rebuild carries no artifact",
+    );
+
+    let into_codex = rebuild_launch_identity(
+        &intent(),
+        None,
+        None,
+        &with_hints(EffectiveSelectionHints {
+            agent: Some(AgentHint::Single(Provider::Codex)),
+            ..EffectiveSelectionHints::default()
+        }),
+        None,
+    )
+    .unwrap();
+    let artifact = into_codex
+        .codex_output
+        .as_ref()
+        .expect("a non-interactive Codex rebuild captures through the artifact");
+    let recorded = intent().launch_plan_inputs.codex_last_message_path;
+    assert_eq!(
+        artifact.last_message_path, recorded,
+        "the artifact must wrap the recorded sink path",
+    );
+    let flag_position = into_codex
+        .args
+        .iter()
+        .position(|arg| arg == "--output-last-message")
+        .expect("the rebuilt argv names the sink");
+    assert_eq!(
+        into_codex.args.get(flag_position + 1).map(String::as_str),
+        recorded.to_str(),
+        "artifact and argv must name the same path",
+    );
+
+    let interactive_codex = rebuild_launch_identity(
+        &intent(),
+        None,
+        None,
+        &with_hints(EffectiveSelectionHints {
+            agent: Some(AgentHint::Single(Provider::Codex)),
+            interactive: Some(true),
+            ..EffectiveSelectionHints::default()
+        }),
+        None,
+    )
+    .unwrap();
+    assert!(
+        interactive_codex.codex_output.is_none(),
+        "an interactive non-inline Codex rebuild does not capture through the file",
+    );
+}
+
+/// Review-9 finding 1: a moved facet recomputes the dispatch context's
+/// provider/model selection entries from the refreshed facets, while
+/// invocation-fixed entries survive untouched.
+#[test]
+fn a_moved_facet_recomputes_the_dispatch_selection_metadata() {
+    let switched = rebuild_launch_identity(
+        &intent(),
+        None,
+        None,
+        &with_hints(EffectiveSelectionHints {
+            agent: Some(AgentHint::Single(Provider::Claude)),
+            model: Some(ModelHint::Single("llamacpp/probe-model-x".to_string())),
+            ..EffectiveSelectionHints::default()
+        }),
+        None,
+    )
+    .unwrap();
+
+    let context = &switched.dispatch_context;
+    assert_eq!(
+        context.get("provider_selection_reason"),
+        Some(&serde_json::Value::String("FrontmatterSingle".to_string())),
+    );
+    assert_eq!(
+        context.get("resolved_model"),
+        Some(&serde_json::Value::String("llamacpp/probe-model-x".to_string())),
+    );
+    assert_eq!(
+        context.get("model_selection_reason"),
+        Some(&serde_json::Value::String("FrontmatterSingle".to_string())),
+    );
+    assert_eq!(
+        context.get("composition_file_ref"),
+        Some(&serde_json::Value::String("doc.md".to_string())),
+        "invocation-fixed entries must survive the recompute",
+    );
+}
+
+/// A model-only move keeps the invocation's provider-selection provenance via
+/// the fallback reason (the rebuild cannot re-derive picker/favorite
+/// provenance from the document), while the model entries recompute.
+#[test]
+fn a_model_only_move_keeps_the_fallback_provider_reason() {
+    let moved = rebuild_launch_identity(
+        &intent(),
+        None,
+        None,
+        &with_hints(EffectiveSelectionHints {
+            model: Some(ModelHint::Single("llamacpp/probe-model-x".to_string())),
+            ..EffectiveSelectionHints::default()
+        }),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(
+        moved.dispatch_context.get("provider_selection_reason"),
+        Some(&serde_json::Value::String("FavoriteAgent".to_string())),
+    );
+    assert_eq!(
+        moved.dispatch_context.get("resolved_model"),
+        Some(&serde_json::Value::String("llamacpp/probe-model-x".to_string())),
+    );
+}
+
+/// An unchanged document keeps the invocation's dispatch context verbatim —
+/// including selection reasons a rebuild could not reproduce (picker,
+/// favorite, sequence review).
+#[test]
+fn an_unchanged_document_keeps_the_invocation_dispatch_context() {
+    let unchanged = rebuild_launch_identity(
+        &intent(),
+        None,
+        None,
+        &with_hints(EffectiveSelectionHints::default()),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(unchanged.dispatch_context, invocation_dispatch_context());
 }
 
 /// MCP `#tag`s lexed from the document **on disk** participate in the

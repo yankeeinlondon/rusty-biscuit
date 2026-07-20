@@ -80,10 +80,6 @@ struct HarnessLoopCtx<'a, 'guard> {
     prompt_state: &'a mut HarnessPromptState,
     repo_root: Option<&'a Path>,
     shell_options: claudine::harness::ShellApprovalOptions,
-    structured_codex_output: Option<&'a super::super::policy::StructuredCodexOutput>,
-    stdout_noise: &'a [&'a str],
-    stderr_noise: &'a [&'a str],
-    suppress_stderr_on_success: bool,
     show_checks: bool,
     stream_verbosity: Verbosity,
     detail_requested: bool,
@@ -91,7 +87,6 @@ struct HarnessLoopCtx<'a, 'guard> {
     // prompt preview when the caller requested a silent run.
     silent: bool,
     env_context: &'a EnvironmentContext,
-    dispatch_context: &'a HashMap<String, serde_json::Value>,
     initial_materialized: Option<MaterializedHarnessPrompt>,
     term: &'a Terminal,
     lifecycle_guard: &'a mut claudine::composition::LifecycleRunGuard<'guard>,
@@ -153,16 +148,11 @@ pub(crate) fn run_harness_loop(
     prompt_state: &mut HarnessPromptState,
     repo_root: Option<&Path>,
     shell_options: claudine::harness::ShellApprovalOptions,
-    structured_codex_output: Option<&super::super::policy::StructuredCodexOutput>,
-    stdout_noise: &[&str],
-    stderr_noise: &[&str],
-    suppress_stderr_on_success: bool,
     show_checks: bool,
     stream_verbosity: Verbosity,
     detail_requested: bool,
     silent: bool,
     env_context: &EnvironmentContext,
-    dispatch_context: &HashMap<String, serde_json::Value>,
     initial_materialized: Option<MaterializedHarnessPrompt>,
     term: &Terminal,
     lifecycle_guard: &mut claudine::composition::LifecycleRunGuard<'_>,
@@ -204,16 +194,11 @@ pub(crate) fn run_harness_loop(
         prompt_state,
         repo_root,
         shell_options,
-        structured_codex_output,
-        stdout_noise,
-        stderr_noise,
-        suppress_stderr_on_success,
         show_checks,
         stream_verbosity,
         detail_requested,
         silent,
         env_context,
-        dispatch_context,
         initial_materialized,
         term,
         lifecycle_guard,
@@ -335,7 +320,9 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
 /// It is the whole launch plan: provider argv, the spawned profile and binary,
 /// the session mode, the permission mode, and MCP runtime injection all come
 /// from this one value, via the re-entrant builder in
-/// [`crate::commands::wrap::launch_plan`].
+/// [`crate::commands::wrap::launch_plan`] — as do the provider-dependent
+/// execution adapters (noise policy, stderr suppression, the Codex output
+/// artifact, and the dispatch context) the attempt runs with.
 struct AttemptDocument {
     materialized: MaterializedHarnessPrompt,
     launch: RebuiltLaunchIdentity,
@@ -1046,13 +1033,21 @@ fn launch_plan_failure(
     }
 }
 
-/// Overlay the rebuilt target launch-identity env onto a materialized prompt's
-/// `env_overrides`, replacing any prior entry for the same key so a re-applied
-/// rebuild is idempotent.
+/// Install the rebuilt target launch-identity env on a materialized prompt.
+///
+/// The rebuild owns the `AGENT`/`MODEL`/`YOLO` triple outright, so every one of
+/// those keys is dropped before the new list is appended — an *entry-wise*
+/// replace would let a `MODEL` from a previous attempt survive a refresh that
+/// stopped resolving one, which is precisely the stale-value class review-9
+/// finding 2 reports.
 fn apply_target_env_overrides(
     materialized: &mut MaterializedHarnessPrompt,
     overrides: &[(String, String)],
 ) {
+    const LAUNCH_TRIPLE: [&str; 3] = ["AGENT", "MODEL", "YOLO"];
+    materialized
+        .env_overrides
+        .retain(|(key, _)| !LAUNCH_TRIPLE.contains(&key.as_str()));
     for (key, value) in overrides {
         materialized.env_overrides.retain(|(k, _)| k != key);
         materialized
@@ -1438,15 +1433,10 @@ fn execute_attempt_phase(
     let cli_step_timeout = &state.run.cli_step_timeout;
     let cli_stall_timeout = &state.run.cli_stall_timeout;
     let base_env = state.run.base_env;
-    let structured_codex_output = state.run.structured_codex_output;
-    let stdout_noise = state.run.stdout_noise;
-    let stderr_noise = state.run.stderr_noise;
-    let suppress_stderr_on_success = state.run.suppress_stderr_on_success;
     let show_checks = state.run.show_checks;
     let stream_verbosity = state.run.stream_verbosity;
     let detail_requested = state.run.detail_requested;
     let env_context = state.run.env_context;
-    let dispatch_context = state.run.dispatch_context;
     let repo_root = state.run.repo_root;
     let term = state.run.term;
     let emit_prompt_timing = state.run.emit_prompt_timing;
@@ -1467,9 +1457,11 @@ fn execute_attempt_phase(
     // R8 — the one bundle this attempt's own fresh read produced, and the sole
     // authority for the launch. The provider spawned, its profile and binary,
     // the argv, the session mode, the structured-output shape, the permission
-    // mode, and the MCP runtime injection all come from here; so does the
-    // session-compatibility key below. There is no invocation-fixed launch state
-    // left for the key to disagree with.
+    // mode, and the MCP runtime injection all come from here — as do the
+    // provider-dependent execution adapters (stdout/stderr noise policy,
+    // structured-stderr suppression, the Codex output artifact, and the
+    // dispatch context) and the session-compatibility key below. There is no
+    // invocation-fixed launch state left for the key to disagree with.
     let AttemptDocument {
         materialized,
         launch: rebuilt,
@@ -1551,7 +1543,7 @@ fn execute_attempt_phase(
         rebuilt.yolo,
         rebuilt.non_interactive,
         rebuilt.use_structured,
-        rebuilt.structured_codex,
+        rebuilt.codex_output.is_some(),
         base_args,
         &rebuilt.mcp_tags,
         &launch,
@@ -1561,16 +1553,28 @@ fn execute_attempt_phase(
     // provider fixed when it opened the session, refuse the resume with a typed
     // diagnostic before launching the provider under the stale session — never
     // mix a live session with a newly prepared launch plan.
+    //
+    // The refusal is post-`start` and pre-spawn, so it owes the same lifecycle
+    // tail as every other failure in that window: `failure` then exactly one
+    // `finalize`, both carrying the incompatibility as `err.*`.
     if resume_session.is_some()
         && let Some(prior) = state.active.iteration().attempt().compat_key()
     {
         let facets = prior.incompatibilities(&launch_key);
         if !facets.is_empty() {
-            return Err(CompositionError::LifecycleResumeIncompatible {
-                source_path: prompt_state.source_path.clone(),
-                facets,
-            }
-            .into());
+            return Err(route_incompatible_resume(
+                lifecycle_guard,
+                &materialized,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                effect_engine,
+                CompositionError::LifecycleResumeIncompatible {
+                    source_path: prompt_state.source_path.clone(),
+                    facets,
+                },
+                loop_start,
+            ));
         }
     }
     // Record the key of the launch this attempt runs with, so a subsequent
@@ -1609,15 +1613,15 @@ fn execute_attempt_phase(
         &materialized,
         effective_non_interactive,
         use_structured,
-        structured_codex_output,
-        stdout_noise,
-        stderr_noise,
-        suppress_stderr_on_success,
+        rebuilt.codex_output.as_ref(),
+        rebuilt.stdout_noise,
+        rebuilt.stderr_noise,
+        rebuilt.suppress_stderr_on_success,
         show_checks,
         stream_verbosity,
         detail_requested,
         env_context,
-        dispatch_context,
+        &rebuilt.dispatch_context,
         term,
         &mut child_spawned,
         prompt_timing,

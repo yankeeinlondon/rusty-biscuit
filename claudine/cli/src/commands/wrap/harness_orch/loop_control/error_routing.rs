@@ -324,6 +324,54 @@ pub(super) fn route_unowned_handoff(
     )
 }
 
+/// Route a refused `resume` through the post-`start` `failure` + `finalize`
+/// transition and return the error to propagate.
+///
+/// A resume re-enters at `start`, so the session-compatibility refusal is a
+/// post-`start`, pre-spawn failure — the same lifecycle shape as a failed
+/// launch construction, never a pre-flight `blocked`. It therefore takes
+/// `emit_failure_finalize_with_err` rather than the `blocked`-selecting
+/// hand-off route: the terminal slot was reset when the resume re-entered, so
+/// `failure` and `finalize` each fire exactly once with the incompatibility
+/// snapshot as `err.*`, and a `failure`/`finalize` stack authored for the
+/// active document can release its locks and branch on `err.variant`.
+///
+/// Refusing before the spawn is the whole point of the comparison, and routing
+/// does not weaken it: nothing here launches a provider, and the resume control
+/// action a re-run `failure` stack may return is not dispatched — the run halts
+/// on the returned error.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn route_incompatible_resume(
+    guard: &mut claudine::composition::LifecycleRunGuard<'_>,
+    materialized: &MaterializedHarnessPrompt,
+    source_path: &Path,
+    repo_root: Option<&Path>,
+    term: &Terminal,
+    effect_engine: &EffectEngine,
+    error: CompositionError,
+    loop_start: std::time::Instant,
+) -> color_eyre::eyre::Report {
+    let info = LifecycleErrorInfo::from_composition_error(&error);
+    let raised = emit_failure_finalize_with_err(
+        guard,
+        materialized,
+        source_path,
+        repo_root,
+        term,
+        effect_engine,
+        &info,
+        loop_start,
+    );
+    // Same precedence rule as a refused hand-off: a raise inside the catch
+    // stacks is the more recent and more specific failure, so it supersedes the
+    // refusal. Otherwise the typed refusal propagates by value and the renderer
+    // still picks its styled block.
+    match raised {
+        Some(evaluation_error) => evaluation_error.into(),
+        None => color_eyre::eyre::Report::new(error),
+    }
+}
+
 /// The shared tail both refusal routes take once their typed cause is snapshot
 /// into `err.*`.
 #[allow(clippy::too_many_arguments)]

@@ -2,12 +2,16 @@
 
 use super::*;
 
-/// Inputs modelling a Goose invocation: non-interactive, no `--yolo`, no MCP,
-/// with one recorded slice in each invocation-fixed position so a replay that
-/// dropped or reordered them is visible.
+/// Inputs modelling a Goose invocation: non-interactive, no `--yolo`, no MCP.
 fn inputs() -> LaunchPlanInputs {
+    inputs_for(Provider::Goose)
+}
+
+/// The fixture above, for an arbitrary opening provider — the reverse-direction
+/// rows need an invocation that started somewhere other than Goose.
+fn inputs_for(provider: Provider) -> LaunchPlanInputs {
     let facets = DocumentLaunchFacets {
-        provider: Provider::Goose,
+        provider,
         non_interactive: true,
         yolo_requested: false,
         is_inline: false,
@@ -16,17 +20,18 @@ fn inputs() -> LaunchPlanInputs {
     };
     let mut recorded = LaunchPlanInputs {
         provider_args_tail: vec!["--tail-flag".to_string()],
-        output_format_args: vec!["--output-format-marker".to_string()],
+        output_format: None,
         system_prompt_args: Vec::new(),
         system_prompt_opencode_config: None,
         system_prompt: None,
         system_prompt_cwd: PathBuf::new(),
         system_prompt_scoped_tmp: PathBuf::new(),
-        sandbox_args: vec!["--sandbox-marker".to_string()],
+        sandbox_requested: false,
         has_model_env: false,
         mcp: None,
         opencode_config_base: None,
         codex_last_message_path: PathBuf::from("/tmp/claudine-test-last.txt"),
+        provider_env_baseline: HashMap::new(),
         invocation: RecordedLaunch {
             facets: facets.clone(),
             args: Vec::new(),
@@ -67,28 +72,267 @@ fn unchanged_facets_return_the_recorded_plan_verbatim() {
     let plan = build_launch_plan(&inputs, &inputs.invocation.facets).unwrap();
 
     assert_eq!(plan.args, inputs.invocation.args);
-    assert_eq!(plan.env_overlay, inputs.invocation.env_overlay);
+    assert_eq!(
+        plan.env_overlay,
+        vec![EnvChange::Set("YOLO".into(), "false".into())],
+        "identical facets touch the base environment identically, so the patch is \
+         the recorded sets and nothing else",
+    );
 }
 
-/// The invocation-fixed slices survive a replay, in their recorded positions
-/// relative to each other.
+/// The invocation-fixed material survives a replay, in the command phase's own
+/// order: the forwarded tail first, then the rendered `--output`, then the
+/// system-prompt delivery, then `--sandbox`.
 #[test]
-fn a_replay_keeps_the_invocation_fixed_slices_in_order() {
-    let inputs = inputs();
+fn a_replay_keeps_the_invocation_fixed_material_in_order() {
+    // Gemini encodes `--output json` as `--output-format json` and implements no
+    // sandbox; Codex encodes the same request as `--json` and does implement
+    // `--sandbox`. Opening on Gemini and retrying into Codex therefore exercises
+    // both re-encodings at once, and the ordering has to survive them.
+    let mut inputs = inputs_for(Provider::Gemini);
+    inputs.output_format = Some(OutputFormat::Json);
+    inputs.sandbox_requested = true;
+    inputs.invocation.args = replay(&inputs, &inputs.invocation.facets.clone())
+        .unwrap()
+        .args;
+
     let moved = DocumentLaunchFacets {
-        non_interactive: false,
+        provider: Provider::Codex,
         ..inputs.invocation.facets.clone()
     };
     let plan = build_launch_plan(&inputs, &moved).unwrap();
 
     let position = |needle: &str| plan.args.iter().position(|arg| arg == needle);
     let tail = position("--tail-flag").expect("the forwarded tail must survive");
-    let output = position("--output-format-marker").expect("`--output` must survive");
-    let sandbox = position("--sandbox-marker").expect("`--sandbox` must survive");
+    let output = position("--json").expect("`--output` must re-render in Codex's encoding");
+    let sandbox = position("--sandbox").expect("`--sandbox` must re-render");
+    assert!(
+        !plan.args.iter().any(|arg| arg == "--output-format"),
+        "Gemini's output encoding must not travel with the request; got {:?}",
+        plan.args,
+    );
     assert!(
         tail < output && output < sandbox,
-        "invocation-fixed slices must keep the command phase's order; got {:?}",
+        "invocation-fixed material must keep the command phase's order; got {:?}",
         plan.args,
+    );
+}
+
+/// Review-9 finding 2 — `--output` is invocation intent, but its encoding
+/// belongs to whichever provider runs.
+///
+/// Goose renders `--output json` as no argv at all; Gemini requires
+/// `--output-format json`. Replaying Goose's (empty) slice into a Gemini retry
+/// silently dropped the format the caller asked for.
+#[test]
+fn a_goose_to_gemini_retry_re_renders_the_requested_output_format() {
+    let mut inputs = inputs();
+    inputs.output_format = Some(OutputFormat::Json);
+    inputs.invocation.args = replay(&inputs, &inputs.invocation.facets.clone())
+        .unwrap()
+        .args;
+    assert!(
+        !inputs.invocation.args.iter().any(|arg| arg == "--output-format"),
+        "fixture check: Goose encodes `--output json` as no argv; got {:?}",
+        inputs.invocation.args,
+    );
+
+    let moved = DocumentLaunchFacets {
+        provider: Provider::Gemini,
+        ..inputs.invocation.facets.clone()
+    };
+    let plan = build_launch_plan(&inputs, &moved).unwrap();
+
+    assert!(
+        adjacent_pair(&plan.args, "--output-format", "json"),
+        "the rebuilt Gemini attempt must carry the requested format in Gemini's \
+         own encoding; got {:?}",
+        plan.args,
+    );
+}
+
+/// The reverse: Gemini's `--output-format` bytes must not reach Goose, which
+/// does not accept them.
+#[test]
+fn a_gemini_to_goose_retry_drops_the_gemini_output_encoding() {
+    let mut inputs = inputs_for(Provider::Gemini);
+    inputs.output_format = Some(OutputFormat::Json);
+    inputs.invocation.args = replay(&inputs, &inputs.invocation.facets.clone())
+        .unwrap()
+        .args;
+    assert!(
+        adjacent_pair(&inputs.invocation.args, "--output-format", "json"),
+        "fixture check: the Gemini invocation renders the flag; got {:?}",
+        inputs.invocation.args,
+    );
+
+    let moved = DocumentLaunchFacets {
+        provider: Provider::Goose,
+        ..inputs.invocation.facets.clone()
+    };
+    let plan = build_launch_plan(&inputs, &moved).unwrap();
+
+    assert!(
+        !plan.args.iter().any(|arg| arg == "--output-format"),
+        "one provider's output encoding must never reach another's argv; got {:?}",
+        plan.args,
+    );
+}
+
+/// Review-9 finding 2 — the same rule for `--sandbox`, which Codex implements
+/// and Goose does not.
+#[test]
+fn sandbox_intent_re_renders_across_a_goose_codex_switch_in_both_directions() {
+    let mut into_codex = inputs();
+    into_codex.sandbox_requested = true;
+    into_codex.invocation.args = replay(&into_codex, &into_codex.invocation.facets.clone())
+        .unwrap()
+        .args;
+    assert!(
+        !into_codex.invocation.args.iter().any(|arg| arg == "--sandbox"),
+        "fixture check: Goose implements no sandbox; got {:?}",
+        into_codex.invocation.args,
+    );
+    let codex_facets = DocumentLaunchFacets {
+        provider: Provider::Codex,
+        ..into_codex.invocation.facets.clone()
+    };
+    assert!(
+        build_launch_plan(&into_codex, &codex_facets)
+            .unwrap()
+            .args
+            .iter()
+            .any(|arg| arg == "--sandbox"),
+        "a retry into Codex must honor the sandbox the caller requested",
+    );
+
+    let mut out_of_codex = inputs_for(Provider::Codex);
+    out_of_codex.sandbox_requested = true;
+    out_of_codex.invocation.args = replay(&out_of_codex, &out_of_codex.invocation.facets.clone())
+        .unwrap()
+        .args;
+    assert!(
+        out_of_codex.invocation.args.iter().any(|arg| arg == "--sandbox"),
+        "fixture check: the Codex invocation renders `--sandbox`; got {:?}",
+        out_of_codex.invocation.args,
+    );
+    let goose_facets = DocumentLaunchFacets {
+        provider: Provider::Goose,
+        ..out_of_codex.invocation.facets.clone()
+    };
+    assert!(
+        !build_launch_plan(&out_of_codex, &goose_facets)
+            .unwrap()
+            .args
+            .iter()
+            .any(|arg| arg == "--sandbox"),
+        "Codex's sandbox flag must not leak into a provider that rejects it",
+    );
+}
+
+/// True when `flag` appears immediately followed by `value`.
+fn adjacent_pair(args: &[String], flag: &str, value: &str) -> bool {
+    args.windows(2)
+        .any(|pair| pair[0] == flag && pair[1] == value)
+}
+
+/// Review-9 finding 2 — a provider-shaped environment key the rebuild no longer
+/// writes is *removed*, not merely omitted from an additive overlay.
+///
+/// `MODEL` is the case the finding names: an attempt whose refreshed document
+/// dropped `model:` used to inherit the opening document's value straight out of
+/// the base child environment.
+#[test]
+fn a_replay_removes_a_provider_owned_env_key_it_no_longer_writes() {
+    let mut inputs = inputs();
+    inputs.invocation.facets.model = Some("llamacpp/opening-model".to_string());
+    inputs.provider_env_baseline = HashMap::from([
+        (OsString::from("MODEL"), None),
+        (OsString::from("OPENCODE_CONFIG_CONTENT"), None),
+    ]);
+    inputs.invocation.args = replay(&inputs, &inputs.invocation.facets.clone())
+        .unwrap()
+        .args;
+
+    let dropped_model = DocumentLaunchFacets {
+        model: None,
+        ..inputs.invocation.facets.clone()
+    };
+    let plan = build_launch_plan(&inputs, &dropped_model).unwrap();
+
+    assert!(
+        plan.env_overlay
+            .contains(&EnvChange::Remove(OsString::from("MODEL"))),
+        "a document that dropped `model:` must clear the opening `MODEL`, not \
+         leave it in the child; got {:?}",
+        plan.env_overlay,
+    );
+    assert!(
+        plan.env_overlay
+            .contains(&EnvChange::Remove(OsString::from("OPENCODE_CONFIG_CONTENT"))),
+        "the opening provider's inline config must not survive a rebuild that \
+         does not write one; got {:?}",
+        plan.env_overlay,
+    );
+}
+
+/// A provider-shaped key that had a value *before* the invocation's own stages
+/// wrote it is restored to that value rather than deleted — the shadow `HOME`
+/// case, where deleting the key would hand the child no home at all.
+#[test]
+fn a_replay_restores_rather_than_deletes_a_key_that_had_a_prior_value() {
+    let mut inputs = inputs();
+    inputs.provider_env_baseline = HashMap::from([(
+        OsString::from("HOME"),
+        Some(OsString::from("/home/real")),
+    )]);
+    inputs.invocation.args = replay(&inputs, &inputs.invocation.facets.clone())
+        .unwrap()
+        .args;
+
+    let moved = DocumentLaunchFacets {
+        non_interactive: false,
+        ..inputs.invocation.facets.clone()
+    };
+    let plan = build_launch_plan(&inputs, &moved).unwrap();
+
+    assert!(
+        plan.env_overlay.contains(&EnvChange::Set(
+            OsString::from("HOME"),
+            OsString::from("/home/real"),
+        )),
+        "a shadow HOME the rebuild does not re-materialize must fall back to the \
+         real one; got {:?}",
+        plan.env_overlay,
+    );
+}
+
+/// A key the rebuild *does* write again keeps the rebuild's value: the restore
+/// pass must never overwrite a live producer's output.
+#[test]
+fn a_baseline_restore_never_overwrites_a_key_the_rebuild_wrote() {
+    let mut inputs = inputs();
+    inputs.provider_env_baseline =
+        HashMap::from([(OsString::from("YOLO"), Some(OsString::from("stale")))]);
+    inputs.invocation.args = replay(&inputs, &inputs.invocation.facets.clone())
+        .unwrap()
+        .args;
+
+    let moved = DocumentLaunchFacets {
+        non_interactive: false,
+        ..inputs.invocation.facets.clone()
+    };
+    let plan = build_launch_plan(&inputs, &moved).unwrap();
+
+    let yolo: Vec<&EnvChange> = plan
+        .env_overlay
+        .iter()
+        .filter(|change| change.key() == OsStr::new("YOLO"))
+        .collect();
+    assert_eq!(
+        yolo,
+        vec![&EnvChange::Set("YOLO".into(), "false".into())],
+        "the permission producer owns `YOLO`; the restore pass must leave it alone",
     );
 }
 
@@ -143,11 +387,11 @@ fn the_plan_and_its_yolo_env_agree_on_the_achieved_permission_mode() {
     let yolo_env = plan
         .env_overlay
         .iter()
-        .find(|(key, _)| key == OsStr::new("YOLO"))
-        .map(|(_, value)| value.clone());
+        .find(|change| change.key() == OsStr::new("YOLO"))
+        .cloned();
     assert_eq!(
         yolo_env,
-        Some(OsString::from("false")),
+        Some(EnvChange::Set("YOLO".into(), "false".into())),
         "the environment must report the achieved mode, not the requested one",
     );
 }
@@ -322,7 +566,7 @@ fn recorded_only_inputs_refuse_a_moved_facet() {
         mcp_body_tags: Vec::new(),
     };
     let inputs =
-        LaunchPlanInputs::recorded_only(facets.clone(), vec!["recorded".to_string()], false);
+        LaunchPlanInputs::recorded_only(facets.clone(), vec!["recorded".to_string()], None);
 
     // Unchanged facets still work: the recorded plan is all this path needs.
     assert_eq!(
