@@ -4,7 +4,9 @@ ready: false
 agent: codex/default
 created: 2026-07-18T01:28:32-07:00
 spec: 2026-07-16-redundant-walk/spec.md
-implemented: false
+implemented: true
+implemented_by: opencode/kimi-for-coding/k3
+log: darkmatter/fixes/2026-07-16-redundant-walk/log.md
 description: "A **fix** review of `2026-07-16-redundant-walk/spec.md`"
 fix: 2026-07-16-redundant-walk/review-3.md
 previous: 2026-07-16-redundant-walk/review-2.md
