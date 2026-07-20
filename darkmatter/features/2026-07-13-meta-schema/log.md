@@ -4,6 +4,7 @@ description: "Implementation log for the meta-schema feature's review-to-impleme
 deferred_perf_measurement: false
 implementation_2: "2026-07-18T09:03:32-07:00"
 implementation_3: "2026-07-19T21:33:53-07:00"
+implementation_4: "2026-07-19T23:27:33-07:00"
 ---
 
 # Meta Schema — Implementation Log
@@ -312,3 +313,111 @@ The files changed during this cycle are:
 - `darkmatter/dmls/docs/diagnostics.md` — diagnostic-code table updated for the standalone outer-declaration contract
 - `darkmatter/lib/tests/schemas_source_projection.rs` — padded/whitespace-only reference parity tests
 - `darkmatter/dmls/tests/lsp_session.rs` — parser-state, mixed-union, and standalone-declaration Level-1 LSP regressions
+
+## Implementation of Review Findings #4
+
+> **started at:** 2026-07-19T23:27:33-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-13-meta-schema/review-4.md'
+- this is iteration 4 of the review-to-implement cycle
+- the review contains **3** findings:
+        - **High** — Completion loses nested semantic owners and RFC 6901-escaped keys (`dmls/src/providers/frontmatter.rs`)
+        - **High** — Referenced schema-file graphs can recurse without bound and lose transitive dependencies (`lib/src/markdown/schemas/resolve.rs`)
+        - **Medium** — The canonical Level-2 gate remains red and its AC13 exception is not ratified
+- impacted package area (per the spec's implementation surface map): `darkmatter`,
+  covering the `darkmatter` lib, `darkmatter-cli`, and `dmls` crates — so
+  `just test` / `just lint` from that area is the verification scope
+
+### Finding 1 — Completion loses nested semantic owners and RFC 6901-escaped keys
+
+- starting the work on 'finding-1-completion-structural-owner-path' at 23:29:41
+- **root cause — two independent path-truncation defects, not one**
+        - `meta_schema_kinds_for_line` (`dmls/src/providers/frontmatter.rs`) reduced the authored position to a single `owner` string (`ancestors.first()`, else `key`) and then searched `SchemaAuthoringState::Frontmatter` values for `value.pointer.strip_prefix('/') == Some(owner)` — comparing a **decoded** single segment against a **serialized RFC 6901 pointer**. It could never match a nested value (`/parameter/type` searched as `parameter`) nor an escaped top-level key (`/a~1b` vs `a/b`, `/c~0d` vs `c~d`). `frontmatter_authoring` was already recording the correct complete pointer; completion was the only lossy stage
+        - a second, previously unnoticed truncation sits underneath: `FrontmatterAst::container_at_offset` filtered to `FmValueKind::Mapping` only, so a `- item` line under a **sequence**-valued key had its ancestor chain cut at the nearest enclosing mapping (`parameter:/type:/- str` reported ancestors `["parameter"]`, not `["parameter", "type"]`). Fixing only the pointer comparison leaves every `[]` array form dead
+- **changes** (3 files)
+        - `dmls/src/providers/frontmatter.rs` — builds the complete structural key path (`ancestors` + `key`, `key` omitted for a `sequence_item`), decodes each recorded pointer through the existing repo authority `darkmatter::markdown::schemas::JsonPointer::parse` (no second escaper hand-rolled), and selects the **longest** recorded pointer that is a segment-wise prefix. Exact match → recorded `kinds`; strict-ancestor match → `TypeDefinition`, which preserves and correctly generalizes the prior "nested under a `schema`-kinded owner degrades to `TypeDefinition`" rule. `$schema`-rooted early returns and the whole `Standalone` arm untouched
+        - `dmls/src/overlay/frontmatter.rs` — `container_at_offset` (and sibling `enclosing_key_path`) take `line_start` and now accept `FmValueKind::Sequence`, **but only when `entry.key_span.end <= line_start`**. That line guard is load-bearing: without it a *flow* collection (`ratios: [0.25, ]`) becomes its own line's ancestor and doubles the key, which regressed `suggest_phase1_completion_positions` on the first attempt. `Mapping` behavior deliberately unchanged
+        - `dmls/tests/lsp_session.rs` — 2 new Level-1 in-memory LSP session tests
+- **tests added**
+        - `meta_schema_completion_matches_complete_structural_pointers` — 8 shapes × LF/CRLF = 16 assertions: nested `type-definition` (`/parameter/type`, the shape Feature A itself authors), nested `schema` (`/nested/decl`), `/`-bearing owner key, `~`-bearing owner key, plus the `[]` sequence form of each. Failures are collected and reported together so one broken class cannot mask the other seven
+        - `malformed_buffer_retains_nested_and_escaped_semantic_owners` — asserts baseline completion, then `didChange`s a malformed `bad: [unclosed` onto a later line and asserts the owner keeps activation via the last-good tree's per-entry still-placed check
+- **load-bearing evidence (measured, not reasoned)**
+        - reverting only `meta_schema_kinds_for_line`: **all 16** sub-cases fail with empty candidate lists
+        - restoring that and reverting only the `Sequence` container change: the 4 scalar shapes pass and **exactly the 8 `[]` sub-cases fail** — confirming the second defect is real and independently covered
+        - with both fixes: 2 tests, 2 passed
+- **gates** — `just test` exit **0**: darkmatter **5920/5920**, darkmatter-cli **561/561**, dmls **613/613** (review's 611 + 2 new); `just lint` exit **0**
+- work completed for 'finding-1-completion-structural-owner-path' at 23:52:18
+
+### Finding 2 — Referenced schema-file graphs can recurse without bound and lose transitive dependencies
+
+- starting the work on 'finding-2-reference-graph-cycle-and-dependencies' at 23:52:40
+- **root cause — two independent defects on the same code path**
+        - `resolve_reference` had no frame stack. A standalone document whose whole payload is a reference (`SchemaDeclaration::Reference`) delegates by re-entering `resolve_reference` from `parse_yaml_referenced_file`, and root-union `SchemaArm::FileRef` arms do the same from `resolve_root_union` / `resolve_standalone_root_union`. Nothing bounded that recursion, so `a.yaml → a.yaml` or `a.yaml ⇄ b.yaml` recursed until the stack died
+        - both success paths (normal reference at `resolve.rs:344`, bare-name/schema-root at `resolve.rs:305`) executed `resolved.referenced_files = vec![canonical_path(&path)]` — an **overwrite** discarding the nested accumulation. `document → a.yaml → b.yaml` reported only `a.yaml`, violating `EffectiveSchema::dependencies`' invalidation contract for every hop past the first
+- **changes — `lib/src/markdown/schemas/resolve.rs`**
+        - new private `ReferenceStack` (canonical-path frames, innermost last) with `enter`/`leave`/`describe`, plus `MAX_REFERENCE_DEPTH = 32` mirroring the existing `MAX_IMPORT_DEPTH`. Frames use the file's existing `canonical_path` helper, so `./a.yaml`, `../dir/a.yaml`, and a case-differing spelling on macOS/Windows collapse to one frame
+        - new `load_guarded` wraps `load_schema_from_path` so the frame opens before load and closes on both success and failure. The stack is threaded through `resolve_root_union`, `resolve_reference`, `load_schema_from_path`, `parse_yaml_referenced_file`, `resolve_standalone_schema`, and `resolve_standalone_root_union`; `resolve_yaml_schema_with_roots` is the single construction site. All six are private with in-file callers, so **no public signature changed**
+        - new `accumulate_referenced_file(nested, canonical)` folds each hop in via `BTreeSet` — deduplicated and deterministically sorted, the order `ResolvedSchema::referenced_files` already documented. Replaces both overwrite sites
+        - new `attribute_origin` sets `SchemaOrigin::referenced_file` only when the nested origin is not already `ReferencedFile`. **Deliberate:** for `doc → a.yaml → b.yaml` the origin is now `b.yaml`, not `a.yaml` — `a.yaml` is a pure redirect with no declaration for `relatedInformation` to range against. Single-hop behavior is byte-identical, so no existing test moved
+- **changes — `lib/src/markdown/schemas/errors.rs`**
+        - added `SchemaError::ReferenceCycle { chain: String }` (rendered `a -> b -> a`) plus its `status_block` arm. `SchemaError` is public and **not** `#[non_exhaustive]`, so every match site was checked first: the only exhaustive match is `status_block` in that same file; `claudine/lib/src/composition/schema/translate.rs` and the three `dmls` sites all match specific variants with a fallback. No downstream break, confirmed by lint across all three crates
+- **deliberate widening worth flagging** — `mod.rs:445` feeds `referenced_files` to `triggers::assemble::check_document_schema_not_trigger`. Now that the list is transitive, a delegation chain whose *terminal* hop is a `*.trigger.yaml` envelope is also rejected, not just a direct reference. That is the correct reading of "triggers activate by placement and match, never by reference", but it is a scope change rather than a pure bug fix
+- **tests added**
+        - new `lib/tests/meta_schema_reference_graph.rs` — 6 Level-1 resolver tests: multi-hop chain (`doc → a → b → terminal`, asserting the resolved schema, all three hops in the dependency list, and origin attribution); self-cycle; two-file cycle; root-union arm cycling back into an open chain; document-level root-union arm entering a cycle; and a diamond (`shared.yaml` named by two arms) proving the guard tracks *open* frames rather than visited ones, so a legitimate repeat still resolves
+        - `dmls/src/overlay/mod.rs` — `schema_cache_invalidates_on_terminal_file_in_a_reference_chain`, sibling of the existing single-hop test. It edits **only** the terminal `b.yaml` in a `doc.md → a.yaml → b.yaml` chain and asserts the bundle is reassembled (`!Arc::ptr_eq`) and that `enum(a, b)` → `enum(x, y)` actually re-fails validation
+- **load-bearing evidence — measured, not reasoned**
+        - *cycle guard*: stashed out **only** the `frames.contains` check while leaving the depth cap in place (so the test process could not die), rebuilt, reran. `two_file_cycle_*` and `root_union_arm_cycling_*` both failed with `chain exceeded 32 levels` — resolution genuinely recursed 32 frames deep with no terminating condition; with no guard at all that recursion is unbounded, so stack overflow is the real pre-fix outcome. The self-cycle test still passed under the partial revert (its assertion only requires `a.yaml` in the message, which the depth error also carries), so the two-file and union tests are the discriminating ones
+        - *dependency accumulation*: reverted `accumulate_referenced_file` to the `vec![canonical]` overwrite. `multi_hop_chain_resolves_and_records_every_hop` failed reporting `["…/a.yaml"]` against expected `[a, b, terminal]`, and the diamond test reported `["…/union.yaml"]` against `[shared, union]` — the exact data loss the review described
+- **gates** — `just test` exit **0**: darkmatter **5926/5926** (+6), darkmatter-cli **561/561**, dmls **614/614** (+1); `just lint` exit **0**
+        - one nextest flake: `markdown::reference::file_tree::model::tests::inline_summary_singular` LKFAIL on try 1, passed on retry — unrelated module, known spurious leak-timeout class
+- **orchestrator note** — the IDE surfaced 8 rustc diagnostics in `resolve.rs` (`cannot find function load_guarded`, arity mismatches) that contradicted the subagent's green report. `cargo check -p darkmatter --all-targets` finished clean, so those were stale mid-edit language-server snapshots, not real breakage — the same false signal seen in iteration 3
+- work completed for 'finding-2-reference-graph-cycle-and-dependencies' at 00:12:05
+
+### Finding 3 — The canonical Level-2 gate remains red and its exception is not approved
+
+- starting the work on 'finding-3-canonical-l2-gate-and-ac13-exception' at 00:12:20
+- this finding was handled by the orchestrator directly rather than a subagent, because its actionable core is a **ratification decision reserved to Ken**, not an implementable code defect
+- reproduced the canonical gate on this host **after** findings 1 and 2 had both landed, to confirm no new L2 breakage was introduced:
+        - `just test-l2` (fail-fast) → exit **100**: library **18/18** passed, then the CLI tier aborted after 2 passes on `level2_code_block_clears_inherited_dim_before_theme_colors`, leaving 66 CLI tests and the whole DMLS tier unrun — byte-for-byte the behavior review 4 describes
+        - `just test-l2 --no-fail-fast` → exit **100**: library **18/18**, CLI **66/69**. The 3 failures are **exactly** the three tests named in the spec's proposed exception and no others
+        - DMLS L2 run separately → **3/3** passed
+- confirmed the failure mechanism matches the spec's stated root cause rather than anything this cycle changed:
+        - the assertion fails with `got luma 44` — a **dark** panel where a light (inverted) one is required. That means the terminal was detected as *light* despite the test staging `COLORFGBG='15;0'`, which is precisely the WezTerm live-OSC-11-wins path the spec documents. A theme-resolution regression would show as a wrong *color*, not as the staged terminal polarity being ignored outright
+- **drift detected in the spec's own exception evidence, and corrected**
+        - the spec claimed `git diff main...HEAD` reports **zero** changes under both `darkmatter/lib/src/markdown/render/` **and** `darkmatter/lib/src/markdown/highlighting/`. The first half still holds; the second is now false — the unrelated perf commit `864521fae` ("borrow syntax themes and write escapes directly") touches `highlighting/{mod,prose,themes}.rs` on this branch
+        - per CLAUDE.md the code is authoritative and the document is wrong, so the paragraph in `spec.md` was corrected to state the accurate diff facts, name the responsible commit, and explain why it is still not the cause (the luma-44 polarity evidence above)
+        - re-verified and left standing: `render/` is genuinely zero, and `darkmatter/cli/tests/level2_code_block_styling.rs` is genuinely byte-identical to `main`
+        - the exception's **PROPOSED / awaiting-ratification status was deliberately left unchanged** — correcting a factual evidence sentence is not the same as approving the exception, and this session cannot ratify on Ken's behalf
+- **DEFERRED.** The finding cannot be closed in this cycle. Its two possible closures are both unavailable here:
+        - *ratify the exception* — reserved to Ken; this is a non-interactive session with no one to ask
+        - *restore the gate by repairing the three tests* — requires porting `run_md_env` / `run_md_after_shell_prefix` in `darkmatter/cli/tests/common/level2.rs` from the WezTerm harness to tmux. That helper backs the entire 69-test CLI L2 corpus, so the change would put the whole tier at risk to fix a pre-existing defect this feature did not introduce. It is already filed as `darkmatter/features/_unscheduled/wezterm-sgr-race-test-fixes/spec.md`, which names this exact test family. Doing it here would violate CLAUDE.md Rule 3 (surgical changes)
+- no performance measurement was required by any finding in this review, so `deferred_perf_measurement` remains `false`
+- work completed for 'finding-3-canonical-l2-gate-and-ac13-exception' at 00:14:03
+
+### Final Verification
+
+- the orchestrator re-ran both L1 gates independently from the `darkmatter` package area **after both code findings had landed together**, to confirm the composed result rather than trusting per-finding reports:
+        - `just lint` → exit **0**; zero warnings and zero errors across `darkmatter`, `darkmatter-cli`, and `dmls`
+        - `just test` → exit **0**; darkmatter **5926 passed / 140 skipped**, darkmatter-cli **561 passed / 71 skipped**, dmls **614 passed / 3 skipped**; zero failures on this run
+- net test growth across the cycle: darkmatter 5920 → 5926 (+6, the new resolver reference-graph file), dmls 611 → 614 (+3: 2 completion regressions + 1 chain cache-invalidation test), darkmatter-cli unchanged at 561
+- L2 was reproduced but is **not** green — see finding 3 above for the full accounting
+- as in iteration 3, the IDE surfaced rustc diagnostics that contradicted a subagent's green report (this time 8 errors in `resolve.rs`). `cargo check -p darkmatter --all-targets` finished clean, confirming them as stale mid-edit language-server snapshots. Worth remembering: the language server's view of a file a subagent has just rewritten is not trustworthy evidence either way — verify with a real compile
+
+### Successful Completion
+
+The implementation of review cycle 4 has completed successfully in 46 minutes. During this implementation all 3 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 1 was deferred (see reasons below):
+
+- **Medium — "The canonical Level-2 gate remains red and its exception is not approved."** Deferred because neither available closure is reachable from this session. Closing it by *ratifying* the AC13 scope exception is a decision reserved to Ken, and this is a non-interactive session with no one to ask. Closing it by *repairing* the three failing tests would require porting the shared `run_md_env` / `run_md_after_shell_prefix` helpers in `darkmatter/cli/tests/common/level2.rs` off the WezTerm harness and onto tmux — a helper that backs the whole 69-test CLI L2 corpus — in order to fix a pre-existing, already-filed defect that this feature did not introduce and whose failure mechanism is demonstrably unrelated to meta-schema code. That is a Rule 3 violation and belongs to `darkmatter/features/_unscheduled/wezterm-sgr-race-test-fixes/spec.md`. What *was* done for this finding: the gate was reproduced post-change to prove no new L2 breakage (the 3 failures are exactly the 3 named tests and no others), the failure mechanism was confirmed against the spec's stated root cause, and a factual drift in the spec's own exception evidence was corrected.
+
+No finding required a performance measurement, so `deferred_perf_measurement` remains `false`.
+
+The files changed during this cycle are:
+
+- `darkmatter/lib/src/markdown/schemas/resolve.rs` — `ReferenceStack` cycle/depth guard, `load_guarded`, `accumulate_referenced_file` transitive dependency accumulation, `attribute_origin`
+- `darkmatter/lib/src/markdown/schemas/errors.rs` — new `SchemaError::ReferenceCycle { chain }` variant and its `status_block` arm
+- `darkmatter/dmls/src/providers/frontmatter.rs` — complete structural key-path matching against encoded RFC 6901 pointers, via the existing `JsonPointer::parse` authority
+- `darkmatter/dmls/src/overlay/frontmatter.rs` — `container_at_offset` accepts sequence-valued containers under a load-bearing `key_span.end <= line_start` guard
+- `darkmatter/dmls/src/overlay/mod.rs` — `schema_cache_invalidates_on_terminal_file_in_a_reference_chain`
+- `darkmatter/lib/tests/meta_schema_reference_graph.rs` — **new**; 6 Level-1 resolver tests (multi-hop chain, self-cycle, two-file cycle, two root-union cycle shapes, diamond)
+- `darkmatter/dmls/tests/lsp_session.rs` — nested/escaped/array completion regressions across LF and CRLF, plus malformed-buffer last-good retention
+- `darkmatter/features/2026-07-13-meta-schema/spec.md` — corrected the stale `highlighting/` claim in the proposed AC13 exception evidence

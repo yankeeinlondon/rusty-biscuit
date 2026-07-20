@@ -1,7 +1,7 @@
 ---
 status: ready for planning and implementation
 reviewed: true
-review_iterations: 3
+review_iterations: 4
 reviewed_by: codex/default
 reviewed_on: 2026-07-14
 rulings: "`type-definition` and `schema` semantic types ruled by Ken 2026-07-13"
@@ -769,9 +769,18 @@ unchanged and is not weakened for any other test, tier, or crate.
 **Why they are outside meta-schema execution paths.** This feature changes
 schema parsing, lowering, validation, and DMLS semantic paths. It changes no
 rendering code: `git diff main...HEAD` reports zero changes under
-`darkmatter/lib/src/markdown/render/` and `darkmatter/lib/src/markdown/highlighting/`,
-and `darkmatter/cli/tests/level2_code_block_styling.rs` is byte-identical to
+`darkmatter/lib/src/markdown/render/`, and
+`darkmatter/cli/tests/level2_code_block_styling.rs` is byte-identical to
 `main`. The three failures reproduce on `main` and are pre-existing.
+
+Corrected 2026-07-20 (review-4 implementation): this paragraph previously also
+claimed zero changes under `darkmatter/lib/src/markdown/highlighting/`. That is
+no longer accurate — the unrelated perf commit `864521fae` ("borrow syntax
+themes and write escapes directly") touches `highlighting/{mod,prose,themes}.rs`
+on this branch. It is not a meta-schema change and it is not the cause: the
+observed failure is a *dark* panel (luma 44) where a light one is required,
+i.e. the terminal was detected light despite `COLORFGBG='15;0'`. That is the
+staging mechanism described below, not a theme-resolution regression.
 
 **Why they are a test-staging defect, not a product defect.** All three assert
 the same contract — a dark terminal must render a light (inverted) code panel —
