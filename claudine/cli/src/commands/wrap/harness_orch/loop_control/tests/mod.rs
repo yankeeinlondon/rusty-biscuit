@@ -274,6 +274,7 @@ mod coordinator_adoption;
 mod lifecycle_ordering;
 mod overlay_layering;
 mod proxy;
+mod recovery_identity;
 mod requeue;
 mod retry_resume;
 mod shell_approval;

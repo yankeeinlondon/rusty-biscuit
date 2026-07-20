@@ -457,6 +457,22 @@ fn run_provider_with_flags(
     extra_flags: &str,
     done_marker: &str,
 ) -> String {
+    run_provider_with_ambient_env(staged, provider_flag, extra_flags, done_marker, &[])
+}
+
+/// [`run_provider_with_flags`] with extra variables exported into the wrapper's
+/// **own** process environment, ahead of any provider allow-list.
+///
+/// Credential rows need this: what a rebuilt provider is entitled to is decided
+/// against the ambient environment Claudine was launched in, not against
+/// anything the document can express.
+fn run_provider_with_ambient_env(
+    staged: &Staged,
+    provider_flag: &str,
+    extra_flags: &str,
+    done_marker: &str,
+    ambient: &[(&str, &str)],
+) -> String {
     static SEQ: AtomicU32 = AtomicU32::new(0);
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
 
@@ -477,11 +493,14 @@ fn run_provider_with_flags(
 
     let claudine = env!("CARGO_BIN_EXE_claudine");
     let sentinel = format!("L2_CTL_DONE_{seq}");
-    let env_prefix = format!(
+    let mut env_prefix = format!(
         "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
         home = staged.workspace.path().display(),
         path = augmented_path(&staged.bin_dir).to_string_lossy(),
     );
+    for (key, value) in ambient {
+        env_prefix.push_str(&format!("{key}='{value}' "));
+    }
     let cmd = format!(
         "cd {ws} && {env_prefix}{claudine} compose {provider_flag} {extra_flags} {md} ; echo {sentinel}",
         ws = staged.workspace.path().display(),
@@ -989,6 +1008,75 @@ fn switched_attempts(staged: &Staged, pane: &str, from: &str, to: &str) -> Vec<R
     attempts
 }
 
+/// A fake Gemini that echoes the *content* of the system-prompt file it was
+/// handed.
+///
+/// Gemini's delivery puts a path in `GEMINI_SYSTEM_MD` and nothing else, so
+/// reading that path back out is the only way to observe from outside the
+/// process that the file was still on disk when the child started. A recorder
+/// that logged the variable alone would pass against a dangling path.
+fn write_gemini_system_prompt_reader(bin_dir: &Path, events_log: &Path) {
+    write_executable(
+        &bin_dir.join("gemini"),
+        &format!(
+            "#!/bin/sh\ncase \"$1\" in --version|-V|-v|version|models) exit 0;; esac\n\
+             if [ ! -t 0 ]; then cat > /dev/null 2>&1; fi\n\
+             printf 'launched-binary=%s\\n' \"$(basename \"$0\")\" >> {log}\n\
+             printf 'sysprompt-path=%s\\n' \"${{GEMINI_SYSTEM_MD:-unset}}\" >> {log}\n\
+             if [ -f \"$GEMINI_SYSTEM_MD\" ]; then\n  \
+             printf 'sysprompt-read=%s\\n' \"$(tr '\\n' ' ' < \"$GEMINI_SYSTEM_MD\")\" >> {log}\n\
+             fi\n\
+             printf 'provider-ran\\n' >> {log}\nexit 0\n",
+            log = events_log.display(),
+        ),
+    );
+}
+
+/// **Review-10 finding 4 — a provider-switch retry's system-prompt file is
+/// still on disk when the child starts.**
+///
+/// Delivery is provider-shaped, so a retry that lands on a different provider
+/// re-applies it — and Gemini's mechanism hands the child a *path* in
+/// `GEMINI_SYSTEM_MD`, never the content. The `LaunchPlan` that wrote that temp
+/// file is consumed at the rebuild seam, so until the rebuilt bundle took
+/// ownership of its artifacts the `NamedTempFile` dropped there and unlinked the
+/// file before anything was spawned. The switched attempt then pointed Gemini at
+/// a path that no longer existed, silently losing the system prompt.
+///
+/// The fake Gemini echoes what it can read at that path, so the sentinel
+/// reaches the log only if the bytes survived to spawn.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_retry_delivers_a_readable_system_prompt_file_after_a_switch() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    const SENTINEL: &str = "SYSPROMPT-SURVIVED-THE-SWITCH";
+
+    let staged = stage_launch_recording(&provider_switch_retry_doc("goose", "gemini", ""));
+    write_full_launch_recorder(&staged.bin_dir, "goose", &staged.events_log, 1);
+    write_gemini_system_prompt_reader(&staged.bin_dir, &staged.events_log);
+
+    let sysprompt = staged.workspace.path().join("sysprompt.txt");
+    fs::write(&sysprompt, format!("{SENTINEL}\n")).unwrap();
+    let extra = format!("--append-system-prompt '{}'", sysprompt.display());
+
+    let pane = run_provider_with_flags(&staged, "", &extra, "finalize");
+    let lines = event_lines(&staged);
+
+    assert!(
+        lines.iter().any(|l| l == "launched-binary=gemini"),
+        "fixture check: the retry must reach the refreshed provider; log:\n\
+         {lines:#?}\npane:\n{pane}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("sysprompt-read=") && l.contains(SENTINEL)),
+        "the switched attempt must be able to read the file GEMINI_SYSTEM_MD \
+         names; log:\n{lines:#?}\npane:\n{pane}"
+    );
+}
+
 /// **Review-9 finding 2 — `--output` and `--sandbox` are intent, not bytes.**
 ///
 /// Goose encodes `--output json` as no argv at all and implements no sandbox;
@@ -1163,6 +1251,88 @@ fn level2_lifecycle_retry_clears_the_opening_providers_environment() {
     );
 }
 
+/// A non-secret stand-in. Only the *key* reaches an allow-list, so the value
+/// never needs to be a real credential — and must not be.
+const FIXTURE_OPENAI_KEY: &str = "fixture-openai-not-a-real-key";
+
+/// **Review-10 finding 1 — credential admission follows the provider that runs.**
+///
+/// Goose's `allowed_env_keys` is empty and Codex's names `OPENAI_API_KEY`, so
+/// the opening Goose sanitizer strips the ambient key and the Codex retry must
+/// get it back. Before the fix the retry inherited Goose's sanitized base and
+/// launched Codex without a credential it is entitled to.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_retry_readmits_credentials_the_refreshed_provider_admits() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let staged = stage_provider_switch(
+        &provider_switch_retry_doc("goose", "codex", ""),
+        "goose",
+        "codex",
+    );
+
+    let pane = run_provider_with_ambient_env(
+        &staged,
+        "",
+        "",
+        "finalize",
+        &[("OPENAI_API_KEY", FIXTURE_OPENAI_KEY)],
+    );
+    let attempts = switched_attempts(&staged, &pane, "goose", "codex");
+
+    assert_eq!(
+        attempts[0].env_value("OPENAI_API_KEY"),
+        None,
+        "fixture check: Goose admits no credential keys, so the opening attempt \
+         must not see the ambient one; pane:\n{pane}"
+    );
+    assert_eq!(
+        attempts[1].env_value("OPENAI_API_KEY"),
+        Some(FIXTURE_OPENAI_KEY),
+        "Codex admits OPENAI_API_KEY, so the switched attempt must receive the \
+         ambient value the opening sanitizer removed; pane:\n{pane}"
+    );
+}
+
+/// **Review-10 finding 1, leak direction.** The reverse switch must *remove* an
+/// ambient credential the opening provider admitted, because the target's
+/// allow-list does not name it. Before the fix the secret rode the invocation
+/// base straight into a provider that should never receive it.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_retry_strips_credentials_the_refreshed_provider_rejects() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let staged = stage_provider_switch(
+        &provider_switch_retry_doc("codex", "goose", ""),
+        "codex",
+        "goose",
+    );
+
+    let pane = run_provider_with_ambient_env(
+        &staged,
+        "",
+        "",
+        "finalize",
+        &[("OPENAI_API_KEY", FIXTURE_OPENAI_KEY)],
+    );
+    let attempts = switched_attempts(&staged, &pane, "codex", "goose");
+
+    assert_eq!(
+        attempts[0].env_value("OPENAI_API_KEY"),
+        Some(FIXTURE_OPENAI_KEY),
+        "fixture check: Codex admits OPENAI_API_KEY, so the opening attempt \
+         carries it; pane:\n{pane}"
+    );
+    assert_eq!(
+        attempts[1].env_value("OPENAI_API_KEY"),
+        None,
+        "Goose admits no credential keys, so the switched attempt must not \
+         inherit Codex's admission; pane:\n{pane}"
+    );
+}
+
 /// **Review-8 finding 2 — MCP runtime injection.** A document whose `failure`
 /// stack adds an MCP `#tag` to its own body and then retries has the retried
 /// attempt's MCP configuration rebuilt from the refreshed tag set.
@@ -1284,6 +1454,118 @@ Body
         "OpenCode's bypass is non-interactive only, so the refreshed interactive \
          attempt must launch with the permission mode it actually achieved; \
          got {yolo:?}; pane:\n{pane}"
+    );
+}
+
+/// A document that flips its own `interactive:` in the `failure` stack and
+/// retries once, with the provider held still so the session mode is the only
+/// facet that moves. `opening` is spliced into the frontmatter when the row
+/// needs an interactive opening attempt.
+fn interactivity_retry_doc(opening: &str, refreshed: bool) -> String {
+    format!(
+        "---\ntitle: retry flips session mode\nagent: goose\n{opening}\
+         failure:\n  stack:\n    - action:\n        \
+         - {{set_frontmatter: [\"doc.md\", \"interactive\", {refreshed}]}}\n    \
+         - action: {{retry: 1}}\nfinalize:\n  stack:\n    \
+         - action: {{append_line: [\"events.log\", \"finalize\"]}}\n---\nBody\n"
+    )
+}
+
+/// Both interactivity markers as the two recorded child processes actually
+/// received them.
+///
+/// Asserted together because they are two projections of one session mode: a
+/// row that read only `INTERACTIVE` would pass with a stale hook gate, which is
+/// the half of the defect nothing else in the suite observes.
+fn assert_interactivity_markers(
+    attempts: &[RecordedAttempt],
+    opening: (&str, &str),
+    refreshed: (&str, &str),
+    pane: &str,
+) {
+    assert_eq!(
+        attempts.len(),
+        2,
+        "the row needs an opening attempt and one retry; pane:\n{pane}"
+    );
+    let markers = |attempt: &RecordedAttempt| {
+        (
+            attempt.env_value("INTERACTIVE").map(str::to_string),
+            attempt.env_value("CLAUDINE_INTERACTIVE").map(str::to_string),
+        )
+    };
+    assert_eq!(
+        markers(&attempts[0]),
+        (Some(opening.0.to_string()), Some(opening.1.to_string())),
+        "fixture check: the opening attempt must carry its own mode's markers; \
+         pane:\n{pane}"
+    );
+    assert_eq!(
+        markers(&attempts[1]),
+        (Some(refreshed.0.to_string()), Some(refreshed.1.to_string())),
+        "the retried attempt must carry the refreshed mode's markers, not the \
+         opening invocation's; pane:\n{pane}"
+    );
+}
+
+/// Stage a recorder for `slug` that fails its first launch and succeeds on the
+/// second, so a facet other than the provider can be moved across the retry.
+fn stage_fail_once_recorder(staged: &Staged, slug: &str) {
+    write_full_launch_recorder_with_exit(
+        &staged.bin_dir,
+        slug,
+        &staged.events_log,
+        &format!(
+            "if [ -f {log}.second ]; then exit 0; fi\n: > {log}.second\nexit 1",
+            log = staged.events_log.display(),
+        ),
+    );
+}
+
+/// **Review-10 finding 2 — the interactivity markers follow the refreshed mode
+/// into the child process.**
+///
+/// Wrapped providers and downstream processes read `INTERACTIVE`, and
+/// `CLAUDINE_INTERACTIVE` gates hook behavior. Both were stamped once from the
+/// opening session mode and no other part of the per-attempt patch covers them,
+/// so a retry that flipped `interactive:` shipped refreshed argv and streaming
+/// behavior beside the opening mode's markers.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_retry_refreshes_interactivity_markers_into_interactive() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let staged = stage_launch_recording(&interactivity_retry_doc("", true));
+    stage_fail_once_recorder(&staged, "goose");
+
+    let pane = run_provider_with_flags(&staged, "", "", "finalize");
+
+    assert_interactivity_markers(
+        &recorded_attempts(&staged),
+        ("false", "0"),
+        ("true", "1"),
+        &pane,
+    );
+}
+
+/// **Review-10 finding 2, the reverse direction.** An invocation that opened
+/// interactive and refreshed to non-interactive must not hand the retried child
+/// an `INTERACTIVE=true` it can act on, nor leave the hook gate open.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_retry_refreshes_interactivity_markers_into_non_interactive() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let staged = stage_launch_recording(&interactivity_retry_doc("interactive: true\n", false));
+    stage_fail_once_recorder(&staged, "goose");
+
+    let pane = run_provider_with_flags(&staged, "", "", "finalize");
+
+    assert_interactivity_markers(
+        &recorded_attempts(&staged),
+        ("true", "1"),
+        ("false", "0"),
+        &pane,
     );
 }
 
@@ -1553,6 +1835,167 @@ Body
         pane.contains(CODEX_NOISE_LINE),
         "the rebuilt Goose attempt has no stderr noise prefixes, so the line \
          Codex's policy would filter must reach the pane; pane:\n{pane}"
+    );
+}
+
+/// A document that opens on `{from}`, switches to `{to}` in its `failure` stack
+/// and retries, then chains a `resume` out of the *switched* attempt's
+/// `success` stack.
+///
+/// The resume budget is 1, so the resumed attempt's own `success` falls through
+/// to `finalize` and the run terminates in exactly three provider invocations.
+fn switch_then_resume_doc(from: &str, to: &str, follow_up: &str) -> String {
+    format!(
+        "---\ntitle: switch then resume\nagent: {from}\n\
+         failure:\n  stack:\n    - action: \
+         {{set_frontmatter: [\"doc.md\", \"agent\", \"{to}\"]}}\n    \
+         - action: {{retry: 1}}\n\
+         success:\n  stack:\n    - action: {{resume: \"{follow_up}\"}}\n\
+         finalize:\n  stack:\n    \
+         - action: {{append_line: [\"events.log\", \"finalize\"]}}\n---\nBody\n"
+    )
+}
+
+/// **Review-10 finding 3 — a control action chained out of a switched attempt.**
+///
+/// Goose opens and fails; the `failure` stack rewrites `agent: codex` and
+/// retries; Codex succeeds and reports a session id; the switched attempt's own
+/// `success` stack then resumes it. The resumed invocation must carry *Codex's*
+/// resume encoding (`codex exec resume <id>`), never Goose's
+/// (`goose run --resume --session-id <id>`).
+///
+/// This closes the chain the review found untested: every prior provider-switch
+/// row ended at the switched attempt. It does not by itself discriminate the
+/// stale-identity defect, because the resume argv is rebuilt from the refreshed
+/// document rather than from the value classification forwards, and because all
+/// ten shipped providers report `supports_resume() == true` — see
+/// `composition_seams::classification_reads_no_invocation_fixed_launch_identity`
+/// for the guard that does.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_switch_into_codex_resumes_under_codexs_encoding() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let follow_up = "finish the switched work";
+    let session_id = "switch-into-codex-session";
+    let staged = stage_launch_recording(&switch_then_resume_doc("goose", "codex", follow_up));
+    write_launch_recorder(&staged.bin_dir, "goose", &staged.events_log, 1);
+    write_session_reporting_codex(&staged.bin_dir, &staged.events_log, session_id);
+
+    let pane = run_compose_await_exit_with_args(&staged, "");
+    let lines = event_lines(&staged);
+
+    assert_eq!(
+        launched_binaries(&staged),
+        vec![
+            "goose".to_string(),
+            "codex".to_string(),
+            "codex".to_string()
+        ],
+        "the switched attempt must succeed and its `success` stack must resume it; \
+         events {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        lines.iter().any(|l| l == "resume-session-ok"),
+        "the resumed invocation must carry Codex's own `resume <id>` argv, not the \
+         opening Goose profile's `--resume --session-id`; got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        lines.iter().any(|l| l == "follow-up-ok"),
+        "the resumed invocation must receive the `success`-stack follow-up prompt; \
+         got {lines:?}; pane:\n{pane}"
+    );
+}
+
+/// **Review-10 finding 3, the reverse direction.** Codex opens, reports a
+/// session id on its own wire, and fails; the switch lands on Goose, which
+/// succeeds. Goose runs no structured stream and so reports no session at all.
+///
+/// The chained `resume` must therefore be refused as session-less. The opening
+/// Codex session must not stand in for it: a resume admitted on the strength of
+/// a session the switched-to provider never opened would hand Goose a session id
+/// from a different provider's store.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_switch_out_of_codex_refuses_a_session_less_resume() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let follow_up = "finish the switched work";
+    let session_id = "switch-out-of-codex-session";
+    let staged = stage_launch_recording(&switch_then_resume_doc("codex", "goose", follow_up));
+    write_failing_session_reporting_codex(&staged.bin_dir, &staged.events_log, session_id);
+    write_launch_recorder(&staged.bin_dir, "goose", &staged.events_log, 0);
+
+    let pane = run_compose_await_exit_with_args(&staged, "");
+    let lines = event_lines(&staged);
+
+    assert_eq!(
+        launched_binaries(&staged),
+        vec!["codex".to_string(), "goose".to_string()],
+        "the run must stop at the switched Goose attempt — no third invocation; \
+         events {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        pane.contains("resume") && pane.contains("session"),
+        "the chained resume must be refused as session-less rather than reusing the \
+         opening Codex session; events {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.contains(session_id)),
+        "the opening provider's session id must not reach the switched attempt's \
+         recovery; got {lines:?}; pane:\n{pane}"
+    );
+}
+
+/// A `codex` that reports a session id on Codex's wire and then fails, so the
+/// `failure` stack runs with a live session on the record.
+fn write_failing_session_reporting_codex(
+    bin_dir: &Path,
+    events_log: &Path,
+    session_id: &str,
+) {
+    write_executable(
+        &bin_dir.join("codex"),
+        &format!(
+            r#"#!/bin/sh
+case "$1" in --version|-V|-v|version|models) exit 0;; esac
+cat > /dev/null
+printf 'launched-binary=codex\n' >> {log}
+printf '%s\n' '{{"type":"thread.started","thread_id":"{session_id}"}}'
+exit 1
+"#,
+            log = events_log.display(),
+            session_id = session_id,
+        ),
+    );
+}
+
+/// A `codex` that always succeeds, reports `session_id` on Codex's wire, and
+/// records whether it was reached through Codex's resume argv.
+///
+/// Unlike [`write_resumable_codex`], the first invocation succeeds: these rows
+/// chain the resume out of `success`, not out of `failure`.
+fn write_session_reporting_codex(bin_dir: &Path, events_log: &Path, session_id: &str) {
+    write_executable(
+        &bin_dir.join("codex"),
+        &format!(
+            r#"#!/bin/sh
+case "$1" in --version|-V|-v|version|models) exit 0;; esac
+prompt=$(cat)
+printf 'launched-binary=codex\n' >> {log}
+case " $* " in
+  *" resume {session_id} "*) printf 'resume-session-ok\n' >> {log} ;;
+esac
+case "$prompt" in
+  *"finish the switched work"*) printf 'follow-up-ok\n' >> {log} ;;
+esac
+printf '%s\n' '{{"type":"thread.started","thread_id":"{session_id}"}}'
+printf '%s\n' '{{"type":"item.completed","item":{{"type":"agent_message","text":"ok"}}}}'
+exit 0
+"#,
+            log = events_log.display(),
+            session_id = session_id,
+        ),
     );
 }
 

@@ -338,6 +338,77 @@ fn no_ad_hoc_printing_on_a_transition_path() {
     );
 }
 
+/// The launch-identity fields terminal classification must never re-read from
+/// the invocation, expressed as the exact field accesses that would do it.
+///
+/// R8 fixes these on the invocation and never moves them; the per-attempt
+/// bundle moves. A classification that reads either one negotiates recovery
+/// under the opening provider while the live session belongs to whichever
+/// provider the attempt actually spawned (review-10 finding 3).
+const INVOCATION_LAUNCH_IDENTITY_ACCESSES: &[&str] =
+    &["state.run.provider", "state.run.profile"];
+
+/// `classify_attempt_phase` decides recovery for the attempt that just ran, so
+/// its provider and profile must come from that attempt's own bundle.
+///
+/// A source guard rather than a behavioral one because the wiring has no
+/// runtime seam of its own: both values are plain arguments forwarded to
+/// `drive_terminal_recovery`, and every real provider currently reports
+/// `supports_resume() == true`, so the capability half of the defect is latent
+/// rather than reachable. The `dispatch_terminal_control` rows in
+/// `harness_orch::loop_control::tests::recovery_identity` cover what the
+/// forwarded profile then decides.
+#[test]
+fn classification_reads_no_invocation_fixed_launch_identity() {
+    const FILE: &str = "cli/src/commands/wrap/harness_orch/loop_control.rs";
+    let src = fs::read_to_string(area_root().join(FILE)).expect("read loop_control.rs");
+    let sanitized = sanitize(&src);
+
+    let mut offenders: Vec<String> = Vec::new();
+    for access in INVOCATION_LAUNCH_IDENTITY_ACCESSES {
+        for offset in find_all(&sanitized, access.as_bytes()) {
+            let item = enclosing_item(&sanitized, offset)
+                .unwrap_or_else(|| "<file scope>".to_string());
+            if item == "classify_attempt_phase" {
+                offenders.push(format!(
+                    "`{access}` at {FILE}:{}",
+                    line_of(&sanitized, offset)
+                ));
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "`classify_attempt_phase` reads invocation-fixed launch identity:\n  {}\n\n\
+         Terminal recovery negotiates over the session the executed attempt opened, so \
+         its provider and profile must be destructured from `ExecutedHarnessAttempt` — \
+         which carries what the attempt actually launched under. Reading `state.run` \
+         re-introduces review-10 finding 3: after a Goose to Codex retry the recovery \
+         asks Goose's profile whether the Codex session may resume, and names Goose in \
+         the hand-off remediation command.",
+        offenders.join("\n  "),
+    );
+}
+
+/// The guard above is only meaningful if the accesses it bans still exist
+/// somewhere in the file — otherwise a rename silently retires it.
+#[test]
+fn the_invocation_launch_identity_guard_still_has_something_to_ban() {
+    const FILE: &str = "cli/src/commands/wrap/harness_orch/loop_control.rs";
+    let src = fs::read_to_string(area_root().join(FILE)).expect("read loop_control.rs");
+    let sanitized = sanitize(&src);
+
+    for access in INVOCATION_LAUNCH_IDENTITY_ACCESSES {
+        assert!(
+            !find_all(&sanitized, access.as_bytes()).is_empty(),
+            "`{access}` no longer appears in {FILE}; the field was renamed or removed, so \
+             `INVOCATION_LAUNCH_IDENTITY_ACCESSES` guards nothing. Update it to the new \
+             spelling.",
+        );
+    }
+}
+
 /// Scan an explicit file list rather than the whole tree.
 ///
 /// [`scan_all`]'s finders ban a construct everywhere; this one bans a construct

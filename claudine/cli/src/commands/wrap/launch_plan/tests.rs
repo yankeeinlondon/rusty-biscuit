@@ -32,6 +32,7 @@ fn inputs_for(provider: Provider) -> LaunchPlanInputs {
         opencode_config_base: None,
         codex_last_message_path: PathBuf::from("/tmp/claudine-test-last.txt"),
         provider_env_baseline: HashMap::new(),
+        credential_policy: CredentialPolicyInputs::default(),
         invocation: RecordedLaunch {
             facets: facets.clone(),
             args: Vec::new(),
@@ -333,6 +334,132 @@ fn a_baseline_restore_never_overwrites_a_key_the_rebuild_wrote() {
         yolo,
         vec![&EnvChange::Set("YOLO".into(), "false".into())],
         "the permission producer owns `YOLO`; the restore pass must leave it alone",
+    );
+}
+
+/// Non-secret stand-ins for the two credentials Codex admits and Goose does not.
+/// Real values never appear in a fixture; the allow-list only reads key names.
+const FIXTURE_OPENAI_KEY: &str = "fixture-openai-not-a-real-key";
+const FIXTURE_CODEX_KEY: &str = "fixture-codex-not-a-real-key";
+
+/// Ambient credentials as they stand before any provider allow-list runs.
+fn ambient_credentials() -> CredentialPolicyInputs {
+    CredentialPolicyInputs {
+        ambient: HashMap::from([
+            (
+                OsString::from("OPENAI_API_KEY"),
+                OsString::from(FIXTURE_OPENAI_KEY),
+            ),
+            (
+                OsString::from("CODEX_API_KEY"),
+                OsString::from(FIXTURE_CODEX_KEY),
+            ),
+        ]),
+        explicit_include: HashSet::new(),
+    }
+}
+
+/// Rebuild `inputs` onto `provider` and return the resulting environment patch.
+fn patch_after_switch(inputs: &LaunchPlanInputs, provider: Provider) -> Vec<EnvChange> {
+    let switched = DocumentLaunchFacets {
+        provider,
+        ..inputs.invocation.facets.clone()
+    };
+    build_launch_plan(inputs, &switched).unwrap().env_overlay
+}
+
+/// Review-10 finding 1, forward direction — a rebuilt provider gets the ambient
+/// credentials *its own* allow-list admits, even though the opening profile
+/// stripped them from the base child environment.
+///
+/// Goose admits no credential keys at all, so without the ambient snapshot a
+/// Goose → Codex retry launched Codex with no API key it was entitled to.
+#[test]
+fn a_provider_switch_readmits_credentials_the_opening_profile_stripped() {
+    let mut inputs = inputs_for(Provider::Goose);
+    inputs.credential_policy = ambient_credentials();
+
+    let patch = patch_after_switch(&inputs, Provider::Codex);
+
+    for (key, value) in [
+        ("OPENAI_API_KEY", FIXTURE_OPENAI_KEY),
+        ("CODEX_API_KEY", FIXTURE_CODEX_KEY),
+    ] {
+        assert!(
+            patch.contains(&EnvChange::Set(key.into(), value.into())),
+            "Codex admits `{key}`, so a switch onto it must restore the ambient \
+             value Goose's allow-list removed; got {patch:?}",
+        );
+    }
+}
+
+/// Review-10 finding 1, reverse direction — a rebuilt provider loses ambient
+/// credentials its own allow-list does not admit, even though the opening
+/// profile left them in the base child environment.
+///
+/// This is the leak direction: Codex → Goose used to hand Goose two API keys
+/// Goose is never entitled to see.
+#[test]
+fn a_provider_switch_strips_credentials_the_rebuilt_profile_does_not_admit() {
+    let mut inputs = inputs_for(Provider::Codex);
+    inputs.credential_policy = ambient_credentials();
+
+    let patch = patch_after_switch(&inputs, Provider::Goose);
+
+    for key in ["OPENAI_API_KEY", "CODEX_API_KEY"] {
+        assert!(
+            patch.contains(&EnvChange::Remove(key.into())),
+            "Goose admits no credential keys, so a switch onto it must remove \
+             `{key}` rather than inherit Codex's admission; got {patch:?}",
+        );
+    }
+}
+
+/// `--include` is explicit invocation intent, so it admits a key under every
+/// rebuilt provider — including one whose own allow-list names none.
+#[test]
+fn explicit_include_survives_a_provider_switch() {
+    let mut inputs = inputs_for(Provider::Codex);
+    inputs.credential_policy = CredentialPolicyInputs {
+        explicit_include: HashSet::from(["OPENAI_API_KEY".to_string()]),
+        ..ambient_credentials()
+    };
+
+    let patch = patch_after_switch(&inputs, Provider::Goose);
+
+    assert!(
+        patch.contains(&EnvChange::Set(
+            "OPENAI_API_KEY".into(),
+            FIXTURE_OPENAI_KEY.into(),
+        )),
+        "an explicitly included key is the caller's decision, not the rebuilt \
+         profile's; got {patch:?}",
+    );
+    assert!(
+        patch.contains(&EnvChange::Remove("CODEX_API_KEY".into())),
+        "only the included key is exempt; got {patch:?}",
+    );
+}
+
+/// A rebuild that holds the provider still leaves credential admission alone:
+/// the base child environment already carries this profile's own verdict, and
+/// restating it would be noise in the patch the R8 comparison reads.
+#[test]
+fn a_rebuild_that_keeps_the_provider_emits_no_credential_patch() {
+    let mut inputs = inputs_for(Provider::Codex);
+    inputs.credential_policy = ambient_credentials();
+
+    let moved_mode = DocumentLaunchFacets {
+        non_interactive: false,
+        ..inputs.invocation.facets.clone()
+    };
+    let patch = build_launch_plan(&inputs, &moved_mode).unwrap().env_overlay;
+
+    assert!(
+        !patch
+            .iter()
+            .any(|change| change.key() == OsStr::new("OPENAI_API_KEY")),
+        "same provider, same allow-list — nothing to restate; got {patch:?}",
     );
 }
 

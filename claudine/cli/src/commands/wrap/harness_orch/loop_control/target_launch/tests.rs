@@ -7,6 +7,21 @@ use claudine::composition::{EffectiveSelectionHints, ModelHint};
 /// the verbatim shortcut from a replay at a glance.
 const RECORDED_ARGV: &str = "recorded-invocation-argv";
 
+/// The model the OpenCode fixtures below launch with.
+///
+/// OpenCode is the only provider whose non-interactive launch *requires* a
+/// resolved model, and with none supplied the rebuild falls through to the
+/// host's `~/.config/opencode/config.json`. That made these tests pass on a
+/// developer machine that happens to configure OpenCode and fail with "No model
+/// specified" on one that does not (review-10 finding 5).
+///
+/// Delivered through `rebuild_launch_identity`'s `cli_model` seam rather than a
+/// `model:` frontmatter hint: an explicit CLI model resolves ahead of both the
+/// process environment and the model catalog, so this fixture depends on
+/// neither — and cannot rot when a real model name leaves the catalog. The
+/// value is deliberately not a real model; nothing here asserts on it.
+const FIXTURE_MODEL: &str = "fixture/opencode-model";
+
 /// The launch-plan inputs the fixture invocation recorded: Goose,
 /// non-interactive, no `--yolo`, no model, no body tags.
 ///
@@ -31,6 +46,7 @@ fn plan_inputs() -> launch_plan::LaunchPlanInputs {
         codex_last_message_path: PathBuf::from("/tmp/claudine-test-last-message.txt"),
         // The provider-shaped keys the fixture invocation wrote, none of which
         // existed beforehand — so a rebuild that stops writing one clears it.
+        credential_policy: launch_plan::CredentialPolicyInputs::default(),
         provider_env_baseline: HashMap::from([
             (std::ffi::OsString::from("MODEL"), None),
             (std::ffi::OsString::from("OPENCODE_CONFIG_CONTENT"), None),
@@ -304,6 +320,204 @@ fn a_provider_switch_clears_the_opening_providers_environment() {
     );
 }
 
+/// Non-secret stand-in for a credential Codex admits and Goose does not.
+const FIXTURE_OPENAI_KEY: &str = "fixture-openai-not-a-real-key";
+
+/// The fixture intent carrying an ambient credential the opening Goose profile
+/// would have stripped.
+fn intent_with_ambient_credential() -> LaunchRebuildIntent {
+    let mut intent = intent();
+    intent.launch_plan_inputs.credential_policy = launch_plan::CredentialPolicyInputs {
+        ambient: HashMap::from([(
+            std::ffi::OsString::from("OPENAI_API_KEY"),
+            std::ffi::OsString::from(FIXTURE_OPENAI_KEY),
+        )]),
+        explicit_include: std::collections::HashSet::new(),
+    };
+    intent
+}
+
+/// Review-10 finding 1 — a Goose → Codex switch reaches the child with the
+/// ambient credential Codex admits, which Goose's allow-list had removed from
+/// the base environment.
+#[test]
+fn a_provider_switch_readmits_a_credential_the_target_admits() {
+    let base = [("PATH", "/usr/bin")];
+    let rebuilt = rebuild_launch_identity(
+        &intent_with_ambient_credential(),
+        None,
+        None,
+        &with_hints(EffectiveSelectionHints {
+            agent: Some(AgentHint::Single(Provider::Codex)),
+            ..EffectiveSelectionHints::default()
+        }),
+        None,
+    )
+    .unwrap();
+
+    let env = effective_child_env(&base, &rebuilt);
+    assert_eq!(
+        env.get(std::ffi::OsStr::new("OPENAI_API_KEY"))
+            .map(|v| v.as_os_str()),
+        Some(std::ffi::OsStr::new(FIXTURE_OPENAI_KEY)),
+        "Codex admits OPENAI_API_KEY, so a switch onto it must recover the \
+         ambient value; got {env:?}",
+    );
+}
+
+/// Review-10 finding 1, leak direction — a Codex → Goose switch removes an
+/// ambient credential the base environment carries but Goose never admits.
+#[test]
+fn a_provider_switch_strips_a_credential_the_target_rejects() {
+    let base = [("OPENAI_API_KEY", FIXTURE_OPENAI_KEY), ("PATH", "/usr/bin")];
+    let mut intent = intent_with_ambient_credential();
+    intent.launch_plan_inputs.invocation.facets.provider = Provider::Codex;
+    let rebuilt = rebuild_launch_identity(
+        &intent,
+        None,
+        None,
+        &with_hints(EffectiveSelectionHints {
+            agent: Some(AgentHint::Single(Provider::Goose)),
+            ..EffectiveSelectionHints::default()
+        }),
+        None,
+    )
+    .unwrap();
+
+    let env = effective_child_env(&base, &rebuilt);
+    assert!(
+        !env.contains_key(std::ffi::OsStr::new("OPENAI_API_KEY")),
+        "Goose admits no credential keys, so Codex's ambient key must not reach \
+         it; got {env:?}",
+    );
+    assert_eq!(
+        env.get(std::ffi::OsStr::new("PATH")).map(|v| v.as_os_str()),
+        Some(std::ffi::OsStr::new("/usr/bin")),
+        "sanitation is scoped to sensitive keys; got {env:?}",
+    );
+}
+
+/// The composed system-prompt body the fixture invocation captured.
+const COMPOSED_SYSTEM_PROMPT: &str = "stay terse";
+
+/// The fixture intent carrying a resolved system prompt, plus the scoped temp
+/// directory a provider-move re-delivery writes its file into.
+///
+/// The returned [`tempfile::TempDir`] must outlive the rebuild: it is the
+/// directory, not the artifact, and dropping it early would remove the file for
+/// a reason unrelated to what the test measures.
+fn intent_with_system_prompt(
+    mode: claudine::system_prompt::SystemPromptMode,
+) -> (LaunchRebuildIntent, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let discovered = dir.path().join("system-prompt.md");
+    std::fs::write(&discovered, COMPOSED_SYSTEM_PROMPT).unwrap();
+
+    let mut intent = intent();
+    intent.launch_plan_inputs.system_prompt = Some(
+        claudine::system_prompt::ResolvedSystemPrompt::Ready(
+            claudine::system_prompt::PreparedSystemPrompt {
+                mode,
+                source: claudine::system_prompt::SystemPromptSource::StandardDiscovered {
+                    path: discovered,
+                    scope: claudine::system_prompt::StandardPromptScope::Repo,
+                },
+                raw_text: COMPOSED_SYSTEM_PROMPT.to_string(),
+                composed_markdown: COMPOSED_SYSTEM_PROMPT.to_string(),
+                non_interactive_appendix: None,
+            },
+        ),
+    );
+    intent.launch_plan_inputs.system_prompt_cwd = dir.path().to_path_buf();
+    intent.launch_plan_inputs.system_prompt_scoped_tmp = dir.path().to_path_buf();
+    (intent, dir)
+}
+
+/// Every filesystem path the rebuilt bundle hands the child: argv tokens and
+/// environment values alike, since file-backed delivery uses both.
+fn referenced_existing_files(rebuilt: &RebuiltLaunchIdentity) -> Vec<PathBuf> {
+    let from_args = rebuilt.args.iter().cloned();
+    let from_env = rebuilt.launch_env.iter().filter_map(|change| match change {
+        launch_plan::EnvChange::Set(_, value) => Some(value.to_string_lossy().into_owned()),
+        launch_plan::EnvChange::Remove(_) => None,
+    });
+    from_args
+        .chain(from_env)
+        // `-c model_instructions_file=/path` names its path after an `=`.
+        .map(|token| match token.split_once('=') {
+            Some((_, tail)) => tail.to_string(),
+            None => token,
+        })
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
+        .collect()
+}
+
+/// Review-10 finding 4 — a provider switch's system-prompt temp file survives
+/// the `LaunchPlan` that wrote it.
+///
+/// File-backed delivery puts a *path* in the argv (Codex's replacement config
+/// file) or in the child environment (Gemini's `GEMINI_SYSTEM_MD`), never the
+/// content. The plan that created the `NamedTempFile` is consumed inside
+/// `rebuild_launch_identity`, so unless the rebuilt bundle takes ownership the
+/// file is unlinked when the builder returns — before `build_harness_launch`
+/// spawns anything, and the provider then reads nothing.
+///
+/// The final assertion is the other half of the contract: the file is bound to
+/// the bundle's lifetime, so dropping the bundle (which the attempt does only
+/// after the child has exited) still cleans it up.
+#[test]
+fn a_provider_switch_keeps_its_system_prompt_file_alive_past_the_plan() {
+    for (provider, mode) in [
+        (
+            Provider::Gemini,
+            claudine::system_prompt::SystemPromptMode::Append,
+        ),
+        (
+            Provider::Codex,
+            claudine::system_prompt::SystemPromptMode::Replace,
+        ),
+    ] {
+        let (intent, _scoped_tmp) = intent_with_system_prompt(mode);
+        let rebuilt = rebuild_launch_identity(
+            &intent,
+            None,
+            None,
+            &with_hints(EffectiveSelectionHints {
+                agent: Some(AgentHint::Single(provider)),
+                ..EffectiveSelectionHints::default()
+            }),
+            None,
+        )
+        .unwrap();
+
+        let referenced = referenced_existing_files(&rebuilt);
+        let delivered: Vec<String> = referenced
+            .iter()
+            .filter_map(|path| std::fs::read_to_string(path).ok())
+            .collect();
+        // `contains`, not equality: Gemini's append delivery merges the host's
+        // own `~/.gemini/GEMINI.md` ahead of the composed body.
+        assert!(
+            delivered
+                .iter()
+                .any(|body| body.contains(COMPOSED_SYSTEM_PROMPT)),
+            "the {provider} launch must still be able to read its system-prompt \
+             file after the plan was consumed; argv {:?}, env {:?}",
+            rebuilt.args,
+            rebuilt.launch_env,
+        );
+
+        let paths = referenced;
+        drop(rebuilt);
+        assert!(
+            paths.iter().all(|path| !path.exists()),
+            "the artifacts are bound to the bundle, so dropping it must clean \
+             them up; {paths:?} survived",
+        );
+    }
+}
+
 /// The property the whole R8 comparison rests on: the rebuild is a pure
 /// function of (document, intent), so an unchanged document cannot produce a
 /// false refusal no matter how many attempts run.
@@ -413,10 +627,10 @@ fn frontmatter_interactive_moves_the_mode_and_structured_output() {
         fallback_provider: Provider::OpenCode,
         ..intent()
     };
-    let base = rebuild_launch_identity(&streaming, None, None, &with_hints(
+    let base = rebuild_launch_identity(&streaming, Some(FIXTURE_MODEL), None, &with_hints(
         EffectiveSelectionHints::default(),
     ), None).unwrap();
-    let interactive = rebuild_launch_identity(&streaming, None, None, &with_hints(
+    let interactive = rebuild_launch_identity(&streaming, Some(FIXTURE_MODEL), None, &with_hints(
         EffectiveSelectionHints {
             interactive: Some(true),
             ..EffectiveSelectionHints::default()
@@ -428,6 +642,118 @@ fn frontmatter_interactive_moves_the_mode_and_structured_output() {
     assert!(
         base.use_structured && !interactive.use_structured,
         "structured streaming is non-interactive only, so the mode flip must move it",
+    );
+}
+
+/// Review-10 finding 2 — the two interactivity markers follow the refreshed
+/// mode into the child, in both directions.
+///
+/// The invocation stamped them from the *opening* mode, and nothing else in the
+/// patch covers them, so an additive overlay left a retry that moved
+/// `interactive:` shipping refreshed argv beside the opening mode's
+/// `INTERACTIVE` (which wrapped providers read) and `CLAUDINE_INTERACTIVE`
+/// (which gates hook behavior). Asserted on the effective child environment,
+/// where that difference is observable.
+#[test]
+fn a_mode_refresh_moves_both_interactivity_markers_in_the_child_env() {
+    // The base the invocation stamped for its own non-interactive opening.
+    let opened_non_interactive = [
+        ("INTERACTIVE", "false"),
+        ("CLAUDINE_INTERACTIVE", "0"),
+        ("PATH", "/usr/bin"),
+    ];
+    let to_interactive = rebuild_launch_identity(
+        &intent(),
+        None,
+        None,
+        &with_hints(EffectiveSelectionHints {
+            interactive: Some(true),
+            ..EffectiveSelectionHints::default()
+        }),
+        None,
+    )
+    .unwrap();
+    let env = effective_child_env(&opened_non_interactive, &to_interactive);
+    assert_eq!(
+        env.get(std::ffi::OsStr::new("INTERACTIVE")).map(|v| v.as_os_str()),
+        Some(std::ffi::OsStr::new("true")),
+        "an interactive refresh must not ship the opening mode's INTERACTIVE; got {env:?}",
+    );
+    assert_eq!(
+        env.get(std::ffi::OsStr::new("CLAUDINE_INTERACTIVE")).map(|v| v.as_os_str()),
+        Some(std::ffi::OsStr::new("1")),
+        "the hook gate must move with the mode; got {env:?}",
+    );
+
+    // The reverse: an invocation that opened interactive, refreshed to
+    // non-interactive by frontmatter.
+    let opened_interactive = [
+        ("INTERACTIVE", "true"),
+        ("CLAUDINE_INTERACTIVE", "1"),
+        ("PATH", "/usr/bin"),
+    ];
+    let interactive_intent = LaunchRebuildIntent {
+        default_non_interactive: false,
+        launch_plan_inputs: launch_plan::LaunchPlanInputs {
+            invocation: launch_plan::RecordedLaunch {
+                facets: launch_plan::DocumentLaunchFacets {
+                    non_interactive: false,
+                    ..plan_inputs().invocation.facets
+                },
+                ..plan_inputs().invocation
+            },
+            ..plan_inputs()
+        },
+        ..intent()
+    };
+    let to_non_interactive = rebuild_launch_identity(
+        &interactive_intent,
+        None,
+        None,
+        &with_hints(EffectiveSelectionHints {
+            interactive: Some(false),
+            ..EffectiveSelectionHints::default()
+        }),
+        None,
+    )
+    .unwrap();
+    let env = effective_child_env(&opened_interactive, &to_non_interactive);
+    assert_eq!(
+        env.get(std::ffi::OsStr::new("INTERACTIVE")).map(|v| v.as_os_str()),
+        Some(std::ffi::OsStr::new("false")),
+        "a non-interactive refresh must not ship the opening mode's INTERACTIVE; got {env:?}",
+    );
+    assert_eq!(
+        env.get(std::ffi::OsStr::new("CLAUDINE_INTERACTIVE")).map(|v| v.as_os_str()),
+        Some(std::ffi::OsStr::new("0")),
+        "the hook gate must move with the mode; got {env:?}",
+    );
+}
+
+/// An unchanged document takes the verbatim shortcut, whose recorded overlay
+/// carries no interactivity keys at all. The markers are restated absolutely
+/// rather than only when the mode moved, so the bundle still agrees with the
+/// mode it launches under.
+#[test]
+fn an_unchanged_document_still_states_the_interactivity_markers() {
+    let rebuilt =
+        rebuild_launch_identity(&intent(), None, None, &with_hints(
+            EffectiveSelectionHints::default(),
+        ), None)
+        .unwrap();
+
+    // A base that disagrees with the resolved mode: only an absolute restatement
+    // corrects it.
+    let env = effective_child_env(&[("INTERACTIVE", "true"), ("CLAUDINE_INTERACTIVE", "1")], &rebuilt);
+    assert!(rebuilt.non_interactive);
+    assert_eq!(
+        env.get(std::ffi::OsStr::new("INTERACTIVE")).map(|v| v.as_os_str()),
+        Some(std::ffi::OsStr::new("false")),
+        "the markers must agree with the mode this bundle launches under; got {env:?}",
+    );
+    assert_eq!(
+        env.get(std::ffi::OsStr::new("CLAUDINE_INTERACTIVE")).map(|v| v.as_os_str()),
+        Some(std::ffi::OsStr::new("0")),
     );
 }
 
@@ -443,10 +769,10 @@ fn the_permission_mode_records_what_yolo_achieved_not_what_was_asked() {
         fallback_provider: Provider::OpenCode,
         ..intent()
     };
-    let non_interactive = rebuild_launch_identity(&requested, None, None, &with_hints(
+    let non_interactive = rebuild_launch_identity(&requested, Some(FIXTURE_MODEL), None, &with_hints(
         EffectiveSelectionHints::default(),
     ), None).unwrap();
-    let interactive = rebuild_launch_identity(&requested, None, None, &with_hints(
+    let interactive = rebuild_launch_identity(&requested, Some(FIXTURE_MODEL), None, &with_hints(
         EffectiveSelectionHints {
             interactive: Some(true),
             ..EffectiveSelectionHints::default()
