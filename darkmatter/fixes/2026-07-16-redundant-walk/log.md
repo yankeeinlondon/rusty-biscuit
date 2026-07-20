@@ -93,3 +93,15 @@ The files changed during this implementation:
 - `darkmatter/fixes/2026-07-16-redundant-walk/log.md` — this iteration's verification log (no source edits; the reviewed implementation in `snapshot.rs` / `types.rs` / `graph.rs` / `validate.rs` / `mod.rs` / `file_tree/model.rs` was already in place at commit `f82221e0c` and is retained unchanged)
 
 Verification gates (run from the `darkmatter/` package area): focused `fresh_seam` tests PASS (2/2), focused reference/validation/fragment/heading/snapshot/graph/file_tree selection PASS (568/568), `just lint` PASS in `darkmatter`, `darkmatter-cli`, and `dmls` (no warnings, clippy `-D warnings`). No Rust source was modified and nothing was committed.
+
+## Implementation of Review Findings #5
+
+> **started at:** 2026-07-19T22:19:22-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/fixes/2026-07-16-redundant-walk/review-5.md'
+- this is iteration 5 of the review-to-implement cycle
+- the review found in 'darkmatter/fixes/2026-07-16-redundant-walk/review-5.md' indicated that the specification is **production ready**!
+- the specification file used to define the functional/non-functional target of all this work can be found at 'fixes/2026-07-16-redundant-walk/spec.md'
+- while the review found this feature to be production ready, it did have findings worth looking at for follow on work:
+        - **Low — The Review 4 cache-first optimization remains unimplemented and untested**
+- refer to the review file -- darkmatter/fixes/2026-07-16-redundant-walk/review-5.md -- for more details

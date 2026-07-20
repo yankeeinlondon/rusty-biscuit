@@ -4,10 +4,11 @@ ready: true
 agent: codex/default
 created: 2026-07-19T21:29:43-07:00
 spec: 2026-07-16-redundant-walk/spec.md
-implemented: false
+implemented: true
 description: "A **fix** review of `2026-07-16-redundant-walk/spec.md`"
 fix: 2026-07-16-redundant-walk/review-4.md
 previous: 2026-07-16-redundant-walk/review-3.md
+next: 2026-07-16-redundant-walk/review-5.md
 ---
 
 # Review 4 — Redundant Walk
