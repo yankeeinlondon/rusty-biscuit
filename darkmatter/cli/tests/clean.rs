@@ -132,6 +132,78 @@ fn test_clean_subcommand_list_modes_match_library_contract() {
 }
 
 #[test]
+fn test_clean_subcommand_fixed_width_treats_nine_digit_ordinal_as_an_ordered_marker() {
+    let fixed = md_cmd()
+        .args(["clean", "--fixed-width", "24", "-"])
+        .write_stdin("123456789. Alpha beta gamma delta epsilon.\n")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    assert_eq!(
+        String::from_utf8(fixed).unwrap(),
+        concat!(
+            "123456789. Alpha beta\n",
+            "           gamma delta\n",
+            "           epsilon.\n"
+        )
+    );
+}
+
+#[test]
+fn test_clean_subcommand_fixed_width_treats_ten_digit_ordinal_as_prose() {
+    let fixed = md_cmd()
+        .args(["clean", "--fixed-width", "24", "-"])
+        .write_stdin("1234567890. Alpha beta gamma delta epsilon zeta.\n")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    // A ten-digit run is not a CommonMark marker, so no hanging indent may be synthesized.
+    assert_eq!(
+        String::from_utf8(fixed).unwrap(),
+        concat!(
+            "1234567890. Alpha beta\n",
+            "gamma delta epsilon\n",
+            "zeta.\n"
+        )
+    );
+}
+
+#[test]
+fn test_clean_subcommand_fixed_width_keeps_reference_definitions_intact() {
+    let source = concat!(
+        "- Before [label][ref] alpha beta gamma delta.\n",
+        "\n",
+        "[ref]: https://example.com/a/very/long/path \"A descriptive title\"\n"
+    );
+
+    let fixed = md_cmd()
+        .args(["clean", "--fixed-width", "24", "-"])
+        .write_stdin(source)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    assert_eq!(
+        String::from_utf8(fixed).unwrap(),
+        concat!(
+            "- Before [label][ref]\n",
+            "  alpha beta gamma\n",
+            "  delta.\n",
+            "\n",
+            "[ref]: https://example.com/a/very/long/path \"A descriptive title\"\n"
+        )
+    );
+}
+
+#[test]
 fn test_clean_subcommand_rejects_fixed_width_with_ignore_incidental_newlines() {
     md_cmd()
         .args([
