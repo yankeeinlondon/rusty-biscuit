@@ -119,13 +119,23 @@ pub enum SchemaError {
     ImportCycle { chain: String },
 
     /// A `$schema` file-reference chain revisits a file it is already
-    /// resolving, or exceeds the delegation depth cap. A schema file whose
-    /// whole payload is a reference (`$schema: ./other.yaml`) — and each
-    /// root-union file arm — re-enters reference resolution, so a self- or
-    /// mutually-referencing pair would otherwise recurse until the process
-    /// stack overflows. `chain` lists the canonical paths in visit order.
+    /// resolving. A schema file whose whole payload is a reference
+    /// (`$schema: ./other.yaml`) — and each root-union file arm — re-enters
+    /// reference resolution, so a self- or mutually-referencing pair would
+    /// otherwise recurse until the process stack overflows. `chain` lists the
+    /// canonical paths in visit order.
     #[error("$schema file-reference cycle detected: {chain}")]
     ReferenceCycle { chain: String },
+
+    /// A `$schema` file-reference chain exceeded the delegation depth cap
+    /// while every file in it was distinct. Deliberately distinct from
+    /// [`SchemaError::ReferenceCycle`]: an acyclic chain has no loop to break,
+    /// so reporting it as a cycle would send the author looking for a
+    /// self-reference that does not exist. `limit` is the cap that was
+    /// reached; `chain` lists the canonical paths in visit order, ending at
+    /// the hop that would have exceeded it.
+    #[error("$schema file-reference chain exceeded the {limit}-file depth limit: {chain}")]
+    ReferenceDepthExceeded { limit: usize, chain: String },
 
     /// An `example(...)` constraint (Feature A) referenced a file that is
     /// missing, malformed, or does not validate against the example-artifact
@@ -469,6 +479,27 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                      to that file. Break the loop so the chain terminates at a file that declares \
                      an actual schema.",
                 ),
+
+            SchemaError::ReferenceDepthExceeded { limit, chain } => {
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "SchemaError",
+                        "$schema reference chain too deep",
+                    ))
+                    .body(vec![
+                        Prose::new(format!("<dim>Limit:</dim> {limit} files")),
+                        Prose::new(format!(
+                            "<dim>Chain:</dim> {}",
+                            Prose::escape_text(chain)
+                        )),
+                    ])
+                    .hint(
+                        "Every file in this chain is distinct, so there is no loop to break. \
+                         Flatten the delegation: point <cyan>$schema</cyan> at the file that \
+                         declares the actual schema instead of chaining through intermediate \
+                         redirects.",
+                    )
+            }
 
             SchemaError::InvalidExample { reference, message } => {
                 StatusBlock::new(StatusState::Error)

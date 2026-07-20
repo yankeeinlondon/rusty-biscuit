@@ -315,7 +315,10 @@ struct ReferenceStack {
 
 impl ReferenceStack {
     /// Opens a frame for `canonical`, or reports the offending chain when that
-    /// file is already open (cycle) or the chain is too deep.
+    /// file is already open ([`SchemaError::ReferenceCycle`]) or the chain has
+    /// reached the depth cap ([`SchemaError::ReferenceDepthExceeded`]). The two
+    /// are separate errors because an over-deep acyclic chain has no loop to
+    /// break — telling its author to find one is a false diagnosis.
     fn enter(&mut self, canonical: &Path) -> Result<(), SchemaError> {
         if self.frames.iter().any(|frame| frame == canonical) {
             return Err(SchemaError::ReferenceCycle {
@@ -323,11 +326,9 @@ impl ReferenceStack {
             });
         }
         if self.frames.len() >= MAX_REFERENCE_DEPTH {
-            return Err(SchemaError::ReferenceCycle {
-                chain: format!(
-                    "$schema file-reference chain exceeded {MAX_REFERENCE_DEPTH} levels at `{}`",
-                    canonical.display()
-                ),
+            return Err(SchemaError::ReferenceDepthExceeded {
+                limit: MAX_REFERENCE_DEPTH,
+                chain: self.describe(canonical),
             });
         }
         self.frames.push(canonical.to_path_buf());
@@ -338,15 +339,16 @@ impl ReferenceStack {
         self.frames.pop();
     }
 
-    /// Renders the open frames plus the repeated file as an `a -> b -> a`
-    /// chain for the cycle-error message.
-    fn describe(&self, repeat: &Path) -> String {
+    /// Renders the open frames plus the rejected file as an `a -> b -> a`
+    /// chain. Shared by both guards: for a cycle `rejected` is the repeated
+    /// file, for the depth cap it is the hop that would have exceeded it.
+    fn describe(&self, rejected: &Path) -> String {
         let mut parts: Vec<String> = self
             .frames
             .iter()
             .map(|frame| frame.display().to_string())
             .collect();
-        parts.push(repeat.display().to_string());
+        parts.push(rejected.display().to_string());
         parts.join(" -> ")
     }
 }
