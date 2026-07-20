@@ -4,10 +4,11 @@ ready: false
 agent: codex/default
 created: 2026-07-19T16:22:11-07:00
 spec: 2026-07-11-sequence-plus/spec.md
-implemented: false
+implemented: true
 description: A **feature** review of `2026-07-11-sequence-plus/spec.md`
 feature: 2026-07-11-sequence-plus/review-8.md
 previous: 2026-07-11-sequence-plus/review-7.md
+next: 2026-07-11-sequence-plus/review-9.md
 ---
 
 # Review 8: Sequence Plus

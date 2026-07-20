@@ -31,15 +31,30 @@ same pattern review-7 finding 4 corrected one round earlier for R1, and review-6
 finding 4 the round before that for R0). Anything attributed to R2, R1, R0,
 R-1, or R-2 is historical evidence about a tree that no longer exists.
 
-**R3 is a reproducible revision, and R2 was not.** That is the substantive
-difference between the two anchors rather than a bookkeeping one. `baba83844` is
-a commit another developer can check out. The working tree carries a dirty
-remainder on top of it, and that remainder is load-bearing — the Level-3
-fixtures compile only with the untracked
-`biscuit-test-harness/src/{win_input,xdotool}.rs` injector modules and their
-`lib.rs` declarations present — but **no `lib/src` or `cli/src` production file
-is dirty**, so the reviewed production sources *are* exactly `baba83844`'s. That
-claim was verified with `git status --short`, not assumed.
+**R3 is not a reproducible revision for the Level-3 gates** (review-9 finding
+3). An earlier draft of this section claimed it was, on the grounds that
+`baba83844` is a commit another developer can check out and that **no `lib/src`
+or `cli/src` production file is dirty** — so the reviewed *production* sources
+are exactly `baba83844`'s. That second claim was verified with `git status
+--short` and still holds. The reproducibility claim built on top of it did not.
+
+The working tree carries a dirty remainder, and that remainder is **load-bearing
+for the Level-3 evidence**: the Linux and Windows fixtures compile only with the
+untracked `biscuit-test-harness/src/{win_input,xdotool}.rs` injector modules and
+their `lib.rs` declarations present. `git show HEAD:biscuit-test-harness/src/lib.rs`
+contains neither declaration, so a clean checkout of `baba83844` does not build
+those fixtures at all — it fails on unresolved imports. An anchor whose recorded
+gate cannot be re-run from the anchor is not reproducible, however clean its
+production sources are.
+
+Scope of the defect: it bounds the **Level-3 rows only**. The L1/L2 and
+cross-target type-check rows depend on no untracked source and remain
+reproducible from `baba83844`.
+
+Status: the injector modules and their `lib.rs` declarations are staged for
+inclusion in the release-candidate change set. Once they are committed, this
+section must be re-anchored to that commit and the Linux Level-3 gate and
+Windows cross-target check re-run against it before either is cited again.
 
 `git rev-parse HEAD` at the R3 gate runs:
 
