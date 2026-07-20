@@ -1,7 +1,13 @@
-# Gate run — 2026-07-19 — Windows type-check + native runbook (review-8 finding 2)
+# Gate run — Windows type-check + native runbook (review-8 finding 2)
+
+**Run date: 2026-07-20.** The filename retains its original `2026-07-19` date so
+that inbound links from `validation-matrix.md` keep resolving; the authoritative
+dating and revision anchor are the ones stated in this file, not in its name.
+This record supersedes the 2026-07-19 run at `baba83844` — see
+[Revision under test](#revision-under-test).
 
 The executable half of review-8 finding 2 from this host: the Windows
-cross-target type-check gates, re-run at the committed candidate. This file
+cross-target type-check gates, re-run at the release candidate. This file
 records measurement only. No production code and no test was changed to
 produce it. Format follows `gate-run-2026-07-19-linux.md`: nothing is reported
 green unless the command ran to completion and its summary line is quoted
@@ -17,44 +23,74 @@ below is type-check-only. Nothing Windows has ever executed.
 
 ```
 git rev-parse HEAD
-baba838446cf0e21c33dd17870c462b45c0311e6
+96679f516184722e858d0e2fa8778a541c8b0b4e
 ```
 
-The working tree is **not** clean, and the dirt is load-bearing: the Windows
-and Linux Level-3 fixtures compile only with the uncommitted
-biscuit-test-harness injector modules present. `git status --short` at run
-time, verbatim:
+`96679f516` is the release candidate. **The load-bearing-dirt caveat that the
+previous revision of this record carried is gone, and that is the point of this
+update.** The prior run (anchored at `baba83844`) had to state that the working
+tree was not clean and that the dirt was load-bearing, because the Windows and
+Linux Level-3 fixtures compiled only with the then-uncommitted
+biscuit-test-harness injector modules present. Those modules were committed in
+`b965938e2` (`feat(biscuit-test-harness): add Linux and Windows L3 keyboard
+injectors`), which is an ancestor of the release candidate:
 
 ```
+git ls-tree HEAD biscuit-test-harness/src/
+100644 blob 5d93ad2e441fc0e53df2be96df772d55cc407cf6	biscuit-test-harness/src/win_input.rs
+100644 blob 224737e8400fcaace8eb32d2f328ad02d7babbd9	biscuit-test-harness/src/xdotool.rs
+```
+
+(Abridged to the two injector entries; the full listing also contains the
+pre-existing harness modules. `git merge-base --is-ancestor b965938e2 HEAD`
+succeeds.)
+
+`git status --short` at run time, verbatim:
+
+```
+ M .claude/skills/biscuit-test-harness/SKILL.md
  M .claudine/memory/commits.md
  M CLAUDE.md
+ M biscuit-test-harness/README.md
+ M biscuit-test-harness/src/cliclick.rs
  M biscuit-test-harness/src/lib.rs
- M claudine/cli/tests/level3_linux_sequence_ctrl_c.rs
- M claudine/features/2026-07-11-sequence-plus/l3-ctrl-c-runbook.md
- M claudine/features/2026-07-11-sequence-plus/review-7.md
+ M claudine/features/2026-07-11-sequence-plus/review-9.md
  M claudine/features/2026-07-11-sequence-plus/spec.md
-?? biscuit-test-harness/src/win_input.rs
-?? biscuit-test-harness/src/xdotool.rs
-?? claudine/features/2026-07-11-sequence-plus/gate-run-2026-07-19-l3-linux.md
-?? claudine/features/2026-07-11-sequence-plus/review-8.md
+?? claudine/features/2026-07-11-sequence-plus/review-10.md
 ?? prompts/_implement/implement-review-findings-plan.md
 ?? prompts/_implement/review-findings-plan.md
 ```
 
-Enumerated: the test-harness injector modules (`biscuit-test-harness/src/
-win_input.rs`, `xdotool.rs`, and their `lib.rs` declarations) that the L3
-fixtures require; the review-8 working set (`review-8.md`, the concurrent
-finding-1 artifacts `gate-run-2026-07-19-l3-linux.md` /
-`level3_linux_sequence_ctrl_c.rs` / `l3-ctrl-c-runbook.md`, plus `review-7.md`
-and `spec.md` doc edits); and repo-level docs/prompts (`CLAUDE.md`, memory,
-`prompts/_implement/*`). No `lib/src` or `cli/src` production file is dirty —
-the compiled Windows-path sources under review are exactly `baba83844`'s.
+Enumerated: two dirty `.rs` files (`biscuit-test-harness/src/lib.rs` and
+`src/cliclick.rs`); the review working set (`review-9.md`, `review-10.md`,
+`spec.md`); and repo-level docs/prompts (`CLAUDE.md`, the harness `SKILL.md`
+and `README.md`, memory, `prompts/_implement/*`). No `lib/src` or `cli/src`
+production file is dirty — the compiled Windows-path sources under review are
+exactly `96679f516`'s.
+
+**Reproducibility property.** The two dirty `.rs` files were checked
+mechanically and contain **comment-only** changes: every added or removed
+non-blank line is a `//`, `///`, or `//!` line. Re-verify with:
+
+```
+for f in biscuit-test-harness/src/lib.rs biscuit-test-harness/src/cliclick.rs; do
+  git diff -- "$f" | grep -E '^[+-]' | grep -vE '^[+-]{3}' \
+    | grep -vE '^[+-]\s*(//|///|//!)' | grep -vE '^[+-]\s*$'
+done
+```
+
+Empty output means comment-only. The working tree is therefore behaviorally
+identical to a clean checkout of `96679f516`, and the dirty remainder is
+documentation. Consequently a **clean checkout of the release candidate does
+build the Level-3 fixtures** — which is exactly the claim the previous anchor
+could not make. This gate result is reproducible from a named revision alone,
+with no tree reconstruction required.
 
 ## Summary of verdicts
 
 | Gate | Verdict | Exit code | Duration |
 |---|---|---|---|
-| `just check-windows` (from `claudine/`) — lib + CLI **including all test targets**, `x86_64-pc-windows-gnu` | **Green — compile-only, NOT runtime verification** | `0` | 8.25 s wall (warm dependency cache; both workspace crates freshly re-checked) |
+| `just check-windows` (from `claudine/`) — lib + CLI **including all test targets**, `x86_64-pc-windows-gnu` | **Green — compile-only, NOT runtime verification** | `0` | 3 m 25 s cold (the meaningful figure); 1.05 s on an immediate warm re-run |
 | Native Windows runtime execution (any of it) | **Not run — impossible on this host.** The gap stands. | — | — |
 
 ## Environment
@@ -72,7 +108,7 @@ x86_64-w64-mingw32-gcc (GCC) 16.1.0
 
 ## Gate — `just check-windows` (type-check, lib + CLI test targets)
 
-Run 2026-07-19 from the `claudine/` package area. The recipe
+Run 2026-07-20 from the `claudine/` package area. The recipe
 (`claudine/justfile::check-windows`) executes, with its two load-bearing host
 workarounds (`RUSTC_WRAPPER=""` to keep the host's kache rustc-wrapper out of
 cc-rs; `-Wa,-mbig-obj` for duckdb's COFF section overflow) and
@@ -82,25 +118,32 @@ cc-rs; `-Wa,-mbig-obj` for duckdb's COFF section overflow) and
 cargo check -p claudine -p claudine-cli --tests --target x86_64-pc-windows-gnu
 ```
 
-Verbatim closing lines:
+Two runs happened, back to back. The first was cold and finished in **3 m 25 s**
+— that is the meaningful duration. An immediate warm re-run finished in
+**1.05 s** and is what captured the exit code, `0`.
+
+Verbatim closing lines of the captured log (`/tmp/check-windows-r4.log`, the
+warm re-run's transcript):
 
 ```
-warning: `claudine` (lib test) generated 16 warnings (2 duplicates) (run `cargo fix --lib -p claudine --tests` to apply 10 suggestions)
-warning: `claudine-cli` (bin "claudine" test) generated 2 warnings (run `cargo fix --bin "claudine" -p claudine-cli --tests` to apply 1 suggestion)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.91s
-EXIT=0
+warning: `claudine-cli` (test "loop_cli") generated 4 warnings (run `cargo fix --test "loop_cli" -p claudine-cli` to apply 4 suggestions)
+warning: `claudine-cli` (test "wrap_antigravity_exit_signal") generated 5 warnings (run `cargo fix --test "wrap_antigravity_exit_signal" -p claudine-cli` to apply 5 suggestions)
+warning: `claudine-cli` (test "wrap_opencode") generated 7 warnings (run `cargo fix --test "wrap_opencode" -p claudine-cli` to apply 7 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.05s
 ```
 
-Wall time 8.25 s (`just check-windows 15.32s user 12.02s system 331% cpu
-8.250 total`). The short duration is a warm `target/windows-check` dependency
-cache from earlier rounds; cargo nevertheless re-fingerprinted and freshly
-re-checked both workspace crates at this tree (`Checking claudine v0.1.0 …`,
-`Checking claudine-cli v0.1.0 …` appear in the transcript), including every
-CLI integration-test target — the warning replay above spans the test
-binaries. The warnings are dead-code/unused-import artifacts of Unix-only
-helpers appearing unused under the Windows cfg; there are no errors.
+Two provenance notes, stated rather than smoothed over. First, the exit code
+`0` was observed as the shell status of the warm re-run; the captured log ends
+at cargo's `Finished` line and carries no `EXIT=` marker of its own, so the
+exit code is reported here, not quoted from the log. Second, because the log is
+the warm re-run, it contains no `Checking claudine …` lines — cargo had nothing
+left to re-fingerprint. The cold run immediately preceding it is what actually
+type-checked both workspace crates and every CLI integration-test target; the
+warning replay quoted above spans those test binaries and is cargo's cached
+report of that work. The warnings are dead-code/unused-import artifacts of
+Unix-only helpers appearing unused under the Windows cfg; there are no errors.
 
-**What this proves:** the Windows arms of the current committed candidate —
+**What this proves:** the Windows arms of the release candidate `96679f516` —
 `cli/src/commands/wrap/exec/termination/windows.rs` (console-control handler,
 `windows_wait_loop`, Job-object wait scopes, and its
 `#[cfg(all(test, windows))]` regressions), the `#[cfg(windows)]`
@@ -109,7 +152,7 @@ suspended-spawn/Job-assignment path in
 process-tree test twins in `task/tests.rs`, and the
 `cli/tests/level2_windows_sequence_ctrl_c.rs` /
 `level3_windows_sequence_ctrl_c.rs` fixtures — all type-check for
-`x86_64-pc-windows-gnu`.
+`x86_64-pc-windows-gnu`, and do so from a clean checkout of that revision.
 
 **What this does not prove:** anything about `CreateJobObjectW`,
 `SetInformationJobObject`, `AssignProcessToJobObject`, thread
@@ -143,10 +186,10 @@ For the operator on a native Windows host. Prerequisites: interactive desktop
 session (not a disconnected RDP session), attached console, Rust stable
 toolchain (repo `rust-toolchain.toml` pins `channel = "stable"`),
 `cargo-nextest`, `just`, and a bash on `PATH` (Git Bash/MSYS — every justfile
-recipe runs under `bash`). The tree must contain the biscuit-test-harness
-injector modules (`win_input.rs` + the `lib.rs` declarations) — i.e. a commit
-including them, or this exact dirty tree reproduced. All commands run from the
-`claudine/` package area.
+recipe runs under `bash`). A clean checkout of `96679f516` is sufficient: the
+biscuit-test-harness injector modules the fixtures require (`win_input.rs` and
+its `lib.rs` declaration) are committed as of `b965938e2`, so no dirty tree
+needs reproducing. All commands run from the `claudine/` package area.
 
 For **every** step record: revision (`git rev-parse HEAD` plus
 `git status --short` if dirty), host OS and version, terminal and version,
