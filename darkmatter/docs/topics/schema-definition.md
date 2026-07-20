@@ -152,6 +152,8 @@ the network. It also preserves the authored YAML representation: mappings stay
 mappings and sequences stay sequences. Actual `$schema` preparation remains a
 separate operation that may resolve referenced schema files.
 
+#### Semantic Arrays
+
 The ordinary array postfix remains available. `type-definition[]` and
 `schema[]` mean arrays of independent semantic values. When one array item is
 itself a union, use a nested sequence so the outer sequence remains the
@@ -1458,7 +1460,7 @@ unless the same baseline is supplied explicitly.
 - **No inline object detection.** `md schema detect` continues to emit `object` for object-typed values; inline object schemas must be hand-written.
 - **No quoted inline object property names.** Rename to a valid identifier (alphanumeric, `-`, `_`, leading digits allowed) or use a JSON Schema file.
 - **No escaped commas inside inline object descriptions.** Inline descriptions terminate at the next top-level comma or closing brace — keep descriptions comma-free inside `{ ... }`.
-- **No arrays of unions.** The `[]` suffix binds to a single type expression, and a YAML sequence at a property value is itself the union form. Workaround: reference a JSON Schema file.
+- **No arrays of ordinary denoted-value unions.** For ordinary denoted types, the `[]` suffix binds to a single type expression, and a YAML sequence at a property value is itself the union form. This limitation does not apply to `type-definition[]` or `schema[]`; these semantic arrays support union-valued items through nested sequences, as shown in [Semantic Arrays](#semantic-arrays). Use an external JSON Schema when an ordinary property needs an array of union-valued items.
 - **No coercion opt-out.** [Type coercion](#type-coercion) is default-on with no `--no-coerce` / strict-types flag.
 - **No coercions beyond the matrix.** In particular no `"yes"` / `"no"` / `"1"` / `"0"` → boolean, no string-parsing into `date` / `url` / `email`, and no cross-property coercions. Coercion recurses into inline object fields and inline object arrays when the schema path is unambiguous; for property-level unions, only exactly-one-arm-validates candidates are committed.
 - **No `md schema validate --write`.** The library check path reports post-coercion validity but does not rewrite files; only the compose pipeline mutates the (in-memory) document it composes.
