@@ -105,3 +105,15 @@ Verification gates (run from the `darkmatter/` package area): focused `fresh_sea
 - while the review found this feature to be production ready, it did have findings worth looking at for follow on work:
         - **Low — The Review 4 cache-first optimization remains unimplemented and untested**
 - refer to the review file -- darkmatter/fixes/2026-07-16-redundant-walk/review-5.md -- for more details
+
+## Implementation of Review Findings #6
+
+> **started at:** 2026-07-19T22:42:57-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/fixes/2026-07-16-redundant-walk/review-6.md'
+- this is iteration 6 of the review-to-implement cycle
+- the review found in 'darkmatter/fixes/2026-07-16-redundant-walk/review-6.md' indicated that the specification is **production ready**!
+- the specification file used to define the functional/non-functional target of all this work can be found at 'fixes/2026-07-16-redundant-walk/spec.md'
+- while the review found this feature to be production ready, it did have findings worth looking at for follow on work:
+        - **Low — Review 5's cache-first fragment optimization was not implemented**
+- refer to the review file -- darkmatter/fixes/2026-07-16-redundant-walk/review-6.md -- for more details
