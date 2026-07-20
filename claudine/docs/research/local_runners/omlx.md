@@ -298,6 +298,68 @@ detection:
     confidence: documented
     notes: Fresh default base path for settings unless `--base-path` or `OMLX_BASE_PATH` is used.
 
+identity_probes:
+  - rank: 1
+    request: GET /health
+    match_in: json_field
+    field: engine_pool
+    marker: '"engine_pool":{"model_count":N,"loaded_count":N,...}'
+    uniqueness: unique
+    zero_model_ok: true
+    auth_gated: false
+    confidence: observed
+    notes: The engine_pool key exists in no other runner's health response (vLLM's /health returns an empty 200 body — body shape disambiguates the shared port 8000). Stays unauthenticated even when an API key is configured; verified live on oMLX 0.5.1.
+  - rank: 2
+    request: GET /openapi.json
+    match_in: json_field
+    field: info.title
+    marker: "oMLX API"
+    uniqueness: unique
+    zero_model_ok: true
+    auth_gated: false
+    confidence: observed
+    notes: Literal FastAPI title; also yields the exact server version and full route inventory. Unauthenticated even with an API key set.
+  - rank: 3
+    request: GET /api/status
+    match_in: json_field
+    field: detail
+    marker: '{"detail":"API key required"}'
+    uniqueness: strong
+    zero_model_ok: true
+    auth_gated: true
+    confidence: observed
+    notes: The /api/* and /admin/api/* namespaces are oMLX-only — even the 401 auth rejection proves the route exists and identifies the software when a key is configured.
+  - rank: 4
+    request: ANY /
+    match_in: header
+    field: server
+    marker: uvicorn
+    uniqueness: weak
+    zero_model_ok: true
+    auth_gated: false
+    confidence: observed
+    notes: "`server: uvicorn` is shared with vLLM and every FastAPI server — never use it to identify oMLX; identification must come from response bodies."
+
+version_probe:
+  - os: macos
+    method: cli
+    command: omlx --version
+    pattern: "^(\\d+\\.\\d+\\.\\d+)$"
+    confidence: observed
+    notes: Observed `0.5.1` — a plain semver on stdout. For the running server's version use `GET /openapi.json` → info.version (identity_probes rank 2).
+  - os: macos
+    method: bundle
+    command: "defaults read /Applications/oMLX.app/Contents/Info.plist CFBundleShortVersionString"
+    pattern: "(\\S+)"
+    confidence: observed
+    notes: Observed 0.5.1; the menu-bar app and the omlx CLI version in lockstep on this host.
+  - os: linux
+    method: cli
+    command: omlx --version
+    pattern: "^(\\d+\\.\\d+\\.\\d+)$"
+    confidence: inferred
+    notes: oMLX is macOS-first (Apple Silicon MLX); Linux install paths are not an official released artifact — record honestly if observed.
+
 config_mechanism: mixed
 
 config_files:
@@ -602,6 +664,25 @@ Recommended probe order:
 5. Probe `GET http://localhost:8000/health`; identify oMLX by `status: healthy` and an `engine_pool` object.
 6. Probe `GET http://localhost:8000/openapi.json`; identify oMLX by `info.title: oMLX API`.
 7. Check config under the real user home, usually `~/.omlx/settings.json`. Agent wrappers may override `HOME`; this session's `HOME` was `/Users/ken/.claudine`, while the actual oMLX config was `/Users/ken/.omlx/settings.json`.
+
+### Port identity
+
+Port 8000 collides with vLLM (and both are FastAPI/uvicorn servers, so the
+`server: uvicorn` header cannot separate them), so the ranked
+`identity_probes` frontmatter block is the canonical strategy for answering
+"which runner is listening on this port?":
+
+1. `GET /health` — a body containing an `engine_pool` object
+   (`model_count`, `loaded_count`, memory ceilings) is unique to oMLX; vLLM's
+   `/health` returns an empty 200 body. Ungated even when an API key is
+   configured, and works with zero models loaded.
+2. `GET /openapi.json` — `info.title: oMLX API` is a literal fingerprint and
+   also yields the exact version and full route inventory; unauthenticated.
+3. `GET /api/status` — even the 401 `{"detail":"API key required"}` rejection
+   identifies oMLX, because the `/api/*` and `/admin/api/*` namespaces exist
+   nowhere else.
+4. Header check — `server: uvicorn` is shared with vLLM and every FastAPI
+   server; never use it for identity.
 
 ## Configuration
 
