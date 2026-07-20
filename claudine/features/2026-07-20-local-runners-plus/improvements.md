@@ -4,9 +4,17 @@ Produced 2026-07-19 by a three-pass orchestrated review of the local-runners
 research fleet (`_fleet.md` + `local-runners.yaml` + `_schema.yaml`), followed
 by a coherence pass across the three task outcomes.
 
+> **Addendum 2026-07-19 (applied):** an independent research pass verified the
+> claims here against live sources and local probes, corrected the facts
+> marked ✎ below, added the port-identity strategy ([Task 4](#task-4--port-identity-strategy-added-2026-07-19)),
+> and landed the sequencing step-1 `_fleet.md` defect fixes plus the
+> `identity_probes` schema addition (all five existing docs updated and
+> re-validated).
+
 - **Task 1** — roster evaluation: which runners belong in the fleet
 - **Task 2** — frontmatter facts: schema structure and missing facts
 - **Task 3** — lifecycle hooks: challenging success, recovering from failure
+- **Task 4** — port identity: identifying which runner listens on a shared port
 
 A consolidated, ordered adoption plan is at the end ([Recommended
 Sequencing](#recommended-sequencing)); a Claudine/Darkmatter feature wishlist
@@ -27,9 +35,9 @@ live sources on 2026-07-19.
 | Candidate | Verdict | One-line rationale |
 |---|---|---|
 | LocalAI | **add now** | Very active (v4.3, May 2026); OpenAI + Anthropic + Ollama drop-in APIs; distinct `local-ai` binary + systemd service |
-| SGLang | **add now** | HF's officially recommended TGI successor alongside vLLM; distinct port 30000; `sglang serve` CLI |
+| SGLang | **add now** | HF's officially recommended TGI successor alongside vLLM; distinct port 30000; launched via `python -m sglang.launch_server` ✎ |
 | Docker Model Runner | **add now** | Docker-official, huge install base via Docker Desktop 4.40+; distinct port 12434; OpenAI + Anthropic + Ollama APIs |
-| Jan | **add now** | Active desktop app with built-in OpenAI **and** Anthropic server on distinct port 1337 |
+| Jan | **add now** | Active desktop app with a built-in OpenAI-compatible server on distinct port 1337 (Anthropic endpoint claimed in the original review is unverified — see ✎ below) |
 | Lemonade Server | **add now** | AMD-sponsored official local server (GPU + NPU); distinct port 13305; OpenAI/Ollama/Anthropic compatible |
 | KoboldCpp | **add now** | Active single-binary llama.cpp derivative with its own API family, port 5001, and router mode |
 | mistral.rs | watchlist | Capable Rust engine (OpenAI + Anthropic endpoints) but moderate adoption; port 1234 collides with LM Studio |
@@ -125,9 +133,13 @@ Entry-specific cautions the research docs must carry:
   systemd service `lemonade-server`; apt installs cache under
   `/var/lib/lemonade/.cache`.
 - **KoboldCpp** — deliberately emulates other runners' APIs (Ollama,
-  A1111/Forge, ComfyUI, Whisper, XTTS) and users run it on 11434 to
-  impersonate Ollama — a detection minefield worth cataloguing explicitly.
-  API key accepted but not validated.
+  A1111/Forge, ComfyUI, Whisper, XTTS — Ollama emulation confirmed via the
+  README feature list ✎). Community reports that users run it on 11434 to
+  impersonate Ollama, and that its API key is accepted but not validated, are
+  plausible but were **not verifiable** against official sources on
+  2026-07-19 ✎ — treat both as reported, not established. Its
+  `GET /api/extra/version` endpoint returns `{"result":"KoboldCpp",...}`, a
+  definitive identity marker even when it impersonates Ollama's port.
 
 ### Existing-entry audit
 
@@ -146,11 +158,38 @@ live). Two research-doc (not roster) notes:
 
 ### Landscape note
 
-Anthropic-Messages-API support has become table stakes in 2026: oMLX, LocalAI,
-Jan, Docker Model Runner, Lemonade, llamafile, mistral.rs, and
-text-generation-webui all expose one. The `## Agentic CLI Integration`
+Anthropic-Messages-API support has become table stakes in 2026: oMLX,
+LocalAI, Docker Model Runner, Lemonade, llamafile, mistral.rs, and
+text-generation-webui all expose one. (The original review included Jan in
+this list ✎ — Jan's API-server docs describe only an OpenAI-compatible
+server powered by llama.cpp; no Anthropic endpoint was verifiable on
+2026-07-19, so the Jan research doc must establish this fresh rather than
+inherit the claim.) The `## Agentic CLI Integration`
 section's direct-Claude-Code wiring (`ANTHROPIC_BASE_URL`) is now relevant for
 most of the fleet, not an exception.
+
+### Fact corrections (2026-07-19 verification pass)
+
+Claims in the original review that did not survive re-verification against
+official sources:
+
+1. **Jan has an Anthropic-compatible server** — unverified; Jan's docs
+   document OpenAI-compatible only. Corrected in the verdict table and
+   landscape note.
+2. **SGLang's CLI is `sglang serve`** — unverified; the documented launcher
+   is `python -m sglang.launch_server`. The proposed roster entry's
+   `binary: sglang` should be re-established by the research doc (a `sglang`
+   console script exists, but its `serve` subcommand alias was not evidenced).
+3. **KoboldCpp on 11434 / unvalidated API key** — community-reported, not
+   established by official sources; downgraded to "reported" in the cautions.
+
+Confirmed during the same pass: LocalAI (8080, `/readyz`, OpenAI + Anthropic
++ Ollama route registrations in `core/http/app.go`), Docker Model Runner
+(12434, `/engines/v1`, host-TCP opt-in split, `~/.docker/cli-plugins/`), Jan
+(1337), Lemonade (**port changed 8000 → 13305 in v10.1.0, 2026-04-06** — the
+review's 13305 is correct, and the 8000-collision set shrank accordingly),
+KoboldCpp (5001, OllamaApi emulation), llama.cpp router mode
+(`--models-dir`, `/models/load`, `GET /props` → `"role":"router"`).
 
 ---
 
@@ -240,7 +279,7 @@ Each tied to a stated consumer; encyclopedia candidates were rejected.
 | Field | Type (SimplifiedSchema) | Consumer / justification |
 |---|---|---|
 | `license` | `enum(mit,apache_2,gpl_3,proprietary,mixed; required)` | model-config: legal permissions are distinct from `open_source` artifact availability (full-open + GPL ≠ full-open + Apache) |
-| `version_probe` | `"{ os: enum(macos,linux,windows,all; required), command: string(required), pattern: string, notes: string }[]"` | sniff: binary detection is incomplete without the `--version` invocation and a parse regex; flag and output format vary per runner (and sometimes per OS — hence a record list) |
+| `version_probe` | `"{ os: enum(macos,linux,windows,all; required), method: enum(cli,bundle,package,http; required), command: string(required), pattern: string, confidence: enum(source_code,observed,documented,inferred; required), notes: string }[]"` | sniff: binary detection is incomplete without the `--version` invocation and a parse regex; flag and output format vary per runner (and sometimes per OS — hence a record list). **Adopted and landed 2026-07-19** (schema + all five docs; shape extended with `method`/`confidence` — see below) |
 | `structured_output` | `"{ supported: enum(yes,no,conditional; required), mechanism: enum(json_mode,json_schema,grammar,tool_use,none), notes: string }"` | model-config: agentic CLIs lean on JSON-mode / schema-constrained / grammar generation; support varies widely |
 | `vision` | `"{ supported: enum(yes,no,conditional; required), modalities: string[], notes: string }"` | model-config: which runners serve multimodal models (agentic CLIs send base64 images) |
 | `context_control` | `"{ mechanism: enum(flag,env_var,model_default,config_file,unsupported; required), site: string, notes: string }"` | user guidance: agentic sessions hit 32k-128k; how to raise the limit (`--ctx-size`, `OLLAMA_CONTEXT_LENGTH`, …) |
@@ -249,6 +288,7 @@ Each tied to a stated consumer; encyclopedia candidates were rejected.
 | `telemetry` | `"{ enabled_by_default: boolean(required), opt_out_mechanism: enum(flag,env_var,config,none), site: string, notes: string }"` | privacy/compliance: phone-home behavior and how to disable it |
 | `min_hardware` | `"{ ram_gb: number, vram_gb: number, cpu: string, notes: string }"` | sniff/user guidance: "this host probably can't run X" inference (oMLX needs Apple Silicon; vLLM needs real GPU memory) |
 | `port_conflict` | `"{ default_port: number(required), configurable: boolean(required), mechanism: enum(flag,env_var,config,none), site: string, notes: string }"` | sniff: Task 1's collision map (8000, 8080, 1234, 5000) makes reconfigurability a detection-relevant fact |
+| `identity_probes` | `"{ rank: number(required), request: string(required), match_in: enum(body,json_field,header,status; required), field: string, marker: string(required), uniqueness: enum(unique,strong,weak; required), zero_model_ok: boolean, auth_gated: boolean, confidence: enum(source_code,observed,documented,inferred; required), notes: string }[]"` | sniff: the ranked, machine-consumable answer to "which runner is listening on this port?" — see [Task 4](#task-4--port-identity-strategy-added-2026-07-19). **Adopted and landed 2026-07-19** (schema + all five docs) |
 
 **Rejected** (with reason): release cadence (too volatile), VRAM sizing
 guidance (model-specific, not runner-specific), API-key provisioning (covered
@@ -478,6 +518,88 @@ until then the `--yolo` comment should stay loudly in place.
 
 ---
 
+## Task 4 — Port-identity strategy (added 2026-07-19)
+
+Motivation: many runners share default ports (8000: vLLM/oMLX; 8080:
+llama.cpp/LocalAI; 1234: LM Studio/mistral.rs; 5000: TabbyAPI/
+text-generation-webui), so a listening port never identifies the runner. The
+fleet already carried the ingredients (`detection[].expect` markers, `traps`
+warnings), but the *strategy* — which probes to run, in what order, with what
+confidence — lived only in prose. This task makes it a first-class structured
+fact.
+
+### Findings (verified against live servers on this host + upstream source)
+
+The single best identity probe per fleet runner, ranked with fallbacks:
+
+| Runner | Port | Rank-1 probe (definitive) | Marker | Fallbacks |
+|---|---|---|---|---|
+| Ollama | 11434 | `GET /` | exact body `Ollama is running` | `GET /api/version` (Ollama-only path); `/api/tags` with real sha256 digests; no `Server` header (Go) |
+| llama.cpp | 8080 | header check on any request | `Server: llama.cpp` (set on every response, even 503-loading; no opt-out) | `GET /props` → `build_info`; `/v1/models` → `"owned_by":"llamacpp"`; `/api/tags` empty-digest reverse-tell |
+| LM Studio | 1234 | `GET /api/v0/models` | `/api/v0/*` namespace + `compatibility_type`/`state` fields | `/api/v1/models` (`models` root key); `/v1/models` → `"owned_by":"organization_owner"`; `X-Powered-By: Express` (weak) |
+| oMLX | 8000 | `GET /health` | `engine_pool` object (ungated even with API key; works with zero models) | `/openapi.json` → `info.title: "oMLX API"`; `/api/status` 401 envelope (namespace is oMLX-only) |
+| vLLM | 8000 | `GET /version` | `{"version":"0.x.x"}` on a vLLM-only path | `/openapi.json` path fingerprint (`/tokenize`, `/pooling`, `/rerank`); `/metrics` `vllm:` families |
+
+Anti-patterns the research docs must call out explicitly:
+
+- `GET /health` returning `{"status":"ok"}` (llama.cpp) or an empty 200
+  (vLLM) — **liveness, not identity**. oMLX's JSON-bodied `/health` is the
+  exception that proves the rule: its shape identifies, its status does not.
+- `GET /v1/models` — the path is universal; only per-entry markers
+  (`owned_by`) discriminate, and only some runners set distinctive values.
+- `server: uvicorn` — shared by every FastAPI runner (vLLM, oMLX, LocalAI,
+  SGLang, Lemonade); useless for disambiguation. Conversely llama.cpp's
+  `Server: llama.cpp` and LM Studio's `X-Powered-By: Express` show headers
+  *can* be first-class probes.
+- Runner mimicry cuts both ways: llama.cpp mounts `/api/tags` (Ollama
+  alias) but with empty `digest`/`modified_at` — a reverse-tell that
+  *distinguishes* it from real Ollama when both probes are run.
+
+Best probes for the six proposed roster additions (from the 2026-07-19
+verification pass; the research docs must confirm each):
+
+| Candidate | Port | Best probe | Marker |
+|---|---|---|---|
+| LocalAI | 8080 | `GET /readyz` (or `/healthz`) | auth-exempt k8s-style path + `/v1/models` OpenAI shape |
+| SGLang | 30000 | `GET /get_model_info` | SGLang-specific keys (`model_path`, `is_generation`, `weight_version`) |
+| Docker Model Runner | 12434 | `GET /engines/v1/models` | the `/engines/` path prefix itself |
+| Jan | 1337 | `GET /v1/models` | weak — no documented app-specific endpoint; research must find one |
+| Lemonade | 13305 | `GET /api/v1/health` (fallback `/live`) | Lemonade-only `/api/v1` prefix |
+| KoboldCpp | 5001 | `GET /api/extra/version` | `{"result":"KoboldCpp","version":...}` — defeats its own Ollama impersonation |
+
+### Representation (landed)
+
+Structured in frontmatter as the `identity_probes` record list (shape in the
+Task 2 table; full semantics documented in `_schema.yaml`): ranked probes with
+`match_in` (`body`/`json_field`/`header`/`status`), the `field`/`marker`
+pair, a `uniqueness` grade (`unique`/`strong`/`weak`), and the two
+detector-critical booleans `zero_model_ok` and `auth_gated`. Prose mirrors it
+in each doc's `## Detection` → `### Port identity` subsection. Both are now
+required by the schema, so the fleet prompt captures them on the next run and
+`validate_schema()` enforces them mechanically.
+
+### Installed-version determination (landed 2026-07-19)
+
+The companion question — "is it installed, and which version?" — was only
+implicit in the fleet (version output lived in `detection[].expect` prose).
+It is now structured as `version_probe` (shape in the Task 2 table). Live
+verification on this host surfaced three traps the docs now record:
+
+- **LM Studio:** `lms --version` prints `CLI commit: 0b2a176` — the CLI's git
+  commit, **not** the app version (observed app version `0.4.12+1`, available
+  only from the app-bundle plist on macOS). There is no running-server
+  version endpoint at all.
+- **llama.cpp:** `llama-server --version` prints `version: 8168 (723c71064)`
+  — a build number + commit sha, not a semver — and emits Metal/backend init
+  noise *before* the version line, so a parser must match the `version:`
+  line anywhere in the output.
+- **Ollama:** the CLI (`ollama version is 0.32.1`) and the long-lived server
+  daemon can drift; the running server's version is an `identity_probes`
+  concern (`GET /api/version`), the installed version a `version_probe` one
+  — the two channels are recorded separately.
+
+---
+
 ## Claudine / Darkmatter Feature Wishlist
 
 Improvements blocked on missing capability, in rough priority order:
@@ -522,6 +644,9 @@ twice:
    `err.message` → `err.msg`, drop the redundant success/initialize complement
    guards, add `fail_fast: false`, fix the stale `_schema.yaml` nested-mapping
    comment, add the changelog-heading prompt amendment (P4's prose half).
+   **Status: ✅ landed 2026-07-19** — along with P1's `validate_schema()`
+   success guard, the step-4 initialize schema gate, and the `identity_probes`
+   schema fact + five-doc update (Task 4).
 2. **Land the schema changes in one batch** (Task 2): additive proposals
    (2, 4, 5, 7) plus the two breaking ones (1's data migration,
    3's `opencode_example` restructure) plus the ten new facts. Batching
@@ -538,6 +663,9 @@ twice:
    ```yaml
    - when: "!file_exists(file) || !validate_schema(file) || !frontmatter(file, 'last_updated') || date_delta(frontmatter(file, 'last_updated'), ctx.today, '14d')"
    ```
+
+   **Status: ✅ landed 2026-07-19** (the initialize skip arm was simplified
+   to an unguarded fallback instead of a mirrored complement guard).
 
 5. **Expand the roster** (Task 1's six adds) and run the fleet: the six new
    runners get researched once, under the final schema, with the hardened
@@ -591,3 +719,13 @@ Task 1's full per-candidate source list (all fetched 2026-07-19):
 - Msty: https://docs.msty.app/how-to-guides/get-the-latest-version-of-local-ai-service
 
 Tasks 2 and 3 were grounded in repo sources: `darkmatter/lib/src/markdown/schemas/simplified/`, `.claude/skills/claudine/lifecycle.md`, `claudine/lib/src/composition/lifecycle/`, `claudine/cli/src/commands/wrap/harness_orch/loop_control/`, and the five existing research documents in this directory.
+
+Task 4 (2026-07-19) was grounded in live probes on this host (Ollama 0.32.1
+on :11434, oMLX 0.5.1 on :8000, LM Studio started briefly for `/api/v0`/
+`/api/v1` probes then restored), the local llama.cpp checkout
+(`tools/server/server.cpp` route table, `server-http.cpp:75` `Server`
+header), and official docs/source: vLLM `api_server.py` +
+docs.vllm.ai/en/latest/serving, LocalAI `core/http/app.go`, docs.sglang.ai,
+docs.docker.com/ai/model-runner, jan.ai/docs/desktop/api-server,
+lemonade-server.ai/docs + lemonade-sdk/lemonade releases (v10.1.0 port
+change), github.com/LostRuins/koboldcpp + lite.koboldai.net/koboldcpp_api.
