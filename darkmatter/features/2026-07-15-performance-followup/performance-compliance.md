@@ -171,3 +171,22 @@ objects. The threshold remains blocked solely on an admissible quiet-host
 capture.
 
 **Current verdict:** not established. Acceptance criteria 5 and 6 remain open.
+
+### 2026-07-20 — Review 10 assessment
+
+**Declined before capture; inadmissible host.** The review-10 assessment checked
+the host before attempting the committed three-arm harness. It reported load
+averages of **55.19** (1 minute), **131.94** (5 minutes), and **140.85**
+(15 minutes). A later reading rose to **93.97** (1 minute), **105.16**
+(5 minutes), and **125.72** (15 minutes). The host was also running another
+Cargo build in this worktree, so admissibility condition 1 was already violated
+by more than 27 times at the first reading. No benchmark was run and no
+threshold verdict was claimed from an inadmissible host.
+
+The three required build-arm SHAs
+(`51c1f16e10ffe825b56987573ba4eabc659c768e`,
+`e15b1cc22b113a9b24058207d760cd879fa62eb6`, and
+`92a3d502eb65c30205a9a255dd13dd8dc6d0aabf`) remain committed objects. The
+threshold remains blocked solely on two admissible quiet-host captures.
+
+**Current verdict:** not established. Acceptance criteria 5 and 6 remain open.
