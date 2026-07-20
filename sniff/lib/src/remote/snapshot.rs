@@ -7,7 +7,7 @@
 //! learn the default branch and then re-fetched the identical recursive tree, so a
 //! single report paid for the same evidence up to three times.
 //!
-//! See `sniff/features/2026-07-16-performance/phases/06-remote-network-and-subprocess/spec.md`.
+//! See `sniff/features/2026-07-16-performance/phases/_completed/06-remote-network-and-subprocess/spec.md`.
 
 use super::types::{DocumentCategory, DocumentRef, RepoMetadata};
 

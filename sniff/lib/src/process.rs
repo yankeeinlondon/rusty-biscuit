@@ -4,7 +4,7 @@
 //! single place that owns the deadline, the pipe draining, and process-tree
 //! termination/reaping, so a wedged or verbose child can never wedge a detection.
 //!
-//! See `sniff/features/2026-07-16-performance/phases/06-remote-network-and-subprocess/spec.md`
+//! See `sniff/features/2026-07-16-performance/phases/_completed/06-remote-network-and-subprocess/spec.md`
 //! for the contract this module implements.
 //!
 //! ## What tree termination guarantees

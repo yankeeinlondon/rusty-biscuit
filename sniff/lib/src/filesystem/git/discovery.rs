@@ -575,7 +575,7 @@ fn commit_trees(
 /// [`PathHistoryOptions::count`] matches does that.
 ///
 /// 10,000 is a policy default, not a measured optimum. See the Phase 5 sub-spec
-/// (`sniff/features/2026-07-16-performance/phases/05-git-observation/spec.md`)
+/// (`sniff/features/2026-07-16-performance/phases/_completed/05-git-observation/spec.md`)
 /// for why lowering it would make [`PathHistoryResult::limit_reached`] routine
 /// enough that callers learn to ignore it.
 pub const DEFAULT_PATH_HISTORY_SCAN_LIMIT: usize = 10_000;
