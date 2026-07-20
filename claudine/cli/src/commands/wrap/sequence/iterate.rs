@@ -28,6 +28,7 @@ use claudine::composition::{
     ResolvedCompositionSource, RuntimeState, SequencePlan, SequenceRunSummary, SequenceStepResult,
     SequenceTaskResult,
 };
+use claudine::diagnostics::DiagnosticSnapshot;
 use claudine::system_prompt::SystemPromptArgs;
 use color_eyre::eyre::Result;
 use serde_json::Value;
@@ -76,6 +77,14 @@ pub(super) enum StepOutcome {
     },
     Failed {
         message: String,
+        /// The failure's diagnostic identity, when its error chain carried one.
+        ///
+        /// Beside `message` rather than replacing it: the prose is compared
+        /// against the interrupt sentinel and rendered verbatim, while this
+        /// carries the facets the string discards (spec §D9).
+        /// Boxed to keep `StepOutcome` small — it is returned by value from
+        /// every step-running path.
+        snapshot: Option<Box<DiagnosticSnapshot>>,
         agent_perf: Option<crate::perf::AgentExecutionPerf>,
         compose_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
         tasks: Vec<SequenceTaskResult>,
@@ -153,19 +162,29 @@ pub(super) fn run_sequence_steps(
         let outcome = run_one_step(run, step_index, &runtime_state);
         let duration = start.elapsed();
 
-        let (success, error, provider, agent_perf, compose_perf, tasks) = match outcome {
+        let (success, error, error_snapshot, provider, agent_perf, compose_perf, tasks) =
+            match outcome {
             StepOutcome::Succeeded {
                 provider,
                 agent_perf,
                 compose_perf,
                 tasks,
-            } => (true, None, provider, agent_perf, compose_perf, tasks),
+            } => (true, None, None, provider, agent_perf, compose_perf, tasks),
             StepOutcome::Failed {
                 message,
+                snapshot,
                 agent_perf,
                 compose_perf,
                 tasks,
-            } => (false, Some(message), None, agent_perf, compose_perf, tasks),
+            } => (
+                false,
+                Some(message),
+                snapshot,
+                None,
+                agent_perf,
+                compose_perf,
+                tasks,
+            ),
             StepOutcome::Interrupted {
                 agent_perf,
                 compose_perf,
@@ -173,6 +192,7 @@ pub(super) fn run_sequence_steps(
             } => (
                 false,
                 Some("interrupted by SIGINT".to_string()),
+                None,
                 None,
                 agent_perf,
                 compose_perf,
@@ -208,6 +228,7 @@ pub(super) fn run_sequence_steps(
             name: step.name.clone(),
             success,
             error: error.clone(),
+            error_snapshot,
             duration,
             tasks: tasks.clone(),
         });
@@ -334,12 +355,18 @@ fn run_one_step(
                 "provider {} exited with code {}",
                 outcome.provider, outcome.exit_code
             ),
+            // The provider ran and exited non-zero; no typed error was raised.
+            snapshot: None,
             agent_perf: outcome.agent_perf,
             compose_perf,
             tasks: Vec::new(),
         },
         Err(error) => StepOutcome::Failed {
             message: error.to_string(),
+            // `Report` boxes its source rather than discarding it, so the typed
+            // diagnostic is still reachable by downcast here — the last point
+            // that has it.
+            snapshot: DiagnosticSnapshot::select(error.as_ref()).map(Box::new),
             agent_perf: None,
             compose_perf,
             tasks: Vec::new(),
@@ -477,6 +504,7 @@ impl StepOutcome {
     fn failed(error: &CompositionError) -> Self {
         StepOutcome::Failed {
             message: error.to_string(),
+            snapshot: DiagnosticSnapshot::select(error).map(Box::new),
             agent_perf: None,
             compose_perf: None,
             tasks: Vec::new(),

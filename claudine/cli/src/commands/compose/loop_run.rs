@@ -109,6 +109,10 @@ pub(crate) fn build_loop_iteration_output(
             exit_code: outcome.exit_code,
             reason,
             exit_reason: exit_reason.clone(),
+            // The provider ran and exited non-zero: `reason` is assembled from
+            // session_end fields, not raised as a typed error, so there is no
+            // chain to project from here.
+            snapshot: None,
         };
         claudine::composition::LoopIterationOutput::failure("", outcome.exit_code, error)
             .with_rate_limit(rate_limit)

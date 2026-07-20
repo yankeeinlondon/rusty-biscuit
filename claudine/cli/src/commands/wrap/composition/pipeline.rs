@@ -665,10 +665,7 @@ fn construct_argv_and_system_prompt(
 
         enforce_repo_launch_detection(
             request.repo,
-            request
-                .prep_launch_detection_error
-                .as_ref()
-                .map(|snapshot| snapshot.message.as_str()),
+            request.prep_launch_detection_error.as_ref(),
         )?;
         let mut launch_context = if let Some(prep) = request.prep_launch_context.as_ref() {
             // Phase fix (2026-05-09-slow-prep): reuse the launch_context computed

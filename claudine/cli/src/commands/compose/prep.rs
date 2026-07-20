@@ -24,6 +24,7 @@ use claudine::composition::{
     PrepareOptions, PreparedComposition, ResolvedCompositionSource, ResolvedExecutionTarget,
     SharedApprovalCache, SystemShellRunner, build_loop_seed_with_lifecycle, resolve_loop_config,
 };
+use claudine::diagnostics::DiagnosticSnapshot;
 use claudine::system_prompt::SystemPromptArgs;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use tracing::info_span;
@@ -608,6 +609,10 @@ fn build_and_run_loop(
                     exit_code: 1,
                     reason: e.to_string(),
                     exit_reason: None,
+                    // `Report` boxes its source rather than discarding it, so
+                    // the typed diagnostic the wiring raised is still reachable
+                    // by downcast here — the last point that has it.
+                    snapshot: DiagnosticSnapshot::select(e.as_ref()).map(Box::new),
                 }
             })?;
 

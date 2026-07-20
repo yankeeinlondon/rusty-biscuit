@@ -39,6 +39,7 @@ use claudine::composition::{
     PreparedComposition, ResolvedExecutionTarget, RuntimeState, SequenceTaskResult,
 };
 use claudine::composition::sequence::preflight::PreflightTask;
+use claudine::diagnostics::DiagnosticSnapshot;
 use claudine::composition::sequence::task::{
     PromptRunOutcome, PromptTaskRequest, PromptTaskRunner, SystemTaskShell, TaskExecution,
     TaskOutcome, TaskStatus,
@@ -74,8 +75,10 @@ pub(super) fn run_step_task(
     {
         Ok(state) => state,
         Err(source) => {
+            let error = CompositionError::PreFlightStateBuildFailed { source };
             return StepOutcome::Failed {
-                message: CompositionError::PreFlightStateBuildFailed { source }.to_string(),
+                message: error.to_string(),
+                snapshot: DiagnosticSnapshot::select(&error).map(Box::new),
                 agent_perf: None,
                 compose_perf,
                 tasks: Vec::new(),
@@ -179,6 +182,12 @@ pub(super) fn run_step_task(
                 .error
                 .as_ref()
                 .map_or_else(|| "task failed".to_string(), |d| d.message().to_string()),
+            // The task diagnostic already carries the projection `err.*` reads;
+            // reuse it rather than re-deriving a second, possibly divergent one.
+            snapshot: outcome
+                .error
+                .as_ref()
+                .and_then(|d| d.info.snapshot.clone()),
             agent_perf,
             compose_perf,
             tasks,
@@ -358,6 +367,10 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             task: request.reference.clone(),
             path: request.path.clone(),
             message: error.to_string(),
+            // `Report` boxes its source rather than discarding it, so the typed
+            // diagnostic the wrapper raised is still reachable by downcast here
+            // — the last point that has it.
+            snapshot: DiagnosticSnapshot::select(error.as_ref()).map(Box::new),
         })?;
 
         *self.record() = PromptRunRecord {
