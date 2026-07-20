@@ -32,7 +32,9 @@ use lsp_types::{
 
 use super::DocumentContext;
 use crate::graph::normalize_join;
-use crate::overlay::{FmEntry, FmValueKind, FrontmatterAst, SchemaAuthoringState, expressions};
+use crate::overlay::{
+    FmEntry, FmValueKind, FrontmatterAst, SchemaAuthoringState, doc_links, expressions,
+};
 use crate::overlay::schema::{MetaSchemaKind, semantic_type_regions};
 use crate::workspace::file_path_to_uri;
 
@@ -734,7 +736,7 @@ fn expr_completion_item(
         documentation: candidate.documentation.map(|value| {
             Documentation::MarkupContent(MarkupContent {
                 kind: MarkupKind::Markdown,
-                value,
+                value: doc_links::resolve(&value, ctx.path).into_owned(),
             })
         }),
         text_edit: Some(CompletionTextEdit::Edit(TextEdit {
@@ -1846,7 +1848,7 @@ fn markup_hover(ctx: &DocumentContext, span: SourceSpan, value: String) -> Optio
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
-            value,
+            value: doc_links::resolve(&value, ctx.path).into_owned(),
         }),
         range,
     })

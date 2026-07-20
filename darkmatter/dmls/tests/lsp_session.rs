@@ -3953,3 +3953,207 @@ fn standalone_outer_declaration_errors_are_shape_coded_and_precisely_ranged() {
 
     fixture.shutdown();
 }
+
+// ── Query-vocabulary documentation links ────────────────────────────────────
+
+/// Installs a copy of the real topic doc at its repository-relative location
+/// under `root`, so a resolved `file://` target lands on the same headings the
+/// shipped doc carries.
+fn install_topic_doc(root: &std::path::Path) -> std::path::PathBuf {
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../docs/topics/darkmatter-expressions.md");
+    let destination = root.join("darkmatter/docs/topics/darkmatter-expressions.md");
+    std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+    std::fs::copy(&source, &destination).expect("the shipped topic doc is readable");
+    destination
+}
+
+/// The first Markdown link destination in `markdown` whose target names the
+/// query-vocabulary anchor, if any.
+fn vocabulary_destination(markdown: &str) -> Option<String> {
+    let mut rest = markdown;
+    while let Some(open) = rest.find("](") {
+        let after = &rest[open + 2..];
+        let close = after.find(')')?;
+        let destination = &after[..close];
+        if destination.contains("provider-query-vocabulary") {
+            return Some(destination.to_string());
+        }
+        rest = &after[close..];
+    }
+    None
+}
+
+/// Asserts `destination` is an absolute `file://` URI whose path exists and
+/// whose fragment names a real heading in the file it points at — i.e. that
+/// following the link actually arrives at the vocabulary.
+fn assert_destination_navigates(destination: &str) {
+    assert!(
+        destination.starts_with("file:///"),
+        "the emitted target must be absolute, got `{destination}`"
+    );
+    let url = url::Url::parse(destination).expect("the emitted target parses as a URL");
+    let path = url
+        .to_file_path()
+        .expect("the emitted target converts back to a filesystem path");
+    assert!(path.is_file(), "the emitted target must exist: {path:?}");
+
+    let fragment = url.fragment().expect("the emitted target keeps its anchor");
+    let content = std::fs::read_to_string(&path).unwrap();
+    let resolved = content
+        .lines()
+        .filter_map(|line| line.strip_prefix("## "))
+        .any(|heading| github_slug(heading) == fragment);
+    assert!(
+        resolved,
+        "`#{fragment}` must resolve to a heading in {path:?}"
+    );
+}
+
+/// A GitHub-style heading slug — the anchor form an editor resolves.
+fn github_slug(heading: &str) -> String {
+    heading
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter_map(|c| match c {
+            ' ' => Some('-'),
+            c if c.is_ascii_alphanumeric() || c == '-' => Some(c),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The review-20 contract: the query-vocabulary target a client receives must
+/// be navigable from a document that is **not** a sibling of the topic doc.
+/// The authored `darkmatter-expressions.md#…` spelling is sibling-relative, so
+/// an editor resolves it against the active file; the response boundary must
+/// therefore hand back an absolute `file://` URI instead.
+#[test]
+fn vocabulary_link_resolves_from_a_document_outside_the_topic_directory() {
+    let workspace = tempfile::tempdir().unwrap();
+    install_topic_doc(workspace.path());
+
+    // Deliberately nested, and nowhere near `darkmatter/docs/topics/`.
+    let document = workspace.path().join("notes/deep/nested/page.md");
+    std::fs::create_dir_all(document.parent().unwrap()).unwrap();
+    let text = "# Notes\n\nRecent work: {{ pr_list(5) }}\n";
+    std::fs::write(&document, text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(&document).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    // Hover on the `pr_list` function name (D5).
+    let line = 2;
+    let character = text.lines().nth(line as usize).unwrap().find("pr_list").unwrap() as u32 + 1;
+    let hover = hover_markup(&mut fixture, uri.as_str(), line, character);
+    assert!(hover.contains("pr_list"), "{hover}");
+    let hovered = vocabulary_destination(&hover)
+        .unwrap_or_else(|| panic!("hover must carry a vocabulary link: {hover}"));
+    assert_destination_navigates(&hovered);
+
+    // Hover additionally answers the question inline, so the reader never has
+    // to follow the link at all.
+    assert!(hover.contains("**Query keys**"), "{hover}");
+    assert!(hover.contains("`target_branch`"), "{hover}");
+
+    // Completion documentation (D4) is the second promised surface.
+    let completion_text = "# Notes\n\nRecent work: {{ pr_li\n";
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [{ "text": completion_text }]
+        }),
+    );
+    let items = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 2, "character": 29 }
+            }),
+        )
+        .result
+        .expect("completions");
+    let items = items.as_array().expect("completion array");
+    let documented: Vec<&Value> = items
+        .iter()
+        .filter(|item| {
+            item["label"]
+                .as_str()
+                .is_some_and(|label| label.starts_with("pr_list("))
+        })
+        .collect();
+    assert!(!documented.is_empty(), "expected `pr_list` completions: {items:?}");
+    for item in documented {
+        let documentation = item["documentation"]["value"]
+            .as_str()
+            .unwrap_or_else(|| panic!("completion documentation: {item:?}"));
+        let target = vocabulary_destination(documentation).unwrap_or_else(|| {
+            panic!("completion documentation must carry a vocabulary link: {documentation}")
+        });
+        assert_destination_navigates(&target);
+    }
+
+    fixture.shutdown();
+}
+
+/// The complement: with no topic doc reachable from the document, no dead
+/// relative target may reach the client on either surface. The vocabulary is
+/// embedded in hover, so dropping the link costs the reader nothing.
+#[test]
+fn an_unshipped_topic_doc_yields_no_dead_link_on_either_surface() {
+    let workspace = tempfile::tempdir().unwrap();
+    let document = workspace.path().join("page.md");
+    let text = "# Notes\n\nRecent work: {{ cicd_list(5) }}\n";
+    std::fs::write(&document, text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(&document).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let character = text.lines().nth(2).unwrap().find("cicd_list").unwrap() as u32 + 1;
+    let hover = hover_markup(&mut fixture, uri.as_str(), 2, character);
+    assert!(hover.contains("cicd_list"), "{hover}");
+    assert!(
+        !hover.contains("darkmatter-expressions.md"),
+        "an unresolvable relative target must not reach the client: {hover}"
+    );
+    assert!(vocabulary_destination(&hover).is_none(), "{hover}");
+    // The reader still gets the vocabulary, which is the point of the link.
+    assert!(hover.contains("**Query keys**"), "{hover}");
+    assert!(hover.contains("`workflow`"), "{hover}");
+    assert!(hover.contains("provider query vocabulary"), "{hover}");
+
+    let completion_text = "# Notes\n\nRecent work: {{ cicd_li\n";
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [{ "text": completion_text }]
+        }),
+    );
+    let items = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 2, "character": 31 }
+            }),
+        )
+        .result
+        .expect("completions");
+    for item in items.as_array().expect("completion array") {
+        let documentation = item["documentation"]["value"].as_str().unwrap_or_default();
+        assert!(
+            !documentation.contains("darkmatter-expressions.md"),
+            "an unresolvable relative target must not reach the client: {documentation}"
+        );
+    }
+
+    fixture.shutdown();
+}

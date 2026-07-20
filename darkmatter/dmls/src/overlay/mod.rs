@@ -13,6 +13,7 @@
 //! touches the YAML parser or the schema library directly.
 
 pub mod directives;
+pub mod doc_links;
 pub mod expressions;
 pub mod frontmatter;
 pub mod schema;

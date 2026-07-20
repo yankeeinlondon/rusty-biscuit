@@ -331,12 +331,65 @@ pub fn format_ctx_hover_block(descriptor: &ContextVariableDescriptor) -> String 
 /// Carries the typed signature (e.g. `as_csv(list: any[]) -> string | error`)
 /// and the description. Used by the D5 function-call hover and available as the
 /// D4 completion documentation source.
+///
+/// The provider-query functions additionally carry
+/// [`query_vocabulary_block`]'s inline vocabulary, so hover answers the
+/// authoring question without navigation — including in a workspace where the
+/// linked topic doc does not ship. Completion documentation deliberately keeps
+/// only the (response-boundary–resolved) link: a completion popup is a
+/// one-line surface, not a reference table.
 pub fn format_function_block(descriptor: &ExpressionFunctionDescriptor) -> String {
-    format!(
+    let mut block = format!(
         "**`{}`**\n\n{}",
         descriptor.typed_signature(),
         descriptor.description
-    )
+    );
+    if let Some(vocabulary) = query_vocabulary_block(function_name(descriptor.signature)) {
+        block.push_str("\n\n");
+        block.push_str(vocabulary);
+    }
+    block
+}
+
+/// The compact authored-query vocabulary for `pr_list` / `cicd_list` — the keys,
+/// the closed enum values, and the bounds an author needs while typing a query
+/// object.
+///
+/// Kept in sync with the `## Provider Query Vocabulary` section of
+/// `docs/topics/darkmatter-expressions.md` by
+/// `embedded_vocabulary_matches_the_topic_doc`, which fails on any key or enum
+/// value that exists in one and not the other. That doc remains the authority
+/// for the prose; this is the summary that fits in a hover.
+fn query_vocabulary_block(function: &str) -> Option<&'static str> {
+    match function {
+        "pr_list" => Some(concat!(
+            "**Query keys** — `remote`, `state`, `draft`, `source_branch`, ",
+            "`target_branch`, `author`, `assignee`, `reviewer`, `labels`, ",
+            "`milestone`, `search`, `commit`, `created_after`, `created_before`, ",
+            "`updated_after`, `updated_before`, `sort`, `direction`, `limit`\n\n",
+            "**Enums** — `state`: `open`, `closed`, `merged` · ",
+            "`sort`: `created`, `updated`, `provider-default` · ",
+            "`direction`: `ascending`, `descending`\n\n",
+            "**Bounds** — `limit` defaults to 20, hard maximum 100; results are ",
+            "newest-first. Unknown keys, invalid enum values, inverted date ",
+            "ranges, and `sort: \"provider-default\"` combined with `direction` ",
+            "are rejected before any provider request.",
+        )),
+        "cicd_list" => Some(concat!(
+            "**Query keys** — `remote`, `statuses`, `name`, `stage`, `workflow`, ",
+            "`parent`, `branch`, `commit`, `actor`, `trigger`, `created_after`, ",
+            "`created_before`, `updated_after`, `updated_before`, `direction`, ",
+            "`limit`\n\n",
+            "**Enums** — `statuses`: `success`, `failed`, `cancelled`, `queued`, ",
+            "`running`, `manual`, `skipped` · ",
+            "`direction`: `ascending`, `descending`\n\n",
+            "**Bounds** — `limit` defaults to 20, hard maximum 100; results are ",
+            "newest-first. `stage` is honored only where the provider exposes ",
+            "stage data (GitLab). Unknown keys, invalid enum values, and ",
+            "inverted date ranges are rejected before any provider request.",
+        )),
+        _ => None,
+    }
 }
 
 /// The kind of an [`ExprCompletion`] candidate, so a caller can map it onto its
@@ -708,10 +761,145 @@ mod tests {
         }
     }
 
+    /// Hover must answer the authoring question on its own: the compact
+    /// vocabulary is inline, so no navigation — and no shipped topic doc — is
+    /// required to read the keys, enums, and bounds.
+    #[test]
+    fn list_query_hover_embeds_the_vocabulary_and_completion_does_not() {
+        for (name, expected_key) in [("pr_list", "`target_branch`"), ("cicd_list", "`workflow`")] {
+            let descriptor = function_descriptor(name).unwrap();
+            let block = format_function_block(descriptor);
+            assert!(block.contains("**Query keys**"), "{block}");
+            assert!(block.contains(expected_key), "{block}");
+            assert!(block.contains("**Enums**"), "{block}");
+            assert!(block.contains("hard maximum 100"), "{block}");
+        }
+        // The other function's keys never leak into this one's block.
+        assert!(!format_function_block(function_descriptor("pr_list").unwrap()).contains("`workflow`"));
+        assert!(!format_function_block(function_descriptor("cicd_list").unwrap()).contains("`draft`"));
+        // A non-query function carries no vocabulary at all.
+        assert!(!format_function_block(function_descriptor("length").unwrap()).contains("**Query keys**"));
+
+        // Completion documentation stays the one-line catalog description.
+        for candidate in completion_candidates("pr_list", &[]) {
+            let documentation = candidate.documentation.as_deref().unwrap_or_default();
+            assert!(!documentation.contains("**Query keys**"), "{documentation}");
+        }
+    }
+
+    /// The embedded vocabulary is a summary of
+    /// `docs/topics/darkmatter-expressions.md`, which stays the authority. A key
+    /// or enum value present in one and absent from the other is drift, and the
+    /// hover would then teach an authoring vocabulary the engine does not honor.
+    #[test]
+    fn embedded_vocabulary_matches_the_topic_doc() {
+        let doc = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../docs/topics/darkmatter-expressions.md"),
+        )
+        .expect("darkmatter-expressions.md should be readable");
+
+        for (function, section) in [
+            ("pr_list", "### `pr_list(query)` keys"),
+            ("cicd_list", "### `cicd_list(query)` keys"),
+        ] {
+            let start = doc.find(section).expect("vocabulary section exists");
+            let table = &doc[start..];
+            let end = table[section.len()..]
+                .find("\n### ")
+                .map(|offset| offset + section.len())
+                .unwrap_or(table.len());
+            let documented = table_keys(&table[..end]);
+            let embedded = backticked(query_vocabulary_block(function).expect("embedded block"));
+
+            for key in &documented {
+                assert!(
+                    embedded.contains(key),
+                    "`{key}` is documented for {function} but missing from the embedded vocabulary"
+                );
+            }
+            // Every embedded key must be a real one; the enum/bounds paragraphs
+            // reference keys the table also lists, so the check is symmetric.
+            for key in &embedded {
+                assert!(
+                    documented.contains(key) || is_enum_value_or_prose(key),
+                    "`{key}` is embedded for {function} but not documented in the topic doc"
+                );
+            }
+        }
+
+        // Closed enum values must agree with the doc's enum table.
+        let enums = doc
+            .find("### Closed enum values")
+            .map(|start| backticked(&doc[start..start + 600]))
+            .expect("closed enum table exists");
+        for value in ["open", "closed", "merged", "created", "updated", "provider-default",
+            "ascending", "descending", "success", "failed", "cancelled", "queued",
+            "running", "manual", "skipped"]
+        {
+            assert!(
+                enums.iter().any(|found| found == value),
+                "`{value}` missing from the doc's enum table"
+            );
+            let blocks = format!(
+                "{}{}",
+                query_vocabulary_block("pr_list").unwrap(),
+                query_vocabulary_block("cicd_list").unwrap()
+            );
+            assert!(blocks.contains(value), "`{value}` missing from the embedded enums");
+        }
+    }
+
+    /// The key names in the first column of a Markdown key table — a row's
+    /// leading cell, which may name a pair (`created_after` / `created_before`).
+    /// The section heading is not a row, so its own backticks stay out.
+    fn table_keys(section: &str) -> Vec<String> {
+        section
+            .lines()
+            .filter(|line| line.starts_with('|'))
+            .filter_map(|line| line.split('|').nth(1))
+            .flat_map(backticked)
+            .collect()
+    }
+
+    /// Every backtick-quoted token in `text`, deduplicated.
+    fn backticked(text: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut rest = text;
+        while let Some(open) = rest.find('`') {
+            let after = &rest[open + 1..];
+            let Some(close) = after.find('`') else { break };
+            let token = &after[..close];
+            if !token.is_empty() && !found.iter().any(|seen: &String| seen == token) {
+                found.push(token.to_string());
+            }
+            rest = &after[close + 1..];
+        }
+        found
+    }
+
+    /// Tokens the embedded block quotes that are enum values or bound examples
+    /// rather than query keys — they are checked against the doc's enum table
+    /// and prose separately.
+    fn is_enum_value_or_prose(token: &str) -> bool {
+        matches!(
+            token,
+            "open" | "closed" | "merged"
+                | "created" | "updated" | "provider-default"
+                | "ascending" | "descending"
+                | "success" | "failed" | "cancelled" | "queued" | "running" | "manual" | "skipped"
+                | "sort: \"provider-default\""
+        )
+    }
+
     /// The spec requires function hover to link to the authored query
     /// vocabulary. Both promised surfaces — D5 hover and D4 completion
     /// documentation — must carry the link for `pr_list` and `cicd_list`.
     /// Both emit `MarkupKind::Markdown`, so the Markdown link renders.
+    ///
+    /// This asserts the *authored* spelling, which is what the catalog carries.
+    /// [`crate::overlay::doc_links`] rewrites it to a resolvable target at the
+    /// LSP response boundary; `tests/lsp_session.rs` proves that end of it.
     #[test]
     fn list_query_functions_link_to_the_vocabulary_in_hover_and_completion() {
         const LINK: &str = "(darkmatter-expressions.md#provider-query-vocabulary)";
