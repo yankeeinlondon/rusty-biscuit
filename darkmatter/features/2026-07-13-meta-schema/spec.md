@@ -1,7 +1,7 @@
 ---
 status: ready for planning and implementation
 reviewed: true
-review_iterations: 2
+review_iterations: 3
 reviewed_by: codex/default
 reviewed_on: 2026-07-14
 rulings: "`type-definition` and `schema` semantic types ruled by Ken 2026-07-13"
@@ -749,6 +749,81 @@ accepts only a closed subset of bare names rather than arbitrary definitions.
     imports named `schema` or `type-definition` continue to parse.
 13. L1 and L2 coverage passes through `just test` and `just test-l2`; the
     implementation remains portable across macOS, Windows, and Linux.
+    Subject to the scoped exception below, which is **proposed and awaiting
+    ratification** — it is not yet approved and does not yet relax AC13.
+
+### Proposed scoped exception to AC13 (awaiting ratification)
+
+**Status: PROPOSED — not approved. Ken ratifies scope exceptions.**
+
+`just test` is green. `just test-l2` is red on exactly three tests, all in
+`darkmatter/cli/tests/level2_code_block_styling.rs`:
+
+- `level2_code_block_inverts_to_light_in_dark_terminal`
+- `level2_default_code_block_inverts_background_and_foreground`
+- `level2_code_block_clears_inherited_dim_before_theme_colors`
+
+The exception covers **these three named tests only**. AC13 is otherwise
+unchanged and is not weakened for any other test, tier, or crate.
+
+**Why they are outside meta-schema execution paths.** This feature changes
+schema parsing, lowering, validation, and DMLS semantic paths. It changes no
+rendering code: `git diff main...HEAD` reports zero changes under
+`darkmatter/lib/src/markdown/render/` and `darkmatter/lib/src/markdown/highlighting/`,
+and `darkmatter/cli/tests/level2_code_block_styling.rs` is byte-identical to
+`main`. The three failures reproduce on `main` and are pre-existing.
+
+**Why they are a test-staging defect, not a product defect.** All three assert
+the same contract — a dark terminal must render a light (inverted) code panel —
+and all three stage that terminal with `COLORFGBG='15;0'` under the **WezTerm**
+harness. That staging no longer works. `query_osc_color_with_timeout`
+(`biscuit-terminal/lib/src/discovery/osc_queries/query.rs`) attempts a live
+OSC-11 query first for `TerminalApp::Wezterm` when no multiplexer is present,
+and returns on success — so `COLORFGBG` is never consulted in a WezTerm pane.
+Under tmux the OSC query is skipped and `COLORFGBG` is honored. The same file
+already documents this for the mirror direction and abandoned its
+light-terminal test for exactly this reason; the dark direction has since
+become invalid the same way.
+
+**Evidence the contract itself is green.** The inversion rule is verified at
+two independent levels that both pass:
+
+- L1: `resolve_for_surface_inverts_default_dark_terminal_to_light_panel` and
+  `resolve_for_surface_inverts_default_light_terminal_to_dark_panel`
+  (`darkmatter/lib/src/markdown/highlighting/resolve.rs`).
+- L2 under the tmux harness, with exact OneHalf RGB assertions in both
+  directions: `level2_schema_about_dark_terminal_uses_light_code_theme` and
+  `level2_schema_about_light_terminal_uses_dark_code_theme`.
+- L2 in the library tier: `level2_page_code_panel_is_contiguous_inverted_rectangle`.
+
+**Evidence the meta-schema-relevant L2 slices pass** (2026-07-19, this host):
+
+- Darkmatter library L2 — 18/18 passed.
+- `schema about` CLI L2 — 3/3 passed.
+- DMLS L2 — 3/3 passed.
+- Canonical `just test-l2`, `--no-fail-fast`: library 18/18; CLI 66/69;
+  DMLS 3/3 (run separately — the canonical run aborts in the CLI tier before
+  reaching it). Total 87/90, with the only 3 failures being those named above.
+
+**Repair path (deliberately not taken here).** Restage the three tests on the
+tmux harness, as `level2_schema_about` already does, or fold their coverage
+into it. That requires porting `run_md_env` / `run_md_after_shell_prefix` in
+`darkmatter/cli/tests/common/level2.rs` to tmux — a shared helper used by the
+whole 69-test CLI L2 corpus. Doing that inside this feature would violate the
+repository's surgical-changes rule and put the entire CLI L2 tier at risk for
+a defect this feature did not introduce. It belongs with the already-filed
+`darkmatter/features/_unscheduled/wezterm-sgr-race-test-fixes/spec.md`, which
+already names this test family and `max_bg_luma_on_line` as fragile.
+
+**Separately noted, not currently failing.**
+`darkmatter/cli/tests/level2_errors.rs` runs `md compose` as a bare command
+through the pane `PATH` (lines 98, 135, 180) instead of the `md_shim` that
+`common/level2.rs` adopted so Level 2 can never pass against a stale
+host-installed `md`. All 8 `level2_errors` tests pass on this host because a
+host `md` is installed and on the pane `PATH`. The review-3 observation of
+`md`-not-found harness failures did not reproduce in a clean canonical run.
+This is a latent hazard rather than an active failure, and is out of scope
+for this feature.
 
 ## Ruled Design Questions
 

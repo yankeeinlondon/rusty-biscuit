@@ -3,9 +3,170 @@ feature: 2026-07-13-meta-schema
 description: "Implementation log for the meta-schema feature's review-to-implement cycles"
 deferred_perf_measurement: false
 implementation_2: "2026-07-18T09:03:32-07:00"
+implementation_3: "2026-07-19T21:33:53-07:00"
 ---
 
 # Meta Schema — Implementation Log
+
+## Implementation of Review Findings #3
+
+> **started at:** 2026-07-19T21:33:53-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-13-meta-schema/review-3.md'
+- this is iteration 3 of the review-to-implement cycle
+- a prior attempt on this same iteration was interrupted mid-Finding-1; its partial
+  library edits are present in the working tree and are carried forward rather than
+  reverted (see the resumed-state notes below)
+- the review contains **3** findings:
+        - **High** — Standalone schema documents bypass declaration-level reference validation
+        - **High** — DMLS still reconstructs semantic paths instead of consuming structural paths
+        - **Medium** — The canonical Level-2 release gate is still red (unrelated CLI rendering tests)
+- impacted package area (per the spec's implementation surface map): `darkmatter`,
+  covering the `darkmatter` lib, `darkmatter-cli`, and `dmls` crates — so
+  `just test` / `just lint` from that area is the verification scope
+
+### Resumed state carried forward from the interrupted attempt
+
+- `SchemaDeclaration` gained `PartialEq`; `SchemaReference` got a hand-written
+  `PartialEq` keyed on `(kind, file_reference.raw())` because resolution-time
+  `FileReference` state is not part of a freshly classified reference's identity
+- `parse_standalone_schema_payload_with_source` now returns
+  `SourceAware<SchemaDeclaration>` via `parse_schema_declaration` instead of
+  `SourceAware<SimplifiedSchema>` via `parse_yaml_schema`
+- `StandaloneSchemaDocument.schema` (field) became `.declaration` with a
+  `.schema()` accessor returning `Option<&SimplifiedSchema>`
+- the pure-payload mapping/sequence carrier guard was removed so a scalar
+  reference reaches the declaration parser
+- downstream `dmls` consumers were **not** yet migrated when the attempt was
+  interrupted, so the area is expected to be red on entry
+
+### Prior (interrupted) attempt log
+
+> **started at:** 2026-07-19T21:12:27-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-13-meta-schema/review-3.md'
+- this is iteration 3 of the review-to-implement cycle
+- the review contains **3** findings:
+        - **High** — Standalone schema documents bypass declaration-level reference validation
+        - **High** — DMLS still reconstructs semantic paths instead of consuming structural paths
+        - **Medium** — The canonical Level-2 release gate is still red (unrelated CLI rendering tests)
+- impacted package area (per the spec's implementation surface map): `darkmatter`, covering the `darkmatter` lib, `darkmatter-cli`, and `dmls` crates — so `just test` / `just lint` from that area is the verification scope
+- findings are implemented serially:
+        1. High — standalone declaration-parser parity
+        2. High — DMLS structural path consumption
+        3. Medium — canonical L2 gate (repair or formally scope AC13)
+
+### Finding 1 (High) — Standalone declaration-parser parity
+
+- starting the work on 'standalone-declaration-parser-parity' at 21:16:19-07:00
+- resumed the work on 'standalone-declaration-parser-parity' at 21:35:12-07:00
+        - carried forward the interrupted attempt's edits to `reference.rs`, `simplified/mod.rs`, `simplified/source.rs`, and `simplified/standalone.rs` rather than reverting them, and completed the `.schema` field → `.declaration` / `.schema()` migration across every downstream consumer
+        - ran GitNexus upstream impact analysis before editing; all three key symbols returned **HIGH** risk — `parse_standalone_schema_document` (55 impacted, 5 direct, across Overlay/Diagnostics/Schemas/Providers), `StandaloneSchemaDocument` (35 impacted), `parse_standalone_schema_payload_with_source` (35 impacted). No CRITICAL, and no execution flows were reported affected
+        - discovered the compile breaks extended beyond the two known `resolve.rs` sites to five call sites total: `resolve.rs:382`/`:924`, `dmls/src/providers/frontmatter.rs:394`/`:1025`, plus unit tests in `dmls/src/overlay/schema.rs` and `dmls/src/overlay/mod.rs` and integration test `lib/tests/suggest_constraint_phase4.rs`
+        - decided `resolve.rs:382` (`parse_yaml_referenced_file`) routes a whole-file reference through the existing `resolve_reference`, matching how root-union `FileRef` arms already resolve, so the target file becomes the origin and the dependency edge
+        - decided `resolve.rs:924` (`load_named_types`) returns an explicit `SchemaDocument` error ("whole-file reference schema documents cannot supply named imports") rather than following the chain, since imports are defined only among a file's own top-level entries; this mirrors the sibling root-union error instead of papering over `None`
+        - decided the two DMLS provider sites treat `schema() == None` as an active-but-empty document: a whole-file reference contributes no passive namespace names and no semantic type regions, and is deliberately **not** malformed
+        - discovered `dmls/src/diagnostics/frontmatter.rs` (`standalone_declaration_diagnostic`) already routed scalar and sequence payloads through `parse_schema_declaration`, so the DMLS diagnostic layer was already correct — the inconsistency was solely in the library parse path, which is why `$schema: "   "` already produced `invalid_schema_shape` while `$schema: ["   "]` produced nothing
+        - detected a retired-contract test: `suggest_constraint_phase4.rs::claimed_malformed_envelopes_are_schema_document_errors` asserted `$schema: string` is malformed, but under declaration-parser parity `string` is a valid bare-name reference — the same thing inline `$schema: myschema` means — so rejecting it would reintroduce the exact inline/standalone divergence this finding is about. Removed that case, added `pure_scalar_payloads_are_whole_file_references` documenting the deliberate contract change, and added `types: ./other.yaml` to the malformed list to pin tagged mapping-only enforcement
+        - diagnosed `cargo fmt --check` as an unusable signal in this area: it reports drift in files never touched by this work (`dmls/src/bench.rs`, `dmls/src/capabilities.rs`), confirming the local-rustfmt-vs-`main` drift `CLAUDE.md` warns about. No write-mode formatting was run; new code was hand-matched to surrounding style and verified only against `just lint`
+- work completed for 'standalone-declaration-parser-parity' at 22:06:07-07:00
+        - added five Level-1 library parser tests to `lib/tests/meta_schema_phase6.rs` covering the valid scalar reference (asserting the exact `FileReference` span `9..21` and `PathQualified` kind), whitespace-only scalar and arm, remote scalar and arm, mixed valid/invalid union, tagged mapping-only enforcement, and a valid all-reference root union
+        - added one Level-1 in-memory LSP test `standalone_reference_declarations_match_the_shared_declaration_parser` to `dmls/tests/lsp_session.rs` asserting exact LSP diagnostic ranges over the offending arm for the invalid cases and zero schema diagnostics for the two valid cases; every fixture target is a non-existent path or a remote URL, so a passing run is itself evidence that no I/O occurs
+        - gates: `just build` **PASS**; `just test` **PASS** (darkmatter 5,920/5,920, darkmatter-cli 561/561, dmls 606/606, 214 skipped); `just lint` **PASS** (clippy `-D warnings` clean)
+        - **surfaced a separate pre-existing defect (not fixed here).** A self-referential whole-file schema reference stack-overflows the process: `a.yaml` containing `$schema:\n  - ./a.yaml` aborts with `fatal runtime error: stack overflow` on the **existing** contract, independent of this change — `resolve_standalone_root_union` recurses through `resolve_reference` → `load_schema_from_path` with no cycle guard (`MAX_IMPORT_DEPTH` guards only named-type import expansion). This change makes the scalar shape `$schema: ./a.yaml` reach the same unguarded loop. Left unfixed under surgical-change discipline; it warrants its own finding, since a fix means threading a visited-set or depth bound through `load_schema_from_path` / `parse_yaml_referenced_file` / `resolve_standalone_schema` / `resolve_standalone_root_union` / `resolve_reference` — all HIGH-risk symbols
+
+### Finding 2 (High) — DMLS structural path consumption
+
+- starting the work on 'dmls-structural-path-consumption' at 22:07:41-07:00
+        - recorded GitNexus upstream impact before editing: `frontmatter_authoring` is **HIGH** risk (40 impacted symbols, 1 direct caller, 3 modules — Overlay direct, Diagnostics and Providers indirect); `enclosing_path` LOW (27 impacted, 4 direct); `standalone_type_definition_diagnostic` LOW (3 impacted); `entry_at_offset` LOW (0 impacted). The HIGH-risk change is fully covered by the DMLS suite, which is green
+        - added the missing structural accessors to `FrontmatterAst` (`dmls/src/overlay/frontmatter.rs`) rather than reconstructing paths in the providers: `entry_by_key_path`, `key_path_at`, `key_path`, `index_of`, `container_at_offset`, `enclosing_key_path`, `children_of_key_path`, `key_entry_on_line`, `child_entry`, plus a shared `pointer_for` RFC-6901 builder. `entry_by_dotted` was kept but documented as usable only for the library contracts that already hand DMLS a dotted string (`style:` warnings)
+        - **defect 1 — semantic activation:** `overlay/schema.rs:frontmatter_authoring` now walks `ast.key_path_at(index)` instead of `entry.dotted.split('.')`, so a property named `build.target` resolves as one key and activates its declared `type-definition`/`schema` behavior. The `$schema` descendant skip became a structural path check rather than a `"/$schema/"` pointer-prefix string test
+        - **defect 2 — completion:** `providers/frontmatter.rs` gained `value_cursor` (owner key + value partial taken from the authored entry, so `"build.target"` and `"host: port"` are not split at a raw `:`) and rewired `enclosing_path` onto `ast.container_at_offset`, so a quoted `"$schema"` ancestor now decodes to the reserved `$schema` path. The reverse line scan (`enclosing_path_by_indent`) survives only as the fallback for a cursor no still-placed AST entry describes
+        - chose per-entry staleness verification over a blanket `overlay.stale` veto: `still_placed` re-reads the entry's key token at its recorded span and compares it to the decoded key, so a malformed edit elsewhere in the frontmatter block leaves untouched keys structurally owned instead of surrendering every structural answer at once. A span that has genuinely moved is rejected rather than trusted
+        - **defect 3 — standalone inner-definition diagnostics:** `diagnostics/frontmatter.rs` replaced `format!("{payload_key}.{key}")` with `entry_by_key_path(&[payload_key, key])`. Two sibling dotted-format lookups in the same file (`$schema.{property}` prepare ranging, and the nested-property range in `semantic_problem_range`) were converted to `entry_by_key_path` / `child_entry` for the same reason
+        - extended the fix past the three named sites to the same defect class, per the review's "use those products end-to-end" instruction: `present_child_keys` now uses structural parentage instead of a dotted-prefix strip; `expression_values`, `schema_file_targets`, and `schema_hover` take `key_path_at`/`key_path` instead of `dotted.split('.')`; the `ctx.*` hover discriminator is a path check instead of a `dotted.starts_with("ctx.")` test; and `graph/substrate.rs:inline_schema_file_keys` uses structural parentage instead of `dotted.starts_with("$schema.")`
+- work completed for 'dmls-structural-path-consumption' at 22:39:12-07:00
+        - added four Level-1 in-memory LSP regressions to `dmls/tests/lsp_session.rs` covering everything the review demanded: quoted `"$schema"` as an ancestor, keys containing `.`, `:`, `/`, and `~` (with `~0`/`~1` pointer round-trip), nested mappings, CRLF (each completion case runs under both LF and CRLF), and a malformed current buffer retaining last-good semantic ownership of untouched keys
+        - verified the new tests are **not vacuous**: with the four fix sites temporarily reverted in place, all four fail; restored, all four pass. The standalone-diagnostic case initially passed against the old code because a dotted join and `format!("{payload}.{key}")` coincide for a single dotted key, so the fixture was strengthened to the collision the dotted spelling is actually blind to — a nested `build: {target: …}` authored alongside a flat `"build.target": …`, where the dotted lookup ranged the valid sibling instead of the rejected definition
+        - no existing test encoded the retired text-derived contract as a behavior assertion. One unit test, `test_enclosing_path_builds_full_ancestor_chain`, was renamed to `test_enclosing_path_by_indent_builds_full_ancestor_chain` to follow the indentation walk to its new name; its assertions are unchanged and it now covers the fallback rather than the primary path
+        - gates: `just build` **PASS**; `just test` **PASS** (darkmatter 5,920/5,920, darkmatter-cli 561/561, dmls **611/611**); `just lint` **PASS**. dmls went 606 → 611 (+4 LSP regressions, +1 unit test); no test was weakened or deleted
+        - orchestrator independently re-verified with `cargo check -p dmls --all-targets` (clean) after a stale mid-edit rust-analyzer diagnostic reported a type error at `providers/frontmatter.rs:500`
+
+### Finding 3 (Medium) — Canonical Level-2 release gate
+
+- starting the work on 'canonical-l2-release-gate' at 22:40:23-07:00
+        - confirmed the three failures are **deterministic, not load artifacts**: reproduced 4/4 retries at ~2s each with host load down at 8 (load was 18/66/74 at the start of the investigation and settled during it)
+        - established the failures are **pre-existing on `main`**: `git diff main...HEAD` shows zero changes under `darkmatter/lib/src/markdown/render/` and `markdown/highlighting/`, and `level2_code_block_styling.rs` is byte-identical to `main`
+        - identified a single shared root cause for all three failures in `level2_code_block_styling.rs`: the code panel renders dark (luma 25/44) where a light inverted panel (>175) is asserted
+        - attributed the defect to **test staging, not product code**. `query_osc_color_with_timeout` (`biscuit-terminal/lib/src/discovery/osc_queries/query.rs:69-113`) attempts a live OSC-11 query first for `TerminalApp::Wezterm` when no multiplexer is present and returns on success, so `COLORFGBG` is never consulted in a WezTerm pane; under tmux the query is skipped and `COLORFGBG` is honored. The test file's own comment already documents this and had abandoned its light-terminal mirror for exactly this reason — the dark direction has since gone the same way
+        - confirmed the inversion contract is green at three independent points, which is what rules out a product defect:
+                - L1 `resolve_for_surface_inverts_default_dark_terminal_to_light_panel`
+                - library L2 `level2_page_code_panel_is_contiguous_inverted_rectangle`
+                - tmux-staged L2 `level2_schema_about_{dark,light}_terminal_uses_*_code_theme`, with exact OneHalf RGB assertions in **both** directions
+        - found the review's `md`-not-found harness failures **did not reproduce**: all 8 `level2_errors` tests passed in a clean canonical run
+        - recorded the underlying latent hazard behind that reported failure: `level2_errors.rs` invokes bare `md compose` through the pane `PATH` (lines 98, 135, 180) instead of the `md_shim` that `common/level2.rs` adopted specifically so L2 cannot pass against a stale host binary. It passes here only because a host `md` is installed
+        - declined to repair the gate under Rule 3 (surgical changes): restaging the three tests onto tmux requires porting `run_md_env` / `run_md_after_shell_prefix` in the shared `common/level2.rs` helper that backs all 69 CLI L2 tests, which is non-trivial work in code paths unrelated to meta-schema and would put the entire CLI L2 tier at risk for a defect this feature did not introduce
+        - routed the repair to the already-filed `_unscheduled/wezterm-sgr-race-test-fixes/spec.md`, which names this exact test family
+- work completed for 'canonical-l2-release-gate' at 22:55:12-07:00
+        - added a **proposed** scoped AC13 exception to `spec.md` naming exactly the three excepted tests, their out-of-scope justification, the contract-is-green evidence, the passing-slice evidence, the repair path, and the `level2_errors` note. AC13 is not relaxed for anything else
+        - the exception is marked **PROPOSED — not approved, awaiting Ken's ratification**. Until it is ratified, AC13 is formally unmet and the feature cannot claim the area-level release gate is green
+        - gates after the change: `just test` **PASS** (5,920/5,920, 561/561, 611/611); `just lint` **PASS**; darkmatter library L2 **18/18**; `schema about` CLI L2 **3/3**; DMLS L2 **3/3**
+        - canonical `just test-l2` remains **red at 87/90** (library 18/18, CLI 66/69, DMLS 3/3 — run separately because the canonical run aborts in the CLI tier). This is reported honestly and is **not** claimed green
+
+### Successful Completion
+
+The implementation of review cycle 3 has completed successfully in 1 hour and 22 minutes. During this implementation all 3 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 1 was deferred (see reasons below):
+
+- **Medium — The canonical Level-2 release gate is still red** — deferred as a
+  **proposed scoped AC13 exception** rather than repaired. The three failing
+  tests (`level2_code_block_clears_inherited_dim_before_theme_colors` and two
+  siblings in `level2_code_block_styling.rs`) are pre-existing on `main`,
+  outside every meta-schema execution path, and caused by WezTerm-harness test
+  staging that the single-source color-mode resolver invalidated — not by
+  product code. The inversion contract they claim to test is proven green at L1,
+  in the library L2 tier, and under the tmux L2 harness with exact RGB
+  assertions in both directions. Repairing the gate requires converting
+  `run_md_env` / `run_md_after_shell_prefix` in the shared `common/level2.rs`
+  helper that backs all 69 CLI L2 tests from WezTerm to tmux — non-trivial
+  out-of-scope work that would risk the entire CLI L2 tier under Rule 3. It is
+  routed to the pre-existing `_unscheduled/wezterm-sgr-race-test-fixes/spec.md`.
+  **This deferral requires Ken's ratification of the proposed exception; until
+  then AC13 is formally unmet.**
+
+> **Note:** no performance measurement was required or deferred by this review,
+> so `deferred_perf_measurement` remains `false`.
+
+Two defects were surfaced during this cycle that are **out of scope for this
+review** and warrant their own findings:
+
+- **Unbounded whole-file schema-reference recursion (crash).** A self-referential
+  standalone schema reference stack-overflows the process on the pre-existing
+  contract; Finding 1 makes the scalar shape reach the same unguarded loop. A fix
+  means threading a visited-set or depth bound through five HIGH-risk resolver
+  symbols.
+- **`level2_errors.rs` bypasses the `md_shim`.** It invokes bare `md compose`
+  through the pane `PATH`, so it can pass against a stale host-installed binary
+  rather than the build under test.
+
+The files changed by this implementation cycle are:
+
+- `darkmatter/lib/src/markdown/schemas/reference.rs`
+- `darkmatter/lib/src/markdown/schemas/resolve.rs`
+- `darkmatter/lib/src/markdown/schemas/simplified/mod.rs`
+- `darkmatter/lib/src/markdown/schemas/simplified/source.rs`
+- `darkmatter/lib/src/markdown/schemas/simplified/standalone.rs`
+- `darkmatter/lib/tests/meta_schema_phase6.rs`
+- `darkmatter/lib/tests/suggest_constraint_phase4.rs`
+- `darkmatter/dmls/src/overlay/frontmatter.rs`
+- `darkmatter/dmls/src/overlay/schema.rs`
+- `darkmatter/dmls/src/overlay/mod.rs`
+- `darkmatter/dmls/src/providers/frontmatter.rs`
+- `darkmatter/dmls/src/diagnostics/frontmatter.rs`
+- `darkmatter/dmls/src/graph/substrate.rs`
+- `darkmatter/dmls/tests/lsp_session.rs`
+- `darkmatter/features/2026-07-13-meta-schema/spec.md`
+- `darkmatter/features/2026-07-13-meta-schema/log.md`
+- `darkmatter/features/2026-07-13-meta-schema/review-3.md`
 
 ## Implementation of Review Findings #2
 
