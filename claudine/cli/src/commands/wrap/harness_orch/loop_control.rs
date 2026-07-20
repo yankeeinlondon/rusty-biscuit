@@ -375,6 +375,18 @@ struct ExecutedHarnessAttempt {
     materialized: MaterializedHarnessPrompt,
     outcome: claudine::harness::AttemptOutcome,
     iteration_signals: Option<IterationSummarySignals>,
+    /// The provider this attempt actually spawned, carried out of the per-attempt
+    /// bundle rather than re-read from the invocation-fixed `state.run`.
+    ///
+    /// Terminal recovery negotiates against the live session this attempt opened,
+    /// so it must ask *this* provider's profile whether a `resume` is admissible
+    /// (`WrapperProfile::supports_resume`) and name *this* provider in the
+    /// unowned-hand-off diagnostic. After a Goose → Codex retry the invocation
+    /// still says Goose, which would refuse a resume Codex supports — and admit
+    /// one in the reverse direction that fails at spawn (review-10 finding 3).
+    provider: Provider,
+    /// The profile paired with [`Self::provider`], from the same bundle.
+    profile: &'static dyn crate::commands::wrap::profile::WrapperProfile,
 }
 
 enum PhaseResult<T> {
@@ -1462,6 +1474,12 @@ fn execute_attempt_phase(
     // structured-stderr suppression, the Codex output artifact, and the
     // dispatch context) and the session-compatibility key below. There is no
     // invocation-fixed launch state left for the key to disagree with.
+    //
+    // `rebuilt` must stay bound as a whole for the rest of this function: it
+    // owns the system-prompt temp files a provider-move re-delivery wrote, and
+    // the argv/environment below name only their paths. Moving its fields out
+    // piecemeal would drop those artifacts here and delete the files the child
+    // is about to read (review-10 finding 4).
     let AttemptDocument {
         materialized,
         launch: rebuilt,
@@ -1683,15 +1701,19 @@ fn execute_attempt_phase(
     }
 
 
-    Ok(ExecutedHarnessAttempt { materialized, outcome, iteration_signals })
+    Ok(ExecutedHarnessAttempt {
+        materialized,
+        outcome,
+        iteration_signals,
+        provider,
+        profile,
+    })
 }
 
 fn classify_attempt_phase(
     state: &mut HarnessLoopState<'_, '_>,
     executed: ExecutedHarnessAttempt,
 ) -> Result<LoopStep> {
-    let provider = state.run.provider;
-    let profile = state.run.profile;
     let child_cwd = state.run.child_cwd;
     let repo_root = state.run.repo_root;
     let show_checks = state.run.show_checks;
@@ -1705,7 +1727,16 @@ fn classify_attempt_phase(
     let active = &mut state.active;
     let coordinator = &mut state.coordinator;
     let loop_start = state.loop_start;
-    let ExecutedHarnessAttempt { materialized, outcome, iteration_signals } = executed;
+    // R8 — the executed attempt's own provider/profile, never `state.run`'s.
+    // Every recovery decision below negotiates over the session this attempt
+    // opened, so the capability that gates it has to be the one that opened it.
+    let ExecutedHarnessAttempt {
+        materialized,
+        outcome,
+        iteration_signals,
+        provider,
+        profile,
+    } = executed;
     if outcome.termination == claudine::harness::ProcessTermination::Interrupted {
         // Surface the interrupt to the user before we let the guard
         // close: without this the wrapper would silently return 130

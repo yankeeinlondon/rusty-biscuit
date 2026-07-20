@@ -108,6 +108,11 @@ struct EnvironmentPhase {
     /// to produce [`crate::commands::wrap::launch_plan::LaunchPlanInputs::provider_env_baseline`],
     /// the invocation-neutral base a per-attempt rebuild restores from.
     pre_provider_env: std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
+    /// R6/R8 — the ambient credential environment and explicit `--include`
+    /// intent, captured before the opening profile's allow-list narrowed it. A
+    /// per-attempt rebuild re-sanitizes this for its own profile; see
+    /// [`crate::commands::wrap::launch_plan::CredentialPolicyInputs`].
+    credential_policy: crate::commands::wrap::launch_plan::CredentialPolicyInputs,
 }
 
 struct CommandPhase {
@@ -413,6 +418,14 @@ fn prepare_environment_and_mcp(
         let needs_repo_shadow_home = request.repo;
         let raw_agent_params: Vec<String> = std::env::args().skip(1).collect();
         let yolo_enabled = request.yolo;
+        // Taken before the allow-list runs: once `build_child_env_with_launch`
+        // has sanitized for this profile, a credential it stripped is
+        // unrecoverable, and a rebuild onto a provider entitled to it could only
+        // guess.
+        let credential_policy = crate::commands::wrap::launch_plan::CredentialPolicyInputs {
+            ambient: env::ambient_sensitive_env(),
+            explicit_include: env::validate_include_names(&request.include)?,
+        };
         let mut env_plan = env::build_child_env_with_launch(
             profile,
             provider,
@@ -629,6 +642,7 @@ fn prepare_environment_and_mcp(
             mcp_rebuild,
             opencode_config_base,
             pre_provider_env,
+            credential_policy,
         })
     })())
 }
@@ -664,6 +678,7 @@ fn construct_argv_and_system_prompt(
             mcp_rebuild,
             opencode_config_base,
             pre_provider_env,
+            credential_policy,
         } = environment;
         let silent = request.silent;
         let quiet = request.quiet;
@@ -1035,6 +1050,7 @@ fn construct_argv_and_system_prompt(
                 system_prompt_scoped_tmp: scoped_tmp.clone(),
                 sandbox_requested: request.sandbox,
                 provider_env_baseline,
+                credential_policy: credential_policy.clone(),
                 has_model_env: env_plan
                     .env
                     .contains_key(&std::ffi::OsString::from("MODEL")),

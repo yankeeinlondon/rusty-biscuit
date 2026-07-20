@@ -61,6 +61,13 @@
 //! omitting `MODEL` from an additive overlay laid over an environment that still
 //! has it.
 //!
+//! That baseline covers keys the provider-shaped stages *wrote*. Credential
+//! sanitation is the other half: it runs earlier still, deciding which ambient
+//! secrets exist in the base at all, and a key the opening profile stripped
+//! leaves no trace to restore from. [`CredentialPolicyInputs`] carries the
+//! unsanitized ambient values so a rebuilt provider can re-run the same
+//! allow-list for itself, in both directions.
+//!
 //! ## System-prompt delivery
 //!
 //! *Resolution* — finding the file, composing its body — is
@@ -75,7 +82,10 @@
 //! Re-application writes a temp file, whose [`SystemPromptArtifact`] must
 //! outlive the child process. Those artifacts ride in
 //! [`LaunchPlan::system_prompt_artifacts`] rather than being dropped when the
-//! builder returns, so RAII cleanup happens after the attempt, not before it.
+//! builder returns — and the caller that consumes the plan has to keep carrying
+//! them, because the argv only holds a *path*. The per-attempt bundle
+//! (`RebuiltLaunchIdentity`) takes ownership and holds them until the child has
+//! exited.
 //!
 //! The *content* is an immutable invocation input under R8: a document has no
 //! `system_prompt:` surface, and this builder re-delivers the already-composed
@@ -85,7 +95,7 @@
 //!
 //! [`SystemPromptArtifact`]: super::system_prompt::SystemPromptArtifact
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
@@ -212,6 +222,9 @@ pub(crate) struct LaunchPlanInputs {
     /// attempt that dropped `model:` or moved provider inherited the opening
     /// document's `MODEL`, `OPENCODE_CONFIG_CONTENT`, and shadow `HOME`.
     pub(crate) provider_env_baseline: HashMap<OsString, Option<OsString>>,
+    /// The unsanitized ambient credential environment plus explicit `--include`
+    /// intent. See [`CredentialPolicyInputs`].
+    pub(crate) credential_policy: CredentialPolicyInputs,
     /// The invocation's own facets and the plan they produced. See the module
     /// docs' verbatim shortcut.
     pub(crate) invocation: RecordedLaunch,
@@ -258,6 +271,7 @@ impl LaunchPlanInputs {
             opencode_config_base: None,
             codex_last_message_path: codex_last_message.unwrap_or_default(),
             provider_env_baseline: HashMap::new(),
+            credential_policy: CredentialPolicyInputs::default(),
             invocation: RecordedLaunch {
                 facets,
                 args,
@@ -266,6 +280,62 @@ impl LaunchPlanInputs {
             },
             replay_supported: false,
         }
+    }
+}
+
+/// The invocation-neutral inputs a rebuild re-runs credential sanitation from.
+///
+/// Which ambient secrets reach a child is a *profile* decision — each provider's
+/// `allowed_env_keys()` — but the command phase makes it once, before the base
+/// child environment exists. That base therefore records only the opening
+/// profile's verdict, and a key it stripped is simply gone: no additive overlay
+/// over it can readmit a credential the rebuilt provider is entitled to. Holding
+/// the ambient values instead lets a replay restate the answer absolutely in
+/// both directions.
+///
+/// ## Notes
+///
+/// The values here are ambient process-environment secrets. They exist so a
+/// rebuild can decide admission, and reach a child only through the same
+/// allow-list a direct invocation of that provider would consult.
+#[derive(Clone, Default)]
+pub(crate) struct CredentialPolicyInputs {
+    /// Every sensitive key in the wrapper's process environment, before any
+    /// provider allow-list ran.
+    pub(crate) ambient: HashMap<OsString, OsString>,
+    /// `--include` names. Explicit invocation intent, so it admits a key under
+    /// every rebuilt provider exactly as it did at invocation.
+    pub(crate) explicit_include: HashSet<String>,
+}
+
+impl CredentialPolicyInputs {
+    /// The absolute sensitive-key patch one profile's allow-list produces
+    /// against the ambient environment: a `Set` for every key it admits, a
+    /// `Remove` for every key it does not.
+    ///
+    /// Absolute rather than differential because the base it lands on was
+    /// sanitized for a *different* profile, and sorted by key so the patch is
+    /// deterministic for the same inputs.
+    fn patch_for(&self, profile: &dyn WrapperProfile) -> Vec<EnvChange> {
+        let auto_include: HashSet<String> = profile
+            .allowed_env_keys()
+            .iter()
+            .map(|key| (*key).to_string())
+            .collect();
+        let mut patch: Vec<EnvChange> = self
+            .ambient
+            .iter()
+            .map(|(key, value)| {
+                let name = key.to_string_lossy();
+                if super::env::admits_sensitive_key(&name, &self.explicit_include, &auto_include) {
+                    EnvChange::Set(key.clone(), value.clone())
+                } else {
+                    EnvChange::Remove(key.clone())
+                }
+            })
+            .collect();
+        patch.sort_by(|a, b| a.key().cmp(b.key()));
+        patch
     }
 }
 
@@ -348,10 +418,10 @@ pub(crate) struct LaunchPlan {
     /// the rebuild cannot reproduce, e.g. `SequenceReview`), while a moved
     /// facet recomputes them from the refreshed facets.
     pub(crate) replayed: bool,
-    /// Temp resources a re-applied system prompt created. Never read; they exist
-    /// so their RAII cleanup runs after the child exits, not when the builder
-    /// returns.
-    #[allow(dead_code)]
+    /// Temp resources a re-applied system prompt created, whose paths this
+    /// plan's argv and environment name. Their contents are never read here;
+    /// they are moved into the per-attempt bundle so their RAII cleanup runs
+    /// after the child exits, not when the plan is consumed.
     pub(crate) system_prompt_artifacts: Vec<super::system_prompt::SystemPromptArtifact>,
 }
 
@@ -421,6 +491,17 @@ fn replay(
 
     let mut args = inputs.provider_args_tail.clone();
     let mut env_overlay: Vec<(OsString, OsString)> = Vec::new();
+
+    // R6/AC10 — credential admission belongs to the provider that actually runs.
+    // The base child environment was sanitized for the opening profile, so a
+    // provider move must restate the verdict for the rebuilt one: readmit what
+    // the opening profile stripped, strip what it admitted. Emitted ahead of the
+    // provider-shaped sets below so those still win a key collision.
+    let credential_patch = if provider_moved {
+        inputs.credential_policy.patch_for(profile)
+    } else {
+        Vec::new()
+    };
 
     // -- permission mode ----------------------------------------------------
     let mut yolo_applied = false;
@@ -567,7 +648,7 @@ fn replay(
 
     Ok(LaunchPlan {
         args,
-        env_overlay: patch_with_baseline_restores(inputs, env_overlay),
+        env_overlay: patch_with_baseline_restores(inputs, credential_patch, env_overlay),
         yolo_applied,
         structured_codex,
         replayed: true,
@@ -587,14 +668,20 @@ fn replay(
 ///
 /// Restores are appended after the sets and sorted by key so the patch is
 /// deterministic for the same inputs — the R8 comparison reads it.
+///
+/// `credential_prefix` leads the patch (see [`CredentialPolicyInputs`]); a
+/// baseline restore never overwrites it, because restores skip keys the patch
+/// already names.
 fn patch_with_baseline_restores(
     inputs: &LaunchPlanInputs,
+    credential_prefix: Vec<EnvChange>,
     sets: Vec<(OsString, OsString)>,
 ) -> Vec<EnvChange> {
-    let mut patch: Vec<EnvChange> = sets
-        .into_iter()
-        .map(|(key, value)| EnvChange::Set(key, value))
-        .collect();
+    let mut patch: Vec<EnvChange> = credential_prefix;
+    patch.extend(
+        sets.into_iter()
+            .map(|(key, value)| EnvChange::Set(key, value)),
+    );
     let mut restores: Vec<EnvChange> = inputs
         .provider_env_baseline
         .iter()

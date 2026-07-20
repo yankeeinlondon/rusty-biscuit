@@ -88,6 +88,13 @@
 //! its provider/model selection metadata. There is no invocation-fixed launch
 //! state left for the key — or the attempt's own execution — to disagree with.
 //!
+//! It owns the launch's *temp-file* resources for the same reason. A provider
+//! move re-delivers the system prompt for the rebuilt provider, which for
+//! Gemini and Codex writes a file and names only its path in the argv or child
+//! environment. The bundle therefore holds those artifacts, and the attempt
+//! holds the bundle until the child has exited — otherwise the file is deleted
+//! between plan construction and spawn, and the provider reads nothing.
+//!
 //! Argv and MCP injection come from [`super::super::super::launch_plan`], a
 //! re-entrant builder the invocation feeds once with the results of every side
 //! effect it performed (temp files, shadow HOME, ambiguity resolutions). A
@@ -204,7 +211,13 @@ pub(crate) struct LaunchRebuildIntent {
 /// Built by [`rebuild_launch_identity`]. Both sides of the R8 compatibility
 /// comparison are derived from this, so a document mutation that moves any field
 /// here is a named incompatible facet on the next resume.
-#[derive(Clone)]
+///
+/// ## Notes
+///
+/// Deliberately not `Clone`: it owns the launch's temp-file artifacts
+/// ([`Self::system_prompt_artifacts`]), whose RAII cleanup is what bounds the
+/// files' lifetime. A second owner would either double the deletion or silently
+/// extend it, and the bundle is a single attempt's launch by construction.
 pub(crate) struct RebuiltLaunchIdentity {
     pub(crate) provider: Provider,
     pub(crate) profile: &'static dyn WrapperProfile,
@@ -242,11 +255,23 @@ pub(crate) struct RebuiltLaunchIdentity {
     /// moved no launch facet — see [`crate::commands::wrap::launch_plan`].
     pub(crate) args: Vec<String>,
     /// The environment patch the rebuilt plan contributes (MCP runtime
-    /// injection, the OpenCode inline config, the permission mode, and removals
-    /// for provider-shaped keys the refreshed document no longer wants).
-    /// Applied beneath [`Self::env_overrides`], which stays authoritative for
+    /// injection, the OpenCode inline config, the permission mode, the
+    /// interactivity markers, and removals for provider-shaped keys the
+    /// refreshed document no longer wants). Applied beneath
+    /// [`Self::env_overrides`], which stays authoritative for
     /// `AGENT`/`MODEL`/`YOLO`.
     pub(crate) launch_env: Vec<launch_plan::EnvChange>,
+    /// The temp files a provider-move re-delivery of the system prompt wrote.
+    ///
+    /// [`Self::args`] and [`Self::launch_env`] carry only their *paths*, so the
+    /// files have to stay on disk until the child that reads them has exited.
+    /// Holding them here binds their RAII cleanup to the bundle, which the
+    /// attempt keeps for exactly that long. Dropping the plan without them
+    /// deleted a Gemini `GEMINI_SYSTEM_MD` or Codex config file before spawn
+    /// (review-10 finding 4).
+    #[allow(dead_code)]
+    pub(crate) system_prompt_artifacts:
+        Vec<crate::commands::wrap::system_prompt::SystemPromptArtifact>,
 }
 
 /// Recompute the full launch identity from one refreshed read of a document.
@@ -332,6 +357,21 @@ pub(crate) fn rebuild_launch_identity(
         launch_env.push(launch_plan::EnvChange::Remove("MODEL".into()));
     }
 
+    // R6/AC10 — the interactivity markers are a function of the session mode,
+    // and this rebuild owns the mode. The base child environment stamped them
+    // from the *opening* mode, and no provider-shaped baseline covers them, so
+    // an additive overlay would leave a retry that moved `interactive:` shipping
+    // refreshed argv and streaming behavior beside a stale `INTERACTIVE` — which
+    // wrapped providers read, and a stale `CLAUDINE_INTERACTIVE`, which gates
+    // hook behavior (review-10 finding 2).
+    //
+    // Restated absolutely on every attempt rather than only when the mode moved:
+    // the two markers then cannot disagree with the `non_interactive` this same
+    // bundle launches under, whatever the base carried.
+    for (key, value) in crate::commands::wrap::env::interactivity_env(!non_interactive) {
+        launch_env.push(launch_plan::EnvChange::Set(key.into(), value.into()));
+    }
+
     // The provider-dependent execution adapters, derived from the REBUILT
     // profile and mode: the attempt that spawns under this bundle also filters,
     // suppresses, and recovers output with this bundle's policies — never the
@@ -404,6 +444,7 @@ pub(crate) fn rebuild_launch_identity(
         env_overrides,
         args: plan.args,
         launch_env,
+        system_prompt_artifacts: plan.system_prompt_artifacts,
     })
 }
 
@@ -518,6 +559,12 @@ pub(super) fn rebuild_target_launch(
 ) -> Result<TargetLaunchRebuild, crate::commands::wrap::launch_plan::LaunchPlanError> {
     // Passes no source path: the environment overlay has no MCP component, and
     // only the compatibility key reads [`RebuiltLaunchIdentity::mcp_tags`].
+    //
+    // The rest of the bundle is discarded on purpose — this route's target was
+    // already re-prepared through the production pipeline above the harness, so
+    // its argv, and any system-prompt temp file a provider move would have
+    // re-delivered, come from there. Nothing here names those paths, so
+    // dropping the artifacts frees them rather than orphaning a live reference.
     let env_overrides =
         rebuild_launch_identity(intent, cli_model, repo_root, target, None)?.env_overrides;
 

@@ -18,11 +18,12 @@ pub(crate) fn build_harness_launch(
     resume_session: Option<&str>,
     materialized: &MaterializedHarnessPrompt,
     // R8 — the rebuilt plan's environment patch (MCP runtime injection, the
-    // OpenCode inline config, the permission mode, plus removals for whatever
-    // provider-shaped keys the refreshed document no longer wants). Applied
-    // beneath `materialized.env_overrides`, which stays authoritative for the
-    // `AGENT`/`MODEL`/`YOLO` triple the document resolved — so a `MODEL` this
-    // patch removes stays removed exactly when the document pins no model.
+    // OpenCode inline config, the permission mode, the interactivity markers,
+    // plus removals for whatever provider-shaped keys the refreshed document no
+    // longer wants). Applied beneath `materialized.env_overrides`, which stays
+    // authoritative for the `AGENT`/`MODEL`/`YOLO` triple the document resolved
+    // — so a `MODEL` this patch removes stays removed exactly when the document
+    // pins no model.
     launch_env: &[crate::commands::wrap::launch_plan::EnvChange],
     effective_non_interactive: bool,
     cli_timeout: Option<String>,
