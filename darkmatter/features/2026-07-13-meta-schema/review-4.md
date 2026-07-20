@@ -5,6 +5,7 @@ agent: codex/default
 created: 2026-07-19T23:07:31-07:00
 spec: 2026-07-13-meta-schema/spec.md
 implemented: true
+next: 2026-07-13-meta-schema/review-5.md
 implemented_by: claude/default
 log: darkmatter/features/2026-07-13-meta-schema/log.md
 description: "A **feature** review of `2026-07-13-meta-schema/spec.md`"
