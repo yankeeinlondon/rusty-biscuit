@@ -1,7 +1,7 @@
 ---
 status: ready for planning and implementation
 reviewed: true
-review_iterations: 5
+review_iterations: 6
 reviewed_by: codex/default
 reviewed_on: 2026-07-14
 rulings: "`type-definition` and `schema` semantic types ruled by Ken 2026-07-13"
@@ -814,6 +814,18 @@ two independent levels that both pass:
   DMLS 3/3 (run separately — the canonical run aborts in the CLI tier before
   reaching it). Total 87/90, with the only 3 failures being those named above.
 
+**Reconfirmed after the `level2_errors` repair** (2026-07-20, review-6
+implementation): library 18/18, CLI 66/69, DMLS 3/3 — total 87/90, unchanged.
+The 8 `level2_errors` tests now execute `CARGO_BIN_EXE_md`, and the exception's
+scope is once again exactly coextensive with the remaining failure set: the
+three named code-block tests and no others. Each L2 tier is run through
+`just _test_l2 <crate>` because the CLI tier's failure aborts the canonical
+recipe before it reaches DMLS. Note that `just test-l2 -- --no-fail-fast` is
+rejected by the harness; the flag must be passed bare as
+`just test-l2 --no-fail-fast`. Under heavy host load (load average >25) the
+library tier can produce a spurious single-test failure that clears on rerun at
+lower load; verify `uptime` before treating an L2 failure as real.
+
 **Repair path (deliberately not taken here).** Restage the three tests on the
 tmux harness, as `level2_schema_about` already does, or fold their coverage
 into it. That requires porting `run_md_env` / `run_md_after_shell_prefix` in
@@ -824,15 +836,28 @@ a defect this feature did not introduce. It belongs with the already-filed
 `darkmatter/features/_unscheduled/wezterm-sgr-race-test-fixes/spec.md`, which
 already names this test family and `max_bg_luma_on_line` as fragile.
 
-**Separately noted, not currently failing.**
-`darkmatter/cli/tests/level2_errors.rs` runs `md compose` as a bare command
-through the pane `PATH` (lines 98, 135, 180) instead of the `md_shim` that
-`common/level2.rs` adopted so Level 2 can never pass against a stale
-host-installed `md`. All 8 `level2_errors` tests pass on this host because a
-host `md` is installed and on the pane `PATH`. The review-3 observation of
-`md`-not-found harness failures did not reproduce in a clean canonical run.
-This is a latent hazard rather than an active failure, and is out of scope
-for this feature.
+**Previously noted as a latent hazard — repaired 2026-07-20 (review-6
+implementation).** `darkmatter/cli/tests/level2_errors.rs` ran `md compose` as a
+bare command through the pane `PATH` (lines 98, 135, 180) instead of the
+`md_shim` that `common/level2.rs` adopted so Level 2 can never pass against a
+stale host-installed `md`. The file was the only `level2_*` test file in
+`darkmatter/cli/tests/` with no `mod common;` declaration, so it had no access
+to the shared helper.
+
+The hazard was active, not latent, and it failed in the more dangerous
+direction: a stale `md` (2026-07-14, predating this branch's meta-schema
+commits) was on the host `PATH`, so all 8 tests passed **green while verifying
+the wrong binary**. Its output happened to be byte-identical to the workspace
+binary across the four fixtures checked, which is why the drift survived
+undetected. Review 6 observed the opposite symptom — `bash: md: command not
+found` — on a host with no installed `md`; both symptoms are the same defect.
+
+The three command builders now route through `md_shim()`, inheriting its
+symlink → hard-link → copy fallback ladder and the `assert_shim_resolves_to_built`
+integrity check. Non-vacuity was proven by temporarily neutering a rendered
+error headline in `darkmatter/lib/src/markdown/errors/blocks.rs` and confirming
+2 of the 8 tests went red — a break the pre-repair tests would have passed
+through unchanged.
 
 ## Ruled Design Questions
 

@@ -10,6 +10,7 @@ log: darkmatter/features/2026-07-13-meta-schema/log.md
 description: "A **feature** review of `2026-07-13-meta-schema/spec.md`"
 feature: 2026-07-13-meta-schema/review-5.md
 previous: 2026-07-13-meta-schema/review-4.md
+next: 2026-07-13-meta-schema/review-6.md
 ---
 
 # Review 5 — Meta Schema

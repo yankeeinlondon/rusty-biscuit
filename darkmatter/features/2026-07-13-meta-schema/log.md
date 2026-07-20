@@ -6,6 +6,7 @@ implementation_2: "2026-07-18T09:03:32-07:00"
 implementation_3: "2026-07-19T21:33:53-07:00"
 implementation_4: "2026-07-19T23:27:33-07:00"
 implementation_5: "2026-07-20T00:40:04-07:00"
+implementation_6: "2026-07-20T06:55:12-07:00"
 ---
 
 # Meta Schema — Implementation Log
@@ -507,3 +508,68 @@ The files changed during this cycle are:
 - `darkmatter/lib/src/markdown/schemas/errors.rs` — new `SchemaError::ReferenceDepthExceeded { limit, chain }` variant, its `Display`, and its `status_block` arm; narrowed the now-drifted `ReferenceCycle` rustdoc
 - `darkmatter/lib/src/markdown/schemas/resolve.rs` — `ReferenceStack::enter` reports depth exhaustion distinctly from a cycle and routes both through `describe` for a consistent visit-order chain
 - `darkmatter/lib/tests/meta_schema_reference_graph.rs` — 3 new Level-1 boundary tests (largest permitted chain resolves, one hop past the cap reports depth rather than a loop, root-union entry route bounded by the same cap) plus a portable `write_delegation_chain` fixture helper
+
+## Implementation of Review Findings #6
+
+> **started at:** 2026-07-20T06:55:12-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-13-meta-schema/review-6.md'
+- this is iteration 6 of the review-to-implement cycle
+- the review contains **2** findings:
+        - **High** — Eight Level-2 error-rendering tests do not execute the product under review (they invoke bare `md` instead of the Cargo-built shim)
+        - **Medium** — AC13 remains unmet and the proposed scoped exception is insufficient to cover the additional failures
+- impacted package area (per the spec's implementation surface map): `darkmatter`,
+  covering the `darkmatter` lib, `darkmatter-cli`, and `dmls` crates — so
+  `just test` / `just lint` from that area is the verification scope
+- the two findings are **causally ordered**: finding 2's accounting cannot be
+  settled until finding 1's eight tests actually execute the product, so they are
+  worked serially rather than in parallel
+- starting the work on 'finding-1-level2-error-tests-use-cargo-built-shim' at 06:56:13
+        - the review's stated **premise did not reproduce** on this host, but the underlying defect is real and in fact worse-shaped than the review describes. Review 6 reported all eight tests failing with `bash: md: command not found`. On this host `md` **is** installed at `/Users/ken/.cargo/bin/md` (mtime 2026-07-14 11:11, ~6 days stale, predating this branch's meta-schema commits), so all eight tests were passing **green against a stale host binary** — the review-2 class defect, silently providing zero verification of the code under review. A hard failure at least announces itself; a false green does not
+        - the stale host `md` was diffed against the freshly built workspace `md` across four fixtures (`unterminated.md`, `planner-schema.md`, `invalid-ref.md`, `schema-ref.md`) and produced **byte-identical output on all four**. That is precisely why the drift went unnoticed for six days: the stale binary still happened to satisfy every assertion
+        - root cause of the drift located: `level2_errors.rs` was the **only** `level2_*` file in `darkmatter/cli/tests/` with no `mod common;` declaration at all — the other 37 test files have it. It never had access to `md_shim()`, so it could not have used the shared helper even by intent
+        - the fix is 5 lines in one file, `darkmatter/cli/tests/level2_errors.rs`: added `mod common;` + `use common::level2::md_shim;`, and rewrote the three command builders (lines 98/135/180) from `format!("md compose {}", …)` to `format!("{} compose {}", md_shim(), …)`. No helper was reimplemented, so the existing symlink → hard-link → copy fallback ladder and the `assert_shim_resolves_to_built` integrity check come along unchanged, preserving Windows/Linux/macOS portability
+        - **non-vacuity proven by neuter-and-confirm-red**, not by assertion: the `"schema validation failed"` headline in `darkmatter/lib/src/markdown/errors/blocks.rs` (lines 534, 594) was temporarily replaced with a sentinel string, rebuilt, and the suite re-run. **2 of the 8 tests went red**, and the captured pane frame showed both that the command echo carried the **shim path rather than bare `md`**, and that the pane rendered the **neutered** string. Under the old code these tests would have stayed green straight through that source break, because the stale host `md` still emits the original headline. The neuter was fully reverted — `git diff` on `blocks.rs` is empty and zero sentinel strings remain
+        - gates from the `darkmatter` package area: `just test` → exit **0** (darkmatter **5929** passed, darkmatter-cli **561**, dmls **616**); `just lint` → exit **0**, zero warnings; `just _test_l2 darkmatter-cli --no-fail-fast` → **66/69**, with all **8/8** `level2_errors` tests passing while executing `CARGO_BIN_EXE_md` through the shim
+        - host load average was **59.25** during the first L2 run and 15.40 → 10.76 by the final confirmation run. High enough to distrust any timeout-shaped failure, but the 3 remaining CLI failures are deterministic value mismatches (`got luma 44`), not timeouts, so load does not explain them
+- work completed for 'finding-1-level2-error-tests-use-cargo-built-shim' at 07:23:21
+- starting the work on 'finding-2-ac13-gate-and-exception-scope' at 07:23:21
+        - this finding is **partly closed and partly deferred**, and the split is now cleaner than in any prior cycle
+        - **what closed:** the review's substantive objection was that the proposed AC13 exception names exactly three tests but eleven were failing, so ratifying it as written could not make the gate green. Finding 1 removed the eight-test excess. The exception's scope is once again **exactly coextensive** with the remaining failure set — three named code-block tests and no others
+        - the composed L2 state was reproduced by the orchestrator **after** finding 1 landed, each tier run through `just _test_l2 <crate>` because the CLI tier's failure aborts the canonical recipe before it reaches DMLS:
+                - darkmatter library L2 — **18/18**
+                - darkmatter-cli L2 — **66/69**; the 3 failures are exactly `level2_code_block_inverts_to_light_in_dark_terminal`, `level2_default_code_block_inverts_background_and_foreground`, `level2_code_block_clears_inherited_dim_before_theme_colors`
+                - dmls L2 — **3/3**
+                - total **87/90**, identical to the pre-change total, so this cycle introduced no new L2 breakage
+        - an honesty note on that library tier number: the **first** library L2 run failed 1 test (`level2_unmatched_policy_matches_no_policy_color_in_real_terminal`, 14/15 with 3 unrun) at load average **26.25**. A rerun at load **17.27** passed **18/18**, and the same test passed in 1.350s. That is a load artifact, not a regression — but it is recorded rather than quietly discarded, and the spec now warns future runs to check `uptime` before believing an L2 failure
+        - **what remains deferred:** ratifying the AC13 scope exception. This is the **fourth** consecutive cycle it has been deferred and the reason is unchanged and unreachable from here — the repository reserves scope-exception ratification to Ken, and this is a non-interactive session with nobody to ask. Repairing the three tests instead would require porting `run_md_env` / `run_md_after_shell_prefix` off the WezTerm harness onto tmux; that helper backs the entire 69-test CLI L2 corpus, so rewriting it inside this feature to fix a pre-existing defect this feature did not introduce is a Rule 3 violation. The work is already filed as `darkmatter/features/_unscheduled/wezterm-sgr-race-test-fixes/spec.md`
+        - **spec drift corrected in the same change**, since finding 1 falsified two of the spec's paragraphs:
+                - the "Separately noted, not currently failing" paragraph is now titled "Previously noted as a latent hazard — repaired 2026-07-20" and records the repair, the `mod common;` root cause, the neuter-and-confirm-red evidence, and the fact that the hazard was **active rather than latent** and failed in the more dangerous green-against-the-wrong-binary direction. It also reconciles review 6's `command not found` symptom with this host's false-green symptom as two faces of one defect
+                - the 2026-07-19 evidence block gained a 2026-07-20 reconfirmation recording 87/90 post-repair, the `just _test_l2 <crate>` tier-scoping requirement, the bare-flag `just test-l2 --no-fail-fast` harness quirk, and the load-average caveat above
+        - `md schema validate` accepts the updated spec
+- work completed for 'finding-2-ac13-gate-and-exception-scope' at 07:29:03
+
+### Final Verification
+
+- the orchestrator re-ran both L1 gates from the `darkmatter` package area **after** the change landed, rather than trusting the subagent's report:
+        - `just test` → exit **0**; darkmatter **5929 passed / 140 skipped** (185.9s), darkmatter-cli **561 passed / 71 skipped**, dmls **616 passed / 3 skipped**; zero failures
+        - `just lint` → exit **0**; zero warning and zero error lines across `darkmatter`, `darkmatter-cli`, and `dmls`
+- test counts are **unchanged** this cycle (darkmatter 5929, darkmatter-cli 561, dmls 616). That is the correct outcome: the finding was that eight existing tests were not exercising the product, so the fix restores their verification value rather than adding new tests. Counting a repaired false-green as "new coverage" would overstate the work
+- L2 post-change: library **18/18**, CLI **66/69**, DMLS **3/3** — total **87/90**, identical to the pre-change total, with the failure set now exactly the three tests the spec's proposed exception names
+- host load average during the final `just test` reached **91.49**, which inflates wall times throughout this log. Every gate still returned green, so there is no timeout-shaped failure to discount — but no timing figure in this cycle should be compared against a quiet-host baseline
+- the practice carried forward from iteration 5 paid off again: the finding-1 subagent proved its repair non-vacuous by neutering a production string and confirming the suite went red. Without that step this cycle would have "fixed" the tests and had no way to distinguish a real repair from a rearranged false green — which is precisely the failure mode the finding was about
+
+### Successful Completion
+
+The implementation of review cycle 6 has completed successfully in 39 minutes. During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 was fixed, 1 was deferred (see reasons below):
+
+- **Medium — "AC13 remains unmet and the proposed exception is insufficient."** Deferred, for the fourth consecutive cycle, but the finding is materially smaller than when it was written. Its substantive objection — that the exception names three tests while eleven were failing, so ratifying it as written could not make the gate green — **is now resolved**: finding 1 removed the eight-test excess, and the exception's scope is once again exactly coextensive with the remaining failure set (library 18/18, CLI 66/69, DMLS 3/3, total 87/90, with the only failures being the three named code-block tests). What remains is purely the **ratification decision**, which the repository reserves to Ken and which is unreachable from a non-interactive session with nobody to ask. The alternative closure — repairing the three tests — would require porting `run_md_env` / `run_md_after_shell_prefix` in `darkmatter/cli/tests/common/level2.rs` off the WezTerm harness onto tmux, a helper backing the entire 69-test CLI L2 corpus, in order to fix a pre-existing defect this feature did not introduce and whose failure mechanism (WezTerm's live OSC-11 query pre-empting the `COLORFGBG` staging the three tests rely on) is demonstrably unrelated to meta-schema code. That is a Rule 3 violation and the work is already filed as `darkmatter/features/_unscheduled/wezterm-sgr-race-test-fixes/spec.md`.
+
+No finding required a performance measurement, so `deferred_perf_measurement` remains `false`.
+
+One correction worth recording against the review itself: review 6 stated that all eight `level2_errors` tests fail with `bash: md: command not found`. That symptom did not reproduce here, because this host **does** have a stale `md` on `PATH` — so the tests were passing green against a six-day-old binary instead. The defect the review identified is real and its prescribed fix is exactly right; only the observed symptom differs, and the false-green symptom is the more dangerous of the two.
+
+The files changed during this cycle are:
+
+- `darkmatter/cli/tests/level2_errors.rs` — added the missing `mod common;` / `use common::level2::md_shim;` (this was the only `level2_*` test file lacking the shared-helper module) and routed all three command builders through `md_shim()` so the eight error-rendering tests execute `CARGO_BIN_EXE_md` instead of whatever `md` sits on the host `PATH`
+- `darkmatter/features/2026-07-13-meta-schema/spec.md` — retitled and rewrote the stale "Separately noted, not currently failing" paragraph to record the repair, its root cause, and the active-not-latent nature of the hazard; added a 2026-07-20 reconfirmation of the L2 evidence block including the tier-scoping requirement, the bare-flag harness quirk, and a load-average caveat
