@@ -76,3 +76,10 @@ protocol-focused:
   file-reference resolution conventions.
 - `biscuit-hash` — xxHash content-hash identity for the Phase 3 invalidation
   engine (`WorkspaceIndex`).
+
+## CLI (`darkmatter/cli`)
+
+- `serde` (`derive`) — the `md clean --json` diagnostic envelope. The
+  per-diagnostic body is `biscuit_file::YamlDiagnostic`'s own `Serialize`, so
+  the wire format stays pinned to the shared diagnostic vocabulary; the derive
+  is only needed for the CLI-local envelope and stage tag that wrap it.

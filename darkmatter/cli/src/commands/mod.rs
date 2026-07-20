@@ -23,7 +23,7 @@ use compose::{ComposeAllowFlags, build_remote_read_config, parse_compose_positio
 use frontmatter::{run_edit, run_get, run_rm, run_set};
 use hash::run_hash;
 
-pub use clean::run_clean;
+pub use clean::{CleanOptions, CleanSchemaFlags, run_clean};
 pub use render::run_render;
 
 /// Validates that top-level CLI options are not combined with subcommands.
@@ -72,17 +72,28 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             loose,
             fixed_width,
             ignore_incidental_newlines,
+            json,
+            schema,
+            baseline_schema,
+            no_baseline_schema,
+            no_trigger_schemas,
         } => {
-            let mode = clean::resolve_list_spacing(compact, loose);
-            run_clean(
-                input.as_ref(),
+            let options = CleanOptions {
                 save,
                 indent,
-                mode,
+                list_spacing: clean::resolve_list_spacing(compact, loose),
                 fixed_width,
                 ignore_incidental_newlines,
-                cli.verbose > 0,
-            )?;
+                verbose: cli.verbose > 0,
+                json,
+                schema: CleanSchemaFlags {
+                    schema,
+                    baseline_schema,
+                    no_baseline_schema,
+                    no_trigger_schemas,
+                },
+            };
+            run_clean(input.as_ref(), &options)?;
         }
         CliCommand::Compose {
             args,

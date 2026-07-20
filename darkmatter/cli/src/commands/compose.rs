@@ -657,7 +657,8 @@ fn apply_compose_baseline_schema(
     Ok(options.with_darkmatter_baseline_schema())
 }
 
-fn env_disables_baseline_schema() -> bool {
+/// Shared with `md clean`, whose schema resolution is at full compose parity.
+pub(crate) fn env_disables_baseline_schema() -> bool {
     matches!(
         std::env::var("DARKMATTER_NO_BASELINE_SCHEMA")
             .ok()

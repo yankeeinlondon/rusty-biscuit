@@ -8,7 +8,9 @@ use color_eyre::eyre::Result;
 use darkmatter::markdown::errors::as_block_error as as_darkmatter_block_error;
 use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
 use darkmatter_cli::Cli;
-use darkmatter_cli::commands::{run_clean, run_render, run_subcommand, validate_subcommand_usage};
+use darkmatter_cli::commands::{
+    CleanOptions, run_clean, run_render, run_subcommand, validate_subcommand_usage,
+};
 use std::io::{self, IsTerminal};
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -147,15 +149,12 @@ fn run() -> Result<()> {
     }
 
     if cli.save {
-        run_clean(
-            cli.input.as_ref(),
-            true,
-            None,
-            darkmatter::markdown::cleanup::ListSpacingMode::Normal,
-            None,
-            false,
-            cli.verbose > 0,
-        )?;
+        let options = CleanOptions {
+            save: true,
+            verbose: cli.verbose > 0,
+            ..CleanOptions::default()
+        };
+        run_clean(cli.input.as_ref(), &options)?;
         return Ok(());
     }
 
