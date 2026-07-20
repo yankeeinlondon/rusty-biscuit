@@ -7,7 +7,6 @@
 //! referenced, root union, custom/disabled baseline, triggers on/off).
 
 use std::fs;
-use std::path::Path;
 
 use biscuit_file::{YamlCertainty, YamlDiagnosticCode, apply_edit_set};
 use tempfile::TempDir;
@@ -136,7 +135,8 @@ fn test_boolean_scalar_variant() {
 fn test_two_type_problems_block_auto_apply() {
     // `release` fails string-required and `count` fails integer-required:
     // the "exactly one problem" gate fails, so both are report-only.
-    let analysis = analyze("$schema:\n  release: string\n  count: integer\nrelease: 1.20\ncount: abc\n");
+    let analysis =
+        analyze("$schema:\n  release: string\n  count: number(integer)\nrelease: 1.20\ncount: abc\n");
     assert_all_report_only(&analysis);
     assert_eq!(analysis.diagnostics().len(), 2);
     assert!(
@@ -233,7 +233,7 @@ fn test_coercion_sensitive_string_is_silent() {
     // clean does not second-guess compose.
     assert!(analyze("$schema:\n  enabled: boolean\nenabled: \"true\"\n").is_clean());
     // A numeric string against integer coerces cleanly as well.
-    assert!(analyze("$schema:\n  count: integer\ncount: \"42\"\n").is_clean());
+    assert!(analyze("$schema:\n  count: number(integer)\ncount: \"42\"\n").is_clean());
 }
 
 #[test]
@@ -328,7 +328,7 @@ fn test_referenced_schema_file() {
 
 #[test]
 fn test_root_union_with_literal_discriminant() {
-    let yaml = "$schema:\n  - kind: literal(a)\n    release: string\n  - kind: literal(b)\n    count: integer\nkind: a\nrelease: 1.20\n";
+    let yaml = "$schema:\n  - kind: literal(a)\n    release: string\n  - kind: literal(b)\n    count: number(integer)\nkind: a\nrelease: 1.20\n";
     let analysis = analyze(yaml);
     assert_eq!(proven_repair(&analysis).replacement, "\"1.20\"");
 }
@@ -417,7 +417,7 @@ fn test_stdin_has_no_trigger_discovery() {
 
 #[test]
 fn test_diagnostics_are_deterministic_across_runs() {
-    let yaml = "$schema:\n  release: string\n  count: integer\nrelease: 1.20\ncount: abc\n";
+    let yaml = "$schema:\n  release: string\n  count: number(integer)\nrelease: 1.20\ncount: abc\n";
     let first = analyze(yaml);
     let second = analyze(yaml);
     assert_eq!(first.diagnostics(), second.diagnostics());

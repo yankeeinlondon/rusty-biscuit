@@ -313,12 +313,21 @@ pub fn analyze_frontmatter(
 /// an effective schema exists, a schema-independent candidate edit is
 /// auto-apply eligible only when the candidate's schema result set is
 /// identical to the original's. Both sources must parse; any parse failure
-/// fails the proof. The comparison uses the shared coercing semantics (the
-/// same result set compose observes), keyed on `(path, code, arm_index)`.
+/// fails the proof.
+///
+/// Identity is required on **both** validation halves, each keyed on
+/// `(path, code, arm_index)`: the coercing set (the same result set compose
+/// observes) and the raw, non-coercing set. The raw half is load-bearing —
+/// coercion maps an authored `42` and an authored `"42"` onto the same
+/// problem set, so the coerced comparison alone cannot see a type-changing
+/// edit and would wrongly report it as unchanged. The coerced half is
+/// retained because a raw-identical pair can still diverge under coercion
+/// (`"42"` and `"abc"` against `number` are both raw mismatches, but only
+/// the first coerces).
 ///
 /// This check is for schema-**independent** (parse-equivalent) candidates
 /// only; it must never gate the explicitly invalid-to-valid schema-quoting
-/// transition (S2), which intentionally shrinks the problem set.
+/// transition (S2), which intentionally shrinks the raw problem set.
 #[must_use]
 pub fn schema_result_set_identical(
     effective: &EffectiveSchema,
@@ -331,7 +340,9 @@ pub fn schema_result_set_identical(
     ) else {
         return false;
     };
-    problem_set(&effective.validate(&original)) == problem_set(&effective.validate(&candidate))
+    problem_set(&effective.validate_raw(&original))
+        == problem_set(&effective.validate_raw(&candidate))
+        && problem_set(&effective.validate(&original)) == problem_set(&effective.validate(&candidate))
 }
 
 /// The `(path, code, arm_index)` multiset of a validation report, sorted for
