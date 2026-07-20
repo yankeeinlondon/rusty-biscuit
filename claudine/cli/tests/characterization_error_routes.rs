@@ -244,14 +244,24 @@ Body
 
 /// Proxy hand-off from a terminal event (`failure`).
 ///
-/// Records the resolver divergence documented in `decisions.md` D-2: this route
-/// uses `harness::resolve_harness_path`, which **succeeds** on a missing target.
-/// The run therefore announces the hand-off, runs its full terminal lifecycle,
-/// and only fails later in pre-flight (`prompt.rs:196`).
+/// Since the file-resolution feature converged the proxy routes, this route
+/// resolves its target through the same existence-checking
+/// `composition::resolve_proxy_target` as the `initialize` route — the legacy
+/// `harness::resolve_harness_path` that succeeded on a missing target is gone
+/// (see the `ProxyHandoff` branch in `control_dispatch.rs`). A missing target
+/// now fails *at resolution* with `CompositionError::InvalidFileReference`,
+/// the same typed surface as route 1. The convergence itself — shared code,
+/// headline, and hint across both routes — is asserted end-to-end by
+/// `level2_proxy_routes_share_identity_across_routes_in_tmux`, so this
+/// characterization owns only the lifecycle-event and exactly-once invariants.
 ///
-/// Baseline: the complete `start` → `failure` → `finalize` order fires. Phase 4
-/// must not collapse this into the route-1 shape — that would be a routing
-/// change, which D10 requires be split into a separate spec.
+/// The full `start` → `failure` → `finalize` order still fires because the
+/// resolution failure happens *inside* the `failure` stack itself (where the
+/// `proxy` action lives), and the abort path fires `finalize` once before
+/// propagating — the terminal lifecycle is preserved end to end.
+///
+/// Phase 4/5 migration constraint: this baseline must remain behavior-neutral
+/// on exit code, event order, and emission count.
 #[test]
 fn characterize_terminal_proxy_resolution_failure() {
     let outcome = run_route(
@@ -283,15 +293,79 @@ Body
     assert_eq!(
         outcome.events,
         vec!["start", "failure", "finalize"],
-        "the terminal proxy route resolves the missing target successfully and \
-         fails later in pre-flight, so the full terminal lifecycle must fire; \
-         stderr:\n{}",
+        "the terminal proxy route fails at resolution inside the failure stack, \
+         but the abort path still fires finalize once before propagating — full \
+         terminal lifecycle preserved; stderr:\n{}",
         outcome.stderr_plain
     );
     assert_eq!(
         outcome.emission_count(),
         1,
         "the failure must be surfaced exactly once; stderr:\n{}",
+        outcome.stderr_plain
+    );
+}
+
+// --- Route 2 typed-surface lock -------------------------------------------
+
+/// Locks the typed failure surface for the terminal-proxy route.
+///
+/// `characterize_terminal_proxy_resolution_failure` above pins the lifecycle
+/// event order and exactly-once emission — the properties Phase 4/5 must keep
+/// neutral — and deliberately does *not* pin the failure's typed surface,
+/// because that is the property the file-resolution feature changed when it
+/// converged the proxy routes. This test closes that gap from below: it asserts
+/// the surface is now the shared `CompositionError::InvalidFileReference`
+/// block (the same surface `level2_proxy_routes_share_identity_across_routes_in_tmux`
+/// proves in a real terminal), so any future regression that pushes the route
+/// back to the legacy `failed to load Markdown` pre-flight failure trips both
+/// this runtime assertion and the prose above in the same change.
+#[test]
+fn characterize_terminal_proxy_fails_at_resolution_with_invalid_file_reference() {
+    let outcome = run_route(
+        r#"---
+title: characterize terminal proxy typed surface
+start:
+  stack:
+    - action: {append_line: ["events.log", "start"]}
+failure:
+  stack:
+    - action: {append_line: ["events.log", "failure"]}
+    - action: {proxy: "no/such/target.md"}
+finalize:
+  stack:
+    - action: {append_line: ["events.log", "finalize"]}
+---
+Body
+"#,
+        3,
+        &[],
+    );
+
+    assert_eq!(
+        outcome.exit_code,
+        Some(1),
+        "terminal-proxy resolution failure must exit 1; stderr:\n{}",
+        outcome.stderr_plain
+    );
+    assert_eq!(
+        outcome.emission_count(),
+        1,
+        "the failure must be surfaced exactly once; stderr:\n{}",
+        outcome.stderr_plain
+    );
+    assert!(
+        outcome.stderr_plain.contains("Unresolvable file reference"),
+        "the terminal-proxy route must fail at resolution with the shared \
+         `Unresolvable file reference` headline — the typed \
+         `CompositionError::InvalidFileReference` surface converged on by the \
+         file-resolution feature; stderr:\n{}",
+        outcome.stderr_plain
+    );
+    assert!(
+        !outcome.stderr_plain.contains("failed to load Markdown"),
+        "the terminal-proxy route must not fall through to the adopted-document \
+         read — the legacy pre-flight failure stage is gone; stderr:\n{}",
         outcome.stderr_plain
     );
 }
