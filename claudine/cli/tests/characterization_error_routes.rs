@@ -504,3 +504,63 @@ fn characterize_all_failure_routes_exit_one_and_emit_once() {
         );
     }
 }
+
+// --- Route 6: loop iteration failure --------------------------------------
+
+/// A `--loop` run whose provider exits non-zero.
+///
+/// The route that produces `CompositionError::LoopIterationFailed` — one of
+/// the two records that gained a carried `DiagnosticSnapshot`. The snapshot is
+/// additive data on the variant, never a `#[source]`, so none of the three
+/// pinned properties may move: the failed iteration must still end the run
+/// with exit 1, fire its terminal lifecycle in the same order, and surface the
+/// failure exactly once.
+///
+/// `fail_fast` is left at its default so the first failing iteration stops the
+/// loop, which is what keeps the marker sequence deterministic under load.
+#[test]
+fn characterize_loop_iteration_failure() {
+    let outcome = run_route(
+        r#"---
+title: characterize loop iteration failure
+phase: 1
+loop:
+  until: "phase > 3"
+  action: "increment(phase)"
+  max: 3
+start:
+  stack:
+    - action: {append_line: ["events.log", "start"]}
+failure:
+  stack:
+    - action: {append_line: ["events.log", "failure"]}
+finalize:
+  stack:
+    - action: {append_line: ["events.log", "finalize"]}
+---
+Body
+"#,
+        3,
+        &[],
+    );
+
+    assert_eq!(
+        outcome.exit_code,
+        Some(1),
+        "a failed loop iteration must exit 1; stderr:\n{}",
+        outcome.stderr_plain
+    );
+    assert_eq!(
+        outcome.events,
+        vec!["start", "failure", "finalize"],
+        "the failing iteration must run its full terminal lifecycle in order; \
+         stderr:\n{}",
+        outcome.stderr_plain
+    );
+    assert_eq!(
+        outcome.emission_count(),
+        1,
+        "the iteration failure must be surfaced exactly once; stderr:\n{}",
+        outcome.stderr_plain
+    );
+}

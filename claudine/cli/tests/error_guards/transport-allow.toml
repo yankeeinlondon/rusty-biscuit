@@ -9,13 +9,43 @@
 # stale, an entry with an unknown shape or tag fails, and an entry without a
 # substantive reason fails.
 #
+# ## Shapes
+#
+# `formatted_report`   — `eyre!("context: {e}")`; the typed error becomes a report.
+# `to_string_collapse` — `map_err(|e| … e.to_string() …)`.
+# `error_text_field`   — a prose `reason`/`message`/`detail` field built from a
+#                        typed error that is not also retained.
+# `format_context`     — `format!("context: {e}")` feeding a returned error.
+# `log_then_return_other` — the cause is logged and a different error is returned.
+# `snapshot_re_erasure` — a facet (`snapshot.message`, `snapshot.code`, …) lifted
+#                        out of a `DiagnosticSnapshot` and fed to `eyre!`/`bail!`/
+#                        `format!`/a prose error field, or a closure that projects
+#                        one facet and drops the snapshot. The snapshot is already
+#                        the lossless projection of a typed error, captured so a
+#                        `Clone` record could carry the identity across a boundary
+#                        no error value survives; collapsing it back to a string
+#                        discards `code`, `category`, `disposition`, `origin`,
+#                        `detail`, and the one-level cause at the last place that
+#                        still had them. Restore it with
+#                        `claudine::diagnostics::RestoredDiagnostic` instead — the
+#                        facets re-enter selection, `err.*`, and `StatusBlock`
+#                        rendering, and a boundary-specific framing line goes on
+#                        `with_context` rather than into an `eyre!` format string.
+#
 # ## Tags
 #
 # `retained` — permanent. The value genuinely has no typed source (a panic
 # payload, arbitrary user text, a ratified String-carrying cross-package
-# contract), or the site is downstream of the final render boundary — including
-# a `color_eyre::eyre::Report` in hand, which does not implement
-# `std::error::Error` and so cannot be a `#[source]`.
+# contract), or the site is downstream of the final render boundary.
+#
+# A `color_eyre::eyre::Report` in hand is **not** by itself a reason to retain.
+# `Report` does not implement `std::error::Error`, so it cannot be a `#[source]`
+# — but it *boxes* its source rather than discarding it, so the typed diagnostic
+# is still reachable: `DiagnosticSnapshot::select(report.as_ref())` runs the same
+# selection walk the CLI renders through and yields the facets. Three entries
+# here once claimed the upstream `Result<_, Report>` boundary had "already
+# erased" the provenance; it had not, and they are gone. A record that stores the
+# projection beside its prose field loses nothing.
 #
 # `d10-routing-change` — a ratified cross-spec deferral, not a burn-down. A typed
 # error IS in hand, but typing it here would change an authored matching surface
@@ -31,27 +61,11 @@
 
 [[allow]]
 shape = "error_text_field"
-file = "cli/src/commands/compose/prep.rs"
-symbol = "build_and_run_loop"
-tag = "retained"
-reason = """
-The value in hand is a `color_eyre::eyre::Report` returned by `execute_composition_attempt` (the wrapper-grade exec-wiring boundary, `wrap/composition/mod.rs`). `Report` does not implement `std::error::Error`, so it cannot be a `#[source]`, and the typed provenance was already erased upstream where `execute_composition_request_inner_with_guard` returns `Result<_, Report>`. Retyping that exec-wiring boundary to a concrete error is a separate workstream; this site only records the flattened text into `LoopIterationFailed.reason` at the consumption boundary."""
-
-[[allow]]
-shape = "error_text_field"
 file = "lib/src/harness/audit.rs"
 symbol = "audit_shell_commands"
 tag = "retained"
 reason = """
 The sink is `ShellAuditOutcome.message`, a pre-rendered prose field carrying terminal markup (`prose_escape`d text inside `<red-500>` spans). It is a partially-rendered view for the audit report, not a data record, and `audit_shell_commands` returns a `ShellAuditReport` rather than an `Err` — nothing propagates. The typed variants that carry structure (`ShellCommandDenied`, `ShellCommandBlacklisted`) are already destructured by the preceding match arms; the catch-all `Err(e)` arm this entry covers is the final render of everything else."""
-
-[[allow]]
-shape = "error_text_field"
-file = "lib/src/reporting/ingest.rs"
-symbol = "sync_file"
-tag = "retained"
-reason = """
-The `Err` type is `SyncFailure`, a `Serialize + Deserialize + Eq` report record persisted in the sync summary. Per spec D9 concrete error values never cross a persistence boundary, and a typed cause cannot live in this struct without breaking those derives. Worth a follow-up: the flattening happens at the innermost `?` rather than at the report boundary, so a `ClaudineError` already wrapping a `rusqlite::Error` is double-flattened."""
 
 [[allow]]
 shape = "format_context"
@@ -236,22 +250,6 @@ symbol = "run"
 tag = "retained"
 reason = """
 The sink is `SyncAction::Error(String)`, a per-provider display record rendered as a table row by `prose_error`; the conversion is the final render. The typed error is rendered here and never returned; this line is the final render. The enclosing function's `Ok(())`-on-failure is a separate exit-status defect, recorded as follow-up 1 in `features/2026-07-13-error-propogation/burndown-triage.md` — spec D10 forbids changing exit status in the transport migration."""
-
-[[allow]]
-shape = "error_text_field"
-file = "cli/src/commands/wrap/sequence/iterate.rs"
-symbol = "run_one_step"
-tag = "retained"
-reason = """
-The value in hand is a `color_eyre::eyre::Report` returned by `execute_composition_request_inner` (the wrapper-grade exec-wiring boundary). `Report` does not implement `std::error::Error`, so it cannot be a `#[source]`, and the typed provenance was already erased upstream where that function returns `Result<_, Report>`. Retyping the exec-wiring boundary to a concrete error is a separate workstream; this site only records the flattened text into `SequenceStepResult.error` for the run summary, and fail-fast keys on step counts, never on this text."""
-
-[[allow]]
-shape = "error_text_field"
-file = "cli/src/commands/wrap/sequence/task_run.rs"
-symbol = "WrapperPromptRunner::run"
-tag = "retained"
-reason = """
-Same exec-wiring boundary as `run_one_step` above, reached from the other side: `execute_composition_request_inner` returns `Result<_, Report>`, and `Report` cannot be a `#[source]`. The text lands in `SequenceTaskPromptLaunch.message`, which exists to name *which* task and *which* document failed to launch; the task's continuation is decided by `TaskStatus`, never by this string."""
 
 [[allow]]
 shape = "to_string_collapse"

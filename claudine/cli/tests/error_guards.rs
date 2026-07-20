@@ -14,7 +14,11 @@
 //!   return a top-level `null`, and every downstream `err.detail.*` lookup then
 //!   silently reads wrong.
 //! - **D8 — lossy boundaries.** A typed error collapsed to prose still compiles
-//!   and still prints something plausible. Only a scan can see it.
+//!   and still prints something plausible. Only a scan can see it. The same
+//!   applies one step later: a `DiagnosticSnapshot` exists so an identity can
+//!   cross a boundary no error value survives, and lifting `snapshot.message`
+//!   back into an `eyre!` string erases it a second time at the last place that
+//!   still had the facets (`snapshot_re_erasure`).
 //!
 //! `just lint-transport` runs the D8 guard; `just test` runs all three.
 //!
@@ -195,6 +199,60 @@ fn every_allowlist_entry_names_a_known_shape_tag_and_reason() {
     }
 }
 
+#[test]
+fn the_scan_still_sees_a_snapshot_facet_re_erasure() {
+    // Anchors the `snapshot_re_erasure` arm. The production instance it was
+    // written for is fixed, so without a fixture the arm would silently match
+    // nothing and the guard would pass by being blind — the same failure mode
+    // `the_boxed_scan_still_sees_a_source_field_box` exists to prevent.
+    //
+    // Each of the four sinks appears once, and the fifth function is the
+    // counter-case: a body that keeps the snapshot loses nothing.
+    let fixture = r#"
+        fn projection_closure(captured: Option<&DiagnosticSnapshot>) -> Option<&str> {
+            captured.map(|snapshot| snapshot.message.as_str())
+        }
+
+        fn report_macro(snapshot: &DiagnosticSnapshot) -> Report {
+            eyre!("launch detection failed: {}", snapshot.message)
+        }
+
+        fn format_context(snapshot: &DiagnosticSnapshot) -> CompositionError {
+            CompositionError::PreFlightFailed(format!("failed: {}", snapshot.code))
+        }
+
+        fn prose_field(snapshot: &DiagnosticSnapshot) -> Failure {
+            Failure { reason: snapshot.message.clone() }
+        }
+
+        fn retained_alongside(snapshot: DiagnosticSnapshot) -> Info {
+            Info { msg: snapshot.message.clone(), snapshot: Some(Box::new(snapshot)) }
+        }
+    "#;
+
+    let scan = source_scan::scan_text("lib/src/fixture.rs", fixture);
+    let hits: BTreeSet<&str> = scan
+        .findings
+        .iter()
+        .filter(|finding| finding.shape == Shape::SnapshotReErasure)
+        .map(|finding| finding.symbol.as_str())
+        .collect();
+
+    let expected: BTreeSet<&str> = [
+        "projection_closure",
+        "report_macro",
+        "format_context",
+        "prose_field",
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(
+        hits, expected,
+        "the snapshot re-erasure arm must flag every sink and must not flag a body \
+         that retains the snapshot"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // D2 — source parity between the sources and the discovery registry
 // ---------------------------------------------------------------------------
@@ -265,7 +323,12 @@ fn the_scan_finds_the_diagnostic_impls_known_to_exist() {
         .map(|item| item.type_name.as_str())
         .collect();
 
-    for expected in ["ClaudineError", "CompositionError", "HarnessError"] {
+    for expected in [
+        "ClaudineError",
+        "CompositionError",
+        "HarnessError",
+        "RestoredDiagnostic",
+    ] {
         assert!(
             implemented.contains(expected),
             "scan did not find `impl Diagnostic for {expected}`; found {implemented:?}"
@@ -660,7 +723,7 @@ mod corpus {
     use std::path::PathBuf;
 
     use claudine::composition::{CompositionError, ShellApprovalFailure};
-    use claudine::diagnostics::Diagnostic;
+    use claudine::diagnostics::{Diagnostic, DiagnosticSnapshot, RestoredDiagnostic};
     use claudine::error::ClaudineError;
     use claudine::harness::error::{HarnessError, PathResolutionFailure};
     use claudine::hook_adapters::AdapterError;
@@ -757,6 +820,17 @@ mod corpus {
                     resolved: Some(PathBuf::from("/repo/nope.md")),
                     resolution: None,
                 }),
+            ),
+            // --- RestoredDiagnostic ---
+            // Its facets come from the snapshot's code rather than from a
+            // `match`, so the catalog-shape check is the only thing standing
+            // between a restored snapshot and a `detail` the catalog does not
+            // declare.
+            (
+                "RestoredDiagnostic(internal.bug)",
+                Box::new(RestoredDiagnostic::new(DiagnosticSnapshot::from_diagnostic(
+                    &ClaudineError::TemplateError("boom".to_string()),
+                ))),
             ),
             // --- CompositionError ---
             (

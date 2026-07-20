@@ -66,6 +66,27 @@ const REPORT_MACROS: &[&str] = &["eyre", "bail", "anyhow"];
 /// `tracing` emitters, for the log-then-return-another-error shape.
 const LOG_MACROS: &[&str] = &["error", "warn", "info", "debug", "trace"];
 
+/// The facet fields of a `DiagnosticSnapshot` / `DiagnosticCause`.
+///
+/// A snapshot is already the *lossless* projection of a typed error. Lifting
+/// one of these out of it and dropping the rest is a second erasure at the one
+/// boundary that still held the full identity — the shape
+/// [`Shape::SnapshotReErasure`] exists to catch.
+const SNAPSHOT_FACET_FIELDS: &[&str] = &[
+    "category",
+    "code",
+    "detail",
+    "disposition",
+    "message",
+    "origin",
+    "severity",
+];
+
+/// Method calls that wrap an extracted facet without changing *what* was
+/// extracted, so a projection closure is recognized through them.
+const FACET_PASSTHROUGH_METHODS: &[&str] =
+    &["as_str", "as_ref", "as_deref", "clone", "to_string", "to_owned", "into"];
+
 /// A lossy transport, as D8 enumerates them.
 ///
 /// D8's sixth shape — a concrete `Diagnostic`/`BlockError` implementation absent
@@ -88,6 +109,17 @@ pub enum Shape {
     /// A log call consumes the typed error and a *different* error is returned,
     /// so the cause never reaches the caller.
     LogThenReturnOther,
+    /// `snapshot.message` lifted out of a `DiagnosticSnapshot` and fed to
+    /// `eyre!`/`format!`/a prose error field — or a closure that projects one
+    /// facet and discards the snapshot.
+    ///
+    /// Distinct from the four shapes above because the value being erased is
+    /// not a live typed error: it is the *snapshot* of one, captured precisely
+    /// so a boundary that cannot hold an error value could still carry the
+    /// identity. Collapsing it to a string throws away the `code`, `category`,
+    /// `disposition`, `origin`, `detail`, and cause the projection preserved.
+    /// Restore it (`RestoredDiagnostic`) instead.
+    SnapshotReErasure,
 }
 
 impl Shape {
@@ -98,6 +130,7 @@ impl Shape {
             Shape::ErrorTextField => "error_text_field",
             Shape::FormatContext => "format_context",
             Shape::LogThenReturnOther => "log_then_return_other",
+            Shape::SnapshotReErasure => "snapshot_re_erasure",
         }
     }
 
@@ -108,6 +141,7 @@ impl Shape {
             Shape::ErrorTextField,
             Shape::FormatContext,
             Shape::LogThenReturnOther,
+            Shape::SnapshotReErasure,
         ]
         .into_iter()
         .find(|shape| shape.as_str() == slug)
@@ -425,6 +459,30 @@ impl FileScan<'_> {
 }
 
 impl FileScan<'_> {
+    /// Report every snapshot facet this body erases into prose.
+    ///
+    /// Runs per function rather than per expression because the two halves of
+    /// the shape are usually apart: one site projects `snapshot.message` out
+    /// and hands it on, another builds the report. Retention is judged over the
+    /// whole body for the same reason the typed-error guard judges it over the
+    /// whole closure — a body that also keeps the snapshot has lost nothing,
+    /// however much prose it builds from a facet alongside it.
+    fn scan_snapshot_re_erasure(&mut self, sig: Option<&syn::Signature>, block: &syn::Block) {
+        for binding in snapshot_bindings(sig, block) {
+            if snapshot_retained(block, &binding) {
+                continue;
+            }
+            let mut probe = SnapshotSinkScan {
+                binding: &binding,
+                hits: Vec::new(),
+            };
+            probe.visit_block(block);
+            for (line, evidence) in std::mem::take(&mut probe.hits) {
+                self.record(Shape::SnapshotReErasure, line, evidence);
+            }
+        }
+    }
+
     /// Record a `Box<T>` return type on a function signature.
     fn scan_result_error(&mut self, sig: &syn::Signature) {
         let syn::ReturnType::Type(_, ty) = &sig.output else {
@@ -504,6 +562,7 @@ impl<'ast> Visit<'ast> for FileScan<'_> {
         }
         self.stack.push(node.sig.ident.to_string());
         self.scan_result_error(&node.sig);
+        self.scan_snapshot_re_erasure(Some(&node.sig), &node.block);
         syn::visit::visit_item_fn(self, node);
         self.stack.pop();
     }
@@ -542,6 +601,7 @@ impl<'ast> Visit<'ast> for FileScan<'_> {
         }
         self.stack.push(node.sig.ident.to_string());
         self.scan_result_error(&node.sig);
+        self.scan_snapshot_re_erasure(Some(&node.sig), &node.block);
         syn::visit::visit_impl_item_fn(self, node);
         self.stack.pop();
     }
@@ -1085,4 +1145,275 @@ fn returns_unrelated_error(stmt: &Stmt, binding: &str) -> bool {
 
 fn line_of(span: proc_macro2::Span) -> usize {
     span.start().line
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot re-erasure analysis
+// ---------------------------------------------------------------------------
+
+/// Is `name` a binding this scan treats as a `DiagnosticSnapshot`?
+///
+/// Name-based, because a snapshot arrives through `Option`, `Box`, closure
+/// parameters, and struct fields, and `syn` has no types to consult. The
+/// convention is uniform in the tree (`snapshot`, `error_snapshot`,
+/// `snapshot_for_cause`), and a type-annotated binding is picked up separately
+/// by [`type_mentions_snapshot`].
+fn is_snapshot_name(name: &str) -> bool {
+    name == "snapshot" || name.ends_with("_snapshot") || name.starts_with("snapshot_")
+}
+
+/// Does a type annotation name the snapshot types, through references,
+/// `Option`, and `Box`?
+fn type_mentions_snapshot(ty: &syn::Type) -> bool {
+    match ty {
+        syn::Type::Path(path) => path.path.segments.iter().any(|segment| {
+            segment.ident == "DiagnosticSnapshot"
+                || segment.ident == "DiagnosticCause"
+                || match &segment.arguments {
+                    syn::PathArguments::AngleBracketed(args) => args.args.iter().any(|arg| {
+                        matches!(arg, syn::GenericArgument::Type(inner)
+                            if type_mentions_snapshot(inner))
+                    }),
+                    _ => false,
+                }
+        }),
+        syn::Type::Reference(reference) => type_mentions_snapshot(&reference.elem),
+        syn::Type::Paren(paren) => type_mentions_snapshot(&paren.elem),
+        _ => false,
+    }
+}
+
+/// Every snapshot binding visible in a function: its parameters plus any
+/// pattern binding introduced inside the body (a `let`, a `match` arm, a
+/// closure parameter).
+fn snapshot_bindings(sig: Option<&syn::Signature>, block: &syn::Block) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+
+    if let Some(sig) = sig {
+        for input in &sig.inputs {
+            let syn::FnArg::Typed(typed) = input else {
+                continue;
+            };
+            let Some(name) = pat_ident(&typed.pat) else {
+                continue;
+            };
+            if is_snapshot_name(&name) || type_mentions_snapshot(&typed.ty) {
+                names.insert(name);
+            }
+        }
+    }
+
+    struct Bindings<'a> {
+        names: &'a mut BTreeSet<String>,
+    }
+    impl<'ast> Visit<'ast> for Bindings<'_> {
+        fn visit_pat_ident(&mut self, node: &'ast syn::PatIdent) {
+            if is_snapshot_name(&node.ident.to_string()) {
+                self.names.insert(node.ident.to_string());
+            }
+            syn::visit::visit_pat_ident(self, node);
+        }
+        fn visit_pat_type(&mut self, node: &'ast syn::PatType) {
+            if type_mentions_snapshot(&node.ty)
+                && let Some(name) = pat_ident(&node.pat)
+            {
+                self.names.insert(name);
+            }
+            syn::visit::visit_pat_type(self, node);
+        }
+    }
+    Bindings { names: &mut names }.visit_block(block);
+
+    names
+}
+
+/// Does the whole snapshot survive somewhere in this body?
+///
+/// True when `binding` appears as a bare expression that is not the base of a
+/// facet field access — stored in a field, cloned wholesale, forwarded to a
+/// call. The mirror of [`retains_typed`]: if the snapshot is kept, lifting a
+/// facet out of it alongside is a convenience, not a loss.
+fn snapshot_retained(block: &syn::Block, binding: &str) -> bool {
+    struct Probe<'a> {
+        binding: &'a str,
+        retained: bool,
+    }
+    impl<'ast> Visit<'ast> for Probe<'_> {
+        fn visit_expr_field(&mut self, node: &'ast syn::ExprField) {
+            if facet_member(node).is_some() && expr_is_binding(&node.base, self.binding) {
+                return;
+            }
+            syn::visit::visit_expr_field(self, node);
+        }
+        fn visit_expr_path(&mut self, node: &'ast syn::ExprPath) {
+            if node.path.is_ident(self.binding) {
+                self.retained = true;
+            }
+        }
+    }
+    let mut probe = Probe {
+        binding,
+        retained: false,
+    };
+    probe.visit_block(block);
+    probe.retained
+}
+
+/// The facet name of `expr` when it is `<something>.<facet>`.
+fn facet_member(expr: &syn::ExprField) -> Option<String> {
+    let Member::Named(name) = &expr.member else {
+        return None;
+    };
+    let name = name.to_string();
+    SNAPSHOT_FACET_FIELDS.contains(&name.as_str()).then_some(name)
+}
+
+/// Strip the wrappers that do not change *what* was projected: `&`, parens,
+/// and the pass-through method calls.
+fn unwrap_passthrough(expr: &Expr) -> &Expr {
+    match expr {
+        Expr::Reference(reference) => unwrap_passthrough(&reference.expr),
+        Expr::Paren(paren) => unwrap_passthrough(&paren.expr),
+        Expr::MethodCall(call)
+            if call.args.is_empty()
+                && FACET_PASSTHROUGH_METHODS.contains(&call.method.to_string().as_str()) =>
+        {
+            unwrap_passthrough(&call.receiver)
+        }
+        other => other,
+    }
+}
+
+/// The facet `expr` projects out of `binding`, if that is all it does.
+fn facet_projection(expr: &Expr, binding: &str) -> Option<String> {
+    let Expr::Field(field) = unwrap_passthrough(expr) else {
+        return None;
+    };
+    let facet = facet_member(field)?;
+    expr_is_binding(&field.base, binding).then_some(facet)
+}
+
+/// Every facet the expression reads off `binding`.
+fn facets_read(expr: &Expr, binding: &str) -> BTreeSet<String> {
+    struct Probe<'a> {
+        binding: &'a str,
+        found: BTreeSet<String>,
+    }
+    impl<'ast> Visit<'ast> for Probe<'_> {
+        fn visit_expr_field(&mut self, node: &'ast syn::ExprField) {
+            if let Some(facet) = facet_member(node)
+                && expr_is_binding(&node.base, self.binding)
+            {
+                self.found.insert(facet);
+            }
+            syn::visit::visit_expr_field(self, node);
+        }
+    }
+    let mut probe = Probe {
+        binding,
+        found: BTreeSet::new(),
+    };
+    probe.visit_expr(expr);
+    probe.found
+}
+
+/// Does a macro's token stream contain `binding . <facet>`?
+fn macro_reads_facet(tokens: &TokenStream, binding: &str) -> bool {
+    let trees: Vec<TokenTree> = tokens.clone().into_iter().collect();
+    for (index, tree) in trees.iter().enumerate() {
+        if let TokenTree::Group(group) = tree
+            && macro_reads_facet(&group.stream(), binding)
+        {
+            return true;
+        }
+        let TokenTree::Ident(ident) = tree else {
+            continue;
+        };
+        if *ident != binding {
+            continue;
+        }
+        let is_dot = matches!(trees.get(index + 1), Some(TokenTree::Punct(p)) if p.as_char() == '.');
+        let reads_facet = matches!(
+            trees.get(index + 2),
+            Some(TokenTree::Ident(field)) if SNAPSHOT_FACET_FIELDS.contains(&field.to_string().as_str())
+        );
+        if is_dot && reads_facet {
+            return true;
+        }
+    }
+    false
+}
+
+/// Finds the places a snapshot facet is turned back into prose.
+///
+/// Deliberately sink-directed rather than "any facet read": `err.*` projection
+/// reads every facet off a snapshot and is exactly the surface the snapshot
+/// exists to feed. What is lossy is a facet reaching a *report*, a prose error
+/// field, or a projection closure that hands one field on and drops the rest.
+struct SnapshotSinkScan<'a> {
+    binding: &'a str,
+    hits: Vec<(usize, String)>,
+}
+
+impl<'ast> Visit<'ast> for SnapshotSinkScan<'_> {
+    fn visit_expr_closure(&mut self, node: &'ast ExprClosure) {
+        if node.inputs.len() == 1
+            && pat_ident(&node.inputs[0]).as_deref() == Some(self.binding)
+            && let Some(facet) = facet_projection(&node.body, self.binding)
+        {
+            self.hits.push((
+                line_of(node.body.span()),
+                format!(
+                    "closure projects only `{}.{facet}`, discarding the snapshot",
+                    self.binding
+                ),
+            ));
+        }
+        syn::visit::visit_expr_closure(self, node);
+    }
+
+    fn visit_macro(&mut self, node: &'ast Macro) {
+        if !macro_reads_facet(&node.tokens, self.binding) {
+            return;
+        }
+        if macro_is(node, REPORT_MACROS) || macro_is(node, &["format"]) {
+            self.hits.push((
+                line_of(node.span()),
+                format!(
+                    "{}! is built from a `{}` facet",
+                    macro_name(node),
+                    self.binding
+                ),
+            ));
+        }
+    }
+
+    fn visit_expr_struct(&mut self, node: &'ast ExprStruct) {
+        for field in &node.fields {
+            let Member::Named(name) = &field.member else {
+                self.visit_expr(&field.expr);
+                continue;
+            };
+            let name = name.to_string();
+            let facets = facets_read(&field.expr, self.binding);
+            // A facet copied into a field of the *same* name carries the
+            // identity forward — that is how `DiagnosticCause` widens back into
+            // a `DiagnosticSnapshot`. The collapse is a facet landing in a
+            // field that means something else, which is where it stops being a
+            // facet and starts being prose.
+            let claimed = ERROR_TEXT_FIELDS.contains(&name.as_str())
+                && facets.iter().any(|facet| *facet != name);
+            if claimed {
+                self.hits.push((
+                    line_of(field.span()),
+                    format!("`{name}` is built from a `{}` facet", self.binding),
+                ));
+            } else {
+                self.visit_expr(&field.expr);
+            }
+        }
+        if let Some(rest) = &node.rest {
+            self.visit_expr(rest);
+        }
+    }
 }
