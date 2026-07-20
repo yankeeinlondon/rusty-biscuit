@@ -493,3 +493,29 @@ fn a_handoff_assembles_into_an_evaluated_request_losslessly() {
     assert_eq!(request.provenance().source_path(), Path::new("router.md"));
     assert_eq!(request.provenance().chain(), chain.as_slice());
 }
+
+#[test]
+fn nested_ctx_refs_resolve_against_one_captured_snapshot() {
+    // A snapshot-less handoff (prepared_context: None) captures the fallback
+    // context ONCE for the whole overlay. Two `ctx.today` reads at different
+    // nesting depths must resolve to the same non-empty value.
+    let outcome = run_failure(
+        proxy_stack(json!({
+            "top": "{{ ctx.today }}",
+            "nested": {"deep": ["{{ ctx.today }}"]}
+        })),
+        json!({}),
+        None,
+    );
+    let (_, overlay, _) = proxy_of(&outcome);
+    let top = overlay
+        .get("top")
+        .and_then(Value::as_str)
+        .expect("top resolves to a string");
+    assert!(!top.is_empty(), "ctx.today must resolve; overlay: {overlay:?}");
+    assert_eq!(
+        overlay.get("nested"),
+        Some(&json!({ "deep": [top] })),
+        "nested ctx.today must equal the top-level capture; overlay: {overlay:?}"
+    );
+}
