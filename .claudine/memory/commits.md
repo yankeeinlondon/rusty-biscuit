@@ -50,8 +50,11 @@ do not belong here.
 - Put Git options before `--`. For very large explicit path lists, use
   `--pathspec-from-file` and inspect the generated list.
 - Feed commit messages through `-F -` with a single-quoted heredoc, or through a
-  checked temp file for long bodies. A bare `git commit -- <paths> <<EOF` can
-  open the configured editor and block.
+  checked temp file for long bodies. Prefer the temp-file pattern when the
+  commit may need to be retried (lock contention): an in-place heredoc does not
+  compose cleanly with a retry loop inside a single shell invocation, while a
+  prewritten file lets the loop reuse the same body verbatim. A bare
+  `git commit -- <paths> <<EOF` can open the configured editor and block.
 - Do not place messages containing backticks, dollar signs, or other shell
   metacharacters in a double-quoted `-m` argument.
 
@@ -123,27 +126,29 @@ do not belong here.
   report as "unknown, verify independently" rather than "failed". The
   existing Verification section already mandates this; the lesson is that
   it can happen even when the sub-agent had nothing to report as a problem.
+- The corollary is sharper than the existing wording suggests: an empty
+  return report can also mean the commit *never ran*. Observed in a 13-group
+  batch: one sub-agent returned a blank final message and its three assigned
+  paths were still staged. Treat empty/ambiguous reports as **silent failure
+  until proven otherwise** by `git status --short` showing the assigned paths
+  gone (and the expected hash in the log). Verify per-agent rather than
+  only at the end of the batch — recovering from a missed commit is much
+  cheaper while the orchestrator still has the intended commit body and
+  pathspec in context.
 
 ## Verification
 
 - A successful `git commit` exit status is authoritative for that invocation.
-- Capture the new commit hash from `git commit` stdout and verify that hash with
-  `git show --stat <hash>` or `git show --name-status <hash>`. Do not rely on
-  `git log -1` after concurrent commits; HEAD may already have advanced.
+- Capture the new commit hash via `git rev-parse HEAD` immediately after success;
+  this is more robust than parsing `git commit`'s stdout, where branch refs like
+  `[error-prop-and-file-resolution …]` and other wrappers can confuse
+  `awk '{print $1}'`. Verify with `git show --stat <hash>` or
+  `git show --name-status <hash>`. Do not rely on `git log -1` after concurrent
+  commits; HEAD may already have advanced.
 - If a wrapper hides commit stdout, recover immediately with `git reflog -1`
   and verify that hash. Prefer unwrapped `git commit` so stdout is visible.
 - After all groups finish, inspect `git status --short` for staged paths left
   behind and report or commit them as appropriate.
-- For whitespace-only groups, sanity-check with
-  `git diff --staged --stat --ignore-all-space --ignore-blank-lines` or
-  `--numstat --ignore-all-space --ignore-blank-lines`. Zero output means no
-  non-whitespace changes remain.
-- A successful `git commit` exit status is authoritative for that invocation.
-- Capture the new commit hash from `git commit` stdout and verify that hash with
-  `git show --stat <hash>` or `git show --name-status <hash>`. Do not rely on
-  `git log -1` after concurrent commits; HEAD may already have advanced.
-- If a wrapper hides commit stdout, recover immediately with `git reflog -1`
-  and verify that hash. Prefer unwrapped `git commit` so stdout is visible.
 - Agent or task completion alone does not prove that its commit landed. After
   all groups finish, inspect `git status --short` and recent history for staged
   paths or missing commits. Treat empty or ambiguous agent reports as unknown.
