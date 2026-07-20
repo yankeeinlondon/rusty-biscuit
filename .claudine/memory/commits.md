@@ -139,14 +139,17 @@ do not belong here.
 ## Verification
 
 - A successful `git commit` exit status is authoritative for that invocation.
-- Capture the new commit hash via `git rev-parse HEAD` immediately after success;
-  this is more robust than parsing `git commit`'s stdout, where branch refs like
-  `[error-prop-and-file-resolution …]` and other wrappers can confuse
-  `awk '{print $1}'`. Verify with `git show --stat <hash>` or
-  `git show --name-status <hash>`. Do not rely on `git log -1` after concurrent
-  commits; HEAD may already have advanced.
-- If a wrapper hides commit stdout, recover immediately with `git reflog -1`
-  and verify that hash. Prefer unwrapped `git commit` so stdout is visible.
+- Capture the new commit hash from `git commit`'s bracketed success banner and
+  verify it with `git show --stat <hash>` or `git show --name-status <hash>`.
+  Parse the hash token inside the brackets, not the first whitespace-delimited
+  field, because branch refs and wrappers can make that field ambiguous.
+- In a concurrent batch, `git rev-parse HEAD` immediately after success is not
+  authoritative for that invocation: a sibling can advance `HEAD` between the
+  commit and the read. Use the captured banner hash; if stdout was hidden,
+  recover with `git reflog --grep '<subject-substring>' -1` and verify the
+  subject and exact path set.
+- Do not rely on `git log -1` after concurrent commits; HEAD may already have
+  advanced.
 - After all groups finish, inspect `git status --short` for staged paths left
   behind and report or commit them as appropriate.
 - Agent or task completion alone does not prove that its commit landed. After
