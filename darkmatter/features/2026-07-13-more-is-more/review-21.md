@@ -66,6 +66,8 @@ Recommendation: run the existing three-OS CI matrices on the reviewed commit and
 
 Strongest verification present: **Level 1 on macOS; no passing Windows or Linux result**. This is a high-severity rigor gap.
 
+**DECISION:** Use Docker to pass Linux results but defer Windows for now.
+
 ## Verification Matrix
 
 All feature requirements are in-process filesystem/Git/parser/network/Markdown/LSP behavior. None depends on terminal-emulator rendering or its input encoder, so Level 2 and Level 3 are not applicable.
