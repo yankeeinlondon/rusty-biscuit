@@ -33,7 +33,7 @@ use serde_json::{Map, Value};
 use serde_yaml_ng::Value as YamlValue;
 
 use super::{
-    SchemaArm, SchemaOrigin, SchemaShape, SimplifiedSchema,
+    SchemaArm, SchemaOrigin, SchemaOriginKind, SchemaShape, SimplifiedSchema,
     errors::SchemaError,
     reference::{
         SchemaReferenceKind, classify_schema_reference, is_bare_schema_name,
@@ -132,8 +132,11 @@ pub fn resolve_yaml_schema_with_roots(
     base_dir: &Path,
     schema_roots: &[PathBuf],
 ) -> Result<ResolvedSchema, SchemaError> {
+    let mut stack = ReferenceStack::default();
     match value {
-        YamlValue::String(reference) => resolve_reference(reference, base_dir, schema_roots),
+        YamlValue::String(reference) => {
+            resolve_reference(reference, base_dir, schema_roots, &mut stack)
+        }
         YamlValue::Mapping(_) => {
             let schema = parse_yaml_schema(value)?;
             // Inline the definitions of any `Name@file` named-type imports
@@ -156,7 +159,9 @@ pub fn resolve_yaml_schema_with_roots(
                 referenced_files: Vec::new(),
             })
         }
-        YamlValue::Sequence(items) => resolve_root_union(items, base_dir, schema_roots),
+        YamlValue::Sequence(items) => {
+            resolve_root_union(items, base_dir, schema_roots, &mut stack)
+        }
         other => Err(SchemaError::FrontmatterShape {
             message: format!(
                 "$schema must be a mapping, sequence, or string; got {}",
@@ -170,6 +175,7 @@ fn resolve_root_union(
     items: &[YamlValue],
     base_dir: &Path,
     schema_roots: &[PathBuf],
+    stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     if items.is_empty() {
         return Err(SchemaError::FrontmatterShape {
@@ -206,7 +212,7 @@ fn resolve_root_union(
                 any_of.push(strip_schema_uri(arm_json));
             }
             YamlValue::String(reference) => {
-                let resolved = resolve_reference(reference, base_dir, schema_roots)?;
+                let resolved = resolve_reference(reference, base_dir, schema_roots, stack)?;
                 imports.extend(resolved.imports.iter().cloned());
                 examples.extend(resolved.examples.iter().cloned());
                 referenced_files.extend(resolved.referenced_files.iter().cloned());
@@ -286,10 +292,96 @@ fn try_bare_name_in_roots(
     Ok(None)
 }
 
+// ── `$schema` file-reference delegation guard ───────────────────────────────
+
+/// Hard cap on `$schema` file-reference delegation depth. Mirrors
+/// [`MAX_IMPORT_DEPTH`] so neither cross-file mechanism can bypass the other's
+/// recursion guard.
+const MAX_REFERENCE_DEPTH: usize = 32;
+
+/// Open `$schema` file-reference frames, innermost last.
+///
+/// A schema file whose whole payload is a reference (`$schema: ./other.yaml`)
+/// delegates by re-entering [`resolve_reference`], and root-union file arms do
+/// the same. Without this stack a file that references itself — or two files
+/// that reference each other — recurses until the process stack overflows
+/// instead of reporting a structured error. Frames are canonicalized paths, so
+/// the same file reached by two spellings (`./a.yaml` vs `../dir/a.yaml`, or a
+/// case-differing spelling on macOS/Windows) is one frame.
+#[derive(Default)]
+struct ReferenceStack {
+    frames: Vec<PathBuf>,
+}
+
+impl ReferenceStack {
+    /// Opens a frame for `canonical`, or reports the offending chain when that
+    /// file is already open (cycle) or the chain is too deep.
+    fn enter(&mut self, canonical: &Path) -> Result<(), SchemaError> {
+        if self.frames.iter().any(|frame| frame == canonical) {
+            return Err(SchemaError::ReferenceCycle {
+                chain: self.describe(canonical),
+            });
+        }
+        if self.frames.len() >= MAX_REFERENCE_DEPTH {
+            return Err(SchemaError::ReferenceCycle {
+                chain: format!(
+                    "$schema file-reference chain exceeded {MAX_REFERENCE_DEPTH} levels at `{}`",
+                    canonical.display()
+                ),
+            });
+        }
+        self.frames.push(canonical.to_path_buf());
+        Ok(())
+    }
+
+    fn leave(&mut self) {
+        self.frames.pop();
+    }
+
+    /// Renders the open frames plus the repeated file as an `a -> b -> a`
+    /// chain for the cycle-error message.
+    fn describe(&self, repeat: &Path) -> String {
+        let mut parts: Vec<String> = self
+            .frames
+            .iter()
+            .map(|frame| frame.display().to_string())
+            .collect();
+        parts.push(repeat.display().to_string());
+        parts.join(" -> ")
+    }
+}
+
+/// Folds this hop's canonical path into the dependency edges the nested
+/// resolution already collected.
+///
+/// Every hop of a delegation chain is a dependency edge: for `document ->
+/// a.yaml -> b.yaml`, editing `b.yaml` must invalidate the cached effective
+/// schema, so replacing the nested list with this one path would silently drop
+/// it. `BTreeSet` keeps the emitted list sorted and deduplicated, which is the
+/// order [`ResolvedSchema::referenced_files`] promises.
+fn accumulate_referenced_file(nested: Vec<PathBuf>, canonical: PathBuf) -> Vec<PathBuf> {
+    let mut edges: BTreeSet<PathBuf> = nested.into_iter().collect();
+    edges.insert(canonical);
+    edges.into_iter().collect()
+}
+
+/// Records the file a nested resolution ultimately loaded its schema from.
+///
+/// A delegating file (`a.yaml` whose whole payload is `$schema: ./b.yaml`) has
+/// already reported `b.yaml`, the file that actually authors the schema. Keep
+/// it: `relatedInformation` should land on the declaration, not on the
+/// redirect that has nothing to point at.
+fn attribute_origin(resolved: &mut ResolvedSchema, path: &Path) {
+    if resolved.origin.kind != SchemaOriginKind::ReferencedFile {
+        resolved.origin = SchemaOrigin::referenced_file(path.to_path_buf());
+    }
+}
+
 fn resolve_reference(
     reference: &str,
     base_dir: &Path,
     schema_roots: &[PathBuf],
+    stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     let classified = classify_schema_reference(reference)?;
     // Take the canonical string back off the classifier rather than trimming
@@ -303,9 +395,10 @@ fn resolve_reference(
     // the roots nearest-first instead of the document directory.
     if !schema_roots.is_empty() && classified.kind() == SchemaReferenceKind::BareName {
         if let Some(path) = try_bare_name_in_roots(trimmed, schema_roots)? {
-            let mut resolved = load_schema_from_path(&path, schema_roots)?;
-            resolved.origin = SchemaOrigin::referenced_file(path.clone());
-            resolved.referenced_files = vec![canonical_path(&path)];
+            let mut resolved = load_guarded(&path, schema_roots, stack)?;
+            attribute_origin(&mut resolved, &path);
+            resolved.referenced_files =
+                accumulate_referenced_file(resolved.referenced_files, canonical_path(&path));
             return Ok(resolved);
         }
         // Bare name not found in any schema root. Check if a document-sibling
@@ -341,19 +434,36 @@ fn resolve_reference(
             )),
         })?;
 
-    let mut resolved = load_schema_from_path(&path, schema_roots)?;
+    let mut resolved = load_guarded(&path, schema_roots, stack)?;
     // The schema was loaded from a file — record the resolved path so
     // diagnostics can point `relatedInformation` at the referenced source.
-    resolved.origin = SchemaOrigin::referenced_file(path.clone());
+    attribute_origin(&mut resolved, &path);
     // The referenced file's own content is a dependency edge: editing
     // `schema.yaml`'s type must invalidate a cached effective schema.
-    resolved.referenced_files = vec![canonical_path(&path)];
+    resolved.referenced_files =
+        accumulate_referenced_file(resolved.referenced_files, canonical_path(&path));
     Ok(resolved)
+}
+
+/// Loads `path` with a cycle/depth frame open, so a delegating file cannot
+/// re-enter a file already being resolved. The frame is closed on both the
+/// success and failure paths.
+fn load_guarded(
+    path: &Path,
+    schema_roots: &[PathBuf],
+    stack: &mut ReferenceStack,
+) -> Result<ResolvedSchema, SchemaError> {
+    let canonical = canonical_path(path);
+    stack.enter(&canonical)?;
+    let loaded = load_schema_from_path(path, schema_roots, stack);
+    stack.leave();
+    loaded
 }
 
 fn load_schema_from_path(
     path: &Path,
     schema_roots: &[PathBuf],
+    stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     let bytes = fs::read(path).map_err(|source| SchemaError::Io {
         path: path.to_path_buf(),
@@ -366,7 +476,7 @@ fn load_schema_from_path(
 
     match extension.as_deref() {
         Some("json") => parse_raw_json_schema(path, &bytes),
-        _ => parse_yaml_referenced_file(path, &bytes, schema_roots),
+        _ => parse_yaml_referenced_file(path, &bytes, schema_roots, stack),
     }
 }
 
@@ -374,6 +484,7 @@ fn parse_yaml_referenced_file(
     path: &Path,
     bytes: &[u8],
     schema_roots: &[PathBuf],
+    stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     let text = std::str::from_utf8(bytes).map_err(|_| SchemaError::AmbiguousReferenced {
         path: path.to_path_buf(),
@@ -381,14 +492,14 @@ fn parse_yaml_referenced_file(
     if let Some(document) = parse_standalone_schema_document(text, path)? {
         return match document.declaration {
             SchemaDeclaration::Schema(schema) => {
-                resolve_standalone_schema(schema, path, schema_roots)
+                resolve_standalone_schema(schema, path, schema_roots, stack)
             }
             // A whole-file reference document delegates to another file, so it
             // resolves through the same path as a root-union `FileRef` arm and
             // reports the *target* as its origin and dependency edge.
             SchemaDeclaration::Reference(reference) => {
                 let file_dir = path.parent().unwrap_or_else(|| Path::new("."));
-                resolve_reference(reference.file_reference().raw(), file_dir, schema_roots)
+                resolve_reference(reference.file_reference().raw(), file_dir, schema_roots, stack)
             }
         };
     }
@@ -417,6 +528,7 @@ fn resolve_standalone_schema(
     schema: SimplifiedSchema,
     path: &Path,
     schema_roots: &[PathBuf],
+    stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     let file_dir = path.parent().unwrap_or_else(|| Path::new("."));
     let key = NamespaceKey::File(canonical_path(path));
@@ -435,7 +547,7 @@ fn resolve_standalone_schema(
             })
         }
         SimplifiedSchema::Union(arms) => {
-            resolve_standalone_root_union(arms, file_dir, path, schema_roots)
+            resolve_standalone_root_union(arms, file_dir, path, schema_roots, stack)
         }
     }
 }
@@ -445,6 +557,7 @@ fn resolve_standalone_root_union(
     base_dir: &Path,
     path: &Path,
     schema_roots: &[PathBuf],
+    stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     let mut any_of = Vec::with_capacity(arms.len());
     let mut simplified_arms = Vec::with_capacity(arms.len());
@@ -478,7 +591,7 @@ fn resolve_standalone_root_union(
                 any_of.push(strip_schema_uri(arm_json));
             }
             SchemaArm::FileRef(reference) => {
-                let resolved = resolve_reference(&reference, base_dir, schema_roots)?;
+                let resolved = resolve_reference(&reference, base_dir, schema_roots, stack)?;
                 imports.extend(resolved.imports.iter().cloned());
                 examples.extend(resolved.examples.iter().cloned());
                 referenced_files.extend(resolved.referenced_files.iter().cloned());

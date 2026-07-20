@@ -623,6 +623,58 @@ mod tests {
     }
 
     #[test]
+    fn schema_cache_invalidates_on_terminal_file_in_a_reference_chain() {
+        // `doc.md` -> `a.yaml` -> `b.yaml`: `a.yaml` is a pure redirect, so the
+        // declaration the document actually validates against lives two hops
+        // away. Every hop must reach `effective.dependencies()`, otherwise
+        // editing the terminal file leaves the document validating against a
+        // stale cached schema.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.yaml"), "$schema: ./b.yaml\n").unwrap();
+        std::fs::write(root.join("b.yaml"), "$schema:\n  value: 'enum(a, b)'\n").unwrap();
+        let doc_path = root.join("doc.md");
+        let text = "---\n$schema: ./a.yaml\nvalue: a\n---\n\nbody\n";
+        let state = OverlayState::default();
+        let doc = uri("file:///w/doc.md");
+        let roots = [root.to_path_buf()];
+
+        let first = state
+            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &roots)
+            .unwrap();
+        let bundle1 = ready_bundle(&first);
+        let report1 = bundle1.effective.validate(&bundle1.frontmatter_json);
+        assert!(report1.valid, "`a` is a valid enum(a, b): {:?}", report1.problems);
+        assert!(
+            bundle1
+                .effective
+                .dependencies()
+                .iter()
+                .any(|p| p.ends_with("b.yaml")),
+            "the terminal hop must be a dependency edge: {:?}",
+            bundle1.effective.dependencies(),
+        );
+
+        // Edit the TERMINAL file only — `a.yaml` and the document are untouched.
+        std::fs::write(root.join("b.yaml"), "$schema:\n  value: 'enum(x, y)'\n").unwrap();
+
+        let second = state
+            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &roots)
+            .unwrap();
+        let bundle2 = ready_bundle(&second);
+        assert!(
+            !Arc::ptr_eq(&bundle1, &bundle2),
+            "a terminal-hop change must reassemble the bundle"
+        );
+        let report2 = bundle2.effective.validate(&bundle2.frontmatter_json);
+        assert!(
+            !report2.valid,
+            "`a` is no longer a valid enum(x, y): {:?}",
+            report2.problems
+        );
+    }
+
+    #[test]
     fn schema_cache_invalidates_on_extension_baseline_change() {
         // An extension baseline is merged into the baseline JSON schema before
         // the effective schema is assembled, so its dependency edges never reach
