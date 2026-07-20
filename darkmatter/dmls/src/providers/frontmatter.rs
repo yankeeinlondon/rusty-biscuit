@@ -179,6 +179,13 @@ fn meta_schema_kinds_for_line(
                 darkmatter::markdown::schemas::StandaloneSchemaEnvelope::Pure => "$schema",
                 darkmatter::markdown::schemas::StandaloneSchemaEnvelope::Tagged => "types",
             };
+            // A pure standalone document's whole payload may be a scalar
+            // reference (`$schema: ./other.yaml`), whose value sits on the
+            // top-level `$schema` line itself — a line `enclosing_path`
+            // correctly reports as having no ancestors.
+            if payload == "$schema" && !sequence_item && key == "$schema" && ancestors.is_empty() {
+                return Some(vec![MetaSchemaKind::Schema]);
+            }
             if ancestors.first().map(String::as_str) != Some(payload) {
                 return None;
             }

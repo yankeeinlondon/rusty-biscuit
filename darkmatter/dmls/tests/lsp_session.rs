@@ -3457,6 +3457,114 @@ fn meta_schema_phase7_standalone_pure_and_tagged_completion() {
     fixture.shutdown();
 }
 
+/// A pure standalone document whose whole payload is a scalar file reference
+/// still receives schema-declaration completion.
+///
+/// The value being authored sits on the top-level `$schema` line itself, which
+/// no mapping encloses, so activation cannot be recovered from the ancestor
+/// chain the way every nested standalone form is. Before the fix the provider
+/// bailed out before any file-reference candidate was offered.
+#[test]
+fn meta_schema_standalone_scalar_reference_completion() {
+    // (name, text, character, expected label)
+    let cases = [
+        ("empty.yaml", "$schema: \n", 9u32),
+        ("partial.yaml", "$schema: ./sch\n", 14),
+        ("complete.yaml", "$schema: ./schema.yaml\n", 22),
+    ];
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    for (name, body, character) in cases {
+        for crlf in [false, true] {
+            let text = if crlf { body.replace('\n', "\r\n") } else { body.to_string() };
+            let file = if crlf { format!("crlf-{name}") } else { name.to_string() };
+            let path = workspace.path().join(&file);
+            std::fs::write(&path, &text).unwrap();
+            let uri = url::Url::from_file_path(path).unwrap();
+            open(&fixture, uri.as_str(), &text);
+            let completion = fixture
+                .request(
+                    "textDocument/completion",
+                    json!({
+                        "textDocument": { "uri": uri.as_str() },
+                        "position": { "line": 0, "character": character }
+                    }),
+                )
+                .result
+                .expect("standalone scalar reference completion");
+            let items = completion.as_array().expect("completion array");
+            let offered = items
+                .iter()
+                .find(|item| item["label"] == json!("./schema.yaml"))
+                .unwrap_or_else(|| panic!("{file}: no reference candidate: {completion:?}"));
+            // The replaced range is the authored reference token, so an
+            // accepted candidate overwrites what was typed rather than
+            // appending to it.
+            let range = &offered["textEdit"]["range"];
+            assert_eq!(range["end"], json!({ "line": 0, "character": character }), "{file}");
+            assert_eq!(range["start"]["line"], json!(0), "{file}");
+            assert_eq!(range["start"]["character"], json!(9), "{file}");
+        }
+    }
+    fixture.shutdown();
+}
+
+/// The scalar-reference form keeps its completion while the buffer is
+/// momentarily unparseable, on the same last-good state every other standalone
+/// form relies on.
+#[test]
+fn meta_schema_standalone_scalar_reference_completion_survives_malformed_edit() {
+    let workspace = tempfile::tempdir().unwrap();
+    let valid = "$schema: ./schema.yaml\n";
+    let malformed = "$schema: ./schema.yaml\n\tbad\n";
+    let path = workspace.path().join("scalar-reference.yaml");
+    std::fs::write(&path, valid).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), valid);
+    assert!(fixture.wait_for_diagnostics(uri.as_str()).is_empty());
+
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": malformed } ]
+        }),
+    );
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.document_malformed")),
+        "the current malformed buffer owns diagnostics: {diagnostics:?}"
+    );
+
+    let completion = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 0, "character": 14 }
+            }),
+        )
+        .result
+        .expect("last-good scalar reference completion");
+    assert!(
+        completion
+            .as_array()
+            .expect("completion array")
+            .iter()
+            .any(|item| item["label"] == json!("./schema.yaml")),
+        "last-good standalone state keeps scalar-reference completion alive: {completion:?}"
+    );
+
+    fixture.shutdown();
+}
+
 #[test]
 fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnostic() {
     let workspace = tempfile::tempdir().unwrap();
@@ -4663,3 +4771,4 @@ fn standalone_inner_definition_diagnostics_address_punctuated_keys() {
 
     fixture.shutdown();
 }
+
