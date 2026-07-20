@@ -5,8 +5,16 @@ acceptance criterion in [`../spec.md`](../spec.md) mapped to at least one named
 test that exists in the tree.
 
 Written 2026-07-17 during Phase 13; updated after review-3 findings 1-5,
-review-5 findings 1-6, review-6 findings 1-5, review-7 findings 1-4, and
-**review-8 findings 1-5 (current)**.
+review-5 findings 1-6, review-6 findings 1-5, review-7 findings 1-4,
+review-8 findings 1-5, review-9 findings 1-5, and
+**review-10 findings 1-6 (current)**.
+
+Review-10 finding 6 found this document two reviews behind its own tree: the
+header claimed review-8, the body had absorbed only part of review-9, AC 25 was
+scored at L1 against rows that had since gained L2 cover, and AC 15 cited two L1
+tests that were failing on a clean host. Every row below was re-derived from the
+tests that exist at this HEAD, and every cited name re-matched against the `fn`
+and `mod` names the area defines.
 
 ## Status: 30 of 30 complete
 
@@ -14,6 +22,21 @@ The count below is **derived from the rows**, not asserted ahead of them: it is
 the number of ✅ and ⚠️ marks in the [criteria matrix](#criteria). Review-7
 finding 4 found the previous headline overstated, so it is now recomputed
 whenever a row's mark changes.
+
+**Why it is still 30 after review-10.** Finding 6 was right that the headline
+was not *earned* at the moment it was written: AC 15 was marked complete against
+two L1 rows that failed on any host without ambient OpenCode model configuration
+(finding 5), so the count rested on evidence that was not passing. That is a
+different defect from a criterion being unmet — the behavior AC 15 describes was
+implemented and L2-proven throughout; two of its supporting L1 projections were
+simply non-hermetic. Finding 5's fixture fix makes them pass, and the four
+runtime findings (1-4) each *added* evidence to rows that were already ✅ rather
+than reopening one. Two rows changed their strongest level (AC 10 and AC 25 gain
+L2 rows they did not previously cite; AC 15 gains passing L1 evidence and an
+honest latency note). No row moved to ⚠️ or ⛔. The re-derived count is
+therefore **30 of 30** — but it is 30 for the first time since review-8 on
+evidence that is fully passing, and the [gate record](#recorded-gate-results-2026-07-20-macos-host-review-10-finding-6)
+is what it rests on.
 
 | | Count | Which |
 |---|---:|---|
@@ -50,7 +73,9 @@ Nothing below claims a criterion is proven at a level it is not.
   performs no filesystem side effect of its own, matching `spec.md:85-87`.
 - **Finding 2 — resume compatibility is checked against a rebuilt bundle.**
   `rebuild_launch_env` was extracted in
-  `harness_orch/loop_control/target_launch.rs`, and
+  `harness_orch/loop_control/target_launch.rs` (**since deleted** — review-8
+  finding 2 replaced it with `launch_plan::build_launch_plan`; the surviving
+  env-projection helper in that module is `launch_env_overrides`), and
   `materialize_attempt_prompt_phase` now rebuilds the launch env from the freshly
   materialized document at **every** retry/resume fresh-read boundary rather than
   re-applying an adoption-time snapshot. The dead `target_env_overrides`
@@ -87,8 +112,10 @@ Nothing below claims a criterion is proven at a level it is not.
   initialize-proxy, and recovery-proxy routes — for a single-execution document;
   the looping shape was left uncovered and was closed by review-8 finding 1.
 - **Finding 2 — the whole launch identity is rebuilt, not just the env.**
-  `rebuild_launch_env` (review-6) still exists as the env-projection half, but
-  the compatibility comparison no longer derives from it. `rebuild_launch_identity`
+  `rebuild_launch_env` (review-6) still existed **at that point** as the
+  env-projection half, but the compatibility comparison no longer derived from
+  it. (It has since been deleted — see review-8 finding 2 below.)
+  `rebuild_launch_identity`
   now recomputes provider, profile/binary, resume protocol, interactivity,
   permission mode, structured-output mode, MCP tag set, and env from
   `(document, LaunchRebuildIntent)` at every retry/resume fresh-read boundary,
@@ -147,6 +174,92 @@ Nothing below claims a criterion is proven at a level it is not.
   direct-wrapper path instead of hardcoded `false`. This closes the second of
   the two [open items](#open-items-carried-out-of-review-7--both-closed-by-review-8) carried out of review-7.
 
+### What review-9 changed
+
+- **Finding 1 — the per-attempt bundle owns the execution adapters.** A
+  provider-switch retry still ran the *opening* provider's stream parser,
+  stderr-noise policy, and session-id extraction. Those adapters are now taken
+  from the same rebuilt bundle review-8 finding 2 introduced, so a retry that
+  moves the provider moves its adapters with it. L2:
+  `level2_lifecycle_retry_into_codex_rebuilds_the_execution_adapters`,
+  `level2_lifecycle_retry_out_of_codex_drops_the_codex_adapters`.
+- **Finding 2 — launch-plan replay stopped preserving stale provider-shaped
+  values.** Provider-generated argv encodings and environment keys written by the
+  opening provider are now removed or re-rendered rather than carried forward.
+  L2: `level2_lifecycle_retry_re_renders_output_and_sandbox_for_the_refreshed_provider`,
+  `level2_lifecycle_retry_drops_the_opening_providers_flag_encoding`,
+  `level2_lifecycle_retry_clears_model_when_the_refresh_drops_it`,
+  `level2_lifecycle_retry_clears_the_opening_providers_environment`. L1:
+  `launch_plan::tests::{a_goose_to_gemini_retry_re_renders_the_requested_output_format, a_gemini_to_goose_retry_drops_the_gemini_output_encoding, sandbox_intent_re_renders_across_a_goose_codex_switch_in_both_directions, a_replay_removes_a_provider_owned_env_key_it_no_longer_writes, a_replay_restores_rather_than_deletes_a_key_that_had_a_prior_value, a_baseline_restore_never_overwrites_a_key_the_rebuild_wrote}`.
+- **Finding 3 — the incompatible-resume refusal took the shared lifecycle tail.**
+  Recorded in [the AC 15 row](#criteria); L1 cover is
+  `retry_resume::a_refused_resume_routes_through_failure_then_finalize_with_err`.
+- **Finding 4 — AC 25 gained real-terminal cover.** See [the AC 25
+  row](#criteria); this is the row review-10 finding 6 found the map had not
+  absorbed.
+- **Finding 5 — the shipped `implement` route gained a regression row.** L2
+  `level2_lifecycle_shipped_implement_route_matches_direct_run`, plus the drift
+  guard `shipped_prompt_route_drift::{shipped_implement_prompts_have_not_drifted_from_their_fixture, fixture_preserves_the_shipped_schema_and_loop_semantics, shipped_router_carries_no_side_effect_actions}`.
+
+### What review-10 changed
+
+All five runtime/test findings sit in the same retry/resume re-entry boundary
+review-8 finding 2 opened. Each is now closed in the tree this map is derived
+from.
+
+- **Finding 1 — credential policy follows the rebuilt provider.** The pipeline
+  sanitized the process environment once under the *opening* profile's
+  `allowed_env_keys()` and captured its replay baseline only afterwards, so the
+  baseline described provider-generated mutations rather than the ambient values
+  the opening sanitizer had already admitted or dropped. Goose → Codex could not
+  recover an ambient `OPENAI_API_KEY` that Codex admits; Codex → Goose left those
+  ambient credentials in the invocation base with no record that Goose's own
+  sanitizer would remove them. `CredentialPolicyInputs`
+  (`cli/src/commands/wrap/launch_plan.rs`) now carries an *unsanitized* ambient
+  snapshot (`cli/src/commands/wrap/env/sanitize.rs`) into the per-attempt
+  builder, threaded from `composition/pipeline.rs`, and the rebuild re-runs the
+  policy for the refreshed profile while preserving explicit `--include` intent.
+- **Finding 2 — interactivity markers move with the mode.** `launch_env_overrides`
+  refreshed only `AGENT`, `MODEL`, and `YOLO`, so a child could receive refreshed
+  argv and streaming behavior alongside the invocation's `INTERACTIVE` /
+  `CLAUDINE_INTERACTIVE`. `interactivity_env()`
+  (`cli/src/commands/wrap/env/mod.rs`) now emits both per attempt.
+- **Finding 3 — terminal recovery reads the executed attempt's identity.**
+  `ExecutedHarnessAttempt` retains `provider`/`profile`, and
+  `classify_attempt_phase` no longer reloads them from invocation-fixed
+  `state.run`. **The headline scenario this finding named is latent** — see the
+  AC 15 row for exactly which part of it a test can and cannot discriminate.
+- **Finding 4 — system-prompt artifacts outlive the plan.**
+  `rebuild_launch_identity` copied argv and environment out of the `LaunchPlan`
+  but not `plan.system_prompt_artifacts`, so dropping the plan deleted the
+  `NamedTempFile` whose path was already in argv or the child environment.
+  `RebuiltLaunchIdentity` now carries the artifacts through child exit (and lost
+  its `Clone` derive as a consequence — the RAII handles are not copyable).
+- **Finding 5 — the two AC 15 launch-identity L1 rows are hermetic.**
+  `frontmatter_interactive_moves_the_mode_and_structured_output` and
+  `the_permission_mode_records_what_yolo_achieved_not_what_was_asked` selected
+  OpenCode without a model and failed with "No model specified" on any host
+  whose OpenCode config did not supply one. Both now inject `FIXTURE_MODEL`
+  through the `cli_model` seam. Until this landed, the AC 15 row's cited L1
+  evidence was **not passing evidence** — that is why finding 6 refused the
+  retained headline.
+- **Finding 6 — this document.**
+
+Review-10's own "Verification-level audit" listed five gaps. Each named a
+required level; each now has a row at that level, verified in the
+[gate record](#recorded-gate-results-2026-07-20-macos-host-review-10-finding-6).
+`review-10.md` is left as written — a review is a record of what was true when
+it was taken, not a live document — so this table, not that one, is the current
+statement:
+
+| Audit row | Required level | Where it now sits |
+|---|---|---|
+| Provider-specific credential sanitation after a switch | L2 child-env observation | `level2_lifecycle_retry_{readmits_credentials_the_refreshed_provider_admits, strips_credentials_the_refreshed_provider_rejects}` — AC 10 |
+| Refreshed retry interactivity reaches child env/hooks | L2 child-env observation | `level2_lifecycle_retry_refreshes_interactivity_markers_into_{interactive, non_interactive}` — AC 10 |
+| Recovery actions after a switched attempt use that attempt's provider | L2 | `level2_lifecycle_switch_{into_codex_resumes_under_codexs_encoding, out_of_codex_refuses_a_session_less_resume}` — AC 15, **with the latency caveat that row states** |
+| File-backed system prompt survives provider-switch retry | L2 child read | `level2_lifecycle_retry_delivers_a_readable_system_prompt_file_after_a_switch` — AC 10 |
+| Resume incompatibility names changed reachable facets | L2 + passing L1 projections | the five `level2_lifecycle_resume_refuses_when_refresh_changes_*` rows, now over passing L1 — AC 15 |
+
 ### The surfaced coordinator versus the direct provider wrappers
 
 These are two different paths and their limits are **not** the same. Conflating
@@ -200,12 +313,12 @@ it fails if lifecycle is ever wired into the passthrough without an owning
 coordinator arriving with it.
 
 **Every test name in this document — not only in the matrix below — was
-re-verified against the tree at this HEAD on 2026-07-18** (review-7 finding 4),
-by extracting every backticked identifier, expanding the `{a,b,c}` shorthands,
-and matching each leaf against the `fn` and `mod` names the area actually
-defines. Two stale citations were found and corrected: `stage_equivalence_arm`
-(the arm-staging helper is `stage_proxy_pair`) and the AC 15 facet arithmetic.
-Paths are relative to `claudine/`.
+re-verified against the tree** by extracting every backticked identifier,
+expanding the `{a,b,c}` shorthands, and matching each leaf against the `fn` and
+`mod` names the area actually defines. Done first on 2026-07-18 (review-7
+finding 4), which corrected `stage_equivalence_arm` → `stage_proxy_pair` and the
+AC 15 facet arithmetic; repeated on 2026-07-20 (review-10 finding 6) against the
+HEAD carrying review-10 findings 1-5. Paths are relative to `claudine/`.
 
 ## Conventions
 
@@ -255,12 +368,12 @@ assertion is that the two arms' logs are identical.
 | 7 | **Proxied target acquires its own loop; same iteration count as direct** | ✅ | L2 `level2_lifecycle_initialize_proxy_to_looping_target_matches_direct_run` (re-enabled, passes); L2 `level2_lifecycle_loop_router_initialize_proxy_is_honored`; L2 `level2_lifecycle_failure_proxy_to_looping_target_matches_direct_iterations` (terminal-route proxy to a looping target); L2 `level2_lifecycle_sequence_step_proxy_to_looping_target_owns_the_loop` (a sequence step's proxy acquires the target loop while staying contained in the step) |
 | 8 | Body/frontmatter/lifecycle/schema/shell use the same stored `ComposeContext` | ✅ | `prepare::service::tests::the_prepared_document_stores_the_context_it_composed_against`; `..::current_is_not_a_prepare_time_fallback_for_the_stored_context`; `..::context_derivation_ignores_a_later_process_cwd_change`; `composition_seams::every_canonical_preparation_caller_supplies_explicit_context` |
 | 9 | **`ctx.area`/`ctx.agent`/`ctx.model`, `env.AGENT`/`env.MODEL` match direct** | ✅ | All five facets × all three surfaces (prompt body, effective frontmatter, lifecycle): L2 `level2_lifecycle_equivalence_ac9_context_facets_match_direct_run` (no CLI provider flag, so agent/model are target-owned; the router authors no `model:`, so a borrowed launch bundle fails the fixture check before the arms are compared). Signal order, computed properties, `ctx.os`: L2 `level2_lifecycle_equivalence_probe_matches_direct_run`; `level2_lifecycle_initialize_proxy_target_resolves_ctx_not_in_source`. `env.MODEL` under a pinned provider: L2 `level2_lifecycle_equivalence_target_pinned_model_matches_direct_run` |
-| 10 | **Provider/model/MCP/argv/env/CWD/system prompt recalculated per target** | ✅ | Target-driven rows (no CLI provider flag, so the selection asserted on can only come from the target's frontmatter): `level2_lifecycle_equivalence_target_authored_provider_matches_direct_run` (provider, plus explicit-CLI precedence); `level2_lifecycle_equivalence_target_launch_bundle_matches_direct_run` (profile/binary, entrypoint, argv flags, effective child environment, interactivity, structured-output mode, dispatch/correlation configuration — router `goose` → target `codex`, and the router's stub must never launch); `level2_lifecycle_equivalence_target_mcp_injection_matches_direct_run` (MCP runtime injection under a provider switch, router `codex` → target `gemini`, with the server set selected by the target's own prompt tag against an empty-defaults catalog). Invocation-level rows: `level2_lifecycle_equivalence_target_pinned_model_matches_direct_run` (model→env); `level2_lifecycle_equivalence_child_cwd_matches_direct_run` (child CWD); `level2_lifecycle_equivalence_cli_system_prompt_survives_the_proxy` (system-prompt delivery); `level2_lifecycle_sequence_step_proxy_rebuilds_target_launch_bundle` (full bundle in a step); `level2_lifecycle_equivalence_cross_repo_file_resolution_matches_direct_run` (workspace/CWD anchor); `level2_lifecycle_equivalence_stdout_stderr_routing_matches_direct_run` (output routing). **Direct provider wrappers (review-7 finding 3):** every facet named by the criterion is recalculated, and proven at L2, on the **surfaced command coordinator** — the path all three composition commands take. The direct provider wrappers have no coordinator to recalculate *with*, so they no longer adopt a target at all: `surface_or_adopt_terminal_proxy`'s unowned arm refuses the hand-off with the typed `LifecycleProxyWithoutOwningCoordinator` instead of borrowing the invocation's profile/argv/MCP. The reduced launch path R3 forbids is gone rather than documented. L1: `loop_control::tests::unowned_handoff::*` (typed identity, `err.*` projection, source stays active, terminal→`finalize` routing); `composition::error::tests::proxy_without_owning_coordinator_names_the_command_that_can_host_it` (the rendered block names a command that *can* host it). L2 guard: `level2_lifecycle_wrapper_passthrough_raises_no_proxy_handoff` — the wrapper installs no lifecycle config, so the refusal is currently unreachable and the divergence the finding predicted never shipped; see [the two paths](#the-surfaced-coordinator-versus-the-direct-provider-wrappers) |
+| 10 | **Provider/model/MCP/argv/env/CWD/system prompt recalculated per target** | ✅ | Target-driven rows (no CLI provider flag, so the selection asserted on can only come from the target's frontmatter): `level2_lifecycle_equivalence_target_authored_provider_matches_direct_run` (provider, plus explicit-CLI precedence); `level2_lifecycle_equivalence_target_launch_bundle_matches_direct_run` (profile/binary, entrypoint, argv flags, effective child environment, interactivity, structured-output mode, dispatch/correlation configuration — router `goose` → target `codex`, and the router's stub must never launch); `level2_lifecycle_equivalence_target_mcp_injection_matches_direct_run` (MCP runtime injection under a provider switch, router `codex` → target `gemini`, with the server set selected by the target's own prompt tag against an empty-defaults catalog). Invocation-level rows: `level2_lifecycle_equivalence_target_pinned_model_matches_direct_run` (model→env); `level2_lifecycle_equivalence_child_cwd_matches_direct_run` (child CWD); `level2_lifecycle_equivalence_cli_system_prompt_survives_the_proxy` (system-prompt delivery); `level2_lifecycle_sequence_step_proxy_rebuilds_target_launch_bundle` (full bundle in a step); `level2_lifecycle_equivalence_cross_repo_file_resolution_matches_direct_run` (workspace/CWD anchor); `level2_lifecycle_equivalence_stdout_stderr_routing_matches_direct_run` (output routing). **Direct provider wrappers (review-7 finding 3):** every facet named by the criterion is recalculated, and proven at L2, on the **surfaced command coordinator** — the path all three composition commands take. The direct provider wrappers have no coordinator to recalculate *with*, so they no longer adopt a target at all: `surface_or_adopt_terminal_proxy`'s unowned arm refuses the hand-off with the typed `LifecycleProxyWithoutOwningCoordinator` instead of borrowing the invocation's profile/argv/MCP. The reduced launch path R3 forbids is gone rather than documented. L1: `loop_control::tests::unowned_handoff::*` (typed identity, `err.*` projection, source stays active, terminal→`finalize` routing); `composition::error::tests::proxy_without_owning_coordinator_names_the_command_that_can_host_it` (the rendered block names a command that *can* host it). L2 guard: `level2_lifecycle_wrapper_passthrough_raises_no_proxy_handoff` — the wrapper installs no lifecycle config, so the refusal is currently unreachable and the divergence the finding predicted never shipped; see [the two paths](#the-surfaced-coordinator-versus-the-direct-provider-wrappers). **The same-document retry boundary (review-9 findings 1-2, review-10 findings 1-2, 4).** The rows above prove recalculation across a *proxy* handoff, where the outer coordinator re-enters the whole pipeline. A retry that moves `agent:` on the same document does not, and four facets were being carried over from the invocation there. All four now move, each with an L2 row that observes the actual spawned child: **execution adapters** — `level2_lifecycle_retry_into_codex_rebuilds_the_execution_adapters`, `level2_lifecycle_retry_out_of_codex_drops_the_codex_adapters`; **provider-shaped argv and generated env** — `level2_lifecycle_retry_re_renders_output_and_sandbox_for_the_refreshed_provider`, `level2_lifecycle_retry_drops_the_opening_providers_flag_encoding`, `level2_lifecycle_retry_clears_model_when_the_refresh_drops_it`, `level2_lifecycle_retry_clears_the_opening_providers_environment`; **credential policy** — `level2_lifecycle_retry_readmits_credentials_the_refreshed_provider_admits`, `level2_lifecycle_retry_strips_credentials_the_refreshed_provider_rejects` (non-secret fixture values), over L1 `launch_plan::tests::{a_provider_switch_readmits_credentials_the_opening_profile_stripped, a_provider_switch_strips_credentials_the_rebuilt_profile_does_not_admit, explicit_include_survives_a_provider_switch, a_rebuild_that_keeps_the_provider_emits_no_credential_patch}` and `target_launch::tests::{a_provider_switch_readmits_a_credential_the_target_admits, a_provider_switch_strips_a_credential_the_target_rejects}`; **interactivity markers** — `level2_lifecycle_retry_refreshes_interactivity_markers_into_interactive`, `..._into_non_interactive` (both directions, child env observed), over L1 `target_launch::tests::{a_mode_refresh_moves_both_interactivity_markers_in_the_child_env, an_unchanged_document_still_states_the_interactivity_markers}`; **MCP and mode/permission** — `level2_lifecycle_retry_rebuilds_mcp_injection_from_the_refreshed_body`, `level2_lifecycle_retry_launches_the_refreshed_mode_and_permission`. **System-prompt delivery survives the switch (review-10 finding 4):** L2 `level2_lifecycle_retry_delivers_a_readable_system_prompt_file_after_a_switch` — the fake provider *reads* the referenced file, which is the only level that can catch the artifact being dropped with the plan; L1 seam row `target_launch::tests::a_provider_switch_keeps_its_system_prompt_file_alive_past_the_plan`, over `launch_plan::tests::a_provider_move_redelivers_the_system_prompt_for_the_new_provider` |
 | 11 | Target `initialize` after the narrow gate, before full pre-flight; may chain | ✅ | **The order is proven at L2 on every route, for both document shapes.** `level2_lifecycle_initialize_precedes_schema_verdict_{direct,initialize_proxy,recovery_proxy}` (review-7 finding 1) and `level2_lifecycle_initialize_precedes_schema_verdict_loop_{direct,initialize_proxy,recovery_proxy}` (review-8 finding 1) run one target whose `initialize` supplies a schema-`required` property the document does not author — the second trio being the same document plus a `loop:` of its own. Reaching the provider at all *is* the assertion: a verdict taken before `initialize` would have failed on the missing property. Each row also pins `initialize` firing exactly once, no schema diagnostic on the pane, target-owned `finalize`, and exit 0. The still-invalid converse — deferring the verdict must not *drop* it — is `level2_lifecycle_still_invalid_{target,loop_target}_runs_initialize_and_closure_first`, each running all three routes and asserting the owed `initialize` → `blocked` → `finalize` order *precedes* the rendered typed diagnostic, and that the invalid target never reaches a provider. **The loop gap is closed:** `compose/prep.rs::execute_loop_or_single` now threads the chosen `SchemaStage` into `loop_prepare_options` and into `build_and_run_loop`, so every read the loop route takes before the engine emits `initialize` withholds the verdict when the deferred stage was selected; the hard-coded `defer_schema_verdict: false` that made a looping document fail where the identical document without `loop:` succeeded is gone. L1 stage cover: `looping::engine::tests::seed_state::loop_seed_read_honors_the_deferred_schema_verdict`, which pins both halves — the undeferred seed read fails on the unauthored required property, the deferred one does not. Narrow-gate and entry-stage rows: `preflight::tests::initialize_scoped_audit_approves_only_the_initialize_command` (the audit approves only the `initialize` command); `prepare::entry::tests::only_a_new_active_document_emits_initialize`; L2 `level2_lifecycle_proxy_target_initialize_shell_is_gated_before_dispatch` (gate before dispatch, on a schema-*valid* target — the narrow-gate row, not the ordering row). Chaining: L2 `level2_lifecycle_proxy_three_document_chain_forwards_only_explicit_keys` (two `initialize` hops) and `level2_lifecycle_initialize_proxy_hop_limit_routes_source_blocked_finalize` (a 16-document `initialize` chain) |
 | 12 | Full preparation rereads the stabilized target; no double `initialize` | ✅ | L2 `level2_lifecycle_proxy_target_rereads_after_initialize_mutation` (an `initialize` that rewrites its own frontmatter delivers the **mutated** body; the pre-`initialize` bootstrap body never reaches the provider; `initialize` fires once). Extended across all three routes by review-7 finding 1's `level2_lifecycle_initialize_precedes_schema_verdict_{direct,initialize_proxy,recovery_proxy}`, whose delivered prompt carries the value only the stabilized reread can see. Overlay half: `loop_control::tests::overlay_layering::the_overlay_reaches_the_bootstrap_read_and_the_stabilized_reread`. Stage semantics at L1: `prepare::service::tests::{a_deferred_read_withholds_the_verdict_the_validating_read_reaches, a_deferred_read_still_coerces_declared_types}` — the second is the one that matters, because a deferred read that stopped coercing would change the document the reread judges. Extended again to the looping shape by review-8 finding 1's `level2_lifecycle_initialize_precedes_schema_verdict_loop_{direct,initialize_proxy,recovery_proxy}` |
 | 13 | Entry reasons obey the stage matrix; loops reuse the plan, retry/resume reread | ✅ | `prepare::entry::tests::stage_matrix_covers_every_entry_reason`; `..::retry_and_resume_fully_validate_but_a_loop_iteration_reuses_its_plan` |
 | 14 | Retry refreshes canonically, fresh attempt, keeps overlay/provenance | ✅ | `coordinator::tests::retry_replaces_the_attempt_slice_and_drops_the_session`; `coordinator::tests::overlay_and_provenance_survive_a_canonical_refresh`; `..::retry_cannot_reset_its_own_budget_by_replacing_the_attempt` |
-| 15 | **Resume retains only a session whose compatibility key matches; names facets** | ✅ | **Every document-reachable facet drives a real refusal end-to-end.** Both sides of the comparison derive from `target_launch::rebuild_launch_identity`, which recomputes provider / profile+binary / resume protocol / model / interactivity / permission mode / structured-output mode / MCP tag set from the document each fresh read re-materializes — and, since review-8 finding 2, that same rebuilt bundle *is* the launch the harness spawns (argv, profile, binary, session mode, structured-output shape, permission mode, MCP injection), so the key can no longer describe a plan the child did not receive. **Five isolating L2 refusal rows**, each proving no second provider launch, the changed facet(s) named on the pane, and `retry` recommended: `level2_lifecycle_resume_refuses_when_refresh_changes_{model,provider,interactivity,permission_mode,mcp_server_set}`. **Three further facets are named by those same rows** rather than by a row of their own, because none has a document surface independent of the facet that determines it: `profile/binary` and `resume protocol` are asserted by name on the `provider` row, and `structured-output mode` on the `interactivity` row. Converse (no false refusal): `level2_lifecycle_resume_with_dropped_launch_flag_stays_compatible`. L1 identity rebuild: `target_launch::tests::{frontmatter_agent_moves_the_provider_and_its_binary, frontmatter_interactive_moves_the_mode_and_structured_output, the_permission_mode_records_what_yolo_achieved_not_what_was_asked, body_mcp_tags_are_lexed_from_disk_and_only_when_mcp_is_enabled, an_explicit_cli_provider_pins_the_rebuilt_provider, an_unchanged_document_rebuilds_to_an_identical_identity}`. **The remaining two facets are immutable invocation inputs**, ratified as such in R8 (review-8 finding 3) rather than left as an unreachable requirement: `workspace/child CWD` is resolved from the process launch directory before any document is read, and the only document surfaces over launch identity are `agent:`/`model:`/`interactive:` — none names a directory — with the resolver deliberately preferring the launch repository over the document's own (`prep_context::tests::prep_context_launch_workspace_split_contract_unit`, verified non-vacuous); `system-prompt content` is composed once at invocation and captured, so the one mutation a lifecycle stack could attempt — rewriting the discovered `system-prompt.md` — moves neither delivery path (`launch_plan::tests::rewriting_the_discovered_system_prompt_moves_no_delivered_content`, verified non-vacuous). System-prompt *delivery* is not in that bucket: it is rebuilt per provider, so it moves exactly when the provider facet moves, which already refuses. Projections retained at L1: `session_key::tests::{changing_the_working_directory_projects_the_cwd_facet, a_changed_system_prompt_flag_projects_the_system_prompt_facet}`. Retain half: `coordinator::tests::resume_replaces_the_attempt_slice_but_retains_the_live_session`. **Lifecycle tail (review-9 finding 3, settled):** the refusal is a post-`start`, pre-spawn failure, so it now takes the shared typed catch protocol — `route_incompatible_resume` snapshots the `LifecycleResumeIncompatible` diagnostic into `err.*` and routes through `failure` then exactly one `finalize`, matching the ratified lifecycle contract and every other failure in that window. The no-second-spawn guarantee is unchanged: the re-run `failure` stack's `resume` control action is not dispatched from this path. All five L2 refusal rows assert the full `start → provider-ran → initial-prompt-ok → failure → start → failure → finalize` trace; L1 routing cover is `retry_resume::a_refused_resume_routes_through_failure_then_finalize_with_err`. The previously carried "is `finalize` owed here" question is closed. The wrapper-path `mcp_enabled` gap this row previously carried was closed by review-8 finding 5 — see [open items](#open-items-carried-out-of-review-7--both-closed-by-review-8) |
+| 15 | **Resume retains only a session whose compatibility key matches; names facets** | ✅ | **Every document-reachable facet drives a real refusal end-to-end.** Both sides of the comparison derive from `target_launch::rebuild_launch_identity`, which recomputes provider / profile+binary / resume protocol / model / interactivity / permission mode / structured-output mode / MCP tag set from the document each fresh read re-materializes — and, since review-8 finding 2, that same rebuilt bundle *is* the launch the harness spawns (argv, profile, binary, session mode, structured-output shape, permission mode, MCP injection), so the key can no longer describe a plan the child did not receive. **Five isolating L2 refusal rows**, each proving no second provider launch, the changed facet(s) named on the pane, and `retry` recommended: `level2_lifecycle_resume_refuses_when_refresh_changes_{model,provider,interactivity,permission_mode,mcp_server_set}`. **Three further facets are named by those same rows** rather than by a row of their own, because none has a document surface independent of the facet that determines it: `profile/binary` and `resume protocol` are asserted by name on the `provider` row, and `structured-output mode` on the `interactivity` row. Converse (no false refusal): `level2_lifecycle_resume_with_dropped_launch_flag_stays_compatible`. L1 identity rebuild: `target_launch::tests::{frontmatter_agent_moves_the_provider_and_its_binary, frontmatter_interactive_moves_the_mode_and_structured_output, the_permission_mode_records_what_yolo_achieved_not_what_was_asked, body_mcp_tags_are_lexed_from_disk_and_only_when_mcp_is_enabled, an_explicit_cli_provider_pins_the_rebuilt_provider, an_unchanged_document_rebuilds_to_an_identical_identity}`. **The remaining two facets are immutable invocation inputs**, ratified as such in R8 (review-8 finding 3) rather than left as an unreachable requirement: `workspace/child CWD` is resolved from the process launch directory before any document is read, and the only document surfaces over launch identity are `agent:`/`model:`/`interactive:` — none names a directory — with the resolver deliberately preferring the launch repository over the document's own (`prep_context::tests::prep_context_launch_workspace_split_contract_unit`, verified non-vacuous); `system-prompt content` is composed once at invocation and captured, so the one mutation a lifecycle stack could attempt — rewriting the discovered `system-prompt.md` — moves neither delivery path (`launch_plan::tests::rewriting_the_discovered_system_prompt_moves_no_delivered_content`, verified non-vacuous). System-prompt *delivery* is not in that bucket: it is rebuilt per provider, so it moves exactly when the provider facet moves, which already refuses. Projections retained at L1: `session_key::tests::{changing_the_working_directory_projects_the_cwd_facet, a_changed_system_prompt_flag_projects_the_system_prompt_facet}`. Retain half: `coordinator::tests::resume_replaces_the_attempt_slice_but_retains_the_live_session`. **Lifecycle tail (review-9 finding 3, settled):** the refusal is a post-`start`, pre-spawn failure, so it now takes the shared typed catch protocol — `route_incompatible_resume` snapshots the `LifecycleResumeIncompatible` diagnostic into `err.*` and routes through `failure` then exactly one `finalize`, matching the ratified lifecycle contract and every other failure in that window. The no-second-spawn guarantee is unchanged: the re-run `failure` stack's `resume` control action is not dispatched from this path. All five L2 refusal rows assert the full `start → provider-ran → initial-prompt-ok → failure → start → failure → finalize` trace; L1 routing cover is `retry_resume::a_refused_resume_routes_through_failure_then_finalize_with_err`. The previously carried "is `finalize` owed here" question is closed. The wrapper-path `mcp_enabled` gap this row previously carried was closed by review-8 finding 5 — see [open items](#open-items-carried-out-of-review-7--both-closed-by-review-8). **Hermeticity of the cited L1 evidence (review-10 finding 5).** Two of the six `target_launch::tests` rows above — `frontmatter_interactive_moves_the_mode_and_structured_output` and `the_permission_mode_records_what_yolo_achieved_not_what_was_asked` — selected OpenCode without supplying a model, so on a host without ambient OpenCode model configuration they failed at launch-plan construction with "No model specified". For as long as that held, this row was marked complete against **failing** evidence. Both now inject the `FIXTURE_MODEL` constant through the `cli_model` seam and pass with the OpenCode config absent; the fix is a fixture change, so it neither weakens nor widens what the two rows assert. **Recovery after a switched attempt (review-10 finding 3) — evidence is partly latent, and the row says which part.** `ExecutedHarnessAttempt` now retains the executed attempt's `provider`/`profile`, and `classify_attempt_phase` reads them instead of reloading invocation-fixed `state.run`, so a control action chained out of a switched attempt is admitted, encoded, and *named* under the provider that actually ran. Of the three consequences, only two are discriminable today: (a) **resume argv encoding** is proven live by L2 `level2_lifecycle_switch_into_codex_resumes_under_codexs_encoding` (Goose opens → `failure` rewrites `agent: codex` → the switched attempt's own `success` resumes it, and the third invocation must carry `codex exec resume <id>`, never `goose run --resume --session-id`) and its converse `level2_lifecycle_switch_out_of_codex_refuses_a_session_less_resume` (the opening Codex session must not stand in for a session Goose never opened); (b) **diagnostic attribution** is proven by L1 `loop_control::tests::recovery_identity::{a_resume_is_refused_naming_the_executed_attempts_provider, the_unowned_handoff_command_names_the_provider_it_is_given}`, which use a fake profile precisely because no shipped one can produce the divergence. (c) **Resume *admission*** — the `supports_resume()` consultation the finding leads with — is **not reachable at this HEAD**: `ProviderProfile::supports_resume` defaults to the catalog's `ResumeSupport`, and all ten shipped providers are `FirstClass` or `Partial`, i.e. every one returns `true`, so no switch between shipped providers can flip the verdict. `loop_control::tests::recovery_identity::a_resume_is_admitted_by_the_executed_attempts_profile` therefore holds the claim against a fake profile, and the two L2 rows are **chain coverage** — they prove the chain runs and encodes correctly — rather than fix-discriminating rows. The row that *is* fix-discriminating for the identity source itself is the L1 source guard `composition_seams::classification_reads_no_invocation_fixed_launch_identity`, with `..::the_invocation_launch_identity_guard_still_has_something_to_ban` as its guard-the-guard. The fix is still correct — it removes a stale read that a `false` from any future provider would immediately make user-visible — but this row does not claim an end-to-end refusal for a divergence no shipped pair can produce |
 | 16 | Budgets persist across attempts; reset at proxy / next loop iteration | ✅ | `loop_control::tests::budget_scoping` — all 5, incl. `adoption_resets_budgets_while_the_invocation_wide_chain_keeps_growing` |
 | 17 | Every fresh target gets full shell discovery/approval; approved == executed | ✅ | `loop_control::tests::shell_approval` — all 6, incl. `approved_bytes_equal_the_bytes_a_with_value_resolves_to`; L2 `level2_lifecycle_proxy_target_later_event_shell_is_audited_after_stabilization`; L2 `level2_lifecycle_proxy_shell_approved_bytes_equal_executed_bytes` (approved bytes equal executed bytes end-to-end) |
 | 18 | Key/value proxy accepts optional mapping `with:` with static string keys | ✅ | `action_shape_control::{proxy_with_omitted_yields_empty_overlay, proxy_with_empty_mapping_equals_omission, static_keys_with_punctuation_are_accepted, rejects_dynamic_proxy_with_key}` |
@@ -270,7 +383,7 @@ assertion is that the two arms' logs are identical.
 | 22 | Precedence target < `with:` < caller; shallow replace; null removes | ✅ | `overlay_layering::{overlay_beats_the_targets_authored_frontmatter, caller_set_override_beats_a_conflicting_with_key, overlay_object_replaces_rather_than_deep_merging, overlay_null_removes_the_targets_authored_property, a_caller_override_restores_a_key_the_overlay_removed}`; L2 `level2_lifecycle_proxy_with_overlay_loses_to_a_caller_set_and_beats_the_target` |
 | 23 | Stored overlay is the immutable pre-schema input; deterministically reapplied | ✅ | `overlay_layering::{schema_coercion_shapes_effective_frontmatter_but_not_the_stored_overlay, refreshing_the_same_target_reapplies_the_same_overlay}` |
 | 24 | `with:` can satisfy a schema requirement; invalid overlay fails pre-launch | ✅ | `overlay_layering::{with_satisfies_a_required_schema_property_the_target_does_not_author, an_invalid_overlay_fails_the_targets_schema_before_any_launch}` |
-| 25 | Control-plane overlay values reparsed/validated; cannot bypass policy | ✅ | `overlay_layering::{a_control_plane_overlay_is_reparsed_by_the_target, a_shell_command_installed_by_the_overlay_stays_subject_to_target_side_policy, a_malformed_control_plane_overlay_fails_as_the_targets_own_parse_error}` |
+| 25 | Control-plane overlay values reparsed/validated; cannot bypass policy | ✅ | **Strongest level: L2 (review-9 finding 4).** Both rows stage a target that authors **no** `initialize` at all, so the audited stack can only have come from the router's `with:` — the overlay is the *origin* of the shell configuration, which is the stronger claim AC 25 makes and which the AC 17 row (target-authored action, overlay-supplied value) does not reach. Denial: `level2_lifecycle_overlay_installed_initialize_shell_is_denied_by_target_policy` — a builtin-blacklisted `rm sentinel.txt` installed through the overlay is refused by the target's own gate, the operator sees the denial naming the command, the sentinel file survives as physical evidence, and no provider process starts. Approval: `level2_lifecycle_overlay_installed_initialize_shell_runs_the_approved_bytes` — the same overlay-installed shape carrying a target-whitelisted command runs, and the executed bytes equal the approved bytes, embedded spaces and all. The pair is the point: what differs between them is the target's *verdict*, not the overlay's reach. L1 backing: `overlay_layering::{a_control_plane_overlay_is_reparsed_by_the_target, a_shell_command_installed_by_the_overlay_stays_subject_to_target_side_policy, a_malformed_control_plane_overlay_fails_as_the_targets_own_parse_error}` — these three were this row's **only** evidence until review-10 finding 6, which is what made the row understate itself |
 | 26 | Overlay survives retry/resume/loop refresh; a downstream proxy replaces it | ✅ | Retry/resume/refresh: `overlay_layering::refreshing_the_same_target_reapplies_the_same_overlay`; `coordinator::tests::overlay_and_provenance_survive_a_canonical_refresh`. Replacement/forwarding: `overlay_layering::{a_second_hop_replaces_the_overlay_rather_than_merging_it, a_hop_that_omits_with_installs_an_empty_overlay_rather_than_forwarding}`; L2 `level2_lifecycle_proxy_three_document_chain_forwards_only_explicit_keys` (end-to-end explicit-vs-omitted forwarding across two hops). Loop ownership now moves to the adopted target (AC 7), so loop-refresh survival is reachable and asserted end-to-end: L2 `level2_lifecycle_proxy_with_overlay_survives_a_retry`, `..survives_a_loop_refresh`, `..survives_a_resume` |
 | 27 | No source/target byte or hash change from using `with:` | ✅ | `overlay_layering::an_overlay_never_writes_to_disk`; L2 `level2_lifecycle_proxy_with_overlay_loses_to_a_caller_set_and_beats_the_target` (asserts both documents' bytes unchanged) |
 | 28 | Same typed diagnostic identity across direct / initialize-proxy / recovery-proxy | ✅ | **L2 three-route matrix (review-6 finding 4):** `level2_lifecycle_diagnostic_matrix_{schema_failure,invalid_overlay,preparation_failure}_is_route_equivalent` — each fixture runs all three routes through the shipped binary in a real tmux pane and asserts exit status, rendered typed identity, styled block, source attribution, exactly-once rendering, proxy provenance, and byte-equal diagnostics across routes. These caught a real divergence: `prepare_and_run_active_document` had no schema pre-validation ahead of its pre-flight compose, so a proxied target rendered Darkmatter's raw `MarkdownError: schema validation failed` where the direct route rendered the typed `CompositionError: schema validation`. Backed by L1 `prepare::service::tests::a_schema_failure_has_one_typed_identity_across_every_entry`; `..::a_missing_required_property_is_typed_on_the_harness_route`; `..::an_invalid_optional_is_dropped_and_recorded_on_the_harness_route` |
@@ -287,7 +400,9 @@ findings 2-3 closed AC 10 and moved AC 15 from one reachable facet to eight, and
 review-8 findings 2-3 closed AC 15 — finding 2 by making the rebuilt bundle the
 launch the harness actually spawns, finding 3 by ratifying the last two facets
 as immutable invocation inputs on structural evidence. All four are now
-complete (verified 2026-07-18, `just test` + `just lint` + `just test-l2 resume`).
+complete (first verified 2026-07-18; re-verified 2026-07-20 against the
+[review-10 gate record](#recorded-gate-results-2026-07-20-macos-host-review-10-finding-6),
+which is the run this map's marks now rest on).
 
 AC 11 was never on this list — it was recorded complete throughout until
 review-7 finding 4 found that mark unsupported, and review-8 finding 1 then
@@ -343,6 +458,16 @@ the path that cannot says so. See
 [the two paths](#the-surfaced-coordinator-versus-the-direct-provider-wrappers),
 including why the borrowed bundle was latent rather than shipped.
 
+**Review-9 findings 1-2 and review-10 findings 1-2 and 4 moved the boundary
+again — this time on the same document.** Everything above concerns a *proxy*
+handoff, where the outer coordinator re-enters the whole pipeline. A retry that
+rewrites `agent:` on the document already running takes a narrower path, and six
+facets were still being carried over from the invocation there: execution
+adapters, provider-shaped argv and generated environment, credential policy,
+interactivity markers, and the system-prompt artifact's lifetime. Each now moves
+with the rebuilt provider, and each has an L2 row that observes the actual
+spawned child rather than the plan. The AC 10 row lists them.
+
 ### AC 15 — complete: eight facets reachable, two immutable by construction
 
 review-6 finding 2 made the refusal reachable rather than latent, by rebuilding
@@ -376,10 +501,20 @@ re-examined for reachability rather than assumed:
 Neither can move across a same-document resume, so an end-to-end refusal row for
 either would be unwritable, not merely missing. R8 now defines them as immutable
 invocation inputs and states the structural reason; both claims carry a
-non-vacuity-verified L1 test. The per-facet evidence, the empty
-`SessionCompatibilityKey::extra`, and the settled `failure`/`finalize`-on-refusal
-routing are in the [AC 15 row](#criteria) — that row, not this section, is the
-one to read before signing off.
+non-vacuity-verified L1 test.
+
+**Review-10 finding 5 made the row's L1 evidence actually pass**, and
+**review-10 finding 3 added recovery-identity cover with one honestly latent
+part.** Both are recorded in the row rather than here, because the second one is
+the kind of claim that is easy to overstate: the executed attempt's provider now
+drives terminal recovery, but the `supports_resume()` divergence the finding
+leads with cannot be produced by any pair of shipped providers, so its L2 rows
+are chain coverage rather than fix-discriminating.
+
+The per-facet evidence, the empty `SessionCompatibilityKey::extra`, and the
+settled `failure`/`finalize`-on-refusal routing are in the
+[AC 15 row](#criteria) — that row, not this section, is the one to read before
+signing off.
 
 ## Cross-platform status — the plan's tasks 2 and 3 conflict with ratified policy
 
@@ -481,7 +616,72 @@ both. They are kept for the trail, not as live items.
    raises no proxy hand-off at all — see [the two paths](#the-surfaced-coordinator-versus-the-direct-provider-wrappers)); what is
    removed is a constant that contradicted its own flags.
 
-## Recorded gate results (2026-07-18, macOS host, review-7 finding 4)
+## Recorded gate results (2026-07-20, macOS host, review-10 finding 6)
+
+Run from the `claudine/` package area at the HEAD carrying review-10 findings
+1-5, per-package rather than through the area-wide `just test` (which review-10's
+own validation could not finish under the non-interactive duration rule).
+
+**Host caveat, stated up front.** Load average was **131** at the start of the
+run and stayed there. Per the area's own record, claudine L1 timeouts under that
+kind of saturation are load artifacts, not regressions — and that is exactly what
+this run shows.
+
+| Gate | Exit | Result |
+|---|:-:|---|
+| `just lint` | **0** | clippy + fmt-check + error-transport / lifecycle-doc guards clean |
+| `just test-library` | **0** | `claudine` 3531/3531, 7 skipped |
+| `just test-contract` | **0** | `claudine-contract` 47/47, 5 skipped |
+| `just test-gen` | **0** | `claudine-gen` 152/152, 4 skipped; fleet signals check 83/83 records |
+| `just test-cli '' --no-fail-fast` | **1** | `claudine-cli` 2095 run: **2094 passed** (109 slow, 10 flaky), **1 failed**, 225 skipped — the one failure is the pre-existing `dispatch_inventory::dispatch_inventory_matches_committed_file` (see below) |
+| `just test-l2` | **100** | 193/198 run: **192 passed** (1 flaky), **1 failed**, 2122 skipped — the one failure is a WezTerm-backend reachability failure (see below) |
+
+**The `claudine-cli` failure is pre-existing and unrelated to this feature.**
+`dispatch_inventory_matches_committed_file` compares a committed inventory (1408
+entries) against the generated one (1423). Regenerating it requires
+`CLAUDINE_UPDATE_INVENTORY=1`, which this sandbox denies, and the correct fix is
+regeneration rather than a source edit. It touches no acceptance criterion in
+this feature.
+
+**The ten `claudine-cli` "flaky" rows are all 30s timeouts that passed on
+retry** — `wrap_compose_exec`, `wrap_compose_agent`, `wrap_compose_preflight`,
+and `wrap_compose_validation` rows, every one `TRY 1 TMT` then green. Under load
+131 that is the documented signature of host saturation, not of a behavior
+change. None of them is cited by any row in this map.
+
+**The one `test-l2` failure is backend reachability, not a regression.**
+`level2_wezterm_mismatch_renders_yaml_codeblock` failed all four attempts with
+`attach/spawn WezTerm: TimedOut (15s)`. Three sibling WezTerm rows
+(`level2_dry_run_document_cell_renders_osc8_link_in_wezterm`,
+`level2_prompt_reporting_system_link_osc8_in_wezterm`,
+`level2_perf_tree_renders_styled_in_wezterm`,
+`level2_wezterm_removed_key_renders_yaml_codeblock`) hit the same spawn timeout.
+A wall of single-backend failures means that emulator is unreachable from this
+process — `WEZTERM_UNIX_SOCKET` is exported only to processes WezTerm itself
+launches, and this suite was not — rather than that the renderer broke. Because
+`test-l2` runs fail-fast, five rows did not run; all five are in the same
+non-lifecycle capture suites.
+
+**Every `level2_lifecycle_*` row ran and passed — 0 failures across all 103.**
+That is the tier this map's criteria rows actually cite. Specifically, all
+fifteen rows added by review-9 and review-10 passed:
+`level2_lifecycle_overlay_installed_initialize_shell_{is_denied_by_target_policy, runs_the_approved_bytes}` (AC 25),
+`level2_lifecycle_retry_{readmits_credentials_the_refreshed_provider_admits, strips_credentials_the_refreshed_provider_rejects}` (finding 1),
+`level2_lifecycle_retry_refreshes_interactivity_markers_into_{interactive, non_interactive}` (finding 2),
+`level2_lifecycle_switch_{into_codex_resumes_under_codexs_encoding, out_of_codex_refuses_a_session_less_resume}` (finding 3),
+`level2_lifecycle_retry_delivers_a_readable_system_prompt_file_after_a_switch` (finding 4),
+`level2_lifecycle_shipped_implement_route_matches_direct_run` (review-9 finding 5),
+and all five `level2_lifecycle_resume_refuses_when_refresh_changes_*` rows.
+
+**The two rows review-10 finding 5 reported failing now pass.** All 50 assertions
+across `target_launch::tests`, `launch_plan::tests`,
+`loop_control::tests::recovery_identity`, `loop_control::tests::retry_resume`,
+`composition_seams`, and `shipped_prompt_route_drift` passed inside the
+`test-cli` run, including
+`frontmatter_interactive_moves_the_mode_and_structured_output` and
+`the_permission_mode_records_what_yolo_achieved_not_what_was_asked`.
+
+## Superseded gate results (2026-07-18, macOS host, review-7 finding 4)
 
 All three gates run from the `claudine/` package area, **full area, not a
 subset**, at the HEAD that carries review-7 findings 1-4.
