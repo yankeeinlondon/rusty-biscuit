@@ -132,6 +132,46 @@ fn test_clean_subcommand_list_modes_match_library_contract() {
 }
 
 #[test]
+fn test_clean_subcommand_save_preserve_mode_is_idempotent_for_authored_list_soft_breaks() {
+    let source = concat!(
+        "- Alpha beta gamma\n",
+        "    delta epsilon.\n",
+        "- [x] Checked item\n",
+        "      authored continuation.\n"
+    );
+    let expected = concat!(
+        "- Alpha beta gamma\n",
+        "    delta epsilon.\n",
+        "\n",
+        "- [x] Checked item\n",
+        "      authored continuation.\n"
+    );
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    write!(tmp, "{source}").unwrap();
+    tmp.flush().unwrap();
+
+    md_cmd()
+        .args(["clean", "--ignore-incidental-newlines"])
+        .arg(tmp.path())
+        .arg("--save")
+        .assert()
+        .success();
+
+    let first_read = std::fs::read_to_string(tmp.path()).unwrap();
+    assert_eq!(first_read, expected);
+
+    md_cmd()
+        .args(["clean", "--ignore-incidental-newlines"])
+        .arg(tmp.path())
+        .arg("--save")
+        .assert()
+        .success();
+
+    let second_read = std::fs::read_to_string(tmp.path()).unwrap();
+    assert_eq!(second_read, first_read);
+}
+
+#[test]
 fn test_clean_subcommand_fixed_width_treats_nine_digit_ordinal_as_an_ordered_marker() {
     let fixed = md_cmd()
         .args(["clean", "--fixed-width", "24", "-"])
@@ -226,7 +266,23 @@ fn test_clean_subcommand_rejects_invalid_indent() {
         .write_stdin("- Parent\n  - Child\n")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("indent must be one of: 2, 4, 8"));
+        .stderr(predicate::str::contains("indent must be one of: 2, 4"));
+}
+
+#[test]
+fn test_clean_subcommand_rejects_indent_eight_as_unportable() {
+    // `--indent 8` is rejected at the CLI because eight-space nesting is not
+    // CommonMark-portable for narrow markers (`-`, `*`, `+`, single-digit
+    // ordered): pulldown-cmark reads the child as lazy continuation prose
+    // rather than a nested list. See `parse_indent_size`.
+    md_cmd()
+        .args(["clean", "-", "--indent", "8", "--fixed-width", "24"])
+        .write_stdin("- Parent\n  - Child\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "indent 8 is not supported: eight-space nesting is not CommonMark-portable",
+        ));
 }
 
 #[test]
