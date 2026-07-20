@@ -1,7 +1,10 @@
+use serde::Deserialize;
 use serde_json::Value;
-use sniff::remote::{PullRequestQuery, PullRequestRecord};
+use sniff::remote::{
+    CanonicalPullRequestState, PullRequestQuery, PullRequestRecord, QueryValues,
+};
 
-use super::escape::collapse_and_escape;
+use super::escape::{collapse_and_escape, markdown_destination};
 use super::{EvaluationMode, FunctionBinding, FunctionHandler, ResolutionContext};
 use crate::markdown::compose::expression::{ExpressionError, ProviderFailureKind};
 
@@ -14,18 +17,22 @@ fn pr_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, Expressio
     if args.len() != 1 { return Err(other("pr", format!("requires one identifier, got {}", args.len()))); }
     let id = positive_identifier("pr", &args[0])?;
     context.cached_provider_query("pr", format!("pr:{id}"), || {
-        let (client, query_id) = if id.starts_with("http://") || id.starts_with("https://") {
-            sniff::remote::FocusedProviderClient::from_pull_request_url(
+        let record = if id.starts_with("http://") || id.starts_with("https://") {
+            let (client, query_id) = sniff::remote::FocusedProviderClient::from_pull_request_url(
                 &id,
                 context.remote_policy(),
             )
-            .map_err(|error| other("pr", error.to_string()))?
+            .map_err(|error| other("pr", error.to_string()))?;
+            super::provider::run("pr", async move { client.get_pull_request(&query_id).await })?
         } else {
-            (super::provider::client(context, None, "pr")?, id.clone())
-        };
-        let record = super::provider::run("pr", async move {
-            client.get_pull_request(&query_id).await
-        })?
+            let resolved = super::provider::resolve(context, None, "pr")?;
+            let policy = context.remote_policy();
+            let query_id = id.clone();
+            super::provider::run("pr", async move {
+                let client = super::provider::connect(resolved, policy).await?;
+                client.get_pull_request(&query_id).await
+            })?
+        }
         .ok_or_else(|| not_found("pr", format!("pull request {id} was not found")))?;
         Ok(Value::String(format_pr(&record)))
     })
@@ -40,8 +47,10 @@ fn pr_list_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, Expr
         serde_json::to_string(&query).unwrap_or_default()
     );
     context.cached_provider_query("pr_list", key, || {
-        let client = super::provider::client(context, remote.as_deref(), "pr_list")?;
+        let resolved = super::provider::resolve(context, remote.as_deref(), "pr_list")?;
+        let policy = context.remote_policy();
         let page = super::provider::run("pr_list", async move {
+            let client = super::provider::connect(resolved, policy).await?;
             client.query_pull_requests(query).await
         })?;
         Ok(Value::Array(
@@ -53,6 +62,36 @@ fn pr_list_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, Expr
     })
 }
 
+/// Authored `pr_list` query: exactly the documented catalog vocabulary.
+///
+/// This DTO is the only path from an authored object to Sniff's internal
+/// [`PullRequestQuery`], which no longer implements `Deserialize`. Internal
+/// keys such as `descending` or `cursor` are unknown here and rejected by
+/// name via `deny_unknown_fields`; ordering is authored as `direction`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuthoredPullRequestQuery {
+    state: Option<QueryValues<CanonicalPullRequestState>>,
+    draft: Option<bool>,
+    source_branch: Option<String>,
+    target_branch: Option<String>,
+    author: Option<String>,
+    assignee: Option<String>,
+    reviewer: Option<String>,
+    #[serde(default)]
+    labels: Vec<String>,
+    milestone: Option<String>,
+    search: Option<String>,
+    commit: Option<String>,
+    created_after: Option<String>,
+    created_before: Option<String>,
+    updated_after: Option<String>,
+    updated_before: Option<String>,
+    sort: Option<String>,
+    direction: Option<String>,
+    limit: Option<usize>,
+}
+
 fn parse_query(value: &Value) -> Result<(Option<String>, PullRequestQuery), ExpressionError> {
     if let Some(count) = value.as_u64() {
         let limit = usize::try_from(count).ok().filter(|count| (1..=100).contains(count)).ok_or_else(|| other("pr_list", "count must be between 1 and 100"))?;
@@ -60,12 +99,34 @@ fn parse_query(value: &Value) -> Result<(Option<String>, PullRequestQuery), Expr
     }
     let mut object = value.as_object().cloned().ok_or_else(|| other("pr_list", "query must be an object or positive integer"))?;
     let remote = super::provider::authored_remote("pr_list", object.remove("remote"))?;
-    if let Some(direction) = object.remove("direction") {
-        let direction = direction.as_str().ok_or_else(|| other("pr_list", "direction must be a string"))?;
-        object.insert("descending".to_string(), Value::Bool(match direction { "ascending" => false, "descending" => true, _ => return Err(other("pr_list", "direction must be ascending or descending")) }));
-    }
-    let query: PullRequestQuery = serde_json::from_value(Value::Object(object))
+    let authored: AuthoredPullRequestQuery = serde_json::from_value(Value::Object(object))
         .map_err(|error| other("pr_list", format!("invalid query: {error}")))?;
+    let descending = super::provider::authored_direction(
+        "pr_list",
+        authored.direction.as_deref(),
+        authored.sort.as_deref(),
+    )?;
+    let query = PullRequestQuery {
+        state: authored.state,
+        source_branch: authored.source_branch,
+        target_branch: authored.target_branch,
+        author: authored.author,
+        assignee: authored.assignee,
+        reviewer: authored.reviewer,
+        labels: authored.labels,
+        milestone: authored.milestone,
+        search: authored.search,
+        commit: authored.commit,
+        created_after: authored.created_after,
+        created_before: authored.created_before,
+        updated_after: authored.updated_after,
+        updated_before: authored.updated_before,
+        draft: authored.draft,
+        sort: authored.sort,
+        descending,
+        limit: authored.limit,
+        cursor: None,
+    };
     query
         .validate_canonical()
         .map_err(|error| other("pr_list", error.to_string()))?;
@@ -77,7 +138,10 @@ pub(super) fn format_pr(record: &PullRequestRecord) -> String {
     // `display_id` is provider-supplied too, so it goes through the same
     // boundary as the title rather than being trusted for being short.
     let label = format!("PR {} — {title}", collapse_and_escape(&record.identity.display_id));
-    let mut output = match record.identity.web_url.as_deref() { Some(url) => format!("[{label}]({url})"), None => label };
+    let mut output = match record.identity.web_url.as_deref().and_then(markdown_destination) {
+        Some(url) => format!("[{label}]({url})"),
+        None => label,
+    };
     output.push_str(&format!(" · {} · @{}", collapse_and_escape(&record.details.state), collapse_and_escape(&record.details.author)));
     if let (Some(source), Some(target)) = (&record.details.source_branch, &record.details.target_branch) { output.push_str(&format!(" · {} → {}", collapse_and_escape(source), collapse_and_escape(target))); }
     output
@@ -184,6 +248,52 @@ mod tests {
         );
     }
 
+    /// A destination carrying Markdown-active bytes must not be able to close
+    /// its own `(...)` and take over the rest of the line.
+    #[test]
+    fn delimiter_bearing_destinations_cannot_escape_the_link() {
+        let mut record = record();
+        record.identity.web_url = Some(
+            "https://github.example/acme/widgets/pull/123?t=a)+**owned**+[x](https://evil.example)"
+                .to_string(),
+        );
+
+        let rendered = format_pr(&record);
+        let (destination, text) = harness::parse_literal(&rendered);
+        assert_eq!(
+            destination.as_deref(),
+            Some(
+                "https://github.example/acme/widgets/pull/123?t=a%29+**owned**+[x]%28https://evil.example%29"
+            ),
+            "every paren must be encoded, so none can close the destination"
+        );
+        assert!(text.starts_with("PR #123 — "), "{text}");
+        assert!(!text.contains("owned"), "the injected tail leaked into text: {text}");
+    }
+
+    #[test]
+    fn non_web_and_unparseable_destinations_drop_the_link() {
+        for hostile in [
+            "javascript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "file:///etc/passwd",
+            "vbscript:msgbox(1)",
+            "/acme/widgets/pull/123",
+            "not a url",
+            "",
+        ] {
+            let mut record = record();
+            record.identity.web_url = Some(hostile.to_string());
+            let rendered = format_pr(&record);
+            let (destination, text) = harness::parse_literal(&rendered);
+            assert_eq!(destination, None, "{hostile:?} became a destination");
+            assert!(
+                text.starts_with("PR #123 — "),
+                "{hostile:?} cost more than the link: {text}"
+            );
+        }
+    }
+
     /// A title that already contains backslash escapes must survive as the
     /// literal characters the provider stored, not be re-interpreted.
     #[test]
@@ -201,6 +311,14 @@ mod tests {
             json!(101),
             json!({"unknown": true}),
             json!({"direction": "sideways"}),
+            // Internal Sniff query fields are not authored vocabulary; both
+            // must be rejected by name, not silently accepted or ignored.
+            json!({"descending": true}),
+            json!({"cursor": "20"}),
+            // `direction` orders a sort key; `provider-default` asks for the
+            // provider's own order verbatim, so the pair is contradictory.
+            json!({"sort": "provider-default", "direction": "ascending"}),
+            json!({"sort": "provider-default", "direction": "descending"}),
             json!({"state": "invalid"}),
             json!({"limit": 0}),
             // `remote` is authored identity, not a hint: a wrong type or a
@@ -276,5 +394,13 @@ mod tests {
         assert_eq!(remote.as_deref(), Some("upstream"));
         let (absent, _) = parse_query(&json!({})).unwrap();
         assert_eq!(absent, None);
+    }
+
+    /// `provider-default` without a `direction` is the one valid spelling; it
+    /// passes through so Sniff can preserve the provider's order verbatim.
+    #[test]
+    fn provider_default_sort_is_valid_only_without_a_direction() {
+        let (_, query) = parse_query(&json!({"sort": "provider-default"})).unwrap();
+        assert_eq!(query.sort.as_deref(), Some("provider-default"));
     }
 }

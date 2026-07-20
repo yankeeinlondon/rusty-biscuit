@@ -1,7 +1,8 @@
+use serde::Deserialize;
 use serde_json::Value;
-use sniff::remote::{CiCdJob, CiCdJobQuery, CiCdJobReference, GitProvider};
+use sniff::remote::{CiCdJob, CiCdJobQuery, CiCdJobReference, GitProvider, QueryValues};
 
-use super::escape::collapse_and_escape;
+use super::escape::{collapse_and_escape, markdown_destination};
 use super::{EvaluationMode, FunctionBinding, FunctionHandler, ResolutionContext};
 use crate::markdown::compose::expression::{ExpressionError, ProviderFailureKind};
 
@@ -14,53 +15,60 @@ fn cicd_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, Express
     if args.len() != 1 { return Err(other("cicd", "requires one job identifier")); }
     let id = identifier(&args[0])?;
     context.cached_provider_query("cicd", format!("cicd:{id}"), || {
-        let (client, reference) = client_and_reference(context, &id)?;
-        let job = super::provider::run("cicd", async move {
-            client.get_cicd_job(&reference).await
-        })?
+        let policy = context.remote_policy();
+        let job = if id.starts_with("http://") || id.starts_with("https://") {
+            let (resolved, reference) =
+                sniff::remote::FocusedProviderClient::job_reference_from_url(&id)
+                    .map_err(|error| other("cicd", error.to_string()))?;
+            super::provider::run("cicd", async move {
+                let client = super::provider::connect(resolved, policy).await?;
+                client.get_cicd_job(&reference).await
+            })?
+        } else {
+            let resolved = super::provider::resolve(context, None, "cicd")?;
+            let native_id = id.clone();
+            // The reference is built only after the client exists, because a
+            // neutral-hostname remote gets its flavor from the discovery probe
+            // during construction.
+            super::provider::run("cicd", async move {
+                let client = super::provider::connect(resolved, policy).await?;
+                let reference = repository_reference(client.remote(), &native_id)?;
+                client.get_cicd_job(&reference).await
+            })?
+        }
         .ok_or_else(|| not_found("cicd", format!("CI/CD job {id} was not found")))?;
         Ok(Value::String(format_job(&job)))
     })
 }
 
-fn client_and_reference(
-    context: &ResolutionContext,
-    id: &str,
-) -> Result<(sniff::remote::FocusedProviderClient, CiCdJobReference), ExpressionError> {
-    if id.starts_with("http://") || id.starts_with("https://") {
-        let (resolved, reference) =
-            sniff::remote::FocusedProviderClient::job_reference_from_url(id)
-                .map_err(|error| other("cicd", error.to_string()))?;
-        let client = super::provider::build_client(resolved, context.remote_policy(), "cicd")?;
-        return Ok((client, reference));
-    }
-
-    let resolved = super::provider::resolve(context, None, "cicd")?;
-    let provider = match resolved.api_flavor {
+/// Builds the repository-scoped job reference for an already-connected remote.
+fn repository_reference(
+    remote: &sniff::filesystem::git::ResolvedRemote,
+    native_id: &str,
+) -> Result<CiCdJobReference, sniff::SniffError> {
+    let provider = match remote.api_flavor {
         sniff::filesystem::git::ApiFlavor::GitHub => GitProvider::GitHub,
         sniff::filesystem::git::ApiFlavor::GitLab => GitProvider::GitLab,
         sniff::filesystem::git::ApiFlavor::Gitea
         | sniff::filesystem::git::ApiFlavor::Forgejo => GitProvider::Gitea,
         sniff::filesystem::git::ApiFlavor::Bitbucket => GitProvider::Bitbucket,
         flavor => {
-            return Err(other(
-                "cicd",
-                format!("unsupported provider flavor {flavor:?}"),
-            ));
+            return Err(sniff::SniffError::UnsupportedRemoteCapability {
+                capability: "exact CI/CD job lookup",
+                target: format!("{flavor:?}"),
+            });
         }
     };
-    let reference = CiCdJobReference {
+    Ok(CiCdJobReference {
         provider,
-        api_flavor: format!("{:?}", resolved.api_flavor),
-        host: resolved.host.clone().unwrap_or_default(),
-        namespace: resolved.namespace.clone().unwrap_or_default(),
-        repository: resolved.repository.clone().unwrap_or_default(),
-        native_id: id.to_string(),
-        display_id: id.to_string(),
+        api_flavor: format!("{:?}", remote.api_flavor),
+        host: remote.host.clone().unwrap_or_default(),
+        namespace: remote.namespace.clone().unwrap_or_default(),
+        repository: remote.repository.clone().unwrap_or_default(),
+        native_id: native_id.to_string(),
+        display_id: native_id.to_string(),
         original_url: None,
-    };
-    let client = super::provider::build_client(resolved, context.remote_policy(), "cicd")?;
-    Ok((client, reference))
+    })
 }
 
 fn cicd_list_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, ExpressionError> {
@@ -72,8 +80,10 @@ fn cicd_list_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, Ex
         serde_json::to_string(&query).unwrap_or_default()
     );
     context.cached_provider_query("cicd_list", key, || {
-        let client = super::provider::client(context, remote.as_deref(), "cicd_list")?;
+        let resolved = super::provider::resolve(context, remote.as_deref(), "cicd_list")?;
+        let policy = context.remote_policy();
         let page = super::provider::run("cicd_list", async move {
+            let client = super::provider::connect(resolved, policy).await?;
             client.query_cicd_jobs(query).await
         })?;
         Ok(Value::Array(
@@ -85,6 +95,54 @@ fn cicd_list_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, Ex
     })
 }
 
+/// Authored `cicd_list` query: exactly the documented catalog vocabulary.
+///
+/// The only path from an authored object to Sniff's internal [`CiCdJobQuery`]
+/// (which no longer implements `Deserialize`); internal keys such as
+/// `descending` or `cursor` are rejected by name via `deny_unknown_fields`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuthoredCiCdJobQuery {
+    statuses: Option<QueryValues<String>>,
+    name: Option<String>,
+    stage: Option<String>,
+    workflow: Option<String>,
+    /// The spec spells `parent` as "number(integer) or string": run identity
+    /// is an integer on GitHub/GitLab/Gitea and an opaque UUID on Bitbucket,
+    /// and both spellings normalize to the string the job matcher compares.
+    #[serde(default, deserialize_with = "deserialize_parent_identity")]
+    parent: Option<String>,
+    branch: Option<String>,
+    commit: Option<String>,
+    actor: Option<String>,
+    trigger: Option<String>,
+    created_after: Option<String>,
+    created_before: Option<String>,
+    updated_after: Option<String>,
+    updated_before: Option<String>,
+    direction: Option<String>,
+    limit: Option<usize>,
+}
+
+fn deserialize_parent_identity<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum ParentIdentity {
+        Text(String),
+        Number(u64),
+    }
+
+    Ok(
+        Option::<ParentIdentity>::deserialize(deserializer)?.map(|identity| match identity {
+            ParentIdentity::Text(text) => text,
+            ParentIdentity::Number(number) => number.to_string(),
+        }),
+    )
+}
+
 fn parse_query(value: &Value) -> Result<(Option<String>, CiCdJobQuery), ExpressionError> {
     if let Some(count) = value.as_u64() {
         let limit = usize::try_from(count).ok().filter(|count| (1..=100).contains(count)).ok_or_else(|| other("cicd_list", "count must be between 1 and 100"))?;
@@ -92,12 +150,28 @@ fn parse_query(value: &Value) -> Result<(Option<String>, CiCdJobQuery), Expressi
     }
     let mut object = value.as_object().cloned().ok_or_else(|| other("cicd_list", "query must be an object or positive integer"))?;
     let remote = super::provider::authored_remote("cicd_list", object.remove("remote"))?;
-    if let Some(direction) = object.remove("direction") {
-        let direction = direction.as_str().ok_or_else(|| other("cicd_list", "direction must be a string"))?;
-        object.insert("descending".to_string(), Value::Bool(match direction { "ascending" => false, "descending" => true, _ => return Err(other("cicd_list", "direction must be ascending or descending")) }));
-    }
-    let query: CiCdJobQuery = serde_json::from_value(Value::Object(object))
+    let authored: AuthoredCiCdJobQuery = serde_json::from_value(Value::Object(object))
         .map_err(|error| other("cicd_list", format!("invalid query: {error}")))?;
+    let descending =
+        super::provider::authored_direction("cicd_list", authored.direction.as_deref(), None)?;
+    let query = CiCdJobQuery {
+        statuses: authored.statuses,
+        name: authored.name,
+        stage: authored.stage,
+        workflow: authored.workflow,
+        parent: authored.parent,
+        branch: authored.branch,
+        commit: authored.commit,
+        actor: authored.actor,
+        trigger: authored.trigger,
+        created_after: authored.created_after,
+        created_before: authored.created_before,
+        updated_after: authored.updated_after,
+        updated_before: authored.updated_before,
+        descending,
+        limit: authored.limit,
+        cursor: None,
+    };
     query
         .validate_canonical()
         .map_err(|error| other("cicd_list", error.to_string()))?;
@@ -108,7 +182,10 @@ pub(super) fn format_job(job: &CiCdJob) -> String {
     // `display_id` is provider-supplied too, so it goes through the same
     // boundary as the job name rather than being trusted for being short.
     let label = format!("CI job #{} — {}", collapse_and_escape(&job.reference.display_id), collapse_and_escape(&job.name));
-    let mut output = match job.web_url.as_deref() { Some(url) => format!("[{label}]({url})"), None => label };
+    let mut output = match job.web_url.as_deref().and_then(markdown_destination) {
+        Some(url) => format!("[{label}]({url})"),
+        None => label,
+    };
     output.push_str(&format!(" · {}", collapse_and_escape(&job.normalized_status)));
     if let Some(trigger) = &job.trigger { output.push_str(&format!(" · {}", collapse_and_escape(trigger))); }
     if let Some(branch) = &job.branch { output.push_str(&format!(" · {}", collapse_and_escape(branch))); }
@@ -153,6 +230,8 @@ mod tests {
                 display_id: "99".to_string(),
                 name: Some("build".to_string()),
                 web_url: None,
+                definition_id: None,
+                definition_path: None,
             },
             name: " test  [linux] \n suite ".to_string(),
             stage: Some("test".to_string()),
@@ -202,6 +281,50 @@ mod tests {
         );
     }
 
+    /// A destination carrying Markdown-active bytes must not be able to close
+    /// its own `(...)` and take over the rest of the line.
+    #[test]
+    fn delimiter_bearing_destinations_cannot_escape_the_link() {
+        let mut job = job();
+        job.web_url = Some(
+            "https://gitlab.example/acme/widgets/-/jobs/456?t=a)+**owned**+[x](https://evil.example)"
+                .to_string(),
+        );
+
+        let (destination, text) = harness::parse_literal(&format_job(&job));
+        assert_eq!(
+            destination.as_deref(),
+            Some(
+                "https://gitlab.example/acme/widgets/-/jobs/456?t=a%29+**owned**+[x]%28https://evil.example%29"
+            ),
+            "every paren must be encoded, so none can close the destination"
+        );
+        assert!(text.starts_with("CI job #456 — "), "{text}");
+        assert!(!text.contains("owned"), "the injected tail leaked into text: {text}");
+    }
+
+    #[test]
+    fn non_web_and_unparseable_destinations_drop_the_link() {
+        for hostile in [
+            "javascript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "file:///etc/passwd",
+            "vbscript:msgbox(1)",
+            "/acme/widgets/-/jobs/456",
+            "not a url",
+            "",
+        ] {
+            let mut job = job();
+            job.web_url = Some(hostile.to_string());
+            let (destination, text) = harness::parse_literal(&format_job(&job));
+            assert_eq!(destination, None, "{hostile:?} became a destination");
+            assert!(
+                text.starts_with("CI job #456 — "),
+                "{hostile:?} cost more than the link: {text}"
+            );
+        }
+    }
+
     /// A job name that already contains backslash escapes must survive as the
     /// literal characters the provider stored, not be re-interpreted.
     #[test]
@@ -219,6 +342,10 @@ mod tests {
             json!(101),
             json!({"unknown": true}),
             json!({"direction": "sideways"}),
+            // Internal Sniff query fields are not authored vocabulary; both
+            // must be rejected by name, not silently accepted or ignored.
+            json!({"descending": true}),
+            json!({"cursor": "20"}),
             json!({"statuses": 42}),
             json!({"limit": 0}),
             json!({"remote": 42}),

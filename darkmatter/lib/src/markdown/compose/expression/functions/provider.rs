@@ -8,15 +8,6 @@ use super::ResolutionContext;
 use crate::markdown::compose::expression::{ExpressionError, ProviderFailureKind};
 use crate::markdown::compose::remote_fetch::{SharedExecutorError, block_on_shared_executor};
 
-pub(super) fn client(
-    context: &ResolutionContext,
-    remote: Option<&str>,
-    function: &str,
-) -> Result<FocusedProviderClient, ExpressionError> {
-    let resolved = resolve(context, remote, function)?;
-    build_client(resolved, context.remote_policy(), function)
-}
-
 /// Resolves the caller repository's remote for a provider call.
 ///
 /// Shared with `cicd`, which needs the resolved identity to build a job
@@ -44,40 +35,33 @@ pub(super) fn resolve(
 ///
 /// Every provider function funnels through here so the client is built one way
 /// regardless of whether the remote came from repository resolution or from a
-/// canonical provider URL.
-pub(super) fn build_client(
+/// canonical provider URL. Async because a neutral-hostname self-managed
+/// server is identified by Sniff's bounded discovery probe
+/// ([`FocusedProviderClient::discover`]) before the client can exist; it runs
+/// inside the [`run`] bridge on the shared executor.
+pub(super) async fn connect(
     #[allow(unused_mut)] mut resolved: ResolvedRemote,
     policy: FetchPolicy,
-    function: &str,
-) -> Result<FocusedProviderClient, ExpressionError> {
+) -> Result<FocusedProviderClient, sniff::SniffError> {
     #[cfg(test)]
     if let Some(transport) = test_transport::current() {
         resolved.api_flavor = transport.flavor;
-        return FocusedProviderClient::with_api_base(resolved, policy, &transport.api_base)
-            .map_err(|error| provider_error(function, error));
+        return FocusedProviderClient::with_api_base(resolved, policy, &transport.api_base);
     }
-    FocusedProviderClient::new(resolved, policy)
-        .map_err(|error| provider_error(function, error))
+    FocusedProviderClient::discover(resolved, policy).await
 }
 
 /// Test-only injection point for the provider transport.
 ///
-/// Two production facts make a loopback mock server unaddressable through any
-/// real constructor, and both are properties of Sniff rather than of the code
-/// under test here:
-///
-/// - `FocusedProviderClient::new` builds `https://{host}/api/...` from
-///   `ResolvedRemote::host`, which is stored without a port, so neither the
-///   scheme nor the port of a `127.0.0.1:<port>` server can be expressed; and
-/// - `ApiFlavor` is derived purely from host-name patterns, so a numeric
-///   loopback host is always `SelfHosted`/`Unknown` and no provider flavor can
-///   be selected for it.
-///
-/// The endpoint-host check inside the client additionally requires the API host
-/// to equal the remote host, so the mock cannot be reached under a friendly
-/// hostname either. Overriding both fields together is therefore the narrowest
-/// way to exercise the compose → client → HTTP → formatter path; flavor
-/// detection and API-base derivation keep their own unit coverage in Sniff.
+/// The production path can now address a loopback endpoint on its own:
+/// `ResolvedRemote` retains the configured scheme/host/port and
+/// `FocusedProviderClient::discover` identifies a neutral host through the
+/// bounded version-endpoint probe. This override remains because the compose
+/// fixtures assert exact provider request counts (single-flight/memoization),
+/// and the discovery probe issues its own version requests per constructed
+/// client, which would pollute those counts; pinning the flavor and API base
+/// keeps every recorded request a query under test. Sniff's Wiremock suite
+/// covers the discovery path itself against the production constructor.
 ///
 /// Neither this module nor the branch that reads it exists in a non-test build,
 /// so this adds no production surface and no environment variable. The cell is
@@ -149,6 +133,46 @@ pub(super) fn authored_remote(
             message: "remote must be a non-empty string naming a configured remote".to_string(),
         }),
     }
+}
+
+/// Translates the authored `direction` (and, for `pr_list`, its `sort`
+/// companion) into the internal newest-first flag.
+///
+/// `direction` is only meaningful relative to a sort key, so combining it with
+/// `sort: "provider-default"` — which asks for the provider's own order
+/// verbatim — is an invalid filter combination rather than a value to ignore
+/// (D25 forbids silently ignoring an authored field).
+///
+/// ## Errors
+///
+/// Returns [`ExpressionError::Other`] for a direction outside
+/// `ascending`/`descending` or for `direction` combined with
+/// `sort: "provider-default"`.
+pub(super) fn authored_direction(
+    function: &str,
+    direction: Option<&str>,
+    sort: Option<&str>,
+) -> Result<bool, ExpressionError> {
+    let descending = match direction {
+        None => true,
+        Some("ascending") => false,
+        Some("descending") => true,
+        Some(_) => {
+            return Err(ExpressionError::Other {
+                function: function.to_string(),
+                message: "direction must be ascending or descending".to_string(),
+            });
+        }
+    };
+    if direction.is_some() && sort == Some("provider-default") {
+        return Err(ExpressionError::Other {
+            function: function.to_string(),
+            message: "direction cannot be combined with sort: \"provider-default\"; \
+                      the provider's own order is preserved as returned"
+                .to_string(),
+        });
+    }
+    Ok(descending)
 }
 
 /// Bridges one asynchronous provider query into the synchronous expression

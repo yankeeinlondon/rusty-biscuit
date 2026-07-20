@@ -45,7 +45,9 @@ struct Fixture {
     server: MockServer,
     directory: tempfile::TempDir,
     _credentials: Vec<EnvGuard>,
-    _transport: test_transport::Guard,
+    /// `None` for the production-path fixture, which relies on Sniff's
+    /// discovery probe instead of pinning flavor and API base.
+    _transport: Option<test_transport::Guard>,
 }
 
 impl Fixture {
@@ -77,7 +79,36 @@ impl Fixture {
 
         let transport =
             test_transport::install(format!("{}/api/v1", server.uri()), ApiFlavor::Gitea);
-        Self { server, directory, _credentials: credentials, _transport: transport }
+        Self { server, directory, _credentials: credentials, _transport: Some(transport) }
+    }
+
+    /// Production-path variant: no transport override is installed, the
+    /// remote is an ordinary neutral-host HTTP URL (loopback, non-default
+    /// port), and the provider flavor plus API base come from Sniff's bounded
+    /// discovery probe. Request-count assertions do not belong on this
+    /// fixture — discovery issues its own version requests.
+    async fn start_production() -> Self {
+        let server = MockServer::start().await;
+        let directory = tempfile::tempdir().expect("tempdir");
+        let repository = git2::Repository::init(directory.path()).expect("git init");
+        repository
+            .remote("origin", &format!("{}/acme/widgets.git", server.uri()))
+            .expect("configure origin");
+
+        // Gitea discovery: the GitLab probe misses, the Gitea probe identifies.
+        Mock::given(method("GET"))
+            .and(path("/api/v4/version"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/version"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"version": "1.22.0"})))
+            .mount(&server)
+            .await;
+
+        let credentials = CREDENTIAL_VARIABLES.iter().map(EnvGuard::remove_safe).collect();
+        Self { server, directory, _credentials: credentials, _transport: None }
     }
 
     /// Composes `content` as a document sitting in the repository root.
@@ -375,6 +406,29 @@ async fn provider_functions_are_available_in_frontmatter_shell_ternary() {
     );
 }
 
+/// The production constructor now addresses a neutral-hostname self-managed
+/// server end-to-end: no test-only flavor/API-base override is installed, so
+/// the provider flavor and the port-bearing API base both come from Sniff's
+/// allowlisted discovery probe during client construction.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(provider_transport)]
+async fn neutral_host_self_managed_server_composes_through_the_production_path() {
+    let fixture = Fixture::start_production().await;
+    fixture.mount_json(PR_PATH, pr_body(123, "Fix the parser")).await;
+
+    let composed = fixture.compose("PR: {{ pr(123) }}\n").expect("compose succeeds");
+    assert!(
+        composed.content().contains("PR #123 — Fix the parser"),
+        "{}",
+        composed.content()
+    );
+    let paths = fixture.request_paths().await;
+    assert!(
+        paths.contains(&PR_PATH.to_string()),
+        "the PR query never reached the discovered API base: {paths:?}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // 2. Single-flight and memoization (AC26)
 // ---------------------------------------------------------------------------
@@ -454,6 +508,110 @@ async fn list_queries_with_different_shapes_are_not_memoized_together() {
         2,
         "expected the newest-first slot plus the ascending one: {paths:?}"
     );
+}
+
+/// D25/AC22: internal Sniff query fields (`descending`, `cursor`) and the
+/// contradictory `provider-default` + `direction` pair are authoring errors —
+/// rejected by name at the boundary, before repository resolution or any
+/// provider request.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(provider_transport)]
+async fn internal_query_keys_are_rejected_at_the_authored_boundary() {
+    let fixture = Fixture::start().await;
+    for (expression, needle) in [
+        ("pr_list({\"descending\": true})", "descending"),
+        ("pr_list({\"cursor\": \"20\"})", "cursor"),
+        ("cicd_list({\"descending\": false})", "descending"),
+        ("cicd_list({\"cursor\": \"20\"})", "cursor"),
+        (
+            "pr_list({\"sort\": \"provider-default\", \"direction\": \"ascending\"})",
+            "provider-default",
+        ),
+        (
+            "pr_list({\"sort\": \"provider-default\", \"direction\": \"descending\"})",
+            "provider-default",
+        ),
+    ] {
+        let message = error_text(fixture.compose(&frontmatter_document(expression)));
+        assert!(
+            message.contains(needle),
+            "{expression} must fail naming `{needle}`: {message}"
+        );
+    }
+    assert_eq!(
+        fixture.request_count().await,
+        0,
+        "an invalid authored query reached the provider"
+    );
+}
+
+/// `stage` on a flavor with no stage data (the loopback remote resolves as
+/// Gitea) is the spec's explicit unsupported-filter error, never an empty
+/// result — and the refusal lands before any provider request.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(provider_transport)]
+async fn stage_filter_on_a_stageless_flavor_is_an_unsupported_filter_error() {
+    let fixture = Fixture::start().await;
+    let message =
+        error_text(fixture.compose(&frontmatter_document("cicd_list({\"stage\": \"test\"})")));
+    assert!(
+        message.contains("stage") && message.contains("unsupported"),
+        "the refusal must name the field and the capability gap: {message}"
+    );
+    assert_eq!(
+        fixture.request_count().await,
+        0,
+        "an unsupported filter reached the provider"
+    );
+}
+
+/// A provider is entitled to name its own items, not to choose where the
+/// composed document points.
+///
+/// The two halves of the trust boundary are only observable together here:
+/// Sniff refuses to publish a link that leaves the repository's origin, and
+/// Darkmatter would refuse to serialize it even if one arrived. The composed
+/// output must therefore keep the item and lose the link — on the exact and
+/// the list surface, for both item kinds.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(provider_transport)]
+async fn cross_origin_provider_links_never_reach_the_composed_document() {
+    let hostile = "https://evil.example/acme/widgets/pulls/123?t=a)+**owned**";
+    let fixture = Fixture::start().await;
+
+    let mut pr = pr_body(123, "Fix the parser");
+    pr["html_url"] = json!(hostile);
+    let mut job = job_body(456, "build");
+    job["html_url"] = json!("javascript:alert(1)");
+    fixture.mount_json(PR_PATH, pr.clone()).await;
+    fixture.mount_json(PR_LIST_PATH, json!([pr])).await;
+    fixture.mount_json(JOB_PATH, job.clone()).await;
+    fixture.mount_json(RUNS_PATH, json!([{"id": 99, "name": "CI"}])).await;
+    fixture.mount_json(RUN_JOBS_PATH, json!([job])).await;
+
+    let composed = fixture
+        .compose(
+            "---\npr: \"{{ pr(123) }}\"\njob: \"{{ cicd(456) }}\"\n\
+             prs: \"{{ pr_list(5) }}\"\njobs: \"{{ cicd_list(5) }}\"\n---\nunused\n",
+        )
+        .expect("a hostile link costs the link, not the compose");
+
+    let mut projections = vec![
+        frontmatter_string(&composed, "pr"),
+        frontmatter_string(&composed, "job"),
+    ];
+    projections.extend(frontmatter_list(&composed, "prs"));
+    projections.extend(frontmatter_list(&composed, "jobs"));
+
+    assert_eq!(projections.len(), 4, "a surface produced no projection");
+    for projection in &projections {
+        assert!(!projection.contains("evil.example"), "{projection}");
+        assert!(!projection.contains("javascript:"), "{projection}");
+        assert!(!projection.contains("owned"), "{projection}");
+        assert!(!projection.contains(']'), "the item became a link: {projection}");
+    }
+    assert!(projections[0].starts_with("PR #123 — Fix the parser · open"));
+    assert!(projections[1].starts_with("CI job #456 — build · success"));
 }
 
 // ---------------------------------------------------------------------------

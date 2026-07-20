@@ -625,7 +625,16 @@ hover and completion reach the same tables.
   never ignored, approximated, or silently downgraded.
 - **Limits.** An omitted `limit` means 20; the hard maximum is 100. A
   non-positive or over-maximum limit is an invalid-query error.
-- **Ordering.** Both functions return newest-first by default.
+- **Ordering.** Both functions return newest-first by default. `pr_list`'s
+  `sort: "provider-default"` preserves the provider's own result order
+  verbatim; because `direction` only orders a sort key, combining it with
+  `provider-default` is an invalid-query error rather than an ignored field.
+- **Provider-capability filters.** `stage` is honored only where the provider
+  exposes stage data (GitLab); on any other provider it fails with the
+  unsupported-filter error before any request. `workflow` matches the parent
+  workflow/pipeline name, its definition ID, or its definition path (for
+  example `.github/workflows/ci.yml`) where the provider has workflow
+  definitions.
 - **Empty results.** A successful query with no matches returns `[]`.
 - **Datetimes.** `*_after` / `*_before` values are RFC 3339 / ISO 8601 strings
   (for example `2026-07-13T00:00:00Z`). Both bounds are inclusive; an inverted

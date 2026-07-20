@@ -1,9 +1,11 @@
-//! Literal-text projection for provider-supplied strings embedded in Markdown.
+//! Markdown projection for provider-supplied strings.
 //!
-//! Provider titles, branch names, actors, and statuses are attacker-adjacent
-//! text: a repository owner controls them and Darkmatter splices them straight
-//! into composed Markdown. `collapse_and_escape` is the single boundary that
-//! turns such a string into inline content that CommonMark renders verbatim.
+//! Provider titles, branch names, actors, statuses, and links are
+//! attacker-adjacent: a repository owner controls them and Darkmatter splices
+//! them straight into composed Markdown. Two boundaries divide that work by
+//! the syntax position the value lands in — [`collapse_and_escape`] for inline
+//! content CommonMark must render verbatim, and [`markdown_destination`] for a
+//! link destination.
 
 /// Characters that can begin, end, or alter an inline construct at *any*
 /// column, across every `pulldown_cmark::Options` flag Darkmatter enables
@@ -34,9 +36,9 @@ const INLINE_ACTIVE: [char; 16] =
 ///   and `-` in ordinary prose for no rendered difference, and the projection
 ///   is specified as compact, noise-free Markdown.
 /// - **Delimiters that are only live inside a link destination or title** —
-///   `(`, `)`, `"`, `'`. Nothing here is ever emitted as a destination (URLs are
-///   passed through untouched by design), and every `[` and `]` is escaped, so
-///   no destination context can form around them.
+///   `(`, `)`, `"`, `'`. Nothing here is ever emitted as a destination
+///   ([`markdown_destination`] owns that position), and every `[` and `]` is
+///   escaped, so no destination context can form around them.
 ///
 /// CommonMark honors a backslash only before ASCII punctuation — before
 /// anything else the backslash is itself literal — so every character in
@@ -58,6 +60,56 @@ pub(super) fn collapse_and_escape(value: &str) -> String {
         }
     }
     output
+}
+
+/// Bytes that must not appear literally in an inline link destination.
+///
+/// CommonMark accepts a bare destination only as a run of characters with no
+/// ASCII whitespace, no ASCII control, and balanced parentheses; `<`, `>`, and
+/// `\` are added so no autolink, raw-HTML span, or escape can begin inside one.
+/// Everything above the printable-ASCII range is encoded too, so the emitted
+/// destination is pure ASCII regardless of what a producer hands over.
+fn destination_hostile(byte: u8) -> bool {
+    byte <= b' ' || byte >= 0x7F || matches!(byte, b'(' | b')' | b'<' | b'>' | b'\\')
+}
+
+/// Turns a provider-supplied URL into a Markdown link destination, or drops it.
+///
+/// ## Returns
+///
+/// A destination safe to interpolate into `[label](…)` verbatim, or `None` when
+/// the value is not an absolute `http(s)` URL — a non-web scheme degrades to
+/// the link-less projection instead of emitting a `javascript:` or `data:`
+/// destination that a downstream renderer would honor.
+///
+/// ## Notes
+///
+/// Sniff already refuses hostile links at the provider boundary
+/// (`remote::web_link`); this is the second half of that pair and the one that
+/// owns Markdown syntax, so the formatters cannot emit a structurally broken
+/// destination even if a future producer skips the first.
+///
+/// Residual hostile bytes are percent-encoded rather than wrapped in an
+/// angle-bracket `<…>` destination. Percent-encoding is transparent under
+/// RFC 3986 — the origin server receives the same bytes — and keeps the
+/// specified compact `[label](url)` shape. The `<…>` form would still need
+/// backslash escaping for `<`, `>`, and `\` inside it, so it adds syntax
+/// without removing the escaping problem.
+pub(super) fn markdown_destination(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url.trim()).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+    let serialized = parsed.to_string();
+    let mut output = String::with_capacity(serialized.len());
+    for byte in serialized.bytes() {
+        if destination_hostile(byte) {
+            output.push_str(&format!("%{byte:02X}"));
+        } else {
+            output.push(char::from(byte));
+        }
+    }
+    Some(output)
 }
 
 #[cfg(test)]
@@ -206,6 +258,84 @@ mod tests {
             let escaped = collapse_and_escape(&raw);
             renders_literally(&escaped, &collapsed(&raw));
             renders_literally_as_link_label(&escaped, &collapsed(&raw), "https://provider.example/x");
+        }
+    }
+
+    /// Destinations a downstream renderer would execute, read from disk, or
+    /// resolve against the wrong base.
+    const HOSTILE_DESTINATIONS: &[&str] = &[
+        "javascript:alert(1)",
+        "JavaScript:alert(1)",
+        "data:text/html;base64,PHNjcmlwdD4=",
+        "file:///etc/passwd",
+        "vbscript:msgbox(1)",
+        "mailto:alice@evil.example",
+        "//evil.example/x",
+        "/acme/project/pull/1",
+        "pull/1",
+        "not a url",
+        "",
+        "   ",
+    ];
+
+    #[test]
+    fn only_absolute_web_urls_become_destinations() {
+        for raw in HOSTILE_DESTINATIONS {
+            assert_eq!(markdown_destination(raw), None, "accepted {raw:?}");
+        }
+        assert!(markdown_destination("https://provider.example/pr/1").is_some());
+        assert!(markdown_destination("http://provider.example:8443/pr/1").is_some());
+    }
+
+    #[test]
+    fn destination_hostile_bytes_are_percent_encoded() {
+        assert_eq!(
+            markdown_destination("https://provider.example/pr/1?t=a (b) c").as_deref(),
+            Some("https://provider.example/pr/1?t=a%20%28b%29%20c")
+        );
+        assert_eq!(
+            markdown_destination("https://provider.example/a\tb\nc").as_deref(),
+            Some("https://provider.example/abc"),
+            "the URL parser strips tabs and newlines before this ever sees them"
+        );
+    }
+
+    /// Percent-encoding is transparent: an origin server decodes the escapes
+    /// back to the bytes the provider published, so nothing is retargeted.
+    ///
+    /// Asserted by decoding rather than by `Url` equality, because the URL
+    /// parser preserves existing escapes verbatim — `%28` and `(` are two
+    /// distinct `Url` values for the same request.
+    #[test]
+    fn encoding_preserves_the_target() {
+        let raw = "https://provider.example/a(b)/pr/1?t=c(d)e";
+        let decoded = markdown_destination(raw)
+            .unwrap()
+            .replace("%28", "(")
+            .replace("%29", ")");
+        assert_eq!(decoded, url::Url::parse(raw).unwrap().to_string());
+    }
+
+    proptest! {
+        /// Whatever a producer supplies, an accepted destination is printable
+        /// ASCII with no space, no paren, and no autolink or escape opener —
+        /// which is exactly CommonMark's bare-destination grammar, so
+        /// `[label](dest)` can only ever parse as one link.
+        #[test]
+        fn accepted_destinations_are_always_inert(
+            tail in "[\\x00-\\x7f]{0,32}"
+        ) {
+            let raw = format!("https://provider.example/{tail}");
+            if let Some(destination) = markdown_destination(&raw) {
+                prop_assert!(
+                    destination.bytes().all(|byte| !destination_hostile(byte)),
+                    "{destination:?}"
+                );
+                let markdown = format!("[label]({destination})");
+                let (parsed, text) = super::harness::parse_literal(&markdown);
+                prop_assert_eq!(parsed.as_deref(), Some(destination.as_str()));
+                prop_assert_eq!(text, "label");
+            }
         }
     }
 }
