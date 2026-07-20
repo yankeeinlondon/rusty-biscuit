@@ -1,7 +1,7 @@
 ---
 status: ready for planning and implementation
 reviewed: true
-review_iterations: 6
+review_iterations: 7
 reviewed_by: codex/default
 reviewed_on: 2026-07-14
 rulings: "`type-definition` and `schema` semantic types ruled by Ken 2026-07-13"
@@ -825,6 +825,16 @@ rejected by the harness; the flag must be passed bare as
 `just test-l2 --no-fail-fast`. Under heavy host load (load average >25) the
 library tier can produce a spurious single-test failure that clears on rerun at
 lower load; verify `uptime` before treating an L2 failure as real.
+
+**Reconfirmed again after the review-7 DMLS hover/activation work** (2026-07-20,
+review-7 implementation): library 18/18, CLI 66/69, DMLS 3/3 — total 87/90,
+unchanged for the second consecutive cycle. The failure set is still exactly the
+three named code-block tests. That cycle changed only DMLS hover routing,
+pattern-key region projection, and the standalone envelope recognizer, and added
+five L1 tests (dmls 616 → 621), so the L2 total holding steady is the expected
+result rather than evidence of anything new. Host load averaged 36–95 across the
+three tiers; the three failures remained deterministic value mismatches
+(`got luma 44`), not timeouts, so load does not explain them.
 
 **Repair path (deliberately not taken here).** Restage the three tests on the
 tmux harness, as `level2_schema_about` already does, or fold their coverage
