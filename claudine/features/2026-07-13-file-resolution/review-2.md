@@ -4,10 +4,11 @@ ready: false
 agent: codex/default
 created: 2026-07-17T18:55:35-07:00
 spec: 2026-07-13-file-resolution/spec.md
-implemented: false
+implemented: true
 description: A **feature** review of `2026-07-13-file-resolution/spec.md`
 feature: 2026-07-13-file-resolution/review-2.md
 previous: 2026-07-13-file-resolution/review-1.md
+next: 2026-07-13-file-resolution/review-3.md
 ---
 
 # Review 2: Unified File-Reference Resolution
