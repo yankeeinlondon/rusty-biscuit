@@ -4,7 +4,9 @@ ready: false
 agent: codex/default
 created: 2026-07-18T03:57:11-07:00
 spec: 2026-07-13-fixed-width-lists/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/default
+log: darkmatter/fixes/2026-07-13-fixed-width-lists/log.md
 description: "A **fix** review of `2026-07-13-fixed-width-lists/spec.md`"
 fix: 2026-07-13-fixed-width-lists/review-1.md
 ---

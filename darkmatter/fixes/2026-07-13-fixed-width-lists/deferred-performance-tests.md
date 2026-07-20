@@ -1,0 +1,158 @@
+---
+fix: 2026-07-13-fixed-width-lists
+maps_to_finding: "F3 — High — Mandatory performance budgets have no benchmark evidence"
+review: darkmatter/fixes/2026-07-13-fixed-width-lists/review-1.md
+log: darkmatter/fixes/2026-07-13-fixed-width-lists/log.md
+deferred_on: 2026-07-20
+blocked_on: quiet host
+---
+
+# Deferred Performance Measurement — Fixed-Width Lists
+
+## What this maps back to
+
+- **Finding:** "High — Mandatory performance budgets have no benchmark evidence" in
+  [`review-1.md`](review-1.md).
+- **Specification:** [`spec.md`](spec.md) → Test Plan → "Performance regression" (~lines 631-645)
+  and Acceptance Criterion 15 (~lines 709-711).
+- **Implementation log:** [`log.md`](log.md) → "Implementation of Review Findings #1" → F3.
+
+## Status
+
+| Half of the finding | Status |
+|---|---|
+| AC 15 structural requirement (parse counts) | **SATISFIED** — proved deterministically, load-independent |
+| Criterion benchmark harness | **COMPLETE** — written, smoke-tested, verified against the baseline ref |
+| Criterion timing measurement | **DEFERRED** — blocked solely on host quiet |
+
+Nothing needs to be re-derived. Only the two benchmark runs remain.
+
+## Why it was deferred
+
+The measurement was attempted on a macOS host running **load averages of 89-147 on 16 physical
+cores** — roughly 6-9x oversubscribed — with 7 active sessions and three other agents running
+concurrent WezTerm L2 suites throughout.
+
+The tightest budget under test is **10%**. Criterion's own run-to-run variance on an idle machine is
+roughly **1-3%**. Under this load, scheduler contention alone produces double-digit median swings, so
+the noise floor exceeds the budget being tested and any verdict would be meaningless.
+
+**No timing number was recorded, estimated, or extrapolated.** Reporting a load-contaminated median
+would have been worse than deferring, because it would have the shape of evidence without the
+substance.
+
+## The structural half that IS proved
+
+AC 15's normative requirement is that the default cleanup path reuses its existing parse and that
+fixed-width mode adds no parse beyond the established cleanup-plus-reflow sequence. That is a
+structural property, not a timing property, and it is now proved by
+`darkmatter/lib/src/markdown/cleanup/tests/parse_count.rs` (8 tests, with a non-vacuity guard):
+
+| Path | Parses |
+|---|---|
+| `cleanup_content` + all 8 indent/spacing variants | 1 |
+| `strip_incidental_newlines` (standalone) | 1 |
+| `reflow_to_width` | 1 |
+| `cleanup_to_fixed_width` | 2 |
+| `cleanup_content` → `reflow_to_width` (`md clean --fixed-width`) | 2 |
+
+Default cleanup adds no second parse. Fixed-width is exactly cleanup-plus-reflow with no third parse.
+F1's reference-definition protection reads off the existing offset iterator at zero additional parse
+cost — confirmed by measurement rather than inspection.
+
+## The benchmark
+
+`darkmatter/lib/benches/clean_hot_paths.rs`, Criterion group **`clean_list_budgets`** — 8 cases,
+being the four fixture classes the spec names × {default cleanup, fixed-width cleanup}:
+
+- representative top-level prose
+- flat lists
+- deeply nested lists
+- blockquoted task lists
+
+Fixtures are generated deterministically from constants (no clock, RNG, or filesystem), 60 repeated
+units each, so baseline and candidate see byte-identical input.
+
+Fixed-width cases run `cleanup_content` then `reflow_to_width` — the sequence `apply_cleanup` in
+`cli/src/commands/clean.rs` actually executes — rather than the `Markdown` wrapper, whose frontmatter
+parse and re-serialization are constant costs shared by both modes and would compress the 2x ratio
+toward 1.
+
+## Pre-fix baseline state
+
+Git ref **`96c6616e9`** (`docs(darkmatter): ratify invalid-frontmatter phase 1 deliverables`) — the
+parent of `4d0dd908e`, the first commit of this fix's implementation.
+
+Verified: at this ref `reflow.rs` has no semantic-model path, and `cleanup_content`,
+`reflow_to_width`, and `strip_incidental_newlines` all exist with today's signatures, so the
+benchmark compiles unmodified against it.
+
+**Two workarounds are required, both verified by an actual build and `--test` run:**
+
+1. `96c6616e9` does not build standalone. `darkmatter/lib/src/markdown/span.rs` imports
+   `biscuit_file::SourceSpan`, but the biscuit-file side (`7aaa9dccc`) is on the `darkmatter` branch
+   and is *not* an ancestor of this ref — the branch was transiently red here. Fix with
+   `git checkout darkmatter -- biscuit-file/`.
+2. The `clean_hot_paths` bench target is not declared at this ref. Append to
+   `darkmatter/lib/Cargo.toml`:
+
+   ```toml
+   [[bench]]
+   name = "clean_hot_paths"
+   harness = false
+   ```
+
+## Commands to run
+
+```bash
+# Baseline
+git worktree add /tmp/dm-baseline 96c6616e9 --detach
+cd /tmp/dm-baseline
+git checkout darkmatter -- biscuit-file/
+printf '\n[[bench]]\nname = "clean_hot_paths"\nharness = false\n' >> darkmatter/lib/Cargo.toml
+cp <fix-tree>/darkmatter/lib/benches/clean_hot_paths.rs darkmatter/lib/benches/clean_hot_paths.rs
+cargo bench -p darkmatter --bench clean_hot_paths -- --save-baseline fwl-prefix
+
+# Candidate (fix tree, same host, same session, no reboot between)
+cargo bench -p darkmatter --bench clean_hot_paths -- --baseline fwl-prefix
+```
+
+Criterion baselines live under `target/criterion/`. The two trees have separate `target/`
+directories, so either copy `/tmp/dm-baseline/target/criterion/` into the fix tree's
+`target/criterion/` before the candidate run, or point both at one `CARGO_TARGET_DIR`.
+
+## Budgets and pass/fail arithmetic
+
+`median` = Criterion's reported median.
+
+| # | Scope | Test |
+|---|---|---|
+| B1 | `{prose, flat_list, nested_list, blockquoted_tasks}/default_cleanup` | `median_candidate ≤ 1.10 × median_baseline` — all four must pass |
+| B2 | `{flat_list, nested_list, blockquoted_tasks}/fixed_width_cleanup` (list-heavy only) | `median_candidate ≤ 1.15 × median_baseline` — all three must pass |
+| B3 | candidate run only, same fixture both sides | `median(<fixture>/fixed_width_cleanup) ≤ 2.00 × median(<fixture>/default_cleanup)` — all four fixtures |
+
+B1 and B2 are cross-run. B3 is within a single run and is therefore the only budget partially robust
+to load. **Record the verdict per case, not as an aggregate** — an averaged verdict can hide one
+fixture blowing its budget.
+
+## Host admissibility
+
+Required before the numbers mean anything:
+
+- **1-minute load average ≤ 2.0 on this 16-core host** (≈12% utilization)
+- no other agent sessions
+- no concurrent `cargo` builds
+- AC power
+- Criterion's default sampling
+
+Rationale: the tightest budget is 10% and Criterion's idle-machine variance is 1-3%, so the noise
+floor must sit at least ~3x below the budget for a verdict to carry information. At load ≥ 4 on 16
+cores, scheduler contention alone produces double-digit median swings and B1 becomes untestable.
+
+Check `uptime` immediately **before and after** each run, and record both.
+
+## Drift bracket
+
+Per repo convention, cross-run comparison requires bracketing. Run **baseline → candidate →
+baseline again** and confirm the two baseline medians agree within 3%. If they do not, the host
+drifted mid-measurement and the run is void regardless of what the candidate numbers say.
