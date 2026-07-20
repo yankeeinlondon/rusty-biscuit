@@ -702,12 +702,6 @@ fn construct_argv_and_system_prompt(
         )?;
 
         let scoped_tmp = super::super::system_prompt::scoped_tmp_dir(launch_workspace);
-        super::super::system_prompt::maybe_gitignore_claudine_tmp(
-            launch_workspace
-                .repo_root
-                .as_deref()
-                .unwrap_or(&launch_workspace.launch_cwd),
-        );
 
         let mut sp_artifacts: Vec<super::super::system_prompt::SystemPromptArtifact> = Vec::new();
 

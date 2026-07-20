@@ -12,6 +12,8 @@ fn system_prompt_application_empty() {
 #[test]
 fn scoped_tmp_dir_inside_repo() {
     let repo = tempfile::tempdir().unwrap();
+    let gitignore = repo.path().join(".gitignore");
+    std::fs::write(&gitignore, "target/\n").unwrap();
     let ctx = LaunchWorkspaceContext {
         launch_cwd: repo.path().join("sub"),
         repo_root: Some(repo.path().to_path_buf()),
@@ -22,6 +24,9 @@ fn scoped_tmp_dir_inside_repo() {
     let dir = scoped_tmp_dir(&ctx);
     assert_eq!(dir, repo.path().join(".claudine").join("tmp"));
     assert!(dir.exists());
+
+    let contents = std::fs::read_to_string(&gitignore).unwrap();
+    assert!(contents.lines().any(|l| l == ".claudine/tmp/"));
 }
 
 #[test]
@@ -37,6 +42,29 @@ fn scoped_tmp_dir_outside_repo() {
     let dir = scoped_tmp_dir(&ctx);
     assert_eq!(dir, cwd.path().join(".claudine-tmp"));
     assert!(dir.exists());
+}
+
+/// A bare launch CWD that already carries a `.gitignore` (repo added
+/// later, or a nested ignore file) must get the entry naming the
+/// directory that was actually created — not the repo-scoped one.
+#[test]
+fn scoped_tmp_dir_outside_repo_ignores_the_directory_it_created() {
+    let cwd = tempfile::tempdir().unwrap();
+    let gitignore = cwd.path().join(".gitignore");
+    std::fs::write(&gitignore, "target/\n").unwrap();
+    let ctx = LaunchWorkspaceContext {
+        launch_cwd: cwd.path().to_path_buf(),
+        repo_root: None,
+        child_cwd: cwd.path().to_path_buf(),
+        package_context: None,
+        warnings: vec![],
+    };
+    let dir = scoped_tmp_dir(&ctx);
+
+    let contents = std::fs::read_to_string(&gitignore).unwrap();
+    assert!(contents.lines().any(|l| l == ".claudine-tmp/"));
+    assert!(!contents.contains(".claudine/tmp/"));
+    assert!(dir.ends_with(".claudine-tmp"));
 }
 
 #[test]
@@ -61,13 +89,13 @@ fn maybe_gitignore_appends_once() {
     let gitignore = repo.path().join(".gitignore");
     std::fs::write(&gitignore, "target/\n").unwrap();
 
-    maybe_gitignore_claudine_tmp(repo.path());
+    maybe_gitignore(repo.path(), ".claudine/tmp/");
     let contents = std::fs::read_to_string(&gitignore).unwrap();
     assert!(contents.contains(".claudine/tmp/"));
     assert_eq!(contents.matches(".claudine/tmp/").count(), 1);
 
     // Idempotent: second call must not append a duplicate.
-    maybe_gitignore_claudine_tmp(repo.path());
+    maybe_gitignore(repo.path(), ".claudine/tmp/");
     let contents2 = std::fs::read_to_string(&gitignore).unwrap();
     assert_eq!(contents2.matches(".claudine/tmp/").count(), 1);
 }
@@ -76,7 +104,7 @@ fn maybe_gitignore_appends_once() {
 fn maybe_gitignore_noop_when_missing() {
     let repo = tempfile::tempdir().unwrap();
     // No .gitignore present — should not panic or create one.
-    maybe_gitignore_claudine_tmp(repo.path());
+    maybe_gitignore(repo.path(), ".claudine/tmp/");
     assert!(!repo.path().join(".gitignore").exists());
 }
 
@@ -86,7 +114,7 @@ fn maybe_gitignore_noop_when_already_present() {
     let gitignore = repo.path().join(".gitignore");
     std::fs::write(&gitignore, ".claudine/tmp/\n").unwrap();
 
-    maybe_gitignore_claudine_tmp(repo.path());
+    maybe_gitignore(repo.path(), ".claudine/tmp/");
     let contents = std::fs::read_to_string(&gitignore).unwrap();
     assert_eq!(contents, ".claudine/tmp/\n");
 }

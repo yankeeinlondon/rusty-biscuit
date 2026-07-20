@@ -167,12 +167,6 @@ pub(crate) fn resolve_and_apply_system_prompt(
     let mut sp_artifacts: Vec<system_prompt::SystemPromptArtifact> = Vec::new();
 
     let scoped_tmp = system_prompt::scoped_tmp_dir(launch_workspace);
-    system_prompt::maybe_gitignore_claudine_tmp(
-        launch_workspace
-            .repo_root
-            .as_deref()
-            .unwrap_or(&launch_workspace.launch_cwd),
-    );
 
     match &effective_sp {
         claudine::system_prompt::ResolvedSystemPrompt::None

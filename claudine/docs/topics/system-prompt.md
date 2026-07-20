@@ -170,7 +170,9 @@ All transient overlay artifacts live inside the user's trust boundary:
 - inside a repo: `<repo_root>/.claudine/tmp/`
 - outside a repo: `<launch_cwd>/.claudine-tmp/`
 
-Files are created via `tempfile::Builder` with a `.md` suffix so the `Drop` impl deletes them when the wrap call returns. A best-effort `.gitignore` augmentation appends `.claudine/tmp/` idempotently when a repo-root `.gitignore` exists.
+Files are created via `tempfile::Builder` with a `.md` suffix so the `Drop` impl deletes them when the wrap call returns. A best-effort `.gitignore` augmentation idempotently appends the entry naming whichever directory was created — `.claudine/tmp/` inside a repo, `.claudine-tmp/` outside one — when a `.gitignore` already exists alongside it.
+
+Which of the two layouts applies is decided once, from the `repo_root` resolved at launch. A directory that gains a `.git` mid-session keeps its `.claudine-tmp/` for that invocation and switches to `.claudine/tmp/` on the next launch.
 
 ### Gemini Append Composition
 

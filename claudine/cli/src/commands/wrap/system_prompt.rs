@@ -128,21 +128,30 @@ pub(crate) fn describe_effective(effective: &ResolvedSystemPrompt) -> Option<Vec
     }
 }
 
-/// Resolve the directory where claudine should drop transient
-/// per-invocation overlay files (system prompts, instruction files,
-/// etc.). Always inside the user's trust boundary.
+/// Resolve — and create — the directory where claudine should drop
+/// transient per-invocation overlay files (system prompts, instruction
+/// files, etc.). Always inside the user's trust boundary.
+///
+/// Also performs the best-effort `.gitignore` augmentation for that
+/// directory. The two are derived from one branch on purpose: computing
+/// them independently let the ignore entry name a directory that was
+/// never created (a bare launch CWD got `.claudine-tmp` on disk but
+/// `.claudine/tmp/` in `.gitignore`).
 pub(crate) fn scoped_tmp_dir(launch_workspace: &LaunchWorkspaceContext) -> PathBuf {
-    let base = launch_workspace
-        .repo_root
-        .clone()
-        .unwrap_or_else(|| launch_workspace.launch_cwd.clone());
-
-    let scoped = if launch_workspace.repo_root.is_some() {
-        base.join(".claudine").join("tmp")
-    } else {
-        base.join(".claudine-tmp")
+    let (ignore_base, scoped, ignore_entry) = match &launch_workspace.repo_root {
+        Some(root) => (
+            root.as_path(),
+            root.join(".claudine").join("tmp"),
+            ".claudine/tmp/",
+        ),
+        None => {
+            let cwd = launch_workspace.launch_cwd.as_path();
+            (cwd, cwd.join(".claudine-tmp"), ".claudine-tmp/")
+        }
     };
+
     let _ = std::fs::create_dir_all(&scoped);
+    maybe_gitignore(ignore_base, ignore_entry);
     scoped
 }
 
@@ -156,11 +165,14 @@ pub(crate) fn scoped_tempfile(base: &Path, prefix: &str) -> std::io::Result<Name
 
 /// Best-effort `.gitignore` augmentation.
 ///
-/// When `repo_root.join(".gitignore")` exists and doesn't already contain
-/// `.claudine/tmp/`, append the line.  Skip silently on failure (this is a
+/// When `base.join(".gitignore")` exists and doesn't already contain
+/// `entry`, append the line.  Skip silently on failure (this is a
 /// courtesy, not a contract).
-pub(crate) fn maybe_gitignore_claudine_tmp(repo_root: &Path) {
-    let gitignore = repo_root.join(".gitignore");
+///
+/// `entry` is gitignore syntax, so it stays forward-slashed and
+/// trailing-slashed on every host — it is not a filesystem path.
+fn maybe_gitignore(base: &Path, entry: &str) {
+    let gitignore = base.join(".gitignore");
     if !gitignore.is_file() {
         return;
     }
@@ -169,8 +181,7 @@ pub(crate) fn maybe_gitignore_claudine_tmp(repo_root: &Path) {
         return;
     };
 
-    let needle = ".claudine/tmp/";
-    if contents.lines().any(|l| l.trim() == needle) {
+    if contents.lines().any(|l| l.trim() == entry) {
         return;
     }
 
@@ -178,7 +189,7 @@ pub(crate) fn maybe_gitignore_claudine_tmp(repo_root: &Path) {
     if !with_trailing.ends_with('\n') {
         with_trailing.push('\n');
     }
-    with_trailing.push_str(needle);
+    with_trailing.push_str(entry);
     with_trailing.push('\n');
 
     let _ = std::fs::write(&gitignore, with_trailing);
