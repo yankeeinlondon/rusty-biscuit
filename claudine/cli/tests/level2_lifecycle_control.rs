@@ -802,6 +802,103 @@ fn stage_launch_recording(doc: &str) -> Staged {
     }
 }
 
+/// A fake provider that records its **complete** argv and environment, one
+/// attempt per `begin-attempt`/`end-attempt` pair.
+///
+/// [`write_launch_recorder`] records only a flag-shaped projection, which cannot
+/// distinguish "the retry dropped the requested `--output`" from "the recorder
+/// did not look for it", and says nothing at all about the child environment.
+/// Review-9 finding 2 is about both, so these rows assert on everything the
+/// process actually received.
+fn write_full_launch_recorder(bin_dir: &Path, slug: &str, events_log: &Path, exit_code: i32) {
+    write_full_launch_recorder_with_exit(bin_dir, slug, events_log, &format!("exit {exit_code}"));
+}
+
+/// [`write_full_launch_recorder`] with the exit decision spelled out, so a row
+/// can make the *same* binary fail once and then succeed — which is how a facet
+/// other than the provider is moved across a retry.
+///
+/// `exit_script` runs after the recording and must terminate the script.
+fn write_full_launch_recorder_with_exit(
+    bin_dir: &Path,
+    slug: &str,
+    events_log: &Path,
+    exit_script: &str,
+) {
+    write_executable(
+        &bin_dir.join(slug),
+        &format!(
+            // Probes are not attempts. Claudine runs the binary to read its
+            // version during preflight and, for providers with dynamic model
+            // listing, `<binary> models` during model validation; recording
+            // either as a launch would make the attempt sequence depend on
+            // which provider the row happens to open with.
+            "#!/bin/sh\ncase \"$1\" in --version|-V|-v|version|models) exit 0;; esac\n\
+             if [ ! -t 0 ]; then cat > /dev/null 2>&1; fi\n\
+             printf 'begin-attempt=%s\\n' \"$(basename \"$0\")\" >> {log}\n\
+             for a in \"$@\"; do printf 'argv=%s\\n' \"$a\" >> {log}; done\n\
+             env | sed 's/^/env=/' >> {log}\n\
+             printf 'end-attempt\\n' >> {log}\n\
+             printf 'provider-ran\\n' >> {log}\n{exit_script}\n",
+            log = events_log.display(),
+        ),
+    );
+}
+
+/// One provider process as [`write_full_launch_recorder`] observed it.
+struct RecordedAttempt {
+    binary: String,
+    argv: Vec<String>,
+    env: Vec<(String, String)>,
+}
+
+impl RecordedAttempt {
+    fn has_flag(&self, flag: &str) -> bool {
+        self.argv.iter().any(|arg| arg == flag)
+    }
+
+    /// True when `flag` appears immediately followed by `value` — the shape a
+    /// `FlagValue` selector renders, where the flag alone proves nothing.
+    fn has_pair(&self, flag: &str, value: &str) -> bool {
+        self.argv
+            .windows(2)
+            .any(|pair| pair[0] == flag && pair[1] == value)
+    }
+
+    fn env_value(&self, key: &str) -> Option<&str> {
+        self.env
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    }
+}
+
+/// Parse the recorder's log into one entry per provider process, in launch order.
+fn recorded_attempts(staged: &Staged) -> Vec<RecordedAttempt> {
+    let mut attempts: Vec<RecordedAttempt> = Vec::new();
+    for line in event_lines(staged) {
+        if let Some(binary) = line.strip_prefix("begin-attempt=") {
+            attempts.push(RecordedAttempt {
+                binary: binary.to_string(),
+                argv: Vec::new(),
+                env: Vec::new(),
+            });
+            continue;
+        }
+        let Some(current) = attempts.last_mut() else {
+            continue;
+        };
+        if let Some(arg) = line.strip_prefix("argv=") {
+            current.argv.push(arg.to_string());
+        } else if let Some(entry) = line.strip_prefix("env=")
+            && let Some((key, value)) = entry.split_once('=')
+        {
+            current.env.push((key.to_string(), value.to_string()));
+        }
+    }
+    attempts
+}
+
 /// The `launched-binary=` values in recording order.
 fn launched_binaries(staged: &Staged) -> Vec<String> {
     event_lines(staged)
@@ -855,6 +952,214 @@ Body
         vec!["goose".to_string(), "gemini".to_string()],
         "the retried attempt must spawn the refreshed document's provider binary, \
          not the invocation's; pane:\n{pane}"
+    );
+}
+
+/// A document that runs `agent: {from}`, rewrites its own `agent:` to `{to}` in
+/// the `failure` stack, and retries once. `extra` is spliced into the
+/// frontmatter above the stack.
+fn provider_switch_retry_doc(from: &str, to: &str, extra: &str) -> String {
+    format!(
+        "---\ntitle: provider switch retry\nagent: {from}\n{extra}\
+         failure:\n  stack:\n    - action:\n        \
+         - {{set_frontmatter: [\"doc.md\", \"agent\", \"{to}\"]}}\n    \
+         - action: {{retry: 1}}\nfinalize:\n  stack:\n    \
+         - action: {{append_line: [\"events.log\", \"finalize\"]}}\n---\nBody\n"
+    )
+}
+
+/// Stage the two full recorders a provider-switch row needs: the opening
+/// provider fails (driving `failure`), the refreshed one succeeds.
+fn stage_provider_switch(doc: &str, from: &str, to: &str) -> Staged {
+    let staged = stage_launch_recording(doc);
+    write_full_launch_recorder(&staged.bin_dir, from, &staged.events_log, 1);
+    write_full_launch_recorder(&staged.bin_dir, to, &staged.events_log, 0);
+    staged
+}
+
+/// Both attempts, with the binary identities the row expects already checked.
+fn switched_attempts(staged: &Staged, pane: &str, from: &str, to: &str) -> Vec<RecordedAttempt> {
+    let attempts = recorded_attempts(staged);
+    assert_eq!(
+        attempts.iter().map(|a| a.binary.as_str()).collect::<Vec<_>>(),
+        vec![from, to],
+        "the row needs exactly one attempt per provider; recorded argv: {:#?}\npane:\n{pane}",
+        attempts.iter().map(|a| &a.argv).collect::<Vec<_>>(),
+    );
+    attempts
+}
+
+/// **Review-9 finding 2 — `--output` and `--sandbox` are intent, not bytes.**
+///
+/// Goose encodes `--output json` as no argv at all and implements no sandbox;
+/// Codex encodes the same request as `--json` and does implement `--sandbox`. A
+/// retry that switches Goose to Codex therefore has to *re-render* both requests
+/// through the refreshed provider's profile. Replaying the opening provider's
+/// (empty) slices silently dropped both.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_retry_re_renders_output_and_sandbox_for_the_refreshed_provider() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let staged = stage_provider_switch(
+        &provider_switch_retry_doc("goose", "codex", ""),
+        "goose",
+        "codex",
+    );
+
+    let pane = run_provider_with_flags(&staged, "", "--output json --sandbox", "finalize");
+    let attempts = switched_attempts(&staged, &pane, "goose", "codex");
+
+    assert!(
+        !attempts[0].has_flag("--json")
+            && !attempts[0].has_flag("--output-format")
+            && !attempts[0].has_flag("--sandbox"),
+        "fixture check: Goose renders neither request as argv; got {:?}",
+        attempts[0].argv,
+    );
+    assert!(
+        attempts[1].has_flag("--json"),
+        "the retried Codex attempt must carry the requested output format in \
+         Codex's own encoding; argv: {:?}\npane:\n{pane}",
+        attempts[1].argv,
+    );
+    assert!(
+        attempts[1].has_flag("--sandbox"),
+        "the retried Codex attempt must honor the requested sandbox; argv: {:?}\n\
+         pane:\n{pane}",
+        attempts[1].argv,
+    );
+}
+
+/// **Review-9 finding 2, the reverse direction.** Gemini renders `--output json`
+/// as `--output-format json`, which Goose does not accept. A Gemini-to-Goose
+/// retry must not carry those bytes across.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_retry_drops_the_opening_providers_flag_encoding() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let staged = stage_provider_switch(
+        &provider_switch_retry_doc("gemini", "goose", ""),
+        "gemini",
+        "goose",
+    );
+
+    let pane = run_provider_with_flags(&staged, "", "--output json --sandbox", "finalize");
+    let attempts = switched_attempts(&staged, &pane, "gemini", "goose");
+
+    assert!(
+        attempts[0].has_pair("--output-format", "json"),
+        "fixture check: Gemini renders the requested format as a flag/value pair; \
+         got {:?}",
+        attempts[0].argv,
+    );
+    assert!(
+        !attempts[1].has_flag("--output-format"),
+        "Gemini's output encoding must not reach a provider that rejects it; \
+         argv: {:?}\npane:\n{pane}",
+        attempts[1].argv,
+    );
+    assert!(
+        !attempts[1].has_flag("--sandbox"),
+        "a provider with no sandbox must not inherit another's flag; argv: {:?}\n\
+         pane:\n{pane}",
+        attempts[1].argv,
+    );
+}
+
+/// **Review-9 finding 2 — a dropped `model:` clears `MODEL` in the child.**
+///
+/// The plan's environment overlay is applied over the invocation's base child
+/// environment, which already carries the opening document's `MODEL`. Omitting
+/// the key from the overlay therefore left the stale value in the process; only
+/// a removal actually reaches the provider without it.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_retry_clears_model_when_the_refresh_drops_it() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    // A namespaced local-runner id is catalog-valid by construction, so the row
+    // does not depend on the host's live model listings.
+    const OPENING_MODEL: &str = "llamacpp/opening-model";
+    // A null action parameter has to arrive as a whole-value interpolation;
+    // a bare YAML `null` is a typed parse refusal.
+    let doc = format!(
+        "---\ntitle: retry drops the model\nagent: goose\nmodel: {OPENING_MODEL}\n\
+         failure:\n  stack:\n    - action:\n        \
+         - {{set_frontmatter: [\"doc.md\", \"model\", \"{{{{ null }}}}\"]}}\n    \
+         - action: {{retry: 1}}\nfinalize:\n  stack:\n    \
+         - action: {{append_line: [\"events.log\", \"finalize\"]}}\n---\nBody\n"
+    );
+    let staged = stage_launch_recording(&doc);
+    // Same binary both attempts: the model facet moves on its own, with the
+    // provider held still.
+    write_full_launch_recorder_with_exit(
+        &staged.bin_dir,
+        "goose",
+        &staged.events_log,
+        &format!(
+            "if [ -f {log}.second ]; then exit 0; fi\n: > {log}.second\nexit 1",
+            log = staged.events_log.display(),
+        ),
+    );
+
+    let pane = run_provider_with_flags(&staged, "", "", "finalize");
+    let attempts = recorded_attempts(&staged);
+
+    assert_eq!(
+        attempts.len(),
+        2,
+        "the row needs an opening attempt and one retry; pane:\n{pane}"
+    );
+    assert_eq!(
+        attempts[0].env_value("MODEL"),
+        Some(OPENING_MODEL),
+        "fixture check: the opening attempt runs with the document's model; pane:\n{pane}"
+    );
+    assert_ne!(
+        attempts[1].env_value("MODEL"),
+        Some(OPENING_MODEL),
+        "a refresh that drops `model:` must not leave the opening model in the \
+         child environment; env: {:?}\npane:\n{pane}",
+        attempts[1].env_value("MODEL"),
+    );
+}
+
+/// **Review-9 finding 2 — provider-specific base environment does not survive a
+/// provider switch.**
+///
+/// OpenCode is configured through the inline `OPENCODE_CONFIG_CONTENT` document
+/// that Claudine writes for it (here via `--yolo`, whose permission block lands
+/// in that same value). It is meaningless to any other provider, and an additive
+/// overlay had no way to take it back out.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_retry_clears_the_opening_providers_environment() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let staged = stage_provider_switch(
+        // OpenCode refuses to launch without a resolved model, so the document
+        // pins one; only the provider facet moves.
+        &provider_switch_retry_doc("opencode", "goose", "model: llamacpp/probe-model-x\n"),
+        "opencode",
+        "goose",
+    );
+
+    let pane = run_provider_with_flags(&staged, "", "--yolo", "finalize");
+    let attempts = switched_attempts(&staged, &pane, "opencode", "goose");
+
+    assert!(
+        attempts[0].env_value("OPENCODE_CONFIG_CONTENT").is_some(),
+        "fixture check: the OpenCode attempt runs with an inline config; env keys: {:?}\n\
+         pane:\n{pane}",
+        attempts[0].env.iter().map(|(k, _)| k).collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        attempts[1].env_value("OPENCODE_CONFIG_CONTENT"),
+        None,
+        "OpenCode's inline config must not reach the provider a retry switched \
+         to; pane:\n{pane}"
     );
 }
 
@@ -979,6 +1284,275 @@ Body
         "OpenCode's bypass is non-interactive only, so the refreshed interactive \
          attempt must launch with the permission mode it actually achieved; \
          got {yolo:?}; pane:\n{pane}"
+    );
+}
+
+// ── review-9 finding 1: the retried attempt's execution adapters ─────────────
+//
+// Review 8 made the rebuilt bundle own the spawn inputs (binary, profile, argv,
+// session mode, permission, MCP). These rows prove the bundle also owns the
+// provider-dependent *execution adapters*: the Codex `--output-last-message`
+// artifact, the stdout/stderr noise-prefix policy, and the composition dispatch
+// context. Before the fix, `execute_attempt_phase` copied all of these from the
+// invocation-fixed run state, so a provider-switch retry ran the new provider's
+// process through the opening provider's adapters.
+
+/// The final unique token the fake Codex writes to its `--output-last-message`
+/// sink. It appears in the pane only if the retried attempt's rebuilt bundle
+/// carries a working Codex artifact for the rebuilt argv's sink path.
+const CODEX_FILE_TOKEN: &str = "FINAL-FROM-CODEX-FILE-9c41";
+
+/// Codex's own stderr noise line (`stderr_noise_prefixes` for Codex). A row
+/// switching INTO Codex must filter it; a row switching OUT to a provider with
+/// no noise prefixes must let it through.
+const CODEX_NOISE_LINE: &str = "Reading prompt from stdin...";
+
+/// A fake `codex` that records its launch, honors `--output-last-message` by
+/// writing [`CODEX_FILE_TOKEN`] to the given path, emits Codex's stderr noise
+/// line, and speaks enough of the Codex wire for a clean structured attempt.
+fn write_codex_with_output_file(bin_dir: &Path, events_log: &Path) {
+    write_executable(
+        &bin_dir.join("codex"),
+        &format!(
+            r#"#!/bin/sh
+if [ ! -t 0 ]; then cat > /dev/null 2>&1; fi
+printf 'launched-binary=%s\n' "$(basename "$0")" >> {log}
+sink=none
+prev=
+for a in "$@"; do
+  if [ "$prev" = '--output-last-message' ]; then sink="$a"; fi
+  prev="$a"
+done
+printf 'codex-sink=%s\n' "$sink" >> {log}
+if [ "$sink" != none ]; then printf '%s' '{token}' > "$sink"; fi
+printf '{noise}\n' >&2
+printf '%s\n' '{{"type":"thread.started","thread_id":"codex-retry-thread"}}'
+printf '%s\n' '{{"type":"item.completed","item":{{"type":"agent_message","text":"stream narration"}}}}'
+printf 'provider-ran\n' >> {log}
+exit 0
+"#,
+            log = events_log.display(),
+            token = CODEX_FILE_TOKEN,
+            noise = CODEX_NOISE_LINE,
+        ),
+    );
+}
+
+/// A launch recorder that additionally prints Codex's noise line on stderr, so
+/// a row can prove which provider's noise policy filtered the pane.
+fn write_noisy_launch_recorder(bin_dir: &Path, slug: &str, events_log: &Path, exit_code: i32) {
+    write_executable(
+        &bin_dir.join(slug),
+        &format!(
+            "#!/bin/sh\nif [ ! -t 0 ]; then cat > /dev/null 2>&1; fi\n\
+             printf 'launched-binary=%s\\n' \"$(basename \"$0\")\" >> {log}\n\
+             flags=\nfor a in \"$@\"; do\n  \
+             case \"$a\" in -*) flags=\"$flags $a\";; esac\ndone\n\
+             printf 'flags=%s\\n' \"$flags\" >> {log}\n\
+             printf '{noise}\\n' >&2\n\
+             printf 'provider-ran\\n' >> {log}\nexit {code}\n",
+            log = events_log.display(),
+            noise = CODEX_NOISE_LINE,
+            code = exit_code,
+        ),
+    );
+}
+
+/// Install a claudine hook config whose `session_start` action records the
+/// dispatched `extra.resolved_model` into `events.log`, making the composition
+/// dispatch context an externally observable per-attempt fact.
+fn seed_dispatch_recorder_config(staged: &Staged) {
+    let recorder = staged.bin_dir.join("record-dispatch");
+    write_executable(
+        &recorder,
+        &format!(
+            "#!/bin/sh\nprintf 'dispatched-model=%s\\n' \"$1\" >> {log}\n",
+            log = staged.events_log.display(),
+        ),
+    );
+    let config = format!(
+        r#"{{
+  "actions": {{
+    "session_start": [
+      {{ "type": "bash", "command": "{recorder}", "params": "'{{{{extra.resolved_model}}}}'" }}
+    ]
+  }}
+}}
+"#,
+        recorder = recorder.display(),
+    );
+    fs::write(
+        staged.workspace.path().join(".claudine/config.json"),
+        config,
+    )
+    .unwrap();
+}
+
+/// The `dispatched-model=` values in recording order.
+fn dispatched_models(staged: &Staged) -> Vec<String> {
+    event_lines(staged)
+        .into_iter()
+        .filter_map(|line| line.strip_prefix("dispatched-model=").map(str::to_string))
+        .collect()
+}
+
+/// **Review-9 finding 1 — switching INTO Codex.** A document whose `failure`
+/// stack rewrites `agent:` to Codex (and pins a Codex `model:`) and then
+/// retries must run the retried attempt through Codex's own execution
+/// adapters:
+///
+/// - **Final output recovery** — the rebuilt argv carries
+///   `--output-last-message <sink>`, and the rebuilt bundle's Codex artifact
+///   wraps that same sink, so the final response is loaded from the file the
+///   provider wrote. The old behavior kept the opening attempt's `None`
+///   artifact and could never render the file's contents.
+/// - **Pane filtering** — Codex's stderr noise line is filtered by Codex's
+///   noise prefixes. The old behavior filtered with Goose's (empty) prefixes
+///   and leaked the line into the pane.
+/// - **Dispatch metadata** — the `session_start` hook observes the refreshed
+///   document's `resolved_model`, not the opening document's (empty) one.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_retry_into_codex_rebuilds_the_execution_adapters() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let doc = r#"---
+title: retry switches into codex
+agent: goose
+failure:
+  stack:
+    - action:
+        - {append_line: ["events.log", "failure"]}
+        - {set_frontmatter: ["doc.md", "agent", "codex"]}
+        - {set_frontmatter: ["doc.md", "model", "gpt-5.4"]}
+    - action: {retry: 1}
+finalize:
+  stack:
+    - action: {append_line: ["events.log", "finalize"]}
+---
+Body
+"#;
+    let staged = stage_launch_recording(doc);
+    seed_dispatch_recorder_config(&staged);
+    write_launch_recorder(&staged.bin_dir, "goose", &staged.events_log, 1);
+    write_codex_with_output_file(&staged.bin_dir, &staged.events_log);
+
+    let pane = run_compose_await_exit_with_args(&staged, "");
+
+    let refreshed = fs::read_to_string(&staged.md_file).unwrap();
+    assert!(
+        refreshed.contains("agent: codex") && refreshed.contains("model: gpt-5.4"),
+        "fixture check: the failure stack must have rewritten `agent:`/`model:` \
+         before the retry; document:\n{refreshed}"
+    );
+    assert_eq!(
+        launched_binaries(&staged),
+        vec!["goose".to_string(), "codex".to_string()],
+        "the retried attempt must spawn Codex; pane:\n{pane}"
+    );
+
+    // Final output recovery through the rebuilt Codex artifact.
+    let sinks: Vec<String> = event_lines(&staged)
+        .into_iter()
+        .filter_map(|line| line.strip_prefix("codex-sink=").map(str::to_string))
+        .collect();
+    assert!(
+        sinks.len() == 1 && sinks[0] != "none",
+        "the rebuilt Codex argv must carry --output-last-message; got {sinks:?}; \
+         pane:\n{pane}"
+    );
+    assert!(
+        pane.contains(CODEX_FILE_TOKEN),
+        "the final response must be recovered from the Codex output file the \
+         rebuilt artifact wraps; pane:\n{pane}"
+    );
+
+    // Pane filtering under the rebuilt provider's noise policy.
+    assert!(
+        !pane.contains(CODEX_NOISE_LINE),
+        "Codex's stderr noise line must be filtered by the REBUILT profile's \
+         prefixes, not the opening Goose profile's empty set; pane:\n{pane}"
+    );
+
+    // Dispatched provider/model metadata from the refreshed document.
+    assert_eq!(
+        dispatched_models(&staged),
+        vec!["gpt-5.4".to_string()],
+        "the session_start dispatch must carry the refreshed document's \
+         resolved model, not the opening document's; pane:\n{pane}"
+    );
+}
+
+/// **Review-9 finding 1 — switching OUT OF Codex.** A document that opens on
+/// Codex, fails, rewrites `agent:` to Goose, and retries must drop Codex's
+/// execution adapters with the provider:
+///
+/// - the retried argv carries no `--output-last-message` (the artifact leaves
+///   the bundle together with the flag); and
+/// - Goose's (empty) noise prefixes govern the pane, so a stderr line that
+///   Codex's policy would filter is now visible. The old behavior kept
+///   Codex's prefixes and silently swallowed the new provider's stderr.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_retry_out_of_codex_drops_the_codex_adapters() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let doc = r#"---
+title: retry leaves codex
+agent: codex
+failure:
+  stack:
+    - action:
+        - {append_line: ["events.log", "failure"]}
+        - {set_frontmatter: ["doc.md", "agent", "goose"]}
+    - action: {retry: 1}
+finalize:
+  stack:
+    - action: {append_line: ["events.log", "finalize"]}
+---
+Body
+"#;
+    let staged = stage_launch_recording(doc);
+    write_launch_recorder(&staged.bin_dir, "codex", &staged.events_log, 1);
+    write_noisy_launch_recorder(&staged.bin_dir, "goose", &staged.events_log, 0);
+
+    let pane = run_compose_await_exit_with_args(&staged, "");
+
+    let refreshed = fs::read_to_string(&staged.md_file).unwrap();
+    assert!(
+        refreshed.contains("agent: goose"),
+        "fixture check: the failure stack must have rewritten `agent:` before \
+         the retry; document:\n{refreshed}"
+    );
+    assert_eq!(
+        launched_binaries(&staged),
+        vec!["codex".to_string(), "goose".to_string()],
+        "the retried attempt must spawn Goose; pane:\n{pane}"
+    );
+
+    let flags: Vec<String> = event_lines(&staged)
+        .into_iter()
+        .filter_map(|line| line.strip_prefix("flags=").map(str::to_string))
+        .collect();
+    assert_eq!(
+        flags.len(),
+        2,
+        "fixture check: both attempts must have launched; got {flags:?}; pane:\n{pane}"
+    );
+    assert!(
+        flags[0].contains("--output-last-message"),
+        "fixture check: the opening Codex attempt captures through the output \
+         file; got {flags:?}; pane:\n{pane}"
+    );
+    assert!(
+        !flags[1].contains("--output-last-message"),
+        "a retry that leaves Codex must drop the output-file capture from the \
+         rebuilt argv; got {flags:?}; pane:\n{pane}"
+    );
+    assert!(
+        pane.contains(CODEX_NOISE_LINE),
+        "the rebuilt Goose attempt has no stderr noise prefixes, so the line \
+         Codex's policy would filter must reach the pane; pane:\n{pane}"
     );
 }
 
@@ -1308,8 +1882,16 @@ Original body
 /// the test cares about ("resume incompatible after refresh") is routinely split
 /// across two lines. Normalizing first lets the assertions name the phrase the
 /// operator reads instead of whichever fragment happened to fit.
+///
+/// The block's vertical border glyphs are dropped before normalizing: a wrap
+/// that lands mid-phrase puts a `┃` *inside* a backticked facet name, so a
+/// naive normalization would still miss `` `model` `` for a purely cosmetic
+/// reason.
 fn flattened(pane: &str) -> String {
-    pane.split_whitespace().collect::<Vec<_>>().join(" ")
+    pane.replace(['┃', '│', '┆', '┊'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Resume incompatibility (AC15), end to end: when the canonical refresh that
@@ -1405,16 +1987,11 @@ Original body
         "the live session must never be handed the newly prepared launch plan; \
          got {lines:?}; pane:\n{pane}"
     );
-    // The resumed attempt re-enters at `start` before the launch bundle is
-    // rebuilt, so that marker is expected; the refusal lands between `start` and
-    // the spawn. What must be absent is everything downstream of the spawn —
-    // `success` and `finalize` never fire, because the refusal propagates as a
-    // hard error rather than routing through the recovery stacks.
     assert_eq!(
         lines,
-        ["start", "provider-ran", "initial-prompt-ok", "failure", "start"],
-        "the refusal must land after the resumed attempt's `start` and before any \
-         second provider spawn; pane:\n{pane}"
+        REFUSED_RESUME_EVENTS,
+        "the refusal must land after the resumed attempt's `start`, before any second \
+         provider spawn, and close the run through `failure` then `finalize`; pane:\n{pane}"
     );
     assert!(
         flat.contains("resume incompatible after refresh"),
@@ -1487,9 +2064,33 @@ fn stage_resumable(doc: &str, session_id: &str, follow_up: &str) -> Staged {
     }
 }
 
+/// The full event trace every AC15 refusal row must produce.
+///
+/// The resumed attempt re-enters at `start`, so that marker is expected; the
+/// refusal lands between it and the spawn, which is why `provider-ran` appears
+/// only once. The tail is the ratified lifecycle contract: an error after
+/// `start` routes through `failure` and then exactly one `finalize`, so a
+/// document's cleanup and `err`-aware recovery still run. The refusal used to
+/// propagate as a bare error and stop at the second `start`, which made it the
+/// only post-`start`, pre-spawn failure that skipped its own closure.
+///
+/// The second `failure` re-runs the stack that asked to resume. Its `resume`
+/// control action is *not* dispatched from this path, so the refusal cannot
+/// loop back into another attempt — hence one `provider-ran`, not two.
+const REFUSED_RESUME_EVENTS: [&str; 7] = [
+    "start",
+    "provider-ran",
+    "initial-prompt-ok",
+    "failure",
+    "start",
+    "failure",
+    "finalize",
+];
+
 /// Assert the shared shape of an AC15 refusal: the provider ran exactly once,
-/// the live session was never handed the new plan, the diagnostic names every
-/// expected facet, and it recommends `retry`.
+/// the live session was never handed the new plan, the run still closed through
+/// `failure` then `finalize`, the diagnostic names every expected facet, and it
+/// recommends `retry`.
 fn assert_resume_refused(staged: &Staged, pane: &str, expected_facets: &[&str]) {
     let flat = flattened(pane);
     let lines = event_lines(staged);
@@ -1503,6 +2104,12 @@ fn assert_resume_refused(staged: &Staged, pane: &str, expected_facets: &[&str]) 
         !lines.iter().any(|l| l == "resume-session-ok"),
         "the live session must never be handed the newly prepared launch plan; \
          got {lines:?}; pane:\n{pane}"
+    );
+    assert_eq!(
+        lines,
+        REFUSED_RESUME_EVENTS,
+        "a refusal is a post-`start` failure and owes the lifecycle tail: \
+         `failure` then exactly one `finalize`; pane:\n{pane}"
     );
     assert!(
         flat.contains("resume incompatible after refresh"),
@@ -2991,6 +3598,43 @@ fn run_until_settled(staged: &Staged, expected_lines: usize) -> String {
 /// outranks the target's authored `agent:`, which would make the assertion
 /// vacuous.
 fn run_until_settled_with_flags(staged: &Staged, flags: &str, expected_lines: usize) -> String {
+    run_until_settled_with_params(staged, flags, "", expected_lines, SettlePacing::default())
+}
+
+/// How long [`run_until_settled_with_params`] waits overall, and how long a
+/// stalled marker count must hold before it concludes the run finished short.
+///
+/// The defaults suit the synthetic fixtures, whose iterations are a few hundred
+/// milliseconds apart. A document that does substantially more per-iteration
+/// work — schema validation, file-reference resolution, and composing a large
+/// body, as the shipped `implement-plan.md` does — needs a wider stability
+/// window, or the gap *between* two healthy iterations reads as "settled".
+struct SettlePacing {
+    deadline: Duration,
+    stable_for: Duration,
+}
+
+impl Default for SettlePacing {
+    fn default() -> Self {
+        Self {
+            deadline: Duration::from_secs(40),
+            stable_for: Duration::from_millis(1200),
+        }
+    }
+}
+
+/// [`run_until_settled_with_flags`] plus trailing `key=value` composition
+/// setters, appended after the document path exactly as a user would type them.
+///
+/// Used by the shipped-implement-route row, whose documents take their
+/// `spec:`/`plan:` parameters from the command line.
+fn run_until_settled_with_params(
+    staged: &Staged,
+    flags: &str,
+    params: &str,
+    expected_lines: usize,
+    pacing: SettlePacing,
+) -> String {
     static SEQ: AtomicU32 = AtomicU32::new(0);
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
 
@@ -3024,7 +3668,7 @@ fn run_until_settled_with_flags(staged: &Staged, flags: &str, expected_lines: us
         path = augmented_path(&staged.bin_dir).to_string_lossy(),
     );
     let cmd = format!(
-        "cd {ws} && {env_prefix}{claudine} compose {flags} {md} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} compose {flags} {md} {params} ; echo {sentinel}",
         ws = staged.workspace.path().display(),
         md = staged.md_file.display(),
     );
@@ -3032,7 +3676,7 @@ fn run_until_settled_with_flags(staged: &Staged, flags: &str, expected_lines: us
         .send_command_with_env(&cmd, &[])
         .expect("send compose command");
 
-    let deadline = Instant::now() + Duration::from_secs(40);
+    let deadline = Instant::now() + pacing.deadline;
     let mut last_count = 0usize;
     let mut stable_since: Option<Instant> = None;
     while Instant::now() < deadline {
@@ -3049,7 +3693,7 @@ fn run_until_settled_with_flags(staged: &Staged, flags: &str, expected_lines: us
         // empty log while that setup is still in flight.
         if count == last_count && count > 0 {
             match stable_since {
-                Some(since) if since.elapsed() >= Duration::from_millis(1200) => break,
+                Some(since) if since.elapsed() >= pacing.stable_for => break,
                 Some(_) => {}
                 None => stable_since = Some(Instant::now()),
             }
@@ -3136,9 +3780,13 @@ router body phase {{phase}}
 /// headline acceptance signal for that move.
 ///
 /// Deterministic by construction: a fake provider, a self-contained temporary
-/// fixture, and no live Claude/Codex/Gemini service. The shipped
-/// `prompts/implement.md` command remains a manual smoke case, never a CI
-/// dependency.
+/// fixture, and no live Claude/Codex/Gemini service.
+///
+/// This row owns the *synthetic* fixture, which is what exercises the loop
+/// coordinator directly. The shipped `prompts/implement.md` route has its own
+/// regression at
+/// [`level2_lifecycle_shipped_implement_route_matches_direct_run`]; it is no
+/// longer a manual-only smoke case.
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_proxy_to_looping_target_matches_direct_run() {
@@ -3269,6 +3917,217 @@ fn level2_lifecycle_loop_router_initialize_proxy_is_honored() {
         0,
         "a clean hand-off ends the source loop before it starts; the router's \
          finalize must not fire; got {routed_lines:?}; pane:\n{routed_pane}"
+    );
+}
+
+// ── The shipped `implement` route ───────────────────────────────────────────
+//
+// The rows above prove generic loop-ownership on a synthetic fixture. This one
+// protects the *shipped artifacts* the feature was written for — their routing
+// conditions and their multi-phase loop schema — from drifting independently
+// (`features/2026-07-13-proxy-with/spec.md:1068-1072`).
+//
+// `prompts/implement.md` is executed verbatim; the target is a side-effect-free
+// copy of `prompts/_implement/implement-plan.md` because the shipped file's
+// `say:`, `effect:`, and `shell:` properties are respectively a real TTS call,
+// real audio playback, and a pair of commands that are denied without an
+// interactive approver (which would divert the run to `blocked` before the
+// loop's second iteration). `tests/shipped_prompt_route_drift.rs` mechanically
+// holds that copy in sync and fails when either shipped file changes.
+
+/// A fake `goose` that records the phase heading of the body it was handed.
+///
+/// Goose takes the prompt on argv, not stdin, so both channels are scanned. The
+/// phase is read out of the *rendered* body (`# Implement Phase N of M`), which
+/// makes the loop's per-iteration mutation observable without adding any
+/// marker property to the document under test.
+fn write_phase_recording_goose(bin_dir: &Path, events_log: &Path) {
+    write_executable(
+        &bin_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\nstdin=$(cat)\nprintf 'provider-ran\\n' >> {log}\n\
+             phase=$(printf '%s %s' \"$stdin\" \"$*\" | \
+             sed -n 's/.*Implement Phase \\([0-9][0-9]*\\) of \\([0-9][0-9]*\\).*/\\1-of-\\2/p' | \
+             head -1)\n\
+             if [ -z \"$phase\" ]; then phase=UNRESOLVED; fi\n\
+             printf 'phase:%s\\n' \"$phase\" >> {log}\nexit 0\n",
+            log = events_log.display(),
+        ),
+    );
+}
+
+/// Stage the shipped `implement` route in a self-contained workspace.
+///
+/// `entry` is the workspace-relative document `claudine compose` is pointed at:
+/// `implement.md` for the routed run, `_implement/implement-plan.md` for the
+/// direct run. Both receive the same `spec=` parameter, so the only difference
+/// between the two runs is the hand-off itself.
+fn stage_shipped_implement_route(entry: &str, total_phases: usize) -> Staged {
+    let workspace = tempdir().unwrap();
+    let root = workspace.path().to_path_buf();
+    let bin_dir = root.join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    fs::create_dir_all(root.join("_implement")).unwrap();
+    fs::create_dir_all(root.join("feature")).unwrap();
+    seed_minimal_config(&root);
+    // `implement-plan.md` derives `total_phases` from the plan's frontmatter, so
+    // it is schema-`required` but never caller-supplied. On a TTY that is the
+    // one input `resolve_interactive_options` would open a biscuit-tui prompt
+    // for, and nothing in a tmux pane types an answer. Declining the prompt is
+    // what a non-TTY invocation already does implicitly — the derived value is
+    // then used — so this keeps the derivation under test instead of masking it
+    // with a caller override.
+    fs::write(
+        root.join(".claudine/config.json"),
+        "{\"prompt_for_missing\": false}",
+    )
+    .unwrap();
+    assert!(init_git_repo(&root), "git init failed");
+
+    let events_log = root.join("events.log");
+    write_phase_recording_goose(&bin_dir, &events_log);
+
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let repo_root = manifest
+        .ancestors()
+        .nth(2)
+        .expect("repository root is two levels above claudine/cli");
+    fs::copy(
+        repo_root.join("prompts/implement.md"),
+        root.join("implement.md"),
+    )
+    .expect("copy the shipped router");
+    fs::copy(
+        manifest.join("tests/fixtures/shipped_implement_route/_implement/implement-plan.md"),
+        root.join("_implement/implement-plan.md"),
+    )
+    .expect("copy the drift-guarded implement-plan fixture");
+
+    // The router branches on `frontmatter(spec, 'implemented')`; an unimplemented
+    // spec is the branch that reaches `implement-plan.md`.
+    fs::write(
+        root.join("feature/spec.md"),
+        "---\nimplemented: false\n---\n\n# Spec\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("feature/plan.md"),
+        format!("---\ntotal_phases: {total_phases}\nstart_phase: 1\n---\n\n# Plan\n"),
+    )
+    .unwrap();
+
+    Staged {
+        workspace,
+        bin_dir,
+        md_file: root.join(entry),
+        events_log,
+        rendezvous_endpoint: None,
+    }
+}
+
+/// **The shipped motivating route** (`spec.md:1057-1060,1068-1072`): routing
+/// `prompts/implement.md` to `prompts/_implement/implement-plan.md` must execute
+/// every phase exactly as invoking `implement-plan.md` directly does.
+///
+/// This is the shipped-artifact counterpart to
+/// [`level2_lifecycle_initialize_proxy_to_looping_target_matches_direct_run`].
+/// That row owns a synthetic fixture and proves the loop coordinator honors an
+/// `initialize` hand-off in general; it cannot notice the shipped router's
+/// `when:` conditions being rewritten, the `$schema` gaining a required
+/// parameter, or `loop.until` changing shape. This row can, because it runs the
+/// real router and a mechanically-synced copy of the real target.
+///
+/// The phase sequence is read out of the *rendered body* the fake provider
+/// receives, so the assertion is over what the agent would actually have been
+/// asked to do on each iteration — not over a marker the test injected.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_shipped_implement_route_matches_direct_run() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    const TOTAL_PHASES: usize = 3;
+    // Each provider invocation records `provider-ran` + `phase:N-of-3`.
+    const EXPECTED_MARKERS: usize = TOTAL_PHASES * 2;
+
+    // `spec=` is what the router branches on; `plan=` is what
+    // `implement-plan.md` declares `required` in its `$schema`. Both runs get
+    // the identical pair, so the hand-off is the only difference between them.
+    //
+    // The paths are workspace-relative — the shape a user actually types, and
+    // the shape the document's `'@{{area}}/{{plan}}'` body reference is written
+    // for. The runner `cd`s into the workspace before invoking claudine.
+    const PARAMS: &str = "spec=feature/spec.md plan=feature/plan.md";
+
+    // The shipped document re-validates its schema, re-resolves `@`-references,
+    // and re-composes a large body on every iteration, so under parallel L2 load
+    // healthy iterations sit seconds apart — wide enough that the default
+    // 1200ms stability window would read the gap between two good iterations as
+    // "the run settled early". The deadline stays at the default so two arms
+    // still fit inside the tier's 90s termination ceiling.
+    let pacing = || SettlePacing {
+        stable_for: Duration::from_secs(4),
+        ..SettlePacing::default()
+    };
+
+    // Direct: `implement-plan.md` IS the invoked document.
+    let direct = stage_shipped_implement_route("_implement/implement-plan.md", TOTAL_PHASES);
+    let direct_pane = run_until_settled_with_params(
+        &direct,
+        "--goose",
+        PARAMS,
+        EXPECTED_MARKERS,
+        pacing(),
+    );
+    let direct_lines = event_lines(&direct);
+
+    // Routed: the shipped router is invoked and proxies to the same target.
+    let routed = stage_shipped_implement_route("implement.md", TOTAL_PHASES);
+    let routed_pane = run_until_settled_with_params(
+        &routed,
+        "--goose",
+        PARAMS,
+        EXPECTED_MARKERS,
+        pacing(),
+    );
+    let routed_lines = event_lines(&routed);
+
+    let phases = |lines: &[String]| -> Vec<String> {
+        lines
+            .iter()
+            .filter(|l| l.starts_with("phase:"))
+            .cloned()
+            .collect()
+    };
+    let count = |lines: &[String], needle: &str| lines.iter().filter(|l| *l == needle).count();
+
+    // Assert the direct run first: it is the contract the routed run must match,
+    // so a broken fixture is not misread as a routing regression.
+    assert_eq!(
+        phases(&direct_lines),
+        vec!["phase:1-of-3", "phase:2-of-3", "phase:3-of-3"],
+        "fixture check: invoked directly, the shipped implement-plan document \
+         resolves `total_phases` from the plan and runs every phase in order; \
+         got {direct_lines:?}; pane:\n{direct_pane}"
+    );
+
+    assert_eq!(
+        phases(&routed_lines),
+        phases(&direct_lines),
+        "the shipped route must execute the same phases in the same order as a \
+         direct invocation; routed {routed_lines:?}; direct {direct_lines:?}; \
+         pane:\n{routed_pane}"
+    );
+    assert_eq!(
+        count(&routed_lines, "provider-ran"),
+        count(&direct_lines, "provider-ran"),
+        "the shipped router must not change how many provider attempts the plan \
+         document makes; routed {routed_lines:?}; direct {direct_lines:?}; \
+         pane:\n{routed_pane}"
+    );
+    assert_eq!(
+        count(&routed_lines, "provider-ran"),
+        TOTAL_PHASES,
+        "every phase of the plan must run; got {routed_lines:?}; pane:\n{routed_pane}"
     );
 }
 
@@ -4800,6 +5659,123 @@ fn level2_lifecycle_proxy_shell_approved_bytes_equal_executed_bytes() {
          argument: the overlay value (`forty two`) resolved once, the embedded \
          space survived intact, and neither the authored default nor the raw \
          `{{{{ marker }}}}` template reached execution; pane:\n{pane}"
+    );
+}
+
+// ── AC25: overlay-installed control-plane shell configuration ────────────────
+//
+// The AC17 row above proves byte equality for a shell action the *target*
+// authored, with the overlay supplying only an interpolated value. AC25 is the
+// stronger claim: `with:` may install the lifecycle stack itself — the overlay
+// is the *origin* of the shell configuration — and that reach still buys no
+// exemption from the target's own policy. Both rows below therefore stage a
+// target that authors no `initialize` at all, so the audited command can only
+// have come from the router's overlay.
+
+/// **Acceptance criterion 25, denial.** A router that installs the target's
+/// entire `initialize` shell stack through `proxy.with:` does not get to run an
+/// un-approvable command: the target's narrow initialize gate refuses it, the
+/// operator sees the denial, and no provider process starts.
+///
+/// `rm` is builtin-blacklisted, so a gate that ran at all refuses it. The
+/// sentinel is the physical evidence — if the overlay could bypass target-side
+/// policy the command would delete it before anything else could object.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_overlay_installed_initialize_shell_is_denied_by_target_policy() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let source_doc = "---\ntitle: overlay-installed denial router\ninitialize:\n  stack:\n    \
+         - action: {action: proxy, target: '@target.md', with: \
+         {initialize: {stack: [{action: {shell: 'rm sentinel.txt'}}]}}}\n\
+         ---\nrouter body\n";
+    // The target authors no `initialize`: the audited stack is the overlay's.
+    let target_doc = "---\ntitle: overlay-installed denial target\nsuccess:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'target-success']}\n---\ntarget body\n";
+    let staged = stage_proxy_pair(source_doc, target_doc, true);
+    let sentinel = staged.workspace.path().join("sentinel.txt");
+    fs::write(&sentinel, "intact").unwrap();
+
+    let pane = run_in_tmux_until_exit(&staged);
+    let lines = event_lines(&staged);
+    let prose = flattened(&pane);
+
+    assert!(
+        sentinel.exists(),
+        "a blacklisted command installed by `proxy.with:` must be refused by the \
+         target's own shell policy — it deleted the sentinel instead; pane:\n{pane}"
+    );
+    assert!(
+        prose.contains("blacklisted"),
+        "the operator must see the target-side denial diagnostic; flattened \
+         pane:\n{prose}"
+    );
+    assert!(
+        prose.contains("rm sentinel.txt"),
+        "the denial must name the overlay-installed command; flattened \
+         pane:\n{prose}"
+    );
+    assert!(
+        !lines.iter().any(|l| l == "provider-ran"),
+        "a refused overlay-installed command must stop the run before the \
+         provider launches; got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        !lines.iter().any(|l| l == "target-success"),
+        "no target terminal event may fire when the boot never completed; \
+         got {lines:?}; pane:\n{pane}"
+    );
+}
+
+/// **Acceptance criterion 25, approval.** The same overlay-installed
+/// `initialize` stack, this time carrying a command the target's policy does
+/// approve, runs — and the bytes the shell executed are exactly the bytes the
+/// audit approved.
+///
+/// The pairing with the denial row above is the point: approval is a policy
+/// *decision* about overlay-installed configuration, not a path that skips the
+/// gate. The whitelist lives in the target's own policy root, so what changed
+/// between the two rows is the target's verdict, not the overlay's reach.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_overlay_installed_initialize_shell_runs_the_approved_bytes() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let source_doc = "---\ntitle: overlay-installed approval router\ninitialize:\n  stack:\n    \
+         - action: {action: proxy, target: '@target.md', with: \
+         {initialize: {stack: [{action: {shell: \"logbytes 'overlay installed bytes'\"}}]}}}\n\
+         ---\nrouter body\n";
+    let target_doc = "---\ntitle: overlay-installed approval target\nsuccess:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'ac25-approved']}\n---\ntarget body\n";
+    let staged = stage_proxy_pair(source_doc, target_doc, true);
+
+    let executed_log = staged.workspace.path().join("executed.log");
+    write_bytes_recorder(&staged.bin_dir, &executed_log);
+    fs::write(
+        staged.workspace.path().join(".darkmatter-shell-whitelist"),
+        "prefix logbytes\n",
+    )
+    .unwrap();
+
+    let pane = run_in_tmux_for(&staged, "ac25-approved");
+    let lines = event_lines(&staged);
+    let prose = flattened(&pane);
+
+    assert_eq!(
+        fs::read_to_string(&executed_log).unwrap_or_default(),
+        "overlay installed bytes",
+        "the approved bytes must be the executed bytes for a shell action the \
+         overlay installed, embedded spaces and all; pane:\n{pane}"
+    );
+    assert!(
+        !prose.contains("blacklisted"),
+        "an approved overlay-installed command must not render a denial; \
+         flattened pane:\n{prose}"
+    );
+    assert!(
+        lines.iter().any(|l| l == "provider-ran"),
+        "the run must reach the provider once the gate approves; got {lines:?}; \
+         pane:\n{pane}"
     );
 }
 
