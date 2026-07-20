@@ -1,3 +1,4 @@
+pub mod error;
 pub mod ingest;
 pub mod metrics;
 pub mod paths;
@@ -11,6 +12,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
+pub use error::IngestError;
 pub use types::{
     AliasResolution, DailySummary, DailyToolStat, DateRange, DerivedMetrics, DriftReport,
     DriftSignalSummary, ErrorRecord, ErrorsReport, LabeledCount, ProviderSplit, RepoActivity,
