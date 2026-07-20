@@ -33,6 +33,8 @@ pub mod layout_invariants;
 pub mod shared;
 pub mod tmux;
 pub mod wezterm;
+pub mod win_input;
+pub mod xdotool;
 
 /// Prefix used to mark resources owned by this test harness.
 ///
