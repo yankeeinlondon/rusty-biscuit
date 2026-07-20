@@ -4432,6 +4432,180 @@ fn malformed_buffer_retains_structural_ownership_of_untouched_keys() {
     fixture.shutdown();
 }
 
+/// Completion must address the value being authored by its **complete**
+/// structural key path, not by one decoded ancestor name.
+///
+/// Two whole classes of activation are invisible to a single-segment owner. A
+/// nested semantic property is recorded at `/parameter/type` — the authoring
+/// shape the meta-schema feature itself uses — while a search keyed on the first
+/// ancestor looks for `/parameter` and finds nothing. A top-level key holding
+/// `/` or `~` is recorded RFC 6901-encoded (`/a~1b`, `/c~0d`), so comparing it
+/// against the decoded `a/b` / `c~d` never matches. Each shape is exercised in
+/// its scalar and `[]` sequence form, under LF and CRLF.
+#[test]
+fn meta_schema_completion_matches_complete_structural_pointers() {
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    // (file stem, source, line, character, expected label, why)
+    let cases: [(&str, &str, u32, u32, &str, &str); 8] = [
+        (
+            "nested-type-definition",
+            "---\n$schema:\n  parameter:\n    type: type-definition\nparameter:\n  type: str\n---\n\nbody\n",
+            5,
+            11,
+            "string",
+            "a nested `type-definition` is recorded at `/parameter/type`",
+        ),
+        (
+            "nested-schema",
+            "---\n$schema:\n  nested:\n    decl: schema\nnested:\n  decl: ./\n---\n\nbody\n",
+            5,
+            10,
+            "./schema.yaml",
+            "a nested `schema` is recorded at `/nested/decl`",
+        ),
+        (
+            "slash-key",
+            "---\n$schema:\n  \"a/b\": type-definition\n\"a/b\": str\n---\n\nbody\n",
+            3,
+            10,
+            "string",
+            "`a/b` is recorded encoded as `/a~1b`",
+        ),
+        (
+            "tilde-key",
+            "---\n$schema:\n  \"c~d\": type-definition\n\"c~d\": str\n---\n\nbody\n",
+            3,
+            10,
+            "string",
+            "`c~d` is recorded encoded as `/c~0d`",
+        ),
+        (
+            "nested-type-definition-array",
+            "---\n$schema:\n  parameter:\n    type: type-definition[]\nparameter:\n  type:\n    - str\n---\n\nbody\n",
+            6,
+            9,
+            "string",
+            "the `[]` form of a nested `type-definition`",
+        ),
+        (
+            "nested-schema-array",
+            "---\n$schema:\n  nested:\n    decl: schema[]\nnested:\n  decl:\n    - ./\n---\n\nbody\n",
+            6,
+            8,
+            "./schema.yaml",
+            "the `[]` form of a nested `schema`",
+        ),
+        (
+            "slash-key-array",
+            "---\n$schema:\n  \"a/b\": type-definition[]\n\"a/b\":\n  - str\n---\n\nbody\n",
+            4,
+            7,
+            "string",
+            "the `[]` form of an RFC 6901-escaped `/` owner",
+        ),
+        (
+            "tilde-key-array",
+            "---\n$schema:\n  \"c~d\": type-definition[]\n\"c~d\":\n  - str\n---\n\nbody\n",
+            4,
+            7,
+            "string",
+            "the `[]` form of an RFC 6901-escaped `~` owner",
+        ),
+    ];
+
+    // Collected rather than asserted per case: each row is an independent
+    // activation class, and one failure must not hide the other seven.
+    let mut failures = Vec::new();
+    for (stem, lf_text, line, character, expected, why) in cases {
+        for (ending, suffix) in [("\n", "lf"), ("\r\n", "crlf")] {
+            let text = lf_text.replace('\n', ending);
+            let path = workspace.path().join(format!("{stem}-{suffix}.md"));
+            std::fs::write(&path, &text).unwrap();
+            let uri = url::Url::from_file_path(&path).unwrap();
+            open(&fixture, uri.as_str(), &text);
+
+            let labels = completion_labels(&mut fixture, uri.as_str(), line, character);
+            if !labels.iter().any(|label| label == expected) {
+                failures.push(format!(
+                    "{stem} ({suffix}): {why}; expected {expected:?} in {labels:?}"
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+
+    fixture.shutdown();
+}
+
+/// Last-good retention must cover the complete-pointer shapes too.
+///
+/// The nested and escaped owners resolve through the same per-entry
+/// still-placed check as flat keys, so a malformed value on a later line must
+/// leave them structurally owned rather than surrendering their activation.
+#[test]
+fn malformed_buffer_retains_nested_and_escaped_semantic_owners() {
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    // (file stem, source, line, character)
+    let cases: [(&str, &str, u32, u32); 3] = [
+        (
+            "retain-nested",
+            "---\n$schema:\n  parameter:\n    type: type-definition\nparameter:\n  type: str\n",
+            5,
+            11,
+        ),
+        (
+            "retain-slash",
+            "---\n$schema:\n  \"a/b\": type-definition\n\"a/b\": str\n",
+            3,
+            10,
+        ),
+        (
+            "retain-tilde",
+            "---\n$schema:\n  \"c~d\": type-definition\n\"c~d\": str\n",
+            3,
+            10,
+        ),
+    ];
+
+    for (stem, head, line, character) in cases {
+        let good = format!("{head}---\n\nbody\n");
+        let path = workspace.path().join(format!("{stem}.md"));
+        std::fs::write(&path, &good).unwrap();
+        let uri = url::Url::from_file_path(&path).unwrap();
+        open(&fixture, uri.as_str(), &good);
+        assert!(
+            completion_labels(&mut fixture, uri.as_str(), line, character)
+                .iter()
+                .any(|label| label == "string"),
+            "{stem}: baseline valid buffer must complete"
+        );
+
+        let broken = format!("{head}bad: [unclosed\n---\n\nbody\n");
+        fixture.notify(
+            "textDocument/didChange",
+            json!({
+                "textDocument": { "uri": uri.as_str(), "version": 2 },
+                "contentChanges": [ { "text": broken } ]
+            }),
+        );
+
+        let labels = completion_labels(&mut fixture, uri.as_str(), line, character);
+        assert!(
+            labels.iter().any(|label| label == "string"),
+            "{stem}: a malformed value on a later line must not cost the owner \
+             its declared semantic activation; got {labels:?}"
+        );
+    }
+
+    fixture.shutdown();
+}
+
 /// A standalone inner property definition whose key contains punctuation must
 /// keep its specific `dm.schema.invalid_type_definition` code and its own range.
 ///

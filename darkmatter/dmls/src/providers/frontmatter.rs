@@ -15,7 +15,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::schemas::{
-    Constraint, DecodedScalar, PropertyAtom, PropertyDef, SchemaArm, SchemaCursor,
+    Constraint, DecodedScalar, JsonPointer, PropertyAtom, PropertyDef, SchemaArm, SchemaCursor,
     SchemaCursorRole, SchemaDeclaration, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
     darkmatter_base_schema, decode_scalar, locate_schema_declaration_cursor,
     locate_type_definition_cursor, parse_property_definition, parse_schema_declaration,
@@ -200,20 +200,39 @@ fn meta_schema_kinds_for_line(
                 };
             }
 
-            let owner = ancestors
-                .first()
-                .map(String::as_str)
-                .or_else(|| (!key.is_empty()).then_some(key))?;
-            let value = values.iter().find(|value| {
-                value.pointer.strip_prefix('/') == Some(owner)
-            })?;
-            if (ancestors.len() > 1
-                || (!ancestors.is_empty() && !sequence_item && !key.is_empty() && key != owner))
-                && value.kinds.contains(&MetaSchemaKind::Schema)
-            {
+            // The complete structural key path of the value being authored,
+            // matched against each recorded pointer segment-by-segment. Both
+            // sides must be decoded: a recorded pointer is RFC 6901-encoded
+            // (`/a~1b`), an authored key is not, and only the whole path — not
+            // its first segment — can address a nested value like
+            // `/parameter/type`.
+            let mut path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
+            if !sequence_item && !key.is_empty() {
+                path.push(key);
+            }
+            if path.is_empty() {
+                return None;
+            }
+            let (owner_len, owner) = values
+                .iter()
+                .filter_map(|value| {
+                    let pointer = JsonPointer::parse(&value.pointer);
+                    let segments = pointer.segments();
+                    (!segments.is_empty()
+                        && segments.len() <= path.len()
+                        && segments.iter().zip(&path).all(|(recorded, authored)| {
+                            recorded.as_str() == *authored
+                        }))
+                    .then_some((segments.len(), value))
+                })
+                .max_by_key(|(len, _)| *len)?;
+            // A strict ancestor means the cursor sits *inside* that owner's
+            // definition, where every nested entry is one complete type
+            // definition regardless of the owner's own kind.
+            if owner_len < path.len() {
                 return Some(vec![MetaSchemaKind::TypeDefinition]);
             }
-            Some(value.kinds.clone())
+            Some(owner.kinds.clone())
         }
         SchemaAuthoringState::Inactive => None,
     }
@@ -1762,7 +1781,7 @@ fn enclosing_path(
     indent: usize,
 ) -> Vec<String> {
     if let Some(ast) = overlay_ast(ctx) {
-        match ast.container_at_offset(offset) {
+        match ast.container_at_offset(offset, line_start) {
             Some(container) if still_placed(ctx, container) => {
                 return ast.key_path(container).into_iter().map(str::to_string).collect();
             }

@@ -220,26 +220,38 @@ impl FrontmatterAst {
         self.entries.iter().position(|candidate| candidate.pointer == entry.pointer)
     }
 
-    /// The innermost authored mapping whose **value** subtree encloses `offset`
-    /// — the container a line being authored at `offset` is a child of.
+    /// The innermost authored mapping or sequence whose **value** subtree
+    /// encloses `offset` — the container a line being authored at `offset` is a
+    /// child of.
     ///
     /// Key tokens are deliberately excluded: a cursor inside `page:`'s own key
     /// belongs to `page`'s *parent*, not to `page`.
-    pub fn container_at_offset(&self, offset: usize) -> Option<&FmEntry> {
+    ///
+    /// A sequence-valued key owns the `- item` lines beneath it, so leaving
+    /// sequences out truncates an item's ancestor chain at the nearest mapping
+    /// and loses the key whose declaration the item is authored against. That
+    /// only holds for a *block* sequence: `ratios: [0.25]` is the `ratios`
+    /// line's own value, not an ancestor of it, so a sequence qualifies only
+    /// when its key precedes `line_start` (the offset of the cursor's line).
+    pub fn container_at_offset(&self, offset: usize, line_start: usize) -> Option<&FmEntry> {
         self.entries
             .iter()
-            .filter(|entry| entry.kind == FmValueKind::Mapping)
+            .filter(|entry| match entry.kind {
+                FmValueKind::Mapping => true,
+                FmValueKind::Sequence => entry.key_span.end <= line_start,
+                FmValueKind::Scalar | FmValueKind::Alias => false,
+            })
             .filter(|entry| entry.value_span.contains(&offset))
             .max_by_key(|entry| entry.depth)
     }
 
     /// The ancestor key chain enclosing `offset`, outermost first — the
-    /// structural answer to "which mapping is this line a child of".
+    /// structural answer to "which container is this line a child of".
     ///
-    /// Empty at the top level, and empty when no authored mapping encloses
+    /// Empty at the top level, and empty when no authored container encloses
     /// `offset` (a blank line the parser saw no container for).
-    pub fn enclosing_key_path(&self, offset: usize) -> Vec<&str> {
-        self.container_at_offset(offset)
+    pub fn enclosing_key_path(&self, offset: usize, line_start: usize) -> Vec<&str> {
+        self.container_at_offset(offset, line_start)
             .map(|entry| self.key_path(entry))
             .unwrap_or_default()
     }
