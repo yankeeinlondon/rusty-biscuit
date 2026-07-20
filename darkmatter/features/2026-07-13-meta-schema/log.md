@@ -8,6 +8,7 @@ implementation_4: "2026-07-19T23:27:33-07:00"
 implementation_5: "2026-07-20T00:40:04-07:00"
 implementation_6: "2026-07-20T06:55:12-07:00"
 implementation_7: "2026-07-20T08:00:38-07:00"
+implementation_8: "2026-07-20T09:33:32-07:00"
 ---
 
 # Meta Schema — Implementation Log
@@ -650,3 +651,314 @@ The files changed during this cycle are:
 - `darkmatter/lib/src/markdown/schemas/mod.rs` — additive `pub use` re-export of `PatternKey` and `PatternKeyDef`; no symbol modified
 - `darkmatter/dmls/tests/lsp_session.rs` — added `meta_schema_hover_covers_entries_nested_under_semantic_owners`, `meta_schema_hover_covers_pattern_keys_inline_and_standalone`, and `meta_schema_standalone_flow_envelopes_retain_last_good_across_malformed_edit`
 - `darkmatter/features/2026-07-13-meta-schema/spec.md` — added a review-7 reconfirmation to the L2 evidence block recording 87/90 for the second consecutive cycle, the per-tier load averages, and why a steady L2 total is the expected outcome for a cycle that added only L1 tests
+
+## Implementation of Review Findings #8
+
+> **started at:** 2026-07-20T09:33:32-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-13-meta-schema/review-8.md'
+- this is iteration 8 of the review-to-implement cycle
+- the review contains **4** findings, all rated **High**:
+        - **F1** — Flow-style standalone schemas still have no completion
+        - **F2** — Standalone pattern-key hover is still claimed by the Markdown provider
+        - **F3** — Escaped quotes can false-activate ordinary YAML and panic overlay construction
+        - **F4** — AC13 remains red and the scoped exception is still unratified
+- impacted package area (per the spec's implementation surface map): `darkmatter`,
+  covering the `darkmatter` lib, `darkmatter-cli`, and `dmls` crates — so
+  `just test` / `just lint` from that area is the verification scope
+- F3 is a correctness/panic defect and is scheduled **first**, ahead of F1 and F2,
+  because both of those touch the same standalone activation path and should build
+  on a recognizer that is already hardened
+
+### F3 — Escaped quotes can false-activate ordinary YAML and panic overlay construction
+
+- starting the work on 'F3 — escaped-quote false activation and overlay panic' at 09:34:22-07:00
+- reproduced the reviewer's probe exactly: with the pre-fix scanner,
+  `standalone_envelope_claim(r#"{"$schema":"https://example.com/quo\"ted","type":"object"}"#)`
+  returns `Some(Pure)` while `parse_standalone_schema_document` returns `Ok(None)`,
+  and that pair reaches `expect_err` on a *successful* `serde_yaml_ng` parse
+- **discovery — the block scanner has the same class of defect.** The review named
+  only the flow path, but `block_top_level_entries` scanned line-by-line with no
+  cross-line quote state, so a multi-line quoted scalar whose continuation line
+  reads `kind: schema` was counted as a top-level entry:
+        - `description: "some text\nkind: schema\n"\n` is valid YAML with **one**
+          key, but claimed `Some(Tagged)` — the same claim/parser disagreement, and
+          therefore the same panic
+        - fixed by carrying an open quote across lines and skipping continuation
+          lines, using the same escape rules as the flow scanner
+- **discovery — doubled single quotes (`''`) are state-equivalent to the naive
+  scan.** Naive "same char closes it" treats `''` as close-then-immediately-reopen,
+  which leaves the scanner in the same state as correctly absorbing the pair, and
+  no characters sit between the two quotes. So `''` handling is *not* what fixes
+  the reported bug. It is implemented anyway (the review asks for it, and it makes
+  the scanner's rules explicit), but the load-bearing single-quote rule is the
+  opposite one: **backslash is not an escape inside a single-quoted scalar**. Had
+  `\` been treated as an escape for both quote types, `{'$schema': 'a\', 'type':
+  'object'}` would have swallowed the top-level comma and false-claimed `Pure`
+- **decision — the flow scanner keeps opening a quote on any `'`/`"`, but the new
+  block scanner only opens one where a scalar may begin** (line start, or after
+  `:` `,` `-` `[` `{`). Rationale: cross-line state is new, and without the guard
+  the plain scalar `don't` would open a quote that swallows every following line,
+  turning a genuine envelope's mid-edit buffer inert and dropping its last-good
+  model. The flow scanner has no cross-line reach, so its worst case is confined
+  to one mapping and it was left alone (Rule 3)
+- **decision on the panic path — deactivate, not diagnose.** `expect_err` was
+  replaced with a `let Err(..) = ... else { return None }`. The two candidate
+  behaviors were (a) deactivate, (b) surface a diagnostic:
+        - the `Ok(None)` + claim arm exists to serve *mid-edit malformed* buffers,
+          which is exactly the `Err` branch; that path is untouched, so
+          last-good retention and flow-envelope diagnostics keep working
+        - when the buffer is in fact **well-formed** YAML, the authoritative parser
+          has simply declined it. The module contract already states that ordinary
+          YAML and raw JSON Schema "remain inert", so inheriting an envelope's
+          diagnostics would contradict the documented behavior and put a
+          schema-authoring squiggle on someone's ordinary config file
+        - deactivating also degrades toward the pre-existing behavior for any
+          *future* recognizer imprecision, rather than converting it into
+          user-visible noise
+- non-vacuity proof — each of the three guards was neutered independently and the
+  new tests confirmed RED, then restored:
+        1. `step_quoted` reverted to naive close-on-same-char →
+           `envelope_claim_tracks_escapes_in_quoted_scalars` FAILED with
+           `left: Some(Pure), right: None` on the review's exact raw-JSON input
+        2. same neutering **plus** the original `expect_err` restored →
+           `escaped_quotes_stay_inert_without_panicking` FAILED with a panic at
+           `overlay/mod.rs:326`: `a lexical claim returning None must be malformed
+           YAML: Mapping {"$schema": String("https://example.com/quo\"ted"), "type":
+           String("object")}` — the complete reported chain, reproduced end to end
+        3. block cross-line continuation skip disabled →
+           `envelope_claim_tracks_escapes_in_quoted_scalars` FAILED with
+           `left: Some(Tagged), right: None`
+        4. `\` made an escape inside single quotes too →
+           `envelope_claim_tracks_escapes_in_quoted_scalars` FAILED with
+           `left: Some(Pure), right: None`
+- files changed:
+        - `darkmatter/dmls/src/overlay/schema.rs` — new `step_quoted` (shared
+          double-quote-escape / doubled-single-quote stepping) and
+          `advance_quote_state` (per-line block quote state with a scalar-start
+          guard); `flow_top_level_entries` switched to a peekable scan driving
+          `step_quoted`; `block_top_level_entries` now skips quoted-scalar
+          continuation lines
+        - `darkmatter/dmls/src/overlay/mod.rs` — `expect_err` replaced with
+          deactivation on a lexical/authoritative disagreement
+- tests added:
+        - `overlay::schema::tests::envelope_claim_tracks_escapes_in_quoted_scalars`
+          — 6 inert cases (flow + block, double-quote escape, single-quote
+          backslash, doubled `''`, multi-line quoted values) each asserted against
+          `parse_standalone_schema_document`'s own `Ok(None)` so claim and parser
+          are proven to agree, plus 4 pure and 2 tagged false-negative-direction
+          cases that must still activate
+        - `overlay::tests::escaped_quotes_stay_inert_without_panicking` — the
+          `OverlayState::for_document` regression, 3 documents, all `None`, no panic
+- verification (`darkmatter` package area, exit 0 both):
+        - `just test` → `5929 passed` (darkmatter lib), `561 passed`
+          (darkmatter-cli), `623 passed` (dmls); 140/71/3 skipped
+        - `just lint` → clean; one clippy `question_mark` finding on the first run
+          was fixed in place (`let open = (*quote)?;`)
+        - the single `FLAKY 3/4` on `darkmatter-cli::compose_shell
+          test_compose_with_nonexistent_command_fails` is a pre-existing load
+          artifact unrelated to this finding (it passed outright on the prior run
+          of the same gate)
+- work completed for 'F3 — escaped-quote false activation and overlay panic' at 10:08:04-07:00
+
+### F1 — Flow-style standalone schemas still have no completion
+
+- starting the work on 'F1 — flow-style standalone completion' at 10:08:04-07:00
+- discovery — why the block cursor model could never answer a flow envelope:
+        - `meta_schema_completion` derived everything from `line_prefix` →
+          `value_cursor` → `enclosing_path`. For `{$schema: {title: string}}`
+          `value_cursor` splits at the *first* `:` and reports the key
+          `{$schema`, and `enclosing_path` returns `[]` at indent 0, so
+          `meta_schema_kinds_for_line` matched nothing and the router returned
+          `None` — in the valid state as well as the malformed one
+        - standalone documents carry `ast: None`, so every AST-structural helper
+          (`key_entry_on_line`, `container_at_offset`) already falls through to
+          the lexical path for them; there is no sidecar to consult
+        - the standalone `source_map` cannot serve this: it only exists when the
+          buffer parses, and the malformed half of the requirement is by
+          definition unparseable text
+- design decision — locate the cursor with a lexical *structural* walk that
+  reuses both existing authorities rather than adding a flow-only completion path:
+        - new `overlay::schema::flow_value_cursor(text, offset)` walks
+          `text[..offset]` once, maintaining a stack of flow frames. It shares
+          `standalone_envelope_claim`'s quoted-scalar rules — `step_quoted` was
+          re-signatured from `(&mut Peekable<Chars>) -> Option<char>` to
+          `(next: Option<char>) -> bool` so both scanners can drive it from
+          whatever iterator they hold (`Chars` vs `CharIndices`)
+        - a `{`/`[` only opens a frame where a YAML scalar may begin, so a brace
+          inside a plain scalar (`title: a {b`) stays text
+        - **sequences are transparent**: a `[` frame adds nesting but no key, so
+          the reported entry is the nearest enclosing *mapping* entry. This is
+          what makes the two array shapes fall out of one rule — an outer array
+          (`{$schema: [{title: string}]}`) is seen through to the arm's own key,
+          while a union-valued item (`{title: [string, number]}`) stops at
+          `title` and hands `[string, number]` whole to the existing
+          `locate_type_definition_cursor`, which already models a flow sequence
+          as a union. No union/inline-object/constraint parsing was duplicated
+        - the walk answers only *within* the flow collection and returns
+          `root_start`; the caller (`providers::frontmatter::flow_cursor`) resolves
+          the block ancestry above that delimiter with the unchanged
+          `enclosing_path` + `value_cursor`, so a flow value nested under block
+          keys reports its full path
+        - the existing block derivation moved verbatim into `block_cursor`;
+          `meta_schema_completion` is now a two-arm match, flow first
+        - guard: the flow path is skipped when an AST exists and the offset is
+          outside the frontmatter block, so braces in Markdown prose never reach
+          the semantic router
+- non-vacuity proof (required practice): neutered the router by forcing the flow
+  arm to `None` (`.filter(|_| false)`) and re-ran the new test — **RED on the
+  first case**, `pure.yaml: a valid flow envelope owes completion: []`, i.e. the
+  exact empty-candidate symptom the finding describes, on all 4 nextest
+  attempts. Restored the arm and the test went green again
+- test drift found while writing the cases: an outer-array (root-union) malformed
+  buffer publishes `dm.schema.invalid_schema_shape`, not
+  `dm.schema.invalid_type_definition` — a root union fails as a whole
+  declaration rather than as one definition. The assertion was widened to the
+  `darkmatter.schema` source, which is what the test actually cares about
+  (the *current* buffer owns the error while the retained model still answers)
+- files changed:
+        - `dmls/src/overlay/schema.rs` — `FlowCursor` / `flow_value_cursor` /
+          `note_flow_value_start` added after the lexical claim scanners;
+          `step_quoted` signature change plus its two existing call sites
+        - `dmls/src/providers/frontmatter.rs` — `meta_schema_completion` split
+          into `flow_cursor` + `block_cursor`
+        - `dmls/tests/lsp_session.rs` — new Level-1 test
+          `meta_schema_standalone_flow_completion_locates_the_cursor_structurally`
+          (5 forms × valid + malformed = 10 completion assertions: pure flow,
+          tagged flow, nested mapping, outer array, union-valued array item);
+          `meta_schema_standalone_flow_envelopes_retain_last_good_across_malformed_edit`
+          lost the doc-comment paragraph recording completion as not activating
+          and now points at the new test
+- verification (`darkmatter` package area, exit 0 both):
+        - `just test` → `5929 passed` (darkmatter lib, 140 skipped), `561 passed`
+          (darkmatter-cli, 71 skipped, 1 flaky retry on the pre-existing
+          `toc test_toc_subcommand_json_output`), `624 passed` (dmls, 3 skipped)
+        - `just lint` → clean, no findings
+- work completed for 'F1 — flow-style standalone completion' at 10:28:10-07:00
+        - orchestrator independently re-ran `cargo check -p dmls --all-targets` after the subagent
+          returned, because mid-edit editor diagnostics had reported a type error and four
+          `dead_code` warnings in `overlay/schema.rs`. The check finished clean — those diagnostics
+          were stale snapshots taken between the `step_quoted` re-signature and its call-site
+          updates, not a broken tree
+
+### F2 — Standalone pattern-key hover is still claimed by the Markdown provider
+
+- starting the work on 'F2 — standalone pattern-key hover arbitration' at 10:28:10-07:00
+- reproduced the finding before touching any source: an LSP hover at a `"<starting::x-509>"`
+  pattern key in a pure standalone `.yaml` returned
+  `⚠️ Unresolved link: no document matches `starting::x-509` — the substrate link layer, exactly
+  as review-8 described
+        - the three `<scheme::…>` forms are well-formed CommonMark autolinks; `<string>` is not,
+          which is why it was the only form the prior test could cover standalone
+- arbitration decision: **suppress the substrate claim inside activated standalone schema
+  regions**, rather than reordering the registry or making hover a merge
+        - reordering would give the overlay precedence over Markdown in *every* document, a
+          repo-wide behavior change for a narrow collision
+        - the suppression predicate is `overlay::schema::standalone_semantic_region_covers`, which
+          is false unless `SchemaAuthoringState::Standalone` holds a model *and* the offset lands
+          in a projected `key_span`/`definition_span`, so an ordinary Markdown buffer can never
+          reach it
+        - the check lives in `SubstrateProvider::hover` in `providers/mod.rs` — the registry module
+          already owns cross-layer arbitration and already imports `DocumentOverlay`, so the
+          Layer-0 capability module `providers/hover.rs` stays free of overlay knowledge
+- non-vacuity proof: temporarily deleted the suppression block from `SubstrateProvider::hover` and
+  re-ran both new tests
+        - `meta_schema_hover_covers_pattern_keys_inline_and_standalone` → **FAILED on all 4 nextest
+          retries**, each with `pure.yaml line 2: ⚠️ Unresolved link: no document matches
+          `starting::x-509``
+        - `markdown_autolink_hover_survives_standalone_schema_arbitration` → **PASSED**, as it
+          should: it guards pre-existing substrate behavior, so it is insensitive to the fix and
+          only fires if the suppression ever over-reaches
+        - block restored; both tests green afterwards
+- test changes in `dmls/tests/lsp_session.rs`
+        - `meta_schema_hover_covers_pattern_keys_inline_and_standalone` now drives all four
+          pattern-key forms through the full LSP hover round trip in **both** standalone envelopes
+          (pure `$schema:` and tagged `kind: schema` / `types:`), replacing the single `<string>`
+          case and the comment that conceded the collision
+        - added `markdown_autolink_hover_survives_standalone_schema_arbitration`: the same
+          `<starting::x-509>` token in ordinary prose must still hover as an unresolved autolink
+        - a first draft of that regression also asserted a *resolved* inline link; dropped it —
+          target resolution needs `window.workDoneProgress` startup-index synchronization the
+          neovim-like fixture does not advertise, and it is orthogonal to this finding
+- final gates from the `darkmatter` package area
+        - `just test` → exit 0; darkmatter `5929 passed` (147 slow, 140 skipped), darkmatter-cli
+          `561 passed` (19 slow, 1 flaky, 71 skipped), dmls `625 passed` (3 skipped)
+        - `just lint` → exit 0, no findings
+- work completed for 'F2 — standalone pattern-key hover arbitration' at 10:46:20-07:00
+
+### F4 — AC13 remains red and the scoped exception is still unratified
+
+- starting the work on 'F4 — AC13 Level-2 gate and scoped exception' at 10:46:20-07:00
+- the orchestrator re-ran all three Level-2 tiers independently rather than carrying forward the
+  prior cycle's recorded numbers:
+        - `just _test_l2 darkmatter` → **18/18 passed** (14.7s)
+        - `just _test_l2 darkmatter-cli --no-fail-fast` → **66 passed / 3 failed** of 69 (96.3s)
+        - `just _test_l2 dmls --no-fail-fast` → **3/3 passed** (2.9s)
+        - total **87/90**, unchanged for the third consecutive cycle
+- the failure set is still *exactly* the three named code-block tests and no others, so the
+  proposed exception's scope remains precisely coextensive with what actually fails:
+        - `level2_code_block_clears_inherited_dim_before_theme_colors`
+        - `level2_code_block_inverts_to_light_in_dark_terminal`
+        - `level2_default_code_block_inverts_background_and_foreground`
+- each failed all four Nextest attempts with a sub-second deterministic value mismatch, not a
+  timeout — host load averaged **157** during the run, which is high enough to be worth stating,
+  but load does not explain a repeatable wrong-color assertion
+- the canonical `just test-l2` recipe still aborts in the CLI tier before reaching DMLS, so the
+  tiers must be run individually via `just _test_l2 <crate>` to obtain a complete picture; note
+  also that `--no-fail-fast` must be passed bare, not after a `--` separator
+- **no code change was made for this finding.** What remains is purely the ratification
+  decision, which the repository reserves to Ken
+- work completed for 'F4 — AC13 Level-2 gate and scoped exception' at 11:12:40-07:00
+
+### Final Verification
+
+- the orchestrator re-ran both L1 gates from the `darkmatter` package area **after** all three
+  code findings had landed, rather than trusting any subagent's report:
+        - `just test` → exit **0**; darkmatter **5929 passed / 140 skipped** (283.2s, 243 slow,
+          2 flaky), darkmatter-cli **561 passed / 71 skipped**, dmls **625 passed / 3 skipped**;
+          zero failures
+        - `just lint` → exit **0**; zero warning and zero error lines across `darkmatter`,
+          `darkmatter-cli`, and `dmls`
+- **dmls test count rose 621 → 625**, and it is the only tier that moved. That is the correct
+  shape for this cycle: all three implementable findings were DMLS behaviors whose appropriate
+  verification level the review explicitly assigned to Level 1, so new coverage lands entirely in
+  the dmls crate and neither the library nor CLI counts should have changed
+- the two flaky retries in the darkmatter tier (`shell_blocks::all_commands_empty_output`,
+  `about::trigger_combinator_descriptor_set_matches_grammar`) both cleared on rerun and are
+  load artifacts at a load average of 157, not regressions from this cycle's changes
+- the orchestrator additionally ran `cargo check -p dmls --all-targets` mid-cycle after editor
+  diagnostics reported a type error following F1. It was clean; the diagnostics were stale
+  snapshots captured between a function re-signature and its call-site updates. Worth recording
+  because trusting that snapshot would have triggered a needless rollback of correct work
+- **all three code subagents proved their work non-vacuous by neutering and confirming red**, the
+  practice carried forward since iteration 5. F3's neuter was the most valuable of the cycle: it
+  reproduced the review's complete reported chain end to end, panicking at `overlay/mod.rs:326`
+  with `a lexical claim returning None must be malformed YAML: Mapping {"$schema": ..., "type":
+  "object"}` — direct confirmation that the test is anchored to the exact defect the review
+  described rather than to some adjacent behavior
+- **two findings turned up defects beyond what the review named**, both fixed in place:
+        - F3's block-style scanner carried the *same* class of escape defect the review reported
+          only for the flow scanner: it scanned line-by-line with no cross-line quote state, so a
+          quoted multi-line scalar containing `kind: schema` false-claimed `Some(Tagged)`
+        - F1 surfaced a genuine assertion drift — a malformed outer-array (root-union) buffer
+          publishes `dm.schema.invalid_schema_shape`, not `invalid_type_definition`, because a
+          root union fails as a whole declaration rather than as one definition
+
+### Successful Completion
+
+The implementation of review cycle 8 has completed successfully in 99 minutes. During this implementation all 4 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 3 were fixed, 1 was deferred (see reasons below):
+
+- **High — "AC13 remains red and the scoped exception is still unratified."** Deferred for the sixth consecutive cycle, and for the same single reason as cycle 7: there is no longer any substantive objection left to close. This cycle's independent three-tier re-run confirms the exception's scope is still exactly coextensive with the remaining failure set — library 18/18, CLI 66/69, DMLS 3/3, total 87/90, with the only failures being the three named code-block tests. What remains is purely the **ratification decision**, which the repository reserves to Ken and which is unreachable from a non-interactive session with nobody to ask. The alternative closure — repairing the three tests — would require porting `run_md_env` / `run_md_after_shell_prefix` off the WezTerm harness onto tmux, a helper backing the entire 69-test CLI L2 corpus, in order to fix a pre-existing defect this feature did not introduce and whose failure mechanism (WezTerm's live OSC-11 query pre-empting the `COLORFGBG` staging the three tests rely on) is demonstrably unrelated to meta-schema code. That is a Rule 3 violation, and the work is already filed as `darkmatter/features/_unscheduled/wezterm-sgr-race-test-fixes/spec.md`.
+
+Unlike cycle 7, no honesty caveat attaches to the findings recorded as fixed. Cycle 7 closed its flow-envelope finding only in part, because retained *completion* was out of reach of an activation claim and completion did not activate inside a flow mapping in any state. That shortfall was this cycle's F1, and it is now closed: `flow_value_cursor` locates the cursor structurally by walking flow frames, so AC9's completion facet is met for flow presentation in both valid and malformed states. F2 likewise closes the standalone pattern-key half of the review-7 region-projection finding that had remained open at the user-facing layer.
+
+No finding required a performance measurement, so `deferred_perf_measurement` remains `false`.
+
+The files changed during this cycle are:
+
+- `darkmatter/dmls/src/overlay/schema.rs` — added `step_quoted`, a shared bounded one-character step honoring the two YAML rules the previous scanner got wrong (`\` escapes inside a double-quoted scalar but *not* inside a single-quoted one; `''` is a literal `'`), and drove both `flow_top_level_entries` and a new cross-line-stateful `advance_quote_state`/`block_top_level_entries` from it; added `flow_value_cursor`/`FlowCursor`/`FlowFrame`, a linear lexical walk maintaining a stack of flow frames in which sequence frames are transparent so the nearest enclosing *mapping* entry is reported; added `standalone_semantic_region_covers` for hover arbitration
+- `darkmatter/dmls/src/overlay/mod.rs` — replaced the `expect_err` with a deactivating `let Err(...) = ... else { return None }`. A lexical/authoritative disagreement on *well-formed* YAML now falls silent rather than crashing, which matches the module's documented promise that ordinary YAML and raw JSON Schema "remain inert" and avoids putting a schema-authoring squiggle on someone's ordinary config file; the mid-edit malformed path that the arm actually exists to serve is untouched
+- `darkmatter/dmls/src/providers/frontmatter.rs` — `meta_schema_completion` became a two-arm match trying `flow_cursor` before the pre-existing derivation (moved verbatim into `block_cursor`), with `flow_cursor` composing the flow-internal answer with the unchanged `enclosing_path`/`value_cursor` so a flow value nested under block keys still reports its full path
+- `darkmatter/dmls/src/providers/mod.rs` — `SubstrateProvider::hover` now declines inside an activated standalone semantic region. Suppression was chosen over registry reordering because reordering would hand the overlay hover precedence in *every* document to fix a narrow collision; the check is false-by-default and unreachable from any ordinary Markdown buffer
+- `darkmatter/dmls/tests/lsp_session.rs` — added `meta_schema_standalone_flow_completion_locates_the_cursor_structurally` (5 forms × valid/malformed = 10 assertions) and `markdown_autolink_hover_survives_standalone_schema_arbitration`; rewrote the standalone half of `meta_schema_hover_covers_pattern_keys_inline_and_standalone` to drive all four pattern-key forms through full LSP hover in both pure and tagged envelopes; removed the two doc-comment paragraphs conceding the completion and hover-collision gaps
+- `darkmatter/features/2026-07-13-meta-schema/spec.md` — added a review-8 reconfirmation to the L2 evidence block recording 87/90 for the third consecutive cycle, the host load, and why a steady L2 total is the expected outcome for a cycle that added only L1 tests

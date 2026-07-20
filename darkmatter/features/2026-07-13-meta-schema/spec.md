@@ -1,7 +1,7 @@
 ---
 status: ready for planning and implementation
 reviewed: true
-review_iterations: 7
+review_iterations: 8
 reviewed_by: codex/default
 reviewed_on: 2026-07-14
 rulings: "`type-definition` and `schema` semantic types ruled by Ken 2026-07-13"
@@ -835,6 +835,18 @@ five L1 tests (dmls 616 → 621), so the L2 total holding steady is the expected
 result rather than evidence of anything new. Host load averaged 36–95 across the
 three tiers; the three failures remained deterministic value mismatches
 (`got luma 44`), not timeouts, so load does not explain them.
+
+**Reconfirmed a third time after the review-8 DMLS hardening work** (2026-07-20,
+review-8 implementation): library 18/18, CLI 66/69, DMLS 3/3 — total 87/90,
+unchanged for the third consecutive cycle, with the failure set still exactly the
+three named code-block tests. That cycle hardened the standalone envelope
+recognizer against escaped quotes, removed an `expect_err` panic, taught semantic
+completion to locate a cursor structurally inside flow mappings, and made
+activated standalone schema regions win hover arbitration over the Markdown
+substrate — adding four L1 tests (dmls 621 → 625) and touching no rendering code,
+so a steady L2 total is again the expected result. Host load averaged 157 during
+this run; the three failures remained deterministic value mismatches rather than
+timeouts, so load does not explain them.
 
 **Repair path (deliberately not taken here).** Restage the three tests on the
 tmux harness, as `level2_schema_about` already does, or fold their coverage

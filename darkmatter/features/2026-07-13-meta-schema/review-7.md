@@ -10,6 +10,7 @@ implemented_by: claude/default
 description: "A **feature** review of `2026-07-13-meta-schema/spec.md`"
 feature: 2026-07-13-meta-schema/review-7.md
 previous: 2026-07-13-meta-schema/review-6.md
+next: 2026-07-13-meta-schema/review-8.md
 ---
 
 # Review 7 — Meta Schema
