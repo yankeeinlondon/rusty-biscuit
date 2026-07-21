@@ -3,6 +3,7 @@ $schema: feature-log.yaml
 feature: 2026-07-14-invalid-frontmatter
 deferred_perf_measurement: true
 implementation_1: "2026-07-20T23:38:36-07:00"
+implementation_2: "2026-07-21T00:45:59-07:00"
 ---
 
 # Log — Invalid Frontmatter
@@ -296,3 +297,113 @@ The implementation of review cycle 1 has completed successfully in 36 minutes an
 - GitNexus `detect_changes` reports HIGH aggregate worktree risk from unrelated fixed-width cleanup production edits already present in the shared worktree; this review implementation changes no production execution process
 
 The files changed by this implementation are the pinned corpus and its tests/notice under `biscuit-file/lib/tests/`, the stdin trigger-schema Level-1 proof in `darkmatter/cli/tests/clean_schema.rs`, the feature-path benchmark in `darkmatter/lib/benches/clean_hot_paths.rs`, this log and its deferred-performance record, and the review metadata.
+
+## Implementation of Review Findings #2
+
+> **started at:** 2026-07-21T00:45:59-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-14-invalid-frontmatter/review-2.md'
+- this is iteration 2 of the review-to-implement cycle
+- the review contains **4** findings:
+        - **High** — file-level BOM and lone-CR documents bypass frontmatter analysis
+        - **High** — `--json` ships a different wire contract and emits no JSON for unrepaired invalid YAML
+        - **High** — the explicit no-regression performance acceptance is still unverified
+        - **Medium** — public CLI and library documentation still describes the pre-feature behavior
+- affected packages identified by the review and confirmed with `sniff`: `biscuit-file`, `darkmatter`, and `darkmatter-cli`
+- affected package areas: `biscuit-file` and `darkmatter`
+- findings are being dispatched serially so each subagent can own coherent updates to this log section
+
+### Finding 1 — High: file-level BOM and lone-CR documents bypass frontmatter analysis
+
+- starting the work on 'high-file-level-bom-and-lone-cr-frontmatter-analysis' at 00:48:46
+        - loaded the required `darkmatter`, `rust`, and `rust-testing` skills, including Darkmatter's frontmatter model and the repository's Level-1 test conventions
+        - began with the required Sniff package-scope discovery and GitNexus impact workflow before editing any production symbol
+        - GitNexus rated `extract_frontmatter_block` CRITICAL: 15 direct and 99 total upstream symbols, 2 affected CLI processes, and 11 affected modules; `parse_frontmatter` was also CRITICAL with 21 direct and 205 total upstream symbols, 9 processes, and 20 modules
+        - the critical blast radius was surfaced before editing; the change was kept in the shared frontmatter boundary and exercised the DMLS overlay/source-map consumers identified by the impact report
+        - replaced LF-only boundary splitting with one byte-span-preserving scanner for LF, CRLF, and lone CR; both the internal parser and public extractor now accept exactly one leading UTF-8 BOM while retaining the existing trimmed, exact `---` delimiter rule
+        - `md clean` now removes a recognized file BOM and reconstructs the frontmatter block with canonical LF delimiters and the YAML engine's normalized source before Markdown parsing; the body remains owned by the existing cleanup path
+        - added Level-1 extractor/parser tests for BOM, lone CR, source spans, parser/extractor presence parity, and a BOM near-miss proving `---x` is still not accepted as a delimiter
+        - added six spawned-process Level-1 cases covering BOM and lone-CR documents through file input, stdin, and `--save`; each proves reserved-indicator repair, BOM removal, and LF normalization
+        - Sniff scope discovery and dependency mapping selected `darkmatter`, `darkmatter-cli`, and `dmls` in the Darkmatter package area; `biscuit-file` was not changed, so no biscuit-file gate was added
+        - focused Darkmatter parsing verification passed: 28 of 28 frontmatter extractor/parser tests
+        - focused CLI verification passed: all 28 tests in `darkmatter-cli --test clean_frontmatter`, including the six new boundary cases
+        - affected DMLS verification passed: `cargo check -p dmls --all-targets` and all 21 frontmatter-overlay/source-map tests
+        - warnings-denying lint passed for all affected crates: `cargo clippy -p darkmatter -p darkmatter-cli -p dmls --all-targets --color never -- -D warnings`
+        - the first combined test invocation was interrupted at the non-interactive command ceiling after compilation produced no failure output; subsequent smaller incremental gates completed successfully, so the slow command was not retried
+        - formatting diagnosis could not run because the pinned stable toolchain lacks the `rustfmt` component; no component was installed and no write-mode formatting command was run
+        - GitNexus `detect_changes` reports CRITICAL aggregate worktree risk across 31 changed symbols and 18 affected processes; its report includes unrelated pre-existing shared-worktree files, while this finding's production changes are confined to the shared frontmatter parser/extractor and `md clean` repair boundary
+- work completed for 'high-file-level-bom-and-lone-cr-frontmatter-analysis' at 00:57:27
+
+### Finding 2 — High: `--json` wire contract and unrepaired invalid YAML envelope
+
+- starting the work on 'high-json-v1-wire-contract-and-invalid-yaml-envelope' at 00:59:20
+        - loaded the required `darkmatter`, `rust`, and `rust-testing` skills, plus the CLI-output testing guidance for machine-readable channel contracts
+        - confirmed ratified decision D8 requires the exact v1 envelope families: `version`, structured `source`, structured `frontmatter`, document-position `diagnostics`, actually-applied repair audit, and document-level `changed`
+        - GitNexus rated every Finding 2 production surface LOW risk: `run_clean` has 2 direct and 3 total upstream symbols across 2 processes; `repair_frontmatter` has 1 direct and 4 total upstream symbols across the same 2 processes; `CleanJsonReport` has 1 direct dependent and no affected process
+        - replaced the conflicting four-field CLI report with the ratified version-1 envelope: `version`, structured file/stdin `source`, structured present/absent `frontmatter`, unified diagnostics, `applied`, and document-level `changed`
+        - projected diagnostic spans into whole-document byte coordinates with 1-indexed line and byte-column fields; candidate and applied repair spans now use whole-document byte coordinates as well
+        - retained the analyzer's edit audits across initial syntax analysis, syntax rescan, and schema repair; the audit also records the document-level UTF-8 BOM removal introduced by Finding 1
+        - JSON mode now serializes and flushes a valid v1 envelope before preserving exit code 1 for unrepaired invalid YAML; the spawned-process proof confirms stderr stays empty and the file remains untouched
+        - expanded the Level-1 golden contract from 13 to 16 cases, pinning every top-level field, every diagnostic and repair field, enum/code spellings, source/frontmatter variants, empty arrays, ordering, byte columns, BOM coordinates, body-only `changed`, save behavior, and failure-channel behavior
+        - Sniff package discovery and dependency mapping selected `darkmatter-cli` in the Darkmatter package area for this CLI-local wire change; no shared biscuit-file or Darkmatter library shape was changed
+        - focused Level-1 verification passed: `cargo nextest run -p darkmatter-cli --test clean_frontmatter --test clean_json --test clean_schema --color never` completed all 61 tests successfully, including all 16 JSON contract tests
+        - `cargo check -p darkmatter-cli --color never` passed; `git diff --check` also passed
+        - the warnings-denying all-target clippy command was terminated at the orchestration checkpoint after 10 seconds with no diagnostic output, rather than allowing a non-interactive gate to run toward the command ceiling; no slow retry was attempted
+        - the orchestrator subsequently authorized one bounded incremental retry; `cargo clippy -p darkmatter-cli --all-targets --color never -- -D warnings` completed successfully in 1.32 seconds with no warnings
+        - GitNexus `detect_changes` reports CRITICAL aggregate worktree risk across 63 changed symbols and 18 affected processes because it includes Finding 1's shared frontmatter-boundary edits and unrelated pre-existing worktree changes; this finding's own pre-edit impact remains LOW and its production edits are confined to `darkmatter-cli` JSON projection, audit capture, and error-channel handling
+- work completed for 'high-json-v1-wire-contract-and-invalid-yaml-envelope' at 01:08:06
+
+### Finding 3 — High: explicit no-regression performance acceptance is unverified
+
+- starting the work on 'high-explicit-no-regression-performance-acceptance' at 01:10:32
+        - loaded the required `darkmatter`, `rust`, `rust-testing`, and `sniff` skills, including the Criterion baseline-comparison guidance
+        - began by auditing the retained benchmark/deferred-performance records, current worktree isolation, host CPU characteristics, power state, and scheduler load before attempting any timing run
+        - Sniff identified an Apple M4 Max with 16 physical and 16 logical cores; the host was on AC power
+        - the observed load averages were 81.59 / 53.66 / 39.87 with approximately 923.8% aggregate process CPU, so the host was not quiet enough for a trustworthy comparison
+        - the shared feature worktree was dirty with concurrent review-finding edits; branch `darkmatter` was at `7278b1ccbed5` while local `main` was at `4bf0db8813de`, so neither revision could be isolated without including unrelated uncommitted state
+        - no Criterion timing was run and no performance number is claimed; a single run under this load would not satisfy the required retained `main`/branch/`main` drift bracket
+        - no completed Linux or Windows runtime result for both corrected full-pipeline cases was available in the inspected feature or CI records; workflow configuration and static portability were not treated as runtime evidence
+        - `deferred_perf_measurement: true` remains set; full details, exact observed load, isolation blockers, and the required rerun procedure were appended to [`deferred-performance.md`](./deferred-performance.md), explicitly mapped to Review 2 Finding 3
+        - bounded structural verification passed: the corrected benchmark compiled in 12.46 seconds, all 8 `clean_counters` tests passed, and bench-target Clippy passed with warnings denied in 28.77 seconds after waiting for the shared build lock
+        - no production symbol or test was edited for this finding, so GitNexus symbol impact analysis was not required; edits are limited to the feature log and deferred-performance record
+- work completed for 'high-explicit-no-regression-performance-acceptance' at 01:12:32
+
+### Finding 4 — Medium: public CLI and library documentation describes pre-feature behavior
+
+- starting the work on 'medium-public-cli-and-library-invalid-frontmatter-documentation' at 01:13:14
+        - loaded the required `darkmatter`, `rust`, `rust-testing`, and `biscuit-file` skills before auditing the public documentation
+        - selected `darkmatter/docs/cli/clean.md`, the cleanup section of `darkmatter/cli/README.md`, and the public `biscuit-file` crate guide as the user-facing surfaces named by the review
+        - verified every documented claim against `decisions.md`, generated `md clean --help`, the current raw-source repair implementation, and the spawned-process golden tests rather than carrying assumptions forward from the specification
+        - documented that deterministic frontmatter repairs are default-on, operate only on the frontmatter block, preserve body YAML fences, and mutate a file only when `--save` is present
+        - documented all five relevant flags: `--json`, `--schema`, `--baseline-schema`, `--no-baseline-schema`, and `--no-trigger-schemas`; the guide also makes the absence of `md clean --strict` explicit
+        - documented baseline → matching triggers → document `$schema` precedence, `--schema` replacement of the document layer, and stdin's trigger-discovery isolation while explicit schema flags remain active
+        - documented the human channel and status contract: report-only findings render on stderr and exit 0, unrepaired invalid YAML exits 1, and JSON mode emits its envelope on stdout with empty stderr before preserving exit 1
+        - added the exact version-1 JSON envelope fields and flagship repair example from the Finding 2 golden fixture, including stable classifications/codes, whole-document byte coordinates, one-based byte columns, applied-repair audit, and document-level `changed`
+        - expanded `biscuit-file/lib/README.md` with `analyze_yaml`, retained-source `Yaml::analyze`, the duplicate-scan caveat for shorthand views, parse outcomes, all three certainty tiers, and `YamlAnalysis::apply` audit behavior; linked that guide from the package-area README for discovery
+        - no Rust symbol or production execution flow was edited, so GitNexus symbol impact analysis was not required; the directly affected package areas remain `biscuit-file` and `darkmatter`
+        - the exact Darkmatter invalid-frontmatter Level-1 gate passed: all 61 tests in `clean_frontmatter`, `clean_json`, and `clean_schema`
+        - biscuit-file retained-analysis verification passed: all 6 `parse_count` tests and all 19 crate doctests; the doctest set includes the public `Yaml::analyze` example
+        - generated CLI help confirmed all five documented flags and no `--strict`; the embedded JSON example parsed successfully, referenced local documentation targets exist, and `git diff --check` passed
+        - no additional full-area test or lint gate was started: this finding changes Markdown only, biscuit-file's compiled public examples passed doctests, and warnings-denying `darkmatter-cli` Clippy had already passed during Finding 2 against the implementation documented here
+- work completed for 'medium-public-cli-and-library-invalid-frontmatter-documentation' at 01:18:21
+
+### Successful Completion
+
+The implementation of review cycle 2 has completed successfully in 33 minutes and 29 seconds. During this implementation all 4 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 3 were fixed, 1 was deferred (see reasons below):
+
+- **Explicit no-regression performance acceptance**
+        - deferred because the 16-core host was under extreme load (81.59 / 53.66 / 39.87 load averages and approximately 923.8% aggregate process CPU), so Criterion results would not have been legitimate
+        - the shared dirty worktree also prevented an isolated retained `main`/branch/`main` bracket
+        - no completed Linux or Windows runtime evidence for both corrected full-pipeline cases was available; workflow configuration and static portability were not treated as runtime evidence
+        - `deferred_perf_measurement: true` remains set and the full rerun procedure is recorded in [`deferred-performance.md`](./deferred-performance.md)
+- final scoped verification passed:
+        - Darkmatter frontmatter parser/extractor tests: 28 of 28
+        - Darkmatter CLI clean integration tests: 61 of 61
+        - DMLS affected frontmatter/source-map tests: 21 of 21
+        - biscuit-file retained-analysis tests: 6 of 6
+        - biscuit-file doctests: 19 of 19
+        - Darkmatter, darkmatter-cli, DMLS, benchmark-target, biscuit-file, and biscuit-file-cli Clippy gates passed with warnings denied
+        - the corrected benchmark compiled and all 8 load-independent clean-counter tests passed
+- GitNexus `detect_changes` reports CRITICAL aggregate worktree risk across 104 changed indexed symbols and 18 affected processes; the report includes unrelated pre-existing changes, while this cycle's shared production change is the explicitly reviewed frontmatter boundary
+
+The files changed by this implementation are `darkmatter/lib/src/markdown/frontmatter.rs`, `darkmatter/cli/src/commands/clean.rs`, `darkmatter/cli/src/commands/clean/frontmatter_repair.rs`, `darkmatter/cli/tests/clean_frontmatter.rs`, `darkmatter/cli/tests/clean_json.rs`, `darkmatter/docs/cli/clean.md`, `darkmatter/cli/README.md`, `biscuit-file/lib/README.md`, `biscuit-file/README.md`, `darkmatter/features/2026-07-14-invalid-frontmatter/deferred-performance.md`, this log, and the Review 2 metadata.

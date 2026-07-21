@@ -91,3 +91,54 @@ untrustworthy number.
 The corrected harness passed `cargo check -p darkmatter --bench clean_hot_paths --color never`, and
 the load-independent counter suites passed. These verify that the comparison vehicle compiles and
 that the structural cost invariants hold; they do not replace the deferred timing measurement.
+
+## Review 2 Finding 3 — explicit no-regression acceptance
+
+- **Maps back to:** *"High — The explicit no-regression performance acceptance is still
+  unverified"* in [`review-2.md`](./review-2.md).
+- **Evaluated during:** implementation cycle 2 on 2026-07-21.
+
+### Why the measurement remains deferred
+
+The macOS host was not quiet enough for a legitimate Criterion comparison. Sniff identified an
+Apple M4 Max with 16 physical and 16 logical cores. At 01:10 local time, the host reported load
+averages of **81.59 / 53.66 / 39.87** and aggregate process CPU use of approximately **923.8%**.
+The host was attached to AC power, so power source did not cure the scheduler contention.
+
+The repository state also prevented an isolated bracket. The feature worktree was dirty and shared
+with serial review-finding implementations in progress. Its branch tip was `7278b1ccbed5`, while
+local `main` was `4bf0db8813de`; measuring either state would have included uncommitted cross-finding
+changes. Three older `/private/tmp/dmbench/{before,base,after}` registrations were prunable because
+their directories no longer existed, so they contained no retained evidence that could be audited.
+No Criterion timing was run and no performance number is claimed.
+
+No completed Linux or Windows runtime result for both corrected full-pipeline cases was present in
+the inspected feature or CI records. Workflow configuration and portable source were not treated as
+runtime evidence.
+
+### Required rerun procedure
+
+1. Use a quiet, dedicated host on AC power with Low Power Mode disabled and no concurrent builds.
+2. Create clean, separate worktrees for the exact `main` and candidate revisions; record both full
+   commit IDs, compiler version, OS, CPU, and load averages before and after every run.
+3. Use one retained Criterion target directory and measure only
+   `clean_hot_paths/no_frontmatter/full_pipeline` and
+   `clean_hot_paths/clean_frontmatter/full_pipeline` in this order:
+   `main` with `--save-baseline`, candidate with `--baseline`, then `main` again with a distinct
+   comparison baseline.
+4. Retain terminal output and Criterion raw samples for all three runs. Reject the bracket if the two
+   `main` runs disagree beyond their confidence intervals or show material scheduler/thermal drift.
+5. Record the candidate confidence intervals, percentage changes, p-values, and the final
+   no-regression decision for each case separately.
+6. Record completed Linux and Windows runtime gates for the affected Darkmatter and biscuit-file
+   package areas alongside the macOS result; do not substitute workflow definitions for run output.
+
+### Bounded structural evidence from cycle 2
+
+- `cargo check -p darkmatter --bench clean_hot_paths --color never`: passed in 12.46 seconds.
+- `cargo nextest run -p darkmatter --test clean_counters --color never`: 8 passed, 0 skipped.
+- `cargo clippy -p darkmatter --bench clean_hot_paths --color never -- -D warnings`: passed with no
+  warnings in 28.77 seconds after waiting for the shared build-directory lock.
+
+These gates prove the corrected benchmark vehicle still compiles, its load-independent hot-path
+invariants hold, and the benchmark target is lint-clean. They do not satisfy the timed acceptance.

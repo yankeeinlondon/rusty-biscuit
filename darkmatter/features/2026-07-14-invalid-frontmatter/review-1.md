@@ -9,6 +9,7 @@ implemented_by: codex/default
 log: darkmatter/features/2026-07-14-invalid-frontmatter/log.md
 description: "A **feature** review of `2026-07-14-invalid-frontmatter/spec.md`"
 feature: 2026-07-14-invalid-frontmatter/review-1.md
+next: 2026-07-14-invalid-frontmatter/review-2.md
 ---
 
 # Review 1 — Invalid Frontmatter
