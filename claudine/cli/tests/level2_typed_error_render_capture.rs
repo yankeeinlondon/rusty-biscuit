@@ -2,10 +2,11 @@
 //!
 //! Feature: `claudine/features/2026-07-13-error-propogation/` (Phase 7).
 //!
-//! Drives the real `claudine` binary through a real tmux pane for every route
-//! the migration touched, and asserts the property the feature exists to
-//! deliver: **a typed failure reaches the user as a rendered `StatusBlock`, not
-//! the generic `Error:` line**.
+//! Drives the real `claudine` binary through real terminal panes and asserts
+//! the property the feature exists to deliver: **a typed failure reaches the
+//! user as a rendered `StatusBlock`, not the generic `Error:` line**. Tmux
+//! provides portable route and automatic-color coverage; WezTerm verifies
+//! automatic OSC 8 selection in a terminal known to advertise it.
 //!
 //! ## Why these need a terminal
 //!
@@ -39,6 +40,7 @@
 #[allow(deprecated)]
 use assert_cmd::cargo::cargo_bin;
 use biscuit_test_harness::tmux::TmuxHarness;
+use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use std::fs;
@@ -309,7 +311,7 @@ const EXIT_MARKER: &str = "claudine_rc:";
 /// `claudine_rc:$?`, whose suffix is not digits and therefore cannot match — so
 /// this distinguishes the shell's *output* from the keystrokes that produced it
 /// without any settle-time guesswork.
-fn wait_for_exit_marker(harness: &mut TmuxHarness, deadline: Duration) -> Capture {
+fn wait_for_exit_marker<H: TerminalHarness>(harness: &mut H, deadline: Duration) -> Capture {
     let stop = Instant::now() + deadline;
     loop {
         let frame = harness.capture().expect("capture pane");
@@ -389,6 +391,47 @@ fn run_in_pane(
     capture
 }
 
+/// Run the automatic-capability fixture in WezTerm and retain scrollback so
+/// the document link remains available even when the block exceeds the
+/// viewport.
+fn run_in_wezterm_pane(harness: &mut WezTermHarness, staged: &Staged) -> Capture {
+    let claudine = cargo_bin!("claudine").display().to_string();
+    let home = staged.workspace.path().to_string_lossy().into_owned();
+    let path = augmented_path(&staged.bin_dir);
+    let path = path.to_string_lossy().into_owned();
+
+    harness
+        .send_text(b"clear; printf '\\033[3J'\n")
+        .expect("clear pane and scrollback");
+    let _ = biscuit_test_harness::wait_for_prompt(harness);
+    harness
+        .send_text(format!("cd {}\n", staged.workspace.path().display()).as_bytes())
+        .expect("cd into workspace");
+    let _ = biscuit_test_harness::wait_for_prompt(harness);
+
+    let cmd = format!(
+        "{claudine} compose --claude {}; echo {EXIT_MARKER}$?",
+        staged.doc.display()
+    );
+    harness
+        .send_command_with_env(
+            &cmd,
+            &[
+                ("HOME", home.as_str()),
+                ("PATH", path.as_str()),
+                ("COLUMNS", "100"),
+            ],
+        )
+        .expect("send claudine command");
+
+    let mut capture = wait_for_exit_marker(harness, Duration::from_secs(30));
+    let _ = biscuit_test_harness::wait_for_prompt(harness);
+    capture.frame = harness
+        .capture_scrollback(200)
+        .expect("capture WezTerm scrollback");
+    capture
+}
+
 /// The styled contract: a real TTY with colour enabled.
 const TTY_COLOR: [(&str, &str); 2] = [("FORCE_COLOR", "1"), ("COLUMNS", "100")];
 
@@ -405,9 +448,9 @@ const TTY_AUTO: [(&str, &str); 1] = [("COLUMNS", "100")];
 
 const COLOR_OVERRIDES_ABSENT_MARKER: &str = "claudine_color_overrides_absent";
 
-/// Remove the color overrides installed by `TmuxHarness::spawn_shell`, then
-/// verify the interactive shell will not export any of them to Claudine.
-fn unset_and_prove_color_overrides_absent(harness: &mut TmuxHarness) {
+/// Remove the color overrides installed by the terminal harness, then verify
+/// the interactive shell will not export any of them to Claudine.
+fn unset_and_prove_color_overrides_absent<H: TerminalHarness>(harness: &mut H) {
     harness
         .send_text(b"unset NO_COLOR FORCE_COLOR CLICOLOR_FORCE\n")
         .expect("unset color overrides");
@@ -565,7 +608,7 @@ fn level2_initialize_proxy_block_is_plain_under_no_color_in_tmux() {
     assert_eq!(capture.exit_code, 1, "NO_COLOR must not change the exit code");
 }
 
-/// Automatic TTY colour detection — the branch `FORCE_COLOR=1` bypasses.
+/// Automatic TTY color detection — the branch `FORCE_COLOR=1` bypasses.
 ///
 /// `level2_initialize_proxy_block_carries_red_sgr_and_osc8_link_in_tmux` pins
 /// the styled block through `FORCE_COLOR=1`, which selects
@@ -600,14 +643,67 @@ fn level2_initialize_proxy_block_auto_detects_tty_color_in_tmux() {
         capture.frame.raw
     );
     assert!(
-        capture.has_osc8_link(),
-        "the wrapper must recognise its real stderr TTY and emit the OSC 8 \
-         document link without FORCE_COLOR.\nraw:\n{}",
+        !capture.has_osc8_link(),
+        "an unforced tmux pane with no known outer-terminal identifier must \
+         not imply OSC 8 support.\nraw:\n{}",
         capture.frame.raw
+    );
+
+    let normalized_plain: String = capture
+        .frame
+        .plain
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect();
+    assert!(
+        normalized_plain.contains("route.md]("),
+        "a terminal without detected OSC 8 support must retain the visible \
+         Markdown link fallback.\nplain:\n{}",
+        capture.frame.plain
     );
 
     // Same actionable content the forced-colour and plain cases pin: the
     // authored reference and the resolution-failure reason.
+    capture.assert_contains("no/such/target.md", "the authored reference must be named");
+    capture.assert_contains("does not exist", "the resolution failure must be stated");
+}
+
+/// Automatic OSC 8 selection in a terminal whose own identity advertises the
+/// capability. No color or link override is supplied to Claudine.
+#[test]
+#[serial(level2_terminal)]
+fn level2_initialize_proxy_block_auto_detects_osc8_in_wezterm() {
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
+
+    let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");
+    unset_and_prove_color_overrides_absent(&mut harness);
+    let staged = stage(
+        "claudine-l2-init-proxy-auto-wezterm",
+        INITIALIZE_PROXY_DOC,
+        0,
+    );
+    let capture = run_in_wezterm_pane(&mut harness, &staged);
+
+    assert!(
+        capture.has_status_block(),
+        "the block must render under automatic WezTerm detection.\nplain:\n{}",
+        capture.frame.plain
+    );
+    assert!(
+        capture.has_red_sgr(),
+        "WezTerm must enable the red SGR ({RED_SGR_FORMS:?}) without \
+         FORCE_COLOR.\nraw:\n{}",
+        capture.frame.raw
+    );
+    assert!(
+        capture.has_osc8_link(),
+        "WezTerm must enable the OSC 8 document link without FORCE_COLOR.\nraw:\n{}",
+        capture.frame.raw
+    );
     capture.assert_contains("no/such/target.md", "the authored reference must be named");
     capture.assert_contains("does not exist", "the resolution failure must be stated");
 }
@@ -775,15 +871,30 @@ fn level2_proxy_routes_share_identity_across_routes_in_tmux() {
     }
 
     // Match the event label rather than the event name embedded in the
-    // independently asserted property path.
+    // independently asserted property path. StatusBlock gutters are terminal
+    // layout, not semantic separators within wrapped prose.
+    let normalize_wrapped_block = |plain: &str| {
+        plain
+            .lines()
+            .map(|line| {
+                line.trim_start()
+                    .strip_prefix(BODY_GUTTER)
+                    .unwrap_or(line)
+                    .trim()
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let init_plain = normalize_wrapped_block(&init.frame.plain);
+    let term_plain = normalize_wrapped_block(&term.frame.plain);
     assert!(
-        init.frame.plain.contains("`initialize` event of"),
+        init_plain.contains("`initialize` event of"),
         "the initialize route must render its structured event label separately \
          from the property path.\nplain:\n{}",
         init.frame.plain
     );
     assert!(
-        term.frame.plain.contains("`failure` event of"),
+        term_plain.contains("`failure` event of"),
         "the terminal route must render its structured event label separately \
          from the property path.\nplain:\n{}",
         term.frame.plain
