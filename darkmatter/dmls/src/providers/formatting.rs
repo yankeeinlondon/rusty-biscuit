@@ -227,30 +227,67 @@ mod tests {
 
     #[test]
     fn test_format_text_preserves_markers_in_protected_bodies() {
-        let source = concat!(
-            "<div>\n",
-            "* literal html\n",
-            "</div>\n",
-            "\n",
-            "::shell-block\n",
-            "* literal shell\n",
-            "::end-block\n",
-            "\n",
-            "- Actual item.\n"
-        );
+        let fixtures = [
+            (
+                concat!(
+                    "::shell-block\n",
+                    "- first literal\n",
+                    "+ second literal\n",
+                    "* third literal\n",
+                    "1. ordered literal\n",
+                    "- [ ] task literal\n",
+                    "::end-block\n",
+                    "\n",
+                    "+ Actual item long enough to wrap at width twenty four.\n"
+                ),
+                concat!(
+                    "::shell-block\n",
+                    "- first literal\n",
+                    "+ second literal\n",
+                    "* third literal\n",
+                    "1. ordered literal\n",
+                    "- [ ] task literal\n",
+                    "::end-block\n",
+                    "\n",
+                    "+ Actual item long\n",
+                    "  enough to wrap at\n",
+                    "  width twenty four.\n"
+                ),
+            ),
+            (
+                concat!(
+                    "> ::shell-block\n",
+                    "> - first literal\n",
+                    "> + second literal\n",
+                    "> * third literal\n",
+                    "> 1. ordered literal\n",
+                    "> - [ ] task literal\n",
+                    "> ::end-block\n",
+                    "> \n",
+                    "> + Actual item long enough to wrap at width twenty four.\n"
+                ),
+                concat!(
+                    "> ::shell-block\n",
+                    "> - first literal\n",
+                    "> + second literal\n",
+                    "> * third literal\n",
+                    "> 1. ordered literal\n",
+                    "> - [ ] task literal\n",
+                    "> ::end-block\n",
+                    "> \n",
+                    "> + Actual item long\n",
+                    ">   enough to wrap at\n",
+                    ">   width twenty four.\n"
+                ),
+            ),
+        ];
         let mut config = DmlsConfig::default();
         config.formatting.fixed_width = Some(24);
 
-        let mut direct: Markdown = source.into();
-        direct.cleanup();
-        *direct.content_mut() = reflow_to_width(direct.content(), 24);
-        let expected = direct.as_string();
-
-        assert_eq!(format_text(source, &config), expected);
-        assert!(expected.contains("* literal html"));
-        assert!(expected.contains("* literal shell"));
-        assert!(expected.contains("- Actual item."));
-        assert_eq!(format_text(&expected, &config), expected);
+        for (source, expected) in fixtures {
+            assert_eq!(format_text(source, &config), expected);
+            assert_eq!(format_text(expected, &config), expected);
+        }
     }
 
     #[test]
