@@ -3849,6 +3849,60 @@ fn meta_schema_standalone_types_first_retains_last_good_across_nested_quote_edit
     fixture.shutdown();
 }
 
+/// A flow-authored tagged envelope with `types` before `kind` must retain the
+/// same last-good assistance as its block-style equivalent when a nested
+/// definition becomes the valid YAML plain scalar `foo-"bar`.
+#[test]
+fn meta_schema_standalone_flow_types_first_retains_last_good_across_plain_quote_edit() {
+    let workspace = tempfile::tempdir().unwrap();
+    let valid = "{types: {title: string}, kind: schema}\n";
+    let malformed = "{types: {title: foo-\"bar}, kind: schema}\n";
+    let path = workspace.path().join("flow-types-first.yaml");
+    std::fs::write(&path, valid).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), valid);
+    assert!(fixture.wait_for_diagnostics(uri.as_str()).is_empty());
+
+    let hover = hover_markup(&mut fixture, uri.as_str(), 0, 10);
+    assert!(
+        hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+        "valid flow envelope activates semantic intelligence: {hover}"
+    );
+
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": malformed } ]
+        }),
+    );
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_type_definition")),
+        "the current malformed definition owns diagnostics: {diagnostics:?}"
+    );
+
+    let labels = completion_labels(&mut fixture, uri.as_str(), 0, 16);
+    assert!(
+        labels.iter().any(|label| label == "string"),
+        "the retained flow model keeps completion alive: {labels:?}"
+    );
+
+    let hover = hover_markup(&mut fixture, uri.as_str(), 0, 10);
+    assert!(
+        hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+        "the retained flow model survives the malformed edit: {hover}"
+    );
+
+    fixture.shutdown();
+}
+
 /// Flow presentation is not a second dialect: the authoritative standalone
 /// parser accepts a YAML mapping however it is written, so a flow-authored
 /// envelope seeds the same last-good model a block one does. The activation
@@ -5178,4 +5232,3 @@ fn standalone_inner_definition_diagnostics_address_punctuated_keys() {
 
     fixture.shutdown();
 }
-

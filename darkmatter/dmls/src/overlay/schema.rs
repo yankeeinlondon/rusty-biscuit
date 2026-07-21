@@ -428,14 +428,16 @@ fn flow_mapping_start(text: &str) -> Option<usize> {
 ///
 /// Only depth-0 `:` and `,` delimit entries, so nested flow collections and
 /// quoted scalars (which is where a raw JSON Schema hides its `://` and its
-/// commas) cannot be mistaken for top-level structure. Unterminated input
-/// yields whatever entries were complete, which is exactly what a mid-edit
-/// buffer needs.
+/// commas) cannot be mistaken for top-level structure. A quote opens such a
+/// scalar only at a YAML scalar boundary; a quote embedded in plain content is
+/// inert. Unterminated input yields whatever entries were complete, which is
+/// exactly what a mid-edit buffer needs.
 fn flow_top_level_entries(inner: &str) -> Vec<(String, String)> {
     let mut entries = Vec::new();
     let mut depth = 0usize;
     let mut quote: Option<char> = None;
     let mut in_comment = false;
+    let mut at_scalar_start = true;
     let mut previous_space = true;
     let mut key: Option<String> = None;
     let mut token = String::new();
@@ -457,11 +459,13 @@ fn flow_top_level_entries(inner: &str) -> Vec<(String, String)> {
             {
                 token.push(doubled);
             }
+            at_scalar_start = false;
             previous_space = false;
             continue;
         }
+        let mut structural_value_boundary = false;
         match ch {
-            '\'' | '"' => {
+            '\'' | '"' if at_scalar_start => {
                 token.push(ch);
                 quote = Some(ch);
                 escaped = false;
@@ -481,11 +485,17 @@ fn flow_top_level_entries(inner: &str) -> Vec<(String, String)> {
                 push_flow_entry(&mut entries, &mut key, &mut token);
                 break;
             }
-            ':' if depth == 0 && key.is_none() => key = Some(std::mem::take(&mut token)),
+            ':' if depth == 0 && key.is_none() => {
+                key = Some(std::mem::take(&mut token));
+                structural_value_boundary = true;
+            }
             ',' if depth == 0 => push_flow_entry(&mut entries, &mut key, &mut token),
             _ => token.push(ch),
         }
         previous_space = ch.is_whitespace();
+        at_scalar_start = structural_value_boundary
+            || is_scalar_boundary(ch, chars.peek().copied())
+            || (at_scalar_start && previous_space);
     }
     push_flow_entry(&mut entries, &mut key, &mut token);
     entries
@@ -1300,6 +1310,49 @@ mod tests {
         // The inert direction: ordinary YAML carrying the same mid-scalar quote
         // and no envelope tag must stay unclaimed, in agreement with the parser.
         for inert in ["title: foo-\"bar\n", concat!("types:\n", "  title: foo-\"bar\n")] {
+            assert_eq!(standalone_envelope_claim(inert), None, "{inert:?}");
+            assert!(
+                matches!(
+                    darkmatter::markdown::schemas::parse_standalone_schema_document(
+                        inert,
+                        Path::new("/w/schema.yaml"),
+                    ),
+                    Ok(None)
+                ),
+                "the authoritative parser must also decline {inert:?}"
+            );
+        }
+    }
+
+    /// Flow collections use the same YAML scalar-boundary rule as block
+    /// mappings: a quote embedded in a plain scalar is content, not an opener.
+    /// Nested braces must still affect only flow depth so the following
+    /// top-level `kind` entry remains visible in either tagged key order.
+    #[test]
+    fn envelope_claim_agrees_with_parser_on_flow_nested_plain_scalar_quote() {
+        for carrier in [
+            r#"{types: {title: foo-"bar}, kind: schema}"#,
+            r#"{kind: schema, types: {title: foo-"bar}}"#,
+        ] {
+            assert!(
+                darkmatter::markdown::schemas::parse_standalone_schema_document(
+                    carrier,
+                    Path::new("/w/schema.yaml"),
+                )
+                .is_err(),
+                "the authoritative parser recognizes the envelope and rejects the type: {carrier:?}"
+            );
+            assert_eq!(
+                standalone_envelope_claim(carrier),
+                Some(StandaloneSchemaEnvelope::Tagged),
+                "{carrier:?}"
+            );
+        }
+
+        for inert in [
+            r#"{types: {title: foo-"bar}}"#,
+            r#"{kind: config, types: {title: foo-"bar}}"#,
+        ] {
             assert_eq!(standalone_envelope_claim(inert), None, "{inert:?}");
             assert!(
                 matches!(
