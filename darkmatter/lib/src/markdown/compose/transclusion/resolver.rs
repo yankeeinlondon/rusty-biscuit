@@ -5,6 +5,7 @@ use crate::markdown::compose::util::{
     document_resolution_context, find_git_root_from, find_package_area_from,
 };
 use crate::markdown::compose::{ComposeSource, TransclusionOptions};
+use crate::markdown::compose::context::options::SourceDerivation;
 use biscuit_file::{FileReference, FileReferenceKind};
 use biscuit_terminal::errors::SourceContext;
 use std::path::{Path, PathBuf};
@@ -68,9 +69,10 @@ fn resolve_url_target(
 /// and `{{ENV}}` references by their existing `FileReference` semantics. There
 /// is no ambient-CWD read (D2).
 ///
-/// A file-backed `source` has already been accepted as the top-level document
-/// or by a parent transclusion, so deriving its context uses the explicit
-/// trusted-external boundary while retaining validation of the request root.
+/// Source provenance controls context derivation. Ordinary sources retain
+/// repository containment; only a child that already resolved outside that
+/// boundary uses trusted-external derivation. The originating request boundary
+/// remains validated in both cases.
 pub(crate) fn resolve_path(
     raw_target: &str,
     kind: DirectiveKind,
@@ -129,9 +131,12 @@ pub(crate) fn resolve_path(
         None => PathBuf::from("."),
     };
     let resolution_ctx = match options.file_resolution_context.as_ref() {
-        Some(snapshot) => match source_file_path(source) {
-            Some(path) => snapshot.for_trusted_external_source(path),
-            None => snapshot.for_base(&base_dir),
+        Some(snapshot) => match (source_file_path(source), options.source_derivation) {
+            (Some(path), SourceDerivation::TrustedExternal) => {
+                snapshot.for_trusted_external_source(path)
+            }
+            (Some(path), SourceDerivation::Ordinary) => snapshot.for_source(path),
+            (None, _) => snapshot.for_base(&base_dir),
         },
         None => {
             let repo_root = find_git_root_from(&base_dir);

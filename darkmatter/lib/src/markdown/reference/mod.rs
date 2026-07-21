@@ -66,7 +66,14 @@ fn resolve_transclusion_target(
         return Ok(None);
     };
     let context = match options.file_resolution_context() {
-        Some(snapshot) => snapshot.for_source(source_path),
+        Some(snapshot) => match options.source_derivation {
+            crate::markdown::compose::context::options::SourceDerivation::Ordinary => {
+                snapshot.for_source(source_path)
+            }
+            crate::markdown::compose::context::options::SourceDerivation::TrustedExternal => {
+                snapshot.for_trusted_external_source(source_path)
+            }
+        },
         None => {
             let repository_root = crate::markdown::compose::find_git_root_from(base_dir);
             let package_area = crate::markdown::compose::find_package_area_from(

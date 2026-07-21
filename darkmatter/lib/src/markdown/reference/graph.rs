@@ -75,9 +75,13 @@ fn build_graph_inner(
     extract_references: bool,
 ) -> MarkdownResult<ReferenceGraph> {
     let source = md.source().clone().unwrap_or(ComposeSource::Unknown);
-    let options = ReferenceGraphOptions::with_compose(
-        super::options_with_reference_resolution_context(&source, &options.compose),
-    );
+    let compose = super::options_with_reference_resolution_context(&source, &options.compose);
+    let compose = match &source {
+        ComposeSource::File(path) => compose.with_source_file(path),
+        ComposeSource::Url(url) => compose.with_source_url(url.clone()),
+        ComposeSource::Unknown => compose,
+    };
+    let options = ReferenceGraphOptions::with_compose(compose);
     let options = &options;
     let mut runtime = ReferenceAnalysisRuntime {
         transclusion: TransclusionRuntime::new(options.compose.max_transclusion_depth),
@@ -229,6 +233,18 @@ fn section_at_line(
         .map(|(_, text, level)| (text.as_str(), *level))
 }
 
+fn accepted_child_options(
+    options: &ReferenceGraphOptions,
+    path: &std::path::Path,
+) -> ReferenceGraphOptions {
+    ReferenceGraphOptions::with_compose(
+        options
+            .compose
+            .clone()
+            .with_accepted_source_file(path),
+    )
+}
+
 /// Build a single graph node for a document.
 ///
 /// Returns the node itself plus all descendant nodes collected during
@@ -246,7 +262,7 @@ fn build_node(
     // Always run InlinePre preparation (rec #2): page blocks, interpolation,
     // shell expansion, and text replacement can affect references even in
     // leaf documents with no transclusions.
-    let prepared_content = prepare_content(md, source, options)?;
+    let prepared_content = prepare_content(md, options)?;
 
     let ctx = {
         let base = md.source_context_for_errors();
@@ -294,11 +310,7 @@ fn build_node(
         })
     };
 
-    let when_options = match source {
-        ComposeSource::File(path) => options.compose.clone().with_source_file(path),
-        ComposeSource::Url(url) => options.compose.clone().with_source_url(url.clone()),
-        ComposeSource::Unknown => options.compose.clone(),
-    };
+    let when_options = options.compose.clone();
     let when_lookup = ResolvingLookup::new(
         &effective_state,
         when_options.local_expression_resolution_context(),
@@ -362,7 +374,7 @@ fn build_node(
                             let (child_node, mut descendants) = build_node(
                                 &child_md,
                                 &child_source,
-                                options,
+                                &accepted_child_options(options, &child_path),
                                 runtime,
                                 extract_references,
                             )?;
@@ -400,7 +412,7 @@ fn build_node(
     if let Ok(toc_directives) =
         crate::markdown::compose::toc_linking::parse_directives(&prepared_content)
     {
-        let transclusion_options = transclusion_options_for_source(options, source);
+        let transclusion_options = options.compose.transclusion_options();
 
         for directive in &toc_directives {
             let ref_id = make_reference_id(source, directive.line, directive.span.start);
@@ -457,7 +469,7 @@ fn build_node(
                         let (child_node, mut descendants) = build_node(
                             &child_md,
                             &child_source,
-                            options,
+                            &accepted_child_options(options, &path),
                             runtime,
                             extract_references,
                         )?;
@@ -614,7 +626,7 @@ fn build_node(
                         let (child_node, mut descendants) = build_node(
                             &child_md,
                             &child_source,
-                            options,
+                            &accepted_child_options(options, &child_path),
                             runtime,
                             extract_references,
                         )?;
@@ -689,7 +701,7 @@ fn build_node(
                         let (child_node, mut descendants) = build_node(
                             &child_md,
                             &child_source,
-                            options,
+                            &accepted_child_options(options, &child_path),
                             runtime,
                             extract_references,
                         )?;
@@ -791,32 +803,35 @@ pub(super) fn prepare_content_for_validation(
     source: &ComposeSource,
     options: &ReferenceGraphOptions,
 ) -> MarkdownResult<String> {
-    prepare_content(md, source, options)
+    let node_options = match source {
+        ComposeSource::File(path) if options.compose.source != *source => {
+            accepted_child_options(options, path)
+        }
+        ComposeSource::Url(url) if options.compose.source != *source => {
+            ReferenceGraphOptions::with_compose(
+                options.compose.clone().with_source_url(url.clone()),
+            )
+        }
+        _ => options.clone(),
+    };
+    prepare_content(md, &node_options)
 }
 
 /// Prepare content by running only InlinePre operations.
 ///
 /// Starts from the caller's `ComposeOptions` (rec #3) to preserve
-/// external state, overrides, cache settings, shell settings, etc.
-/// Then restricts to InlinePre-only operations and sets the per-node source.
+/// external state, overrides, cache settings, shell settings, and per-node
+/// source provenance, then restricts to InlinePre-only operations.
 fn prepare_content(
     md: &Markdown,
-    source: &ComposeSource,
     options: &ReferenceGraphOptions,
 ) -> MarkdownResult<String> {
-    let mut inline_pre_options = options.compose.clone().only(&[
+    let inline_pre_options = options.compose.clone().only(&[
         ComposeOperation::TextReplacement,
         ComposeOperation::PageBlocks,
         ComposeOperation::Interpolation,
         ComposeOperation::ShellExpansion,
     ]);
-
-    // Set the source for this specific node (may differ from root)
-    inline_pre_options = match source {
-        ComposeSource::File(p) => inline_pre_options.with_source_file(p),
-        ComposeSource::Url(u) => inline_pre_options.with_source_url(u.clone()),
-        ComposeSource::Unknown => inline_pre_options,
-    };
 
     let (result, _report) = md.compose_with(inline_pre_options)?;
     Ok(result.content().to_string())
@@ -856,18 +871,6 @@ fn source_to_id(source: &ComposeSource) -> NodeId {
         ),
         ComposeSource::Url(u) => NodeId::from(u.to_string()),
     }
-}
-
-fn transclusion_options_for_source(
-    options: &ReferenceGraphOptions,
-    source: &ComposeSource,
-) -> crate::markdown::compose::TransclusionOptions {
-    let compose = match source {
-        ComposeSource::File(path) => options.compose.clone().with_source_file(path),
-        ComposeSource::Url(url) => options.compose.clone().with_source_url(url.clone()),
-        ComposeSource::Unknown => options.compose.clone(),
-    };
-    compose.transclusion_options()
 }
 
 fn resolve_toc_linking_target(
@@ -985,7 +988,7 @@ mod tests {
 
     #[test]
     #[serial_test::serial(reference_graph_snapshot)]
-    fn when_condition_reuses_request_env_home_magic_and_package_roots() {
+    fn when_condition_reuses_request_home_magic_and_package_roots() {
         let request = tempfile::tempdir().unwrap();
         let home = request.path().join("home");
         let magic = request.path().join("magic");
@@ -994,60 +997,52 @@ mod tests {
             std::fs::create_dir_all(dir).unwrap();
         }
         for path in [
-            request.path().join("env.flag"),
             home.join("home.flag"),
             magic.join("magic.flag"),
             package.join("package.flag"),
         ] {
             std::fs::write(path, "ready").unwrap();
         }
-        for index in 1..=4 {
+        for index in 1..=3 {
             std::fs::write(request.path().join(format!("child-{index}.md")), "# Child\n").unwrap();
         }
         let root_path = request.path().join("root.md");
         std::fs::write(
             &root_path,
-            "::file child-1.md when=\"file_exists('{{{DARKMATTER_GRAPH_ROOT}}}/env.flag')\"\n\
-             ::file child-2.md when=\"file_exists('~/home.flag')\"\n\
-             ::file child-3.md when=\"file_exists('@magic.flag')\"\n\
-             ::file child-4.md when=\"file_exists('!package.flag')\"\n",
+            "::file child-1.md when=\"file_exists('~/home.flag')\"\n\
+             ::file child-2.md when=\"file_exists('@magic.flag')\"\n\
+             ::file child-3.md when=\"file_exists('!package.flag')\"\n",
         )
         .unwrap();
-        let mut env = std::collections::HashMap::new();
-        env.insert(
-            "DARKMATTER_GRAPH_ROOT".to_string(),
-            request.path().display().to_string(),
-        );
         let snapshot = biscuit_file::FileResolutionContext::from_snapshot(
             request.path(),
             Some(home),
-            env,
+            std::collections::HashMap::new(),
         )
         .with_repository_root(request.path())
         .with_package_area(package)
         .add_magic_path(magic, biscuit_file::PathPosition::Start);
-        let prior = std::env::var_os("DARKMATTER_GRAPH_ROOT");
+        let prior = std::env::var_os("HOME");
         // SAFETY: the test is serialized while process-global state is changed.
-        unsafe { std::env::set_var("DARKMATTER_GRAPH_ROOT", request.path()) };
         let options = ReferenceGraphOptions::with_compose(
             ComposeOptions::new().with_file_resolution_context(snapshot),
         );
         let ambient = tempfile::tempdir().unwrap();
         // SAFETY: the test is serialized while process-global state is changed.
-        unsafe { std::env::set_var("DARKMATTER_GRAPH_ROOT", ambient.path()) };
+        unsafe { std::env::set_var("HOME", ambient.path()) };
 
         let root_md = Markdown::try_from(root_path.as_path()).unwrap();
         let graph = build_reference_graph(&root_md, &options).unwrap();
         assert_eq!(
             graph.node_count(),
-            5,
+            4,
             "resolved nodes: {:?}",
             graph.nodes.iter().map(|node| &node.source).collect::<Vec<_>>()
         );
 
         match prior {
-            Some(value) => unsafe { std::env::set_var("DARKMATTER_GRAPH_ROOT", value) },
-            None => unsafe { std::env::remove_var("DARKMATTER_GRAPH_ROOT") },
+            Some(value) => unsafe { std::env::set_var("HOME", value) },
+            None => unsafe { std::env::remove_var("HOME") },
         }
     }
 
@@ -1110,6 +1105,69 @@ mod tests {
         // Flattened should contain all references in composed order
         let flat = flatten_graph(&graph);
         assert!(flat.len() >= 4); // root-link, transclusion, child-link, after
+    }
+
+    #[test]
+    fn accepted_external_child_keeps_authoring_provenance_across_surfaces() {
+        let request = tempfile::tempdir().unwrap();
+        let repository = request.path().join("repository");
+        let external = request.path().join("external-magic");
+        std::fs::create_dir_all(&repository).unwrap();
+        std::fs::create_dir_all(&external).unwrap();
+
+        let root_path = repository.join("root.md");
+        let child_path = external.join("child.md");
+        let grandchild_path = external.join("grandchild.md");
+        std::fs::write(&root_path, "# Root\n\n::file @child.md\n").unwrap();
+        std::fs::write(
+            &child_path,
+            "# External child\n\n::file ./grandchild.md\n",
+        )
+        .unwrap();
+        std::fs::write(&grandchild_path, "# External grandchild\n").unwrap();
+
+        let snapshot = biscuit_file::FileResolutionContext::from_snapshot(
+            &repository,
+            None,
+            std::collections::HashMap::new(),
+        )
+        .with_repository_root(&repository)
+        .add_magic_path(&external, biscuit_file::PathPosition::Start);
+        let compose = ComposeOptions::new()
+            .with_source_file(&root_path)
+            .with_file_resolution_context(snapshot);
+        let graph_options = ReferenceGraphOptions::with_compose(compose.clone());
+        let root_md = Markdown::try_from(root_path.as_path()).unwrap();
+
+        let (composed, _) = root_md.compose_with(compose.clone()).unwrap();
+        assert!(composed.content().contains("External child"));
+        assert!(composed.content().contains("External grandchild"));
+
+        let references = root_md.composed_references(graph_options.clone()).unwrap();
+        assert!(references.records.iter().any(|record| {
+            record.origin.source == ComposeSource::File(child_path.clone())
+                && record.target.raw() == Some("./grandchild.md")
+        }));
+
+        let graph = root_md.reference_graph(graph_options.clone()).unwrap();
+        let sources: Vec<_> = std::iter::once(&graph.root)
+            .chain(graph.nodes.iter())
+            .map(|node| node.source.clone())
+            .collect();
+        assert!(sources.contains(&ComposeSource::File(root_path.clone())));
+        assert!(sources.contains(&ComposeSource::File(child_path.clone())));
+        assert!(sources.contains(&ComposeSource::File(grandchild_path.clone())));
+
+        let validation = root_md
+            .validate_references(super::super::validate::ReferenceValidationOptions::with_graph(
+                graph_options,
+            ))
+            .unwrap();
+        assert!(validation.is_valid(), "issues: {:?}", validation.issues);
+
+        let child_md = Markdown::try_from(child_path.as_path()).unwrap();
+        let ordinary_external = compose.with_source_file(&child_path);
+        assert!(child_md.transclusions_with_options(&ordinary_external).is_err());
     }
 
     #[test]

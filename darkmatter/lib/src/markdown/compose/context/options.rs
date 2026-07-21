@@ -13,6 +13,13 @@ use std::sync::Arc;
 use std::time::Duration;
 use url::Url;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum SourceDerivation {
+    #[default]
+    Ordinary,
+    TrustedExternal,
+}
+
 /// Configuration for the compose pipeline.
 ///
 /// Controls which operations run, how transclusion resolves references,
@@ -135,6 +142,9 @@ pub struct ComposeOptions {
 
     /// Immutable request-scoped file-resolution inputs supplied by the host.
     pub(crate) file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+
+    /// How the current file source entered this compose run.
+    pub(crate) source_derivation: SourceDerivation,
 
     // ── Shell expansion ────────────────────────────────────────────
     /// Maximum execution time for a single `::shell` command.
@@ -456,6 +466,7 @@ impl ComposeOptions {
             resolve_repo_root: true,
             magic_paths: Vec::new(),
             file_resolution_context: None,
+            source_derivation: SourceDerivation::Ordinary,
             shell_timeout: std::time::Duration::from_secs(10),
             shell_timeout_behavior: ShellTimeoutBehavior::Error,
             shell_policy_root: None,
@@ -517,6 +528,26 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_source_file(mut self, path: impl Into<PathBuf>) -> Self {
         self.source = ComposeSource::File(path.into());
+        self.source_derivation = SourceDerivation::Ordinary;
+        self
+    }
+
+    /// Sets a child source that has already passed file-reference resolution.
+    #[must_use]
+    pub(crate) fn with_accepted_source_file(mut self, path: impl Into<PathBuf>) -> Self {
+        let path = path.into();
+        self.source_derivation = self
+            .file_resolution_context
+            .as_ref()
+            .filter(|snapshot| {
+                snapshot.for_source(&path).validate().is_err()
+                    && snapshot
+                        .for_trusted_external_source(&path)
+                        .validate()
+                        .is_ok()
+            })
+            .map_or(SourceDerivation::Ordinary, |_| SourceDerivation::TrustedExternal);
+        self.source = ComposeSource::File(path);
         self
     }
 
@@ -865,6 +896,7 @@ impl ComposeOptions {
             resolve_repo_root: self.resolve_repo_root,
             magic_paths: self.magic_paths.clone(),
             file_resolution_context: self.file_resolution_context.clone(),
+            source_derivation: self.source_derivation,
         }
     }
 
@@ -897,8 +929,11 @@ impl ComposeOptions {
     ) -> super::super::expression::ResolutionContext {
         let base_dir = self.resolution_base_dir();
         let file_resolution_context = self.file_resolution_context.as_ref().map(|snapshot| {
-            match &self.source {
-                ComposeSource::File(path) => snapshot.for_source(path),
+            match (&self.source, self.source_derivation) {
+                (ComposeSource::File(path), SourceDerivation::TrustedExternal) => {
+                    snapshot.for_trusted_external_source(path)
+                }
+                (ComposeSource::File(path), SourceDerivation::Ordinary) => snapshot.for_source(path),
                 _ => snapshot.for_base(&base_dir),
             }
         });
@@ -955,8 +990,11 @@ impl ComposeOptions {
     pub fn local_expression_resolution_context(&self) -> super::super::expression::ResolutionContext {
         let base_dir = self.resolution_base_dir();
         let file_resolution_context = self.file_resolution_context.as_ref().map(|snapshot| {
-            match &self.source {
-                ComposeSource::File(path) => snapshot.for_source(path),
+            match (&self.source, self.source_derivation) {
+                (ComposeSource::File(path), SourceDerivation::TrustedExternal) => {
+                    snapshot.for_trusted_external_source(path)
+                }
+                (ComposeSource::File(path), SourceDerivation::Ordinary) => snapshot.for_source(path),
                 _ => snapshot.for_base(&base_dir),
             }
         });
@@ -1399,6 +1437,9 @@ pub(crate) struct TransclusionOptions {
 
     /// Immutable request snapshot inherited by every nested document.
     pub file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+
+    /// How the current file source entered the traversal.
+    pub(crate) source_derivation: SourceDerivation,
 }
 
 impl Default for TransclusionOptions {
@@ -1414,6 +1455,7 @@ impl Default for TransclusionOptions {
             resolve_repo_root: true,
             magic_paths: Vec::new(),
             file_resolution_context: None,
+            source_derivation: SourceDerivation::Ordinary,
         }
     }
 }

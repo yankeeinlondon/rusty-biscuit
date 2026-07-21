@@ -352,7 +352,7 @@ fn collect_recursive(
                 apply_child_overrides(&mut child, &directive.options);
                 let child = collect_recursive(
                     &child,
-                    &options.clone().with_source_file(path.clone()),
+                    &options.clone().with_accepted_source_file(path.clone()),
                     seen,
                     entries,
                     visited,
@@ -420,7 +420,7 @@ fn collect_recursive(
                 let child = Markdown::try_from(path.as_path())?;
                 collect_recursive(
                     &child,
-                    &options.clone().with_source_file(path),
+                    &options.clone().with_accepted_source_file(path),
                     seen,
                     entries,
                     visited,

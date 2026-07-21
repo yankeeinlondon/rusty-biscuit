@@ -24,10 +24,10 @@
 use std::{
     collections::BTreeSet,
     fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
-use biscuit_file::FileReference;
+use biscuit_file::{FileReference, FileReferenceKind, FileResolutionContext};
 use crate::markdown::compose::{
     document_resolution_context, find_git_root_from, find_package_area_from,
 };
@@ -301,54 +301,53 @@ fn resolve_root_union(
 // into a filesystem path; bare-name selection only chooses *which* root to
 // resolve from.
 
-/// Returns `true` when `reference` is a bare name — no path separator and no
-/// special prefix (`./`, `../`, `/`, `@`, `!`, `vault:`, `%`). A bare name
-/// is eligible for schema-root resolution when roots are provided.
-fn is_bare_name(reference: &str) -> bool {
-    if reference.is_empty() {
-        return false;
-    }
-    // Any path separator disqualifies — `docs/x.yaml`, `./x.yaml`, `/x`.
-    if reference.contains('/') || reference.contains('\\') {
-        return false;
-    }
-    // Magic-path prefixes — `@`, `!`, `vault:`, `%` — are never bare names.
-    !reference.starts_with('@')
-        && !reference.starts_with('!')
-        && !reference.starts_with('%')
-        && !reference.starts_with("vault:")
-        && !reference.starts_with("vault::")
+/// Returns `true` when a parsed reference is a non-recursive implicit-relative
+/// name with exactly one portable path component.
+fn is_bare_name(file_ref: &FileReference) -> bool {
+    let class = file_ref.class();
+    let portable = file_ref.raw().replace('\\', "/");
+    let mut components = Path::new(&portable).components();
+    let is_single_component =
+        matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none();
+    class.kind == FileReferenceKind::ImplicitRelative
+        && !class.recursive
+        && is_single_component
 }
 
 /// Tries a bare name against each schema root, nearest first. Returns the
 /// resolved path of the first root that contains a file matching `name`, or
 /// `None` when no root has it.
 ///
-/// Each root is probed with explicit-relative (`./name`) semantics, which pins
-/// the probe to exactly that root. An implicit-relative probe would instead
-/// search the root's enclosing repository root first (the feature's new
-/// repository-first policy), letting a repository-root file shadow a nearer
-/// configured schema root and silently load the wrong schema. Explicit-relative
-/// resolution never falls back off the given root, so the loop's advertised
-/// nearest-first ordering is what actually decides the winner.
+/// Each root gets an explicit context derived from the request snapshot with no
+/// repository or package anchor. The parsed implicit-relative reference
+/// therefore has exactly one candidate per iteration, so the loop's advertised
+/// nearest-first ordering decides the winner without reading ambient state.
 fn try_bare_name_in_roots(
-    name: &str,
+    file_ref: &FileReference,
     schema_roots: &[PathBuf],
+    request_context: Option<&FileResolutionContext>,
 ) -> Result<Option<PathBuf>, SchemaError> {
-    // `name` is a bare name here (guaranteed by the `is_bare_name` guard at every
-    // call site): no path separator and no sigil. Prefixing `./` therefore yields
-    // a well-formed explicit-relative reference pinned to the root it resolves
-    // from — `FileReference` stays the sole authority that turns it into a path.
-    let pinned = format!("./{name}");
-    let file_ref = FileReference::new(&pinned).map_err(|source| SchemaError::Unresolved {
-        reference: name.to_string(),
-        source,
-    })?;
+    let captured = request_context.cloned().unwrap_or_else(|| {
+        FileResolutionContext::new(
+            schema_roots
+                .first()
+                .map(PathBuf::as_path)
+                .unwrap_or_else(|| Path::new(".")),
+        )
+    });
     for root in schema_roots {
+        // Omit repository/package anchors so this implicit bare name has one
+        // candidate: the selected schema root. HOME and environment still come
+        // from the immutable request snapshot, with no ambient reads.
+        let root_context = FileResolutionContext::from_snapshot(
+            root,
+            captured.home_dir().map(Path::to_path_buf),
+            captured.env().clone(),
+        );
         if let Some(path) = file_ref
-            .resolve_from(root)
+            .resolve_in_context(&root_context)
             .map_err(|source| SchemaError::Unresolved {
-                reference: name.to_string(),
+                reference: file_ref.raw().to_string(),
                 source,
             })?
         {
@@ -365,14 +364,11 @@ fn resolve_reference_in_context(
     request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Result<ResolvedSchema, SchemaError> {
     let trimmed = reference.trim();
-    if let Some(rest) = trimmed.strip_prefix("http://") {
-        let _ = rest;
-        return Err(SchemaError::RemoteUnsupported {
-            reference: reference.into(),
-        });
-    }
-    if let Some(rest) = trimmed.strip_prefix("https://") {
-        let _ = rest;
+    let file_ref = FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
+        reference: reference.to_string(),
+        source,
+    })?;
+    if file_ref.class().kind == FileReferenceKind::Url {
         return Err(SchemaError::RemoteUnsupported {
             reference: reference.into(),
         });
@@ -381,8 +377,10 @@ fn resolve_reference_in_context(
     // Bare-name resolution against schema roots (Phase 3). When schema roots
     // are provided and the reference has no path component, resolve against
     // the roots nearest-first instead of the document directory.
-    if !schema_roots.is_empty() && is_bare_name(trimmed) {
-        if let Some(path) = try_bare_name_in_roots(trimmed, schema_roots)? {
+    if !schema_roots.is_empty() && is_bare_name(&file_ref) {
+        if let Some(path) =
+            try_bare_name_in_roots(&file_ref, schema_roots, request_context)?
+        {
             let mut resolved =
                 load_schema_from_path_in_context(&path, schema_roots, request_context)?;
             resolved.origin = SchemaOrigin::referenced_file(path.clone());
@@ -408,10 +406,6 @@ fn resolve_reference_in_context(
         });
     }
 
-    let file_ref = FileReference::new(reference).map_err(|source| SchemaError::Unresolved {
-        reference: reference.to_string(),
-        source,
-    })?;
     // `$schema` references resolve through the shared document-backed context:
     // explicit `./`/`../` from the document directory only, implicit path
     // references repository-root first then the document directory — the same
@@ -927,15 +921,24 @@ impl ImportEngine {
                 named_types: current.named_types.clone(),
             });
         }
-        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        let file_ref =
+            FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
+                reference: reference.to_string(),
+                source,
+            })?;
+        if file_ref.class().kind == FileReferenceKind::Url {
             return Err(SchemaError::RemoteUnsupported {
                 reference: reference.to_string(),
             });
         }
 
         // Bare-name resolution against schema roots (Phase 3).
-        let path = if !self.schema_roots.is_empty() && is_bare_name(trimmed) {
-            if let Some(p) = try_bare_name_in_roots(trimmed, &self.schema_roots)? {
+        let path = if !self.schema_roots.is_empty() && is_bare_name(&file_ref) {
+            if let Some(p) = try_bare_name_in_roots(
+                &file_ref,
+                &self.schema_roots,
+                self.file_resolution_context.as_ref(),
+            )? {
                 p
             } else {
                 // Check sibling for pointed error.
@@ -954,11 +957,6 @@ impl ImportEngine {
                 });
             }
         } else {
-            let file_ref =
-                FileReference::new(reference).map_err(|source| SchemaError::Unresolved {
-                    reference: reference.to_string(),
-                    source,
-                })?;
             resolve_file_reference_in_context(
                 &file_ref,
                 &current.base_dir,
@@ -1356,14 +1354,21 @@ fn resolve_one_example(
                     .into(),
             })?
     } else {
-        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        let file_ref =
+            FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
+                reference: reference.to_string(),
+                source,
+            })?;
+        if file_ref.class().kind == FileReferenceKind::Url {
             return Err(SchemaError::RemoteUnsupported {
                 reference: reference.to_string(),
             });
         }
         // Bare-name resolution against schema roots (Phase 3).
-        if !schema_roots.is_empty() && is_bare_name(trimmed) {
-            if let Some(p) = try_bare_name_in_roots(trimmed, schema_roots)? {
+        if !schema_roots.is_empty() && is_bare_name(&file_ref) {
+            if let Some(p) =
+                try_bare_name_in_roots(&file_ref, schema_roots, request_context)?
+            {
                 p
             } else {
                 let sibling = base_dir.join(trimmed);
@@ -1381,11 +1386,6 @@ fn resolve_one_example(
                 });
             }
         } else {
-            let file_ref =
-                FileReference::new(reference).map_err(|source| SchemaError::Unresolved {
-                    reference: reference.to_string(),
-                    source,
-                })?;
             resolve_file_reference_in_context(&file_ref, base_dir, request_context)
                 .map_err(|source| SchemaError::Unresolved {
                     reference: reference.to_string(),
@@ -2576,35 +2576,53 @@ mod bare_name_phase3 {
         serde_yaml_ng::from_str(input).expect("yaml parse")
     }
 
-    // ── is_bare_name detection ──────────────────────────────────────────
+    fn parses_as_bare_name(raw: &str) -> bool {
+        FileReference::new(raw).is_ok_and(|file_ref| is_bare_name(&file_ref))
+    }
+
+    // ── Parsed bare-name classification ─────────────────────────────────
 
     #[test]
     fn bare_name_plain_filename() {
-        assert!(is_bare_name("claudine.yaml"));
-        assert!(is_bare_name("schema.yml"));
+        assert!(parses_as_bare_name("claudine.yaml"));
+        assert!(parses_as_bare_name("schema.yml"));
     }
 
     #[test]
     fn bare_name_rejects_path_separator() {
-        assert!(!is_bare_name("./claudine.yaml"));
-        assert!(!is_bare_name("docs/claudine.yaml"));
-        assert!(!is_bare_name("../types.yaml"));
-        assert!(!is_bare_name("/abs/schema.yaml"));
-        assert!(!is_bare_name(r"docs\schema.yaml"));
+        assert!(!parses_as_bare_name("./claudine.yaml"));
+        assert!(!parses_as_bare_name("docs/claudine.yaml"));
+        assert!(!parses_as_bare_name("../types.yaml"));
+        assert!(!parses_as_bare_name("/abs/schema.yaml"));
+        assert!(!parses_as_bare_name(r"docs\schema.yaml"));
     }
 
     #[test]
-    fn bare_name_rejects_magic_prefix() {
-        assert!(!is_bare_name("@schema.yaml"));
-        assert!(!is_bare_name("!schema.yaml"));
-        assert!(!is_bare_name("%schema.yaml"));
-        assert!(!is_bare_name("vault:schema.yaml"));
-        assert!(!is_bare_name("vault::schema.yaml"));
+    fn bare_name_rejects_special_and_recursive_classes() {
+        for raw in [
+            "@schema.yaml",
+            "!schema.yaml",
+            "%schema.yaml",
+            "vault:schema.yaml",
+            "vault::schema.yaml",
+            "~/schema.yaml",
+            "https://example.com/schema.yaml",
+        ] {
+            let file_ref = FileReference::new(raw).unwrap();
+            assert!(!is_bare_name(&file_ref), "{raw} must not be a bare name");
+        }
     }
 
     #[test]
-    fn bare_name_rejects_empty() {
-        assert!(!is_bare_name(""));
+    fn invalid_reference_fails_before_bare_name_classification() {
+        assert!(matches!(
+            FileReference::new(""),
+            Err(biscuit_file::FileReferenceError::InvalidSyntax(_))
+        ));
+        assert!(matches!(
+            FileReference::new("%"),
+            Err(biscuit_file::FileReferenceError::InvalidSyntax(_))
+        ));
     }
 
     // ── $schema bare-name resolution ────────────────────────────────────
@@ -2658,6 +2676,60 @@ mod bare_name_phase3 {
     }
 
     #[test]
+    #[serial_test::serial(schema_root_snapshot)]
+    fn bare_name_root_probe_uses_captured_environment() {
+        const NAME_VAR: &str = "DARKMATTER_SCHEMA_ROOT_NAME";
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let schemas = root.join("schemas");
+        let docs = root.join("docs");
+        fs::create_dir_all(&schemas).unwrap();
+        fs::create_dir_all(&docs).unwrap();
+        write(
+            &schemas,
+            "captured.yaml",
+            "$schema:\n  captured: 'string(required)'\n",
+        );
+
+        let request_context = FileResolutionContext::from_snapshot(
+            &docs,
+            Some(root.join("captured-home")),
+            std::collections::HashMap::from([(
+                NAME_VAR.to_string(),
+                "captured.yaml".to_string(),
+            )]),
+        );
+        let prior_name = std::env::var_os(NAME_VAR);
+        let prior_home = std::env::var_os("HOME");
+        // SAFETY: this test is serialized while process-global state is changed.
+        unsafe {
+            std::env::set_var(NAME_VAR, "ambient.yaml");
+            std::env::set_var("HOME", root.join("ambient-home"));
+        }
+
+        let value = yaml_value("'{{DARKMATTER_SCHEMA_ROOT_NAME}}'");
+        let result = resolve_yaml_schema_with_roots_in_context(
+            &value,
+            &docs,
+            std::slice::from_ref(&schemas),
+            Some(&request_context),
+        );
+
+        match prior_name {
+            Some(value) => unsafe { std::env::set_var(NAME_VAR, value) },
+            None => unsafe { std::env::remove_var(NAME_VAR) },
+        }
+        match prior_home {
+            Some(value) => unsafe { std::env::set_var("HOME", value) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+
+        let resolved = result.expect("captured schema name resolves");
+        let required = resolved.json_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|value| value == "captured"));
+    }
+
+    #[test]
     fn bare_name_resolves_from_far_root_when_near_lacks_it() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -2696,8 +2768,8 @@ mod bare_name_phase3 {
         // Canonicalize so macOS `/var` -> `/private/var` matches the workdir
         // `gix` reports for repository discovery.
         let root = std::fs::canonicalize(tmp.path()).unwrap();
-        // A real git repo so `resolve_from`'s repository discovery has a root
-        // to (wrongly) prefer if the probe were not pinned.
+        // A real git repo makes the repository-root collision representative of
+        // the request context used by composition hosts.
         gix::init(&root).unwrap();
 
         fs::create_dir_all(root.join("schemas")).unwrap();

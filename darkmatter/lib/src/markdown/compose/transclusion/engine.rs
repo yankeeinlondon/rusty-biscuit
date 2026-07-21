@@ -1357,7 +1357,7 @@ impl<'a> TransclusionEngine<'a> {
                     .with_replace_parent_wins(replace_parent_wins)
                     .with_one_off_replace(one_off.clone());
                 child_options.external_state = Some(inherited.clone());
-                child_options.source = ComposeSource::File(path_buf.clone());
+                child_options = child_options.with_accepted_source_file(path_buf.clone());
                 // Recursive graph reuse: hand the child its OWN preflight
                 // sub-node (whose edges point at grandchildren), so the child's
                 // transclusion stage reuses grandchild target resolution too.

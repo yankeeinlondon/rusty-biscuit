@@ -312,15 +312,14 @@ pub(crate) fn validate(
     options: &ReferenceValidationOptions,
 ) -> Result<ReferenceValidationReport, ReferenceError> {
     info!("validate: starting reference validation");
-    let ref_set = {
-        let graph = super::graph::build_reference_graph(md, &options.graph).map_err(|error| {
+    let graph = super::graph::build_reference_graph(md, &options.graph).map_err(|error| {
             match error {
                 crate::markdown::MarkdownError::Reference(inner) => *inner,
                 other => ReferenceError::Compose(Box::new(other)),
             }
         })?;
-        super::graph::flatten_graph(&graph)
-    };
+    let root_source = graph.root.source.clone();
+    let ref_set = super::graph::flatten_graph(&graph);
 
     let mut report = ReferenceValidationReport {
         references_scanned: ref_set.len(),
@@ -365,6 +364,7 @@ pub(crate) fn validate(
                     record,
                     &mut report,
                     &options.graph,
+                    &root_source,
                 )?;
 
                 // Validate fragment if enabled and path exists
@@ -507,14 +507,23 @@ fn validate_local_path(
     record: &ReferenceRecord,
     report: &mut ReferenceValidationReport,
     graph_options: &ReferenceGraphOptions,
+    root_source: &ComposeSource,
 ) -> Result<Option<std::path::PathBuf>, ReferenceError> {
     trace!(raw = %raw, "validate: checking local path");
     match source {
         ComposeSource::File(_) => {
+            let compose_options = match source {
+                ComposeSource::File(path) if source != root_source => graph_options
+                    .compose
+                    .clone()
+                    .with_accepted_source_file(path),
+                ComposeSource::File(path) => graph_options.compose.clone().with_source_file(path),
+                _ => unreachable!("file source matched above"),
+            };
             if let Some(resolved) = super::resolve_transclusion_target(
                 raw,
                 source,
-                &graph_options.compose,
+                &compose_options,
             )? {
                 report.references_valid += 1;
                 return Ok(Some(resolved));
