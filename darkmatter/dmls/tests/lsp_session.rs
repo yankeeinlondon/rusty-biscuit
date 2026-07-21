@@ -3822,6 +3822,47 @@ fn meta_schema_explicit_mapping_pairs_retain_last_good_assistance() {
     fixture.shutdown();
 }
 
+#[test]
+fn meta_schema_compact_explicit_pair_union_keeps_schema_assistance() {
+    let workspace = tempfile::tempdir().unwrap();
+    let source = concat!(
+        "kind: schema\n",
+        "types:\n",
+        "  choice:\n",
+        "    - ? nested\n",
+        "      : string\n",
+        "    - number\n",
+    );
+    let path = workspace.path().join("compact-explicit-mapping.yaml");
+    std::fs::write(&path, source).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), source);
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic["code"] != json!("dm.schema.document_malformed")),
+        "valid compact explicit mapping pair is not malformed: {diagnostics:?}"
+    );
+
+    let labels = completion_labels(&mut fixture, uri.as_str(), 4, 12);
+    assert!(
+        labels.iter().any(|label| label == "string"),
+        "compact explicit mapping pair retains semantic completion: {labels:?}"
+    );
+    let hover = hover_markup(&mut fixture, uri.as_str(), 3, 9);
+    assert!(
+        hover.contains("Type: **type-definition**")
+            && hover.contains("Declares: **object | number**"),
+        "compact explicit mapping pair retains semantic hover: {hover}"
+    );
+
+    fixture.shutdown();
+}
+
 /// A block tagged document authored `types` first must retain its last-good
 /// model when edited into a buffer whose nested payload holds a valid YAML
 /// plain scalar with a mid-scalar quote (`  title: foo-"bar`).
