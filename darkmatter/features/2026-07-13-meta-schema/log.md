@@ -11,6 +11,7 @@ implementation_7: "2026-07-20T08:00:38-07:00"
 implementation_8: "2026-07-20T09:33:32-07:00"
 implementation_9: "2026-07-20T16:25:54-07:00"
 implementation_10: "2026-07-20T17:20:50-07:00"
+implementation_11: "2026-07-20T19:40:59-07:00"
 ---
 
 # Meta Schema — Implementation Log
@@ -1248,6 +1249,7 @@ The implementation of review cycle 9 has completed successfully in 24 minutes. D
 
 - no findings were deferred
 - no performance measurement was required, so `deferred_perf_measurement` remains `false`
+- final post-metadata verification passed `git diff --check`; GitNexus reported Low risk, seven changed indexed symbols, and no affected execution flows
 - the files changed during this implementation cycle are:
         - `darkmatter/cli/tests/level2_code_block_styling.rs`
         - `darkmatter/dmls/src/overlay/schema.rs`
@@ -1297,4 +1299,52 @@ The implementation of review cycle 10 has completed successfully in 13 minutes. 
         - `darkmatter/dmls/src/overlay/schema.rs`
         - `darkmatter/dmls/tests/lsp_session.rs`
         - `darkmatter/features/2026-07-13-meta-schema/review-10.md`
+        - `darkmatter/features/2026-07-13-meta-schema/log.md`
+
+## Implementation of Review Findings #11
+
+> **started at:** 2026-07-20T19:40:59-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-13-meta-schema/review-11.md'
+- this is iteration 11 of the review-to-implement cycle
+- the review contains **1** finding:
+        - **High** — a mid-token hyphen followed by whitespace still turns a plain-scalar quote into flow quote state, dropping DMLS standalone activation and last-good assistance
+- impacted package area (per the specification's implementation surface map and `sniff` discovery): `darkmatter`, covering the `darkmatter`, `darkmatter-cli`, and `dmls` workspace packages; `zed-dmls` is workspace-excluded and is not part of this implementation surface
+
+### Finding 1 (High) — Mid-token flow-scalar indicator handling
+
+- starting the work on 'mid-token-flow-scalar-indicator-handling' at 19:42:25-07:00
+        - GitNexus upstream impact for `standalone_envelope_claim` is **HIGH**: 41 affected symbols, one direct caller (`OverlayState::for_document`), four affected modules (Overlay, Diagnostics, Providers, and Workspace), and no indexed execution flows
+        - the implementation will repair the context-sensitive `-` / `:` scalar-boundary decision, add parser/claim parity cases for both tagged key orders and inert ordinary flow YAML, and add an in-memory LSP valid-open → malformed-change regression covering diagnostics, completion, and hover
+        - GitNexus upstream impact for the additional production helper `is_scalar_boundary` is **LOW**: five affected symbols, two direct callers, one affected module (Overlay), and no indexed execution flows
+        - `sniff` confirms the verification scope remains the `darkmatter` package area: workspace packages `darkmatter`, `darkmatter-cli`, and `dmls`; the workspace-excluded `zed-dmls` consumer is outside the specification's implementation and gate surface
+        - implemented left-context preservation for hyphen indicators: `-` now begins a fresh scalar position only when the scanner was already at a scalar boundary and the following character is whitespace or end-of-input; mapping `:` and flow collection delimiters retain their existing YAML roles
+        - added parser/claim parity cases for the exact `foo- "bar` carrier in both tagged key orders and for ordinary untagged/config-tagged flow YAML that must remain inert
+        - updated the in-memory LSP valid-open → malformed-change regression to use the exact carrier and continue proving `dm.schema.invalid_type_definition`, retained `string` completion, and retained type-definition hover
+        - focused Level-1 verification passed: 2/2 (`envelope_claim_agrees_with_parser_on_flow_nested_plain_scalar_quote` and `meta_schema_standalone_flow_types_first_retains_last_good_across_plain_quote_edit`)
+- work completed for 'mid-token-flow-scalar-indicator-handling' at 19:49:21-07:00
+        - the broader envelope/flow/LSP regression slice passed 8/8
+        - GitNexus upstream impact for the touched `advance_quote_state` scanner is **LOW**: three affected symbols, one direct caller, one affected module (Overlay), and no indexed execution flows
+        - GitNexus upstream impact for the touched `flow_top_level_entries` scanner is **HIGH**: 23 affected symbols, one direct caller, four affected modules (Overlay, Workspace, Diagnostics, and Providers), and no indexed execution flows; this is the same already-warned retained-overlay path covered by the focused and complete DMLS regressions
+        - `just build` passed for `darkmatter`, `darkmatter-cli`, and `dmls`
+        - the canonical area `just test --color never` aggregate was stopped at the required non-interactive command ceiling after 2,514/2,514 Darkmatter library tests had passed (140 higher-tier tests skipped, one leaked-handle retry recovered); 3,418 remaining library tests and the unchanged CLI/DMLS aggregate stages were not reached before interruption
+        - the exact `darkmatter-cli` Level-1 gate `just _test darkmatter-cli --color never` passed 561/561 with 71 higher-tier tests skipped
+        - the exact changed-package Level-1 gate `just _test dmls --color never` passed 629/629 with three higher-tier tests skipped
+        - `just lint` passed for `darkmatter`, `darkmatter-cli`, and `dmls`; no formatting command was run
+        - `git diff --check` passed
+        - GitNexus `detect_changes(scope=all)` reported Low risk, 10 changed symbols across the eight-file shared dirty worktree, and no affected execution flows; unrelated pre-existing iteration changes were preserved
+        - a final attempt to finish the unchanged Darkmatter library gate in four bounded Nextest partitions was also stopped at the non-interactive command ceiling; every completed test passed, but the partitions remained incomplete because the library contains many unrelated 10–30 second compose tests
+        - implementation files changed for this finding: `darkmatter/dmls/src/overlay/schema.rs`, `darkmatter/dmls/tests/lsp_session.rs`, and this log
+        - the one review finding was fixed; nothing was deferred and no performance measurement was required
+
+### Successful Completion
+
+The implementation of review cycle 11 has completed successfully in 12 minutes. During this implementation all 1 review finding was evaluated to see if it could be fixed as a part of this implementation cycle: 1 was fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+- no performance measurement was required, so `deferred_perf_measurement` remains `false`
+- the files changed during this implementation cycle are:
+        - `darkmatter/dmls/src/overlay/schema.rs`
+        - `darkmatter/dmls/tests/lsp_session.rs`
+        - `darkmatter/features/2026-07-13-meta-schema/review-11.md`
         - `darkmatter/features/2026-07-13-meta-schema/log.md`
