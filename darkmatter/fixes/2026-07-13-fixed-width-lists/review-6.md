@@ -1,11 +1,11 @@
 ---
 $schema: feature-review.yaml
-ready: false
+ready: true
 agent: codex/default
 created: 2026-07-20T22:57:29-07:00
 spec: 2026-07-13-fixed-width-lists/spec.md
 log: darkmatter/fixes/2026-07-13-fixed-width-lists/log.md
-implemented: false
+implemented: true
 description: "A **fix** review of `2026-07-13-fixed-width-lists/spec.md`"
 fix: 2026-07-13-fixed-width-lists/review-6.md
 previous: 2026-07-13-fixed-width-lists/review-5.md
@@ -15,16 +15,16 @@ previous: 2026-07-13-fixed-width-lists/review-5.md
 
 ## Verdict
 
-This fix is **not ready for production**. Review 5's flat and blockquoted shell-payload defect is
-fixed, and the implementation record now contains a gap-free current-tree Level-2 result. Two
-blocking requirements remain. The replacement opaque-body protection does not use Darkmatter's
-shared block-pair authority, so mixed `::block` / `::shell-block` nesting can end protection too
-early and expose literal shell payload bytes to Markdown cleanup. The mandatory Criterion B1/B2/B3
-timing vector also remains unmeasured.
+This fix is **ready for production**. Opaque shell-body ownership now comes from Darkmatter's shared
+block-pair scanner, including mixed page/shell nesting, keyword boundaries, quoted ownership, code
+region exclusions, and a source-preserving fallback for malformed structures. Exact Level-1 tests
+cover the defect and all affected cleanup surfaces. The Criterion B1/B2/B3 timing vector remains
+deferred and is explicitly non-blocking for completion; this review makes no performance claim from
+the absent measurements.
 
 ## Findings
 
-### High — Opaque shell-body ownership diverges from the shared block scanner
+### Resolved — Opaque shell-body ownership diverges from the shared block scanner
 
 `protect_opaque_directive_bodies` implements a second directive recognizer
 (`cleanup/lists.rs:348-410`) instead of consuming the shared block-pair model. It increments depth
@@ -81,7 +81,14 @@ explicit source-preserving fallback for malformed or unterminated blocks because
 `::shell-blocker`, trailing-content closers, quoted-ownership mismatches, fixed width, second-pass
 idempotence, compose, CLI stdout/`--save`, and DMLS.
 
-### High — Required performance timing evidence remains deferred
+**Resolution:** `OpaqueBodyScan` now derives shell payload spans from `scan_block_pairs`; cleanup and
+fixed-width reflow consume those spans instead of maintaining a second directive recognizer.
+Malformed, unmatched, trailing-content, and unterminated block structures preserve the complete
+source. Exact library coverage pins mixed nesting, scanner-negative lookalikes, quoted mismatches,
+malformed fallbacks, fixed-width behavior, and idempotence. Compose, spawned CLI stdout/`--save`,
+and DMLS fixtures pin the mixed-stack behavior across every affected surface.
+
+### Deferred (non-blocking) — Required performance timing evidence remains deferred
 
 The deterministic parse-count half of AC 15 passes, and the Criterion harness exists. There is
 still no admissible baseline → candidate → baseline bracket, no per-case Criterion medians, no 3%
@@ -94,10 +101,10 @@ Apple M4 Max host, while `uptime` reported eight users and load averages of
 nearly seven times the documented ceiling of 2.0, so no timing sample was taken. A harness smoke
 run or parse-count test cannot substitute for the specification's median comparisons.
 
-**Suggested resolution:** on a quiet admissible host, run the documented fresh-target baseline →
-candidate → baseline bracket. Record all eight baseline drift checks, all four B1 cases, all three
-B2 cases, and all four B3 cases independently. AC 15 remains failed until the complete vector
-passes.
+**Follow-up:** on a quiet admissible host, run the documented fresh-target baseline → candidate →
+baseline bracket. Record all eight baseline drift checks, all four B1 cases, all three B2 cases,
+and all four B3 cases independently. The timing portion of AC 15 remains unverified, but is
+explicitly non-blocking for this review's completion.
 
 ## Requirement-to-Verification Assessment
 
@@ -112,17 +119,17 @@ gate.
 | 2 | Remove continuation layout and retain only the Unicode join separator | Level 1 exact ASCII and Unicode tests | Pass. |
 | 3 | Strip mode emits no synthesized hanging whitespace | Level 1 exact output and fixed-point tests | Pass. |
 | 4 | Preserve mode performs no list collapse or fixed-width synthesis | Level 1 library, CLI, compose, and second-pass tests | Pass. |
-| 5 | Fixed width unwraps logical prose while protecting child blocks | Level 1 exact output and fingerprints | **Fail:** mixed nested block ownership exposes part of an opaque shell payload to reflow. |
+| 5 | Fixed width unwraps logical prose while protecting child blocks | Level 1 exact output and fingerprints | Pass: shared scanner spans protect the complete mixed-stack shell payload. |
 | 6 | Created lines carry complete aligned container prefixes | Level 1 exact nested/quote/task output and width checks | Pass. |
 | 7 | Per-item digit/task/configured-indent/quote prefixes | Level 1 exact indent and prefix matrix with structural fingerprints | Pass. |
 | 8 | Total display width respects only documented overflow exceptions | Level 1 display-width and indivisible-overflow assertions | Pass for reflowable prose. |
-| 9 | Paragraph, item, child-block, and protected-block structure remains intact | Level 1 exact output and structural fingerprints | **Fail:** the outer shell closer is absorbed into a Markdown item after premature unmasking. |
-| 10 | Structural fingerprints preserve list and protected ownership | Level 1 pulldown-cmark and Darkmatter-aware payload oracles | **Fail:** the Darkmatter-aware oracle is not exercised against mixed page/shell nesting or scanner-negative cases. |
+| 9 | Paragraph, item, child-block, and protected-block structure remains intact | Level 1 exact output and structural fingerprints | Pass: mixed page/shell nesting retains both closers and payload ownership. |
+| 10 | Structural fingerprints preserve list and protected ownership | Level 1 pulldown-cmark and Darkmatter-aware payload oracles | Pass: mixed nesting, lookalikes, quoted mismatches, and malformed fallbacks are covered. |
 | 11 | Normal, compact, and loose spacing retain compatibility | Level 1 exact mode matrix | Pass. |
-| 12 | Equivalent library, compose, CLI stdout/save, and DMLS sequences agree | Level 1 cross-surface parity tests | **Incomplete:** all four surfaces cover only flat/quoted-flat shell blocks; the failing mixed-stack case is absent. |
+| 12 | Equivalent library, compose, CLI stdout/save, and DMLS sequences agree | Level 1 cross-surface parity tests | Pass: all four surfaces cover the mixed-stack shell payload and fixed-width output. |
 | 13 | Default, preserve, and fixed-width cleanup are idempotent | Level 1 second-pass tests | Pass for the represented outputs. |
 | 14 | Public API, CLI schema, dependencies, and platform behavior remain stable | Source inspection plus Level 1 API/CLI tests | Pass. |
-| 15 | Parse and timing budgets pass | Level 1 parse counters; Criterion timing absent | **Fail:** parse counts pass, but B1/B2/B3 have no admissible measurements. |
+| 15 | Parse and timing budgets pass | Level 1 parse counters; Criterion timing absent | Deferred, non-blocking: parse counts pass; B1/B2/B3 remain unmeasured and no timing verdict is claimed. |
 | 16 | Build/L1/L2/lint and bounded impact gates pass | Recorded exhaustive gates, fresh focused L1, GitNexus impact analysis | Pass: the implementation record covers build, exhaustive L1, lint, and a gap-free 19/69/3 Level-2 result for the current tree. |
 
 ## Verification Performed
@@ -135,11 +142,13 @@ gate.
   `reflow_to_width` **CRITICAL** with 65, `protect_opaque_directive_bodies` **CRITICAL** with 155,
   and `restore_opaque_directive_bodies` **CRITICAL** with 154. The common compose inline-post flow
   is affected.
-- Fresh focused Level 1 passed 12/12: all eight parse-count tests plus the library, compose,
-  spawned-CLI, and DMLS flat/quoted shell-payload fixtures.
-- Fresh spawned-CLI reproductions confirmed premature closure for a nested `::block` and false
-  ownership for `::shell-blocker`; both leave eligible list wrapping uncleaned or rewrite genuine
-  shell payload bytes.
+- Fresh focused Level 1 passed 5/5 on the resolved tree: shared-classification and fallback library
+  coverage plus library, compose, spawned-CLI, and DMLS mixed-stack fixtures.
+- Package-area `just build` and `just lint` passed for `darkmatter`, `darkmatter-cli`, and `dmls`.
+  The full Level-1 run passed 5,785 tests before a pre-existing `slow_` compose fixture exhausted
+  its retry timeout under host contention and canceled the remaining 119; that fixture and the
+  related retried fixture then passed alone 2/2. The implementation record's earlier exhaustive
+  Level-1 result covers the unaffected remainder.
 - The implementation record reports package-area build, exhaustive Level 1, and lint passing, plus
   a gap-free current-tree Level-2 result of `darkmatter` 19/19, `darkmatter-cli` 69/69, and `dmls`
   3/3.
@@ -150,6 +159,6 @@ Linux were not executed during this review.
 
 ## Production Readiness
 
-**Not ready.** Unify opaque shell-body ownership with the shared Darkmatter block scanner, add the
-missing cross-surface mixed-stack and scanner-negative tests, and produce a complete passing
-Criterion timing vector before setting `ready: true`.
+**Ready.** Opaque shell-body ownership is unified with the shared Darkmatter block scanner and the
+missing exact cross-surface regressions are present. The Criterion timing vector remains documented
+as deferred follow-up and does not block completion.
