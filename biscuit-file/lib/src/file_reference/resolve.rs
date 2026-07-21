@@ -121,6 +121,7 @@ pub(crate) fn resolve_core(
         resolve_recursive_core(
             parsed,
             &interpolated,
+            anchoring,
             magic_paths,
             vault_roots,
             ctx,
@@ -164,10 +165,12 @@ fn is_local_anchoring(kind: &ReferenceKind) -> bool {
     )
 }
 
-/// Compute the effective anchoring for a non-recursive local reference.
+/// Compute the effective anchoring for a local reference.
 ///
-/// Returns `None` for recursive references and for the non-anchoring kinds
-/// (magic/package/vault/home/URL), which keep their authored classification.
+/// Returns `None` for non-anchoring kinds (magic/package/vault/home/URL), which
+/// keep their authored classification. Recursive references use the same
+/// post-interpolation anchoring as direct references because recursion is only
+/// a search modifier over the underlying kind.
 ///
 /// ## Errors
 ///
@@ -178,7 +181,7 @@ fn compute_effective_anchoring(
     parsed: &ParsedReference,
     interpolated: &str,
 ) -> Result<Option<EffectiveAnchoring>, FileReferenceError> {
-    if parsed.recursive || !is_local_anchoring(&parsed.kind) {
+    if !is_local_anchoring(&parsed.kind) {
         return Ok(None);
     }
     if let Some(sigil) = injected_sigil(interpolated) {
@@ -457,6 +460,7 @@ fn resolve_direct_core(
 fn resolve_recursive_core(
     parsed: &ParsedReference,
     interpolated: &str,
+    anchoring: Option<EffectiveAnchoring>,
     magic_paths: &MagicPathList,
     vault_roots: &[PathBuf],
     ctx: &ResolutionContext,
@@ -465,6 +469,8 @@ fn resolve_recursive_core(
 ) -> CoreResolution {
     let roots = match build_search_roots(
         parsed,
+        interpolated,
+        anchoring,
         magic_paths,
         vault_roots,
         ctx,
@@ -490,12 +496,6 @@ fn resolve_recursive_core(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| interpolated.to_string());
 
-    let subdir_filter = if path.components().count() > 1 {
-        path.parent().map(|p| p.to_path_buf())
-    } else {
-        None
-    };
-
     debug!(
         root_count = roots.len(),
         ?needle,
@@ -510,7 +510,14 @@ fn resolve_recursive_core(
             continue;
         }
 
-        let walker = WalkDir::new(root)
+        let subdir_filter = recursive_subdir_filter(path, root);
+        let walk_root = if path.is_absolute() {
+            path.parent().unwrap_or(root)
+        } else {
+            root
+        };
+
+        let walker = WalkDir::new(walk_root)
             .follow_links(false)
             .into_iter()
             .filter_map(|e| e.ok());
@@ -525,14 +532,13 @@ fn resolve_recursive_core(
                 continue;
             }
 
-            // If there's a subdirectory filter, check that the entry's parent ends with it
+            // The filter and entry parent are both root-relative so absolute
+            // prefixes and a leading `./` cannot make equivalent paths differ.
             if let Some(ref subdir) = subdir_filter {
                 let entry_path = entry.path();
                 if let Ok(rel) = entry_path.strip_prefix(root) {
                     if let Some(parent) = rel.parent() {
-                        let subdir_str = subdir.to_string_lossy();
-                        let parent_str = parent.to_string_lossy();
-                        if !parent_str.ends_with(subdir_str.as_ref()) {
+                        if !parent.ends_with(subdir) {
                             continue;
                         }
                     } else {
@@ -567,6 +573,14 @@ fn resolve_recursive_core(
         effective_kind: Some(effective_kind),
         outcome,
     }
+}
+
+/// Return the recursive parent filter relative to a traversal root.
+fn recursive_subdir_filter(path: &Path, root: &Path) -> Option<PathBuf> {
+    let parent = path.parent()?;
+    let root_relative = parent.strip_prefix(root).unwrap_or(parent);
+    let normalized = normalize_components(root_relative);
+    (!normalized.as_os_str().is_empty()).then_some(normalized)
 }
 
 /// Resolve the repository root for a resolution context.
@@ -803,17 +817,50 @@ fn build_anchoring_candidates(
 /// Build the ordered, deduplicated search roots for recursive resolution.
 fn build_search_roots(
     parsed: &ParsedReference,
+    interpolated: &str,
+    anchoring: Option<EffectiveAnchoring>,
     magic_paths: &MagicPathList,
     vault_roots: &[PathBuf],
     ctx: &ResolutionContext,
     repository_root: Option<&Path>,
 ) -> Result<Vec<ResolutionCandidate>, FileReferenceError> {
-    let roots = collect_roots(&parsed.kind, magic_paths, vault_roots, ctx, repository_root)?;
+    let roots = match anchoring {
+        Some(anchoring) => {
+            collect_anchoring_roots(anchoring, interpolated, ctx, repository_root)
+        }
+        None => collect_roots(&parsed.kind, magic_paths, vault_roots, ctx, repository_root)?,
+    };
     let candidates = roots
         .into_iter()
         .map(|root| make_candidate(root.path, root.provenance))
         .collect();
     Ok(dedupe_candidates(candidates))
+}
+
+/// Collect recursive search roots for a local reference's effective anchoring.
+fn collect_anchoring_roots(
+    anchoring: EffectiveAnchoring,
+    interpolated: &str,
+    ctx: &ResolutionContext,
+    repository_root: Option<&Path>,
+) -> Vec<RootEntry> {
+    match anchoring {
+        EffectiveAnchoring::Absolute => vec![RootEntry {
+            path: Path::new(interpolated)
+                .ancestors()
+                .last()
+                .unwrap_or_else(|| Path::new(interpolated))
+                .to_path_buf(),
+            provenance: RootProvenance::Absolute,
+        }],
+        EffectiveAnchoring::ExplicitRelative => vec![RootEntry {
+            path: ctx.cwd.clone(),
+            provenance: RootProvenance::Source,
+        }],
+        EffectiveAnchoring::ImplicitRelative => {
+            implicit_relative_roots(&ctx.cwd, repository_root)
+        }
+    }
 }
 
 /// Remove lexically duplicate candidates while preserving first-seen order.
@@ -855,7 +902,15 @@ pub(crate) fn candidate_plan(
     };
 
     if parsed.recursive {
-        build_search_roots(parsed, magic_paths, vault_roots, ctx, repository_root.as_deref())
+        build_search_roots(
+            parsed,
+            &interpolated,
+            anchoring,
+            magic_paths,
+            vault_roots,
+            ctx,
+            repository_root.as_deref(),
+        )
     } else {
         build_candidates(
             parsed,

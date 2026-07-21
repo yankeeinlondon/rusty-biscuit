@@ -249,6 +249,109 @@ fn interpolation_injecting_a_sigil_is_rejected() {
 }
 
 #[test]
+fn recursive_interpolation_reclassifies_and_resolves_local_paths() {
+    let tmp = TempDir::new().unwrap();
+    let (repo, base) = repo_and_base(&tmp);
+    let absolute_dir = repo.join("absolute");
+    fs::create_dir_all(&absolute_dir).unwrap();
+    fs::create_dir_all(base.join("nested")).unwrap();
+    fs::create_dir_all(repo.join("nested")).unwrap();
+    fs::write(absolute_dir.join("absolute.md"), b"absolute").unwrap();
+    fs::write(base.join("nested/explicit.md"), b"explicit").unwrap();
+    fs::write(repo.join("nested/implicit.md"), b"implicit").unwrap();
+
+    let cases = [
+        (
+            "ABSOLUTE",
+            absolute_dir.to_string_lossy().into_owned(),
+            "absolute.md",
+            absolute_dir.join("absolute.md"),
+            FileReferenceKind::Absolute,
+            vec![RootProvenance::Absolute],
+        ),
+        (
+            "EXPLICIT",
+            "./nested".to_string(),
+            "explicit.md",
+            base.join("nested/explicit.md"),
+            FileReferenceKind::ExplicitRelative,
+            vec![RootProvenance::Source],
+        ),
+        (
+            "IMPLICIT",
+            "nested".to_string(),
+            "implicit.md",
+            repo.join("nested/implicit.md"),
+            FileReferenceKind::ImplicitRelative,
+            vec![RootProvenance::Repository, RootProvenance::Source],
+        ),
+    ];
+
+    for (var, expansion, filename, expected_path, expected_kind, expected_provenance) in cases {
+        let ctx = ctx_with_repo(&base, &repo)
+            .with_env(HashMap::from([(var.to_string(), expansion)]));
+        let file_ref = FileReference::new(&format!("%{{{{{var}}}}}/{filename}")).unwrap();
+        let plan = file_ref.candidate_plan(&ctx).unwrap();
+        let provenance: Vec<_> = plan.iter().map(|root| root.provenance()).collect();
+
+        assert_eq!(
+            provenance, expected_provenance,
+            "recursive `{var}` expansion must use its effective local anchoring",
+        );
+
+        let detailed = file_ref.resolve_detailed(&ctx);
+        assert_eq!(detailed.effective_kind(), expected_kind);
+        assert_eq!(
+            detailed.matched_path(),
+            Some(expected_path.as_path()),
+            "recursive `{var}` expansion must resolve through its effective roots",
+        );
+    }
+}
+
+#[test]
+fn recursive_interpolation_injecting_a_sigil_is_rejected_before_root_planning() {
+    let tmp = TempDir::new().unwrap();
+    let (repo, base) = repo_and_base(&tmp);
+
+    for (var, injected) in [
+        ("MAGIC", "@docs/spec.md"),
+        ("PACKAGE", "!README.md"),
+        ("RECURSIVE", "%deep.md"),
+        ("VAULT", "vault:notes.md"),
+        ("HTTP_LOWER", "http://example.com/a.md"),
+        ("HTTPS_LOWER", "https://example.com/a.md"),
+        ("HTTP_UPPER", "HTTP://example.com/a.md"),
+        ("HTTPS_MIXED", "HtTpS://example.com/a.md"),
+    ] {
+        let ctx = ctx_with_repo(&base, &repo).with_env(HashMap::from([(
+            var.to_string(),
+            injected.to_string(),
+        )]));
+        let file_ref = FileReference::new(&format!("%{{{{{var}}}}}")).unwrap();
+
+        assert!(
+            matches!(
+                file_ref.candidate_plan(&ctx),
+                Err(FileReferenceError::InvalidSyntax(_))
+            ),
+            "recursive interpolation must reject injected `{injected}` before building roots",
+        );
+
+        let detailed = file_ref.resolve_detailed(&ctx);
+        assert!(detailed.candidates().is_empty());
+        assert!(matches!(
+            detailed.outcome(),
+            DetailedOutcome::Failed(ResolutionFailure::InvalidReference)
+        ));
+        assert!(matches!(
+            detailed.error(),
+            Some(FileReferenceError::InvalidSyntax(_))
+        ));
+    }
+}
+
+#[test]
 fn special_kinds_are_unchanged_by_the_flip() {
     // Magic, package, and vault references keep their own root order; the
     // implicit flip does not touch them.

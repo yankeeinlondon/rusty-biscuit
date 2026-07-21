@@ -123,11 +123,15 @@ impl ResolutionContext {
 ///
 /// `base_dir` is a directory: for a file-backed source, pass the source
 /// file's parent. A supplied `repository_root` is accepted only when it
-/// lexically contains `base_dir` (see [`validate`]).
+/// lexically contains the initial `base_dir` (see [`validate`]). Contexts
+/// derived with [`for_source`](Self::for_source) must remain inside that root.
+/// A caller that deliberately crosses into a configured external trust root
+/// must use [`for_trusted_external_source`](Self::for_trusted_external_source)
+/// or [`for_trusted_external_base`](Self::for_trusted_external_base).
 ///
 /// [`with_repository_root`]: Self::with_repository_root
 /// [`validate`]: Self::validate
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileResolutionContext {
     source_path: Option<PathBuf>,
     base_dir: PathBuf,
@@ -137,25 +141,127 @@ pub struct FileResolutionContext {
     env: HashMap<String, String>,
     magic_paths: MagicPathList,
     vault_roots: Vec<PathBuf>,
+    /// The request boundary whose containment must remain valid across every
+    /// derivation, including explicitly trusted external ones.
+    request_base_dir: PathBuf,
+    /// Whether the current authoring base intentionally crosses the request
+    /// repository boundary.
+    trusted_external_authoring_base: bool,
 }
 
 impl FileResolutionContext {
+    /// Create a context from request state captured by the caller.
+    ///
+    /// Unlike [`Self::new`], this constructor performs no ambient HOME or
+    /// environment reads. It is intended for a request that must change its
+    /// filesystem anchor after resolving a top-level source while retaining
+    /// the original process-state snapshot.
+    #[must_use]
+    pub fn from_snapshot(
+        base_dir: impl Into<PathBuf>,
+        home_dir: Option<PathBuf>,
+        env: HashMap<String, String>,
+    ) -> Self {
+        let base_dir = base_dir.into();
+        Self {
+            source_path: None,
+            request_base_dir: base_dir.clone(),
+            base_dir,
+            repository_root: None,
+            package_area: None,
+            home_dir,
+            env,
+            magic_paths: MagicPathList::default(),
+            vault_roots: Vec::new(),
+            trusted_external_authoring_base: false,
+        }
+    }
+
     /// Create a context anchored at `base_dir`, snapshotting the ambient
     /// environment and home directory.
     ///
     /// `base_dir` should be an absolutized directory. Builder methods layer
     /// the remaining anchors on top.
     pub fn new(base_dir: impl Into<PathBuf>) -> Self {
+        let base_dir = base_dir.into();
         Self {
             source_path: None,
-            base_dir: base_dir.into(),
+            request_base_dir: base_dir.clone(),
+            base_dir,
             repository_root: None,
             package_area: None,
             home_dir: home_dir(),
             env: std::env::vars().collect(),
             magic_paths: MagicPathList::default(),
             vault_roots: Vec::new(),
+            trusted_external_authoring_base: false,
         }
+    }
+
+    /// Derive a document context from this request snapshot.
+    ///
+    /// Only the authoring source and its base directory change. Repository,
+    /// package-area, home, environment, magic-root, and vault-root inputs are
+    /// cloned from the captured request without reading process state or
+    /// performing discovery.
+    ///
+    /// Both the request boundary and the derived source directory must remain
+    /// inside the supplied repository root. Use
+    /// [`for_trusted_external_source`](Self::for_trusted_external_source) only
+    /// after another policy has accepted an external trust root.
+    #[must_use]
+    pub fn for_source(&self, source_path: impl Into<PathBuf>) -> Self {
+        let source_path = source_path.into();
+        let base_dir = source_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| self.base_dir.clone());
+        let mut derived = self.clone();
+        derived.source_path = Some(source_path);
+        derived.base_dir = base_dir;
+        derived.trusted_external_authoring_base = false;
+        derived
+    }
+
+    /// Derive a document context across an explicitly accepted trust boundary.
+    ///
+    /// The originating request must still satisfy repository containment, but
+    /// the external source directory may live outside that repository. This is
+    /// intended for documents already accepted through a configured home,
+    /// magic, or vault root; it does not establish a filesystem sandbox.
+    #[must_use]
+    pub fn for_trusted_external_source(&self, source_path: impl Into<PathBuf>) -> Self {
+        let mut derived = self.for_source(source_path);
+        derived.trusted_external_authoring_base = true;
+        derived
+    }
+
+    /// Derive a context with a different authoring base but no source file.
+    ///
+    /// This is the in-memory-document counterpart to [`for_source`](Self::for_source).
+    /// All request-scoped inputs remain unchanged and no ambient state is read.
+    ///
+    /// Both the request boundary and the new base must remain inside the
+    /// supplied repository root.
+    #[must_use]
+    pub fn for_base(&self, base_dir: impl Into<PathBuf>) -> Self {
+        let mut derived = self.clone();
+        derived.source_path = None;
+        derived.base_dir = base_dir.into();
+        derived.trusted_external_authoring_base = false;
+        derived
+    }
+
+    /// Derive an in-memory document base across an explicitly accepted trust
+    /// boundary.
+    ///
+    /// The originating request must still satisfy repository containment. Use
+    /// this only after another policy has accepted the external base.
+    #[must_use]
+    pub fn for_trusted_external_base(&self, base_dir: impl Into<PathBuf>) -> Self {
+        let mut derived = self.for_base(base_dir);
+        derived.trusted_external_authoring_base = true;
+        derived
     }
 
     /// Record the source document/file that authored the references being
@@ -184,6 +290,18 @@ impl FileResolutionContext {
     #[must_use]
     pub fn with_home_dir(mut self, home_dir: impl Into<PathBuf>) -> Self {
         self.home_dir = Some(home_dir.into());
+        self
+    }
+
+    /// Clear the snapshotted home directory.
+    ///
+    /// Explicit request contexts use this when their authoritative discovery
+    /// result has no home directory. Resolution must then report missing home
+    /// context rather than falling back to the ambient value captured by
+    /// [`new`](Self::new).
+    #[must_use]
+    pub fn without_home_dir(mut self) -> Self {
+        self.home_dir = None;
         self
     }
 
@@ -236,6 +354,11 @@ impl FileResolutionContext {
         self.home_dir.as_deref()
     }
 
+    /// The captured environment used for interpolation and vault roots.
+    pub fn env(&self) -> &HashMap<String, String> {
+        &self.env
+    }
+
     pub(crate) fn magic_paths(&self) -> &MagicPathList {
         &self.magic_paths
     }
@@ -244,8 +367,7 @@ impl FileResolutionContext {
         &self.vault_roots
     }
 
-    /// Validate that a caller-supplied repository root lexically contains the
-    /// base directory.
+    /// Validate repository containment for the request and authoring bases.
     ///
     /// Containment is component-aware and lexical after `.`/`..` normalization;
     /// it does **not** canonicalize through symlinks, so the authored/worktree
@@ -253,19 +375,30 @@ impl FileResolutionContext {
     /// root, not a sandbox boundary. When no repository root is supplied, the
     /// context is trivially valid.
     ///
+    /// Normal derivations must keep their authoring base inside the repository.
+    /// Trusted-external derivations exempt only the current authoring base; the
+    /// originating request boundary is always checked, so derivation cannot
+    /// make an invalid request snapshot valid.
+    ///
     /// ## Errors
     ///
     /// Returns [`FileReferenceError::RepositoryRootNotContainingSource`] when a
-    /// repository root is supplied but does not contain `base_dir`.
+    /// repository root is supplied but does not contain a required base.
     pub fn validate(&self) -> Result<(), FileReferenceError> {
         if let Some(repo) = &self.repository_root {
             let repo_norm = normalize_components(repo);
-            let base_norm = normalize_components(&self.base_dir);
-            if !base_norm.starts_with(&repo_norm) {
-                return Err(FileReferenceError::RepositoryRootNotContainingSource {
-                    repository_root: repo.clone(),
-                    source_path: self.base_dir.clone(),
-                });
+            let required_bases = if self.trusted_external_authoring_base {
+                [Some(&self.request_base_dir), None]
+            } else {
+                [Some(&self.request_base_dir), Some(&self.base_dir)]
+            };
+            for base in required_bases.into_iter().flatten() {
+                if !normalize_components(base).starts_with(&repo_norm) {
+                    return Err(FileReferenceError::RepositoryRootNotContainingSource {
+                        repository_root: repo.clone(),
+                        source_path: base.clone(),
+                    });
+                }
             }
         }
         Ok(())

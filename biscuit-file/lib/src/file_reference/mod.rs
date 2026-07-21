@@ -890,7 +890,7 @@ pub(crate) enum TemplateSegment {
     EnvVar(String),
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct MagicPathList {
     pub prepend: Vec<PathBuf>,
     pub append: Vec<PathBuf>,
