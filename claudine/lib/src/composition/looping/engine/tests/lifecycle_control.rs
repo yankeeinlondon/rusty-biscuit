@@ -57,27 +57,71 @@ fn run_loop_lifecycle(
     emitter: &dyn LifecycleEmitter,
     invocations: &RefCell<usize>,
 ) -> LoopExecutionResult {
+    run_loop_lifecycle_with_engine_path(
+        prompt_path,
+        prompt_path,
+        config,
+        initial_frontmatter,
+        lifecycle,
+        emitter,
+        invocations,
+    )
+}
+
+fn run_loop_lifecycle_without_current_ctx(
+    prompt_path: &Path,
+    config: &LoopConfig,
+    initial_frontmatter: Map<String, Value>,
+    lifecycle: &LifecycleConfig,
+    emitter: &dyn LifecycleEmitter,
+    invocations: &RefCell<usize>,
+) -> LoopExecutionResult {
+    run_loop_lifecycle_with_engine_path(
+        Path::new(""),
+        prompt_path,
+        config,
+        initial_frontmatter,
+        lifecycle,
+        emitter,
+        invocations,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_loop_lifecycle_with_engine_path(
+    engine_prompt_path: &Path,
+    source_path: &Path,
+    config: &LoopConfig,
+    initial_frontmatter: Map<String, Value>,
+    lifecycle: &LifecycleConfig,
+    emitter: &dyn LifecycleEmitter,
+    invocations: &RefCell<usize>,
+) -> LoopExecutionResult {
     let settings = crate::events::GlobalSettings::default();
     let messaging = crate::messaging::RuntimeMessagingSettings {
         user: None,
         repo: None,
     };
     let term = biscuit_terminal::terminal::Terminal::default();
+    let context = darkmatter::markdown::compose::ComposeContext::capture_for_content(
+        source_path.parent().unwrap_or(Path::new(".")),
+        "",
+    );
     let lifecycle_ctx = LifecycleRuntimeContext {
         settings: &settings,
         messaging: &messaging,
         term: &term,
-        source_path: prompt_path,
-        repo_root: prompt_path.parent(),
+        source_path,
+        repo_root: source_path.parent(),
         launch_area: None,
-        context: None,
+        context: Some(&context),
     };
     let effect_engine = darkmatter::effects::EffectEngine::builder()
-        .mutation_root(prompt_path.parent().unwrap_or(Path::new(".")))
+        .mutation_root(source_path.parent().unwrap_or(Path::new(".")))
         .auto_rehash(false)
         .build();
     execute_loop_with_lifecycle(
-        prompt_path,
+        engine_prompt_path,
         config,
         initial_frontmatter,
         LoopExecutionOptions::default(),
@@ -198,7 +242,7 @@ fn loop_initialize_stop_proceeds_into_iterations() {
         }));
         let emitter = SignalRecorder::default();
         let invocations = RefCell::new(0usize);
-        let result = run_loop_lifecycle(
+        let result = run_loop_lifecycle_without_current_ctx(
             Path::new("loop.md"),
             &config,
             object(json!({ "counter": 0 })),
@@ -570,6 +614,10 @@ fn run_loop_lifecycle_emitting_terminal(
         repo: None,
     };
     let term = biscuit_terminal::terminal::Terminal::default();
+    let context = darkmatter::markdown::compose::ComposeContext::capture_for_content(
+        prompt_path.parent().unwrap_or(Path::new(".")),
+        "",
+    );
     let lifecycle_ctx = LifecycleRuntimeContext {
         settings: &settings,
         messaging: &messaging,
@@ -577,7 +625,7 @@ fn run_loop_lifecycle_emitting_terminal(
         source_path: prompt_path,
         repo_root: prompt_path.parent(),
         launch_area: None,
-        context: None,
+        context: Some(&context),
     };
     let effect_engine = darkmatter::effects::EffectEngine::builder()
         .mutation_root(prompt_path.parent().unwrap_or(Path::new(".")))

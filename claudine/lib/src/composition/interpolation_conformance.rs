@@ -20,7 +20,7 @@
 use std::collections::HashMap;
 
 use darkmatter::markdown::compose::subtree::{SubtreeCompose, SubtreeStrictness};
-use darkmatter::markdown::compose::{EffectiveState, EffectiveStateBuilder};
+use darkmatter::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder};
 use darkmatter::markdown::MarkdownError;
 use serde_json::{Map, Value, json};
 
@@ -51,22 +51,31 @@ fn dm2_render(
     value: &Value,
     frontmatter: &Map<String, Value>,
     strictness: SubtreeStrictness,
+    context: &ComposeContext,
 ) -> Result<Value, MarkdownError> {
-    let state = effective_state(frontmatter);
+    let state = effective_state(frontmatter, context);
     SubtreeCompose::new(value, &state)
         .with_strictness(strictness)
         .compose()
 }
 
-fn effective_state(frontmatter: &Map<String, Value>) -> EffectiveState {
+fn effective_state(
+    frontmatter: &Map<String, Value>,
+    context: &ComposeContext,
+) -> EffectiveState {
     let fm: HashMap<String, Value> = frontmatter
         .iter()
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
     EffectiveStateBuilder::new()
         .with_frontmatter(fm)
+        .with_context(context.clone())
         .build()
         .expect("effective state builds")
+}
+
+fn prepared_context() -> ComposeContext {
+    ComposeContext::capture_for_content(std::path::Path::new("."), "")
 }
 
 fn obj(value: Value) -> Map<String, Value> {
@@ -175,6 +184,7 @@ fn overlap_cases() -> Vec<OverlapCase> {
 
 #[test]
 fn loop_and_lifecycle_agree_on_shared_syntax() {
+    let context = prepared_context();
     for case in overlap_cases() {
         let loop_result = loop_render(&case.input, &case.frontmatter)
             .unwrap_or_else(|error| panic!("loop engine failed for `{}`: {error}", case.name));
@@ -186,8 +196,13 @@ fn loop_and_lifecycle_agree_on_shared_syntax() {
 
         // Lifecycle text runs in strict mode; every overlap case uses only
         // known roots, so strict and lenient resolve identically here.
-        let dm2_result = dm2_render(&case.input, &case.frontmatter, SubtreeStrictness::Strict)
-            .unwrap_or_else(|error| panic!("DM2 engine failed for `{}`: {error}", case.name));
+        let dm2_result = dm2_render(
+            &case.input,
+            &case.frontmatter,
+            SubtreeStrictness::Strict,
+            &context,
+        )
+        .unwrap_or_else(|error| panic!("DM2 engine failed for `{}`: {error}", case.name));
         assert_eq!(
             dm2_result, case.expected,
             "lifecycle DM2 mismatch for `{}`",
@@ -204,6 +219,7 @@ fn loop_and_lifecycle_agree_on_shared_syntax() {
 fn divergence_mixed_string_json_reparse() {
     let input = json!("{{a}}{{b}}");
     let frontmatter = obj(json!({ "a": 1, "b": 2 }));
+    let context = prepared_context();
 
     let loop_result = loop_render(&input, &frontmatter).expect("loop renders");
     assert_eq!(
@@ -212,14 +228,21 @@ fn divergence_mixed_string_json_reparse() {
         "loop re-parses the concatenated `12` as a JSON number"
     );
 
-    let dm2_strict = dm2_render(&input, &frontmatter, SubtreeStrictness::Strict).expect("DM2 renders");
+    let dm2_strict = dm2_render(
+        &input,
+        &frontmatter,
+        SubtreeStrictness::Strict,
+        &context,
+    )
+    .expect("DM2 renders");
     assert_eq!(
         dm2_strict,
         json!("12"),
         "DM2 keeps the mixed string as a string"
     );
     let dm2_lenient =
-        dm2_render(&input, &frontmatter, SubtreeStrictness::Lenient).expect("DM2 renders");
+        dm2_render(&input, &frontmatter, SubtreeStrictness::Lenient, &context)
+            .expect("DM2 renders");
     assert_eq!(dm2_lenient, json!("12"), "DM2 mode does not change typing");
 }
 
@@ -231,12 +254,18 @@ fn divergence_mixed_string_json_reparse() {
 fn divergence_unknown_root_strictness() {
     let input = json!("x={{typo}}");
     let frontmatter = obj(json!({}));
+    let context = prepared_context();
 
     let loop_result = loop_render(&input, &frontmatter).expect("loop tolerates unknown root");
     assert_eq!(loop_result, json!("x="), "loop resolves the unknown root empty");
 
     // Lifecycle strict fails closed on the unknown root.
-    let dm2_strict = dm2_render(&input, &frontmatter, SubtreeStrictness::Strict);
+    let dm2_strict = dm2_render(
+        &input,
+        &frontmatter,
+        SubtreeStrictness::Strict,
+        &context,
+    );
     let error = dm2_strict.expect_err("DM2 strict rejects the unknown root");
     assert!(
         error.to_string().contains("unknown root") && error.to_string().contains("typo"),
@@ -245,7 +274,8 @@ fn divergence_unknown_root_strictness() {
 
     // DM2 lenient matches the loop's tolerant behavior.
     let dm2_lenient =
-        dm2_render(&input, &frontmatter, SubtreeStrictness::Lenient).expect("DM2 lenient renders");
+        dm2_render(&input, &frontmatter, SubtreeStrictness::Lenient, &context)
+            .expect("DM2 lenient renders");
     assert_eq!(dm2_lenient, json!("x="), "DM2 lenient matches the loop engine");
 }
 
@@ -256,6 +286,7 @@ fn divergence_unknown_root_strictness() {
 fn divergence_malformed_expression_both_fail_closed() {
     let input = json!("{{ >bad }}");
     let frontmatter = obj(json!({}));
+    let context = prepared_context();
 
     let loop_error = loop_render(&input, &frontmatter).expect_err("loop fails closed");
     assert!(
@@ -263,7 +294,12 @@ fn divergence_malformed_expression_both_fail_closed() {
         "loop surfaces a contextual InvalidAction: {loop_error}"
     );
 
-    let dm2_error = dm2_render(&input, &frontmatter, SubtreeStrictness::Strict)
+    let dm2_error = dm2_render(
+        &input,
+        &frontmatter,
+        SubtreeStrictness::Strict,
+        &context,
+    )
         .expect_err("DM2 strict fails closed");
     assert!(
         matches!(dm2_error, MarkdownError::Transform(_)),
@@ -271,7 +307,7 @@ fn divergence_malformed_expression_both_fail_closed() {
     );
     // Fail-closed on a malformed whole-value span holds in lenient mode too.
     assert!(
-        dm2_render(&input, &frontmatter, SubtreeStrictness::Lenient).is_err(),
+        dm2_render(&input, &frontmatter, SubtreeStrictness::Lenient, &context).is_err(),
         "a malformed whole-value span is fatal in both DM2 modes"
     );
 }
