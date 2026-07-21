@@ -3768,6 +3768,60 @@ fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnost
     fixture.shutdown();
 }
 
+#[test]
+fn meta_schema_explicit_mapping_pairs_retain_last_good_assistance() {
+    let workspace = tempfile::tempdir().unwrap();
+    let valid = "? kind\n: schema\n? types\n:\n  title: string\n";
+    let malformed = "? kind\n: schema\n? types\n:\n  title: nope\n";
+    let path = workspace.path().join("explicit-mapping.yaml");
+    std::fs::write(&path, valid).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), valid);
+    assert!(fixture.wait_for_diagnostics(uri.as_str()).is_empty());
+
+    let labels = completion_labels(&mut fixture, uri.as_str(), 4, 13);
+    assert!(
+        labels.iter().any(|label| label == "string"),
+        "valid explicit-key envelope offers semantic completion: {labels:?}"
+    );
+    let hover = hover_markup(&mut fixture, uri.as_str(), 4, 3);
+    assert!(
+        hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+        "valid explicit-key envelope activates semantic hover: {hover}"
+    );
+
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": malformed } ]
+        }),
+    );
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_type_definition")),
+        "the current explicit-key buffer owns diagnostics: {diagnostics:?}"
+    );
+
+    let labels = completion_labels(&mut fixture, uri.as_str(), 4, 10);
+    assert!(
+        labels.iter().any(|label| label == "number"),
+        "the retained explicit-key model keeps completion alive: {labels:?}"
+    );
+    let hover = hover_markup(&mut fixture, uri.as_str(), 4, 3);
+    assert!(
+        hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+        "the retained explicit-key model keeps hover alive: {hover}"
+    );
+
+    fixture.shutdown();
+}
+
 /// A block tagged document authored `types` first must retain its last-good
 /// model when edited into a buffer whose nested payload holds a valid YAML
 /// plain scalar with a mid-scalar quote (`  title: foo-"bar`).
@@ -3841,6 +3895,65 @@ fn meta_schema_standalone_types_first_retains_last_good_across_nested_quote_edit
     // Hover stays available: still the last-good `string`, not the buffer's
     // current `foo-"bar`.
     let hover = hover_markup(&mut fixture, uri.as_str(), 1, 3);
+    assert!(
+        hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+        "the retained tagged model survives the malformed edit: {hover}"
+    );
+
+    fixture.shutdown();
+}
+
+/// Flow-only indicators inside a top-level block plain scalar must not hide a
+/// later tagged envelope claim. The current malformed buffer owns diagnostics,
+/// while completion and hover continue to use the valid model opened at the
+/// same source positions.
+#[test]
+fn meta_schema_standalone_block_plain_flow_indicator_retains_last_good() {
+    let workspace = tempfile::tempdir().unwrap();
+    let malformed = "description: foo{ \"bar\nkind: schema\ntypes:\n  title: nope\n";
+    let poison_line_len = malformed.lines().next().unwrap().len();
+    let valid = format!(
+        "#{}\nkind: schema\ntypes:\n  title: string\n",
+        " ".repeat(poison_line_len - 1)
+    );
+    let path = workspace.path().join("block-plain-flow-indicator.yaml");
+    std::fs::write(&path, &valid).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), &valid);
+    assert!(fixture.wait_for_diagnostics(uri.as_str()).is_empty());
+
+    let hover = hover_markup(&mut fixture, uri.as_str(), 3, 3);
+    assert!(
+        hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
+        "valid tagged envelope activates semantic intelligence: {hover}"
+    );
+
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": malformed } ]
+        }),
+    );
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_type_definition")),
+        "the current malformed definition owns diagnostics: {diagnostics:?}"
+    );
+
+    let labels = completion_labels(&mut fixture, uri.as_str(), 3, 9);
+    assert!(
+        labels.iter().any(|label| label == "string"),
+        "the retained tagged model keeps completion alive: {labels:?}"
+    );
+
+    let hover = hover_markup(&mut fixture, uri.as_str(), 3, 3);
     assert!(
         hover.contains("Type: **type-definition**") && hover.contains("Declares: **string**"),
         "the retained tagged model survives the malformed edit: {hover}"

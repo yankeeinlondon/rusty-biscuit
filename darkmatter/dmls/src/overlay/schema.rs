@@ -277,10 +277,11 @@ pub fn standalone_envelope_claim(text: &str) -> Option<StandaloneSchemaEnvelope>
         .then_some(StandaloneSchemaEnvelope::Pure)
 }
 
-/// Top-level `key: value` entries of a block mapping: one per unindented line.
+/// Top-level implicit or explicit pairs of a block mapping.
 fn block_top_level_entries(text: &str) -> Vec<(String, String)> {
     let mut entries = Vec::new();
     let mut quote: Option<char> = None;
+    let mut explicit_key = None;
     for line in text.lines() {
         let line = line.trim_end_matches('\r');
         // A line typed while a top-level quoted scalar is still open is that
@@ -305,6 +306,18 @@ fn block_top_level_entries(text: &str) -> Vec<(String, String)> {
         if line.chars().next().is_some_and(char::is_whitespace) {
             continue;
         }
+        if let Some(key) = explicit_key.take() {
+            let Some(value) = explicit_indicator_content(line, ':') else {
+                continue;
+            };
+            advance_quote_state(value, &mut quote);
+            entries.push((key, value.trim().to_string()));
+            continue;
+        }
+        if let Some(key) = explicit_indicator_content(line, '?') {
+            explicit_key = lexical_scalar(key.trim());
+            continue;
+        }
         // A top-level line advances quote state so its own value may open a
         // multi-line quoted scalar (`description: "multi`) whose following
         // continuation lines close it.
@@ -318,6 +331,11 @@ fn block_top_level_entries(text: &str) -> Vec<(String, String)> {
         entries.push((key, value.trim().to_string()));
     }
     entries
+}
+
+fn explicit_indicator_content(source: &str, indicator: char) -> Option<&str> {
+    let rest = source.strip_prefix(indicator)?;
+    (rest.is_empty() || rest.starts_with(char::is_whitespace)).then_some(rest.trim_start())
 }
 
 /// Advances quoted-scalar state by one character taken from inside an active
@@ -363,15 +381,19 @@ fn step_quoted(
 /// mapping.
 ///
 /// A quote character opens a scalar only where a scalar may begin — line start,
-/// or immediately after a structural indicator (see [`is_scalar_boundary`]).
-/// Elsewhere it is ordinary text: the plain scalars `don't` and `foo-"bar` must
-/// not open a quote that swallows every following line and drops a genuine
-/// envelope's retained model.
+/// or immediately after a structural indicator for the active presentation
+/// (see [`is_scalar_boundary`]). Elsewhere it is ordinary text: the plain
+/// scalars `don't`, `foo-"bar`, and `foo{ "bar` must not open a quote that
+/// swallows every following line and drops a genuine envelope's retained
+/// model. A flow collection opened at a block node boundary switches to flow
+/// semantics until its matching delimiter closes.
 fn advance_quote_state(line: &str, quote: &mut Option<char>) {
     let mut chars = line.chars().peekable();
     let mut escaped = false;
     let mut at_scalar_start = true;
     let mut previous_space = true;
+    let mut presentation = ScalarPresentation::Block;
+    let mut flow_depth = 0usize;
     while let Some(ch) = chars.next() {
         if quote.is_some() {
             if step_quoted(quote, &mut escaped, ch, chars.peek().copied()) {
@@ -382,12 +404,29 @@ fn advance_quote_state(line: &str, quote: &mut Option<char>) {
         match ch {
             '#' if previous_space => return,
             '\'' | '"' if at_scalar_start => *quote = Some(ch),
+            '{' | '[' if presentation == ScalarPresentation::Flow || at_scalar_start => {
+                presentation = ScalarPresentation::Flow;
+                flow_depth += 1;
+            }
+            '}' | ']' if presentation == ScalarPresentation::Flow => {
+                flow_depth = flow_depth.saturating_sub(1);
+                if flow_depth == 0 {
+                    presentation = ScalarPresentation::Block;
+                }
+            }
             _ => {}
         }
         previous_space = ch.is_whitespace();
-        at_scalar_start = is_scalar_boundary(ch, at_scalar_start, chars.peek().copied())
-            || (at_scalar_start && previous_space);
+        at_scalar_start =
+            is_scalar_boundary(ch, at_scalar_start, chars.peek().copied(), presentation)
+                || (at_scalar_start && previous_space);
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ScalarPresentation {
+    Block,
+    Flow,
 }
 
 /// Whether `ch` is a structural indicator that begins a fresh scalar position,
@@ -397,11 +436,17 @@ fn advance_quote_state(line: &str, quote: &mut Option<char>) {
 /// YAML indicators are context-sensitive. `-` is structural only when it is
 /// already at a scalar boundary and is followed by whitespace or end of line;
 /// a mid-token `-` remains plain-scalar content even when whitespace follows
-/// it. `:` followed by whitespace or end of line is a mapping separator, while
-/// `[`, `{`, and `,` are flow indicators that always begin a scalar position.
-fn is_scalar_boundary(ch: char, at_scalar_start: bool, next: Option<char>) -> bool {
+/// it. `:` followed by whitespace or end of line is a mapping separator. `[`,
+/// `{`, and `,` begin scalar positions only in flow presentation; in block
+/// presentation they are content once a plain scalar has begun.
+fn is_scalar_boundary(
+    ch: char,
+    at_scalar_start: bool,
+    next: Option<char>,
+    presentation: ScalarPresentation,
+) -> bool {
     match ch {
-        '[' | '{' | ',' => true,
+        '[' | '{' | ',' => presentation == ScalarPresentation::Flow,
         '-' => at_scalar_start && next.is_none_or(char::is_whitespace),
         ':' => next.is_none_or(char::is_whitespace),
         _ => false,
@@ -496,7 +541,12 @@ fn flow_top_level_entries(inner: &str) -> Vec<(String, String)> {
         }
         previous_space = ch.is_whitespace();
         at_scalar_start = structural_value_boundary
-            || is_scalar_boundary(ch, at_scalar_start, chars.peek().copied())
+            || is_scalar_boundary(
+                ch,
+                at_scalar_start,
+                chars.peek().copied(),
+                ScalarPresentation::Flow,
+            )
             || (at_scalar_start && previous_space);
     }
     push_flow_entry(&mut entries, &mut key, &mut token);
@@ -1141,6 +1191,7 @@ mod tests {
     fn envelope_claim_recognizes_block_and_flow_presentation() {
         for pure in [
             "$schema:\n  title: string\n",
+            "? $schema\n:\n  title: string\n",
             "{\"$schema\":{\"title\":\"string\"}}",
             "{$schema: {title: string}}\n",
             "---\n{ \"$schema\": { \"title\": \"str\" } }\n",
@@ -1156,6 +1207,7 @@ mod tests {
 
         for tagged in [
             "kind: schema\ntypes:\n  title: string\n",
+            "? kind\n: schema\n? types\n:\n  title: string\n",
             "{kind: schema, types: {title: string}}",
             "{\"types\": {\"title\": \"str\"}, \"kind\": \"schema\"}",
         ] {
@@ -1371,6 +1423,64 @@ mod tests {
                 "the authoritative parser must also decline {inert:?}"
             );
         }
+    }
+
+    /// Flow-only indicators are ordinary content after a block plain scalar
+    /// begins. The lexical claim must agree with the authoritative parser for
+    /// every indicator, while an actual flow collection opened at the value
+    /// boundary must still retain flow quote semantics.
+    #[test]
+    fn envelope_claim_distinguishes_block_plain_scalars_from_flow_collections() {
+        for indicator in ['[', '{', ','] {
+            let value = format!("foo{indicator} \"bar");
+            let tagged = format!(
+                "description: {value}\nkind: schema\ntypes:\n  title: nope\n"
+            );
+            serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&tagged).unwrap_or_else(|error| {
+                panic!("block carrier must be valid YAML: {tagged:?}: {error}")
+            });
+            assert!(
+                darkmatter::markdown::schemas::parse_standalone_schema_document(
+                    &tagged,
+                    Path::new("/w/schema.yaml"),
+                )
+                .is_err(),
+                "the authoritative parser recognizes the tagged envelope: {tagged:?}"
+            );
+            assert_eq!(
+                standalone_envelope_claim(&tagged),
+                Some(StandaloneSchemaEnvelope::Tagged),
+                "block indicator {indicator:?}: {tagged:?}"
+            );
+
+            let inert = format!("description: {value}\nsetting: enabled\n");
+            serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&inert).unwrap_or_else(|error| {
+                panic!("ordinary carrier must be valid YAML: {inert:?}: {error}")
+            });
+            assert!(
+                matches!(
+                    darkmatter::markdown::schemas::parse_standalone_schema_document(
+                        &inert,
+                        Path::new("/w/schema.yaml"),
+                    ),
+                    Ok(None)
+                ),
+                "the authoritative parser must decline ordinary YAML: {inert:?}"
+            );
+            assert_eq!(
+                standalone_envelope_claim(&inert),
+                None,
+                "ordinary block indicator {indicator:?}: {inert:?}"
+            );
+        }
+
+        let open_flow_quote =
+            "description: {note: \"open\nkind: schema\ntypes:\n  title: string\n";
+        assert_eq!(
+            standalone_envelope_claim(open_flow_quote),
+            None,
+            "a flow collection opened at a block value boundary keeps its quote state"
+        );
     }
 
     /// Pattern keys live on `SchemaShape::pattern_keys`, not in the literal

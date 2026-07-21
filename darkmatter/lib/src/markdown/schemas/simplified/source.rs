@@ -402,7 +402,9 @@ impl BlockLocator<'_> {
         let content = &self.source[line.content_start..line.end];
         if sequence_content(content).is_some() {
             self.sequence(indent)
-        } else if mapping_separator(content).is_some() {
+        } else if explicit_indicator_content(content, '?').is_some()
+            || mapping_separator(content).is_some()
+        {
             self.mapping(indent)
         } else {
             self.next += 1;
@@ -418,8 +420,16 @@ impl BlockLocator<'_> {
             {
                 break;
             }
-            self.next += 1;
-            pairs.push(self.pair(line.content_start..line.end, indent)?);
+            let content = &self.source[line.content_start..line.end];
+            if explicit_indicator_content(content, '?').is_some() {
+                self.next += 1;
+                pairs.push(self.explicit_pair(line.content_start..line.end, indent)?);
+            } else if mapping_separator(content).is_some() {
+                self.next += 1;
+                pairs.push(self.pair(line.content_start..line.end, indent)?);
+            } else {
+                break;
+            }
         }
         located_mapping(pairs)
     }
@@ -481,7 +491,53 @@ impl BlockLocator<'_> {
         let key_range = trim_range(self.source, range.start..range.start + colon);
         let key = decoded_text(self.source, &key_range)?;
         let value_range = trim_range(self.source, range.start + colon + 1..range.end);
-        let value = if value_range.start < value_range.end {
+        let value = self.value(value_range, indent)?;
+        let pair_span = key_range.start..value.span.end;
+        Ok(LocatedPair {
+            key,
+            key_span: key_range,
+            pair_span,
+            value,
+        })
+    }
+
+    fn explicit_pair(
+        &mut self,
+        key_line: Range<usize>,
+        indent: usize,
+    ) -> Result<LocatedPair, SchemaError> {
+        let key_content = &self.source[key_line.clone()];
+        let key_relative = explicit_indicator_content(key_content, '?')
+            .ok_or_else(projection_error)?;
+        let key_range = trim_range(self.source, key_line.start + key_relative..key_line.end);
+        let key = decoded_text(self.source, &key_range)?;
+
+        let value_line = self.lines.get(self.next).ok_or_else(projection_error)?.clone();
+        if value_line.indent != indent {
+            return Err(projection_error());
+        }
+        let value_content = &self.source[value_line.content_start..value_line.end];
+        let value_relative = explicit_indicator_content(value_content, ':')
+            .ok_or_else(projection_error)?;
+        self.next += 1;
+        let value_range =
+            trim_range(self.source, value_line.content_start + value_relative..value_line.end);
+        let value = self.value(value_range, indent)?;
+        let pair_span = key_range.start..value.span.end;
+        Ok(LocatedPair {
+            key,
+            key_span: key_range,
+            pair_span,
+            value,
+        })
+    }
+
+    fn value(
+        &mut self,
+        value_range: Range<usize>,
+        indent: usize,
+    ) -> Result<LocatedValue, SchemaError> {
+        if value_range.start < value_range.end {
             if let Some(after_anchor) = anchor_value_start(self.source, &value_range) {
                 let remainder = trim_range(self.source, after_anchor..value_range.end);
                 let mut value = if remainder.start < remainder.end {
@@ -496,9 +552,9 @@ impl BlockLocator<'_> {
                     self.node(child_indent)?
                 };
                 value.span.start = value_range.start;
-                value
+                Ok(value)
             } else {
-                locate_inline(self.source, value_range)?
+                locate_inline(self.source, value_range)
             }
         } else {
             let child_indent = self
@@ -507,16 +563,18 @@ impl BlockLocator<'_> {
                 .filter(|line| line.indent > indent)
                 .map(|line| line.indent)
                 .ok_or_else(projection_error)?;
-            self.node(child_indent)?
-        };
-        let pair_span = key_range.start..value.span.end;
-        Ok(LocatedPair {
-            key,
-            key_span: key_range,
-            pair_span,
-            value,
-        })
+            self.node(child_indent)
+        }
     }
+}
+
+fn explicit_indicator_content(source: &str, indicator: char) -> Option<usize> {
+    let rest = source.strip_prefix(indicator)?;
+    if rest.is_empty() {
+        return Some(indicator.len_utf8());
+    }
+    let spaces = rest.bytes().take_while(|byte| byte.is_ascii_whitespace()).count();
+    (spaces > 0).then_some(indicator.len_utf8() + spaces)
 }
 
 fn anchor_value_start(source: &str, range: &Range<usize>) -> Option<usize> {

@@ -55,6 +55,63 @@ fn shipped_base_schema_exposes_structural_spans_across_anchors_and_aliases() {
     assert_eq!(&source[type_keyword.clone()], "number");
 }
 
+#[test]
+fn standalone_explicit_mapping_pairs_preserve_semantics_and_project_spans() {
+    let cases = [
+        (
+            StandaloneSchemaEnvelope::Pure,
+            "? $schema\n:\n  ? title\n  : string\n",
+            "$schema:\n  title: string\n",
+        ),
+        (
+            StandaloneSchemaEnvelope::Tagged,
+            "? kind\n: schema\n? types\n:\n  ? title\n  : string\n",
+            "kind: schema\ntypes:\n  title: string\n",
+        ),
+    ];
+
+    for (envelope, explicit, implicit) in cases {
+        let explicit_document =
+            parse_standalone_schema_document(explicit, Path::new("/w/explicit.yaml"))
+                .expect("explicit mapping pairs are valid schema authoring")
+                .expect("explicit mapping envelope claims the document");
+        let implicit_document =
+            parse_standalone_schema_document(implicit, Path::new("/w/implicit.yaml"))
+                .expect("implicit mapping pairs are valid schema authoring")
+                .expect("implicit mapping envelope claims the document");
+
+        assert_eq!(explicit_document.envelope, envelope);
+        assert_eq!(explicit_document.declaration, implicit_document.declaration);
+
+        let root = SchemaSourcePath::root();
+        let title = root.property("title");
+        let declaration = explicit_document
+            .source_map
+            .spans(&root, SchemaSpanKind::Declaration)
+            .first()
+            .expect("explicit payload declaration span");
+        assert_eq!(&explicit[declaration.clone()], "title\n  : string");
+        let key = explicit_document
+            .source_map
+            .spans(&title, SchemaSpanKind::MappingKey)
+            .first()
+            .expect("explicit mapping key span");
+        assert_eq!(&explicit[key.clone()], "title");
+        let definition = explicit_document
+            .source_map
+            .spans(&title, SchemaSpanKind::Definition)
+            .first()
+            .expect("explicit definition span");
+        assert_eq!(&explicit[definition.clone()], "string");
+        let type_keyword = explicit_document
+            .source_map
+            .spans(&title, SchemaSpanKind::TypeKeyword)
+            .first()
+            .expect("explicit type keyword span");
+        assert_eq!(&explicit[type_keyword.clone()], "string");
+    }
+}
+
 // ── Standalone declaration-parser parity ────────────────────────────────────
 //
 // A standalone pure payload must reach the same `parse_schema_declaration`

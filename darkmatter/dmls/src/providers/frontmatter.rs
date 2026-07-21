@@ -132,13 +132,28 @@ fn meta_schema_completion(ctx: &DocumentContext, offset: usize) -> Option<Vec<Co
     Some(dedup_completions(items))
 }
 
-/// The `(value_start, meta-schema kinds)` a block-presented cursor resolves to:
-/// a `key:` value, or a `- ` sequence item.
+/// The `(value_start, meta-schema kinds)` a block-presented cursor resolves to.
+///
+/// Standalone documents consult the shared source map first, which covers both
+/// implicit and explicit mapping pairs. Frontmatter and incomplete source then
+/// fall back to an implicit `key:` value or a `- ` sequence item.
 fn block_cursor(
     ctx: &DocumentContext,
     overlay: &crate::overlay::DocumentOverlay,
     offset: usize,
 ) -> Option<(usize, Vec<MetaSchemaKind>)> {
+    if let SchemaAuthoringState::Standalone { model: Some(model), .. } =
+        &overlay.schema_authoring
+        && let Some(schema) = model.schema()
+        && let Some(region) = semantic_type_regions(schema, &model.source_map)
+            .into_iter()
+            .find(|region| {
+                region.definition_span.start <= offset && offset <= region.definition_span.end
+            })
+    {
+        return Some((region.definition_span.start, vec![region.kind]));
+    }
+
     let (line_start, prefix) = line_prefix(ctx.text, offset);
     let indent = prefix.len() - prefix.trim_start().len();
     let trimmed = prefix.trim_start();
