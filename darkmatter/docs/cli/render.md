@@ -48,7 +48,7 @@ md render README.md --code-block same    # match the terminal's mode
 
 - `--output <auto|markdown|text|html|json|ast>`: Output format (default: `auto`).
 - `--show`: Write output to a temp file and open it with the system default app.
-- `--indent <#>`: Normalize nested list indentation width (2 or 4 spaces per level). Default: 4. `8` is rejected because eight-space nesting is not CommonMark-portable for narrow markers (`-`, `*`, `+`, single-digit ordered).
+- `--indent <#>`: Prefer a nested-list indentation step of 2, 4, or 8 spaces per level. Default: 4. When the requested step would change the CommonMark structure under a narrow marker, cleanup emits the nearest valid child column instead.
 
 ### Global Flags Relevant to `render`
 
