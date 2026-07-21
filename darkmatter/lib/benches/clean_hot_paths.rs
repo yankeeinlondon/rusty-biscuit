@@ -11,8 +11,9 @@
 //!   parses once and is not reparsed".
 //!
 //! Each case times the full library pipeline the non-save CLI path runs
-//! (`try_from_content` → `cleanup` → `as_string`) plus the parse stage alone,
-//! so a Phase 7 regression can be attributed to parsing versus cleanup.
+//! (raw frontmatter extraction and analysis → schema analysis → Markdown parse
+//! → cleanup → raw-preserving assembly) plus the parse stage alone, so a Phase
+//! 7 regression can be attributed to the feature path versus Markdown parsing.
 //!
 //! ```text
 //! cargo bench -p darkmatter --bench clean_hot_paths -- --save-baseline phase1-before
@@ -37,9 +38,11 @@
 use std::fmt::Write as _;
 use std::hint::black_box;
 
+use biscuit_file::analyze_yaml;
 use criterion::{Criterion, criterion_group, criterion_main};
-use darkmatter::markdown::Markdown;
+use darkmatter::markdown::{Markdown, extract_frontmatter_block};
 use darkmatter::markdown::cleanup::{cleanup_content, reflow_to_width};
+use darkmatter::markdown::schemas::CleanSchemaConfig;
 
 /// Representative no-frontmatter document: headings, prose, a nested list,
 /// and a fenced code block — the shape an agent emits for a plain note.
@@ -112,11 +115,40 @@ cargo nextest run
 Follow up next week with the metrics review.
 ";
 
-/// The non-save `md clean` library pipeline: parse, cleanup, serialize.
+/// The non-save `md clean` hot path, including the invalid-frontmatter feature.
 fn clean_pipeline(source: &str) -> String {
-    let mut md = Markdown::try_from_content(source).expect("baseline fixtures must parse");
-    md.cleanup();
-    md.as_string()
+    let repaired = match extract_frontmatter_block(source).expect("frontmatter extraction") {
+        Some(extraction) if !extraction.yaml.trim().is_empty() => {
+            let analysis = analyze_yaml(extraction.yaml);
+            let yaml = analysis.apply().source;
+
+            let mut repaired = String::with_capacity(source.len());
+            repaired.push_str(&source[..extraction.yaml_span.start]);
+            repaired.push_str(&yaml);
+            repaired.push_str(&source[extraction.yaml_span.end..]);
+
+            let markdown = Markdown::try_from_content(repaired.clone()).expect("parse");
+            let schema = CleanSchemaConfig::new()
+                .resolve(None)
+                .expect("default schema resolution");
+            black_box(schema.analyze(&markdown, &yaml).expect("schema analysis"));
+            repaired
+        }
+        _ => source.to_string(),
+    };
+
+    let mut cleaned = Markdown::try_from_content(repaired.clone()).expect("parse");
+    cleaned.cleanup();
+
+    match extract_frontmatter_block(&repaired).expect("frontmatter extraction") {
+        Some(extraction) if !extraction.yaml.trim().is_empty() => {
+            let mut output = String::with_capacity(repaired.len());
+            output.push_str(&repaired[extraction.block_span]);
+            output.push_str(cleaned.content());
+            output
+        }
+        _ => cleaned.content().to_string(),
+    }
 }
 
 fn bench_clean_hot_paths(c: &mut Criterion) {
