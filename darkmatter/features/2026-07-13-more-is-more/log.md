@@ -4,6 +4,7 @@ implementation_17: "2026-07-19T08:49:09-07:00"
 implementation_18: "2026-07-19T10:23:12-07:00"
 implementation_20: "2026-07-19T18:43:08-07:00"
 implementation_21: "2026-07-20T22:31:43-07:00"
+implementation_22: "2026-07-21T08:34:57-07:00"
 deferred_perf_measurement: false
 ---
 
@@ -1029,3 +1030,110 @@ The three fixed findings are:
 - **Finding 3 (High)** — canonical provider identities reject encoded structural delimiters, controls, backslashes, and dot segments, while request paths independently encode every identity segment and preserve valid Unicode
 
 The files changed in this cycle are `.claude/skills/sniff/SKILL.md`, `sniff/lib/README.md`, `sniff/lib/src/{error,network/mod}.rs`, `sniff/lib/src/filesystem/{formatting,git/recent_commits,git/remote_observation}.rs`, `sniff/lib/src/remote/{focused,provider_url,url_parser}.rs`, `sniff/lib/tests/{focused_provider,integration}.rs`, `sniff/cli/tests/snapshots.rs`, `sniff/cli/tests/snapshots/snapshots__os_json_summary.snap`, `darkmatter/lib/src/markdown/compose/expression/functions/provider.rs`, `darkmatter/lib/src/markdown/compose/tests/provider_network.rs`, `darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs`, `darkmatter/cli/src/commands/compose.rs`, `darkmatter/features/2026-07-13-more-is-more/review-21.md`, and this log file.
+
+## Implementation of Review Findings #22
+
+> **started at:** 2026-07-21T08:34:57-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-13-more-is-more/review-22.md'
+- this is iteration 22 of the review-to-implement cycle
+
+### Finding 1 (High) — ambiguous SSH/SCP remote vendor discovery
+
+- starting the work on 'ambiguous-ssh-scp-remote-vendor-discovery' at 08:36:33-07:00
+        - required skills read before implementation: `darkmatter`, `rust`, `rust-testing`, and `sniff`; because Sniff's remote resolver is gitoxide-backed, the required `rust-devops` gitoxide guidance and the Rust-testing mocking notes were also read
+        - the testing contract classifies the requested disposable-repository and Wiremock coverage as Level 1; no terminal, browser, external provider, or host input is involved
+        - `sniff repo packages`, `sniff repo package-areas`, and `sniff repo package-dependencies` establish `sniff` (`sniff` library plus its package-area CLI consumer) as the directly changed scope; `darkmatter` is a downstream caller of the unchanged `remote_vendor_at` signature, so no Darkmatter source or gate is required for this finding
+        - pre-edit GitNexus impact analysis reports LOW risk for every existing symbol that will change:
+                - private `discovery_remote`: one direct caller (`FocusedProviderClient::discover`), no affected execution flow
+                - public `remote_vendor_at`: two direct consumers (the Sniff integration test and Darkmatter's `remote_vendor_fn`), no affected execution flow
+                - public `FocusedProviderClient::discover`: no indexed upstream caller and no affected execution flow
+        - root cause confirmed: `FocusedProviderClient::discover` normalizes ambiguous SSH/SCP fetch URLs before the shared probe, while `remote_vendor_at` still sends the raw non-HTTP Git URL into that probe and receives `UnsupportedRemoteCapability`
+        - implementation completed with one crate-private Sniff authority, `provider_discovery_remote`, in `filesystem::git::remote_observation`; both `remote_vendor_at` and `FocusedProviderClient::discover` now use it before the bounded provider probe
+                - HTTP(S) remotes retain their configured URL, including a non-default HTTP port
+                - SSH URL and SCP syntax synthesize `https://{resolved-host}/`; an SSH port such as `2222` is omitted and cannot be reinterpreted as an HTTP port
+                - existing exact-host allowlist enforcement remains before client construction, credentials, or network I/O
+        - Level-1 coverage added and strengthened through real configured disposable Git repositories:
+                - `remote_vendor_at` now proves ambiguous SSH and SCP remotes reach the synthesized HTTPS host-policy boundary rather than failing with `UnsupportedRemoteCapability`
+                - public SSH/SCP vendor classification succeeds for GitLab, Gitea, and Forgejo remotes when deterministic local classification is available
+                - public `FocusedProviderClient::discover` successfully constructs GitLab clients from both SSH URL and SCP remotes
+                - the shared helper's focused test proves SSH-port omission, while the existing Wiremock discovery tests prove successful GitLab/Gitea/Forgejo probing, version retention, capability derivation, and provider-specific final API-base selection without contacting a live provider
+        - focused remote binaries passed 56 of 56 tests; one unrelated handle-leak retry passed on its second attempt. A final three-test run including the newly added public GitLab constructor test passed 3 of 3
+        - `cd sniff && just test` was attempted as required but remains blocked by Review 22 Finding 2's reproducible stale registered-worktree defect: `/private/tmp/dmbench/{base,after}` returns `MissingHead` in cwd-based detection tests; the run recorded 1,462 passes, one terminal failure, three skips, and 156 cancellations. This finding's focused remote tests remained green, and the full gate is scheduled for rerun after Finding 2 lands
+        - `cd sniff && just lint` passed for `sniff` and `sniff-cli`; `git diff --check` passed
+        - post-change GitNexus `detect_changes` reports LOW aggregate risk and no affected execution flows; its shared-worktree result includes 98 symbols across 19 files from prior review-cycle and concurrent-finding changes, not only this finding
+        - a broader test-routing seam was evaluated to make a pure host-only HTTPS SSH/SCP origin contact Wiremock's random plain-HTTP port and then carry that injected origin into final API-base construction. Pre-edit GitNexus reported HIGH risk for `canonical_api_base` (46 impacted symbols, two direct callers, three modules including Darkmatter), so the expansion was stopped before edits. The implementation does not weaken HTTPS selection, retain an SSH port, add a production test override, or widen the public API merely to accommodate a mock transport
+- work completed for 'ambiguous-ssh-scp-remote-vendor-discovery' at 08:44:52-07:00
+
+### Finding 2 (High) — stale linked-worktree repository discovery
+
+- starting the work on 'stale-linked-worktree-repository-discovery' at 08:45:59-07:00
+        - required skills read before implementation: `darkmatter`, `rust`, `rust-testing`, `sniff`, and `rust-devops`; the regression is disposable, process-local Level 1 coverage
+        - scope discovery with `sniff repo packages`, `sniff repo package-areas`, and `sniff repo package-dependencies` confirmed the implementation and gates are confined to the `sniff` package area
+        - reproduced the review failure without cleaning host state: `test_detect_with_base_dir` and `test_skip_os_with_filesystem_only` both failed all four retries because full detection opened stale `/private/tmp/dmbench/{base,before,after}` linked-worktree targets and received gix `NotARepository(MissingHead)`
+        - root cause: initial `GitRepo` discovery was correctly anchored to the requested path, but `get_worktrees` subsequently treated every independently registered linked checkout as mandatory; an unrelated stale registration therefore aborted detection of the valid active repository
+        - pre-edit GitNexus impact for `get_worktrees` was **HIGH**: 21 impacted symbols, six direct callers, four modules, and no indexed execution flows; direct callers are `GitRepo::worktrees`, `GitRepo::detect_with_request`, and four focused tests, with transitive Git parity and benchmark coverage
+                - the HIGH blast radius was warned to the user and orchestrator before edits; implementation resumed only after explicit authorization for the bounded change
+                - the existing opposing Git parity test was LOW risk with no dependents
+        - implementation is deliberately narrow: linked targets returning gix `open::Error::NotARepository` are omitted, while registry metadata, trust, permission, I/O, and every other open/analysis error continue to propagate; the active repository handle and requested root are never replaced
+        - the function contract and comments were updated with the stale-registration behavior so the previous propagation claim does not drift from production behavior
+        - added a disposable real-repository regression fixture that creates a linked worktree, deletes its checkout while retaining `.git/worktrees/wt000`, invokes public full Git detection from the explicitly requested main repository, and proves the requested root remains authoritative while the stale entry is omitted
+        - focused regression run passed 3 of 3: the disposable stale-registration fixture plus the two review-reported cwd detection tests
+        - a focused preservation run exposed a boundary bug before the full gate: gix projected an empty registry `gitdir` file as an empty relative target, which the first implementation could misclassify as stale
+                - tightened the boundary cross-platform: only absolute registered checkout targets reach stale-target classification; empty or relative proxy metadata remains a hard `worktree_base` error, while all absolute missing targets still tolerate gix `NotARepository`
+        - first canonical `cd sniff && just test` run: the `sniff` library passed all 1,620 tests (three skipped; one unrelated handle-leak retry passed), closing the review's two library failures, but `sniff-cli` exposed a second enumeration path through public `list_worktrees` and stopped after 395 passes with the same stale target
+                - pre-edit GitNexus impact for `list_worktrees` was MEDIUM: 12 direct callers in Git/CLI modules and one affected CLI execution flow
+                - consolidated the exact gix `NotARepository` classification into one `trusted_open_registered_worktree` helper used by both full Git detection and public worktree listing
+                - added a second disposable real-repository fixture proving public `list_worktrees` preserves the explicitly requested main repository and returns only its main entry after a linked checkout is deleted without pruning metadata
+        - final focused regression and preservation run passed 7 of 7 across `sniff` and `sniff-cli`: both stale-registration fixtures, both review-reported detection tests, both malformed-proxy checks, and aggregate JSON construction
+        - final canonical `cd sniff && just test` passed with the host's unrelated stale `/private/tmp/dmbench` registrations left untouched
+                - `sniff`: 1,621 of 1,621 tests passed; three skipped
+                - `sniff-cli`: 769 of 769 tests passed; three skipped
+                - this closes Finding 1's pending full-gate result as well: its ambiguous SSH/SCP remote tests passed inside the same canonical run
+        - `cd sniff && just lint` passed for `sniff`, `sniff-cli`, and the feature-enabled `darkmatter` dependency
+        - `git diff --check` passed; no formatting command was run
+        - post-change GitNexus `detect_changes(scope: unstaged)` reports LOW aggregate risk, no affected execution flows, and the intended `get_worktrees`/`list_worktrees` changes; the 107-symbol/23-file report includes prior and concurrent review-cycle changes in the shared worktree
+        - changed files owned by this finding: `sniff/lib/src/filesystem/git/{open,remote_refresh,worktree}.rs`, `sniff/lib/tests/git_parity.rs`, and this log file
+- work completed for 'stale-linked-worktree-repository-discovery' at 08:56:30-07:00
+
+### Finding 3 (High, non-blocking) — Windows compile evidence
+
+- starting the work on 'windows-compile-evidence' at 08:57:32-07:00
+        - required skills loaded before evaluation: `darkmatter`, `rust`, `rust-testing`, `sniff`, and `rust-devops`
+        - AC16 and AC29 require cross-platform compile checks on macOS, Windows, and Linux; Review 22 specifically requests a green Windows result for Sniff with `remote`, Darkmatter, DMLS, and downstream consumers selected by the public-API scope
+        - Sniff discovery established the exact package scope
+                - directly reviewed package areas: `sniff` (`sniff`, `sniff-cli`) and `darkmatter` (`darkmatter`, `darkmatter-cli`, `dmls`)
+                - actual downstream compile consumer: `claudine` (`claudine`, `claudine-cli`), which depends on the Sniff provider surface through Darkmatter and has an explicit cross-platform compile-check workflow
+        - inspected the native Windows CI contract before attempting local evidence
+                - `.github/workflows/test.yml` runs `cargo check --color=never -p sniff --all-targets`, the same command with `--features remote`, `cargo check --color=never -p sniff-cli --all-targets`, and `cd sniff && just test` on `windows-latest`
+                - `.github/workflows/darkmatter-tests.yml` delegates to `_area-ci.yml`, which checks/tests `darkmatter`, `darkmatter-cli`, and `dmls` on `windows-latest`
+                - `.github/workflows/claudine-tests.yml` runs `cargo check --color=never --all-targets -p claudine -p claudine-cli` on `windows-latest`
+        - host/toolchain inspection found macOS AArch64 with Rust 1.96.0; both `x86_64-pc-windows-msvc` and `x86_64-pc-windows-gnu` standard-library targets were installed, together with a MinGW compiler, but no native Windows host or MSVC/Windows SDK
+        - the closest-to-CI MSVC cross-check, `cargo check --color=never -p sniff --all-targets --target x86_64-pc-windows-msvc --features remote`, stopped in third-party C dependencies before compiling the reviewed project source
+                - `aws-lc-sys` and `libz-sys` could not find the Windows SDK/CRT headers (`windows.h`, `stdlib.h`, `stdio.h`, and `sys/types.h`)
+                - this is a missing MSVC SDK/sysroot on the macOS host, not a source-code failure
+        - a bounded Windows GNU cross-check was run with the configured cache wrapper disabled and an isolated temporary target directory
+                - `cargo check --color=never -p sniff --all-targets --target x86_64-pc-windows-gnu --features remote` passed
+                - `cargo check --color=never -p sniff --all-targets --target x86_64-pc-windows-gnu` passed
+                - `cargo check --color=never -p sniff-cli --all-targets --target x86_64-pc-windows-gnu` passed
+                - `cargo check --color=never --all-targets --target x86_64-pc-windows-gnu -p darkmatter -p darkmatter-cli -p dmls` passed
+                - the checks compiled the dirty reviewed worktree based on commit `62c27747f7dc5d7ac5d08f89f40fd2f67ac8478c`; no production or test source was changed for this finding
+        - downstream `cargo check --color=never --all-targets --target x86_64-pc-windows-gnu -p claudine -p claudine-cli` was not green because existing test targets contain Unix-only imports (`std::os::unix`) and the CLI Windows target does not resolve the `url` and `shellexpand` crates
+                - these failures are outside the More Is More feature's reviewed Sniff/Darkmatter implementation and require a separate Claudine cross-platform test-target cleanup; they were not patched as part of this evidence-only finding
+        - evidence classification: the green results are legitimate Windows-target cross-compilation evidence for Sniff with `remote`, Sniff CLI, Darkmatter, Darkmatter CLI, and DMLS, but they are not native Windows/MSVC compile or runtime evidence and therefore do not satisfy Review 22's request to retain a green run of the existing `windows-latest` matrices
+        - exact resolution required: run the reviewed worktree on a native `windows-latest`/MSVC runner using the existing Sniff and Darkmatter workflow commands above, then retain the green job result; the Claudine downstream workflow must first address its unrelated Windows all-target compile backlog or be explicitly excluded by a narrower public-API impact decision
+        - `git diff --check` passed; no formatting command was run
+- work DEFERRED for 'windows-compile-evidence' at 09:04:38-07:00 — reason: this macOS host cannot produce the requested native Windows/MSVC CI result, and the closest MSVC cross-check lacks the Windows SDK; Windows GNU cross-compilation passed for the directly reviewed scope, while the existing downstream Claudine all-target check has unrelated Windows test-target failures
+
+### Successful Completion
+
+The implementation of review cycle 22 has completed successfully in 31 minutes. During this implementation all 3 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 1 was deferred (see reasons below):
+
+- **Finding 3 (High, non-blocking) — required Windows compile evidence** — deferred because this macOS host cannot produce the requested native `windows-latest`/MSVC result and lacks the Windows SDK needed for an MSVC cross-check. Windows GNU target compilation passed for Sniff with and without `remote`, Sniff CLI, Darkmatter, Darkmatter CLI, and DMLS. The explicit downstream Claudine all-target check remains red from unrelated pre-existing Windows test-target defects. This is a platform-evidence deferment, not a performance deferment, so `deferred_perf_measurement` remains `false`
+
+The two fixed findings are:
+
+- **Finding 1 (High)** — `remote_vendor_at` and `FocusedProviderClient::discover` now share one Git-transport-to-provider-origin authority; public SSH/SCP coverage proves host policy, SSH-port omission, local provider classification, and client construction without weakening the HTTPS boundary
+- **Finding 2 (High)** — full Git detection and public worktree listing now tolerate only genuinely stale absolute linked-worktree registrations while preserving malformed metadata, trust, permission, I/O, and analysis errors; the canonical Sniff Level-1 suite is green with the host's stale registrations left untouched
+
+The files changed in this cycle are `sniff/lib/src/filesystem/git/{open,remote_observation,remote_refresh,worktree}.rs`, `sniff/lib/src/remote/focused.rs`, `sniff/lib/tests/{focused_provider,git_parity,remote_observation}.rs`, `darkmatter/features/2026-07-13-more-is-more/review-22.md`, and this log file.
