@@ -45,8 +45,8 @@ pub fn strip_incidental_newlines(content: &str) -> String {
     } else {
         lines.len()
     };
-    let metadata = LineMetadata::scan(&lines[..line_count], 0, None);
     let semantic = semantic::SoftBreakModel::from_content(&normalized);
+    let metadata = LineMetadata::scan(&lines[..line_count], 0, Some(&semantic.protected), true);
     // Boundaries arrive in event order, which is source order, so these edits are
     // sorted by `range.start` by construction. The binding is deliberately not
     // `mut`: the legacy pass below binary-searches it to decide ownership, and
@@ -241,6 +241,7 @@ fn reflow_physical_lines(
         &lines[..line_count],
         source_offset,
         Some(protected_spans),
+        false,
     );
     let mut result = String::with_capacity(content.len());
 
@@ -335,12 +336,12 @@ impl LineMetadata {
         lines: &[&str],
         source_offset: usize,
         parsed_protected_spans: Option<&[Range<usize>]>,
+        use_indented_code_fallback: bool,
     ) -> Vec<Self> {
         let mut metadata = Vec::with_capacity(lines.len());
         let mut fence: Option<String> = None;
         let mut html_block: Option<HtmlBlockEnd> = None;
         let mut inline_code_ticks: Option<usize> = None;
-        let mut shell_block_depth = 0usize;
         let mut line_offset = source_offset;
 
         for line in lines {
@@ -349,11 +350,8 @@ impl LineMetadata {
             let blank = trimmed.is_empty();
             let was_in_fence = fence.is_some();
             let was_in_html = html_block.is_some();
-            let was_in_shell_block = shell_block_depth > 0;
             let starts_fence = fence.is_none().then(|| fence_marker(trimmed)).flatten();
             let starts_html = html_block.is_none().then(|| html_block_end(trimmed)).flatten();
-            let starts_shell_block = directive_trimmed.starts_with("::shell-block");
-            let ends_shell_block = directive_trimmed.starts_with("::end-block");
             let list_item = list_marker_byte_width(trimmed).is_some();
             let line_span = line_offset..line_offset + line.len();
             let parsed_protected = parsed_protected_spans.is_some_and(|spans| {
@@ -363,12 +361,10 @@ impl LineMetadata {
             });
             let protected = was_in_fence
                 || was_in_html
-                || was_in_shell_block
                 || starts_fence.is_some()
                 || starts_html.is_some()
                 || parsed_protected
-                || (parsed_protected_spans.is_none() && is_indented_code_line(line))
-                || starts_shell_block
+                || (use_indented_code_fallback && is_indented_code_line(line))
                 || is_structural_line(trimmed)
                 || is_structural_line(directive_trimmed);
 
@@ -400,12 +396,6 @@ impl LineMetadata {
                 && end.closes_on(line, blank)
             {
                 html_block = None;
-            }
-
-            if starts_shell_block {
-                shell_block_depth += 1;
-            } else if was_in_shell_block && ends_shell_block {
-                shell_block_depth = shell_block_depth.saturating_sub(1);
             }
 
             line_offset += line.len() + 1;

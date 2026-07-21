@@ -3,6 +3,7 @@ use std::borrow::Cow;
 use std::ops::Range;
 
 use super::ListSpacingMode;
+use super::opaque::OpaqueBodyScan;
 
 pub(super) fn extract_list_markers(
     content: &str,
@@ -262,8 +263,8 @@ pub(super) fn extract_indented_code_markers(
 pub(super) struct OpaqueDirectiveBodies<'a> {
     masked_content: Cow<'a, str>,
     body_lines: Vec<Range<usize>>,
-    body_ranges: Vec<Range<usize>>,
     payloads: Vec<&'a str>,
+    requires_source_fallback: bool,
 }
 
 impl<'a> OpaqueDirectiveBodies<'a> {
@@ -278,11 +279,14 @@ impl<'a> OpaqueDirectiveBodies<'a> {
     pub(super) fn payloads(&self) -> &[&'a str] {
         &self.payloads
     }
+
+    pub(super) fn requires_source_fallback(&self) -> bool {
+        self.requires_source_fallback
+    }
 }
 
 struct PhysicalLine {
     content: Range<usize>,
-    full_end: usize,
 }
 
 struct PhysicalLines<'a> {
@@ -307,7 +311,6 @@ impl Iterator for PhysicalLines<'_> {
                     };
                     let line = PhysicalLine {
                         content: self.start..content_end,
-                        full_end: self.cursor + 1,
                     };
                     self.cursor += 1;
                     self.start = self.cursor;
@@ -316,7 +319,6 @@ impl Iterator for PhysicalLines<'_> {
                 b'\r' if self.bytes.get(self.cursor + 1) != Some(&b'\n') => {
                     let line = PhysicalLine {
                         content: self.start..self.cursor,
-                        full_end: self.cursor + 1,
                     };
                     self.cursor += 1;
                     self.start = self.cursor;
@@ -329,7 +331,6 @@ impl Iterator for PhysicalLines<'_> {
         if self.start < self.bytes.len() {
             let line = PhysicalLine {
                 content: self.start..self.bytes.len(),
-                full_end: self.bytes.len(),
             };
             self.start = self.bytes.len();
             return Some(line);
@@ -344,52 +345,39 @@ impl Iterator for PhysicalLines<'_> {
 /// Pulldown-cmark intentionally has no Darkmatter directive-body ownership.
 /// Replacing payload bytes with plain text prevents list-looking shell input
 /// from creating Markdown events; the original bytes are spliced back after
-/// every generic string normalization pass.
+/// every generic string normalization pass. Ownership comes from the shared
+/// page/shell block scanner. If that scanner rejects ambiguous block structure,
+/// the caller preserves the complete source instead of formatting only the
+/// apparently unambiguous portion.
 pub(super) fn protect_opaque_directive_bodies(content: &str) -> OpaqueDirectiveBodies<'_> {
-    let mut body_lines = Vec::new();
-    let mut body_ranges = Vec::new();
-    let mut payloads = Vec::new();
-    let mut mask_ranges = Vec::new();
-    let mut depth = 0usize;
-    let mut body_start = None;
-    let mut container_prefix = String::new();
-
-    for line in physical_lines(content) {
-        let source_line = &content[line.content.clone()];
-        let body = directive_body(source_line);
-        let starts = body.starts_with("::shell-block");
-        let ends = body.starts_with("::end-block");
-
-        if depth > 0 && !ends {
-            body_lines.push(line.content.clone());
-            let mask_start = if source_line.starts_with(&container_prefix) {
-                line.content.start + container_prefix.len()
-            } else {
-                line.content.start
-            };
-            mask_ranges.push(mask_start..line.content.end);
-        }
-        if starts {
-            if depth == 0 {
-                body_start = Some(line.full_end);
-                container_prefix = source_line[..source_line.len() - body.len()].to_string();
-            }
-            depth += 1;
-        } else if ends && depth > 0 {
-            depth = depth.saturating_sub(1);
-            if depth == 0 {
-                let range = body_start.take().unwrap_or(line.content.start)..line.content.start;
-                payloads.push(&content[range.clone()]);
-                body_ranges.push(range);
-                container_prefix.clear();
-            }
-        }
+    let scan = OpaqueBodyScan::scan(content);
+    if scan.malformed() {
+        return OpaqueDirectiveBodies {
+            masked_content: Cow::Borrowed(content),
+            body_lines: Vec::new(),
+            payloads: Vec::new(),
+            requires_source_fallback: true,
+        };
     }
 
-    if let Some(start) = body_start {
-        let range = start..content.len();
-        payloads.push(&content[range.clone()]);
-        body_ranges.push(range);
+    let mut body_lines = Vec::new();
+    let mut payloads = Vec::new();
+    let mut mask_ranges = Vec::new();
+
+    for body in scan.bodies() {
+        payloads.push(&content[body.span.clone()]);
+        for line in physical_lines(&content[body.span.clone()]) {
+            let content_range = body.span.start + line.content.start
+                ..body.span.start + line.content.end;
+            let source_line = &content[content_range.clone()];
+            body_lines.push(content_range.clone());
+            let mask_start = if source_line.starts_with(&body.container_prefix) {
+                content_range.start + body.container_prefix.len()
+            } else {
+                content_range.start
+            };
+            mask_ranges.push(mask_start..content_range.end);
+        }
     }
 
     let masked_content = if mask_ranges.is_empty() {
@@ -405,8 +393,8 @@ pub(super) fn protect_opaque_directive_bodies(content: &str) -> OpaqueDirectiveB
     OpaqueDirectiveBodies {
         masked_content,
         body_lines,
-        body_ranges,
         payloads,
+        requires_source_fallback: false,
     }
 }
 
@@ -416,13 +404,13 @@ pub(super) fn restore_opaque_directive_bodies(output: &mut String, payloads: &[&
         return;
     }
 
-    let body_ranges = protect_opaque_directive_bodies(output).body_ranges;
-    if body_ranges.len() != payloads.len() {
+    let scan = OpaqueBodyScan::scan(output);
+    if scan.malformed() || scan.bodies().len() != payloads.len() {
         return;
     }
 
-    for (range, payload) in body_ranges.iter().zip(payloads).rev() {
-        output.replace_range(range.clone(), &normalize_line_endings(payload));
+    for (body, payload) in scan.bodies().iter().zip(payloads).rev() {
+        output.replace_range(body.span.clone(), &normalize_line_endings(payload));
     }
 }
 
@@ -457,14 +445,6 @@ fn normalize_line_endings(content: &str) -> String {
 
     normalized.push_str(&content[copied_through..]);
     normalized
-}
-
-fn directive_body(line: &str) -> &str {
-    let mut body = line.trim_start();
-    while let Some(rest) = body.strip_prefix('>') {
-        body = rest.trim_start();
-    }
-    body
 }
 
 fn range_starts_in(ranges: &[Range<usize>], range: &Range<usize>) -> bool {

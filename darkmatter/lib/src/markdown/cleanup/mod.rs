@@ -8,6 +8,7 @@ mod blockquote;
 mod brackets;
 mod emphasis;
 mod lists;
+mod opaque;
 mod reflow;
 mod tables;
 
@@ -306,6 +307,9 @@ fn cleanup_content_internal(
     // Parse with source ranges to preserve list markers and emphasis styles
     // Use custom options that exclude ENABLE_SMART_PUNCTUATION to preserve original quotes
     let opaque_bodies = protect_opaque_directive_bodies(content);
+    if opaque_bodies.requires_source_fallback() {
+        return content.to_string();
+    }
     let parser = cleanup_parser(opaque_bodies.masked_content());
     let events_with_ranges: Vec<(Event, Range<usize>)> = parser.into_offset_iter().collect();
 

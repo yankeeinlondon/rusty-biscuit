@@ -6,10 +6,12 @@ use super::{
     HtmlBlockEnd,
 };
 use super::super::cleanup_parser;
+use super::super::opaque::OpaqueBodyScan;
 
 #[derive(Debug, Clone)]
 pub(super) struct SoftBreakModel {
     pub(super) boundaries: Vec<SemanticSoftBreak>,
+    pub(super) protected: Vec<Range<usize>>,
 }
 
 #[derive(Debug, Clone)]
@@ -86,7 +88,10 @@ impl SoftBreakModel {
             }
         }
 
-        Self { boundaries }
+        Self {
+            boundaries,
+            protected: protected_lines.opaque_ranges,
+        }
     }
 }
 
@@ -103,11 +108,12 @@ impl ReflowMap {
         // reach the event stream, so their source ranges must be collected from
         // the parser's definition table or word wrapping would shred them into
         // invalid Markdown.
-        let mut protected: Vec<Range<usize>> = events
+        let mut protected: Vec<Range<usize>> = protected_lines.opaque_ranges.clone();
+        protected.extend(events
             .reference_definitions()
             .iter()
             .map(|(_, definition)| prose_block_span(content, definition.span.clone()))
-            .collect();
+        );
 
         for (event, span) in events {
             match event {
@@ -312,6 +318,7 @@ impl ParserContext {
 #[derive(Debug, Clone)]
 struct ProtectedLines {
     lines: Vec<ProtectedLine>,
+    opaque_ranges: Vec<Range<usize>>,
 }
 
 #[derive(Debug, Clone)]
@@ -322,9 +329,10 @@ struct ProtectedLine {
 
 impl ProtectedLines {
     fn scan(content: &str) -> Self {
+        let opaque_scan = OpaqueBodyScan::scan(content);
+        let opaque_ranges = opaque_scan.protected_ranges(content.len());
         let mut fence: Option<String> = None;
         let mut html_block: Option<HtmlBlockEnd> = None;
-        let mut shell_block_depth = 0usize;
         let mut lines = Vec::new();
 
         for span in source_line_spans(content) {
@@ -334,17 +342,16 @@ impl ProtectedLines {
             let blank = trimmed.is_empty();
             let was_in_fence = fence.is_some();
             let was_in_html = html_block.is_some();
-            let was_in_shell_block = shell_block_depth > 0;
             let starts_fence = fence.is_none().then(|| fence_marker(trimmed)).flatten();
             let starts_html = html_block.is_none().then(|| html_block_end(trimmed)).flatten();
-            let starts_shell_block = directive.starts_with("::shell-block");
-            let ends_shell_block = directive.starts_with("::end-block");
+            let opaque = opaque_ranges.iter().any(|opaque| {
+                opaque.start <= span.end && span.start < opaque.end
+            });
             let protected = was_in_fence
                 || was_in_html
-                || was_in_shell_block
                 || starts_fence.is_some()
                 || starts_html.is_some()
-                || starts_shell_block
+                || opaque
                 || is_structural_line(trimmed)
                 || is_structural_line(directive);
             lines.push(ProtectedLine { span, protected });
@@ -366,14 +373,12 @@ impl ProtectedLines {
                 html_block = None;
             }
 
-            if starts_shell_block {
-                shell_block_depth += 1;
-            } else if was_in_shell_block && ends_shell_block {
-                shell_block_depth = shell_block_depth.saturating_sub(1);
-            }
         }
 
-        Self { lines }
+        Self {
+            lines,
+            opaque_ranges,
+        }
     }
 
     fn boundary_is_protected(&self, soft_break: &Range<usize>) -> bool {
