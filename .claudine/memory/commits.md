@@ -96,6 +96,14 @@ do not belong here.
 - Run commands from the inherited worktree root. Do not change to a guessed
   repository path, and do not push commits.
 - In zsh wrappers, avoid special variable names such as `status` and `path`.
+- `git commit --only -F - -- <pathspec...>` is safe under concurrent index
+  churn: when another sub-agent's commit lands between this agent's read and
+  its commit, the `--only -- <paths>` form commits only the named paths
+  regardless of intermediate index changes, so the agent never accidentally
+  sweeps in files that left its assigned set during the gap. Confirmed in a
+  three-group batch where the planning-archive group landed last while the
+  docs-only and rustdoc-only groups had already moved their files out of the
+  index.
 
 ## Orchestration
 
