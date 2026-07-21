@@ -1455,3 +1455,55 @@ The implementation of review cycle 13 has completed successfully in 17 minutes. 
         - `darkmatter/dmls/tests/lsp_session.rs`
         - `darkmatter/features/2026-07-13-meta-schema/review-13.md`
         - `darkmatter/features/2026-07-13-meta-schema/log.md`
+
+## Implementation of Review Findings #14
+
+> **started at:** 2026-07-20T21:39:21-07:00
+
+- this implementation addressed the one Review 14 finding: compact explicit
+  scalar-key mapping pairs inside root and property union sequence items
+- GitNexus reported **LOW** upstream impact for `BlockLocator::sequence`: one
+  direct caller, six affected symbols through depth 3, one affected module, and
+  no indexed execution flows
+- GitNexus reported **LOW** upstream impact for `locate_inline`: two direct
+  callers, seven affected symbols through depth 3, one affected module, and no
+  indexed execution flows
+- `sniff` confirmed the affected package area is `darkmatter`; the production
+  behavior is owned by `darkmatter` and consumed directly by `dmls`, while the
+  area build and lint recipes also cover `darkmatter-cli`
+- `BlockLocator::sequence` now dispatches implicit and explicit first and
+  continuation pairs symmetrically for compact mapping sequence items
+- permanent Level-1 regressions cover root-union and property-union semantic
+  parity plus exact arm, mapping-key, definition, type-keyword, and reference
+  spans
+- an in-memory DMLS regression proves the tagged property-union example has no
+  malformed-document diagnostic and retains completion plus union-aware hover
+- the v1 source-aware presentation grammar is explicitly frozen in the source
+  module contract, public schema topic, spec parser-surface contract, AC7, and
+  design ruling Q8
+- a negative boundary regression exposed and closed a false-span case: block
+  scalars now fail at the documented projection boundary instead of reporting
+  the `|` header as the declaration and file-reference span
+- focused compact-pair and boundary regressions passed 3/3; the complete
+  `meta_schema_phase6` and `schemas_source_projection` binaries passed 15/15;
+  the focused DMLS meta-schema suite passed 24/24
+- the exact DMLS Level-1 gate passed 633/633 with three higher-tier tests
+  skipped
+- `just build --color never` passed for `darkmatter`, `darkmatter-cli`, and
+  `dmls`; canonical `just lint` passed for all three packages
+- Level 2 was not rerun because this closure changes only in-memory YAML source
+  projection; review cycle 9's complete 90/90 terminal result remains applicable
+- the required Darkmatter hash for `.claude/skills/darkmatter/SKILL.md` was
+  refreshed with `md hash --save`; no formatting command was run
+- `git diff --check` passed; GitNexus `detect_changes(scope=all)` reported LOW
+  risk, 15 changed symbols across eight indexed files, and no affected
+  execution flows
+
+### Successful Completion
+
+Review cycle 14 is the final review-to-implementation cycle for this feature.
+The one finding was fixed, nothing was deferred, the source-aware presentation
+grammar is closed at the documented v1 boundary, and future presentation
+expansion requires a separately specified feature. The feature is ready and
+Review 14 is closed; moving the feature to `_completed` remains a separate
+lifecycle step.

@@ -10,6 +10,7 @@ implemented_by: codex/default
 description: "A **feature** review of `2026-07-13-meta-schema/spec.md`"
 feature: 2026-07-13-meta-schema/review-13.md
 previous: 2026-07-13-meta-schema/review-12.md
+next: 2026-07-13-meta-schema/review-14.md
 ---
 
 # Review 13 — Meta Schema

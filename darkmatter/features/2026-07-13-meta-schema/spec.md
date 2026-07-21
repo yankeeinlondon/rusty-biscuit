@@ -1,7 +1,7 @@
 ---
 status: ready for planning and implementation
 reviewed: true
-review_iterations: 13
+review_iterations: 14
 reviewed_by: codex/default
 reviewed_on: 2026-07-14
 rulings: "`type-definition` and `schema` semantic types ruled by Ken 2026-07-13"
@@ -252,6 +252,17 @@ array-level constraints remain available on the postfix surface.
   adds outer declaration/file-reference spans. DMLS consumes these maps for
   hover, completion context, and diagnostics; it must not search decoded text
   to reconstruct ranges.
+
+The v1 source-aware presentation grammar is closed at plain, single-quoted,
+and double-quoted scalars; block and flow sequences; implicit scalar-key block
+and flow mappings; explicit scalar-key block mapping pairs at mapping roots and
+in compact block-sequence items; and the mapping-value anchors/scalar aliases
+used by the shipped corpus. It is not a general YAML concrete-syntax tree.
+Tags, block scalars, complex keys, explicit flow-mapping keys, directives, and
+other unlisted presentations are outside the source-map and DMLS contract even
+when `serde_yaml_ng` can produce a semantic value for them. Expanding this
+boundary requires a separately specified feature and is not an open acceptance
+criterion for this feature.
 
 The exact public type and function names are planning decisions. There must be
 one grammar authority with semantic-only and source-aware entry points, not a
@@ -721,10 +732,14 @@ accepts only a closed subset of bare names rather than arbitrary definitions.
    semantic values; a union-valued item uses a nested sequence. Item and array
    constraints retain the established postfix semantics.
 7. The public passive parsers are the shared authority for schema authoring,
-   custom-keyword validation, and DMLS. Their source-aware companions return
-   the same semantic AST plus structural sidecar spans. Parser-parity and span-
-   projection tests prove representative definitions cannot diverge across
-   plain/double/single-quoted YAML, CRLF, UTF-8, nested mappings, and unions.
+   custom-keyword validation, and DMLS. Within the frozen v1 source-aware
+   presentation grammar, their source-aware companions return the same semantic
+   AST plus structural sidecar spans. Parser-parity and span-projection tests
+   cover plain/double/single-quoted YAML, CRLF, UTF-8, nested mappings, unions,
+   mapping-value anchors/scalar aliases, and implicit or explicit scalar-key
+   block mappings, including compact mapping items in block sequences. A
+   source-free parse of an unlisted YAML presentation does not expand the
+   source-map or DMLS contract.
 8. The Darkmatter base schema declares `$schema: schema`; existing valid inline,
    referenced, root-union, and referenced-raw-JSON documents continue to
    prepare successfully, while DMLS hover displays `Type: schema` instead of
@@ -922,3 +937,8 @@ through unchanged.
   depth limit (2026-07-14 review).** `MAX_INLINE_OBJECT_DEPTH` applies to both
   string-form inline objects and YAML-native mapping definitions. Semantic
   validation must not expose a less-bounded recursive path.
+- **Q8 — Does source-aware parity imply support for every valid YAML
+  presentation?** **Ruled no (2026-07-20 closure).** Parity applies within the
+  frozen v1 presentation grammar stated in the parser-surface contract and
+  AC7. Compact explicit scalar-key mapping items are the final included form.
+  Any further presentation expands scope and requires a separate feature.
