@@ -4,6 +4,7 @@ implementation_1: 2026-07-20T08:30:23-07:00
 implementation_2: "2026-07-20T15:55:57-07:00"
 implementation_3: "2026-07-20T17:02:31-07:00"
 implementation_4: "2026-07-20T19:40:56-07:00"
+implementation_5: "2026-07-20T22:03:29-07:00"
 deferred_perf_measurement: true
 ---
 
@@ -1002,3 +1003,88 @@ The files changed specifically for review cycle 4 were:
 - `darkmatter/fixes/2026-07-13-fixed-width-lists/deferred-performance-tests.md`
 - `darkmatter/fixes/2026-07-13-fixed-width-lists/log.md`
 - `darkmatter/fixes/2026-07-13-fixed-width-lists/review-4.md`
+
+## Implementation of Review Findings #5
+
+> **started at:** 2026-07-20T22:03:29-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/fixes/2026-07-13-fixed-width-lists/review-5.md'
+- this is iteration 5 of the review-to-implement cycle
+- starting the work on 'High — Opaque shell-block bodies are still rewritten as Markdown lists' at 22:06:22-07:00
+        - using the `darkmatter`, `rust`, `rust-testing`, `sniff`, and GitNexus impact-analysis skills; classifying the finding as pure, cross-platform Level-1 cleanup behavior
+        - `sniff` and the specification confirm the affected package area is `darkmatter`, containing `darkmatter`, `darkmatter-cli`, and `dmls`; verification remains limited to those packages
+        - root cause confirmed: opaque source ranges currently filter marker/context side channels only, while the original parser's list events for shell payload lines still pass through cmark serialization
+        - GitNexus rates `cleanup_content_internal` CRITICAL with 171 upstream symbols, nine direct callers, one compose inline-post cleanup flow, and six affected modules; its benchmark replica is LOW risk, and the four cross-surface test oracles have no upstream dependents
+        - proceeding with a private, parse-count-neutral source masking and post-serialization splice so opaque payload bytes never become Markdown events while directive openers and closers remain structural
+        - implementation completed: cleanup now masks opaque shell-body bytes before the existing Markdown parse, preserves byte offsets and structural container prefixes, and restores the original scanner-owned payload slices after serialization and generic cleanup passes
+        - the protection path borrows the input when no opaque bodies exist, scans physical lines without allocating a line vector, handles LF, CRLF, and lone-CR terminators, and introduces no public API or dependency changes
+        - added a Darkmatter-scanner-aware library oracle and exact fixtures covering `-`, `+`, `*`, ordered, task-looking, and multiline payload lines in quoted and unquoted shell blocks, each followed by a differently marked real list under configured and fixed widths
+        - added exact spawned CLI stdout and `--save`, compose, and DMLS formatting coverage; every surface asserts byte-identical opaque payloads and a byte-identical second pass
+        - focused cross-surface Nextest passed 5/5 tests, and the broader shell-block/protected-body/parse-count selection passed 162/162 Level-1 tests; the cleanup parse-count contract remains one parse by default and two at fixed width
+        - package-area `just build` passed for `darkmatter`, `darkmatter-cli`, and `dmls`
+        - exhaustive Level-1 verification passed all four `just test --partition hash:N/4` partitions for `darkmatter`, `darkmatter-cli`, and `dmls`; no test failed or retried
+        - package-area `just lint` passed for all three packages after resolving five local clarity and needless-borrow findings; no lint warnings remain
+        - `cargo fmt --check` could not run because the pinned stable toolchain has no `rustfmt` component installed; no write-mode formatter was installed or run, and `git diff --check` passed
+        - the final source scan confirmed the obsolete `opaque_directive_body_lines` helper is gone and the new protection/restoration path is used consistently by production cleanup and its benchmark replica
+        - cumulative GitNexus `detect_changes` reported CRITICAL risk across 3,540 changed symbols, 673 files, and 63 affected flows versus `main`; that compare result includes the branch-wide delta and unrelated pre-existing worktree changes, while this finding's expected cleanup/compose inline-post flow is present and all unrelated worktree files remain untouched
+        - no public API, dependency, cleanup parse count, platform-specific branch, or output line-ending policy changed
+        - no Level-2 or performance measurement was required for this deterministic Level-1 cleanup finding, and nothing was deferred
+- work completed for 'High — Opaque shell-block bodies are still rewritten as Markdown lists' at 22:28:37-07:00
+- starting the work on 'High — Required performance timing evidence remains deferred' at 22:31:16-07:00
+        - used the `darkmatter`, `rust`, `rust-testing`, and `sniff` skills, including the performance-testing and Criterion guidance; evaluated every documented host-admissibility condition before running a timing command
+        - `sniff hardware --json` identifies the host as an Apple M4 Max with 16 physical and logical cores and 128 GiB memory; `sniff repo package-areas --json` confirms verification remains scoped to the `darkmatter` package area (`darkmatter`, `darkmatter-cli`, and `dmls`)
+        - at 22:31 local, `uptime` reported 8 users and load averages of `40.35 44.01 36.93`; the one-minute load was more than 20 times the documented ceiling of 2.0
+        - AC power was attached and exact-name process checks found no `cargo`, `rustc`, or `sccache` process, but 9 `codex` and 5 `claudine` processes were active; the host therefore failed the quiet-load, single-agent, and logged-in-session requirements
+        - no fresh shared `CARGO_TARGET_DIR` was allocated and no baseline or candidate timing sample was started; existing Criterion data was left untouched, and no medians, estimates, deltas, baseline-drift results, or B1/B2/B3 verdicts were recorded
+        - the load-independent parse-count selector passed all 8 tests, confirming one parse for default cleanup and every indent/spacing variant and exactly two parses for the CLI fixed-width sequence
+        - the Criterion `--test --noplot` harness smoke passed all 12 cases, including all eight `clean_list_budgets` fixture/mode combinations; this mode executes each case once and collects no timing samples
+        - the immediately preceding finding's current exhaustive gates remain applicable because this finding changed only Markdown documentation: package-area `just build`, all four Level-1 hash partitions, and package-area `just lint` passed for `darkmatter`, `darkmatter-cli`, and `dmls`
+        - a fresh package-area `just lint` also passed for all three scoped packages; no write-mode formatting command was run
+        - added the complete Review 5 finding mapping, current host evidence, fresh-target baseline → candidate → baseline procedure, 3% drift guard, and independent B1/B2/B3 arithmetic to `deferred-performance-tests.md`; `deferred_perf_measurement: true` remains set in this log's frontmatter
+        - no production or test symbol was edited, so GitNexus impact analysis and change detection are not applicable to this finding
+        - this finding is deferred solely for the required timing measurement; the deterministic parse-count requirement and Criterion harness are green, but AC 15 cannot receive a timing verdict on the current host
+- work completed for 'High — Required performance timing evidence remains deferred' at 22:33:57-07:00
+- starting the work on 'Medium — The complete Level-2 gate is not recorded for the reviewed HEAD' at 22:37:11-07:00
+        - used the `darkmatter`, `rust`, `rust-testing`, `biscuit-test-harness`, and `sniff` skills; classified this as evidence-only verification with no expected Rust production or test edit
+        - read the complete Review 5 and specification plus the package-area and shared broker recipes; AC 16 scopes the gate to `darkmatter`, `darkmatter-cli`, and `dmls`
+        - `sniff repo package-areas --json` and `sniff repo packages --json` confirmed the three packages in the specification-owned Darkmatter scope; no downstream package-area expansion is warranted because this finding changes only the implementation log
+        - recorded current HEAD `895c22506f3b444e45ed06f0f952a890761fa57f`; the gap-free plan is four sanctioned `just test-l2 --partition hash:N/4` package-area runs, each retaining broker ownership and cleanup while remaining below the non-interactive command ceiling
+        - set `CI=1` only for the Level-2 commands so the sanctioned recipe cannot spawn Apple Terminal; tmux remains available as the headless harness and no host UI focus is requested
+        - before the first partition, no tmux server and no `biscuit-harness-broker` process were present
+        - Level-2 hash partition 1/4 passed in 24.0 seconds: `darkmatter` 5/5, `darkmatter-cli` 12/12, and `dmls` 0/0; no failure or retry occurred
+        - Level-2 hash partition 2/4 passed in approximately 30 seconds: `darkmatter` 5/5, `darkmatter-cli` 21/21, and `dmls` 1/1; no failure or retry occurred
+        - the first partition 3/4 attempt found a genuine stale L2 fixture: `level2_schema_about_light_terminal_uses_dark_code_theme` failed all four configured attempts because the fixture set legacy `COLORFGBG`, while current terminal color-mode discovery honors OSC, `DARK_MODE`, macOS appearance, then its dark default
+        - the recipe exited normally after the failure; no tmux server or broker process survived, and the recipe-created background WezTerm panes were removed
+        - an exact selector passed with external `DARK_MODE=0`, confirming fixture drift rather than a product rendering regression
+        - GitNexus rated `run_with_sentinel` and `capture_schema_about` LOW risk, with one and three direct test-only callers respectively, four total affected test symbols, no execution flow, and no production module
+        - replaced the stale `COLORFGBG` fixture input with the supported explicit `DARK_MODE=1`/`0` override inside the test helper; no production code, public API, dependency, or platform-specific behavior changed
+        - the exact test then passed without an external color-mode workaround, and the corrected Level-2 hash partition 3/4 passed: `darkmatter` 1/1, `darkmatter-cli` 10/10, and `dmls` 1/1; the passing verdict had no failure or retry
+        - Level-2 hash partition 4/4 passed in approximately 48 seconds: `darkmatter` 8/8, `darkmatter-cli` 26/26, and `dmls` 1/1; no failure or retry occurred, and this longest passing command remained below the non-interactive ceiling
+        - the four passing hash partitions form one gap-free current-HEAD Level-2 verdict: `darkmatter` 19/19, `darkmatter-cli` 69/69, and `dmls` 3/3; no passing partition skipped an assigned Level-2 test or consumed a configured retry
+        - after the final partition, no tmux server or `biscuit-harness-broker` process remained and none of the recipe-created WezTerm pane IDs remained; `CI=1` prevented Apple Terminal from being launched, so the complete gate neither stole host focus nor left a broker-owned resource behind
+        - HEAD remained `895c22506f3b444e45ed06f0f952a890761fa57f` throughout the passing gate; the immediately preceding package-area build and exhaustive four-partition Level-1 result remain applicable because the only new Rust edit corrects this Level-2 test fixture
+        - fresh package-area `just lint` passed for `darkmatter`, `darkmatter-cli`, and `dmls`; no write-mode formatting command was run
+        - `git diff --check` passed for the test and implementation-log edits
+        - final GitNexus `detect_changes` reports HIGH cumulative dirty-worktree risk across 41 symbols and six existing cleanup flows; this finding's two edited test helpers and three direct test callers are present, affect no execution flow or production module, and all unrelated dirty changes remain untouched
+        - files changed specifically for this finding are `darkmatter/cli/tests/level2_schema_about.rs` and `darkmatter/fixes/2026-07-13-fixed-width-lists/log.md`; nothing was deferred
+- work completed for 'Medium — The complete Level-2 gate is not recorded for the reviewed HEAD' at 22:48:54-07:00
+
+### Successful Completion
+
+The implementation of review cycle 5 has completed successfully in 46 minutes 40 seconds. During this implementation all 3 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 1 was deferred (see reasons below):
+
+- **High — Required performance timing evidence remains deferred** was deferred because the host was inadmissible for the specification's Criterion budgets: it had 8 logged-in users, 9 Codex processes, 5 Claudine processes, and load averages of `40.35 44.01 36.93`, while the documented one-minute ceiling is 2.0. No timing samples, medians, estimates, deltas, baseline-drift result, or B1/B2/B3 verdicts were recorded. Parse-count tests passed 8/8, the non-sampling Criterion harness passed 12/12, and the exact quiet-host baseline → candidate → baseline procedure, 3% drift guard, and B1/B2/B3 arithmetic are retained in `deferred-performance-tests.md`.
+
+The files changed specifically for review cycle 5 were:
+
+- `darkmatter/lib/src/markdown/cleanup/lists.rs`
+- `darkmatter/lib/src/markdown/cleanup/mod.rs`
+- `darkmatter/lib/src/markdown/cleanup/perf_profile.rs`
+- `darkmatter/lib/src/markdown/cleanup/tests/reflow.rs`
+- `darkmatter/lib/src/markdown/compose/tests/rendering.rs`
+- `darkmatter/cli/tests/clean.rs`
+- `darkmatter/cli/tests/level2_schema_about.rs`
+- `darkmatter/dmls/src/providers/formatting.rs`
+- `darkmatter/fixes/2026-07-13-fixed-width-lists/deferred-performance-tests.md`
+- `darkmatter/fixes/2026-07-13-fixed-width-lists/log.md`
+- `darkmatter/fixes/2026-07-13-fixed-width-lists/review-5.md`
