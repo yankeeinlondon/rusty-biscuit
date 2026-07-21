@@ -3,7 +3,7 @@ sequence:
     - name: darkmatter
     - name: more-is-more
     - name: conflict
-base: "@darkmatter/fixes/2026-07-20-mega-merge"
+base: "@darkmatter/fixes/2026-07-20-dm-mega-merge"
 darkmatter_log: "{{ base }}/darkmatter-log.md"
 more_is_more_log: "{{ base }}/more-is-more-log.md"
 conflict: "{{ base }}/conflict-report.md"
