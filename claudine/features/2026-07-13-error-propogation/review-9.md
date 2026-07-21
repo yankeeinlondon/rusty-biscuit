@@ -1,6 +1,6 @@
 ---
 $schema: feature-review.yaml
-ready: false
+ready: true
 agent: codex/default
 created: 2026-07-20T20:25:16-07:00
 spec: 2026-07-13-error-propogation/spec.md
