@@ -99,7 +99,13 @@ pub(crate) fn run_composition_inner(
     let system_prompt_args = shared.system_prompt_args();
 
     let frontmatter_load_t = std::time::Instant::now();
-    let source = resolve_composition_source(&file, kind, &shared)?;
+    let file_resolution_context = claudine::composition::capture_file_resolution_context()?;
+    let source = resolve_composition_source(
+        &file,
+        kind,
+        &shared,
+        &file_resolution_context,
+    )?;
     record_prep_substage(
         &mut prep_substages,
         perf_enabled,
@@ -264,6 +270,7 @@ pub(crate) fn run_composition_inner(
         }
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
             .with_source_file(&source.resolved_path)
+            .with_file_resolution_context(file_resolution_context.clone())
             // Defer the lifecycle event keys (DM1), exactly as the main prepare
             // passes do. The preflight runs a full compose pipeline purely to
             // discover template `::shell` directives; without the exclusion it
@@ -342,6 +349,7 @@ pub(crate) fn run_composition_inner(
         startup_timings,
         prep_substages,
         compose_entry,
+        file_resolution_context,
     )
 }
 
@@ -373,10 +381,11 @@ fn resolve_composition_source(
     file: &str,
     kind: CompositionKind,
     shared: &SharedComposeArgs,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedCompositionSource> {
     let stderr_is_tty = std::io::stderr().is_terminal()
         || std::env::var_os("FORCE_COLOR").is_some();
-    match claudine::composition::resolve_composition_source(file) {
+    match claudine::composition::resolve_composition_source_in_context(file, file_resolution_context) {
         Ok(source) => Ok(source),
         Err(CompositionError::FileNotFound(_)) => {
             let mode = match kind {
@@ -387,20 +396,25 @@ fn resolve_composition_source(
             };
             let selected =
                 crate::completion::operation_file::autocomplete_operation_file(file, mode)?;
-            claudine::composition::resolve_composition_source(&selected).map_err(|e| {
-                claudine::composition::enrich_composition_source_load_error(
+            claudine::composition::resolve_composition_source_in_context(
+                &selected,
+                file_resolution_context,
+            ).map_err(|e| {
+                claudine::composition::enrich_composition_source_load_error_in_context(
                     &selected,
                     e,
                     stderr_is_tty,
+                    file_resolution_context,
                 )
                 .into()
             })
         }
         Err(e) => {
-            let e = claudine::composition::enrich_composition_source_load_error(
+            let e = claudine::composition::enrich_composition_source_load_error_in_context(
                 file,
                 e,
                 stderr_is_tty,
+                file_resolution_context,
             );
             if kind.is_inline() {
                 // Only a genuine reference-resolution failure means the file
@@ -537,6 +551,7 @@ fn build_and_run_loop(
         &effect_engine,
         &shell_runner,
         &emitter,
+        loop_prepare_options.file_resolution_context.as_ref(),
         |ctx, guard| {
             let prepared = {
                 let _span = match kind {
@@ -713,6 +728,7 @@ fn execute_loop_or_single(
     mut startup_timings: Option<crate::perf::StartupTimings>,
     prep_substages: Vec<crate::perf::SubstageTiming>,
     compose_entry: std::time::Instant,
+    file_resolution_context: biscuit_file::FileResolutionContext,
 ) -> Result<i32> {
     let loop_options = build_loop_options(&shared);
 
@@ -752,6 +768,7 @@ fn execute_loop_or_single(
         shell_working_directory: Some(prep_context.launch_workspace.child_cwd.clone()),
         prepared_context: Some(prepared_context.clone()),
         file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
+        file_resolution_context: Some(file_resolution_context.clone()),
         // Name coercion is a sequence-only concern; standalone compose/loop
         // prep injects no `state` object, so there is nothing to coerce.
         name_coercion_keys: Vec::new(),
@@ -830,6 +847,7 @@ fn execute_loop_or_single(
                 ),
                 prepared_context: Some(prepared_context.clone()),
                 file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
+                file_resolution_context: Some(file_resolution_context.clone()),
                 name_coercion_keys: Vec::new(),
                 allow_empty_body: false,
             },

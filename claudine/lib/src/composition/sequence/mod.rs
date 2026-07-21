@@ -70,6 +70,8 @@ pub type ShellSourceRunner<'a> = &'a dyn Fn(&str) -> Result<String, CompositionE
 pub struct SequenceSourceOptions<'a> {
     /// Expander for `$( … )` sources. `None` rejects them.
     pub shell_runner: Option<ShellSourceRunner<'a>>,
+    /// Immutable request snapshot for external file-backed sequence sources.
+    pub file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
 }
 
 /// Detect and resolve a sequence plan from a resolved composition source.
@@ -155,8 +157,17 @@ pub fn resolve_sequence_plan_with(
             resolve_shell_source(&command, &options, &source.resolved_path, fail_fast)?
         }
         SequenceSourceSpec::Reference(reference) => {
-            let path =
-                source::resolve_sequence_reference(&reference.reference, &source.resolved_path)?;
+            let path = match options.file_resolution_context {
+                Some(context) => source::resolve_sequence_reference_in_context(
+                    &reference.reference,
+                    &source.resolved_path,
+                    context,
+                )?,
+                None => source::resolve_sequence_reference(
+                    &reference.reference,
+                    &source.resolved_path,
+                )?,
+            };
             source::load_referenced_sequence(
                 &reference,
                 &path,

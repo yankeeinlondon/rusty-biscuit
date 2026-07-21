@@ -795,6 +795,7 @@ fn target_initialize_error_with_failure_raise_surfaces_failure_evaluation_error(
         Some(fx._dir.path()),
         &fx.term,
         &eng,
+        None,
         std::time::Instant::now(),
     );
 
@@ -856,6 +857,7 @@ fn target_initialize_routes_to_failure_with_raise_surfaces_failure_evaluation_er
         Some(fx._dir.path()),
         &fx.term,
         &eng,
+        None,
         std::time::Instant::now(),
     );
 

@@ -499,6 +499,9 @@ pub struct RematerializeInputs {
     pub set_overrides: Option<serde_json::Value>,
     /// Launch-area directory that anchors caller-supplied file references.
     pub file_ref_fallback_dir: Option<PathBuf>,
+    /// Immutable request-scoped resolution inputs captured before the first
+    /// source is resolved.
+    pub file_resolution_context: Option<biscuit_file::FileResolutionContext>,
     /// Shell commands approved during the original pre-flight discovery.
     pub pre_approved_commands: Option<HashSet<String>>,
     /// Composition env overrides (e.g. `AGENT`, `MODEL`, `YOLO`) injected into

@@ -107,6 +107,7 @@ fn target_initialize_proxy_failure_projects_event_and_property_separately() {
         Some(fx._dir.path()),
         &fx.term,
         &effect_engine,
+        None,
         std::time::Instant::now(),
     );
 

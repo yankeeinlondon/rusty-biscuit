@@ -1095,6 +1095,7 @@ fn route_initialize(
     effective_repo_root: Option<&Path>,
     provider: Provider,
     term: &Terminal,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> CompositionPhaseResult<Option<PathBuf>> {
     let routed = (|| -> Result<CompositionPhaseResult<Option<PathBuf>>> {
         let init_outcome = guard.execute_event(LifecycleSignal::Initialize, init_ctx);
@@ -1160,11 +1161,18 @@ fn route_initialize(
                     // re-materialize path. The harness loop resets the lifecycle
                     // guard and re-emits the target's own `initialize` before its
                     // pre-flight / start / terminal / finalize lifecycle runs.
-                    let resolved = claudine::composition::resolve_proxy_target(
-                        target,
-                        source_path,
-                        effective_repo_root,
-                    )
+                    let resolved = match file_resolution_context {
+                        Some(context) => claudine::composition::resolve_proxy_target_in_context(
+                            target,
+                            source_path,
+                            context,
+                        ),
+                        None => claudine::composition::resolve_proxy_target(
+                            target,
+                            source_path,
+                            effective_repo_root,
+                        ),
+                    }
                     .map_err(|e| CompositionError::InvalidFileReference {
                         context: Box::new(claudine::composition::FileReferenceContext {
                             source_path: source_path.to_path_buf(),
@@ -1418,6 +1426,7 @@ fn provider_run_handoff(
         effective_repo_root,
         provider,
         term,
+        request.prepared.rematerialize.file_resolution_context.as_ref(),
     ));
 
     runner::run_composition_body(

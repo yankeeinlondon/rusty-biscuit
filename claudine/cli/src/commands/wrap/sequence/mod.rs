@@ -111,6 +111,7 @@ pub(crate) fn execute_sequence(
     verbose: u8,
     perf_enabled: bool,
     startup_timings: Option<crate::perf::StartupTimings>,
+    file_resolution_context: biscuit_file::FileResolutionContext,
 ) -> Result<i32> {
     let silent = shared.silent;
 
@@ -509,6 +510,7 @@ pub(crate) fn execute_sequence(
         shared,
         approval_cache: Arc::clone(&shared_approval_cache),
         inline_mode,
+        file_resolution_context: &file_resolution_context,
     };
 
     let Some(validated) = run_phase_1c_with_schema(

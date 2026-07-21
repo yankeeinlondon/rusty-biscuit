@@ -541,6 +541,7 @@ fn adopt_proxy_lifecycle_phase(
         repo_root,
         term,
         effect_engine,
+        prompt_state.rematerialize.file_resolution_context.as_ref(),
         loop_start,
     ) {
         TargetInitializeAction::Proceed => {}

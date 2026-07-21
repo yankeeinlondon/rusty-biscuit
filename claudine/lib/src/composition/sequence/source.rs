@@ -65,6 +65,37 @@ pub fn resolve_sequence_reference(raw: &str, source_path: &Path) -> Result<PathB
         })
 }
 
+/// Snapshot-preserving external sequence resolver.
+pub fn resolve_sequence_reference_in_context(
+    raw: &str,
+    source_path: &Path,
+    request_context: &FileResolutionContext,
+) -> Result<PathBuf, CompositionError> {
+    let normalized;
+    let ref_input = if let Some(rest) = raw.strip_prefix("@/") {
+        normalized = format!("@{rest}");
+        &normalized
+    } else {
+        raw
+    };
+    let file_ref = FileReference::new(ref_input).map_err(|e| {
+        CompositionError::SequenceExternalLoad {
+            context: format!("`{raw}`"),
+            source: e.into(),
+        }
+    })?;
+    file_ref
+        .resolve_in_context(&request_context.for_source(source_path))
+        .map_err(|e| CompositionError::SequenceExternalLoad {
+            context: format!("`{raw}`"),
+            source: e.into(),
+        })?
+        .ok_or_else(|| CompositionError::SequenceExternalLoad {
+            context: format!("`{raw}`"),
+            source: SequenceLoadCause::NotFound,
+        })
+}
+
 /// Capture the request-scoped resolution anchors for an external sequence
 /// reference authored inside a composition source.
 ///

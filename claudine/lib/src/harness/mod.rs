@@ -18,7 +18,9 @@ pub use audit::{audit_shell_commands, collect_auditable_commands};
 pub use error::{HarnessError, PathResolutionFailure, ResolutionDetail};
 pub use model::*;
 pub use parse::{has_harness_properties, parse_harness_plan};
-pub use resolve::{HarnessResolutionContext, resolve_harness_path};
+pub use resolve::{
+    HarnessResolutionContext, resolve_harness_path, resolve_harness_path_in_context,
+};
 pub use runtime::{build_attempt_outcome, classify_failure, concise_message, failure_message};
 pub use shell::{
     ShellApprovalOptions, execute_approved_command, validate_and_approve_command,

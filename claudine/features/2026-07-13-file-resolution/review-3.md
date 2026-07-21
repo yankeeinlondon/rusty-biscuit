@@ -4,7 +4,7 @@ ready: false
 agent: codex/default
 created: 2026-07-20T07:18:31-07:00
 spec: 2026-07-13-file-resolution/spec.md
-implemented: false
+implemented: true
 description: A **feature** review of `2026-07-13-file-resolution/spec.md`
 feature: 2026-07-13-file-resolution/review-3.md
 previous: 2026-07-13-file-resolution/review-2.md

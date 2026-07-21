@@ -31,6 +31,25 @@ fn make_source(
 }
 
 #[test]
+fn request_snapshot_prevents_prepare_time_repository_rediscovery() {
+    let source_repo = TempDir::new().unwrap();
+    fs::create_dir_all(source_repo.path().join(".git")).unwrap();
+    let source_path = source_repo.path().join("prompt.md");
+    fs::write(&source_path, "prompt").unwrap();
+    let request_root = TempDir::new().unwrap();
+    let snapshot = biscuit_file::FileResolutionContext::new(request_root.path());
+
+    assert_eq!(
+        effective_source_repo_root(None, Some(&snapshot), &source_path),
+        None,
+    );
+    assert_eq!(
+        effective_source_repo_root(None, None, &source_path).as_deref(),
+        Some(source_repo.path()),
+    );
+}
+
+#[test]
 fn direct_composition_uses_effective_frontmatter() {
     let dir = TempDir::new().unwrap();
     let source = make_source(

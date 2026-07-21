@@ -309,6 +309,7 @@ pub fn execute_loop_with_lifecycle<E>(
     effect_engine: &darkmatter::effects::EffectEngine,
     shell_runner: &dyn ShellRunner,
     emitter: &dyn LifecycleEmitter,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
     mut executor: E,
 ) -> Result<LoopExecutionResult, CompositionError>
 where
@@ -412,11 +413,19 @@ where
                 unreachable!("the catch protocol consumes initialize error control: {reason:?}");
             }
             StackControl::Proxy { target } => {
-                let resolved = match resolve_proxy_target(
-                    &target,
-                    prompt_path,
-                    lifecycle_ctx.repo_root,
-                ) {
+                let resolution = match file_resolution_context.as_ref() {
+                    Some(context) => super::super::resolve_proxy_target_in_context(
+                        &target,
+                        prompt_path,
+                        context,
+                    ),
+                    None => resolve_proxy_target(
+                        &target,
+                        prompt_path,
+                        lifecycle_ctx.repo_root,
+                    ),
+                };
+                let resolved = match resolution {
                     Ok(path) => path,
                     Err(err) => {
                         // Resolution failure (missing file, unresolvable

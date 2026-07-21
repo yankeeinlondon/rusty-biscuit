@@ -243,11 +243,39 @@ pub fn resolve_proxy_target(
     source_path: &std::path::Path,
     repo_root: Option<&std::path::Path>,
 ) -> Result<std::path::PathBuf, crate::harness::HarnessError> {
+    let package_area = package_area_for_source(source_path, repo_root);
     let ctx = crate::harness::HarnessResolutionContext {
         source_path,
         repo_root,
+        package_area: package_area.as_deref(),
     };
     crate::harness::resolve_harness_path(target, &ctx)
+}
+
+/// Snapshot-preserving proxy resolver used by Claudine orchestration routes.
+pub fn resolve_proxy_target_in_context(
+    target: &str,
+    source_path: &std::path::Path,
+    request_context: &biscuit_file::FileResolutionContext,
+) -> Result<std::path::PathBuf, crate::harness::HarnessError> {
+    crate::harness::resolve_harness_path_in_context(target, source_path, request_context)
+}
+
+fn package_area_for_source(
+    source_path: &std::path::Path,
+    repo_root: Option<&std::path::Path>,
+) -> Option<std::path::PathBuf> {
+    let root = repo_root?;
+    let source_dir = source_path.parent()?;
+    let repo = sniff::filesystem::repo::detect_repo_structure(root)
+        .ok()
+        .flatten()?;
+    let area = repo.package_area_label_for_dir(source_dir)?;
+    Some(if area.as_ref() == "root" {
+        root.to_path_buf()
+    } else {
+        root.join(area.as_ref())
+    })
 }
 
 /// Parse a lifecycle delay string (e.g. `"5m"`, `"0s"`, `"30 sec"`) into a

@@ -144,6 +144,7 @@ pub(crate) fn run_loop_with_overrides<F>(
     effect_engine: &darkmatter::effects::EffectEngine,
     shell_runner: &dyn claudine::composition::ShellRunner,
     emitter: &dyn claudine::composition::LifecycleEmitter,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
     mut executor: F,
 ) -> std::result::Result<
     Option<claudine::composition::LoopExecutionResult>,
@@ -218,6 +219,7 @@ where
         effect_engine,
         shell_runner,
         emitter,
+        file_resolution_context,
         wrapped_executor,
     )?;
 

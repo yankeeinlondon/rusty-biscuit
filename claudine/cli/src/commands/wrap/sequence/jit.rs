@@ -44,6 +44,8 @@ pub(super) struct StepComposeContext<'a> {
     /// `true` when the sequence document carries a string `prompt:`, making
     /// every step an inline composition that rewrites the body on disk.
     pub(super) inline_mode: bool,
+    /// Immutable request-scoped file-resolution snapshot.
+    pub(super) file_resolution_context: &'a biscuit_file::FileResolutionContext,
 }
 
 impl StepComposeContext<'_> {
@@ -155,6 +157,7 @@ pub(super) fn compose_step(
         &step_source.resolved_path,
         &step_overrides,
         ctx.launch_area,
+        Some(ctx.file_resolution_context),
     );
 
     let approval_options = super::super::apply_composition_shell_overrides(
@@ -188,6 +191,7 @@ pub(super) fn compose_step(
         // capture-at-prepare (the lib default).
         prepared_context: None,
         file_ref_fallback_dir: ctx.launch_area.map(Path::to_path_buf),
+        file_resolution_context: Some(ctx.file_resolution_context.clone()),
         // `{{state}}`/`{{previous}}`/`{{next}}` render their `name` in string
         // context; whole-value/dotted access keeps the typed object.
         name_coercion_keys: composition::sequence::reserved::NAME_COERCION_KEYS
@@ -237,6 +241,7 @@ pub(super) fn build_template_preflight_options(
     source_path: &Path,
     set_overrides: &Value,
     launch_area: Option<&Path>,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> darkmatter::markdown::compose::ComposeOptions {
     let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
     for (key, value) in env_overrides {
@@ -252,6 +257,9 @@ pub(super) fn build_template_preflight_options(
         // check before that event fires. Lifecycle shell commands are audited
         // separately via `collect_lifecycle_shell_commands`.
         .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied());
+    if let Some(context) = file_resolution_context {
+        opts = opts.with_file_resolution_context(context.clone());
+    }
     if let Some(launch_area) = launch_area {
         opts = opts.with_file_ref_fallback_dir(launch_area.to_path_buf());
     }

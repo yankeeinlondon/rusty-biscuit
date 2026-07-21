@@ -85,9 +85,12 @@ fn reject_sequence_interactive(
 /// that `sequence`, `prompt`, `name`, `description`, `$schema`, and other keys
 /// behave exactly as they would in a Markdown frontmatter block.
 #[allow(clippy::result_large_err)]
-fn resolve_sequence_source(file_ref: &str) -> Result<ResolvedCompositionSource, CompositionError> {
+fn resolve_sequence_source(
+    file_ref: &str,
+    context: &biscuit_file::FileResolutionContext,
+) -> Result<ResolvedCompositionSource, CompositionError> {
     // Markdown files use the standard resolution path.
-    match composition::resolve_composition_source(file_ref) {
+    match composition::resolve_composition_source_in_context(file_ref, context) {
         Ok(source) => return Ok(source),
         Err(CompositionError::NotMarkdown(_)) => {}
         Err(e) => return Err(e),
@@ -98,9 +101,14 @@ fn resolve_sequence_source(file_ref: &str) -> Result<ResolvedCompositionSource, 
     // ([`composition::build_prompt_reference`]) so `@foo.yaml` and `@foo.md`
     // resolve identically instead of the YAML fallback seeing only the
     // package-area root.
-    let reference = composition::build_prompt_reference(file_ref)?;
+    let reference = biscuit_file::FileReference::new(file_ref).map_err(|source| {
+        CompositionError::InvalidReference {
+            reference: file_ref.to_string(),
+            source,
+        }
+    })?;
     let resolved_path = reference
-        .resolve()
+        .resolve_in_context(context)
         .map_err(|e| CompositionError::InvalidReference {
             reference: file_ref.to_string(),
             source: e,
@@ -223,24 +231,31 @@ fn run_sequence_inner(
     let stderr_is_tty = std::io::stderr().is_terminal()
         || std::env::var_os("FORCE_COLOR").is_some();
 
-    let source = match resolve_sequence_source(&file) {
+    let file_resolution_context = composition::capture_file_resolution_context()?;
+    let source = match resolve_sequence_source(&file, &file_resolution_context) {
         Ok(source) => source,
         Err(CompositionError::FileNotFound(_)) => {
             let selected = crate::completion::operation_file::autocomplete_operation_file(
                 &file,
                 crate::completion::scopes::ComposeMode::Sequence,
             )?;
-            resolve_sequence_source(&selected).map_err(|e| {
-                composition::enrich_composition_source_load_error(
+            resolve_sequence_source(&selected, &file_resolution_context).map_err(|e| {
+                composition::enrich_composition_source_load_error_in_context(
                     &selected,
                     e,
                     stderr_is_tty,
+                    &file_resolution_context,
                 )
             })?
         }
         Err(e) => {
             return Err(
-                composition::enrich_composition_source_load_error(&file, e, stderr_is_tty).into(),
+                composition::enrich_composition_source_load_error_in_context(
+                    &file,
+                    e,
+                    stderr_is_tty,
+                    &file_resolution_context,
+                ).into(),
             );
         }
     };
@@ -266,6 +281,7 @@ fn run_sequence_inner(
     let shell_runner = |command: &str| expand_shell_source(command, &shell_options);
     let source_options = composition::SequenceSourceOptions {
         shell_runner: Some(&shell_runner),
+        file_resolution_context: Some(&file_resolution_context),
     };
 
     let plan = composition::resolve_sequence_plan_with(&source, source_options)?.ok_or_else(
@@ -324,6 +340,7 @@ fn run_sequence_inner(
         verbose,
         shared.perf,
         startup_timings,
+        file_resolution_context,
     )
 }
 

@@ -54,14 +54,14 @@ impl PathResolutionFailure {
 
 /// The structured diagnostic projection of a `biscuit-file` detailed resolution.
 ///
-/// Carried on [`HarnessError::PathResolutionFailed`] so the ordered candidate
-/// plan the shared resolver probed reaches `err.detail.*` and the rendered
-/// report instead of being discarded by the convenience projection: its parsed
-/// kind, the repository root it anchored on, and each attempted candidate's
-/// provenance and probe disposition (spec §D8).
+/// Carried on both filesystem-probe failure arms so the ordered candidate plan
+/// reaches `err.detail.*` and the rendered report instead of being discarded by
+/// the convenience projection: its authored and effective kinds, repository
+/// root, and each attempted candidate's provenance and probe disposition.
 #[derive(Debug, Clone)]
 pub struct ResolutionDetail {
     kind: FileReferenceKind,
+    effective_kind: FileReferenceKind,
     repository_root: Option<PathBuf>,
     candidates: Vec<ProbedCandidate>,
 }
@@ -71,6 +71,7 @@ impl ResolutionDetail {
     pub fn from_detailed(detailed: &DetailedResolution) -> Self {
         Self {
             kind: detailed.class().kind,
+            effective_kind: detailed.effective_kind(),
             repository_root: detailed.repository_root().map(Path::to_path_buf),
             candidates: detailed.candidates().to_vec(),
         }
@@ -200,7 +201,8 @@ pub enum HarnessError {
     /// other than a plain missing target: invalid syntax, an absent context
     /// anchor (interpolation variable, home, repository), a repository
     /// containment violation, an I/O probe failure, or a remote URL. Carries
-    /// the typed [`FileReferenceError`] cause.
+    /// the typed [`FileReferenceError`] cause and, when probing began, its
+    /// detailed resolution plan.
     ///
     /// Boxed for the same `clippy::result_large_err` reason as
     /// [`ShellAuditParseError`], and with the same D-7 trade: the box publishes
@@ -215,6 +217,10 @@ pub enum HarnessError {
         reference: String,
         /// The document the reference was anchored against, when known.
         source_path: Option<PathBuf>,
+        /// The shared resolver's retained candidate plan, when resolution
+        /// reached candidate construction. `None` for failures raised before a
+        /// probe, such as invalid syntax.
+        resolution: Option<Box<ResolutionDetail>>,
         /// The typed resolution failure from `biscuit-file`.
         #[source]
         source: Box<FileReferenceError>,
@@ -253,6 +259,10 @@ impl HarnessError {
     pub fn resolution_candidates(&self) -> &[ProbedCandidate] {
         match self {
             HarnessError::PathResolutionFailed {
+                resolution: Some(detail),
+                ..
+            }
+            | HarnessError::FileReferenceUnresolvable {
                 resolution: Some(detail),
                 ..
             } => detail.candidates(),
@@ -353,6 +363,8 @@ impl Diagnostic for HarnessError {
                     json!(source_path.as_ref().map(|p| p.to_string_lossy().into_owned()));
                 if let Some(detail) = resolution {
                     base["kind"] = json!(file_reference_kind_slug(detail.kind));
+                    base["effective_kind"] =
+                        json!(file_reference_kind_slug(detail.effective_kind));
                     base["repository_root"] = json!(
                         detail
                             .repository_root
@@ -365,11 +377,12 @@ impl Diagnostic for HarnessError {
             }
             // Same projection as `PathResolutionFailed`, but `failure` is
             // mapped from the typed `FileReferenceError` rather than a resolver
-            // distinction. Only the keys this adapter actually knows are
-            // populated; the rest stay `null` (spec §D3).
+            // distinction. A pre-probe error has no retained plan, so only its
+            // reference, source path, and typed failure are populated.
             HarnessError::FileReferenceUnresolvable {
                 reference,
                 source_path,
+                resolution,
                 source,
             } => {
                 let mut base = null_detail_for("composition.invalid_file_reference");
@@ -377,6 +390,18 @@ impl Diagnostic for HarnessError {
                 base["failure"] = json!(file_reference_failure_slug(source));
                 base["source_path"] =
                     json!(source_path.as_ref().map(|p| p.to_string_lossy().into_owned()));
+                if let Some(detail) = resolution {
+                    base["kind"] = json!(file_reference_kind_slug(detail.kind));
+                    base["effective_kind"] =
+                        json!(file_reference_kind_slug(detail.effective_kind));
+                    base["repository_root"] = json!(
+                        detail
+                            .repository_root
+                            .as_ref()
+                            .map(|p| p.to_string_lossy().into_owned())
+                    );
+                    base["candidates"] = resolution_candidates_detail(&detail.candidates);
+                }
                 base
             }
         }
@@ -387,13 +412,15 @@ impl Diagnostic for HarnessError {
 /// the `composition.invalid_file_reference` catalog entry declares.
 ///
 /// The slug is derived from the typed error, never back-derived from the
-/// reference kind. A future `FileReferenceError` variant defaults to
-/// `invalid_syntax`.
+/// reference kind. The match is intentionally exhaustive so adding a shared
+/// error variant requires an explicit vocabulary decision here.
 fn file_reference_failure_slug(error: &FileReferenceError) -> &'static str {
     use FileReferenceError as E;
     match error {
+        E::InvalidSyntax(_) | E::UnsupportedUserHome(_) => "invalid_syntax",
         E::MissingEnvironmentVariable { .. }
         | E::MissingHomeContext
+        | E::MissingPackageContext
         | E::VaultNotConfigured
         | E::RepositoryRootNotContainingSource { .. }
         | E::BareRepository => "missing_context",
@@ -403,7 +430,7 @@ fn file_reference_failure_slug(error: &FileReferenceError) -> &'static str {
         | E::Workspace(_)
         | E::RelativePath { .. }
         | E::Io { .. } => "permission_io",
-        _ => "invalid_syntax",
+        E::InvalidUrl(_) => "invalid_syntax",
     }
 }
 

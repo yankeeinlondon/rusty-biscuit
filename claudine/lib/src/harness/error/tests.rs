@@ -283,6 +283,7 @@ mod classification_tests {
         let err = HarnessError::FileReferenceUnresolvable {
             reference: "{{MISSING}}/x.md".to_string(),
             source_path: Some(PathBuf::from("/repo/run.md")),
+            resolution: None,
             source: Box::new(FileReferenceError::MissingEnvironmentVariable {
                 name: "MISSING".to_string(),
             }),
@@ -305,6 +306,7 @@ mod classification_tests {
         let err = HarnessError::FileReferenceUnresolvable {
             reference: "http://example.com/x.md".to_string(),
             source_path: None,
+            resolution: None,
             source: Box::new(FileReferenceError::RemoteNotLocal(
                 "http://example.com/x.md".to_string(),
             )),
@@ -324,34 +326,61 @@ mod classification_tests {
 
     #[test]
     fn every_file_reference_error_maps_to_a_declared_failure_slug() {
-        // The slug vocabulary the catalog documents; the mapping must draw from
-        // it rather than coining a slug.
-        let declared = [
-            "invalid_syntax",
-            "missing_context",
-            "no_match",
-            "permission_io",
-            "unsupported_remote",
-        ];
+        // This second exhaustive match deliberately duplicates the expected
+        // vocabulary decision. A new shared error variant must update both the
+        // adapter and this regression test before either will compile.
+        fn expected_slug(error: &FileReferenceError) -> &'static str {
+            use FileReferenceError as E;
+            match error {
+                E::InvalidSyntax(_) | E::UnsupportedUserHome(_) | E::InvalidUrl(_) => {
+                    "invalid_syntax"
+                }
+                E::MissingEnvironmentVariable { .. }
+                | E::BareRepository
+                | E::VaultNotConfigured
+                | E::MissingHomeContext
+                | E::MissingPackageContext
+                | E::RepositoryRootNotContainingSource { .. } => "missing_context",
+                E::CurrentDirectory(_)
+                | E::Git(_)
+                | E::Workspace(_)
+                | E::RelativePath { .. }
+                | E::Io { .. } => "permission_io",
+                E::RemoteNotLocal(_) => "unsupported_remote",
+            }
+        }
+
         let samples = [
             FileReferenceError::InvalidSyntax("x".to_string()),
             FileReferenceError::MissingEnvironmentVariable {
                 name: "X".to_string(),
             },
+            FileReferenceError::CurrentDirectory(std::io::Error::other("cwd")),
+            FileReferenceError::UnsupportedUserHome("other".to_string()),
             FileReferenceError::MissingHomeContext,
+            FileReferenceError::MissingPackageContext,
             FileReferenceError::VaultNotConfigured,
             FileReferenceError::BareRepository,
+            FileReferenceError::RepositoryRootNotContainingSource {
+                repository_root: PathBuf::from("/repo"),
+                source_path: PathBuf::from("/elsewhere/source.md"),
+            },
+            FileReferenceError::RelativePath {
+                from: PathBuf::from("/from"),
+                to: PathBuf::from("/to"),
+            },
             FileReferenceError::RemoteNotLocal("http://x".to_string()),
+            FileReferenceError::InvalidUrl("not a URL".to_string()),
             FileReferenceError::Io {
                 path: PathBuf::from("/x"),
                 source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
             },
         ];
         for error in &samples {
-            let slug = file_reference_failure_slug(error);
-            assert!(
-                declared.contains(&slug),
-                "`{error:?}` maps to undeclared slug `{slug}`"
+            assert_eq!(
+                file_reference_failure_slug(error),
+                expected_slug(error),
+                "unexpected vocabulary mapping for `{error:?}`"
             );
         }
     }

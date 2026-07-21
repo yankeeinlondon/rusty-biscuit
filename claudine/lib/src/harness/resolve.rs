@@ -27,6 +27,9 @@ pub struct HarnessResolutionContext<'a> {
     /// Repository (worktree) root, when known. Supplied by the caller (already
     /// discovered via `sniff`); implicit references anchor on it first.
     pub repo_root: Option<&'a Path>,
+    /// Package-area root captured for this request. Package (`!`) references
+    /// use this anchor before the repository fallback.
+    pub package_area: Option<&'a Path>,
 }
 
 /// Resolve a raw reference string to an existing file, delegating grammar and
@@ -68,7 +71,7 @@ pub fn resolve_harness_path(
     }
 
     let file_ref = FileReference::new(trimmed)
-        .map_err(|error| unresolvable(trimmed, ctx.source_path, error))?;
+        .map_err(|error| unresolvable(trimmed, ctx.source_path, error, None))?;
     let resolution_ctx = build_resolution_context(trimmed, ctx)?;
 
     let detailed = file_ref.resolve_detailed(&resolution_ctx);
@@ -92,7 +95,66 @@ pub fn resolve_harness_path(
             resolved: primary,
             resolution: Some(Box::new(resolution)),
         }),
-        Err(error) => Err(unresolvable(trimmed, ctx.source_path, error)),
+        Err(error) => Err(unresolvable(
+            trimmed,
+            ctx.source_path,
+            error,
+            Some(resolution),
+        )),
+    }
+}
+
+/// Resolves a harness reference from an immutable request snapshot.
+///
+/// Only the authoring document changes; every other resolution input is
+/// retained from `request_context` without ambient reads or discovery.
+pub fn resolve_harness_path_in_context(
+    raw: &str,
+    source_path: &Path,
+    request_context: &FileResolutionContext,
+) -> Result<PathBuf, HarnessError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(HarnessError::PathResolutionFailed {
+            raw: raw.to_string(),
+            failure: PathResolutionFailure::EmptyReference,
+            source_path: Some(source_path.to_path_buf()),
+            resolved: None,
+            resolution: None,
+        });
+    }
+    if source_path.parent().is_none() {
+        return Err(HarnessError::PathResolutionFailed {
+            raw: trimmed.to_string(),
+            failure: PathResolutionFailure::NoSourceParent,
+            source_path: Some(source_path.to_path_buf()),
+            resolved: None,
+            resolution: None,
+        });
+    }
+    let file_ref = FileReference::new(trimmed)
+        .map_err(|error| unresolvable(trimmed, source_path, error, None))?;
+    let detailed = file_ref.resolve_detailed(&request_context.for_source(source_path));
+    let primary = detailed
+        .candidates()
+        .first()
+        .map(|probed| probed.candidate().path().to_path_buf());
+    let resolution = ResolutionDetail::from_detailed(&detailed);
+    match detailed.into_convenience() {
+        Ok(Some(path)) => Ok(path),
+        Ok(None) => Err(HarnessError::PathResolutionFailed {
+            raw: trimmed.to_string(),
+            failure: PathResolutionFailure::TargetMissing,
+            source_path: Some(source_path.to_path_buf()),
+            resolved: primary,
+            resolution: Some(Box::new(resolution)),
+        }),
+        Err(error) => Err(unresolvable(
+            trimmed,
+            source_path,
+            error,
+            Some(resolution),
+        )),
     }
 }
 
@@ -122,14 +184,23 @@ fn build_resolution_context(
     if let Some(root) = ctx.repo_root.filter(|root| base_dir.starts_with(root)) {
         resolution_ctx = resolution_ctx.with_repository_root(root);
     }
+    if let Some(package_area) = ctx.package_area {
+        resolution_ctx = resolution_ctx.with_package_area(package_area);
+    }
     Ok(resolution_ctx)
 }
 
 /// Wrap a typed [`FileReferenceError`] in the harness diagnostic.
-fn unresolvable(reference: &str, source_path: &Path, error: FileReferenceError) -> HarnessError {
+fn unresolvable(
+    reference: &str,
+    source_path: &Path,
+    error: FileReferenceError,
+    resolution: Option<ResolutionDetail>,
+) -> HarnessError {
     HarnessError::FileReferenceUnresolvable {
         reference: reference.to_string(),
         source_path: Some(source_path.to_path_buf()),
+        resolution: resolution.map(Box::new),
         source: Box::new(error),
     }
 }
@@ -151,6 +222,7 @@ mod tests {
         let ctx = HarnessResolutionContext {
             source_path: &source,
             repo_root: Some(dir.path()),
+            package_area: None,
         };
         let result = resolve_harness_path(target.to_str().unwrap(), &ctx).unwrap();
         assert_eq!(result, target);
@@ -167,6 +239,7 @@ mod tests {
         let ctx = HarnessResolutionContext {
             source_path: &source,
             repo_root: None,
+            package_area: None,
         };
         let missing = dir.path().join("nope.md");
         let err = resolve_harness_path(missing.to_str().unwrap(), &ctx).unwrap_err();
@@ -197,6 +270,7 @@ mod tests {
         let ctx = HarnessResolutionContext {
             source_path: &source,
             repo_root: Some(repo.path()),
+            package_area: None,
         };
         let result = resolve_harness_path("@prompts/plan.md", &ctx).unwrap();
         assert_eq!(result, target);
@@ -214,6 +288,7 @@ mod tests {
         let ctx = HarnessResolutionContext {
             source_path: &source,
             repo_root: None,
+            package_area: None,
         };
         let err = resolve_harness_path("@docs/definitely-absent-xyz.md", &ctx).unwrap_err();
         assert!(
@@ -241,6 +316,7 @@ mod tests {
         let ctx = HarnessResolutionContext {
             source_path: &source,
             repo_root: Some(repo.path()),
+            package_area: None,
         };
         let result = resolve_harness_path("./local.md", &ctx).unwrap();
         assert_eq!(result, local);
@@ -263,6 +339,7 @@ mod tests {
         let ctx = HarnessResolutionContext {
             source_path: &source,
             repo_root: Some(repo.path()),
+            package_area: None,
         };
         let result = resolve_harness_path("shared.md", &ctx).unwrap();
         assert_eq!(
@@ -283,9 +360,33 @@ mod tests {
         let ctx = HarnessResolutionContext {
             source_path: &source,
             repo_root: None,
+            package_area: None,
         };
         let result = resolve_harness_path("sibling.md", &ctx).unwrap();
         assert_eq!(result, target);
+    }
+
+    #[test]
+    fn package_reference_prefers_captured_package_area_over_repository_root() {
+        let repo = tempfile::tempdir().unwrap();
+        let package_area = repo.path().join("claudine");
+        let source = package_area.join("prompts/run.md");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, "x").unwrap();
+        std::fs::write(repo.path().join("shared.md"), "repository decoy").unwrap();
+        let package_target = package_area.join("shared.md");
+        std::fs::write(&package_target, "package").unwrap();
+
+        let ctx = HarnessResolutionContext {
+            source_path: &source,
+            repo_root: Some(repo.path()),
+            package_area: Some(&package_area),
+        };
+
+        assert_eq!(
+            resolve_harness_path("!shared.md", &ctx).unwrap(),
+            package_target,
+        );
     }
 
     /// A blank reference is rejected before resolution.
@@ -296,6 +397,7 @@ mod tests {
         let ctx = HarnessResolutionContext {
             source_path: &source,
             repo_root: None,
+            package_area: None,
         };
         let err = resolve_harness_path("   ", &ctx).unwrap_err();
         assert!(matches!(
@@ -324,6 +426,7 @@ mod tests {
         let ctx = HarnessResolutionContext {
             source_path: &source,
             repo_root: Some(repo.path()),
+            package_area: None,
         };
         // Neither `<repo>/absent.md` nor `<repo>/prompts/absent.md` exists.
         let err = resolve_harness_path("absent.md", &ctx).unwrap_err();
@@ -340,6 +443,10 @@ mod tests {
 
         let detail = err.detail();
         assert_eq!(detail["kind"], serde_json::json!("implicit_relative"));
+        assert_eq!(
+            detail["effective_kind"],
+            serde_json::json!("implicit_relative")
+        );
         assert_eq!(detail["failure"], serde_json::json!("no_match"));
         assert_eq!(
             detail["repository_root"],
@@ -368,6 +475,73 @@ mod tests {
         assert_eq!(candidates[1]["disposition"], serde_json::json!("missing"));
     }
 
+    /// D8: a non-`NotFound` probe failure retains the same detailed projection
+    /// as no-match, including every earlier probe and the terminal I/O probe.
+    #[cfg(unix)]
+    #[test]
+    fn io_failure_projects_full_ordered_candidate_detail() {
+        use crate::diagnostics::Diagnostic;
+
+        let repo = tempfile::tempdir().unwrap();
+        let source = repo.path().join("prompts/run.md");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, "x").unwrap();
+
+        // The repository candidate is absent. The source candidate descends
+        // through a regular file, producing ENOTDIR rather than NotFound.
+        std::fs::write(repo.path().join("prompts/blocker"), "x").unwrap();
+
+        let ctx = HarnessResolutionContext {
+            source_path: &source,
+            repo_root: Some(repo.path()),
+            package_area: None,
+        };
+        let err = resolve_harness_path("blocker/target.md", &ctx).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                HarnessError::FileReferenceUnresolvable {
+                    resolution: Some(_),
+                    ..
+                }
+            ),
+            "unexpected variant: {err:?}"
+        );
+
+        let detail = err.detail();
+        assert_eq!(detail["kind"], serde_json::json!("implicit_relative"));
+        assert_eq!(
+            detail["effective_kind"],
+            serde_json::json!("implicit_relative")
+        );
+        assert_eq!(detail["failure"], serde_json::json!("permission_io"));
+        assert_eq!(
+            detail["repository_root"],
+            serde_json::json!(repo.path().to_string_lossy())
+        );
+
+        let candidates = detail["candidates"]
+            .as_array()
+            .expect("candidates must be an array");
+        assert_eq!(candidates.len(), 2, "both probes must survive: {detail}");
+
+        let repository_candidate = repo.path().join("blocker/target.md");
+        assert_eq!(
+            candidates[0]["path"],
+            serde_json::json!(repository_candidate.to_string_lossy())
+        );
+        assert_eq!(candidates[0]["provenance"], serde_json::json!("repository"));
+        assert_eq!(candidates[0]["disposition"], serde_json::json!("missing"));
+
+        let source_candidate = repo.path().join("prompts/blocker/target.md");
+        assert_eq!(
+            candidates[1]["path"],
+            serde_json::json!(source_candidate.to_string_lossy())
+        );
+        assert_eq!(candidates[1]["provenance"], serde_json::json!("source"));
+        assert_eq!(candidates[1]["disposition"], serde_json::json!("io"));
+    }
+
     /// The retained plan is also reachable as typed candidates for the renderer,
     /// in the same repository-then-source order.
     #[test]
@@ -382,6 +556,7 @@ mod tests {
         let ctx = HarnessResolutionContext {
             source_path: &source,
             repo_root: Some(repo.path()),
+            package_area: None,
         };
         let err = resolve_harness_path("absent.md", &ctx).unwrap_err();
 
@@ -406,6 +581,7 @@ mod tests {
         let ctx = HarnessResolutionContext {
             source_path: &source,
             repo_root: None,
+            package_area: None,
         };
         let err = resolve_harness_path("   ", &ctx).unwrap_err();
         assert!(err.resolution_candidates().is_empty());
@@ -413,5 +589,51 @@ mod tests {
         for key in ["kind", "repository_root", "candidates"] {
             assert_eq!(detail[key], serde_json::Value::Null, "`{key}` must be null");
         }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn snapshot_resolver_ignores_later_cwd_and_environment_changes() {
+        let repo = tempfile::tempdir().unwrap();
+        let docs = repo.path().join("docs");
+        let nested = docs.join("nested");
+        let home = repo.path().join("home");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(nested.join("child.md"), "child").unwrap();
+        std::fs::write(home.join("home.md"), "home").unwrap();
+        std::fs::write(repo.path().join("env.md"), "env").unwrap();
+
+        let mut env = std::collections::HashMap::new();
+        env.insert("SNAPSHOT_ROOT".to_string(), repo.path().display().to_string());
+        let snapshot = FileResolutionContext::new(&docs)
+            .with_repository_root(repo.path())
+            .with_home_dir(&home)
+            .with_env(env);
+        let unrelated = tempfile::tempdir().unwrap();
+        let prior_cwd = std::env::current_dir().unwrap();
+        let prior_root = std::env::var_os("SNAPSHOT_ROOT");
+        // SAFETY: this test is serialized while mutating process-global state.
+        unsafe { std::env::set_var("SNAPSHOT_ROOT", unrelated.path()) };
+        std::env::set_current_dir(unrelated.path()).unwrap();
+
+        let source = nested.join("target.md");
+        let child = resolve_harness_path_in_context("./child.md", &source, &snapshot).unwrap();
+        let home_file = resolve_harness_path_in_context("~/home.md", &source, &snapshot).unwrap();
+        let env_file = resolve_harness_path_in_context(
+            "{{SNAPSHOT_ROOT}}/env.md",
+            &source,
+            &snapshot,
+        )
+        .unwrap();
+
+        std::env::set_current_dir(prior_cwd).unwrap();
+        match prior_root {
+            Some(value) => unsafe { std::env::set_var("SNAPSHOT_ROOT", value) },
+            None => unsafe { std::env::remove_var("SNAPSHOT_ROOT") },
+        }
+        assert_eq!(child, nested.join("child.md"));
+        assert_eq!(home_file, home.join("home.md"));
+        assert_eq!(env_file, repo.path().join("env.md"));
     }
 }

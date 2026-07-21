@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{FileReference, PathPosition, find_git_root, find_package_area, home_dir};
+use biscuit_file::{FileReference, FileResolutionContext, PathPosition, home_dir};
 use darkmatter::markdown::{Markdown, MarkdownError};
 
 use super::error::{CompositionError, MarkdownLoadCause};
@@ -39,14 +39,78 @@ fn map_load_error(path: &Path, err: MarkdownError) -> CompositionError {
 pub fn resolve_composition_source(
     file_ref: &str,
 ) -> Result<ResolvedCompositionSource, CompositionError> {
+    let context = capture_file_resolution_context()?;
+    resolve_composition_source_in_context(file_ref, &context)
+}
+
+/// Captures the immutable file-resolution inputs for one Claudine request.
+///
+/// Discovery occurs exactly once here. Every document-backed surface derives
+/// its authoring base from this value without rereading CWD, HOME, environment,
+/// repository metadata, package metadata, or configured roots.
+pub fn capture_file_resolution_context() -> Result<FileResolutionContext, CompositionError> {
+    let cwd = std::env::current_dir().map_err(|source| CompositionError::InvalidReference {
+        reference: "<request working directory>".to_string(),
+        source: biscuit_file::FileReferenceError::CurrentDirectory(source),
+    })?;
+    let git_root = sniff::filesystem::git::GitRepo::discover(&cwd)
+        .ok()
+        .flatten()
+        .map(|repo| repo.repo_root().to_path_buf());
+    let repo_info = git_root
+        .as_deref()
+        .and_then(|root| sniff::filesystem::repo::detect_repo_structure(root).ok().flatten());
+    let package_area = repo_info.as_ref().and_then(|repo| {
+        repo.package_area_label_for_dir(&cwd).map(|area| {
+            if area.as_ref() == "root" {
+                repo.root.clone()
+            } else {
+                repo.root.join(area.as_ref())
+            }
+        })
+    });
+    let package = repo_info
+        .as_ref()
+        .and_then(|repo| repo.package_for_dir(&cwd))
+        .map(|package| package.path.clone());
+
+    let mut context = FileResolutionContext::new(&cwd);
+    if let Some(root) = git_root.as_ref() {
+        context = context.with_repository_root(root);
+    }
+    if let Some(area) = package_area.as_ref() {
+        context = context.with_package_area(area);
+    }
+    for root in prompt_magic_roots(
+        git_root.as_deref(),
+        package_area.as_deref(),
+        package.as_deref(),
+        context.home_dir(),
+    ) {
+        context = context.add_magic_path(root, PathPosition::Start);
+    }
+    Ok(context)
+}
+
+/// Resolves and loads a top-level composition source using a previously
+/// captured request snapshot.
+pub fn resolve_composition_source_in_context(
+    file_ref: &str,
+    context: &FileResolutionContext,
+) -> Result<ResolvedCompositionSource, CompositionError> {
     // Phase 3 (2026-05-09-slow-prep): instrument the file-reference
     // resolution phase so trace inspection / `--perf` reporting can see
     // when the `biscuit-file` resolver dominates compose prep cost.
     let _span = tracing::info_span!("compose_prep.file_reference", file = %file_ref).entered();
-    let reference = build_prompt_reference(file_ref)?;
+    let reference = FileReference::new(file_ref).map_err(|source| {
+        CompositionError::InvalidReference {
+            reference: file_ref.to_string(),
+            source,
+        }
+    })?;
 
     let resolved_path = reference
-        .resolve()
+        .resolve_in_context(context)
         .map_err(|e| CompositionError::InvalidReference {
             reference: file_ref.to_string(),
             source: e,
@@ -263,14 +327,28 @@ fn with_prompt_magic_paths(reference: FileReference) -> FileReference {
     let Ok(cwd) = std::env::current_dir() else {
         return reference;
     };
-    let git_root = find_git_root(&cwd).ok().flatten();
-    let package_area = git_root
+    let git_root = sniff::filesystem::git::GitRepo::discover(&cwd)
+        .ok()
+        .flatten()
+        .map(|repo| repo.repo_root().to_path_buf());
+    let repo_info = git_root
         .as_deref()
-        .and_then(|root| find_package_area(root, &cwd).ok().flatten());
+        .and_then(|root| sniff::filesystem::repo::detect_repo_structure(root).ok().flatten());
+    let package_area = repo_info
+        .as_ref()
+        .and_then(|repo| {
+            repo.package_area_label_for_dir(&cwd)
+                .map(|area| repo.root.join(area.as_ref()))
+        });
+    let package = repo_info
+        .as_ref()
+        .and_then(|repo| repo.package_for_dir(&cwd))
+        .map(|package| package.path.clone());
 
     prompt_magic_roots(
         git_root.as_deref(),
         package_area.as_deref(),
+        package.as_deref(),
         home_dir().as_deref(),
     )
     .into_iter()
@@ -279,31 +357,54 @@ fn with_prompt_magic_paths(reference: FileReference) -> FileReference {
     })
 }
 
-/// The convention prompt directories, **closest-first**: package area, then
-/// repo (`prompts/` then `.claudine/prompts/`), then HOME `~/.claudine/
-/// prompts`. The bare package-area root is included first so the single
-/// `cargo metadata` probe also serves the path-shaped `@prompts/<file>` form.
+/// The ordered magic roots shared by composition completion and execution.
 ///
-/// Pure (no IO) so the ordering is unit-testable; the IO that discovers the
-/// anchors lives in [`with_prompt_magic_paths`].
-fn prompt_magic_roots(
+/// Roots are **closest-first**: discrete package, package area, repository
+/// prompt/document scopes, then the user prompt scope. Package and area roots
+/// are included both bare and with `prompts/` appended so filename-only
+/// `@plan.md` and path-shaped `@prompts/plan.md` use one ordered candidate
+/// builder. Repository document and skill roots support the established
+/// inline-compose and sequence completion surfaces without creating a second
+/// runtime-only order.
+///
+/// This function is pure; callers are responsible for discovering the anchors
+/// once for their request.
+#[must_use]
+pub fn prompt_magic_roots(
     git_root: Option<&Path>,
     package_area: Option<&Path>,
+    package: Option<&Path>,
     home: Option<&Path>,
 ) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
+    if let Some(package) = package {
+        push_unique_root(&mut roots, package.to_path_buf());
+        push_unique_root(&mut roots, package.join("prompts"));
+    }
     if let Some(area) = package_area {
-        roots.push(area.to_path_buf());
-        roots.push(area.join("prompts"));
+        push_unique_root(&mut roots, area.to_path_buf());
+        push_unique_root(&mut roots, area.join("prompts"));
     }
     if let Some(root) = git_root {
-        roots.push(root.join("prompts"));
-        roots.push(root.join(".claudine").join("prompts"));
+        push_unique_root(&mut roots, root.join("prompts"));
+        push_unique_root(&mut roots, root.join(".claudine").join("prompts"));
+        push_unique_root(&mut roots, root.join("docs"));
+        for peer in [
+            ".claude", ".codex", ".gemini", ".opencode", ".goose", ".qwen", ".kimi",
+        ] {
+            push_unique_root(&mut roots, root.join(peer).join("skills"));
+        }
     }
     if let Some(home) = home {
-        roots.push(home.join(".claudine").join("prompts"));
+        push_unique_root(&mut roots, home.join(".claudine").join("prompts"));
     }
     roots
+}
+
+fn push_unique_root(roots: &mut Vec<PathBuf>, root: PathBuf) {
+    if !roots.iter().any(|candidate| candidate == &root) {
+        roots.push(root);
+    }
 }
 
 /// Enrich a source-load error with the authored frontmatter block.
@@ -319,6 +420,19 @@ pub fn enrich_composition_source_load_error(
     stderr_is_tty: bool,
 ) -> CompositionError {
     let Some(source_text) = read_source_text_for_enrichment(file_ref) else {
+        return error;
+    };
+    error.enrich_frontmatter_text(&source_text, stderr_is_tty)
+}
+
+/// Snapshot-preserving variant of [`enrich_composition_source_load_error`].
+pub fn enrich_composition_source_load_error_in_context(
+    file_ref: &str,
+    error: CompositionError,
+    stderr_is_tty: bool,
+    context: &FileResolutionContext,
+) -> CompositionError {
+    let Some(source_text) = read_source_text_for_enrichment_in_context(file_ref, context) else {
         return error;
     };
     error.enrich_frontmatter_text(&source_text, stderr_is_tty)
@@ -340,6 +454,19 @@ fn read_source_text_for_enrichment(file_ref: &str) -> Option<String> {
         return None;
     }
 
+    fs::read_to_string(resolved_path).ok()
+}
+
+fn read_source_text_for_enrichment_in_context(
+    file_ref: &str,
+    context: &FileResolutionContext,
+) -> Option<String> {
+    let reference = FileReference::new(file_ref).ok()?;
+    let resolved_path = reference.resolve_in_context(context).ok()??;
+    let ext = resolved_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if !matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown") {
+        return None;
+    }
     fs::read_to_string(resolved_path).ok()
 }
 

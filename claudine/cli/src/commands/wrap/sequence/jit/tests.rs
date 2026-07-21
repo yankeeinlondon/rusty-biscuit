@@ -83,6 +83,7 @@ fn template_preflight_resolves_against_document_dir() {
         &source_path,
         &overrides,
         Some(launch_dir.path()),
+        None,
     );
     let result =
         resolve_shell_approvals(Some(&md), Some(&opts), &approval_options, None, None).unwrap();
@@ -132,7 +133,13 @@ fn template_preflight_without_fallback_misses_launch_area_file() {
     let _cwd = CwdGuard::enter(unrelated.path());
 
     let env_overrides: BTreeMap<String, String> = BTreeMap::new();
-    let opts = build_template_preflight_options(&env_overrides, &source_path, &overrides, None);
+    let opts = build_template_preflight_options(
+        &env_overrides,
+        &source_path,
+        &overrides,
+        None,
+        None,
+    );
     let result =
         resolve_shell_approvals(Some(&md), Some(&opts), &approval_options, None, None).unwrap();
 

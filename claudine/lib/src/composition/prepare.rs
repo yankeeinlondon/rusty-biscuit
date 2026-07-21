@@ -99,6 +99,9 @@ pub struct PrepareOptions {
     /// default) preserves the legacy ambient-CWD behavior for library-only
     /// callers and tests.
     pub file_ref_fallback_dir: Option<PathBuf>,
+    /// Immutable request-scoped file-resolution snapshot shared with
+    /// Darkmatter and retained across harness re-materialization.
+    pub file_resolution_context: Option<biscuit_file::FileResolutionContext>,
     /// Frontmatter keys whose object values render their `name` field in inline
     /// string context (`{{state}}` → the name). Sequence preparation sets this
     /// to the reserved overlay keys (`state`/`previous`/`next`); every other
@@ -125,6 +128,19 @@ fn find_git_root_from_path(path: &Path) -> Option<PathBuf> {
         }
         dir = dir.parent()?;
     }
+}
+
+fn effective_source_repo_root(
+    configured: Option<PathBuf>,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    source_path: &Path,
+) -> Option<PathBuf> {
+    configured.or_else(|| {
+        file_resolution_context
+            .is_none()
+            .then(|| find_git_root_from_path(source_path))
+            .flatten()
+    })
 }
 
 use super::error::CompositionError;
@@ -195,6 +211,7 @@ pub fn prepare_direct(
     let rematerialize = super::RematerializeInputs {
         set_overrides: options.set_overrides.clone(),
         file_ref_fallback_dir: options.file_ref_fallback_dir.clone(),
+        file_resolution_context: options.file_resolution_context.clone(),
         pre_approved_commands: options.pre_approved_commands.clone(),
         env_overrides: options.env_overrides.clone(),
     };
@@ -211,6 +228,9 @@ pub fn prepare_direct(
     }
     if let Some(fallback) = options.file_ref_fallback_dir.clone() {
         compose_opts = compose_opts.with_file_ref_fallback_dir(fallback);
+    }
+    if let Some(context) = options.file_resolution_context.clone() {
+        compose_opts = compose_opts.with_file_resolution_context(context);
     }
     let (composed, report) = source
         .markdown
@@ -284,9 +304,11 @@ pub fn prepare_direct(
     // binding time.
     validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
 
-    let source_repo_root = options
-        .source_repo_root
-        .or_else(|| find_git_root_from_path(&source.resolved_path));
+    let source_repo_root = effective_source_repo_root(
+        options.source_repo_root,
+        options.file_resolution_context.as_ref(),
+        &source.resolved_path,
+    );
 
     Ok(PreparedComposition {
         mode: CompositionMode::ChainedDocument,
@@ -376,6 +398,7 @@ pub fn prepare_inline(
     let rematerialize = super::RematerializeInputs {
         set_overrides: options.set_overrides.clone(),
         file_ref_fallback_dir: options.file_ref_fallback_dir.clone(),
+        file_resolution_context: options.file_resolution_context.clone(),
         pre_approved_commands: options.pre_approved_commands.clone(),
         env_overrides: options.env_overrides.clone(),
     };
@@ -392,6 +415,9 @@ pub fn prepare_inline(
     }
     if let Some(fallback) = options.file_ref_fallback_dir.clone() {
         compose_opts = compose_opts.with_file_ref_fallback_dir(fallback);
+    }
+    if let Some(context) = options.file_resolution_context.clone() {
+        compose_opts = compose_opts.with_file_resolution_context(context);
     }
     let (composed, report) = temp_md
         .compose_with(compose_opts)
@@ -453,9 +479,11 @@ pub fn prepare_inline(
         });
     }
 
-    let source_repo_root = options
-        .source_repo_root
-        .or_else(|| find_git_root_from_path(&source.resolved_path));
+    let source_repo_root = effective_source_repo_root(
+        options.source_repo_root,
+        options.file_resolution_context.as_ref(),
+        &source.resolved_path,
+    );
 
     // Append guardrails with the new inline contract
     let guardrails = load_or_create_guardrails(source_repo_root.as_deref());

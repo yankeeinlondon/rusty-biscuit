@@ -1395,7 +1395,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs",
-      "line": 147,
+      "line": 148,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -3251,7 +3251,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/sequence/mod.rs",
-      "line": 466,
+      "line": 467,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -3653,7 +3653,7 @@
     },
     {
       "path": "claudine/lib/src/composition/prepare/tests.rs",
-      "line": 51,
+      "line": 70,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -3663,7 +3663,7 @@
     },
     {
       "path": "claudine/lib/src/composition/prepare/tests.rs",
-      "line": 83,
+      "line": 102,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -3673,7 +3673,7 @@
     },
     {
       "path": "claudine/lib/src/composition/prepare/tests.rs",
-      "line": 521,
+      "line": 540,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -3684,7 +3684,7 @@
     },
     {
       "path": "claudine/lib/src/composition/prepare/tests.rs",
-      "line": 577,
+      "line": 596,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [

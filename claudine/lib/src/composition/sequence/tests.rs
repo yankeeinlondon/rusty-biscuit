@@ -572,6 +572,49 @@ fn env_reference_expands_environment_variables() {
     assert_eq!(resolved, target);
 }
 
+#[test]
+#[serial]
+fn external_sequence_reuses_request_snapshot_after_environment_mutation() {
+    let dir = TempDir::new().unwrap();
+    let captured = dir.path().join("captured");
+    fs::create_dir_all(&captured).unwrap();
+    fs::write(captured.join("steps.yaml"), "sequence:\n  - captured\n").unwrap();
+    let ambient = TempDir::new().unwrap();
+    let prior = std::env::var_os("SEQ_SNAPSHOT_ROOT");
+    let mut env = std::collections::HashMap::new();
+    env.insert(
+        "SEQ_SNAPSHOT_ROOT".to_string(),
+        captured.display().to_string(),
+    );
+    let snapshot = biscuit_file::FileResolutionContext::new(dir.path()).with_env(env);
+    let source = make_source(
+        &dir,
+        &[(
+            "sequence",
+            json!("{{SEQ_SNAPSHOT_ROOT}}/steps.yaml"),
+        )],
+        "Prompt",
+    );
+
+    // SAFETY: this test is serialized while mutating process-global state.
+    unsafe { std::env::set_var("SEQ_SNAPSHOT_ROOT", ambient.path()) };
+    let plan = resolve_sequence_plan_with(
+        &source,
+        SequenceSourceOptions {
+            shell_runner: None,
+            file_resolution_context: Some(&snapshot),
+        },
+    );
+    match prior {
+        Some(value) => unsafe { std::env::set_var("SEQ_SNAPSHOT_ROOT", value) },
+        None => unsafe { std::env::remove_var("SEQ_SNAPSHOT_ROOT") },
+    }
+
+    let plan = plan.unwrap().expect("sequence plan");
+    assert_eq!(plan.steps.len(), 1);
+    assert_eq!(plan.steps[0].name, "captured");
+}
+
 /// A `~`-prefixed sequence reference now resolves through [`FileReference`]'s
 /// shared `Home` kind (D11) rather than a private tilde expansion, so it is
 /// home-pinned AND existence-checked: an existing `~/steps.yaml` resolves to
@@ -1927,6 +1970,7 @@ mod dynamic_sources {
             &source,
             SequenceSourceOptions {
                 shell_runner: Some(&runner),
+                file_resolution_context: None,
             },
         )
         .unwrap()
@@ -1955,6 +1999,7 @@ mod dynamic_sources {
             &source,
             SequenceSourceOptions {
                 shell_runner: Some(&runner),
+                file_resolution_context: None,
             },
         )
         .unwrap_err();

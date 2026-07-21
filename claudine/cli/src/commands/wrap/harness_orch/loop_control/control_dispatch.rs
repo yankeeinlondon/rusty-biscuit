@@ -180,11 +180,19 @@ pub(super) fn dispatch_terminal_control(
             // `resolve_harness_path` directly and swapped `source_path` to a
             // path it never probed, so a `failure`-stack proxy to a missing
             // file only failed later in pre-flight.
-            let resolved = match claudine::composition::resolve_proxy_target(
-                &target,
-                &prompt_state.source_path,
-                repo_root,
-            ) {
+            let resolution = match prompt_state.rematerialize.file_resolution_context.as_ref() {
+                Some(context) => claudine::composition::resolve_proxy_target_in_context(
+                    &target,
+                    &prompt_state.source_path,
+                    context,
+                ),
+                None => claudine::composition::resolve_proxy_target(
+                    &target,
+                    &prompt_state.source_path,
+                    repo_root,
+                ),
+            };
+            let resolved = match resolution {
                 Ok(path) => path,
                 Err(e) => {
                     // Name the terminal event whose stack authored the `proxy`

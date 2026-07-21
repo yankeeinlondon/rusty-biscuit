@@ -88,6 +88,9 @@ fn apply_rematerialize_inputs(
     if let Some(fallback) = inputs.file_ref_fallback_dir.clone() {
         options = options.with_file_ref_fallback_dir(fallback);
     }
+    if let Some(context) = inputs.file_resolution_context.clone() {
+        options = options.with_file_resolution_context(context);
+    }
     options
 }
 
@@ -161,6 +164,9 @@ pub(crate) fn preflight_proxy_target(
     );
     if let Some(fallback) = state.rematerialize.file_ref_fallback_dir.clone() {
         options = options.with_file_ref_fallback_dir(fallback);
+    }
+    if let Some(context) = state.rematerialize.file_resolution_context.clone() {
+        options = options.with_file_resolution_context(context);
     }
     if let Some(overrides) = state.rematerialize.set_overrides.clone() {
         options = options.with_set_overrides(overrides);
@@ -307,6 +313,7 @@ pub(crate) fn materialize_harness_prompt(
                     set_overrides: rematerialize.set_overrides.clone(),
                     pre_approved_commands: rematerialize.pre_approved_commands.clone(),
                     file_ref_fallback_dir: rematerialize.file_ref_fallback_dir.clone(),
+                    file_resolution_context: rematerialize.file_resolution_context.clone(),
                     // Carry the resolved `AGENT`/`MODEL` env so `ctx.agent`/
                     // `ctx.model` in the re-materialized body resolve to the run's
                     // provider instead of the `unknown`/`default` fallbacks.

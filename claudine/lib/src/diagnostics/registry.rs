@@ -181,13 +181,13 @@ pub const CODES: &[CodeSpec] = &[
         // `failure` is the stable snake_case failure classification —
         // `invalid_syntax`, `missing_context`, `no_match`, `permission_io`, or
         // `unsupported_remote`. It is distinct from `kind`, which names the
-        // reference kind. The `CompositionError` wrapper supplies
+        // authored reference kind; `effective_kind` names the anchoring after
+        // interpolation. The `CompositionError` wrapper supplies
         // `source_path`/`property`/`event`; the shared `biscuit-file`/harness
         // resolver supplies `failure` on both arms and additionally projects
-        // `kind`/`repository_root`/`candidates` when a probe ran
-        // (`PathResolutionFailed`). The no-probe arm
-        // (`FileReferenceUnresolvable`) and the legacy
-        // `FileReferenceDiagnostic` path leave those three (and `failure` on
+        // `kind`/`effective_kind`/`repository_root`/`candidates` when a probe
+        // ran. The pre-probe form of `FileReferenceUnresolvable` and the legacy
+        // `FileReferenceDiagnostic` path leave those fields (and `failure` on
         // the legacy path) as `null`. Values come from typed data, never
         // back-derived from `Display` (spec §D3).
         detail: &[
@@ -202,6 +202,7 @@ pub const CODES: &[CodeSpec] = &[
             "repository_root",
             "candidates",
             "failure",
+            "effective_kind",
         ],
     },
     CodeSpec {
@@ -540,6 +541,7 @@ mod tests {
             "repository_root",
             "candidates",
             "failure",
+            "effective_kind",
         ] {
             assert!(
                 spec.detail.contains(&field),

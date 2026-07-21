@@ -36,14 +36,14 @@
 //!   (`source_path`, `property`, `event`) and merges whichever resolver path
 //!   reached its `#[source]`. The shared `biscuit-file`/harness resolver
 //!   populates `failure` on both arms; when its probe ran it additionally
-//!   projects `kind`, `repository_root`, and the ordered `candidates` from
-//!   the retained plan (`HarnessError::PathResolutionFailed`), and when no
-//!   probe ran (`HarnessError::FileReferenceUnresolvable`, e.g. a
-//!   syntactically-invalid reference) those three stay `null`. The legacy
+//!   projects authored `kind`, `effective_kind`, `repository_root`, and the
+//!   ordered `candidates` from the retained plan, including on an I/O failure.
+//!   When no probe ran (`HarnessError::FileReferenceUnresolvable`, e.g. a
+//!   syntactically-invalid reference) those four stay `null`. The legacy
 //!   lower-layer path through `FileReferenceDiagnostic` (the
 //!   markdown-interpolation arm) continues to supply the original five
 //!   fields (`reference`, `kind`, `base_dir`, `suggestions`, `fallback_dir`)
-//!   and reserves the six additions as `null`. Values come from typed data,
+//!   and reserves the seven additions as `null`. Values come from typed data,
 //!   never back-derived from `Display` (spec §D3).
 //! - [`ClaudineError`] and [`HarnessError`] project the top-level Claudine,
 //!   provider, io, config, and usage surface, so lifecycle `err.*` exposes

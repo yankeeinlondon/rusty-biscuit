@@ -329,6 +329,38 @@ fn resolve_proxy_target_prefers_repository_root_for_implicit() {
     );
 }
 
+#[test]
+fn resolve_proxy_target_package_reference_prefers_authoring_package_area() {
+    let repo = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(repo.path()).unwrap();
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"claudine/lib\"]\nresolver = \"2\"\n",
+    )
+    .unwrap();
+    let package_area = root.join("claudine");
+    let member = package_area.join("lib");
+    std::fs::create_dir_all(member.join("src")).unwrap();
+    std::fs::create_dir_all(member.join("prompts")).unwrap();
+    std::fs::write(
+        member.join("Cargo.toml"),
+        "[package]\nname = \"fixture-claudine\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .unwrap();
+    std::fs::write(member.join("src/lib.rs"), "").unwrap();
+    let source = member.join("prompts/run.md");
+    std::fs::write(&source, "---\n---\n").unwrap();
+    std::fs::write(root.join("shared.md"), "repository decoy").unwrap();
+    let package_target = package_area.join("shared.md");
+    std::fs::write(&package_target, "package").unwrap();
+
+    assert_eq!(
+        resolve_proxy_target("!shared.md", &source, Some(&root)).unwrap(),
+        package_target,
+    );
+}
+
 /// An explicit `./` proxy target stays pinned to the authoring document even
 /// when a repository-root sibling of the same name exists.
 #[test]
@@ -373,6 +405,42 @@ fn resolve_proxy_target_nested_provenance_follows_the_target_document() {
         err,
         crate::harness::HarnessError::PathResolutionFailed { .. }
     ));
+}
+
+#[test]
+#[serial_test::serial]
+fn lifecycle_proxy_reuses_request_snapshot_after_environment_mutation() {
+    let request = tempfile::tempdir().unwrap();
+    let source_dir = request.path().join("source");
+    let captured = request.path().join("captured");
+    std::fs::create_dir_all(&source_dir).unwrap();
+    std::fs::create_dir_all(&captured).unwrap();
+    let source = source_dir.join("run.md");
+    let target = captured.join("target.md");
+    std::fs::write(&source, "---\n---\n").unwrap();
+    std::fs::write(&target, "---\n---\n").unwrap();
+    let ambient = tempfile::tempdir().unwrap();
+    let prior = std::env::var_os("LIFECYCLE_SNAPSHOT_ROOT");
+    let mut env = std::collections::HashMap::new();
+    env.insert(
+        "LIFECYCLE_SNAPSHOT_ROOT".to_string(),
+        captured.display().to_string(),
+    );
+    let snapshot = biscuit_file::FileResolutionContext::new(request.path()).with_env(env);
+
+    // SAFETY: this test is serialized while mutating process-global state.
+    unsafe { std::env::set_var("LIFECYCLE_SNAPSHOT_ROOT", ambient.path()) };
+    let resolved = resolve_proxy_target_in_context(
+        "{{LIFECYCLE_SNAPSHOT_ROOT}}/target.md",
+        &source,
+        &snapshot,
+    );
+    match prior {
+        Some(value) => unsafe { std::env::set_var("LIFECYCLE_SNAPSHOT_ROOT", value) },
+        None => unsafe { std::env::remove_var("LIFECYCLE_SNAPSHOT_ROOT") },
+    }
+
+    assert_eq!(resolved.unwrap(), target);
 }
 
 /// A `{{VAR}}`-interpolated target with an unset variable surfaces the typed

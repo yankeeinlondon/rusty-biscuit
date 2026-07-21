@@ -925,6 +925,7 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
         shell_working_directory: None,
         prepared_context: None,
         file_ref_fallback_dir: None,
+        file_resolution_context: None,
         name_coercion_keys: Vec::new(),
         allow_empty_body: false,
     };
@@ -1688,6 +1689,7 @@ fn implicit_reference_error(reference: &str, repo: &std::path::Path) -> Composit
     let ctx = crate::harness::HarnessResolutionContext {
         source_path: &source,
         repo_root: Some(repo),
+        package_area: None,
     };
     let source_err = crate::harness::resolve_harness_path(reference, &ctx).unwrap_err();
 

@@ -256,6 +256,7 @@ original five fields keep their names, order, and values:
 | `repository_root` | probe only | the resolver's plan root, projected when a probe ran; `null` otherwise |
 | `candidates` | probe only | the ordered, provenance-carrying probe record, projected when a probe ran; `null` otherwise |
 | `failure` | harness path | typed failure classification — `invalid_syntax`, `missing_context`, `no_match`, `permission_io`, `unsupported_remote` |
+| `effective_kind` | probe only | filesystem anchoring after interpolation; equals `kind` unless interpolation reclassifies a local reference |
 
 **`base_dir` and `fallback_dir` are compatibility projections.** They are the two
 anchors the pre-`candidates` payload exposed, retained so an existing `when:`
@@ -264,11 +265,11 @@ clause keeps matching. `candidates` supersedes them.
 **Two resolver paths today.** The shared `biscuit-file`/harness resolver reaches
 `composition.invalid_file_reference` through two arms.
 `HarnessError::PathResolutionFailed` ran a probe and retained its plan, so
-`failure`, `kind`, `repository_root`, and the ordered `candidates` all project
-from the typed probe record. `HarnessError::FileReferenceUnresolvable` failed
-before any probe ran (e.g. a syntactically-invalid reference), so only `failure`,
-`reference`, and `source_path` project; `kind`, `repository_root`, and
-`candidates` stay `null` rather than being invented. The lower-layer legacy path
+`failure`, `kind`, `effective_kind`, `repository_root`, and the ordered
+`candidates` all project from the typed probe record. An I/O form of
+`HarnessError::FileReferenceUnresolvable` retains and projects that same plan;
+its pre-probe forms (e.g. a syntactically-invalid reference) project only
+`failure`, `reference`, and `source_path`. The lower-layer legacy path
 through `FileReferenceDiagnostic` (the markdown-interpolation arm) continues to
 supply the original five fields and reserves the six additions as `null` —
 exactly the case the additive catalog was designed to tolerate.
