@@ -48,7 +48,7 @@ Required change:
 
 ### 2. High — native Windows process ownership and interruption still have no behavioral execution
 
-DECISION: everything that can be reliable built for the Windows platform outside of actually running it on Windows is required but we are currently using a macOS host so any limitations imposed by this host's OS will not be considered a blocker for achieving "production readiness" for now.
+DECISION: everything that can be reliable built for the Windows platform outside of actually running it on Windows is required but we are currently using a macOS host so any limitations imposed by this host's OS will not be considered a blocker for achieving "production readiness".
 
 The Windows implementation has a materially distinct runtime path: suspended
 child creation, Job Object assignment, thread resume, console-control delivery,
