@@ -2,7 +2,7 @@
 $schema:
     spec: file(required;match(**/*spec*.md);eager) -> path to specification file
     design: file(match(**/*design*.md)) -> path to the design file (if exists)
-    plan: "file(required) -> The _plan file_ this prompt will create"
+    plan: "file(match(**/*plan*.md)) -> The _plan file_ this prompt will create"
     area: "string() -> the package area (or package in some cases) where the work is being done"
     
 description: "Creates a multi-phase, high confidence plan from a _feature_ or _fix_"

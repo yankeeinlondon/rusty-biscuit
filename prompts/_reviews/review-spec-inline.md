@@ -1,6 +1,6 @@
 ---
 $schema:
-    spec: file(required) -> the specification file being reviewed
+    spec: file(required;eager; match(**/*spec*.md)) -> the specification file being reviewed
 description: Reviews a draft specification inline and updates the spec file
 
 basename: "{{ basename(spec) }}"
