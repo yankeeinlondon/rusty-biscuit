@@ -335,6 +335,8 @@ pub struct StackExecutionContext<'a> {
     /// `None`, it falls back to a demand-driven capture rooted at
     /// `ctx_base_dir`/`base_dir`.
     pub prepared_context: Option<&'a ComposeContext>,
+    /// Immutable request snapshot used by document-authored file expressions.
+    pub file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
     /// Darkmatter side-effect engine.
     pub effect_engine: &'a EffectEngine,
     /// Approved-shell runner.
@@ -573,6 +575,7 @@ impl StackExecutionContext<'_> {
             base_dir: self.base_dir,
             ctx_base_dir: self.ctx_base_dir,
             prepared_context: self.prepared_context,
+            file_resolution_context: self.file_resolution_context,
             effect_engine: self.effect_engine,
             shell_runner: self.shell_runner,
             emitter: self.emitter,
@@ -605,6 +608,7 @@ impl StackExecutionContext<'_> {
             base_dir: self.base_dir,
             ctx_base_dir: self.ctx_base_dir,
             prepared_context: self.prepared_context,
+            file_resolution_context: self.file_resolution_context,
             effect_engine: self.effect_engine,
             shell_runner: self.shell_runner,
             emitter: self.emitter,
@@ -661,25 +665,13 @@ impl StackExecutionContext<'_> {
         globals
     }
 
-    /// Resolution context for read-side expression functions.
-    ///
-    /// Resolution order: `base_dir` (the prompt document's parent, or the
-    /// current directory when unknown) is the primary anchor for
-    /// document-authored references; the captured launch area
-    /// (`ctx_base_dir`) is the explicit fallback for caller-supplied file
-    /// references so resolution is independent of the mutated ambient
-    /// process CWD after the wrapper's `chdir`.
     fn resolution_context(&self) -> ResolutionContext {
-        let dir = self
-            .base_dir
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
-        match self.ctx_base_dir {
-            Some(launch_area) => {
-                ResolutionContext::new(dir).with_file_ref_fallback_dir(launch_area.to_path_buf())
-            }
-            None => ResolutionContext::new(dir),
-        }
+        super::super::document_expression_resolution_context(
+            self.source_path,
+            self.prepared_context,
+            self.file_resolution_context,
+            self.ctx_base_dir,
+        )
     }
 
     /// The early-binding `ctx.*`/`env.*` snapshot for this event.

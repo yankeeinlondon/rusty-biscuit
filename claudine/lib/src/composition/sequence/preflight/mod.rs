@@ -31,7 +31,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::expression::ResolutionContext;
 use darkmatter::markdown::compose::subtree::SubtreeCompose;
 use darkmatter::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder};
 use serde_json::{Map, Value};
@@ -162,7 +161,17 @@ pub fn build_preflight_graph_with_context(
     source: &ResolvedCompositionSource,
     context: ComposeContext,
 ) -> Result<PreflightGraph, CompositionError> {
-    let mut loader = Loader::new(source, context);
+    build_preflight_graph_with_context_and_resolution(plan, source, context, None)
+}
+
+/// Builds preflight with both the composition and file-resolution snapshots.
+pub fn build_preflight_graph_with_context_and_resolution(
+    plan: &SequencePlan,
+    source: &ResolvedCompositionSource,
+    context: ComposeContext,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+) -> Result<PreflightGraph, CompositionError> {
+    let mut loader = Loader::new(source, context, file_resolution_context.cloned());
     loader.walk_plan(plan)?;
     Ok(loader.graph)
 }
@@ -183,10 +192,15 @@ struct Loader<'a> {
     /// Captured once: rebuilding it per shell command would re-probe the
     /// environment for every string in the graph.
     context: ComposeContext,
+    file_resolution_context: Option<biscuit_file::FileResolutionContext>,
 }
 
 impl<'a> Loader<'a> {
-    fn new(source: &'a ResolvedCompositionSource, context: ComposeContext) -> Self {
+    fn new(
+        source: &'a ResolvedCompositionSource,
+        context: ComposeContext,
+        file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+    ) -> Self {
         Self {
             graph: PreflightGraph::default(),
             ancestry: Vec::new(),
@@ -194,6 +208,7 @@ impl<'a> Loader<'a> {
             source,
             source_path: canonical(&source.resolved_path),
             context,
+            file_resolution_context,
         }
     }
 
@@ -736,11 +751,12 @@ impl<'a> Loader<'a> {
             });
         }
 
-        let base = origin
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
-        let resolution_ctx = ResolutionContext::new(base);
+        let resolution_ctx = super::super::document_expression_resolution_context(
+            origin,
+            Some(&self.context),
+            self.file_resolution_context.as_ref(),
+            None,
+        );
 
         let composed = SubtreeCompose::new(&Value::String(raw.to_string()), state)
             .with_resolution_context(resolution_ctx)

@@ -11,6 +11,8 @@
 //! validations, handlers, and provider selection across `compose`,
 //! `inline-compose`, and `sequence`.
 
+use std::path::Path;
+
 pub mod agent_message;
 pub mod closure;
 mod error;
@@ -127,7 +129,8 @@ pub use sequence::{
 pub use sequence::preflight::{
     DiscoveredCommand, GroupExecution, PreflightAction, PreflightGraph, PreflightGroup,
     PreflightStep, PreflightTask, PromptDocument, build_preflight_graph,
-    build_preflight_graph_with_context, reject_non_sequence_kind,
+    build_preflight_graph_with_context, build_preflight_graph_with_context_and_resolution,
+    reject_non_sequence_kind,
 };
 pub use sequence::task::{
     DEFAULT_COMMAND_TIMEOUT, PromptRunOutcome, PromptTaskRequest, PromptTaskRunner, RunawayTrip,
@@ -146,3 +149,25 @@ pub use types::{
     SequenceRunSummary, SequenceStepDraft, SequenceStepResult, SequenceTaskResult,
     SharedApprovalCache,
 };
+
+/// Builds Darkmatter's local expression context from the request snapshot for
+/// the document that authored the expression.
+pub fn document_expression_resolution_context(
+    source_path: &Path,
+    prepared_context: Option<&darkmatter::markdown::compose::ComposeContext>,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    file_ref_fallback_dir: Option<&Path>,
+) -> darkmatter::markdown::compose::expression::ResolutionContext {
+    let context = prepared_context.cloned().unwrap_or_else(
+        darkmatter::markdown::compose::ComposeContext::capture,
+    );
+    let mut options = darkmatter::markdown::compose::ComposeOptions::new_with_context(context)
+        .with_source_file(source_path);
+    if let Some(snapshot) = file_resolution_context {
+        options = options.with_file_resolution_context(snapshot.clone());
+    }
+    if let Some(fallback) = file_ref_fallback_dir {
+        options = options.with_file_ref_fallback_dir(fallback);
+    }
+    options.local_expression_resolution_context()
+}

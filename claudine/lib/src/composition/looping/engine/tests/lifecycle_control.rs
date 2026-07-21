@@ -588,6 +588,7 @@ fn run_loop_lifecycle_emitting_terminal(
                 &shell_runner,
                 emitter,
                 prompt_path.parent(),
+                None,
                 Some(&timing),
                 Some(&current),
             );

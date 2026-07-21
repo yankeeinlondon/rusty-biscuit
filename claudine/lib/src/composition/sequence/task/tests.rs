@@ -196,6 +196,7 @@ impl Fixture {
             base_dir: None,
             ctx_base_dir: None,
             prepared_context: None,
+            file_resolution_context: None,
             effect_engine: &self.engine,
             shell_runner: wiring.lifecycle_shell,
             emitter: wiring.recorder,

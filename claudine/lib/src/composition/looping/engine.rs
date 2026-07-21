@@ -259,6 +259,8 @@ pub fn execute_loop_with_config(
                 last_exit_code,
                 base_dir,
                 None,
+                None,
+                prompt_path,
             )?
         {
             return Ok(LoopExecutionResult::failure(
@@ -347,6 +349,7 @@ where
         shell_runner,
         emitter,
         base_dir,
+        file_resolution_context,
         Some(&init_timing),
         Some(&init_current),
     );
@@ -538,7 +541,8 @@ where
             let pre_mutation_lookup =
                 LoopExpressionLookup::new(&frontmatter, &pre_mutation_ambient)
                     .with_base_dir(base_dir)
-                    .with_file_ref_fallback_dir(lifecycle_ctx.launch_area);
+                    .with_file_ref_fallback_dir(lifecycle_ctx.launch_area)
+                    .with_file_resolution_context(file_resolution_context, prompt_path);
             !evaluate_condition(&config.condition, &pre_mutation_lookup)?
         };
         let ambient = LoopAmbient::new(
@@ -664,6 +668,7 @@ where
         shell_runner,
         emitter,
         loop_start,
+        file_resolution_context,
     )? {
             LoopGateOutcome::Exit => {
                 return Ok(LoopExecutionResult::success(
@@ -698,6 +703,8 @@ where
                 last_exit_code,
                 base_dir,
                 lifecycle_ctx.launch_area,
+                file_resolution_context,
+                prompt_path,
             )?
         {
             return Ok(LoopExecutionResult::failure(
@@ -844,6 +851,7 @@ fn run_loop_gate(
     shell_runner: &dyn ShellRunner,
     emitter: &dyn LifecycleEmitter,
     loop_start: std::time::Instant,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Result<LoopGateOutcome, CompositionError> {
     let (timing, current) =
         capture_loop_lifecycle_globals(base_dir, lifecycle_ctx.launch_area, loop_start);
@@ -855,6 +863,7 @@ fn run_loop_gate(
         shell_runner,
         emitter,
         base_dir,
+        file_resolution_context,
         Some(&timing),
         Some(&current),
     );
@@ -954,7 +963,8 @@ fn run_loop_gate(
 
     let lookup = LoopExpressionLookup::new(frontmatter, ambient)
         .with_base_dir(base_dir)
-        .with_file_ref_fallback_dir(lifecycle_ctx.launch_area);
+        .with_file_ref_fallback_dir(lifecycle_ctx.launch_area)
+        .with_file_resolution_context(file_resolution_context, prompt_path);
     if !evaluate_condition(&config.condition, &lookup)? {
         return Ok(LoopGateOutcome::Exit);
     }
@@ -976,6 +986,7 @@ fn build_loop_stack_context<'a>(
     shell_runner: &'a dyn ShellRunner,
     emitter: &'a dyn LifecycleEmitter,
     base_dir: Option<&'a Path>,
+    file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
     timing: Option<&'a super::super::lifecycle_context::LifecycleTiming>,
     current: Option<&'a super::super::lifecycle_context::LifecycleCurrent>,
 ) -> StackExecutionContext<'a> {
@@ -999,6 +1010,7 @@ fn build_loop_stack_context<'a>(
         base_dir,
         ctx_base_dir: lifecycle_ctx.launch_area,
         prepared_context: lifecycle_ctx.context,
+        file_resolution_context,
         effect_engine,
         shell_runner,
         emitter,
@@ -1209,11 +1221,14 @@ fn should_continue_after_cap(
     last_exit_code: i32,
     base_dir: Option<&Path>,
     file_ref_fallback_dir: Option<&Path>,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    prompt_path: &Path,
 ) -> Result<bool, CompositionError> {
     let ambient = LoopAmbient::new(next_iteration, false, true, last_output, last_exit_code);
     let lookup = LoopExpressionLookup::new(frontmatter, &ambient)
         .with_base_dir(base_dir)
-        .with_file_ref_fallback_dir(file_ref_fallback_dir);
+        .with_file_ref_fallback_dir(file_ref_fallback_dir)
+        .with_file_resolution_context(file_resolution_context, prompt_path);
     evaluate_condition(&config.condition, &lookup)
 }
 

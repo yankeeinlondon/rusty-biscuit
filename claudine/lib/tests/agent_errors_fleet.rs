@@ -261,6 +261,7 @@ fn exhausted_remediation_fails_finalize_and_preserves_findings() {
         base_dir: Some(dir.path()),
         ctx_base_dir: Some(dir.path()),
         prepared_context: None,
+        file_resolution_context: None,
         effect_engine: &effect_engine,
         shell_runner: &gate,
         emitter: &emitter,

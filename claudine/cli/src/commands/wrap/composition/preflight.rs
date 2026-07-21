@@ -117,6 +117,7 @@ pub(super) fn emit_preflight_blocked_and_finalize(
         base_dir,
         ctx_base_dir,
         prepared_context,
+        file_resolution_context: None,
         effect_engine,
         shell_runner: &SystemShellRunner,
         emitter,

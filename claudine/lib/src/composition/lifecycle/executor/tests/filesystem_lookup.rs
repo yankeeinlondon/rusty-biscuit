@@ -2,6 +2,88 @@
 
 use super::*;
 
+#[test]
+#[serial_test::serial(file_resolution_snapshot)]
+fn lifecycle_file_functions_reuse_all_request_resolution_inputs() {
+    let request = tempfile::tempdir().unwrap();
+    let source_dir = request.path().join("prompts");
+    let home = request.path().join("home");
+    let magic = request.path().join("magic");
+    let package = request.path().join("package");
+    for dir in [&source_dir, &home, &magic, &package] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    for path in [
+        request.path().join("env.flag"),
+        home.join("home.flag"),
+        magic.join("magic.flag"),
+        package.join("package.flag"),
+    ] {
+        std::fs::write(path, "ready").unwrap();
+    }
+    let source_path = source_dir.join("prompt.md");
+    let mut env = std::collections::HashMap::new();
+    env.insert(
+        "CLAUDINE_SNAPSHOT_ROOT".to_string(),
+        request.path().display().to_string(),
+    );
+    let snapshot = biscuit_file::FileResolutionContext::from_snapshot(
+        request.path(),
+        Some(home.clone()),
+        env,
+    )
+    .with_repository_root(request.path())
+    .with_package_area(&package)
+    .add_magic_path(&magic, biscuit_file::PathPosition::Start);
+
+    let prior_root = std::env::var_os("CLAUDINE_SNAPSHOT_ROOT");
+    let ambient = tempfile::tempdir().unwrap();
+    // SAFETY: the test is serialized while process-global state is changed.
+    unsafe { std::env::set_var("CLAUDINE_SNAPSHOT_ROOT", ambient.path()) };
+
+    let (_engine_dir, engine) = temp_engine();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let fm = Map::new();
+    let context = StackExecutionContext {
+        signal: LifecycleSignal::Start,
+        frontmatter: &fm,
+        live_frontmatter: None,
+        runtime_state: None,
+        err: None,
+        timing: None,
+        current: None,
+        group: None,
+        base_dir: Some(&source_dir),
+        ctx_base_dir: None,
+        prepared_context: None,
+        file_resolution_context: Some(&snapshot),
+        effect_engine: &engine,
+        shell_runner: &shell,
+        emitter: &recorder,
+        term: &harness.term,
+        source_path: &source_path,
+        repo_root: Some(request.path()),
+        messaging: &harness.messaging,
+        settings: &harness.settings,
+    };
+    for expression in [
+        "file_exists('{{CLAUDINE_SNAPSHOT_ROOT}}/env.flag')",
+        "file_exists('~/home.flag')",
+        "file_exists('@magic.flag')",
+        "file_exists('!package.flag')",
+    ] {
+        let parsed = darkmatter::markdown::compose::expression::parse(expression).unwrap();
+        assert_eq!(context.eval_expr(&parsed, &fm).unwrap(), Value::Bool(true));
+    }
+
+    match prior_root {
+        Some(value) => unsafe { std::env::set_var("CLAUDINE_SNAPSHOT_ROOT", value) },
+        None => unsafe { std::env::remove_var("CLAUDINE_SNAPSHOT_ROOT") },
+    }
+}
+
 /// `ctx.*` capture follows the launch area rather than the prompt's parent.
 /// Each temporary directory is its own Git repository, making the selected
 /// root deterministic without relying on the workspace layout.
@@ -51,6 +133,7 @@ fn ctx_capture_follows_ctx_base_dir_not_base_dir() {
         // No prepared snapshot: exercise the fallback re-capture path so the
         // assertion proves `ctx_base_dir` (not `base_dir`) roots the capture.
         prepared_context: None,
+        file_resolution_context: None,
         effect_engine: &engine,
         shell_runner: &shell,
         emitter: &recorder,
@@ -142,6 +225,7 @@ fn lifecycle_reuses_prepared_snapshot_for_prompt_outside_launch_area() {
         ctx_base_dir: Some(launch_root.as_path()),
         // The reused snapshot is the source of truth.
         prepared_context: Some(&prepared),
+        file_resolution_context: None,
         effect_engine: &engine,
         shell_runner: &shell,
         emitter: &recorder,
@@ -215,6 +299,7 @@ fn file_exists_resolves_against_base_dir_after_chdir() {
         // The launch area — carried for diagnostics only, never a candidate.
         ctx_base_dir: Some(launch_dir.path()),
         prepared_context: None,
+        file_resolution_context: None,
         effect_engine: &engine,
         shell_runner: &shell,
         emitter: &recorder,
@@ -290,6 +375,7 @@ fn prepare_time_and_event_time_agree_on_file_reference() {
         base_dir: Some(prompt_dir.path()),
         ctx_base_dir: Some(launch_dir.path()),
         prepared_context: None,
+        file_resolution_context: None,
         effect_engine: &engine,
         shell_runner: &shell,
         emitter: &recorder,
@@ -358,6 +444,7 @@ fn frontmatter_reads_resolve_against_base_dir() {
         base_dir: Some(prompt_dir.path()),
         ctx_base_dir: Some(launch_dir.path()),
         prepared_context: None,
+        file_resolution_context: None,
         effect_engine: &engine,
         shell_runner: &shell,
         emitter: &recorder,
@@ -427,6 +514,7 @@ fn regression_path_only_under_launch_area_does_not_resolve() {
         base_dir: Some(prompt_dir.path()),
         ctx_base_dir: Some(launch_dir.path()),
         prepared_context: None,
+        file_resolution_context: None,
         effect_engine: &engine,
         shell_runner: &shell,
         emitter: &recorder,
@@ -496,6 +584,7 @@ fn source_local_candidate_ignores_same_named_launch_file() {
         base_dir: Some(prompt_dir.path()),
         ctx_base_dir: Some(launch_dir.path()),
         prepared_context: None,
+        file_resolution_context: None,
         effect_engine: &engine,
         shell_runner: &shell,
         emitter: &recorder,

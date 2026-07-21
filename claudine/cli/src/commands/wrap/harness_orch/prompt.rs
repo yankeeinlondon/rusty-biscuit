@@ -27,6 +27,7 @@ pub(crate) fn materialized_harness_prompt_from_prepared(
         prompt: prepared.prompt.clone(),
         env_overrides: Vec::new(),
         inline_closure_plan,
+        file_resolution_context: prepared.rematerialize.file_resolution_context.clone(),
         live_frontmatter,
         runtime_state,
     }
@@ -351,6 +352,7 @@ pub(crate) fn materialize_harness_prompt(
         prompt,
         env_overrides,
         inline_closure_plan,
+        file_resolution_context: state.rematerialize.file_resolution_context.clone(),
         live_frontmatter,
         runtime_state: std::sync::Arc::clone(&state.runtime_state),
     })

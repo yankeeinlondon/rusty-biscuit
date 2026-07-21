@@ -48,6 +48,8 @@ Required change:
 
 ### 2. High — native Windows process ownership and interruption still have no behavioral execution
 
+DECISION: everything that can be reliable built for the Windows platform outside of actually running it on Windows is required but we are currently using a macOS host so any limitations imposed by this host's OS will not be considered a blocker for achieving "production readiness" for now.
+
 The Windows implementation has a materially distinct runtime path: suspended
 child creation, Job Object assignment, thread resume, console-control delivery,
 bounded reader settlement, Job termination, and kill-on-close ownership. The
@@ -71,6 +73,8 @@ Required change:
   in finding 1.
 
 ### 3. High — the acceptance record still cannot reproduce its current Level-3 claim
+
+DECISION: this will be considered non-blocking for now!
 
 The injector modules are now committed and the Windows compile-only gate was
 re-anchored to `96679f516`, closing part of review 10. The canonical validation

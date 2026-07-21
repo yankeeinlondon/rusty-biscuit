@@ -170,6 +170,7 @@ fn ctx<'a>(
         base_dir: None,
         ctx_base_dir: None,
         prepared_context: None,
+        file_resolution_context: None,
         effect_engine: engine,
         shell_runner: shell,
         emitter: recorder,
@@ -232,6 +233,7 @@ fn ctx_with_live<'a>(
         base_dir: None,
         ctx_base_dir: None,
         prepared_context: None,
+        file_resolution_context: None,
         effect_engine: engine,
         shell_runner: shell,
         emitter: recorder,
@@ -250,4 +252,3 @@ mod event_time_interpolation;
 mod filesystem_lookup;
 mod mutation_visibility;
 mod runtime_set;
-

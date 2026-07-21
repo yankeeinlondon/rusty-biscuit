@@ -367,6 +367,7 @@ pub(super) fn build_lifecycle_stack_context_for_materialized<'a>(
         base_dir,
         ctx_base_dir: launch_area,
         prepared_context,
+        file_resolution_context: materialized.file_resolution_context.as_ref(),
         effect_engine,
         shell_runner: &SystemShellRunner,
         emitter,

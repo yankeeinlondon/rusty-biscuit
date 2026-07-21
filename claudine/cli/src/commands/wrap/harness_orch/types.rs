@@ -75,6 +75,7 @@ pub(crate) struct MaterializedHarnessPrompt {
     pub(crate) prompt: String,
     pub(crate) env_overrides: Vec<(String, String)>,
     pub(crate) inline_closure_plan: Option<claudine::composition::InlineClosurePlan>,
+    pub(crate) file_resolution_context: Option<biscuit_file::FileResolutionContext>,
     /// Shared cross-event live document frontmatter for the current attempt.
     ///
     /// Seeded from `frontmatter` when the prompt is materialized and threaded

@@ -1410,6 +1410,7 @@ fn provider_run_handoff(
         base_dir,
         ctx_base_dir: Some(launch_workspace.launch_cwd.as_path()),
         prepared_context: Some(lifecycle_context),
+        file_resolution_context: request.prepared.rematerialize.file_resolution_context.as_ref(),
         effect_engine: lifecycle_effect_engine,
         shell_runner: &SystemShellRunner,
         emitter,

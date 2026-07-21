@@ -55,6 +55,7 @@ pub(crate) fn materialize_passthrough_harness_seed(
         prompt,
         env_overrides: Vec::new(),
         inline_closure_plan: None,
+        file_resolution_context: None,
         live_frontmatter,
         runtime_state,
     })

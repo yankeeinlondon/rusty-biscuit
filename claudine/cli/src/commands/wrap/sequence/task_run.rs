@@ -115,6 +115,7 @@ pub(super) fn run_step_task(
         base_dir: prepared.resolved_path.parent(),
         ctx_base_dir: Some(run.prep_context.launch_workspace.launch_cwd.as_path()),
         prepared_context: None,
+        file_resolution_context: Some(run.compose.file_resolution_context),
         effect_engine: &engine,
         shell_runner: &SystemShellRunner,
         emitter: &emitter,

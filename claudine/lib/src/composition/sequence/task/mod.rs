@@ -38,7 +38,6 @@ use std::time::{Duration, Instant};
 
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::EffectiveState;
-use darkmatter::markdown::compose::expression::ResolutionContext;
 use darkmatter::markdown::compose::subtree::SubtreeCompose;
 use serde_json::{Map, Value};
 
@@ -778,7 +777,12 @@ impl TaskExecution<'_> {
         if !contains_interpolation(value) {
             return Ok(value.clone());
         }
-        let resolution = ResolutionContext::new(self.task.origin_dir.clone());
+        let resolution = super::super::document_expression_resolution_context(
+            &self.task.origin_path,
+            self.stack.prepared_context,
+            self.stack.file_resolution_context,
+            self.stack.ctx_base_dir,
+        );
         SubtreeCompose::new(value, self.state)
             .with_resolution_context(resolution)
             .strict()

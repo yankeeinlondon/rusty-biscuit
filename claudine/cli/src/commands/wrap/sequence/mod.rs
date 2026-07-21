@@ -226,7 +226,12 @@ pub(crate) fn execute_sequence(
     // ones behind `when:` guards that read false today — is resolved to bytes
     // and approved. A failure at this point is abort-all regardless of
     // `fail_fast`, and `--dry-run` performs this identical walk.
-    let graph = composition::build_preflight_graph(&plan, source)?;
+    let graph = composition::build_preflight_graph_with_context_and_resolution(
+        &plan,
+        source,
+        darkmatter::markdown::compose::ComposeContext::capture(),
+        Some(&file_resolution_context),
+    )?;
     let preflight_approved = approve_preflight_graph(
         &graph,
         source,

@@ -151,6 +151,7 @@ pub fn resolve_sequence_plan_with(
             &expression,
             &frontmatter,
             &source.resolved_path,
+            options.file_resolution_context,
             fail_fast,
         )?,
         SequenceSourceSpec::Shell(command) => {
@@ -191,10 +192,12 @@ fn resolve_expression_source(
     expression: &str,
     frontmatter: &Map<String, Value>,
     invocation_path: &Path,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
     fail_fast: bool,
 ) -> Result<SequencePlan, CompositionError> {
     let base_dir = invocation_path.parent().unwrap_or_else(|| Path::new("."));
-    let lookup = SourceExpressionLookup::new(frontmatter, base_dir);
+    let lookup = SourceExpressionLookup::new(frontmatter, base_dir)
+        .with_file_resolution_context(file_resolution_context, invocation_path);
     let value = expr::evaluate_whole(expression, &lookup)?;
 
     let items = match value {

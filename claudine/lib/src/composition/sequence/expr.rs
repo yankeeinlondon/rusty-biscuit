@@ -33,6 +33,8 @@ pub struct SourceExpressionLookup<'a> {
     frontmatter: &'a Map<String, Value>,
     ctx: CtxLookup<'a>,
     base_dir: &'a Path,
+    file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
+    source_path: Option<&'a Path>,
 }
 
 impl<'a> SourceExpressionLookup<'a> {
@@ -45,6 +47,8 @@ impl<'a> SourceExpressionLookup<'a> {
             frontmatter,
             ctx: CtxLookup::new(base_dir),
             base_dir,
+            file_resolution_context: None,
+            source_path: None,
         }
     }
 
@@ -52,6 +56,18 @@ impl<'a> SourceExpressionLookup<'a> {
     #[must_use]
     pub fn with_item(mut self, item: &'a Map<String, Value>) -> Self {
         self.item = Some(item);
+        self
+    }
+
+    /// Reuse the request snapshot for expressions authored by `source_path`.
+    #[must_use]
+    pub fn with_file_resolution_context(
+        mut self,
+        context: Option<&'a biscuit_file::FileResolutionContext>,
+        source_path: &'a Path,
+    ) -> Self {
+        self.file_resolution_context = context;
+        self.source_path = Some(source_path);
         self
     }
 }
@@ -76,7 +92,15 @@ impl EvaluationLookup for SourceExpressionLookup<'_> {
     }
 
     fn resolution_context(&self) -> Option<ResolutionContext> {
-        Some(ResolutionContext::new(self.base_dir.to_path_buf()))
+        Some(match self.source_path {
+            Some(source_path) => super::super::document_expression_resolution_context(
+                source_path,
+                None,
+                self.file_resolution_context,
+                None,
+            ),
+            None => ResolutionContext::new(self.base_dir.to_path_buf()),
+        })
     }
 }
 
@@ -146,4 +170,54 @@ pub fn render_interpolated<L: EvaluationLookup>(
 
     output.push_str(&raw[cursor..]);
     Ok(Value::String(output))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sequence_expression_lookup_reuses_request_resolution_inputs() {
+        let request = tempfile::tempdir().unwrap();
+        let source_path = request.path().join("sequence.md");
+        let home = request.path().join("home");
+        let magic = request.path().join("magic");
+        let package = request.path().join("package");
+        for dir in [&home, &magic, &package] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        for path in [
+            request.path().join("env.flag"),
+            home.join("home.flag"),
+            magic.join("magic.flag"),
+            package.join("package.flag"),
+        ] {
+            std::fs::write(path, "ready").unwrap();
+        }
+        let mut env = std::collections::HashMap::new();
+        env.insert(
+            "CLAUDINE_SEQUENCE_ROOT".to_string(),
+            request.path().display().to_string(),
+        );
+        let snapshot = biscuit_file::FileResolutionContext::from_snapshot(
+            request.path(),
+            Some(home),
+            env,
+        )
+        .with_repository_root(request.path())
+        .with_package_area(package)
+        .add_magic_path(magic, biscuit_file::PathPosition::Start);
+        let frontmatter = Map::new();
+        let lookup = SourceExpressionLookup::new(&frontmatter, request.path())
+            .with_file_resolution_context(Some(&snapshot), &source_path);
+
+        for expression in [
+            "file_exists('{{CLAUDINE_SEQUENCE_ROOT}}/env.flag')",
+            "file_exists('~/home.flag')",
+            "file_exists('@magic.flag')",
+            "file_exists('!package.flag')",
+        ] {
+            assert_eq!(evaluate_whole(expression, &lookup).unwrap(), Value::Bool(true));
+        }
+    }
 }

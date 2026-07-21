@@ -74,6 +74,8 @@ pub struct LoopExpressionLookup<'a> {
     ambient: &'a LoopAmbient,
     base_dir: Option<&'a Path>,
     file_ref_fallback_dir: Option<&'a Path>,
+    file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
+    source_path: Option<&'a Path>,
 }
 
 impl<'a> LoopExpressionLookup<'a> {
@@ -84,6 +86,8 @@ impl<'a> LoopExpressionLookup<'a> {
             ambient,
             base_dir: None,
             file_ref_fallback_dir: None,
+            file_resolution_context: None,
+            source_path: None,
         }
     }
 
@@ -103,6 +107,18 @@ impl<'a> LoopExpressionLookup<'a> {
     #[must_use]
     pub fn with_file_ref_fallback_dir(mut self, fallback: Option<&'a Path>) -> Self {
         self.file_ref_fallback_dir = fallback;
+        self
+    }
+
+    /// Reuse the request snapshot for references authored by `source_path`.
+    #[must_use]
+    pub fn with_file_resolution_context(
+        mut self,
+        context: Option<&'a biscuit_file::FileResolutionContext>,
+        source_path: &'a Path,
+    ) -> Self {
+        self.file_resolution_context = context;
+        self.source_path = Some(source_path);
         self
     }
 }
@@ -129,11 +145,19 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
     }
 
     fn resolution_context(&self) -> Option<ResolutionContext> {
-        self.base_dir.map(|dir| {
-            let ctx = ResolutionContext::new(dir.to_path_buf());
-            match self.file_ref_fallback_dir {
-                Some(fallback) => ctx.with_file_ref_fallback_dir(fallback.to_path_buf()),
-                None => ctx,
+        self.base_dir.map(|dir| match self.source_path {
+            Some(source_path) => super::super::document_expression_resolution_context(
+                source_path,
+                None,
+                self.file_resolution_context,
+                self.file_ref_fallback_dir,
+            ),
+            None => {
+                let ctx = ResolutionContext::new(dir.to_path_buf());
+                match self.file_ref_fallback_dir {
+                    Some(fallback) => ctx.with_file_ref_fallback_dir(fallback.to_path_buf()),
+                    None => ctx,
+                }
             }
         })
     }
@@ -421,6 +445,45 @@ mod tests {
             )
             .unwrap()
         );
+    }
+
+    #[test]
+    fn loop_file_functions_reuse_request_home_magic_and_package_roots() {
+        let request = tempfile::tempdir().unwrap();
+        let source_path = request.path().join("prompt.md");
+        let home = request.path().join("home");
+        let magic = request.path().join("magic");
+        let package = request.path().join("package");
+        for dir in [&home, &magic, &package] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        std::fs::write(home.join("home.flag"), "ready").unwrap();
+        std::fs::write(magic.join("magic.flag"), "ready").unwrap();
+        std::fs::write(package.join("package.flag"), "ready").unwrap();
+        let snapshot = biscuit_file::FileResolutionContext::from_snapshot(
+            request.path(),
+            Some(home),
+            std::collections::HashMap::new(),
+        )
+        .with_repository_root(request.path())
+        .with_package_area(package)
+        .add_magic_path(magic, biscuit_file::PathPosition::Start);
+        let fm = map(json!({}));
+        let ambient = ambient();
+        let lookup = LoopExpressionLookup::new(&fm, &ambient)
+            .with_base_dir(Some(request.path()))
+            .with_file_resolution_context(Some(&snapshot), &source_path);
+
+        for expression in [
+            "file_exists('~/home.flag')",
+            "file_exists('@magic.flag')",
+            "file_exists('!package.flag')",
+        ] {
+            assert!(
+                evaluate_condition(&LoopCondition::While(expression.into()), &lookup).unwrap(),
+                "{expression} must use the request snapshot"
+            );
+        }
     }
 
     /// The launch-area fallback (`file_ref_fallback_dir`) is diagnostic-only: a
