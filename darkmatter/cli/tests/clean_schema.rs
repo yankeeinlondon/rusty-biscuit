@@ -296,6 +296,34 @@ fn test_stdin_honors_schema_flag() {
     assert!(release_quoted(&stdout), "got:\n{stdout}");
 }
 
+/// D-2: stdin has no document path, so repository trigger discovery stays
+/// inert even when the process runs below a Git root with a matching trigger.
+#[test]
+fn test_stdin_does_not_discover_repository_trigger_schemas() {
+    let repo = Repo::new();
+    repo.with_release_trigger();
+    let source = "---\nkind: thing\nrelease: 1.20\n---\n\n# Body\n";
+
+    let file = repo.write("docs/positive-control.md", source);
+    assert!(
+        release_quoted(&clean(&file, &[])),
+        "the matching trigger must be active for file input"
+    );
+
+    let assert = md_cmd()
+        .current_dir(repo.root.join("docs"))
+        .args(["clean", "-"])
+        .write_stdin(source)
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+
+    assert!(
+        !release_quoted(&stdout),
+        "stdin must not anchor trigger discovery to the process cwd:\n{stdout}"
+    );
+}
+
 /// The top-level `md <file> --save` shorthand runs the same pipeline with the
 /// same schema defaults.
 #[test]
