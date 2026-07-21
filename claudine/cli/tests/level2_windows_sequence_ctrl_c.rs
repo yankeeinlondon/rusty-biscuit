@@ -23,26 +23,25 @@
 //! path rather than by setting an `AtomicBool`. It is not Level 3 because the
 //! event is synthesized with `GenerateConsoleCtrlEvent` instead of an OS
 //! keyboard chord — it starts downstream of the keyboard and the terminal's
-//! input encoder. Windows has no `cliclick` equivalent wired into the harness,
-//! so Level 3 on this host remains out of reach.
+//! input encoder. The separate `level3_windows_sequence_ctrl_c` fixture uses
+//! the harness's Windows input injector to cover that keyboard boundary.
 //!
 //! ## Why the marker file and the exit code carry the weight
 //!
 //! Claudine is spawned in `CREATE_NEW_PROCESS_GROUP`, so the injected
 //! `CTRL_BREAK_EVENT` reaches its group and no other. Each task's `cmd /C`
-//! child, however, is spawned *without* a new group (see
-//! `lib/src/composition/sequence/task/shell.rs`), so it inherits Claudine's and
-//! receives the same event incidentally. Child death is therefore corroborating
-//! evidence, not discriminating evidence, and the per-task `interrupted` label
-//! is deliberately not asserted: whether the task's poll loop observes the
-//! shared flag or the already-dead child first is a genuine race on this
-//! platform.
+//! child is created suspended in its own process group, assigned to a
+//! kill-on-close Job Object, and then resumed (see
+//! `lib/src/composition/sequence/task/shell.rs`). The shared interrupt flag
+//! therefore drives each task shell to terminate its owned Job tree. The
+//! per-task `interrupted` label is deliberately not asserted: whether the task's
+//! poll loop observes the shared flag or the already-terminated child first is
+//! a genuine race on this platform.
 //!
-//! Liveness is measured by heartbeat rather than by pid. A `cmd /C` task
-//! spawns its own grandchildren, and Claudine's task shell kills only the
-//! direct child, so a pid check on any one process could report a dead tree
-//! that is still ticking. A file that stops growing proves the whole tree
-//! stopped.
+//! Liveness is measured by heartbeat rather than by pid. A `cmd /C` task can
+//! spawn grandchildren, so a pid check on any one process could report a dead
+//! process while other members of the Job tree are still ticking. A file that
+//! stops growing proves the fixture's work stopped.
 //!
 //! The two assertions that a broken implementation cannot pass are the ones
 //! that read the shared flag and nothing else: `later-step-ran.txt` must not
