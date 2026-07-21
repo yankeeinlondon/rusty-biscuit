@@ -1169,7 +1169,11 @@ fn route_initialize(
                         context: Box::new(claudine::composition::FileReferenceContext {
                             source_path: source_path.to_path_buf(),
                             event: Some("initialize".to_string()),
-                            property: "initialize".to_string(),
+                            // Wildcard index: the stack position that authored
+                            // the `proxy` is not threaded back through the
+                            // outcome, so name the stable path, not a concrete
+                            // `[0]` we cannot verify (spec §D3/§D6).
+                            property: "initialize.stack[*].proxy".to_string(),
                             reference: target.clone(),
                             hint: PROXY_TARGET_HINT.to_string(),
                         }),

@@ -92,7 +92,10 @@ pub(super) fn run_target_initialize(
                                     claudine::composition::FileReferenceContext {
                                         source_path: source_path.to_path_buf(),
                                         event: Some("initialize".to_string()),
-                                        property: "initialize".to_string(),
+                                        // Wildcard index: the authoring stack
+                                        // position is not threaded back here, so
+                                        // name the stable path (spec §D3/§D6).
+                                        property: "initialize.stack[*].proxy".to_string(),
                                         reference: target.clone(),
                                         hint:
                                             crate::commands::wrap::composition::PROXY_TARGET_HINT

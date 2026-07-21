@@ -187,12 +187,20 @@ pub(super) fn dispatch_terminal_control(
             ) {
                 Ok(path) => path,
                 Err(e) => {
+                    // Name the terminal event whose stack authored the `proxy`
+                    // so the property is a stable `event.stack[*].proxy` path
+                    // rather than a bare `proxy` (spec §D3/§D6). The exact stack
+                    // index is not threaded back here, hence the wildcard.
+                    let event = lifecycle_guard
+                        .terminal_signal()
+                        .unwrap_or(LifecycleSignal::Finalize)
+                        .property_name();
                     return TerminalControlAction::Abort(
                         CompositionError::InvalidFileReference {
                             context: Box::new(claudine::composition::FileReferenceContext {
                                 source_path: prompt_state.source_path.clone(),
                                 event: None,
-                                property: "proxy".to_string(),
+                                property: format!("{event}.stack[*].proxy"),
                                 reference: target.clone(),
                                 hint: crate::commands::wrap::composition::PROXY_TARGET_HINT
                                     .to_string(),

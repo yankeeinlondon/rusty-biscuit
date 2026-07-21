@@ -395,6 +395,14 @@ const TTY_COLOR: [(&str, &str); 2] = [("FORCE_COLOR", "1"), ("COLUMNS", "100")];
 /// The plain contract: a real TTY with colour suppressed.
 const TTY_NO_COLOR: [(&str, &str); 2] = [("NO_COLOR", "1"), ("COLUMNS", "100")];
 
+/// The auto-detect contract: a real TTY with neither override exported, so the
+/// wrapper's `Terminal::new()` probe — not `Terminal::new_optimistic()` — decides
+/// depth. `FORCE_COLOR=1` short-circuits `cli/src/log.rs::compute_terminal` into
+/// its forced-styling arm and never reaches that probe; only this const
+/// exercises the third arm, which is what an unforced `claudine` process
+/// actually runs in a real pane.
+const TTY_AUTO: [(&str, &str); 1] = [("COLUMNS", "100")];
+
 // --- Route 1: `initialize` proxy resolution -------------------------------
 
 /// The motivating incident, rendered in a real terminal.
@@ -516,6 +524,52 @@ fn level2_initialize_proxy_block_is_plain_under_no_color_in_tmux() {
     assert_eq!(capture.exit_code, 1, "NO_COLOR must not change the exit code");
 }
 
+/// Automatic TTY colour detection — the branch `FORCE_COLOR=1` bypasses.
+///
+/// `level2_initialize_proxy_block_carries_red_sgr_and_osc8_link_in_tmux` pins
+/// the styled block through `FORCE_COLOR=1`, which selects
+/// `Terminal::new_optimistic` in `cli/src/log.rs::compute_terminal` and never
+/// probes the pane. The spec's Testing Strategy requires L2 to cover "TTY,
+/// `NO_COLOR`, `FORCE_COLOR`, and piped stderr variants ... where their output
+/// contracts differ"; the auto-detect arm (`Terminal::new()`) is the TTY case
+/// proper, and it is the code path an unforced `claudine` process actually
+/// runs in a real pane. Removing both overrides — rather than reusing
+/// `TTY_COLOR` — is what makes this distinct from the forced-colour test: a
+/// regression that breaks `is_tty`/depth detection while leaving
+/// `FORCE_COLOR=1` working would pass the existing suite and fail this case.
+#[test]
+#[serial(level2_terminal)]
+fn level2_initialize_proxy_block_auto_detects_tty_color_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let staged = stage("claudine-l2-init-proxy-auto", INITIALIZE_PROXY_DOC, 0);
+    let capture = run_in_pane(&mut harness, &staged, &TTY_AUTO, &[]);
+
+    assert!(
+        capture.has_status_block(),
+        "the block must render under automatic TTY detection.\nplain:\n{}",
+        capture.frame.plain
+    );
+    assert!(
+        capture.has_red_sgr(),
+        "the wrapper must recognise its real stderr TTY and enable the red \
+         SGR ({RED_SGR_FORMS:?}) without FORCE_COLOR.\nraw:\n{}",
+        capture.frame.raw
+    );
+    assert!(
+        capture.has_osc8_link(),
+        "the wrapper must recognise its real stderr TTY and emit the OSC 8 \
+         document link without FORCE_COLOR.\nraw:\n{}",
+        capture.frame.raw
+    );
+
+    // Same actionable content the forced-colour and plain cases pin: the
+    // authored reference and the resolution-failure reason.
+    capture.assert_contains("no/such/target.md", "the authored reference must be named");
+    capture.assert_contains("does not exist", "the resolution failure must be stated");
+}
+
 // --- Route 2: terminal/recovery proxy resolution --------------------------
 
 /// Proxy hand-off from a terminal (`failure`) event.
@@ -608,8 +662,13 @@ fn level2_proxy_routes_share_identity_across_routes_in_tmux() {
     let term_staged = stage("claudine-l2-parity-term", TERMINAL_PROXY_DOC, 3);
     let term = run_in_pane(&mut harness, &term_staged, &TTY_COLOR, &[]);
 
-    // Full AC5 identity: both routes render the SAME typed failure.
-    for (name, capture) in [("initialize", &init), ("terminal", &term)] {
+    // Full AC5 identity: both routes render the SAME typed failure. The
+    // per-route `property` is the one intentional structured difference (see the
+    // dotted-path assertion below).
+    for (name, capture, property) in [
+        ("initialize", &init, "initialize.stack[*].proxy"),
+        ("terminal", &term, "failure.stack[*].proxy"),
+    ] {
         assert!(
             capture.has_status_block(),
             "proxy route `{name}` must render a StatusBlock.\nplain:\n{}",
@@ -652,11 +711,13 @@ fn level2_proxy_routes_share_identity_across_routes_in_tmux() {
              read — the routes converged on the resolution-time failure.\nplain:\n{}",
             capture.frame.plain
         );
-        // Identical typed detail: the `proxy` property and the resolution
-        // failure reason ("does not exist") both reach the block.
+        // The structured `property` path reaches the block as its full dotted
+        // form — not the bare word `proxy`, which also appears in the fixture,
+        // hint, and surrounding prose. Anchoring on the whole path ties the
+        // assertion to the rendered structured field.
         assert!(
-            capture.frame.plain.contains("proxy"),
-            "proxy route `{name}` must name the `proxy` property.\nplain:\n{}",
+            capture.frame.plain.contains(property),
+            "proxy route `{name}` must name its `{property}` property.\nplain:\n{}",
             capture.frame.plain
         );
         assert!(
