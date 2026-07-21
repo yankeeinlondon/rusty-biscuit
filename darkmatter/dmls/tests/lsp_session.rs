@@ -3851,12 +3851,13 @@ fn meta_schema_standalone_types_first_retains_last_good_across_nested_quote_edit
 
 /// A flow-authored tagged envelope with `types` before `kind` must retain the
 /// same last-good assistance as its block-style equivalent when a nested
-/// definition becomes the valid YAML plain scalar `foo-"bar`.
+/// definition becomes the valid YAML plain scalar `foo- "bar`. The hyphen is
+/// mid-token even though whitespace follows it, so the quote remains inert.
 #[test]
 fn meta_schema_standalone_flow_types_first_retains_last_good_across_plain_quote_edit() {
     let workspace = tempfile::tempdir().unwrap();
     let valid = "{types: {title: string}, kind: schema}\n";
-    let malformed = "{types: {title: foo-\"bar}, kind: schema}\n";
+    let malformed = "{types: {title: foo- \"bar}, kind: schema}\n";
     let path = workspace.path().join("flow-types-first.yaml");
     std::fs::write(&path, valid).unwrap();
 

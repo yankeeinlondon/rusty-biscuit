@@ -385,23 +385,25 @@ fn advance_quote_state(line: &str, quote: &mut Option<char>) {
             _ => {}
         }
         previous_space = ch.is_whitespace();
-        at_scalar_start =
-            is_scalar_boundary(ch, chars.peek().copied()) || (at_scalar_start && previous_space);
+        at_scalar_start = is_scalar_boundary(ch, at_scalar_start, chars.peek().copied())
+            || (at_scalar_start && previous_space);
     }
 }
 
 /// Whether `ch` is a structural indicator that begins a fresh scalar position,
-/// judged by the character `next` that follows it.
+/// judged by the current scalar position and the character `next` that follows
+/// it.
 ///
-/// YAML indicators are context-sensitive. `-` and `:` open a scalar position
-/// only at a token boundary — followed by whitespace or end of line; a `-` or
-/// `:` inside a plain scalar (`foo-"bar`, `http://x`) is content, so a quote
-/// after it must not open a quoted scalar. `[`, `{`, and `,` are flow
-/// indicators that always begin one.
-fn is_scalar_boundary(ch: char, next: Option<char>) -> bool {
+/// YAML indicators are context-sensitive. `-` is structural only when it is
+/// already at a scalar boundary and is followed by whitespace or end of line;
+/// a mid-token `-` remains plain-scalar content even when whitespace follows
+/// it. `:` followed by whitespace or end of line is a mapping separator, while
+/// `[`, `{`, and `,` are flow indicators that always begin a scalar position.
+fn is_scalar_boundary(ch: char, at_scalar_start: bool, next: Option<char>) -> bool {
     match ch {
         '[' | '{' | ',' => true,
-        '-' | ':' => next.is_none_or(char::is_whitespace),
+        '-' => at_scalar_start && next.is_none_or(char::is_whitespace),
+        ':' => next.is_none_or(char::is_whitespace),
         _ => false,
     }
 }
@@ -494,7 +496,7 @@ fn flow_top_level_entries(inner: &str) -> Vec<(String, String)> {
         }
         previous_space = ch.is_whitespace();
         at_scalar_start = structural_value_boundary
-            || is_scalar_boundary(ch, chars.peek().copied())
+            || is_scalar_boundary(ch, at_scalar_start, chars.peek().copied())
             || (at_scalar_start && previous_space);
     }
     push_flow_entry(&mut entries, &mut key, &mut token);
@@ -1333,6 +1335,8 @@ mod tests {
         for carrier in [
             r#"{types: {title: foo-"bar}, kind: schema}"#,
             r#"{kind: schema, types: {title: foo-"bar}}"#,
+            r#"{types: {title: foo- "bar}, kind: schema}"#,
+            r#"{kind: schema, types: {title: foo- "bar}}"#,
         ] {
             assert!(
                 darkmatter::markdown::schemas::parse_standalone_schema_document(
@@ -1352,6 +1356,8 @@ mod tests {
         for inert in [
             r#"{types: {title: foo-"bar}}"#,
             r#"{kind: config, types: {title: foo-"bar}}"#,
+            r#"{types: {title: foo- "bar}}"#,
+            r#"{kind: config, types: {title: foo- "bar}}"#,
         ] {
             assert_eq!(standalone_envelope_claim(inert), None, "{inert:?}");
             assert!(
