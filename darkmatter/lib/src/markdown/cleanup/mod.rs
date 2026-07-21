@@ -29,8 +29,8 @@ use emphasis::{
 use lists::{
     detect_list_indentation, extract_additional_paragraph_contexts,
     extract_indented_code_markers, extract_list_item_contexts, extract_list_markers,
-    fix_list_indentation, normalize_list_spacing, opaque_directive_body_lines,
-    restore_list_markers,
+    fix_list_indentation, normalize_list_spacing, protect_opaque_directive_bodies,
+    restore_list_markers, restore_opaque_directive_bodies,
 };
 pub use reflow::{reflow_to_width, strip_incidental_newlines};
 use tables::align_tables_in_stream;
@@ -305,17 +305,18 @@ fn cleanup_content_internal(
 ) -> String {
     // Parse with source ranges to preserve list markers and emphasis styles
     // Use custom options that exclude ENABLE_SMART_PUNCTUATION to preserve original quotes
-    let parser = cleanup_parser(content);
+    let opaque_bodies = protect_opaque_directive_bodies(content);
+    let parser = cleanup_parser(opaque_bodies.masked_content());
     let events_with_ranges: Vec<(Event, Range<usize>)> = parser.into_offset_iter().collect();
 
     // Extract list markers from source for each list
-    let opaque_body_lines = opaque_directive_body_lines(content);
-    let list_markers = extract_list_markers(content, &events_with_ranges, &opaque_body_lines);
-    let list_item_contexts = extract_list_item_contexts(&events_with_ranges, &opaque_body_lines);
+    let opaque_body_lines = opaque_bodies.body_lines();
+    let list_markers = extract_list_markers(content, &events_with_ranges, opaque_body_lines);
+    let list_item_contexts = extract_list_item_contexts(&events_with_ranges, opaque_body_lines);
     let additional_paragraph_contexts =
-        extract_additional_paragraph_contexts(content, &events_with_ranges, &opaque_body_lines);
+        extract_additional_paragraph_contexts(content, &events_with_ranges, opaque_body_lines);
     let protected_markers =
-        extract_indented_code_markers(&events_with_ranges, &opaque_body_lines);
+        extract_indented_code_markers(&events_with_ranges, opaque_body_lines);
 
     // Determine emphasis style:
     // 1. If PREFER_ITALICS env var is set, use that style (standardize all emphasis)
@@ -412,6 +413,8 @@ fn cleanup_content_internal(
 
     // Unescape unnecessarily escaped brackets (e.g., \[0%\] -> [0%])
     unescape_brackets(&mut output);
+
+    restore_opaque_directive_bodies(&mut output, opaque_bodies.payloads());
 
     // Trim leading blank lines, then normalize to exactly one trailing newline
     // for non-empty documents.

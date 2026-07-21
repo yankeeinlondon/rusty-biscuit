@@ -101,31 +101,33 @@ fn profile_fixture(harness: &Harness, label: &str, raw: &str) {
     // From here the replica follows `cleanup_content_internal` step by step on
     // the bytes it would actually see.
     let content = strip_incidental_newlines(raw);
+    let opaque_bodies = protect_opaque_directive_bodies(&content);
     harness.single(&format!("f25-{label}-stage1-parse"), || {
-        let events: Vec<(Event, Range<usize>)> = Parser::new_ext(&content, cleanup_parser_options())
-            .into_offset_iter()
-            .collect();
+        let events: Vec<(Event, Range<usize>)> =
+            Parser::new_ext(opaque_bodies.masked_content(), cleanup_parser_options())
+                .into_offset_iter()
+                .collect();
         black_box(events);
     });
     let events_with_ranges: Vec<(Event, Range<usize>)> =
-        Parser::new_ext(&content, cleanup_parser_options())
+        Parser::new_ext(opaque_bodies.masked_content(), cleanup_parser_options())
             .into_offset_iter()
             .collect();
-    let opaque_body_lines = opaque_directive_body_lines(&content);
+    let opaque_body_lines = opaque_bodies.body_lines();
 
     harness.single(&format!("f25-{label}-stage1-extract-list-markers"), || {
         black_box(extract_list_markers(
             &content,
             &events_with_ranges,
-            &opaque_body_lines,
+            opaque_body_lines,
         ));
     });
-    let list_markers = extract_list_markers(&content, &events_with_ranges, &opaque_body_lines);
-    let list_item_contexts = extract_list_item_contexts(&events_with_ranges, &opaque_body_lines);
+    let list_markers = extract_list_markers(&content, &events_with_ranges, opaque_body_lines);
+    let list_item_contexts = extract_list_item_contexts(&events_with_ranges, opaque_body_lines);
     let additional_paragraph_contexts =
-        extract_additional_paragraph_contexts(&content, &events_with_ranges, &opaque_body_lines);
+        extract_additional_paragraph_contexts(&content, &events_with_ranges, opaque_body_lines);
     let protected_markers =
-        extract_indented_code_markers(&events_with_ranges, &opaque_body_lines);
+        extract_indented_code_markers(&events_with_ranges, opaque_body_lines);
     let preferred_style = get_preferred_emphasis_style();
     harness.single(&format!("f25-{label}-stage1-preserve-emphasis"), || {
         black_box(preserve_original_emphasis(
@@ -182,6 +184,10 @@ fn profile_fixture(harness: &Harness, label: &str, raw: &str) {
         &additional_paragraph_contexts,
         &protected_markers,
     );
+    let mut after_unescape_brackets = after_fix_indentation.clone();
+    unescape_brackets(&mut after_unescape_brackets);
+    let mut after_restore_opaque = after_unescape_brackets.clone();
+    restore_opaque_directive_bodies(&mut after_restore_opaque, opaque_bodies.payloads());
 
     harness.single(&format!("f25-{label}-stage2-string-clone"), || {
         black_box(after_unescape_emphasis.clone());
@@ -246,8 +252,14 @@ fn profile_fixture(harness: &Harness, label: &str, raw: &str) {
     );
     profile_line_pass(
         harness,
+        &format!("f25-{label}-stage2-restore-opaque-directive-bodies"),
+        &after_unescape_brackets,
+        |working| restore_opaque_directive_bodies(working, opaque_bodies.payloads()),
+    );
+    profile_line_pass(
+        harness,
         &format!("f25-{label}-stage2-trailing-trim"),
-        &after_fix_indentation,
+        &after_restore_opaque,
         |working| {
             let mut normalized = working.trim_start_matches('\n').to_string();
             if !normalized.is_empty() {
