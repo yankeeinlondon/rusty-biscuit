@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use biscuit_test_harness::shared::SharedHarness;
+use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use std::fs;
@@ -24,8 +25,13 @@ pub fn wezterm_decision() -> LevelDecision {
 /// `Drop` on `static` values).
 pub static SHARED_HARNESS: SharedHarness<WezTermHarness> = SharedHarness::new();
 
+/// Shared headless pane for tests that need deterministic geometry or need
+/// `COLORFGBG` to remain authoritative because tmux does not answer OSC-11.
+pub static SHARED_TMUX_HARNESS: SharedHarness<TmuxHarness> = SharedHarness::new();
+
 /// Monotonic counter for sentinel uniqueness across tests in this binary.
 static SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
+static TMUX_SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 /// Absolute path to the `md` binary built for *this* workspace, injected by
 /// Cargo at compile time. Using it instead of a bare `md` keeps Level 2 tests
@@ -153,6 +159,68 @@ pub fn is_same_binary(candidate: &std::path::Path, built: &std::path::Path) -> b
 /// sentinel to appear in the pane. Generous — most `md` invocations finish
 /// in well under a second; this is a safety net for first-run cold builds.
 const SENTINEL_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn wait_for_tmux_sentinel(
+    harness: &mut TmuxHarness,
+    sentinel: &str,
+) -> Result<CapturedFrame, CapturedFrame> {
+    let deadline = Instant::now() + SENTINEL_TIMEOUT;
+    let mut last = CapturedFrame::from_raw(String::new());
+    while Instant::now() < deadline {
+        if let Ok(frame) = harness.capture() {
+            if frame.plain.lines().any(|line| line.trim() == sentinel) {
+                return Ok(frame);
+            }
+            last = frame;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    Err(last)
+}
+
+fn run_tmux_command(
+    harness: &mut TmuxHarness,
+    command: &str,
+    env: &[(&str, &str)],
+) -> CapturedFrame {
+    let id = TMUX_SENTINEL_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let sentinel = format!("__DM_CODE_TMUX_DONE_{id}__");
+    let wrapped = format!("{command}; printf '\\n{sentinel}\\n'");
+    harness
+        .send_command_with_env(&wrapped, env)
+        .expect("send_command_with_env failed");
+    match wait_for_tmux_sentinel(harness, &sentinel) {
+        Ok(frame) => frame,
+        Err(last) => panic!(
+            "timed out waiting for sentinel {sentinel} after {SENTINEL_TIMEOUT:?}. \
+             last plain capture:\n{}",
+            last.plain
+        ),
+    }
+}
+
+/// Runs the Cargo-built `md` in a headless tmux pane.
+pub fn run_md_in_tmux(
+    file_body: &str,
+    shell_prefix: Option<&str>,
+    extra_args: &str,
+    env: &[(&str, &str)],
+) -> CapturedFrame {
+    let dir = tempdir().expect("create markdown fixture directory");
+    let file_path = dir.path().join("layout.md");
+    fs::write(&file_path, file_body).expect("write markdown fixture");
+
+    let mut guard = SHARED_TMUX_HARNESS
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("tmux harness present");
+
+    run_tmux_command(harness, "clear", &[]);
+    let md_command = format!("{} {} {extra_args}", md_shim(), file_path.display());
+    let command = shell_prefix
+        .map(|prefix| format!("{prefix}; {md_command}"))
+        .unwrap_or(md_command);
+    run_tmux_command(harness, &command, env)
+}
 
 /// Polls the pane every 50 ms looking for `sentinel`, returning the final
 /// captured frame once it appears. Returns the last attempted capture on

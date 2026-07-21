@@ -5,6 +5,9 @@
 //! pane per test would push each test past the nextest slow-test termination
 //! threshold (`slow-timeout = 5s`, `terminate-after = 3` → 15 s).
 
+mod common;
+
+use common::level2::md_shim;
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
@@ -95,7 +98,7 @@ fn run_md_compose_named(
     // into this capture.
     run_with_sentinel(harness, "clear");
 
-    let cmd = format!("md compose {}", file_path.display());
+    let cmd = format!("{} compose {}", md_shim(), file_path.display());
     let frame = run_with_sentinel(harness, &cmd);
     // Keep tempdir alive past capture by returning canonical path to caller.
     drop(dir);
@@ -132,7 +135,7 @@ fn run_md_compose_with_sibling(
 
     run_with_sentinel(harness, "clear");
 
-    let cmd = format!("md compose {}", file_path.display());
+    let cmd = format!("{} compose {}", md_shim(), file_path.display());
     let frame = run_with_sentinel(harness, &cmd);
     // Keep tempdir (and the on-disk sibling) alive past capture.
     drop(dir);
@@ -177,7 +180,7 @@ fn run_md_compose_with_nested_siblings(
 
     run_with_sentinel(harness, "clear");
 
-    let cmd = format!("md compose {}", file_path.display());
+    let cmd = format!("{} compose {}", md_shim(), file_path.display());
     let frame = run_with_sentinel(harness, &cmd);
     drop(dir);
     Some((frame, canonical))

@@ -132,6 +132,146 @@ fn test_clean_subcommand_list_modes_match_library_contract() {
 }
 
 #[test]
+fn test_clean_subcommand_preserves_nested_child_after_additional_item_paragraph() {
+    let source = concat!(
+        "- Parent first paragraph.\n",
+        "\n",
+        "  Second paragraph.\n",
+        "\n",
+        "  - Child item.\n"
+    );
+    let expected_default = concat!(
+        "- Parent first paragraph.\n",
+        "    \n",
+        "  Second paragraph.\n",
+        "\n",
+        "    - Child item.\n"
+    );
+    let expected_configured = concat!(
+        "- Parent first paragraph.\n",
+        "  \n",
+        "  Second paragraph.\n",
+        "\n",
+        "  - Child item.\n"
+    );
+    let expected_fixed = concat!(
+        "- Parent first\n",
+        "  paragraph.\n",
+        "    \n",
+        "  Second paragraph.\n",
+        "\n",
+        "    - Child item.\n"
+    );
+
+    let default = md_cmd()
+        .args(["clean", "-"])
+        .write_stdin(source)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(String::from_utf8(default).unwrap(), expected_default);
+
+    let configured = md_cmd()
+        .args(["clean", "--indent", "2", "-"])
+        .write_stdin(source)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(String::from_utf8(configured).unwrap(), expected_configured);
+
+    let fixed = md_cmd()
+        .args(["clean", "--fixed-width", "24", "-"])
+        .write_stdin(source)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let fixed = String::from_utf8(fixed).unwrap();
+    assert_eq!(fixed, expected_fixed);
+
+    let second = md_cmd()
+        .args(["clean", "--fixed-width", "24", "-"])
+        .write_stdin(fixed.as_str())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(String::from_utf8(second).unwrap(), fixed);
+}
+
+#[test]
+fn test_clean_subcommand_preserves_nested_lists_inside_blockquotes() {
+    let fixtures = [
+        (
+            "> - Parent.\n>   - Child.\n",
+            "> - Parent.\n>     - Child.\n",
+            "> - Parent.\n>   - Child.\n",
+        ),
+        (
+            "> 1. Parent.\n>    1. Child.\n",
+            "> 1. Parent.\n>     1. Child.\n",
+            "> 1. Parent.\n>    1. Child.\n",
+        ),
+        (
+            "> - [ ] Parent.\n>   - [x] Child.\n",
+            "> - [ ] Parent.\n>     - [x] Child.\n",
+            "> - [ ] Parent.\n>   - [x] Child.\n",
+        ),
+    ];
+
+    for (source, expected_default, expected_configured) in fixtures {
+        let default = md_cmd()
+            .args(["clean", "-"])
+            .write_stdin(source)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        assert_eq!(String::from_utf8(default).unwrap(), expected_default);
+
+        let configured = md_cmd()
+            .args(["clean", "--indent", "2", "-"])
+            .write_stdin(source)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        assert_eq!(String::from_utf8(configured).unwrap(), expected_configured);
+
+        let fixed = md_cmd()
+            .args(["clean", "--fixed-width", "24", "-"])
+            .write_stdin(source)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let fixed = String::from_utf8(fixed).unwrap();
+        for line in fixed.lines() {
+            assert!(UnicodeWidthStr::width(line) <= 24, "line exceeded width: {line:?}");
+        }
+
+        let fixed_second = md_cmd()
+            .args(["clean", "--fixed-width", "24", "-"])
+            .write_stdin(fixed.as_str())
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        assert_eq!(String::from_utf8(fixed_second).unwrap(), fixed);
+    }
+}
+
+#[test]
 fn test_clean_subcommand_save_preserve_mode_is_idempotent_for_authored_list_soft_breaks() {
     let source = concat!(
         "- Alpha beta gamma\n",
@@ -266,23 +406,93 @@ fn test_clean_subcommand_rejects_invalid_indent() {
         .write_stdin("- Parent\n  - Child\n")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("indent must be one of: 2, 4"));
+        .stderr(predicate::str::contains("indent must be one of: 2, 4, 8"));
 }
 
 #[test]
-fn test_clean_subcommand_rejects_indent_eight_as_unportable() {
-    // `--indent 8` is rejected at the CLI because eight-space nesting is not
-    // CommonMark-portable for narrow markers (`-`, `*`, `+`, single-digit
-    // ordered): pulldown-cmark reads the child as lazy continuation prose
-    // rather than a nested list. See `parse_indent_size`.
-    md_cmd()
-        .args(["clean", "-", "--indent", "8", "--fixed-width", "24"])
-        .write_stdin("- Parent\n  - Child\n")
+fn test_clean_subcommand_indent_eight_preserves_structure() {
+    let source = concat!(
+        "- Parent first paragraph alpha beta gamma delta.\n",
+        "\n",
+        "  Second paragraph alpha beta gamma delta epsilon.\n",
+        "\n",
+        "  - Child item alpha beta gamma delta epsilon.\n",
+        "\n",
+        "> - Quote parent alpha beta gamma delta.\n",
+        ">   - Quote child alpha beta gamma delta epsilon.\n",
+        "\n",
+        "> - [ ] Task parent alpha beta gamma delta.\n",
+        ">   - [x] Task child alpha beta gamma delta epsilon.\n"
+    );
+    let expected_cleaned = concat!(
+        "- Parent first paragraph alpha beta gamma delta.\n",
+        "        \n",
+        "  Second paragraph alpha beta gamma delta epsilon.\n",
+        "\n",
+        "     - Child item alpha beta gamma delta epsilon.\n",
+        "\n",
+        "> - Quote parent alpha beta gamma delta.\n",
+        ">      - Quote child alpha beta gamma delta epsilon.\n",
+        "\n",
+        "> - [ ] Task parent alpha beta gamma delta.\n",
+        ">      - [x] Task child alpha beta gamma delta epsilon.\n"
+    );
+    let expected_fixed = concat!(
+        "- Parent first paragraph alpha\n",
+        "  beta gamma delta.\n",
+        "        \n",
+        "  Second paragraph alpha beta\n",
+        "  gamma delta epsilon.\n",
+        "\n",
+        "     - Child item alpha beta\n",
+        "       gamma delta epsilon.\n",
+        "\n",
+        "> - Quote parent alpha beta\n",
+        ">   gamma delta.\n",
+        ">      - Quote child alpha\n",
+        ">        beta gamma delta\n",
+        ">        epsilon.\n",
+        "\n",
+        "> - [ ] Task parent alpha beta\n",
+        ">       gamma delta.\n",
+        ">      - [x] Task child alpha\n",
+        ">            beta gamma delta\n",
+        ">            epsilon.\n"
+    );
+
+    let cleaned = md_cmd()
+        .args(["clean", "-", "--indent", "8"])
+        .write_stdin(source)
         .assert()
-        .failure()
-        .stderr(predicate::str::contains(
-            "indent 8 is not supported: eight-space nesting is not CommonMark-portable",
-        ));
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(String::from_utf8(cleaned).unwrap(), expected_cleaned);
+
+    let fixed = md_cmd()
+        .args(["clean", "-", "--indent", "8", "--fixed-width", "30"])
+        .write_stdin(source)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let fixed = String::from_utf8(fixed).unwrap();
+    assert_eq!(fixed, expected_fixed);
+    for line in fixed.lines() {
+        assert!(UnicodeWidthStr::width(line) <= 30, "line exceeded width: {line:?}");
+    }
+
+    let second = md_cmd()
+        .args(["clean", "-", "--indent", "8", "--fixed-width", "30"])
+        .write_stdin(fixed.as_str())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(String::from_utf8(second).unwrap(), fixed);
 }
 
 #[test]
