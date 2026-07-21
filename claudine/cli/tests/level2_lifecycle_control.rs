@@ -1397,8 +1397,12 @@ fn level2_lifecycle_initialize_proxy_cycle_guarded() {
         "target initialize must run before the back-proxy; got {lines:?}; pane:\n{pane}"
     );
     assert!(
-        pane.contains("proxy") && (pane.contains("cycle") || pane.contains("hop limit")),
-        "the LifecycleProxyCycle error must surface in the terminal; pane:\n{pane}"
+        pane.contains("CompositionError")
+            && pane.contains("composition failed")
+            && pane.contains("lifecycle `proxy` hand-off")
+            && pane.contains("forms a cycle or exceeds the proxy hop limit")
+            && pane.contains("active chain"),
+        "the typed LifecycleProxyCycle block must surface in the terminal; pane:\n{pane}"
     );
 }
 

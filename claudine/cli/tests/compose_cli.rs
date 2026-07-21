@@ -229,3 +229,108 @@ exit 0
          not be transcluded.\ndelivered prompt:\n{delivered}"
     );
 }
+
+// ============================================================================
+// Cross-repository source re-anchoring (Finding 1 — D2/D10/AC12)
+// ============================================================================
+
+/// A nested bare `::file` transclusion authored inside a top-level document from
+/// repository A must resolve against repository A even when the binary is
+/// launched from an unrelated repository B.
+///
+/// Prior to the two-phase re-anchor (provisional launch-time context →
+/// definitive source-anchored context), repository discovery was driven by
+/// the launch CWD, so launching from B hijacked every nested reference in A.
+/// This test pins the post-fix behavior: the source document's repository
+/// wins regardless of where the user invoked `claudine compose` from.
+#[cfg(unix)]
+#[test]
+fn compose_transclusion_uses_source_doc_repository_not_launch_cwd() {
+    let workspace = tempdir().unwrap();
+
+    // --- Primary repo: source doc + correct transclusion target ------------
+    let repo_root = workspace.path().join("repo");
+    fs::create_dir_all(&repo_root).unwrap();
+    assert!(
+        init_git_repo(&repo_root),
+        "source-doc re-anchoring needs a real git worktree root for repo_root"
+    );
+    // The transclusion target lives at the primary repo's root.
+    write(
+        &repo_root.join("snippet.md"),
+        "PRIMARY_REPO_TRANSCLUSION_MARKER\n",
+    );
+    write(
+        &repo_root.join("nested.md"),
+        "::file snippet.md\n",
+    );
+
+    // --- Unrelated repo: decoy transclusion target --------------------------
+    let decoy_root = workspace.path().join("decoy");
+    fs::create_dir_all(&decoy_root).unwrap();
+    // `git init` on the decoy too: with no git root, biscuit-file's ambient
+    // gix walk could find repo_root by walking up, so we give decoy its own
+    // worktree root to make the test deterministic when the launch CWD lives
+    // inside it.
+    assert!(
+        init_git_repo(&decoy_root),
+        "decoy launch repo needs a real git worktree root"
+    );
+    write(
+        &decoy_root.join("snippet.md"),
+        "DECOY_REPO_TRANSCLUSION_MARKER\n",
+    );
+    write(
+        &decoy_root.join("nested.md"),
+        "::file snippet.md\n",
+    );
+
+    let prompts_dir = repo_root.join("prompts");
+    fs::create_dir_all(&prompts_dir).unwrap();
+    let doc = prompts_dir.join("uses_snippet.md");
+    // Bare transclusion resolves repository-first: with the fix, the source's
+    // repo (repo_root) wins, not the launch CWD's repo (decoy_root).
+    write(&doc, "---\n---\n::file nested.md\n");
+
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let capture = workspace.path().join("delivered-prompt.txt");
+    write_executable(
+        &path_dir.join("claude"),
+        r#"#!/bin/sh
+{
+  for a in "$@"; do
+    if [ -f "$a" ]; then cat "$a"; else printf '%s\n' "$a"; fi
+  done
+  cat
+} >> "$CLAUDINE_PROMPT_CAPTURE" 2>/dev/null
+exit 0
+"#,
+    );
+
+    // Launch from the decoy repo while targeting the document in repo_root.
+    // If repository discovery were still CWD-driven, the decoy's snippet.md
+    // would win and the delivered prompt would contain the decoy marker.
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("CLAUDINE_PROMPT_CAPTURE", &capture)
+        .current_dir(&decoy_root)
+        .args(["compose", "--claude", doc.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let delivered = fs::read_to_string(&capture).unwrap_or_default();
+    assert!(
+        delivered.contains("PRIMARY_REPO_TRANSCLUSION_MARKER"),
+        "the `::file snippet.md` transclusion must resolve against the source \
+         document's repository (repo_root), not the launch CWD's repository \
+         (decoy_root).\ndelivered prompt:\n{delivered}"
+    );
+    assert!(
+        !delivered.contains("DECOY_REPO_TRANSCLUSION_MARKER"),
+        "the decoy repo's snippet must not leak into a document authored in \
+         repo_root.\ndelivered prompt:\n{delivered}"
+    );
+}
