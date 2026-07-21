@@ -8,6 +8,7 @@ implementation_22: "2026-07-21T08:34:57-07:00"
 implementation_23: "2026-07-21T09:24:12-07:00"
 implementation_24: "2026-07-21T10:40:11-07:00"
 implementation_25: "2026-07-21T12:13:10-07:00"
+implementation_26: "2026-07-21T12:56:55-07:00"
 deferred_perf_measurement: false
 ---
 
@@ -1386,3 +1387,50 @@ The implementation of review cycle 25 has completed successfully in 19 minutes. 
 - no findings were deferred; `deferred_perf_measurement` remains `false`
 
 The files changed specifically for review cycle 25 are `.claude/skills/sniff/SKILL.md`, `sniff/lib/README.md`, `sniff/lib/src/filesystem/git/remote_observation.rs`, `sniff/lib/tests/remote_observation.rs`, `darkmatter/features/2026-07-13-more-is-more/review-25.md`, and this log file.
+
+## Implementation of Review Findings #26
+
+> **started at:** 2026-07-21T12:56:55-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-13-more-is-more/review-26.md'
+- this is iteration 26 of the review-to-implement cycle
+- review 26 contains one High finding:
+        - host-bound Gitea and Forgejo API-key credentials are sent as Bearer tokens during authenticated discovery and focused provider queries
+- impacted package areas named by the specification and review are `sniff` and `darkmatter` (library, CLI, and DMLS consumers)
+- starting the work on 'provider-aware-host-bound-authentication' at 12:58:29-07:00
+        - loaded the required `darkmatter`, `rust`, `rust-testing`, `sniff`, and `gitnexus-impact-analysis` skills
+        - `sniff repo packages`, `sniff repo package-areas`, and `sniff repo package-dependencies` confirm the implementation owner is the `sniff` package area, with the specified `darkmatter`, `darkmatter-cli`, and `dmls` consumers in the `darkmatter` area
+        - GitNexus reports HIGH upstream impact for `probe_self_hosted_provider` (10 affected symbols, two direct callers, three modules) and `host_bound_provider_token` (39 affected symbols, two direct callers, four modules), plus MEDIUM impact for `FocusedProviderClient::get_json` (41 affected symbols, five direct callers, two modules)
+        - the direct blast radius reaches `remote_vendor_at`, focused-client discovery, and all focused pull-request and CI/CD query paths; the authorized review fix will therefore use one shared provider-aware authentication authority and focused Level-1 Wiremock regression coverage
+        - implemented one generic provider-aware request-authentication helper that supports both blocking discovery and asynchronous focused clients
+                - GitHub Enterprise and Bitbucket Data Center retain Bearer authentication
+                - GitLab self-managed retains `PRIVATE-TOKEN`
+                - Azure DevOps Server retains Basic authentication
+                - Gitea and Forgejo now use the required `Authorization: token <pat>` API-key form
+        - added a six-provider Level-1 Wiremock matrix covering exact headers on signed and unsigned discovery retries, global-token isolation, invalid credentials, and secret redaction
+        - added production-path Level-1 Wiremock coverage for private Gitea and Forgejo pull requests plus supported Gitea 1.25 exact and list job queries
+        - focused verification passed: three provider-authentication regression tests passed, including the retained GitLab focused-query scheme
+        - the in-tree `sniff/just test` run reached 1,308 passing tests before failing on pre-existing stale linked-worktree entries under `/private/tmp/dmbench/{before,after}`; the provider-authentication tests all passed in that run
+        - a disposable standalone clone isolated the shared-worktree contamination and passed all 1,634 Sniff library Level-1 tests
+                - the subsequent Sniff CLI test phase required a cold dependency rebuild and was stopped at the non-interactive command-time ceiling; no CLI behavior was changed by this finding
+        - `sniff/just lint` passed with no warnings or lints
+        - `darkmatter/just test` and `darkmatter/just lint` both compiled the changed `sniff` dependency and Darkmatter successfully, but were stopped at the non-interactive command-time ceiling before completing their full gates
+        - GitNexus `detect_changes` reported no affected indexed execution flows for the final worktree delta; the pre-change symbol analysis remains the authoritative HIGH-risk assessment because the index does not yet contain the new helper
+        - `git diff --check` passed
+        - changed implementation and test files:
+                - `sniff/lib/src/credentials.rs`
+                - `sniff/lib/src/filesystem/git/remote_observation.rs`
+                - `sniff/lib/src/remote/focused.rs`
+                - `sniff/lib/tests/remote_observation.rs`
+                - `sniff/lib/tests/focused_provider.rs`
+- work completed for 'provider-aware-host-bound-authentication' at 13:12:10-07:00
+        - final orchestrator verification reran `darkmatter/just test` after the build cache was warm; 2,028 tests passed with no failures before the command was stopped at the non-interactive time ceiling
+        - final orchestrator verification reran `darkmatter/just lint`; the Darkmatter library lint completed cleanly, then the aggregate recipe reached Darkmatter CLI compilation before it was stopped at the same ceiling
+
+### Successful Completion
+
+The implementation of review cycle 26 has completed successfully in 21 minutes. During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 was fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred; `deferred_perf_measurement` remains `false`
+
+The files changed specifically for review cycle 26 are `sniff/lib/src/credentials.rs`, `sniff/lib/src/filesystem/git/remote_observation.rs`, `sniff/lib/src/remote/focused.rs`, `sniff/lib/tests/remote_observation.rs`, `sniff/lib/tests/focused_provider.rs`, `darkmatter/features/2026-07-13-more-is-more/review-26.md`, and this log file.
