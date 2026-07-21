@@ -9,9 +9,9 @@
 //!
 //! Pipeline (see spec §5.1):
 //!
-//! 1. Classify the partial under the cursor into [`PartialKind`].
+//! 1. Parse and expand the partial through `biscuit_file::FileReference`.
 //! 2. Resolve [`ScopeSet`] for the mode (see [`scopes`]).
-//! 3. Walk each scope under a per-partial-kind strategy
+//! 3. Walk each scope under the shared completion entry form
 //!    ([`walker::walk_scope`]).
 //! 4. Filter each file by mode contract ([`frontmatter::valid_for_mode`]).
 //! 5. Dedup across scopes by canonical path.
@@ -27,6 +27,8 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+
+use biscuit_file::{CompletionEntryForm, FileReference, PartialCompletion};
 
 use super::fuzzy;
 use super::scopes::{self, ComposeMode, ScopeContext};
@@ -50,81 +52,6 @@ use setter_value::gather_committed;
 /// de-prioritized so the existing prompt scopes win on dedup ties.
 const REPO_DIR_WALK_RANK: u8 = 10;
 
-/// Classification of the token under the cursor in a composition positional
-/// slot.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum PartialKind {
-    /// Empty partial — the user has typed `claudine compose <TAB>`.
-    Empty,
-    /// `@...` magic path — search sigil; resolved to a relative inserted
-    /// token on selection.
-    ///
-    /// `dir` is the path portion before the last `/` (scope-relative);
-    /// `active` is the fuzzy-match segment after the last `/`. For a bare
-    /// `@plan`, `dir` is empty and `active` is `"plan"`; for
-    /// `@prompts/plan`, `dir` is `"prompts"` and `active` is `"plan"`.
-    Magic { dir: String, active: String },
-    /// A committed directory token — ends in `/`. Walking is confined to
-    /// that directory relative to cwd (or repo root).
-    CommittedDir(String),
-    /// A word partial with no `/` and no leading `@`. The active segment
-    /// length drives fuzzy matching and directory visibility.
-    Word(String),
-    /// A path-shaped partial with a `/` inside it but **not** ending in
-    /// `/` — e.g. `prompts/pl`. The committed portion before the last
-    /// `/` is the walk root; everything after is the active segment.
-    PartialPath { dir: String, active: String },
-}
-
-impl PartialKind {
-    /// Derive a partial kind from the raw token the shell forwarded.
-    pub(crate) fn classify(token: &str) -> Self {
-        if token.is_empty() {
-            return Self::Empty;
-        }
-        if let Some(rest) = token.strip_prefix('@') {
-            if let Some((dir, active)) = rest.rsplit_once('/') {
-                return Self::Magic {
-                    dir: dir.to_string(),
-                    active: active.to_string(),
-                };
-            }
-            return Self::Magic {
-                dir: String::new(),
-                active: rest.to_string(),
-            };
-        }
-        if token.ends_with('/') {
-            return Self::CommittedDir(token.to_string());
-        }
-        if let Some((dir, active)) = token.rsplit_once('/') {
-            return Self::PartialPath {
-                dir: dir.to_string(),
-                active: active.to_string(),
-            };
-        }
-        Self::Word(token.to_string())
-    }
-
-    /// The "active segment" — the piece that drives fuzzy matching and
-    /// directory visibility gating. Empty for `Empty` / `CommittedDir`.
-    /// For `Magic`, returns the segment after the last `/` (or the whole
-    /// token if there is no `/`).
-    ///
-    /// Production callers extract the active segment inline at the
-    /// pipeline branch point; this method exists for the variant
-    /// classification regression test.
-    #[cfg(test)]
-    pub(crate) fn active_segment(&self) -> &str {
-        match self {
-            Self::Empty | Self::CommittedDir(_) => "",
-            Self::Magic { active, .. } => active,
-            Self::Word(s) => s,
-            Self::PartialPath { active, .. } => active,
-        }
-    }
-}
-
 /// A rendered completion candidate ready for stdout emission.
 ///
 /// Kept as a struct rather than a bare string so the rendering layer can
@@ -142,18 +69,43 @@ struct Candidate {
 /// Returns candidate strings, one per line, in priority order. An empty
 /// return value means "no matches" — the shell falls back to its default.
 pub(crate) fn run(mode: ComposeMode, ctx: &ScopeContext, partial_token: &str) -> Vec<String> {
-    let kind = PartialKind::classify(partial_token);
     let scope_set = scopes::resolve_compose_scopes(ctx, mode);
+    let resolution = scopes::file_resolution_context(ctx);
+    let Ok(Some(completion)) = FileReference::complete_partial_in_context(partial_token, &resolution)
+    else {
+        return Vec::new();
+    };
 
-    let candidates = match &kind {
-        PartialKind::Empty => gather_empty_or_word(mode, ctx, &scope_set, ""),
-        PartialKind::Word(active) => gather_empty_or_word(mode, ctx, &scope_set, active),
-        PartialKind::Magic { dir, active } => gather_magic(mode, ctx, &scope_set, dir, active),
-        PartialKind::CommittedDir(dir) => gather_committed(mode, ctx, dir, ""),
-        PartialKind::PartialPath { dir, active } => gather_committed(mode, ctx, dir, active),
+    let candidates = match completion.entry_form() {
+        CompletionEntryForm::Magic => gather_magic(mode, &completion),
+        CompletionEntryForm::ImplicitRelative => {
+            gather_implicit(mode, ctx, &scope_set, partial_token, &completion)
+        }
     };
 
     finalize(candidates)
+}
+
+/// Route a shared implicit-relative completion expansion into Claudine's
+/// existing display policies without re-parsing the authored token.
+fn gather_implicit(
+    mode: ComposeMode,
+    ctx: &ScopeContext,
+    scope_set: &scopes::ScopeSet,
+    partial_token: &str,
+    completion: &PartialCompletion,
+) -> Vec<Candidate> {
+    let active = completion.active_segment();
+    let scope = completion.rendered_prefix();
+    if partial_token.is_empty() {
+        gather_empty_or_word(mode, ctx, scope_set, active)
+    } else if active.is_empty() {
+        gather_committed(mode, ctx, scope, active)
+    } else if scope.is_empty() {
+        gather_empty_or_word(mode, ctx, scope_set, active)
+    } else {
+        gather_committed(mode, ctx, scope, active)
+    }
 }
 
 /// Sort candidates by source rank, then lexically, and collapse duplicates
