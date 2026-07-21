@@ -3,7 +3,7 @@ status: ready for planning and implementation
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-07-18
-review_iterations: 5
+review_iterations: 6
 created: 2026-07-13
 area: darkmatter
 packages:
