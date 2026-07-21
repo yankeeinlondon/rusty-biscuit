@@ -282,8 +282,56 @@ fn test_clean_subcommand_preserves_markers_in_protected_bodies() {
             "<div>\n* literal html\n</div>\n\n- Actual item.\n",
         ),
         (
-            "::shell-block\n* literal shell\n::end-block\n\n- Actual item.\n",
-            "::shell-block\n\n* literal shell\n  ::end-block\n- Actual item.\n",
+            concat!(
+                "::shell-block\n",
+                "- first literal\n",
+                "+ second literal\n",
+                "* third literal\n",
+                "1. ordered literal\n",
+                "- [ ] task literal\n",
+                "::end-block\n",
+                "\n",
+                "+ Actual item long enough to wrap at width twenty four.\n"
+            ),
+            concat!(
+                "::shell-block\n",
+                "- first literal\n",
+                "+ second literal\n",
+                "* third literal\n",
+                "1. ordered literal\n",
+                "- [ ] task literal\n",
+                "::end-block\n",
+                "\n",
+                "+ Actual item long\n",
+                "  enough to wrap at\n",
+                "  width twenty four.\n"
+            ),
+        ),
+        (
+            concat!(
+                "> ::shell-block\n",
+                "> - first literal\n",
+                "> + second literal\n",
+                "> * third literal\n",
+                "> 1. ordered literal\n",
+                "> - [ ] task literal\n",
+                "> ::end-block\n",
+                "> \n",
+                "> + Actual item long enough to wrap at width twenty four.\n"
+            ),
+            concat!(
+                "> ::shell-block\n",
+                "> - first literal\n",
+                "> + second literal\n",
+                "> * third literal\n",
+                "> 1. ordered literal\n",
+                "> - [ ] task literal\n",
+                "> ::end-block\n",
+                "> \n",
+                "> + Actual item long\n",
+                ">   enough to wrap at\n",
+                ">   width twenty four.\n"
+            ),
         ),
     ];
 
@@ -308,6 +356,26 @@ fn test_clean_subcommand_preserves_markers_in_protected_bodies() {
             .clone();
         assert_eq!(String::from_utf8(second).unwrap(), expected);
     }
+
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    write!(tmp, "{}", fixtures[1].0).unwrap();
+    tmp.flush().unwrap();
+    md_cmd()
+        .args(["clean", "--fixed-width", "24"])
+        .arg(tmp.path())
+        .arg("--save")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("changed"));
+    assert_eq!(std::fs::read_to_string(tmp.path()).unwrap(), fixtures[1].1);
+
+    md_cmd()
+        .args(["clean", "--fixed-width", "24"])
+        .arg(tmp.path())
+        .arg("--save")
+        .assert()
+        .success();
+    assert_eq!(std::fs::read_to_string(tmp.path()).unwrap(), fixtures[1].1);
 }
 
 #[test]
