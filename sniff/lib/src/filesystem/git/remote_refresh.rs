@@ -702,6 +702,12 @@ fn get_remote_branches(repo: &gix::Repository, remote_name: &str) -> Option<Vec<
 /// default for [`GitRequest::full()`] and keeps enumeration fast on checkouts
 /// with many linked worktrees.
 ///
+/// Registered worktrees whose checkout target is absent are omitted. Git
+/// intentionally retains these stale registrations until they are pruned, and
+/// they do not invalidate discovery of the repository containing
+/// `current_worktree_path`. An existing target that does not open as a
+/// repository is corrupt and fails the request.
+///
 /// `current_worktree_path` should be the canonical (or at least absolute) path
 /// to the worktree the calling process is running inside. `None` means "no
 /// current worktree" (e.g. the caller is outside any git worktree).
@@ -725,14 +731,23 @@ pub(crate) fn get_worktrees(
     let current_canonical = current_worktree_path.and_then(|p| std::fs::canonicalize(p).ok());
 
     // Collect (name, worktree path) pairs up front — cheap sequential work —
-    // before the per-worktree analysis fans out. Trust, permission, I/O, and
-    // corruption failures are propagated rather than silently dropped.
+    // before the per-worktree analysis fans out. Registry metadata failures
+    // are distinct from a valid registration whose checkout has gone stale.
     let mut worktree_paths: Vec<(String, PathBuf)> = Vec::new();
     for proxy in proxies {
         let name = proxy.id().to_str_lossy().into_owned();
         let path = proxy
             .base()
             .map_err(|e| SniffError::git("worktree_base", e))?;
+        if !path.is_absolute() {
+            return Err(SniffError::git(
+                "worktree_base",
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "registered worktree path is not absolute",
+                ),
+            ));
+        }
         worktree_paths.push((name, path));
     }
 
@@ -741,11 +756,16 @@ pub(crate) fn get_worktrees(
     // rather than reopening the base repo N times.
     let base_sync = repo.clone().into_sync();
 
-    let results: crate::Result<Vec<(String, WorktreeInfo)>> = worktree_paths
+    let results: crate::Result<Vec<Option<(String, WorktreeInfo)>>> = worktree_paths
         .par_iter()
         .map(|(name, worktree_path)| {
             let base = base_sync.to_thread_local();
-            let mut worktree_repo = super::open::trusted_open(worktree_path)?;
+            let mut worktree_repo = match super::open::trusted_open_registered_worktree(
+                worktree_path,
+            )? {
+                Some(repo) => repo,
+                None => return Ok(None),
+            };
             super::open::configure_cache(&mut worktree_repo);
 
             let branch = worktree_repo
@@ -814,7 +834,7 @@ pub(crate) fn get_worktrees(
                 (false, 0)
             };
 
-            Ok((
+            Ok(Some((
                 branch.clone(),
                 WorktreeInfo {
                     branch,
@@ -829,11 +849,11 @@ pub(crate) fn get_worktrees(
                     changed_files,
                     is_current,
                 },
-            ))
+            )))
         })
         .collect();
 
-    Ok(results?.into_iter().collect())
+    Ok(results?.into_iter().flatten().collect())
 }
 
 #[cfg(test)]

@@ -102,7 +102,10 @@ fn normalized_os_summary(output: &str) -> Value {
         .map_or(0, Vec::len);
 
     json!({
-        "distribution": json.get("distribution"),
+        "distribution": json
+            .get("distribution")
+            .and_then(Value::as_str)
+            .map(|_| "<normalized>"),
         "kernel": json
             .get("kernel")
             .and_then(Value::as_str)
@@ -111,8 +114,14 @@ fn normalized_os_summary(output: &str) -> Value {
             .get("long_version")
             .and_then(Value::as_str)
             .map(|_| "<normalized>"),
-        "name": json.get("name"),
-        "os_type": json.get("os_type"),
+        "name": json
+            .get("name")
+            .and_then(Value::as_str)
+            .map(|_| "<normalized>"),
+        "os_type": json
+            .get("os_type")
+            .and_then(Value::as_str)
+            .map(|_| "<normalized>"),
         "version": json
             .get("version")
             .and_then(Value::as_str)

@@ -1797,7 +1797,7 @@ fn test_linux_package_managers_finds_at_least_one() {
 
     // Get distro info to determine family
     let linux_family = detect_linux_distro().map(|d| d.family);
-    let managers = detect_linux_package_managers(linux_family);
+    let managers = detect_linux_package_managers(linux_family, None);
 
     // On any real Linux system, at least one package manager should be found
     // This may fail in extremely minimal containers, which is acceptable

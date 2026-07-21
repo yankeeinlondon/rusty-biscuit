@@ -142,6 +142,24 @@ pub enum SniffError {
         target: String,
     },
 
+    /// A provider family was identified, but its server version cannot supply
+    /// the requested endpoint contract.
+    #[error(
+        "{provider} API flavor {flavor} at server version {version} does not support {capability}; {requirement}"
+    )]
+    UnsupportedServerVersion {
+        /// Provider family selected for the query.
+        provider: String,
+        /// Concrete API flavor detected from the server response.
+        flavor: String,
+        /// Server-reported version, retained verbatim for diagnosis.
+        version: String,
+        /// Operation that cannot be performed.
+        capability: &'static str,
+        /// Minimum version or endpoint requirement that would satisfy it.
+        requirement: &'static str,
+    },
+
     /// The remote endpoint could not be reached or decoded.
     #[error("remote endpoint `{url}` is unreachable: {message}")]
     RemoteUnreachable {

@@ -308,24 +308,56 @@ fn golden_worktree_metadata() {
 }
 
 #[test]
+fn stale_linked_worktree_registration_does_not_derail_requested_repo() {
+    let dir = TempDir::new().unwrap();
+    builder::build_git_repo_with_worktrees(dir.path(), 1);
+
+    // Remove the checkout without pruning its registration from the main
+    // repository, matching the state left by an interrupted benchmark or an
+    // externally deleted linked worktree.
+    let wt_path = dir.path().join("_wt").join("wt000");
+    std::fs::remove_dir_all(&wt_path).expect("remove linked worktree checkout");
+    assert!(!wt_path.exists(), "linked worktree checkout should be gone");
+    assert!(
+        dir.path()
+            .join(".git")
+            .join("worktrees")
+            .join("wt000")
+            .exists(),
+        "stale registration should remain"
+    );
+
+    let info = detect_git_with_request(dir.path(), &GitRequest::full())
+        .expect("requested repository detection should succeed")
+        .expect("requested repository should remain discoverable");
+    assert_eq!(
+        norm(&info.repo_root),
+        norm(dir.path()),
+        "detection should stay anchored to the requested repository"
+    );
+    assert!(info.worktrees.is_empty(), "stale worktree should be omitted");
+}
+
+#[test]
 fn worktree_trusted_open_failure_is_propagated() {
     let dir = TempDir::new().unwrap();
     builder::build_git_repo_with_worktrees(dir.path(), 1);
 
-    // Corrupt the linked worktree by removing its `.git` file so
-    // `trusted_open` fails (not a repository).
     let wt_path = dir.path().join("_wt").join("wt000");
-    let git_file = wt_path.join(".git");
-    std::fs::remove_file(&git_file).expect("remove worktree .git file");
-    assert!(!git_file.exists(), ".git file should be gone");
+    std::fs::remove_file(wt_path.join(".git")).expect("remove linked checkout .git file");
+    assert!(wt_path.exists(), "linked checkout target should remain");
 
-    // `get_worktrees` must propagate the open failure rather than
-    // silently omitting the worktree or returning empty metadata.
     let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
-    let result = handle.worktrees();
+    let worktrees = handle.worktrees();
     assert!(
-        result.is_err(),
-        "corrupted linked worktree must surface an error, got {result:?}"
+        worktrees.is_err(),
+        "GitRepo::worktrees must report the corrupt checkout, got {worktrees:?}"
+    );
+
+    let full_detection = detect_git_with_request(dir.path(), &GitRequest::full());
+    assert!(
+        full_detection.is_err(),
+        "full Git detection must report the corrupt checkout, got {full_detection:?}"
     );
 }
 

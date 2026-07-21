@@ -68,11 +68,10 @@ fn parse_duration(input: &str) -> Option<Duration> {
 
     let (num_str, unit): (&str, &str) = if let Some((n, u)) = split_number_unit(input) {
         (n, u)
-    } else if let Some(pos) = input.find(char::is_alphabetic) {
+    } else {
+        let pos = input.find(char::is_alphabetic)?;
         let (n, u) = input.split_at(pos);
         (n, u)
-    } else {
-        return None;
     };
 
     let count: i64 = num_str.trim().parse().ok()?;

@@ -15,6 +15,8 @@ pub mod performance;
 pub mod programs;
 #[cfg(feature = "remote")]
 pub mod remote;
+#[cfg(feature = "network")]
+mod credentials;
 pub mod request;
 pub mod services;
 

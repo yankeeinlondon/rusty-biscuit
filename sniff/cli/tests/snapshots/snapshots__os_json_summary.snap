@@ -3,11 +3,11 @@ source: sniff/cli/tests/snapshots.rs
 expression: normalized_os_summary(&stdout)
 ---
 {
-  "distribution": "macos",
+  "distribution": "<normalized>",
   "kernel": "<normalized>",
   "long_version": "<normalized>",
   "manager_count": 2,
-  "name": "Darwin",
-  "os_type": "MacOS",
+  "name": "<normalized>",
+  "os_type": "<normalized>",
   "version": "<normalized>"
 }

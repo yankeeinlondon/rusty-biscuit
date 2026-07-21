@@ -101,11 +101,20 @@ fn provider(flavor: ApiFlavor) -> GitProvider {
 }
 
 fn client(server: &MockServer, flavor: ApiFlavor) -> FocusedProviderClient {
-    FocusedProviderClient::with_api_base(
-        remote(flavor),
-        FetchPolicy::deny_all().allow_host("127.0.0.1"),
-        &format!("{}/api", server.uri()),
-    ).unwrap()
+    let remote = remote(flavor);
+    let policy = FetchPolicy::deny_all().allow_host("127.0.0.1");
+    let api_base = format!("{}/api", server.uri());
+    if flavor == ApiFlavor::Gitea {
+        FocusedProviderClient::with_api_base_and_server_version(
+            remote,
+            policy,
+            &api_base,
+            "1.25.0",
+        )
+        .unwrap()
+    } else {
+        FocusedProviderClient::with_api_base(remote, policy, &api_base).unwrap()
+    }
 }
 
 fn reference(flavor: ApiFlavor, id: &str) -> CiCdJobReference {
@@ -369,6 +378,80 @@ fn malformed_provider_urls_are_rejected() {
     }
 }
 
+/// Percent-decoding is part of canonical-reference parsing, so validation must
+/// run on the decoded value rather than only on the URL parser's segment text.
+#[test]
+fn encoded_delimiters_controls_and_dot_segments_are_malformed_references() {
+    let pull_request_urls = [
+        "https://api.github.com/repos/acme/project%3Fadmin/pulls/7",
+        "https://api.github.com/repos/acme/project%23fragment/pulls/7",
+        "https://api.github.com/repos/acme/project%5Cchild/pulls/7",
+        "https://api.github.com/repos/acme/project%01control/pulls/7",
+        "https://api.github.com/repos/%2E/project/pulls/7",
+        "https://api.github.com/repos/%2E%2E/project/pulls/7",
+        "https://gitlab.com/api/v4/projects/group%2Fproject%3Fadmin/merge_requests/8",
+        "https://bitbucket.org/acme/project/pull-requests/10%23fragment",
+    ];
+    for url in pull_request_urls {
+        let error = pr_identity(url).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                SniffError::InvalidRemoteQuery { field: "id", ref message }
+                    if message.contains("canonical")
+            ),
+            "expected an actionable malformed-reference error for {url}: {error}"
+        );
+    }
+
+    let job_urls = [
+        "https://api.github.com/repos/acme/project/actions/jobs/21%3Fadmin",
+        "https://gitlab.com/api/v4/projects/group%2Fproject%23fragment/jobs/22",
+        "https://gitea.example/acme%5Cchild/project/actions/runs/20/jobs/23",
+        "https://forgejo.example/acme/project%00control/actions/runs/20/jobs/23",
+        "https://bitbucket.org/acme/project/pipelines/results/%2E/steps/s1",
+        "https://bitbucket.org/acme/project/pipelines/results/p1/steps/%2E%2E",
+    ];
+    for url in job_urls {
+        let error = job_identity(url).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                SniffError::InvalidRemoteQuery { field: "id", ref message }
+                    if message.contains("canonical")
+            ),
+            "expected an actionable malformed-reference error for {url}: {error}"
+        );
+    }
+}
+
+#[test]
+fn unicode_repository_identities_survive_canonical_reference_parsing() {
+    assert_eq!(
+        pr_identity("https://gitea.example/%C3%A9quipe/r%C3%A9sum%C3%A9/pulls/7").unwrap(),
+        UrlIdentity {
+            flavor: ApiFlavor::Gitea,
+            host: "gitea.example".to_string(),
+            namespace: "équipe".to_string(),
+            repository: "résumé".to_string(),
+            native_id: "7".to_string(),
+        }
+    );
+    assert_eq!(
+        job_identity(
+            "https://gitlab.com/api/v4/projects/%E7%A0%94%E7%A9%B6%2F%E6%9E%84%E5%BB%BA/jobs/22"
+        )
+        .unwrap(),
+        UrlIdentity {
+            flavor: ApiFlavor::GitLab,
+            host: "gitlab.com".to_string(),
+            namespace: "研究".to_string(),
+            repository: "构建".to_string(),
+            native_id: "22".to_string(),
+        }
+    );
+}
+
 /// An official API hostname resolves to the repository's web host, so the
 /// derived endpoint reaches the API host through the allowlist rather than by
 /// the remote host having been rewritten.
@@ -409,13 +492,112 @@ async fn exact_pull_requests_preserve_identity_and_authoritative_not_found() {
     }
 }
 
+/// Request construction re-encodes every identity segment independently. This
+/// is a second boundary behind canonical parsing because repository identities
+/// can also come from configured Git remotes or direct library construction.
 #[tokio::test]
-async fn exact_jobs_are_normalized_for_every_initial_flavor() {
+async fn exact_and_list_paths_encode_unicode_and_structural_identity_bytes() {
+    for (namespace, repository, encoded_namespace, encoded_repository) in [
+        ("équipe", "résumé", "%C3%A9quipe", "r%C3%A9sum%C3%A9"),
+        (
+            "acme?owner=#root\\\u{1}",
+            "project#fragment?x=1\\\u{2}",
+            "acme%3Fowner%3D%23root%5C%01",
+            "project%23fragment%3Fx%3D1%5C%02",
+        ),
+        (".", "..", "%252E", "%252E%252E"),
+    ] {
+        let server = MockServer::start().await;
+        let exact_id = "7?state=closed#fragment\\\u{3}";
+        let encoded_id = "7%3Fstate%3Dclosed%23fragment%5C%03";
+        let repository_base = format!("repos/{encoded_namespace}/{encoded_repository}");
+
+        Mock::given(method("GET"))
+            .and(path(format!("/api/{repository_base}/pulls/{encoded_id}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(pr_item(7, "alice")))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/api/{repository_base}/pulls")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/api/{repository_base}/actions/jobs/{encoded_id}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(job_item(7)))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/api/{repository_base}/actions/jobs")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "jobs": []
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let mut identity_remote = remote(ApiFlavor::Gitea);
+        identity_remote.namespace = Some(namespace.to_string());
+        identity_remote.repository = Some(repository.to_string());
+        let adapter = FocusedProviderClient::with_api_base_and_server_version(
+            identity_remote,
+            FetchPolicy::deny_all().allow_host(FIXTURE_HOST),
+            &format!("{}/api", server.uri()),
+            "1.25.0",
+        )
+        .unwrap();
+
+        assert!(adapter.get_pull_request(exact_id).await.unwrap().is_some());
+        assert!(
+            adapter
+                .query_pull_requests(PullRequestQuery::default())
+                .await
+                .unwrap()
+                .items
+                .is_empty()
+        );
+        let exact_reference = CiCdJobReference {
+            native_id: exact_id.to_string(),
+            display_id: exact_id.to_string(),
+            ..reference(ApiFlavor::Gitea, exact_id)
+        };
+        assert!(adapter.get_cicd_job(&exact_reference).await.unwrap().is_some());
+        assert!(
+            adapter
+                .query_cicd_jobs(CiCdJobQuery::default())
+                .await
+                .unwrap()
+                .items
+                .is_empty()
+        );
+
+        for request in server.received_requests().await.unwrap() {
+            assert!(
+                request.url.path().starts_with("/api/repos/"),
+                "identity bytes retargeted the path: {}",
+                request.url
+            );
+            assert_ne!(request.url.fragment(), Some("fragment"));
+            assert!(
+                request.url.query_pairs().all(|(key, value)| {
+                    !(key == "state" && value == "closed") && key != "x"
+                }),
+                "identity bytes retargeted the query: {}",
+                request.url
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn exact_jobs_are_normalized_for_every_supported_flavor() {
     let cases = [
         (ApiFlavor::GitHub, "10", "/api/repos/acme/project/actions/jobs/10", serde_json::json!({"id": 10, "name": "test", "status": "completed", "conclusion": "success", "run_id": 1})),
         (ApiFlavor::GitLab, "10", "/api/projects/acme%2Fproject/jobs/10", serde_json::json!({"id": 10, "name": "test", "status": "success", "pipeline_id": 1})),
         (ApiFlavor::Gitea, "10", "/api/repos/acme/project/actions/jobs/10", serde_json::json!({"id": 10, "name": "test", "status": "success", "run_id": 1})),
-        (ApiFlavor::Forgejo, "10", "/api/repos/acme/project/actions/jobs/10", serde_json::json!({"id": 10, "name": "test", "status": "success", "run_id": 1})),
         (ApiFlavor::Bitbucket, "parent/step", "/api/repositories/acme/project/pipelines/parent/steps/step", serde_json::json!({"uuid": "step", "name": "test", "state": {"name": "COMPLETED", "result": {"name": "SUCCESSFUL"}}})),
     ];
     for (flavor, id, endpoint, body) in cases {
@@ -434,8 +616,8 @@ async fn exact_jobs_are_normalized_for_every_initial_flavor() {
 }
 
 #[tokio::test]
-async fn job_listing_uses_direct_or_bounded_parent_strategy_for_every_flavor() {
-    for flavor in [ApiFlavor::GitHub, ApiFlavor::GitLab, ApiFlavor::Gitea, ApiFlavor::Forgejo, ApiFlavor::Bitbucket] {
+async fn job_listing_uses_each_supported_flavor_strategy() {
+    for flavor in [ApiFlavor::GitHub, ApiFlavor::GitLab, ApiFlavor::Gitea, ApiFlavor::Bitbucket] {
         let server = MockServer::start().await;
         if flavor == ApiFlavor::GitLab {
             Mock::given(method("GET"))
@@ -443,6 +625,15 @@ async fn job_listing_uses_direct_or_bounded_parent_strategy_for_every_flavor() {
                 .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
                     {"id": 10, "name": "test", "status": "success", "pipeline_id": 1}
                 ])))
+                .expect(1)
+                .mount(&server)
+                .await;
+        } else if flavor == ApiFlavor::Gitea {
+            Mock::given(method("GET"))
+                .and(path("/api/repos/acme/project/actions/jobs"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "jobs": [{"id": 10, "name": "test", "status": "success", "run_id": 1}]
+                })))
                 .expect(1)
                 .mount(&server)
                 .await;
@@ -671,9 +862,9 @@ async fn exact_jobs_retain_every_field_the_record_promises() {
     assert_eq!(job.finished_at.as_deref(), Some("2024-01-01T00:19:00.000Z"));
     assert_eq!(job.runner.as_deref(), Some("linux-runner-01"));
 
-    // GitHub/Gitea/Forgejo: flat runner_name, completed_at, conclusion-derived
+    // GitHub/Gitea: flat runner_name, completed_at, conclusion-derived
     // verdict. Branch/commit/actor/trigger are absent without a parent run.
-    for flavor in [ApiFlavor::GitHub, ApiFlavor::Gitea, ApiFlavor::Forgejo] {
+    for flavor in [ApiFlavor::GitHub, ApiFlavor::Gitea] {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/repos/acme/project/actions/jobs/399444496"))
@@ -1543,7 +1734,7 @@ async fn cursor_is_refused_by_the_focused_client_before_io() {
 /// capabilities advertisement must agree with it flavor by flavor.
 #[tokio::test]
 async fn stage_filter_is_refused_before_io_on_flavors_without_stage_data() {
-    for flavor in [ApiFlavor::GitHub, ApiFlavor::Gitea, ApiFlavor::Forgejo, ApiFlavor::Bitbucket] {
+    for flavor in [ApiFlavor::GitHub, ApiFlavor::Gitea, ApiFlavor::Bitbucket] {
         let server = MockServer::start().await;
         let adapter = client(&server, flavor);
         assert!(
@@ -1742,7 +1933,10 @@ async fn neutral_host_self_managed_gitlab_resolves_through_the_production_path()
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v4/version"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"version": "17.0.1"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "version": "17.0.1",
+            "revision": "a1b2c3d4"
+        })))
         .mount(&server)
         .await;
     Mock::given(method("GET"))
@@ -1777,6 +1971,37 @@ async fn neutral_host_self_managed_gitlab_resolves_through_the_production_path()
     assert_eq!(record.identity.provider, GitProvider::GitLab);
     assert_eq!(record.details.title, "Fix");
     assert_eq!(record.details.author, "alice");
+}
+
+#[tokio::test]
+async fn neutral_host_github_enterprise_resolves_through_the_production_path() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v3/meta"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "installed_version": "3.16.1"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v3/repos/acme/project/pulls/7"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(actions_pr_body()))
+        .mount(&server)
+        .await;
+
+    let directory = loopback_repository(&format!("{}/acme/project.git", server.uri()));
+    let resolved = resolve_remote_at(directory.path(), None).unwrap().expect("remote resolved");
+    let client = FocusedProviderClient::discover(
+        resolved,
+        FetchPolicy::deny_all().allow_host("127.0.0.1"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(client.remote().api_flavor, ApiFlavor::GitHub);
+    assert_eq!(client.discovery().server_version.as_deref(), Some("3.16.1"));
+
+    let record = client.get_pull_request("7").await.unwrap().expect("PR found");
+    assert_eq!(record.identity.provider, GitProvider::GitHub);
 }
 
 /// Gitea and Forgejo share one API surface; only the version body tells them
@@ -1819,6 +2044,152 @@ async fn neutral_host_gitea_and_forgejo_are_distinguished_by_the_discovery_probe
     }
 }
 
+/// Gitea 1.25 is the first released API whose repository routes expose both
+/// exact job lookup and repository-wide job listing. The latest 1.24 patch
+/// must therefore fail both operations before a query request is sent.
+#[tokio::test]
+async fn gitea_job_capabilities_cross_the_1_25_endpoint_threshold() {
+    for (version, supported) in [("1.24.6", false), ("1.25.0", true)] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v4/version"))
+            .respond_with(ResponseTemplate::new(404))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/version"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"version": version})),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        if supported {
+            Mock::given(method("GET"))
+                .and(path("/api/v1/repos/acme/project/actions/jobs/10"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(job_item(10)))
+                .expect(1)
+                .mount(&server)
+                .await;
+            Mock::given(method("GET"))
+                .and(path("/api/v1/repos/acme/project/actions/jobs"))
+                .and(query_param("page", "1"))
+                .and(query_param("limit", PAGE_SIZE.to_string()))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "jobs": [job_item(10)],
+                    "total_count": 1
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+        }
+
+        let directory = loopback_repository(&format!("{}/acme/project.git", server.uri()));
+        let resolved = resolve_remote_at(directory.path(), None).unwrap().expect("remote resolved");
+        let adapter = FocusedProviderClient::discover(
+            resolved,
+            FetchPolicy::deny_all().allow_host("127.0.0.1"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(adapter.discovery().server_version.as_deref(), Some(version));
+        assert_eq!(adapter.capabilities().cicd_jobs, supported);
+        assert_eq!(adapter.capabilities().direct_job_listing, supported);
+        let request_count_after_discovery = server.received_requests().await.unwrap().len();
+
+        let exact = adapter
+            .get_cicd_job(&reference(ApiFlavor::Gitea, "10"))
+            .await;
+        let list = adapter
+            .query_cicd_jobs(CiCdJobQuery::default())
+            .await;
+        if supported {
+            assert_eq!(exact.unwrap().unwrap().reference.native_id, "10");
+            assert_eq!(list.unwrap().items.len(), 1);
+        } else {
+            for error in [exact.unwrap_err(), list.unwrap_err()] {
+                assert!(matches!(
+                    error,
+                    SniffError::UnsupportedServerVersion {
+                        ref provider,
+                        ref flavor,
+                        ref version,
+                        ..
+                    } if provider == "Gitea" && flavor == "Gitea" && version == "1.24.6"
+                ));
+            }
+            assert_eq!(
+                server.received_requests().await.unwrap().len(),
+                request_count_after_discovery,
+                "unsupported operations reached the provider"
+            );
+        }
+    }
+}
+
+/// Forgejo 14 still lacks the exact-job and repository-job endpoint pair used by
+/// the normalized contract, so family detection must not inherit Gitea's
+/// version threshold merely because both providers share `/api/v1`.
+#[tokio::test]
+async fn forgejo_14_rejects_exact_and_list_jobs_before_io() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/version"))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/version"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "version": "14.0.0+forgejo-1"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let directory = loopback_repository(&format!("{}/acme/project.git", server.uri()));
+    let resolved = resolve_remote_at(directory.path(), None).unwrap().expect("remote resolved");
+    let adapter = FocusedProviderClient::discover(
+        resolved,
+        FetchPolicy::deny_all().allow_host("127.0.0.1"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(adapter.discovery().api_flavor, ApiFlavor::Forgejo);
+    assert!(!adapter.capabilities().cicd_jobs);
+    let request_count_after_discovery = server.received_requests().await.unwrap().len();
+
+    let exact = adapter
+        .get_cicd_job(&reference(ApiFlavor::Forgejo, "10"))
+        .await
+        .unwrap_err();
+    let list = adapter
+        .query_cicd_jobs(CiCdJobQuery::default())
+        .await
+        .unwrap_err();
+    for error in [exact, list] {
+        assert!(matches!(
+            error,
+            SniffError::UnsupportedServerVersion {
+                ref provider,
+                ref flavor,
+                ref version,
+                ..
+            } if provider == "Gitea"
+                && flavor == "Forgejo"
+                && version == "14.0.0+forgejo-1"
+        ));
+    }
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        request_count_after_discovery,
+        "unsupported Forgejo operations reached the provider"
+    );
+}
+
 /// Discovery is deny-by-default: an unlisted host fails before any byte
 /// leaves the process.
 #[tokio::test]
@@ -1832,6 +2203,46 @@ async fn neutral_host_discovery_is_denied_before_any_request() {
         .unwrap_err();
     assert!(matches!(error, SniffError::RemotePolicyDenied { .. }));
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+/// SSH and SCP remotes must reach the production discovery policy boundary
+/// through their host-derived HTTPS origin, rather than failing as unsupported
+/// Git transports before policy is evaluated.
+#[tokio::test]
+async fn neutral_host_ssh_and_scp_discovery_checks_the_synthesized_https_host_policy() {
+    for remote_url in [
+        "ssh://git@git.example:2222/acme/project.git",
+        "git@git.example:acme/project.git",
+    ] {
+        let directory = loopback_repository(remote_url);
+        let resolved = resolve_remote_at(directory.path(), None).unwrap().expect("remote resolved");
+        assert_eq!(resolved.api_flavor, ApiFlavor::Unknown);
+
+        let error = FocusedProviderClient::discover(resolved, FetchPolicy::deny_all())
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            SniffError::RemotePolicyDenied { ref host } if host == "git.example"
+        ));
+    }
+}
+
+#[tokio::test]
+async fn ssh_and_scp_gitlab_remotes_construct_through_the_public_discovery_api() {
+    for remote_url in [
+        "ssh://git@gitlab.com:2222/acme/project.git",
+        "git@gitlab.com:acme/project.git",
+    ] {
+        let directory = loopback_repository(remote_url);
+        let resolved = resolve_remote_at(directory.path(), None).unwrap().expect("remote resolved");
+
+        let client = FocusedProviderClient::discover(resolved, FetchPolicy::deny_all())
+            .await
+            .unwrap();
+        assert_eq!(client.remote().api_flavor, ApiFlavor::GitLab);
+        assert_eq!(client.discovery().api_flavor, ApiFlavor::GitLab);
+    }
 }
 
 /// A deterministically classified flavor never probes, and its API base keeps

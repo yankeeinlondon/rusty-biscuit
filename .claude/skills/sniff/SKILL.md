@@ -1,8 +1,8 @@
 ---
 name: sniff
 description: Expert knowledge for sniff-lib and sniff-cli, a cross-platform system detection library and CLI for Rust. Use when detecting OS/hardware/network/filesystem info, program detection, service detection, adding new detection capabilities, or optimizing detection performance.
-hash: 3cd50ffff2b8b5db-c1a8af2ea00de21b
-last_updated: 2026-07-18
+hash: 3cd50ffff2b8b5db-948dab0cf0fecaef
+last_updated: 2026-07-20
 ---
 
 # sniff
@@ -155,8 +155,15 @@ Use `FocusedProviderClient` for bounded pull-request and CI/CD-job queries. It
 retains provider/repository/native identity, follows provider pagination within
 hard parent/page/item bounds, rejects unsupported canonical filters, disables
 redirects, and checks host policy before client construction, credential reads,
-or network I/O. Do not collapse its focused malformed, missing, credential,
-authorization, rate-limit, capability, or transport errors into empty results.
+or network I/O. Its production discovery path retains the self-hosted server's
+reported version for capability selection, derives a policy-checked HTTPS origin
+from the resolved host for neutral SSH/SCP remotes, and never treats an SSH port
+as an HTTP port. Gitea CI/CD job operations require stable 1.25.0 or newer;
+Forgejo releases through 14.0 lack the required exact/list job endpoints. These
+unsupported operations fail before provider I/O with the provider, flavor, and
+version preserved in the error. Do not collapse focused malformed, missing,
+credential, authorization, rate-limit, capability, or transport errors into
+empty results.
 
 ## Monorepo Topology Model
 

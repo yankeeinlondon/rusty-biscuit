@@ -2,6 +2,11 @@
 
 use std::path::Path;
 
+#[cfg(test)]
+use std::collections::HashMap;
+#[cfg(test)]
+use std::sync::{Arc, LazyLock, Mutex};
+
 use biscuit_file::{Conditional, FetchError, FetchPolicy, PolicyClient, fetch_blocking};
 use gix::bstr::ByteSlice;
 
@@ -76,7 +81,10 @@ pub fn remote_vendor_at(
         return Ok(String::new());
     };
     let flavor = match resolved.api_flavor {
-        ApiFlavor::Unknown => probe_self_hosted_flavor(&resolved.fetch_url, policy)?,
+        ApiFlavor::Unknown => {
+            let discovery_remote = provider_discovery_remote(&resolved)?;
+            probe_self_hosted_provider(&discovery_remote, policy)?.flavor
+        }
         flavor => flavor,
     };
     let token = match flavor {
@@ -84,7 +92,7 @@ pub fn remote_vendor_at(
         ApiFlavor::GitLab => "gitlab",
         ApiFlavor::Gitea => "gitea",
         ApiFlavor::Forgejo => "forgejo",
-        ApiFlavor::Bitbucket => "bitbucket",
+        ApiFlavor::Bitbucket | ApiFlavor::BitbucketDataCenter => "bitbucket",
         ApiFlavor::AzureDevOps => "azure_devops",
         ApiFlavor::AwsCodeCommit => "aws_code_commit",
         ApiFlavor::SourceHut => "source_hut",
@@ -94,6 +102,30 @@ pub fn remote_vendor_at(
         }
     };
     Ok(token.to_string())
+}
+
+/// Selects the provider-discovery origin independently from the Git transport.
+///
+/// HTTP(S) remotes retain their configured origin, including a non-default HTTP
+/// port. SSH and SCP remotes use HTTPS on the resolved host; their port belongs
+/// to SSH and must never be reinterpreted as an HTTP port.
+pub(crate) fn provider_discovery_remote(remote: &super::ResolvedRemote) -> Result<String> {
+    let Some(endpoint) = remote.endpoint.as_ref() else {
+        return Ok(remote.fetch_url.clone());
+    };
+    if endpoint.scheme != "ssh" {
+        return Ok(remote.fetch_url.clone());
+    }
+
+    let mut origin = url::Url::parse("https://provider.invalid/")
+        .expect("the static provider discovery origin is valid");
+    origin
+        .set_host(Some(&endpoint.host))
+        .map_err(|_| SniffError::UnsupportedRemoteCapability {
+            capability: "provider detection",
+            target: remote.fetch_url.clone(),
+        })?;
+    Ok(origin.to_string())
 }
 
 fn current_branch(path: &Path) -> Result<String> {
@@ -250,15 +282,114 @@ fn advertises_branch(body: &[u8], branch: &str) -> bool {
     false
 }
 
-/// Detects a self-managed server family behind an ambiguous HTTP(S) host.
+/// Detects a self-managed server family and its reported version.
 ///
 /// This is the single bounded discovery probe: `remote_vendor_at` projects its
-/// result to a vendor token, and the focused provider client reuses it to
-/// select a flavor for a neutral-hostname endpoint. The exact host must pass
-/// `policy` before any request; the transport is the deny-by-default,
-/// redirect-disabled `PolicyClient`. Blocking — callers inside an async
-/// runtime must move it to a blocking thread.
-pub(crate) fn probe_self_hosted_flavor(remote: &str, policy: &FetchPolicy) -> Result<ApiFlavor> {
+/// result to a vendor token, and the focused provider client retains both fields
+/// to derive operation capabilities. The exact host must pass `policy` before
+/// any request or credential lookup. Blocking — callers inside an async runtime
+/// must move it to a blocking thread.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SelfHostedProviderDiscovery {
+    pub(crate) flavor: ApiFlavor,
+    pub(crate) version: String,
+}
+
+#[cfg(test)]
+#[derive(Clone)]
+struct TestProviderDiscoveryEntry {
+    token: u64,
+    discovery: SelfHostedProviderDiscovery,
+    origins: Arc<Mutex<Vec<String>>>,
+}
+
+#[cfg(test)]
+static TEST_PROVIDER_DISCOVERIES: LazyLock<Mutex<HashMap<String, TestProviderDiscoveryEntry>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+#[cfg(test)]
+static NEXT_TEST_PROVIDER_DISCOVERY_TOKEN: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(1);
+
+#[cfg(test)]
+pub(crate) struct TestProviderDiscoveryGuard {
+    host: String,
+    token: u64,
+    origins: Arc<Mutex<Vec<String>>>,
+}
+
+#[cfg(test)]
+impl TestProviderDiscoveryGuard {
+    pub(crate) fn origins(&self) -> Vec<String> {
+        self.origins.lock().expect("test discovery origins lock").clone()
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestProviderDiscoveryGuard {
+    fn drop(&mut self) {
+        let mut discoveries = TEST_PROVIDER_DISCOVERIES
+            .lock()
+            .expect("test provider discovery registry lock");
+        if discoveries
+            .get(&self.host)
+            .is_some_and(|entry| entry.token == self.token)
+        {
+            discoveries.remove(&self.host);
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn register_test_provider_discovery(
+    host: &str,
+    flavor: ApiFlavor,
+    version: &str,
+) -> TestProviderDiscoveryGuard {
+    let token = NEXT_TEST_PROVIDER_DISCOVERY_TOKEN
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let origins = Arc::new(Mutex::new(Vec::new()));
+    let entry = TestProviderDiscoveryEntry {
+        token,
+        discovery: SelfHostedProviderDiscovery {
+            flavor,
+            version: version.to_string(),
+        },
+        origins: Arc::clone(&origins),
+    };
+    let replaced = TEST_PROVIDER_DISCOVERIES
+        .lock()
+        .expect("test provider discovery registry lock")
+        .insert(host.to_string(), entry);
+    assert!(replaced.is_none(), "test discovery host `{host}` is already registered");
+    TestProviderDiscoveryGuard {
+        host: host.to_string(),
+        token,
+        origins,
+    }
+}
+
+#[cfg(test)]
+fn registered_test_provider_discovery(
+    remote: &url::Url,
+) -> Option<SelfHostedProviderDiscovery> {
+    let entry = TEST_PROVIDER_DISCOVERIES
+        .lock()
+        .expect("test provider discovery registry lock")
+        .get(remote.host_str().unwrap_or_default())
+        .cloned()?;
+    entry
+        .origins
+        .lock()
+        .expect("test discovery origins lock")
+        .push(remote.to_string());
+    Some(entry.discovery)
+}
+
+pub(crate) fn probe_self_hosted_provider(
+    remote: &str,
+    policy: &FetchPolicy,
+) -> Result<SelfHostedProviderDiscovery> {
     let remote = url::Url::parse(remote)
         .ok()
         .filter(|url| matches!(url.scheme(), "http" | "https"))
@@ -270,33 +401,188 @@ pub(crate) fn probe_self_hosted_flavor(remote: &str, policy: &FetchPolicy) -> Re
     if !policy.is_allowed(host) {
         return Err(SniffError::RemotePolicyDenied { host: host.to_string() });
     }
-    let client = PolicyClient::new().map_err(|error| unreachable(&remote, error))?;
+    #[cfg(test)]
+    if let Some(discovery) = registered_test_provider_discovery(&remote) {
+        return Ok(discovery);
+    }
+    let client = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(std::time::Duration::from_secs(3))
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|error| unreachable(&remote, error))?;
+    let mut discoveries = Vec::new();
+    let mut focused_error = None;
     for (path, flavor) in [
+        ("/api/v3/meta", ApiFlavor::GitHub),
         ("/api/v4/version", ApiFlavor::GitLab),
         ("/api/v1/version", ApiFlavor::Gitea),
+        ("/rest/api/1.0/application-properties", ApiFlavor::BitbucketDataCenter),
+        ("/_apis/connectionData", ApiFlavor::AzureDevOps),
     ] {
         let mut endpoint = remote.clone();
         endpoint.set_path(path);
-        endpoint.set_query(None);
-        let response = match fetch_blocking(&client, &endpoint, policy, &Conditional::default()) {
-            Ok(response) => response,
-            Err(FetchError::HttpError { status: 404, .. }) => continue,
-            Err(error) => return Err(map_fetch_error(&endpoint, ApiFlavor::Unknown, error)),
-        };
-        if response.is_success() {
-            // Forgejo serves Gitea's API surface; only its version body tells
-            // the two apart.
-            if flavor == ApiFlavor::Gitea
-                && String::from_utf8_lossy(&response.body)
-                    .to_ascii_lowercase()
-                    .contains("forgejo")
-            {
-                return Ok(ApiFlavor::Forgejo);
-            }
-            return Ok(flavor);
+        if flavor == ApiFlavor::AzureDevOps {
+            endpoint.set_query(Some("connectOptions=1&lastChangeId=-1&lastChangeId64=-1"));
+        } else {
+            endpoint.set_query(None);
+        }
+        if endpoint.host_str() != Some(host) || !policy.is_allowed(endpoint.host_str().unwrap_or_default()) {
+            return Err(SniffError::RemotePolicyDenied {
+                host: endpoint.host_str().unwrap_or_default().to_string(),
+            });
+        }
+        let (token, variable) = crate::credentials::provider_token(flavor);
+        let mut request = client
+            .get(endpoint.clone())
+            .header(reqwest::header::USER_AGENT, "sniff/provider-discovery");
+        if let Some(token) = token.as_deref() {
+            request = match flavor {
+                ApiFlavor::GitLab => request.header("PRIVATE-TOKEN", token),
+                ApiFlavor::AzureDevOps => request.basic_auth("", Some(token)),
+                _ => request.bearer_auth(token),
+            };
+        }
+        let response = request.send().map_err(|error| unreachable(&endpoint, error))?;
+        let status = response.status().as_u16();
+        if (300..400).contains(&status) {
+            return Err(SniffError::RemoteUnreachable {
+                url: endpoint.to_string(),
+                message: "provider discovery redirect was blocked".to_string(),
+            });
+        }
+        if status == 404 {
+            continue;
+        }
+        if matches!(status, 401 | 403) {
+            focused_error.get_or_insert_with(|| {
+                if token.is_some() {
+                    SniffError::InvalidCredentials {
+                        provider: format!("{flavor:?}"),
+                        message: "provider rejected credentials during discovery".to_string(),
+                    }
+                } else {
+                    SniffError::MissingCredentials {
+                        provider: format!("{flavor:?}"),
+                        env_var: variable.to_string(),
+                    }
+                }
+            });
+            continue;
+        }
+        if status == 429 {
+            focused_error.get_or_insert_with(|| SniffError::RateLimited {
+                provider: format!("{flavor:?}"),
+                retry_after: None,
+            });
+            continue;
+        }
+        if status >= 500 {
+            focused_error.get_or_insert_with(|| SniffError::RemoteApi {
+                provider: format!("{flavor:?}"),
+                status,
+                message: "provider discovery endpoint failed".to_string(),
+            });
+            continue;
+        }
+        if !response.status().is_success() {
+            continue;
+        }
+        let body = response
+            .bytes()
+            .map_err(|error| unreachable(&endpoint, error))?;
+        if let Some(discovery) = discovery_from_signature(flavor, &body, status)? {
+            discoveries.push(discovery);
         }
     }
-    Err(SniffError::UnsupportedProvider { url: remote.to_string() })
+    match discoveries.as_slice() {
+        [discovery] => Ok(discovery.clone()),
+        [] => Err(focused_error
+            .unwrap_or_else(|| SniffError::UnsupportedProvider { url: remote.to_string() })),
+        _ => Err(SniffError::RemoteApi {
+            provider: "provider discovery".to_string(),
+            status: 200,
+            message: format!(
+                "conflicting provider signatures: {}",
+                discoveries
+                    .iter()
+                    .map(|discovery| format!("{:?}", discovery.flavor))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        }),
+    }
+}
+
+fn discovery_from_signature(
+    flavor: ApiFlavor,
+    body: &[u8],
+    status: u16,
+) -> Result<Option<SelfHostedProviderDiscovery>> {
+    let Ok(body) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return Ok(None);
+    };
+    let (flavor, version) = match flavor {
+        ApiFlavor::GitHub
+            if body.get("installed_version").and_then(serde_json::Value::as_str).is_some() => (
+            flavor,
+            body.get("installed_version")
+                .and_then(serde_json::Value::as_str)
+                .filter(|version| server_version_shape(version)),
+        ),
+        ApiFlavor::GitLab
+            if body.get("revision").and_then(serde_json::Value::as_str)
+                .is_some_and(|revision| !revision.trim().is_empty()) =>
+        {
+            (
+                flavor,
+                body.get("version")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|version| server_version_shape(version)),
+            )
+        }
+        ApiFlavor::Gitea if body.get("version").and_then(serde_json::Value::as_str).is_some() => {
+            let version = body.get("version").and_then(serde_json::Value::as_str).filter(|version| {
+                version.to_ascii_lowercase().contains("forgejo") || server_version_shape(version)
+            });
+            let flavor = if version.is_some_and(|version| version.to_ascii_lowercase().contains("forgejo")) {
+                ApiFlavor::Forgejo
+            } else {
+                flavor
+            };
+            (flavor, version)
+        }
+        ApiFlavor::BitbucketDataCenter
+            if body.get("displayName").and_then(serde_json::Value::as_str)
+                .is_some_and(|name| name.to_ascii_lowercase().contains("bitbucket")) =>
+        {
+            (flavor, body.get("version").and_then(serde_json::Value::as_str))
+        }
+        ApiFlavor::AzureDevOps
+            if body.get("instanceId").and_then(serde_json::Value::as_str).is_some()
+                && body.get("deploymentVersion").and_then(serde_json::Value::as_str)
+                    .is_some_and(|version| version.to_ascii_lowercase().contains("azure devops server")) =>
+        {
+            (flavor, body.get("deploymentVersion").and_then(serde_json::Value::as_str))
+        }
+        _ => return Ok(None),
+    };
+    let version = version
+        .filter(|version| !version.trim().is_empty())
+        .ok_or_else(|| SniffError::RemoteApi {
+            provider: format!("{flavor:?}"),
+            status,
+            message: "provider signature did not contain a non-empty server version".to_string(),
+        })?;
+    Ok(Some(SelfHostedProviderDiscovery { flavor, version: version.to_string() }))
+}
+
+fn server_version_shape(version: &str) -> bool {
+    let version = version.trim_start_matches(|character: char| !character.is_ascii_digit());
+    version.split('.').take(3).count() == 3
+        && version.split('.').take(3).all(|part| {
+            !part.is_empty() && part.chars().take_while(|character| character.is_ascii_digit()).count() > 0
+        })
 }
 
 fn provider_branch_exists(

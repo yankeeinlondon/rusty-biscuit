@@ -495,8 +495,15 @@ errors. `FocusedProviderClient::discover` is the production constructor for
 ordinary self-managed servers: a neutral-hostname remote is identified through
 the same allowlisted, bounded version-endpoint probe `remote_vendor_at` uses
 (GitLab/Gitea/Forgejo, exact-host consent before any request) and then queried
-against the endpoint origin its remote URL was configured with. Exact-host
-policy is checked before credentials or requests; redirects are disabled, with
+against the endpoint origin its remote URL was configured with. The client
+retains the reported server version and derives operation capabilities from the
+concrete flavor/version pair. Gitea job lookup and listing require stable 1.25.0
+or newer; Forgejo releases through 14.0 do not expose the required job endpoint
+pair. Unsupported job operations fail before provider I/O with the provider,
+flavor, and detected version in the error. SSH and SCP remotes derive a
+policy-checked `https://{host}` discovery origin and never reinterpret an SSH
+port as an HTTP port. Exact-host policy is checked before credentials or
+requests; redirects are disabled, with
 only the official GitHub and Bitbucket API-host mappings accepted as cross-host
 provider endpoints.
 
@@ -514,7 +521,11 @@ repository. A hostname that pins a provider (`github.com`, `gitlab.com`,
 route shape borrowed from another forge is rejected instead of resolving to the
 wrong flavor. Official API hostnames resolve back to the repository's web host,
 and the URL's own scheme and non-default port are retained so an enterprise or
-self-managed reference derives the API base it was addressed by.
+self-managed reference derives the API base it was addressed by. Decoded
+repository identities reject reserved URL delimiters, backslashes, controls,
+and dot segments, while valid Unicode identities are retained. Provider request
+paths independently percent-encode every repository and item segment, so an
+identity cannot become a query, fragment, or path traversal during URL joining.
 
 Link fields a provider *returns* pass the opposite direction of the same trust
 boundary. A projected `web_url` (on pull requests, jobs, and parent runs) is

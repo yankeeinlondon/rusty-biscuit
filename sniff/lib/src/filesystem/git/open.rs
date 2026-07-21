@@ -69,3 +69,19 @@ pub(crate) fn trusted_open(path: &Path) -> Result<gix::Repository> {
     let opts = gix::open::Options::default().bail_if_untrusted(true);
     gix::open_opts(path, opts).map_err(|e| SniffError::git("open", e))
 }
+
+/// Open a registered worktree target, omitting an absent checkout.
+///
+/// Linked-worktree registrations can outlive their checkouts until Git prunes
+/// them. A target that exists but does not open as a repository is corrupt, not
+/// stale; trust, permission, I/O, and repository-open failures remain errors.
+pub(crate) fn trusted_open_registered_worktree(path: &Path) -> Result<Option<gix::Repository>> {
+    if !path
+        .try_exists()
+        .map_err(|error| SniffError::git("open", error))?
+    {
+        return Ok(None);
+    }
+
+    trusted_open(path).map(Some)
+}

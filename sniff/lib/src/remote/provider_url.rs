@@ -293,8 +293,8 @@ fn flavor_route(
 fn flat(flavor: ApiFlavor, namespace: &str, repository: &str, id: &str) -> Option<Route> {
     Some(Route {
         flavor,
-        namespace: identity(namespace)?,
-        repository: identity(repository)?,
+        namespace: repository_identity(namespace)?,
+        repository: repository_identity(repository)?,
         native_id: identity(id)?,
     })
 }
@@ -302,8 +302,8 @@ fn flat(flavor: ApiFlavor, namespace: &str, repository: &str, id: &str) -> Optio
 fn step_route(workspace: &str, repository: &str, parent: &str, step: &str) -> Option<Route> {
     Some(Route {
         flavor: ApiFlavor::Bitbucket,
-        namespace: identity(workspace)?,
-        repository: identity(repository)?,
+        namespace: repository_identity(workspace)?,
+        repository: repository_identity(repository)?,
         native_id: format!("{}/{}", identity(parent)?, identity(step)?),
     })
 }
@@ -316,13 +316,15 @@ fn step_route(workspace: &str, repository: &str, parent: &str, step: &str) -> Op
 fn encoded_project(project: &str, id: &str) -> Option<Route> {
     let decoded = decode(project)?;
     let (namespace, repository) = decoded.rsplit_once('/')?;
-    if namespace.is_empty() || repository.is_empty() {
-        return None;
-    }
+    let namespace = namespace
+        .split('/')
+        .map(validated_repository_identity)
+        .collect::<Option<Vec<_>>>()?
+        .join("/");
     Some(Route {
         flavor: ApiFlavor::GitLab,
-        namespace: namespace.to_string(),
-        repository: repository.to_string(),
+        namespace,
+        repository: validated_repository_identity(repository)?,
         native_id: identity(id)?,
     })
 }
@@ -336,25 +338,78 @@ fn project_path(path: &[&str], id: &str) -> Option<Route> {
     }
     let namespace = namespace
         .iter()
-        .map(|segment| identity(segment))
+        .map(|segment| repository_identity(segment))
         .collect::<Option<Vec<_>>>()?
         .join("/");
     Some(Route {
         flavor: ApiFlavor::GitLab,
         namespace,
-        repository: identity(repository)?,
+        repository: repository_identity(repository)?,
         native_id: identity(id)?,
     })
 }
 
-/// Decodes one path segment and rejects anything that is not a usable identity.
-///
-/// A segment that decodes to an empty string or to something containing a path
-/// separator would silently restructure the repository identity, so it is a
-/// parse failure rather than a value.
+/// Decodes one opaque provider item identifier and rejects URL structure.
 fn identity(segment: &str) -> Option<String> {
     let decoded = decode(segment)?;
-    (!decoded.is_empty() && !decoded.contains('/')).then_some(decoded)
+    valid_opaque_identity(&decoded).then_some(decoded)
+}
+
+/// Decodes one repository-coordinate segment using the common safe grammar.
+///
+/// Provider repository names admit Unicode while reserving ASCII URL syntax.
+/// Applying this after percent-decoding prevents an encoded delimiter from
+/// acquiring structural meaning at a later URL-construction boundary.
+fn repository_identity(segment: &str) -> Option<String> {
+    validated_repository_identity(&decode(segment)?)
+}
+
+fn validated_repository_identity(identity: &str) -> Option<String> {
+    (!is_dot_segment(identity)
+        && !identity.is_empty()
+        && identity.chars().all(|character| {
+            character.is_ascii_alphanumeric()
+                || matches!(character, '-' | '_' | '.')
+                || (!character.is_ascii()
+                    && !character.is_control()
+                    && !character.is_whitespace())
+        }))
+    .then(|| identity.to_string())
+}
+
+fn valid_opaque_identity(identity: &str) -> bool {
+    !identity.is_empty()
+        && !is_dot_segment(identity)
+        && identity.chars().all(|character| {
+            !character.is_control()
+                && !character.is_whitespace()
+                && !matches!(
+                    character,
+                    ':' | '/'
+                        | '?'
+                        | '#'
+                        | '['
+                        | ']'
+                        | '@'
+                        | '!'
+                        | '$'
+                        | '&'
+                        | '\''
+                        | '('
+                        | ')'
+                        | '*'
+                        | '+'
+                        | ','
+                        | ';'
+                        | '='
+                        | '\\'
+                        | '%'
+                )
+        })
+}
+
+fn is_dot_segment(identity: &str) -> bool {
+    matches!(identity, "." | "..")
 }
 
 fn decode(segment: &str) -> Option<String> {

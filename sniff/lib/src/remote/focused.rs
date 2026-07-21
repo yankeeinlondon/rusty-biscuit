@@ -30,9 +30,21 @@ const PAGE_SIZE: usize = 100;
 #[derive(Debug, Clone)]
 pub struct FocusedProviderClient {
     remote: ResolvedRemote,
+    discovery: FocusedProviderDiscovery,
     policy: FetchPolicy,
     api_base: url::Url,
     original_reference: Option<String>,
+}
+
+/// Provider identity and operation capabilities retained by a focused client.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FocusedProviderDiscovery {
+    /// Concrete API family selected for provider requests.
+    pub api_flavor: ApiFlavor,
+    /// Verbatim server-reported version when discovery queried the host.
+    pub server_version: Option<String>,
+    /// Operations and filters supported by this flavor/version combination.
+    pub capabilities: ProviderCapabilities,
 }
 
 impl FocusedProviderClient {
@@ -49,12 +61,13 @@ impl FocusedProviderClient {
 
     /// Creates a focused client, probing an ambiguous self-hosted endpoint.
     ///
-    /// Known flavors behave exactly like [`Self::new`] with no network I/O. An
-    /// `ApiFlavor::Unknown` remote runs the same allowlisted, bounded discovery
-    /// probe `remote_vendor` uses (exact-host consent before any request,
-    /// redirect-disabled transport, GitLab/Gitea/Forgejo version endpoints
-    /// only) and constructs the client for the detected flavor. This is the
-    /// production path for ordinary self-managed servers on neutral hostnames.
+    /// Cloud and GitLab flavors behave exactly like [`Self::new`] with no
+    /// network I/O. Unknown, Gitea, and Forgejo remotes run the same allowlisted,
+    /// bounded version probe `remote_vendor` uses (exact-host consent before any
+    /// request, redirect-disabled transport) so the client retains the concrete
+    /// family and version used for capability selection. SSH and SCP remotes
+    /// probe `https://{host}` without carrying their SSH port into the provider
+    /// request.
     ///
     /// ## Errors
     ///
@@ -62,17 +75,20 @@ impl FocusedProviderClient {
     /// [`SniffError::UnsupportedProvider`] failures for hosts that cannot be
     /// identified, and [`Self::new`]'s errors for the constructed client.
     pub async fn discover(remote: ResolvedRemote, policy: FetchPolicy) -> Result<Self, SniffError> {
-        if remote.api_flavor != ApiFlavor::Unknown {
+        if !matches!(
+            remote.api_flavor,
+            ApiFlavor::Unknown | ApiFlavor::Gitea | ApiFlavor::Forgejo
+        ) {
             return Self::new(remote, policy);
         }
-        let mut remote = remote;
-        let fetch_url = remote.fetch_url.clone();
+        let discovery_remote =
+            crate::filesystem::git::remote_observation::provider_discovery_remote(&remote)?;
         let probe_policy = policy.clone();
         // The probe is blocking (it drives its own current-thread runtime), so
         // it must leave the async worker before it can block.
-        let flavor = tokio::task::spawn_blocking(move || {
-            crate::filesystem::git::remote_observation::probe_self_hosted_flavor(
-                &fetch_url,
+        let discovery = tokio::task::spawn_blocking(move || {
+            crate::filesystem::git::remote_observation::probe_self_hosted_provider(
+                &discovery_remote,
                 &probe_policy,
             )
         })
@@ -81,8 +97,7 @@ impl FocusedProviderClient {
             provider: "discovery".to_string(),
             message: error.to_string(),
         })??;
-        remote.api_flavor = flavor;
-        Self::new(remote, policy)
+        Self::from_discovered_flavor(remote, policy, discovery)
     }
 
     /// The resolved remote this client is bound to, including any flavor
@@ -91,14 +106,49 @@ impl FocusedProviderClient {
         &self.remote
     }
 
+    /// Detected provider family, reported server version, and derived capabilities.
+    pub fn discovery(&self) -> &FocusedProviderDiscovery {
+        &self.discovery
+    }
+
     /// Creates a focused client with an explicit enterprise/test API base.
     ///
     /// The base host is still checked against `policy` before credentials are
-    /// read or an HTTP client is constructed.
+    /// read or an HTTP client is constructed. Gitea and Forgejo CI/CD
+    /// capabilities remain disabled without a detected version; use
+    /// [`Self::with_api_base_and_server_version`] when discovery happened
+    /// outside this constructor.
     pub fn with_api_base(
         remote: ResolvedRemote,
         policy: FetchPolicy,
         api_base: &str,
+    ) -> Result<Self, SniffError> {
+        Self::with_api_base_and_version(remote, policy, api_base, None)
+    }
+
+    /// Creates a client with an explicit API base and server version.
+    ///
+    /// This is useful for custom transports and hermetic provider fixtures
+    /// where discovery is intentionally performed outside this constructor.
+    pub fn with_api_base_and_server_version(
+        remote: ResolvedRemote,
+        policy: FetchPolicy,
+        api_base: &str,
+        server_version: &str,
+    ) -> Result<Self, SniffError> {
+        Self::with_api_base_and_version(
+            remote,
+            policy,
+            api_base,
+            Some(server_version.to_string()),
+        )
+    }
+
+    fn with_api_base_and_version(
+        remote: ResolvedRemote,
+        policy: FetchPolicy,
+        api_base: &str,
+        server_version: Option<String>,
     ) -> Result<Self, SniffError> {
         let mut api_base = url::Url::parse(api_base).map_err(|error| SniffError::RemoteUnreachable {
             url: api_base.to_string(),
@@ -107,12 +157,24 @@ impl FocusedProviderClient {
         if !api_base.path().ends_with('/') {
             api_base.set_path(&format!("{}/", api_base.path().trim_end_matches('/')));
         }
+        let discovery = provider_discovery(remote.api_flavor, server_version)?;
         Ok(Self {
             remote,
+            discovery,
             policy,
             api_base,
             original_reference: None,
         })
+    }
+
+    fn from_discovered_flavor(
+        mut remote: ResolvedRemote,
+        policy: FetchPolicy,
+        discovery: crate::filesystem::git::remote_observation::SelfHostedProviderDiscovery,
+    ) -> Result<Self, SniffError> {
+        remote.api_flavor = discovery.flavor;
+        let base = canonical_api_base(&remote)?;
+        Self::with_api_base_and_version(remote, policy, &base, Some(discovery.version))
     }
 
     /// Creates a client and repository-scoped identity from a canonical PR/MR URL.
@@ -142,49 +204,9 @@ impl FocusedProviderClient {
         Ok((remote, reference))
     }
 
-    /// Explicit capabilities for the selected initial provider flavor.
+    /// Explicit capabilities derived from the selected provider flavor and version.
     pub fn capabilities(&self) -> ProviderCapabilities {
-        let jobs = matches!(
-            self.remote.api_flavor,
-            ApiFlavor::GitHub
-                | ApiFlavor::GitLab
-                | ApiFlavor::Gitea
-                | ApiFlavor::Forgejo
-                | ApiFlavor::Bitbucket
-        );
-        ProviderCapabilities {
-            pull_requests: jobs,
-            cicd_jobs: jobs,
-            pagination: jobs,
-            direct_job_listing: matches!(self.remote.api_flavor, ApiFlavor::GitLab),
-            bounded_parent_traversal: matches!(
-                self.remote.api_flavor,
-                ApiFlavor::GitHub | ApiFlavor::Gitea | ApiFlavor::Forgejo | ApiFlavor::Bitbucket
-            ),
-            logs: false,
-            artifacts: false,
-            test_reports: false,
-            pull_request_filters: [
-                "state", "draft", "source_branch", "target_branch", "author", "labels",
-                "search", "created_after", "created_before", "updated_after", "updated_before",
-                "sort", "direction", "limit",
-            ]
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
-            // `stage` is advertised only where validation accepts it: GitLab is
-            // the sole flavor whose job objects carry stage data, so every
-            // other flavor rejects the filter instead of matching nothing.
-            cicd_job_filters: [
-                "statuses", "name", "workflow", "parent", "branch", "commit",
-                "actor", "trigger", "created_after", "created_before", "updated_after",
-                "updated_before", "direction", "limit",
-            ]
-            .into_iter()
-            .map(str::to_string)
-            .chain(matches!(self.remote.api_flavor, ApiFlavor::GitLab).then(|| "stage".to_string()))
-            .collect(),
-        }
+        self.discovery.capabilities.clone()
     }
 
     /// Gets one exact pull/merge request. Authoritative 404 is `Ok(None)`.
@@ -265,6 +287,7 @@ impl FocusedProviderClient {
         &self,
         reference: &CiCdJobReference,
     ) -> Result<Option<CiCdJob>, SniffError> {
+        self.require_cicd("exact CI/CD job lookup")?;
         let path = self.job_exact_path(&reference.native_id)?;
         let Some(value) = self.get_json(&path, &[]).await? else {
             return Ok(None);
@@ -299,9 +322,10 @@ impl FocusedProviderClient {
         &self,
         query: CiCdJobQuery,
     ) -> Result<CiCdJobPage, SniffError> {
+        self.require_cicd("CI/CD job query")?;
         validate_job_query(&query, self.remote.api_flavor)?;
         let limit = query.limit.unwrap_or(20);
-        let mut jobs = if self.remote.api_flavor == ApiFlavor::GitLab {
+        let mut jobs = if self.discovery.capabilities.direct_job_listing {
             self.direct_jobs(&query).await?
         } else {
             self.jobs_via_parents(&query).await?
@@ -327,13 +351,13 @@ impl FocusedProviderClient {
         let mut inspected = 0;
         let mut exhausted = false;
         for page in 1..=MAX_PAGES {
-            let path = format!("projects/{}/jobs", encoded_project(&self.remote));
-            let params = pagination_params(self.remote.api_flavor, page, PAGE_SIZE);
+            let path = self.direct_jobs_path()?;
+            let params = direct_job_pagination_params(self.remote.api_flavor, page, PAGE_SIZE);
             let Some(value) = self.get_json(&path, &params).await? else {
                 exhausted = true;
                 break;
             };
-            let (items, next) = page_items(value);
+            let (items, next) = page_items_named(value, &["jobs", "values"]);
             let count = items.len();
             for item in items {
                 inspected += 1;
@@ -358,6 +382,31 @@ impl FocusedProviderClient {
             return Err(incomplete_domain(self.remote.api_flavor, "job pages", MAX_PAGES));
         }
         Ok(jobs)
+    }
+
+    fn require_cicd(&self, capability: &'static str) -> Result<(), SniffError> {
+        if self.discovery.capabilities.cicd_jobs {
+            return Ok(());
+        }
+        let version = self
+            .discovery
+            .server_version
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
+        let requirement = match self.remote.api_flavor {
+            ApiFlavor::Gitea => "requires Gitea 1.25.0 or newer",
+            ApiFlavor::Forgejo => {
+                "no released Forgejo version through 14.0 exposes the required job endpoints"
+            }
+            _ => "the selected API flavor does not expose this operation",
+        };
+        Err(SniffError::UnsupportedServerVersion {
+            provider: format!("{:?}", git_provider(self.remote.api_flavor)),
+            flavor: format!("{:?}", self.remote.api_flavor),
+            version,
+            capability,
+            requirement,
+        })
     }
 
     async fn jobs_via_parents(&self, query: &CiCdJobQuery) -> Result<Vec<CiCdJob>, SniffError> {
@@ -507,6 +556,7 @@ impl FocusedProviderClient {
 
     fn pr_exact_path(&self, id: &str) -> Result<String, SniffError> {
         let base = repo_path(&self.remote);
+        let id = path_segment(id);
         Ok(match self.remote.api_flavor {
             ApiFlavor::GitHub | ApiFlavor::Gitea | ApiFlavor::Forgejo => format!("repos/{base}/pulls/{id}"),
             ApiFlavor::GitLab => format!("projects/{}/merge_requests/{id}", encoded_project(&self.remote)),
@@ -535,15 +585,28 @@ impl FocusedProviderClient {
     fn job_exact_path(&self, native_id: &str) -> Result<String, SniffError> {
         let base = repo_path(&self.remote);
         Ok(match self.remote.api_flavor {
-            ApiFlavor::GitHub | ApiFlavor::Gitea | ApiFlavor::Forgejo => format!("repos/{base}/actions/jobs/{native_id}"),
-            ApiFlavor::GitLab => format!("projects/{}/jobs/{native_id}", encoded_project(&self.remote)),
+            ApiFlavor::GitHub | ApiFlavor::Gitea | ApiFlavor::Forgejo => format!("repos/{base}/actions/jobs/{}", path_segment(native_id)),
+            ApiFlavor::GitLab => format!("projects/{}/jobs/{}", encoded_project(&self.remote), path_segment(native_id)),
             ApiFlavor::Bitbucket => {
                 let (parent, job) = native_id.split_once('/').ok_or_else(|| SniffError::InvalidRemoteQuery {
                     field: "id", message: "Bitbucket job identity must be parent/job".to_string(),
                 })?;
-                format!("repositories/{base}/pipelines/{parent}/steps/{job}")
+                format!(
+                    "repositories/{base}/pipelines/{}/steps/{}",
+                    path_segment(parent),
+                    path_segment(job)
+                )
             }
             _ => return Err(unsupported("exact CI/CD job lookup", self.remote.api_flavor)),
+        })
+    }
+
+    fn direct_jobs_path(&self) -> Result<String, SniffError> {
+        let base = repo_path(&self.remote);
+        Ok(match self.remote.api_flavor {
+            ApiFlavor::GitLab => format!("projects/{}/jobs", encoded_project(&self.remote)),
+            ApiFlavor::Gitea => format!("repos/{base}/actions/jobs"),
+            _ => return Err(unsupported("direct CI/CD job listing", self.remote.api_flavor)),
         })
     }
 
@@ -558,6 +621,7 @@ impl FocusedProviderClient {
 
     fn parent_jobs_path(&self, parent: &str) -> Result<String, SniffError> {
         let base = repo_path(&self.remote);
+        let parent = path_segment(parent);
         Ok(match self.remote.api_flavor {
             ApiFlavor::GitHub | ApiFlavor::Gitea | ApiFlavor::Forgejo => format!("repos/{base}/actions/runs/{parent}/jobs"),
             ApiFlavor::Bitbucket => format!("repositories/{base}/pipelines/{parent}/steps"),
@@ -719,7 +783,7 @@ impl ParentContext {
     }
 }
 
-/// GitHub Actions job, shared verbatim by Gitea and Forgejo.
+/// GitHub-compatible Actions job returned by GitHub and supported Gitea versions.
 ///
 /// Runner identity is two flat keys (`runner_name`, `runner_group_name`), never
 /// a nested `runner` object, and the run-level `event`/actor are absent here —
@@ -830,6 +894,130 @@ fn canonical_api_base(remote: &ResolvedRemote) -> Result<String, SniffError> {
         ApiFlavor::Gitea | ApiFlavor::Forgejo => format!("{origin}/api/v1/"),
         ApiFlavor::Bitbucket => "https://api.bitbucket.org/2.0/".to_string(),
         _ => return Err(unsupported("provider queries", remote.api_flavor)),
+    })
+}
+
+fn provider_discovery(
+    flavor: ApiFlavor,
+    server_version: Option<String>,
+) -> Result<FocusedProviderDiscovery, SniffError> {
+    let gitea_jobs = match (flavor, server_version.as_deref()) {
+        (ApiFlavor::Gitea, Some(version)) => {
+            let parsed = parse_server_version(version).ok_or_else(|| SniffError::RemoteApi {
+                provider: provider_name(flavor),
+                status: 200,
+                message: format!("provider reported an unparseable server version `{version}`"),
+            })?;
+            parsed.at_least((1, 25, 0))
+        }
+        _ => false,
+    };
+    let pull_requests = matches!(
+        flavor,
+        ApiFlavor::GitHub
+            | ApiFlavor::GitLab
+            | ApiFlavor::Gitea
+            | ApiFlavor::Forgejo
+            | ApiFlavor::Bitbucket
+    );
+    let cicd_jobs = matches!(flavor, ApiFlavor::GitHub | ApiFlavor::GitLab | ApiFlavor::Bitbucket)
+        || gitea_jobs;
+    let pull_request_filters = if pull_requests {
+        [
+            "state",
+            "draft",
+            "source_branch",
+            "target_branch",
+            "author",
+            "labels",
+            "search",
+            "created_after",
+            "created_before",
+            "updated_after",
+            "updated_before",
+            "sort",
+            "direction",
+            "limit",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+    } else {
+        Vec::new()
+    };
+    let cicd_job_filters = if cicd_jobs {
+        [
+            "statuses",
+            "name",
+            "workflow",
+            "parent",
+            "branch",
+            "commit",
+            "actor",
+            "trigger",
+            "created_after",
+            "created_before",
+            "updated_after",
+            "updated_before",
+            "direction",
+            "limit",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .chain((flavor == ApiFlavor::GitLab).then(|| "stage".to_string()))
+        .collect()
+    } else {
+        Vec::new()
+    };
+    Ok(FocusedProviderDiscovery {
+        api_flavor: flavor,
+        server_version,
+        capabilities: ProviderCapabilities {
+            pull_requests,
+            cicd_jobs,
+            pagination: pull_requests || cicd_jobs,
+            direct_job_listing: matches!(flavor, ApiFlavor::GitLab) || gitea_jobs,
+            bounded_parent_traversal: matches!(
+                flavor,
+                ApiFlavor::GitHub | ApiFlavor::Bitbucket
+            ),
+            logs: false,
+            artifacts: false,
+            test_reports: false,
+            pull_request_filters,
+            cicd_job_filters,
+        },
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ParsedServerVersion {
+    core: (u64, u64, u64),
+    prerelease: bool,
+}
+
+impl ParsedServerVersion {
+    fn at_least(self, minimum: (u64, u64, u64)) -> bool {
+        self.core > minimum || (self.core == minimum && !self.prerelease)
+    }
+}
+
+fn parse_server_version(raw: &str) -> Option<ParsedServerVersion> {
+    let start = raw.find(|character: char| character.is_ascii_digit())?;
+    let version = &raw[start..];
+    let core_end = version
+        .find(|character: char| !character.is_ascii_digit() && character != '.')
+        .unwrap_or(version.len());
+    let mut parts = version[..core_end].split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next().unwrap_or("0").parse().ok()?;
+    let patch = parts.next().unwrap_or("0").parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(ParsedServerVersion {
+        core: (major, minor, patch),
+        prerelease: version[core_end..].starts_with('-'),
     })
 }
 
@@ -950,6 +1138,22 @@ fn pagination_params(flavor: ApiFlavor, page: usize, size: usize) -> Vec<(String
     ]
 }
 
+fn direct_job_pagination_params(
+    flavor: ApiFlavor,
+    page: usize,
+    size: usize,
+) -> Vec<(String, String)> {
+    let size_key = if flavor == ApiFlavor::Gitea {
+        "limit"
+    } else {
+        "per_page"
+    };
+    vec![
+        ("page".to_string(), page.to_string()),
+        (size_key.to_string(), size.to_string()),
+    ]
+}
+
 fn page_items_named(value: Value, names: &[&str]) -> (Vec<Value>, bool) {
     if let Value::Array(items) = value { return (items, false); }
     let next = value.get("next").is_some_and(|next| !next.is_null());
@@ -1057,8 +1261,31 @@ fn parent_context(value: &Value, id: &str, flavor: ApiFlavor, host: &str) -> Par
     }
 }
 
-fn repo_path(remote: &ResolvedRemote) -> String { format!("{}/{}", remote.namespace.as_deref().unwrap_or_default(), remote.repository.as_deref().unwrap_or_default()) }
-fn encoded_project(remote: &ResolvedRemote) -> String { urlencoding::encode(&repo_path(remote)).into_owned() }
+fn repo_path(remote: &ResolvedRemote) -> String {
+    format!(
+        "{}/{}",
+        path_segment(remote.namespace.as_deref().unwrap_or_default()),
+        path_segment(remote.repository.as_deref().unwrap_or_default())
+    )
+}
+fn encoded_project(remote: &ResolvedRemote) -> String {
+    urlencoding::encode(&format!(
+        "{}/{}",
+        remote.namespace.as_deref().unwrap_or_default(),
+        remote.repository.as_deref().unwrap_or_default()
+    ))
+    .into_owned()
+}
+fn path_segment(identity: &str) -> String {
+    match identity {
+        // `Url::join` recognizes percent-encoded dot segments too. Encoding
+        // the percent sign keeps an invalid internal identity inert instead of
+        // allowing it to traverse the API base before the provider rejects it.
+        "." => "%252E".to_string(),
+        ".." => "%252E%252E".to_string(),
+        _ => urlencoding::encode(identity).into_owned(),
+    }
+}
 fn value_string(value: &Value, names: &[&str]) -> Option<String> { names.iter().find_map(|name| value.get(*name).and_then(|v| v.as_str()).map(str::to_string)) }
 fn value_bool(value: &Value, names: &[&str]) -> Option<bool> { names.iter().find_map(|name| value.get(*name).and_then(Value::as_bool)) }
 fn value_u64(value: &Value, names: &[&str]) -> Result<u64, SniffError> { names.iter().find_map(|name| value.get(*name).and_then(Value::as_u64)).ok_or_else(|| malformed("missing numeric identity")) }
@@ -1076,7 +1303,7 @@ fn nonempty(value: Option<String>) -> Option<String> { value.filter(|value| !val
 fn normalize_status(status: &str) -> String { match status.to_ascii_lowercase().as_str() { "success" | "successful" | "completed" => "success", "failure" | "failed" | "error" => "failed", "cancelled" | "canceled" | "stopped" | "expired" => "cancelled", "queued" | "pending" | "created" | "ready" => "queued", "running" | "in_progress" => "running", "paused" | "halted" => "manual", "not_run" => "skipped", other => other }.to_string() }
 fn provider_name(flavor: ApiFlavor) -> String { format!("{flavor:?}") }
 fn git_provider(flavor: ApiFlavor) -> GitProvider { match flavor { ApiFlavor::GitHub => GitProvider::GitHub, ApiFlavor::GitLab => GitProvider::GitLab, ApiFlavor::Gitea | ApiFlavor::Forgejo => GitProvider::Gitea, ApiFlavor::Bitbucket => GitProvider::Bitbucket, _ => unreachable!("unsupported focused provider flavor") } }
-fn credential(flavor: ApiFlavor) -> (Option<String>, &'static str) { let names: &[&str] = match flavor { ApiFlavor::GitHub => &["GH_TOKEN", "GITHUB_TOKEN"], ApiFlavor::GitLab => &["GITLAB_TOKEN"], ApiFlavor::Gitea | ApiFlavor::Forgejo => &["GITEA_TOKEN", "FORGEJO_TOKEN"], ApiFlavor::Bitbucket => &["BITBUCKET_TOKEN"], _ => &[] }; (names.iter().find_map(|name| std::env::var(name).ok()), names.first().copied().unwrap_or("PROVIDER_TOKEN")) }
+fn credential(flavor: ApiFlavor) -> (Option<String>, &'static str) { crate::credentials::provider_token(flavor) }
 fn unsupported(capability: &'static str, flavor: ApiFlavor) -> SniffError { SniffError::UnsupportedRemoteCapability { capability, target: format!("{flavor:?}") } }
 fn incomplete_domain(flavor: ApiFlavor, bound: &'static str, limit: usize) -> SniffError { SniffError::IncompleteRemoteDomain { provider: provider_name(flavor), bound, limit } }
 fn malformed(message: &str) -> SniffError { SniffError::RemoteApi { provider: "provider".to_string(), status: 200, message: format!("malformed response: {message}") } }
@@ -1085,6 +1312,32 @@ fn transport(url: &url::Url, error: impl std::fmt::Display) -> SniffError { Snif
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn neutral_remote(fetch_url: &str) -> ResolvedRemote {
+        ResolvedRemote {
+            name: "origin".to_string(),
+            fetch_url: fetch_url.to_string(),
+            push_url: fetch_url.to_string(),
+            host: Some("git.example".to_string()),
+            namespace: Some("acme".to_string()),
+            repository: Some("project".to_string()),
+            api_flavor: ApiFlavor::Unknown,
+            endpoint: Some(crate::filesystem::git::RemoteEndpoint {
+                scheme: "ssh".to_string(),
+                host: "git.example".to_string(),
+                port: Some(2222),
+            }),
+        }
+    }
+
+    fn repository_with_remote(remote_url: &str) -> tempfile::TempDir {
+        let directory = tempfile::tempdir().expect("temporary repository");
+        let repository = git2::Repository::init(directory.path()).expect("initialize repository");
+        repository
+            .remote("origin", remote_url)
+            .expect("configure origin remote");
+        directory
+    }
 
     #[test]
     fn endpoint_policy_allows_only_same_host_or_official_api_mapping() {
@@ -1113,5 +1366,151 @@ mod tests {
             "api.github.com",
             ApiFlavor::GitHub
         ));
+    }
+
+    #[test]
+    fn neutral_host_ssh_and_scp_discovery_uses_https_without_the_ssh_port() {
+        for fetch_url in [
+            "ssh://git@git.example:2222/acme/project.git",
+            "git@git.example:acme/project.git",
+        ] {
+            assert_eq!(
+                crate::filesystem::git::remote_observation::provider_discovery_remote(
+                    &neutral_remote(fetch_url),
+                )
+                .unwrap(),
+                "https://git.example/"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn public_ssh_and_scp_discovery_retains_flavor_version_capabilities_and_api_base() {
+        for (flavor, version, vendor, api_path, cicd_jobs) in [
+            (ApiFlavor::GitLab, "17.2.0", "gitlab", "api/v4/", true),
+            (ApiFlavor::Gitea, "1.25.0", "gitea", "api/v1/", true),
+            (
+                ApiFlavor::Forgejo,
+                "14.0.0+forgejo-1",
+                "forgejo",
+                "api/v1/",
+                false,
+            ),
+        ] {
+            for transport in ["ssh", "scp"] {
+                let flavor_name = format!("{flavor:?}").to_ascii_lowercase();
+                let host = format!("finding3-{flavor_name}-{transport}.invalid");
+                let remote_url = if transport == "ssh" {
+                    format!("ssh://git@{host}:2222/acme/project.git")
+                } else {
+                    format!("git@{host}:acme/project.git")
+                };
+                let repository = repository_with_remote(&remote_url);
+                let resolver = crate::filesystem::git::remote_observation::register_test_provider_discovery(
+                    &host,
+                    flavor,
+                    version,
+                );
+
+                let denied_vendor = crate::filesystem::git::remote_observation::remote_vendor_at(
+                    repository.path(),
+                    None,
+                    &FetchPolicy::deny_all(),
+                )
+                .unwrap_err();
+                assert!(matches!(
+                    denied_vendor,
+                    SniffError::RemotePolicyDenied { host: ref denied_host }
+                        if denied_host == &host
+                ));
+                assert!(resolver.origins().is_empty());
+
+                let policy = FetchPolicy::deny_all().allow_host(&host);
+                assert_eq!(
+                    crate::filesystem::git::remote_observation::remote_vendor_at(
+                        repository.path(),
+                        None,
+                        &policy,
+                    )
+                    .unwrap(),
+                    vendor
+                );
+                assert_eq!(resolver.origins(), [format!("https://{host}/")]);
+
+                let resolved = crate::filesystem::git::resolve_remote_at(repository.path(), None)
+                    .unwrap()
+                    .expect("configured remote resolved");
+                assert_eq!(resolved.api_flavor, ApiFlavor::Unknown);
+                let denied_client = FocusedProviderClient::discover(
+                    resolved.clone(),
+                    FetchPolicy::deny_all(),
+                )
+                .await
+                .unwrap_err();
+                assert!(matches!(
+                    denied_client,
+                    SniffError::RemotePolicyDenied { host: ref denied_host }
+                        if denied_host == &host
+                ));
+                assert_eq!(resolver.origins().len(), 1);
+
+                let client = FocusedProviderClient::discover(resolved, policy)
+                    .await
+                    .unwrap();
+                assert_eq!(client.remote().api_flavor, flavor);
+                assert_eq!(client.discovery().api_flavor, flavor);
+                assert_eq!(client.discovery().server_version.as_deref(), Some(version));
+                assert_eq!(client.api_base.as_str(), format!("https://{host}/{api_path}"));
+                let capabilities = client.capabilities();
+                assert!(capabilities.pull_requests);
+                assert!(capabilities.pagination);
+                assert_eq!(capabilities.cicd_jobs, cicd_jobs);
+                assert_eq!(capabilities.direct_job_listing, cicd_jobs);
+                assert_eq!(
+                    resolver.origins(),
+                    [format!("https://{host}/"), format!("https://{host}/")]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn neutral_host_ssh_and_scp_remotes_enter_each_self_managed_provider_client() {
+        for fetch_url in [
+            "ssh://git@git.example:2222/acme/project.git",
+            "git@git.example:acme/project.git",
+        ] {
+            for (flavor, version, expected_base) in [
+                (ApiFlavor::GitLab, "17.0.1", "https://git.example/api/v4/"),
+                (ApiFlavor::Gitea, "1.25.0", "https://git.example/api/v1/"),
+                (
+                    ApiFlavor::Forgejo,
+                    "14.0.0+forgejo-1",
+                    "https://git.example/api/v1/",
+                ),
+            ] {
+                let remote = neutral_remote(fetch_url);
+                let client = FocusedProviderClient::from_discovered_flavor(
+                    remote,
+                    FetchPolicy::deny_all().allow_host("git.example"),
+                    crate::filesystem::git::remote_observation::SelfHostedProviderDiscovery {
+                        flavor,
+                        version: version.to_string(),
+                    },
+                )
+                .unwrap();
+
+                assert_eq!(client.remote().api_flavor, flavor);
+                assert_eq!(client.api_base.as_str(), expected_base);
+            }
+        }
+    }
+
+    #[test]
+    fn stable_gitea_1_25_is_supported_but_its_prerelease_is_not() {
+        assert!(parse_server_version("1.25.0").unwrap().at_least((1, 25, 0)));
+        assert!(parse_server_version("1.25.0+gitea-1").unwrap().at_least((1, 25, 0)));
+        assert!(!parse_server_version("1.25.0-rc.1").unwrap().at_least((1, 25, 0)));
+        assert!(!parse_server_version("Forgejo 14.0").unwrap().at_least((14, 0, 1)));
     }
 }

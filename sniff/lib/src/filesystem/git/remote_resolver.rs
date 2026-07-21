@@ -16,6 +16,7 @@ pub enum ApiFlavor {
     Gitea,
     Forgejo,
     Bitbucket,
+    BitbucketDataCenter,
     AzureDevOps,
     AwsCodeCommit,
     SourceHut,
