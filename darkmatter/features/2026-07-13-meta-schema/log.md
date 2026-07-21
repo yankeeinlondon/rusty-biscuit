@@ -10,6 +10,7 @@ implementation_6: "2026-07-20T06:55:12-07:00"
 implementation_7: "2026-07-20T08:00:38-07:00"
 implementation_8: "2026-07-20T09:33:32-07:00"
 implementation_9: "2026-07-20T16:25:54-07:00"
+implementation_10: "2026-07-20T17:20:50-07:00"
 ---
 
 # Meta Schema — Implementation Log
@@ -1257,4 +1258,43 @@ The implementation of review cycle 9 has completed successfully in 24 minutes. D
         - `schemas/feature-review.yaml`
         - `schemas/suggestion-review.yaml`
         - `darkmatter/features/2026-07-13-meta-schema/review-9.md`
+        - `darkmatter/features/2026-07-13-meta-schema/log.md`
+
+## Implementation of Review Findings #10
+
+> **started at:** 2026-07-20T17:20:50-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-13-meta-schema/review-10.md'
+- this is iteration 10 of the review-to-implement cycle
+- starting the work on 'flow-style-nested-plain-scalar-last-good-state' at 17:21:47-07:00
+        - the review contains one High finding: flow mappings currently open quote state for a quote embedded in a YAML plain scalar, which can hide a later top-level `kind: schema` claim and discard DMLS last-good semantic state
+        - `sniff` confirms the directly impacted package area is `darkmatter`; the workspace packages in the requested gate are `darkmatter`, `darkmatter-cli`, and `dmls` (`zed-dmls` is workspace-excluded and the spec names no separate verification surface)
+        - GitNexus reports High upstream impact for `flow_top_level_entries`: 23 affected symbols, one direct caller (`standalone_envelope_claim`), four DMLS modules (overlay, diagnostics, providers, and workspace), and no indexed execution flows
+        - GitNexus reports Low upstream impact for the existing shared `is_scalar_boundary` helper: three affected symbols, all in the DMLS overlay scanner path
+        - the implementation will change only flow quote opening; the existing nested collection depth, quoted-scalar escape handling, comments, and top-level delimiter handling remain authoritative
+        - implemented flow-local scalar-start tracking: quotes open only at YAML scalar boundaries, while the known top-level key/value separator explicitly starts its value and nested `{}` / `[]` depth handling is unchanged
+        - added parser/claim parity coverage for the exact mid-plain-scalar quote carrier in both tagged key orders, plus two inert ordinary flow mappings that the authoritative parser and lexical claim both decline
+        - added an in-memory LSP regression that opens valid `{types: {title: string}, kind: schema}`, changes it to `{types: {title: foo-"bar}, kind: schema}`, and proves current diagnostics plus last-good completion and hover
+        - focused Level-1 verification passed:
+        - `cargo nextest run --color never -p dmls -E 'test(envelope_claim_agrees_with_parser_on_flow_nested_plain_scalar_quote) + test(meta_schema_standalone_flow_types_first_retains_last_good_across_plain_quote_edit)'` — 2 passed
+        - broadened envelope/flow regression slice — 7 passed
+- work completed for 'flow-style-nested-plain-scalar-last-good-state' at 17:32:35-07:00
+        - `just build` passed for `darkmatter`, `darkmatter-cli`, and `dmls`
+        - `just test` passed: Darkmatter 5,932/5,932, CLI 561/561, and DMLS 629/629 (three skipped); one unrelated preflight test passed its configured retry after a first-attempt timeout
+        - `just lint` passed for all three Darkmatter-area packages, including the read-only formatting checks; no formatting command was run
+        - `git diff --check` passed
+        - GitNexus `detect_changes` reported Low risk and no affected execution flows for the dirty worktree; its eight-file scope also includes the preserved review-cycle-9 changes that predated this finding
+        - implementation files changed for this finding: `darkmatter/dmls/src/overlay/schema.rs`, `darkmatter/dmls/tests/lsp_session.rs`, and this log
+        - the one review finding was fixed; nothing was deferred
+
+### Successful Completion
+
+The implementation of review cycle 10 has completed successfully in 13 minutes. During this implementation all 1 review finding was evaluated to see if it could be fixed as a part of this implementation cycle: 1 was fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+- no performance measurement was required, so `deferred_perf_measurement` remains `false`
+- the files changed during this implementation cycle are:
+        - `darkmatter/dmls/src/overlay/schema.rs`
+        - `darkmatter/dmls/tests/lsp_session.rs`
+        - `darkmatter/features/2026-07-13-meta-schema/review-10.md`
         - `darkmatter/features/2026-07-13-meta-schema/log.md`

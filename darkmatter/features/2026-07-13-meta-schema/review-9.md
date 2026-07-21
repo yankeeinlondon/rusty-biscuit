@@ -9,6 +9,7 @@ implemented: true
 implemented_by: codex/default
 description: "A **feature** review of `2026-07-13-meta-schema/spec.md`"
 feature: 2026-07-13-meta-schema/review-9.md
+next: 2026-07-13-meta-schema/review-10.md
 previous: 2026-07-13-meta-schema/review-8.md
 ---
 
