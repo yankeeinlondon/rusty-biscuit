@@ -206,6 +206,111 @@ fn test_clean_subcommand_preserves_nested_child_after_additional_item_paragraph(
 }
 
 #[test]
+fn test_clean_subcommand_preserves_additional_paragraphs_inside_blockquoted_items() {
+    let fixtures = [
+        (
+            "> - Parent first paragraph.\n>\n>   Second paragraph alpha beta gamma delta.\n>\n>   - Child item alpha beta.\n",
+            &[
+                "clean",
+                "--indent",
+                "4",
+                "--fixed-width",
+                "24",
+                "-",
+            ][..],
+            "> - Parent first\n>   paragraph.\n> \n>   Second paragraph\n>   alpha beta gamma\n>   delta.\n> \n>     - Child item alpha\n>       beta.\n",
+        ),
+        (
+            "> > 1. Parent first paragraph.\n> >\n> >    Second paragraph alpha beta gamma delta.\n> >\n> >    - Child item alpha beta.\n",
+            &[
+                "clean",
+                "--compact",
+                "--indent",
+                "2",
+                "--fixed-width",
+                "24",
+                "-",
+            ][..],
+            "> > 1. Parent first\n> >    paragraph.\n> > \n> >    Second paragraph\n> >    alpha beta gamma\n> >    delta.\n> > \n> >    - Child item\n> >      alpha beta.\n",
+        ),
+        (
+            "> - [ ] Parent first paragraph.\n>\n>   Second café 🙂 alpha beta gamma delta.\n>\n>   1. Child item alpha beta.\n",
+            &[
+                "clean",
+                "--loose",
+                "--indent",
+                "4",
+                "--fixed-width",
+                "24",
+                "-",
+            ][..],
+            "> - [ ] Parent first\n>       paragraph.\n> \n>   Second café 🙂 alpha\n>   beta gamma delta.\n> \n>     1. Child item\n>        alpha beta.\n",
+        ),
+    ];
+
+    for (source, args, expected) in fixtures {
+        let first = md_cmd()
+            .args(args)
+            .write_stdin(source)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        assert_eq!(String::from_utf8(first).unwrap(), expected);
+        for line in expected.lines() {
+            assert!(UnicodeWidthStr::width(line) <= 24, "line exceeded width: {line:?}");
+        }
+
+        let second = md_cmd()
+            .args(args)
+            .write_stdin(expected)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        assert_eq!(String::from_utf8(second).unwrap(), expected);
+    }
+}
+
+#[test]
+fn test_clean_subcommand_preserves_markers_in_protected_bodies() {
+    let fixtures = [
+        (
+            "<div>\n* literal html\n</div>\n\n- Actual item.\n",
+            "<div>\n* literal html\n</div>\n\n- Actual item.\n",
+        ),
+        (
+            "::shell-block\n* literal shell\n::end-block\n\n- Actual item.\n",
+            "::shell-block\n\n* literal shell\n  ::end-block\n- Actual item.\n",
+        ),
+    ];
+
+    for (source, expected) in fixtures {
+        let first = md_cmd()
+            .args(["clean", "--fixed-width", "24", "-"])
+            .write_stdin(source)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        assert_eq!(String::from_utf8(first).unwrap(), expected);
+
+        let second = md_cmd()
+            .args(["clean", "--fixed-width", "24", "-"])
+            .write_stdin(expected)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        assert_eq!(String::from_utf8(second).unwrap(), expected);
+    }
+}
+
+#[test]
 fn test_clean_subcommand_preserves_nested_lists_inside_blockquotes() {
     let fixtures = [
         (
@@ -268,6 +373,56 @@ fn test_clean_subcommand_preserves_nested_lists_inside_blockquotes() {
             .stdout
             .clone();
         assert_eq!(String::from_utf8(fixed_second).unwrap(), fixed);
+    }
+}
+
+#[test]
+fn test_clean_subcommand_preserves_quoted_marker_looking_indented_code() {
+    let fixtures = [
+        (
+            "> - Parent.\n>\n>       - literal code\n>\n> - Later sibling.\n",
+            "> - Parent.\n> \n>       - literal code\n> \n> \n> - Later sibling.\n",
+        ),
+        (
+            "> 1. Parent.\n>\n>       1. literal code\n>\n> 2. Later sibling.\n",
+            "> 1. Parent.\n> \n>     1. literal code\n> 2. Later sibling.\n",
+        ),
+        (
+            "> > - Parent.\n> >\n> >       - literal code\n> >\n> > - Later sibling.\n",
+            "> > - Parent.\n> > \n> >       - literal code\n> > \n> > \n> > - Later sibling.\n",
+        ),
+        (
+            "> > 1. Parent.\n> >\n> >       1. literal code\n> >\n> > 2. Later sibling.\n",
+            "> > 1. Parent.\n> > \n> >     1. literal code\n> > 2. Later sibling.\n",
+        ),
+    ];
+
+    for (source, expected) in fixtures {
+        for args in [
+            &["clean", "-"][..],
+            &["clean", "--indent", "4", "-"][..],
+            &["clean", "--fixed-width", "24", "-"][..],
+        ] {
+            let output = md_cmd()
+                .args(args)
+                .write_stdin(source)
+                .assert()
+                .success()
+                .get_output()
+                .stdout
+                .clone();
+            assert_eq!(String::from_utf8(output).unwrap(), expected);
+        }
+
+        let second = md_cmd()
+            .args(["clean", "--fixed-width", "24", "-"])
+            .write_stdin(expected)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        assert_eq!(String::from_utf8(second).unwrap(), expected);
     }
 }
 
@@ -355,6 +510,54 @@ fn test_clean_subcommand_fixed_width_treats_ten_digit_ordinal_as_prose() {
 }
 
 #[test]
+fn test_clean_subcommand_compact_preserves_ten_digit_prose_boundary() {
+    let source = concat!(
+        "123456789. nine-digit item\n",
+        "\n",
+        "- first unordered item\n",
+        "\n",
+        "1) first ordered item\n",
+        "\n",
+        "1234567890. ten-digit prose\n",
+        "\n",
+        "+ second unordered item\n",
+        "\n",
+        "2) second ordered item\n"
+    );
+    let expected = concat!(
+        "123456789. nine-digit item\n",
+        "- first unordered item\n",
+        "1. first ordered item\n",
+        "\n",
+        "1234567890. ten-digit prose\n",
+        "\n",
+        "+ second unordered item\n",
+        "2. second ordered item\n"
+    );
+
+    let first = md_cmd()
+        .args(["clean", "--compact", "-"])
+        .write_stdin(source)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let first = String::from_utf8(first).unwrap();
+    assert_eq!(first, expected);
+
+    let second = md_cmd()
+        .args(["clean", "--compact", "-"])
+        .write_stdin(first.clone())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(String::from_utf8(second).unwrap(), first);
+}
+
+#[test]
 fn test_clean_subcommand_fixed_width_keeps_reference_definitions_intact() {
     let source = concat!(
         "- Before [label][ref] alpha beta gamma delta.\n",
@@ -425,39 +628,41 @@ fn test_clean_subcommand_indent_eight_preserves_structure() {
         ">   - [x] Task child alpha beta gamma delta epsilon.\n"
     );
     let expected_cleaned = concat!(
-        "- Parent first paragraph alpha beta gamma delta.\n",
+        "-    Parent first paragraph alpha beta gamma delta.\n",
         "        \n",
-        "  Second paragraph alpha beta gamma delta epsilon.\n",
+        "     Second paragraph alpha beta gamma delta epsilon.\n",
         "\n",
-        "     - Child item alpha beta gamma delta epsilon.\n",
+        "        - Child item alpha beta gamma delta epsilon.\n",
         "\n",
-        "> - Quote parent alpha beta gamma delta.\n",
-        ">      - Quote child alpha beta gamma delta epsilon.\n",
+        "> -    Quote parent alpha beta gamma delta.\n",
+        ">         - Quote child alpha beta gamma delta epsilon.\n",
         "\n",
-        "> - [ ] Task parent alpha beta gamma delta.\n",
-        ">      - [x] Task child alpha beta gamma delta epsilon.\n"
+        "> -    [ ] Task parent alpha beta gamma delta.\n",
+        ">         - [x] Task child alpha beta gamma delta epsilon.\n"
     );
     let expected_fixed = concat!(
-        "- Parent first paragraph alpha\n",
-        "  beta gamma delta.\n",
+        "-    Parent first paragraph\n",
+        "     alpha beta gamma delta.\n",
         "        \n",
-        "  Second paragraph alpha beta\n",
-        "  gamma delta epsilon.\n",
+        "     Second paragraph alpha\n",
+        "     beta gamma delta epsilon.\n",
         "\n",
-        "     - Child item alpha beta\n",
-        "       gamma delta epsilon.\n",
+        "        - Child item alpha\n",
+        "          beta gamma delta\n",
+        "          epsilon.\n",
         "\n",
-        "> - Quote parent alpha beta\n",
-        ">   gamma delta.\n",
-        ">      - Quote child alpha\n",
-        ">        beta gamma delta\n",
-        ">        epsilon.\n",
+        "> -    Quote parent alpha beta\n",
+        ">      gamma delta.\n",
+        ">         - Quote child alpha\n",
+        ">           beta gamma delta\n",
+        ">           epsilon.\n",
         "\n",
-        "> - [ ] Task parent alpha beta\n",
-        ">       gamma delta.\n",
-        ">      - [x] Task child alpha\n",
-        ">            beta gamma delta\n",
-        ">            epsilon.\n"
+        "> -    [ ] Task parent alpha\n",
+        ">          beta gamma delta.\n",
+        ">         - [x] Task child\n",
+        ">               alpha beta\n",
+        ">               gamma delta\n",
+        ">               epsilon.\n"
     );
 
     let cleaned = md_cmd()
@@ -493,6 +698,45 @@ fn test_clean_subcommand_indent_eight_preserves_structure() {
         .stdout
         .clone();
     assert_eq!(String::from_utf8(second).unwrap(), fixed);
+}
+
+#[test]
+fn test_clean_subcommand_indent_eight_uses_exact_nested_columns() {
+    let cases = [
+        ("- Parent\n  - Child\n", "-    Parent\n        - Child\n"),
+        ("1. Parent\n   1. Child\n", "1.    Parent\n        1. Child\n"),
+        (
+            "- [ ] Parent\n  - [x] Child\n",
+            "-    [ ] Parent\n        - [x] Child\n",
+        ),
+        (
+            "- Parent\n  - Child\n    - Grandchild\n",
+            "-    Parent\n        -    Child\n                - Grandchild\n",
+        ),
+    ];
+
+    for (source, expected) in cases {
+        let first = md_cmd()
+            .args(["clean", "-", "--indent", "8", "--fixed-width", "80"])
+            .write_stdin(source)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let first = String::from_utf8(first).unwrap();
+        assert_eq!(first, expected, "source: {source:?}");
+
+        let second = md_cmd()
+            .args(["clean", "-", "--indent", "8", "--fixed-width", "80"])
+            .write_stdin(first.as_str())
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        assert_eq!(String::from_utf8(second).unwrap(), first);
+    }
 }
 
 #[test]
