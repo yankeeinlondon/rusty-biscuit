@@ -8,7 +8,7 @@ Written 2026-07-17 during Phase 13; updated after review-3 findings 1-5,
 review-5 findings 1-6, review-6 findings 1-5, review-7 findings 1-4,
 review-8 findings 1-5, review-9 findings 1-5,
 review-10 findings 1-6, review-11 findings 1-4, and
-**review-15 finding 2 (current)**.
+**review-17 finding 1 (current)**.
 
 Review-10 finding 6 found this document two reviews behind its own tree: the
 header claimed review-8, the body had absorbed only part of review-9, AC 25 was
@@ -41,11 +41,11 @@ evidence that was fully passing at that revision. That review-10 evidence is
 retained below as historical evidence; it does not cover the Level 2 rows added
 by review 11.
 
-**Current review-15 gate.** Level 1 and lint are green, but the managed host
-could not create either tmux or WezTerm backend resources, so the Level 2 run
-reached no feature assertion. In particular, none of review 11's five new rows
-ran. The mapping remains complete, but production-readiness evidence does not;
-see the [current gate record](#recorded-gate-results-2026-07-20-macos-host-review-15).
+**Current review-17 gate.** The five review-11 rows and all 94 rows in the
+proxy-with Level 2 matrix were selected explicitly. The managed host denied
+tmux Unix-socket creation and access before every feature assertion. The
+mapping remains complete, but production-readiness evidence does not; see the
+[current gate record](#recorded-gate-results-2026-07-20-macos-managed-host-review-17-finding-1).
 
 | | Count | Which |
 |---|---:|---|
@@ -627,7 +627,45 @@ both. They are kept for the trail, not as live items.
    raises no proxy hand-off at all — see [the two paths](#the-surfaced-coordinator-versus-the-direct-provider-wrappers)); what is
    removed is a constant that contradicted its own flags.
 
-## Recorded gate results (2026-07-20, macOS host, review 15)
+## Recorded gate results (2026-07-20, macOS managed host, review 17 finding 1)
+
+Run from the `claudine/` package area at revision
+`5019f6e5f195e67b888b631ba9571333ac34dd8c`. Sniff found tmux 3.7b at
+`/opt/homebrew/bin/tmux`, but the managed host denied creation of an isolated
+tmux socket and denied access to the default socket. Both test runs therefore
+stopped at the real-terminal backend boundary before any feature assertion.
+
+The five review-11 rows were selected with this exact command:
+
+```sh
+BISCUIT_L2_THREADS=5 just test-l2 level2_lifecycle_direct_compose_delivers_a_readable_system_prompt_file level2_lifecycle_retry_to_an_unavailable_provider_matches_direct_selection level2_lifecycle_retry_keeps_an_interpolated_mcp_tag_at_child_launch level2_lifecycle_switch_surfaces_unsupported_system_prompt_warning level2_lifecycle_switch_surfaces_unsupported_sandbox_warning
+```
+
+Nextest run `a33d8eac-9392-466c-8b5c-0e128c9afca2` exited 100: **0 passed,
+5 failed, and 2331 skipped**. All five rows exhausted their four attempts while
+tmux reported `Operation not permitted` for `/private/tmp/tmux-501/default`.
+
+The existing proxy-with matrix was selected with this exact command:
+
+```sh
+BISCUIT_L2_THREADS=8 just test-l2 level2_lifecycle_ --test level2_lifecycle_control --no-fail-fast
+```
+
+Nextest run `6dbf5944-06e3-4d51-9a1b-3167987c6748` exited 100: **0 passed,
+94 failed, and 0 skipped within the selected binary**. Every row failed at the
+same tmux boundary. The binary-scoped command intentionally excluded the 11
+`level2_lifecycle_dispatch` rows, the 4 `level2_lifecycle_loop` rows, and all
+non-lifecycle Level 2 rows because they are outside the proxy-with matrix. A
+broader diagnostic prefix run confirmed that the 15 excluded lifecycle rows
+hit the same backend denial; it is not acceptance evidence for this feature.
+
+An isolated-socket probe using a task-owned directory under `/private/tmp`
+failed with `Operation not permitted` while creating the socket, confirming
+that changing `TMUX_TMPDIR` cannot make this host usable. No production or test
+change is justified by these backend-only failures. A reachable tmux host or
+the Linux CI runner must still record both selections green.
+
+## Superseded gate results (2026-07-20, macOS host, review 15)
 
 Run from the `claudine/` package area in the review-15 working tree at
 `2a01dabe74bf`. Level 1 and lint are green. Level 2 is **not** green: the
