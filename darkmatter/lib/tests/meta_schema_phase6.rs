@@ -4,7 +4,8 @@ use std::path::Path;
 
 use darkmatter::markdown::schemas::{
     SchemaDeclaration, SchemaError, SchemaReferenceKind, SchemaSourcePath, SchemaSpanKind,
-    SimplifiedSchema, StandaloneSchemaEnvelope, parse_standalone_schema_document,
+    SimplifiedSchema, StandaloneSchemaEnvelope, parse_schema_declaration,
+    parse_standalone_schema_document,
 };
 
 #[test]
@@ -120,6 +121,135 @@ fn standalone_explicit_mapping_pairs_preserve_semantics_and_project_spans() {
 // unchecked `SchemaArm::FileRef` — so an invalid or remote arm was silently
 // accepted — while rejecting every scalar payload outright, so a valid
 // whole-file reference was reported as a malformed document.
+
+#[test]
+fn compact_explicit_mapping_pair_projects_root_union_spans() {
+    let explicit = concat!(
+        "$schema:\n",
+        "  - ? title\n",
+        "    : string\n",
+        "  - ./other.yaml\n",
+    );
+    let implicit = "$schema:\n  - title: string\n  - ./other.yaml\n";
+    let explicit_document =
+        parse_standalone_schema_document(explicit, Path::new("/w/explicit.yaml"))
+            .expect("compact explicit mapping pair is valid root-union authoring")
+            .expect("pure envelope claims the document");
+    let implicit_document =
+        parse_standalone_schema_document(implicit, Path::new("/w/implicit.yaml"))
+            .expect("implicit root union")
+            .expect("pure envelope claims the document");
+
+    assert_eq!(explicit_document.declaration, implicit_document.declaration);
+    let arm = SchemaSourcePath::root().union_arm(0);
+    let title = arm.property("title");
+    let arm_span = explicit_document
+        .source_map
+        .spans(&arm, SchemaSpanKind::UnionArm)
+        .first()
+        .expect("root union arm span");
+    assert_eq!(&explicit[arm_span.clone()], "title\n    : string");
+    let key = explicit_document
+        .source_map
+        .spans(&title, SchemaSpanKind::MappingKey)
+        .first()
+        .expect("explicit key span");
+    assert_eq!(&explicit[key.clone()], "title");
+    let definition = explicit_document
+        .source_map
+        .spans(&title, SchemaSpanKind::Definition)
+        .first()
+        .expect("explicit value span");
+    assert_eq!(&explicit[definition.clone()], "string");
+    let reference = explicit_document
+        .source_map
+        .spans(
+            &SchemaSourcePath::root().union_arm(1),
+            SchemaSpanKind::FileReference,
+        )
+        .first()
+        .expect("reference arm span");
+    assert_eq!(&explicit[reference.clone()], "./other.yaml");
+}
+
+#[test]
+fn compact_explicit_mapping_pair_projects_property_union_spans() {
+    let explicit = concat!(
+        "kind: schema\n",
+        "types:\n",
+        "  choice:\n",
+        "    - ? nested\n",
+        "      : string\n",
+        "    - number\n",
+    );
+    let implicit = concat!(
+        "kind: schema\n",
+        "types:\n",
+        "  choice:\n",
+        "    - nested: string\n",
+        "    - number\n",
+    );
+    let explicit_document =
+        parse_standalone_schema_document(explicit, Path::new("/w/explicit.yaml"))
+            .expect("compact explicit mapping pair is valid property-union authoring")
+            .expect("tagged envelope claims the document");
+    let implicit_document =
+        parse_standalone_schema_document(implicit, Path::new("/w/implicit.yaml"))
+            .expect("implicit property union")
+            .expect("tagged envelope claims the document");
+
+    assert_eq!(explicit_document.declaration, implicit_document.declaration);
+    let arm = SchemaSourcePath::root().property("choice").union_arm(0);
+    let nested = arm.property("nested");
+    let arm_span = explicit_document
+        .source_map
+        .spans(&arm, SchemaSpanKind::UnionArm)
+        .first()
+        .expect("property union arm span");
+    assert_eq!(&explicit[arm_span.clone()], "nested\n      : string");
+    let key = explicit_document
+        .source_map
+        .spans(&nested, SchemaSpanKind::MappingKey)
+        .first()
+        .expect("nested key span");
+    assert_eq!(&explicit[key.clone()], "nested");
+    let definition = explicit_document
+        .source_map
+        .spans(&nested, SchemaSpanKind::Definition)
+        .first()
+        .expect("nested definition span");
+    assert_eq!(&explicit[definition.clone()], "string");
+    let type_keyword = explicit_document
+        .source_map
+        .spans(&nested, SchemaSpanKind::TypeKeyword)
+        .first()
+        .expect("nested type span");
+    assert_eq!(&explicit[type_keyword.clone()], "string");
+}
+
+#[test]
+fn source_aware_v1_presentation_boundary_is_closed() {
+    let source = "$schema: |\n  ./other.yaml\n";
+    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(source).expect("valid YAML fixture");
+    let payload = yaml
+        .as_mapping()
+        .and_then(|mapping| mapping.get("$schema"))
+        .expect("schema payload");
+    assert!(
+        parse_schema_declaration(payload).is_ok(),
+        "the source-free semantic authority accepts the block-scalar value"
+    );
+
+    let error = parse_standalone_schema_document(source, Path::new("/w/schema.yaml"))
+        .expect_err("block scalars are outside the frozen v1 source-aware grammar");
+    assert!(matches!(error, SchemaError::SchemaDocument { .. }), "{error:?}");
+    assert!(
+        error
+            .to_string()
+            .contains("could not project SimplifiedSchema expression spans through YAML source"),
+        "the unsupported presentation must fail at the documented projection boundary: {error}"
+    );
+}
 
 /// A scalar payload is a whole-file reference: a valid, active standalone
 /// schema document that carries no inline schema.

@@ -1,4 +1,15 @@
 //! Source-aware projection for passive SimplifiedSchema parsers.
+//!
+//! ## V1 presentation boundary
+//!
+//! The locator covers the SimplifiedSchema authoring presentations exercised by
+//! the shipped schema corpus: plain, single-quoted, and double-quoted scalars;
+//! block and flow sequences; implicit scalar-key block and flow mappings;
+//! explicit scalar-key block mapping pairs in mapping roots or compact sequence
+//! items; and the mapping-value anchors and scalar aliases used by that corpus.
+//! This is not a general YAML concrete-syntax tree. Other YAML presentations
+//! accepted by `serde_yaml_ng` are outside the v1 source-map contract and may
+//! return a projection error even when semantic parsing succeeds.
 
 use std::{collections::BTreeMap, ops::Range};
 
@@ -452,8 +463,15 @@ impl BlockLocator<'_> {
             self.next += 1;
             let item_start = line.content_start + relative;
             if item_start < line.end {
-                if mapping_separator(&self.source[item_start..line.end]).is_some() {
-                    let first = self.pair(item_start..line.end, indent + 2)?;
+                let item_content = &self.source[item_start..line.end];
+                if explicit_indicator_content(item_content, '?').is_some()
+                    || mapping_separator(item_content).is_some()
+                {
+                    let first = if explicit_indicator_content(item_content, '?').is_some() {
+                        self.explicit_pair(item_start..line.end, indent + 2)?
+                    } else {
+                        self.pair(item_start..line.end, indent + 2)?
+                    };
                     let mut pairs = vec![first];
                     while let Some(next) = self.lines.get(self.next).cloned() {
                         if next.indent != indent + 2
@@ -461,8 +479,18 @@ impl BlockLocator<'_> {
                         {
                             break;
                         }
-                        self.next += 1;
-                        pairs.push(self.pair(next.content_start..next.end, indent + 2)?);
+                        let next_content = &self.source[next.content_start..next.end];
+                        if explicit_indicator_content(next_content, '?').is_some() {
+                            self.next += 1;
+                            pairs.push(
+                                self.explicit_pair(next.content_start..next.end, indent + 2)?,
+                            );
+                        } else if mapping_separator(next_content).is_some() {
+                            self.next += 1;
+                            pairs.push(self.pair(next.content_start..next.end, indent + 2)?);
+                        } else {
+                            break;
+                        }
                     }
                     items.push(located_mapping(pairs)?);
                 } else {
@@ -599,6 +627,9 @@ fn located_mapping(pairs: Vec<LocatedPair>) -> Result<LocatedValue, SchemaError>
 fn locate_inline(source: &str, range: Range<usize>) -> Result<LocatedValue, SchemaError> {
     let range = trim_range(source, range);
     let raw = &source[range.clone()];
+    if is_block_scalar_header(raw) {
+        return Err(projection_error());
+    }
     if raw.starts_with('[') {
         let end = matching_delimiter(source, range.start, b'[', b']')
             .filter(|end| *end + 1 == range.end)
@@ -650,6 +681,13 @@ fn locate_inline(source: &str, range: Range<usize>) -> Result<LocatedValue, Sche
         span: range.start..range.start + consumed,
         kind: LocatedKind::Scalar(scalar),
     })
+}
+
+fn is_block_scalar_header(source: &str) -> bool {
+    let header = source.split('#').next().unwrap_or(source).trim();
+    let mut chars = header.chars();
+    matches!(chars.next(), Some('|' | '>'))
+        && chars.all(|character| matches!(character, '+' | '-' | '1'..='9'))
 }
 
 fn sequence_content(content: &str) -> Option<usize> {
