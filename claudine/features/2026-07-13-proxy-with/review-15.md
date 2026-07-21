@@ -8,6 +8,7 @@ implemented: true
 description: A **feature** review of `2026-07-13-proxy-with/spec.md`
 feature: 2026-07-13-proxy-with/review-15.md
 previous: 2026-07-13-proxy-with/review-14.md
+next: 2026-07-13-proxy-with/review-16.md
 ---
 
 # Review 15: Proxy With
