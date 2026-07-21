@@ -147,7 +147,7 @@ jobs:
       # The example materializes the same synthetic fixtures the Criterion
       # benches use, so a counter here and a timing there describe one workload.
       # No `--features`: this matches the harness the archived baselines in
-      # `phases/01-work-accounting/spec.md` were captured with, and changing the
+      # `phases/_completed/01-work-accounting/spec.md` were captured with, and changing the
       # feature set would change what the counters mean.
       - name: Collect work counts
         shell: bash
