@@ -1,6 +1,6 @@
 ---
 clarified: "claude/claude-opus-4-8"
-review_iterations: 2
+review_iterations: 3
 ---
 # Invalid Frontmatter
 

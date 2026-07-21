@@ -142,3 +142,79 @@ runtime evidence.
 
 These gates prove the corrected benchmark vehicle still compiles, its load-independent hot-path
 invariants hold, and the benchmark target is lint-clean. They do not satisfy the timed acceptance.
+
+## Review 3 Finding 3 — performance and cross-platform acceptance
+
+- **Maps back to:** *"High — Performance and cross-platform acceptance are still explicitly
+  open"* in [`review-3.md`](./review-3.md), where the finding is explicitly marked
+  `DECISION: DEFERRED` and non-blocking.
+- **Evaluated during:** implementation cycle 3 on 2026-07-21.
+
+### Review 3 disposition
+
+The timing measurement remains deferred. Sniff identified macOS 26.5.2 on an Apple M4 Max with 16
+physical and 16 logical cores and the linked `darkmatter` worktree. At 08:52 local time, the host
+reported load averages of **26.27 / 19.37 / 17.79** and aggregate process CPU use of approximately
+**228.1%**. The host was attached to AC power with normal power mode selected, but the one-minute
+load still exceeded the core count and was not admissible for a low-noise Criterion comparison.
+
+The candidate was also not isolated. Sniff reported the current worktree dirty with 15 changed
+paths; `git status` independently showed 13 modified and 2 untracked paths. The registered
+`/private/tmp/dmbench/{before,base,after}` directories existed but were no longer Git repositories,
+so they could not establish revision identity or supply an auditable main/branch/main bracket.
+Existing `target/criterion` samples were left untouched and were not accepted as Review 3 evidence
+because they do not carry a retained three-run bracket for the current candidate. No Criterion
+timing was run and no performance number is claimed.
+
+The bounded structural check
+`cargo check -p darkmatter --bench clean_hot_paths --color never` passed in 6.09 seconds. Source
+inspection confirmed that the benchmark continues to register both requirement-matched cases:
+`clean_hot_paths/no_frontmatter/full_pipeline` and
+`clean_hot_paths/clean_frontmatter/full_pipeline`. This proves the vehicle compiles after the Review
+3 functional changes; it is not timing evidence.
+
+Cross-platform acceptance also remains open. The cycle has scoped macOS runtime evidence for both
+affected package areas, but no completed Linux or Windows run for the current candidate was found in
+the feature records. The public GitHub Actions API returned zero `darkmatter-tests` runs for branch
+`darkmatter`, and the Review 3 changes are uncommitted, so no remote commit check can represent this
+candidate. The workflow definition's Linux/Windows/macOS matrix is configuration evidence only;
+Windows is still soft-fail, and no equivalent three-OS biscuit-file area run was retained. Therefore
+the combined cross-platform row is not green.
+
+### Exact rerun procedure
+
+1. Choose exact, committed baseline and candidate revisions. Create three clean worktrees for
+   baseline-before, candidate, and baseline-after; record each full commit ID and prove each
+   worktree has an empty status before running anything.
+2. Use a dedicated macOS host on AC power with normal power mode, no concurrent builds or agent
+   sessions, and sustained load comfortably below the logical-core count. Record Sniff OS/hardware/
+   worktree output, power state, load averages, compiler version, and aggregate process CPU before
+   and after every run.
+3. Create a new absolute `CARGO_TARGET_DIR` used only by this bracket. From baseline-before, run:
+
+        CARGO_TARGET_DIR=/absolute/review3-target cargo bench -p darkmatter --bench clean_hot_paths -- full_pipeline --save-baseline review3-main-before
+
+4. From the candidate worktree, use the same target directory and run:
+
+        CARGO_TARGET_DIR=/absolute/review3-target cargo bench -p darkmatter --bench clean_hot_paths -- full_pipeline --baseline review3-main-before
+
+   Immediately retain the complete Criterion tree and terminal output under a candidate-labeled
+   artifact directory before the third run can replace any `new` samples.
+5. From baseline-after, use the same target directory and run:
+
+        CARGO_TARGET_DIR=/absolute/review3-target cargo bench -p darkmatter --bench clean_hot_paths -- full_pipeline --baseline review3-main-before
+
+   Retain this complete Criterion tree and terminal output separately.
+6. Reject the bracket if the two baseline runs disagree beyond their confidence intervals or show
+   material load, power, or thermal drift. Otherwise record the confidence interval, median,
+   percentage change, p-value, and no-regression verdict separately for the no-frontmatter and
+   clean-frontmatter full-pipeline cases. Do not aggregate the two cases.
+7. On clean macOS, Linux, and Windows hosts or CI runners at the same candidate commit, retain the
+   successful scoped runtime outputs for both affected package areas:
+
+        cd biscuit-file && just test
+        cd darkmatter && just test
+
+   Retain package-area lint/build output when required by the CI gate, but do not substitute a
+   workflow definition, cross-compilation, or a soft-failed job for successful native runtime
+   execution.

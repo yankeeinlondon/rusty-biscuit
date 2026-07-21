@@ -4,6 +4,7 @@ feature: 2026-07-14-invalid-frontmatter
 deferred_perf_measurement: true
 implementation_1: "2026-07-20T23:38:36-07:00"
 implementation_2: "2026-07-21T00:45:59-07:00"
+implementation_3: "2026-07-21T08:30:12-07:00"
 ---
 
 # Log — Invalid Frontmatter
@@ -407,3 +408,87 @@ The implementation of review cycle 2 has completed successfully in 33 minutes an
 - GitNexus `detect_changes` reports CRITICAL aggregate worktree risk across 104 changed indexed symbols and 18 affected processes; the report includes unrelated pre-existing changes, while this cycle's shared production change is the explicitly reviewed frontmatter boundary
 
 The files changed by this implementation are `darkmatter/lib/src/markdown/frontmatter.rs`, `darkmatter/cli/src/commands/clean.rs`, `darkmatter/cli/src/commands/clean/frontmatter_repair.rs`, `darkmatter/cli/tests/clean_frontmatter.rs`, `darkmatter/cli/tests/clean_json.rs`, `darkmatter/docs/cli/clean.md`, `darkmatter/cli/README.md`, `biscuit-file/lib/README.md`, `biscuit-file/README.md`, `darkmatter/features/2026-07-14-invalid-frontmatter/deferred-performance.md`, this log, and the Review 2 metadata.
+
+## Implementation of Review Findings #3
+
+> **started at:** 2026-07-21T08:30:12-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-14-invalid-frontmatter/review-3.md'
+- this is iteration 3 of the review-to-implement cycle
+
+### Finding 1 — High: JSON spans stop indexing the authored document after an earlier repair
+
+- starting the work on 'high-json-authored-coordinate-mapping-after-stacked-repairs' at 08:32:28
+        - loaded the required `darkmatter`, `rust`, `rust-testing`, and `sniff` skills before tracing the repair coordinate spaces and selecting verification scope
+        - Sniff identified the directly affected package areas as `biscuit-file` and `darkmatter`; this finding changes `darkmatter` and `darkmatter-cli`, with `dmls` retained as the downstream consumer to check for the shared span helper
+        - GitNexus rated both edited production surfaces LOW risk: `repair_frontmatter` has 1 direct and 4 total upstream symbols across 2 CLI processes; `line_col_of_offset` has 2 direct consumers and no affected production process
+        - reproduced the review defect: after quoting `@daily-report`, the later `1.20` schema diagnostic and repair were shifted two bytes past the authored scalar and could extend beyond authored frontmatter
+        - added a pass-composing reverse coordinate map that projects every rescan/schema diagnostic, candidate repair, and applied repair through all earlier accepted edit sets before retaining it
+        - spans landing wholly in synthetic replacement text conservatively project to the authored range that the replacement superseded; unchanged regions retain exact byte coordinates after cumulative length deltas
+        - corrected the shared byte line/column helper to recognize LF, CRLF, and lone CR without splitting CRLF into two line breaks; its behavior documentation was updated with the expanded contract
+        - added Level-1 golden coverage for a stacked length-changing syntax repair plus later syntax/schema artifacts, and for schema diagnostics and applied repairs over CRLF and lone-CR authored documents
+        - focused verification passed: all 4 `line_col_of_offset` unit tests and all 19 `darkmatter-cli --test clean_json` tests
+        - full `biscuit-file` package-area verification passed via `just test`: 624 library tests and 61 CLI tests passed; `just lint` also passed for both crates
+        - the full Darkmatter `just test` gate exceeded the non-interactive command ceiling and was interrupted after 2,281 of 5,909 library tests had passed with no failures; it was not retried as another unbounded run
+        - complete feature-focused verification passed: all 19 Darkmatter schema-quoting/span-compatibility tests and all 64 `clean_frontmatter`, `clean_json`, and `clean_schema` CLI tests
+        - Darkmatter package-area `just lint` passed for `darkmatter`, `darkmatter-cli`, and the `dmls` downstream crate after Clippy identified and a bounded retry removed three redundant iterator clones
+        - `git diff --check` passed; no write-mode formatting command was run
+        - GitNexus `detect_changes --compare main` reports CRITICAL aggregate shared-worktree risk across 3,719 changed symbols, 682 files, and 77 affected processes; the result includes extensive pre-existing and concurrent work, while this finding's pre-edit symbol impacts were both LOW
+- work completed for 'high-json-authored-coordinate-mapping-after-stacked-repairs' at 08:42:52
+
+### Finding 2 — High: Frontmatter delimiters are rewritten outside the accepted edit set
+
+- starting the work on 'high-frontmatter-delimiter-preservation-and-repair-audit' at 08:44:28
+        - loaded the required `darkmatter`, `rust`, `rust-testing`, and `sniff` skills before inspecting delimiter reconstruction and selecting the affected verification scope
+        - Sniff identified `biscuit-file` and `darkmatter` as the specification's package areas; the changed production path is confined to `darkmatter-cli`, so the exact package selector was used for the complete affected Level-1 suite while the package-area lint retained `darkmatter`, `darkmatter-cli`, and `dmls`
+        - GitNexus rated `splice_frontmatter` HIGH risk: 1 direct caller, 4 total upstream symbols, 2 affected CLI processes, and 3 affected modules; the warning was surfaced before editing and the implementation was deliberately constrained to source-slice reconstruction
+        - replaced canonical delimiter emission with byte-for-byte copies of the authored opening and closing delimiter slices, preserving surrounding whitespace plus LF, CRLF, or lone-CR delimiter terminators
+        - retained YAML-interior normalization as an accepted repair: the line terminator immediately before the closing delimiter remains inside the extracted YAML span, is normalized to LF, and appears in the document-relative `applied` audit
+        - updated the `assemble` contract and public `md clean` documentation so they state that delimiter whitespace and terminators are preserved and only accepted YAML edits or ordinary body cleanup may change other bytes
+        - added Level-1 file, stdin, and `--save` matrices covering trimmed delimiters with LF, CRLF, and lone CR; each asserts the complete emitted or saved document bytes
+        - added a Level-1 JSON matrix for the same three line-ending forms, proving clean LF input has `changed: false` and an empty `applied`, while CRLF/lone-CR YAML-interior normalization has `changed: true`, audits exactly that interior terminator, and never overlaps either delimiter terminator
+        - the first focused run exposed three stale lone-CR expectations from Review 2 that still required canonical LF delimiter terminators; only those assertions were updated to the C-4 preservation contract
+        - focused verification then passed all 51 tests in `clean_frontmatter` and `clean_json`
+        - the complete affected `darkmatter-cli` Level-1 suite passed: 641 tests passed and 71 higher-tier tests were skipped by the canonical filter
+        - Darkmatter package-area `just lint` passed for `darkmatter`, `darkmatter-cli`, and `dmls`; `git diff --check` also passed and no write-mode formatting command was run
+        - GitNexus `detect_changes --compare main` reports CRITICAL aggregate shared-worktree risk across 3,722 changed symbols, 682 files, and 77 affected processes; this includes extensive pre-existing and concurrent work, while this finding's pre-edit `splice_frontmatter` impact was HIGH and its production edit is limited to delimiter reconstruction
+- work completed for 'high-frontmatter-delimiter-preservation-and-repair-audit' at 08:50:26
+
+### Finding 3 — High: Performance and cross-platform acceptance remain explicitly open
+
+- starting the work on 'high-performance-and-cross-platform-acceptance-evidence' at 08:51:00
+        - loaded the required `darkmatter`, `rust`, `rust-testing`, and `sniff` skills, including the Criterion performance guidance, before auditing the retained evidence
+        - honored the review's explicit `DECISION: DEFERRED` and non-blocking disposition; no Rust symbol or test needed to change for this evidence-only finding
+        - Sniff identified macOS 26.5.2 on an Apple M4 Max with 16 physical and 16 logical cores and confirmed the current linked worktree is `darkmatter`
+        - host admission failed: the observed load averages were 26.27 / 19.37 / 17.79 with approximately 228.1% aggregate process CPU, which exceeds a quiet 16-core host; AC power and normal power mode were confirmed but do not remove scheduler contention
+        - worktree admission also failed: Sniff reported the current feature worktree dirty with 15 changed paths, while `git status` independently showed 13 modified and 2 untracked paths; the current candidate is therefore not an isolated retained revision
+        - the registered `/private/tmp/dmbench/{before,base,after}` paths now exist only as non-repository directories, so they cannot supply an auditable main/branch/main bracket; existing `target/criterion` samples likewise lack a retained Review 3 bracket and were not reinterpreted as current evidence
+        - no Criterion timing was run and no performance value or no-regression verdict is claimed
+        - the bounded, load-independent benchmark check passed: `cargo check -p darkmatter --bench clean_hot_paths --color never` completed successfully, and source inspection confirmed both required `no_frontmatter/full_pipeline` and `clean_frontmatter/full_pipeline` cases remain registered
+        - macOS retains successful scoped runtime evidence from Findings 1 and 2, including the full biscuit-file Level-1 suite, feature-focused Darkmatter/CLI suites, and the complete `darkmatter-cli` Level-1 suite
+        - no completed Linux or Windows run for the current candidate was found in feature records; the public GitHub Actions API reported zero `darkmatter-tests` runs for branch `darkmatter`, and the uncommitted Review 3 candidate has no remote commit check record
+        - workflow configuration was treated only as structural evidence: Darkmatter declares full Level-1 Linux and Windows jobs plus a macOS all-target check, Windows remains soft-fail, and no equivalent three-OS biscuit-file area runtime workflow closes the feature row
+        - the combined cross-platform acceptance row remains open because Windows and Linux runtime evidence is absent; no new platform/timing acceptance became green during this finding
+        - `deferred_perf_measurement: true` remains set and [`deferred-performance.md`](./deferred-performance.md) now maps Review 3 Finding 3 to the observed blockers, retained evidence, and exact rerun procedure
+- work completed for 'high-performance-and-cross-platform-acceptance-evidence' at 08:54:09
+
+### Successful Completion
+
+The implementation of review cycle 3 has completed successfully in 25 minutes and 59 seconds. During this implementation all 3 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 1 was deferred (see reasons below):
+
+- **Performance and cross-platform acceptance remain explicitly open**
+        - deferred in accordance with Review 3's explicit non-blocking decision because the 16-core host was not quiet enough for a legitimate Criterion comparison (26.27 / 19.37 / 17.79 load averages and approximately 228.1% aggregate process CPU)
+        - the dirty 15-path shared worktree and non-repository `/private/tmp/dmbench` directories prevented an isolated, retained `main`/branch/`main` bracket
+        - no completed Linux or Windows runtime evidence exists for the current uncommitted candidate; workflow configuration and static portability were not treated as runtime evidence
+        - `deferred_perf_measurement: true` remains set, and the Review 3 evidence plus exact rerun procedure are recorded in [`deferred-performance.md`](./deferred-performance.md)
+- final scoped verification passed:
+        - biscuit-file package-area Level-1 tests: 624 library and 61 CLI tests passed
+        - Darkmatter feature-focused schema/span tests: 19 passed
+        - Darkmatter CLI frontmatter-focused tests: 64 passed after Finding 1; the combined delimiter suite passed 51 of 51 after Finding 2
+        - complete affected `darkmatter-cli` Level-1 suite: 641 passed, with 71 higher-tier tests skipped by the canonical filter
+        - biscuit-file and Darkmatter package-area lint gates passed for `biscuit-file`, `biscuit-file-cli`, `darkmatter`, `darkmatter-cli`, and `dmls`
+        - the clean hot-path benchmark target compiled successfully with both required full-pipeline cases registered
+        - the full Darkmatter `just test` attempt was interrupted at the non-interactive ceiling after 2,281 of 5,909 library tests passed with zero failures; it was not retried unbounded
+- final GitNexus `detect_changes --compare main` reports CRITICAL aggregate shared-worktree risk across 3,722 changed symbols, 682 files, and 77 affected processes; this includes extensive pre-existing changes, while the task-specific pre-edit impact was LOW for Finding 1 and HIGH for the narrowly constrained delimiter reconstruction in Finding 2
+
+The files changed by this implementation are `darkmatter/cli/src/commands/clean.rs`, `darkmatter/cli/src/commands/clean/frontmatter_repair.rs`, `darkmatter/cli/tests/clean_frontmatter.rs`, `darkmatter/cli/tests/clean_json.rs`, `darkmatter/lib/src/markdown/span.rs`, `darkmatter/docs/cli/clean.md`, `darkmatter/features/2026-07-14-invalid-frontmatter/deferred-performance.md`, this log, and the Review 3 metadata.
