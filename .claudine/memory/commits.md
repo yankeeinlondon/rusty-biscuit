@@ -95,6 +95,11 @@ do not belong here.
 
 ## Concurrency
 
+- GitNexus `detect_changes` against a shared staged worktree reports aggregate
+  symbols, processes, and risk for sibling groups as well as the group under review.
+  A HIGH/CRITICAL result for a docs-only group may therefore describe unrelated
+  staged runtime work; review the assigned diff and path-limited commit shape before
+  treating the aggregate rating as group-local risk.
 - Parallel groups must have disjoint paths. If one group introduces a module,
   dependency, or symbol consumed by another group, commit the producer first.
 - Extra staged paths are normal in concurrent batches. Treat them as sibling
