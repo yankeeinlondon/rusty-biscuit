@@ -152,6 +152,27 @@ the network. It also preserves the authored YAML representation: mappings stay
 mappings and sequences stay sequences. Actual `$schema` preparation remains a
 separate operation that may resolve referenced schema files.
 
+#### Source-Aware Presentation Boundary
+
+The semantic parsers operate on YAML values, while DMLS and other diagnostic
+consumers additionally require exact source spans. The v1 source-aware grammar
+is deliberately capped at these authored presentations:
+
+- plain, single-quoted, and double-quoted scalars;
+- block and flow sequences;
+- implicit scalar-key block and flow mappings;
+- explicit scalar-key block mapping pairs, including compact mapping items in
+  block sequences; and
+- mapping-value anchors and scalar aliases used by the shipped schema corpus.
+
+This is a SimplifiedSchema authoring grammar, not a promise to project every
+presentation accepted by a general YAML parser. Tags, block scalars, complex
+keys, explicit flow-mapping keys, directives, and other unlisted YAML
+presentations are outside the v1 source-map and DMLS contract. Authors should
+prefer ordinary `key: value` mappings. Expanding this closed boundary requires
+a separately specified feature; discovering another valid-but-unlisted YAML
+spelling is not a production-readiness regression for these meta-types.
+
 #### Semantic Arrays
 
 The ordinary array postfix remains available. `type-definition[]` and

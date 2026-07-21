@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-97d0b49fb0bdb421
-last_updated: 2026-07-18
+hash: 87f17662fa397abe-d1616037ec05a2a1
+last_updated: 2026-07-20
 ---
 
 # darkmatter
