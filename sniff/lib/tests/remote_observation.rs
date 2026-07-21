@@ -5,7 +5,7 @@ use serial_test::serial;
 use sniff::SniffError;
 use sniff::filesystem::git::{branch_exists_on_remote_at, remote_vendor_at};
 use test_toolkit::EnvGuard;
-use wiremock::matchers::{header, method, path, query_param};
+use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn repository(remote_url: &str) -> (tempfile::TempDir, git2::Repository) {
@@ -215,7 +215,8 @@ async fn ambiguous_discovery_distinguishes_all_six_server_flavors() {
             "/_apis/connectionData",
             serde_json::json!({
                 "instanceId": "9e3f8106-1d6b-4ff8-9a7e-10e1fd9ab06f",
-                "deploymentVersion": "Azure DevOps Server 2022.2"
+                "deploymentId": "880d3b0c-9d90-4c7f-bb08-a2d1e159b4b2",
+                "deploymentType": "OnPremises"
             }),
             "azure_devops",
         ),
@@ -232,6 +233,68 @@ async fn ambiguous_discovery_distinguishes_all_six_server_flavors() {
 
         assert_eq!(discovered_vendor(&server).await.unwrap(), expected);
         assert_eq!(server.received_requests().await.unwrap().len(), 5);
+    }
+}
+
+#[tokio::test]
+async fn azure_discovery_requires_documented_on_premises_identity() {
+    let hosted = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/_apis/connectionData"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "instanceId": "9e3f8106-1d6b-4ff8-9a7e-10e1fd9ab06f",
+            "deploymentId": "880d3b0c-9d90-4c7f-bb08-a2d1e159b4b2",
+            "deploymentType": "Hosted"
+        })))
+        .expect(1)
+        .mount(&hosted)
+        .await;
+    assert!(matches!(
+        discovered_vendor(&hosted).await,
+        Err(SniffError::UnsupportedProvider { .. })
+    ));
+
+    for body in [
+        serde_json::json!({
+            "deploymentId": "880d3b0c-9d90-4c7f-bb08-a2d1e159b4b2",
+            "deploymentType": "OnPremises"
+        }),
+        serde_json::json!({
+            "instanceId": "",
+            "deploymentId": "880d3b0c-9d90-4c7f-bb08-a2d1e159b4b2",
+            "deploymentType": "OnPremises"
+        }),
+        serde_json::json!({
+            "instanceId": "9e3f8106-1d6b-4ff8-9a7e-10e1fd9ab06f",
+            "deploymentType": "OnPremises"
+        }),
+        serde_json::json!({
+            "instanceId": "9e3f8106-1d6b-4ff8-9a7e-10e1fd9ab06f",
+            "deploymentId": 42,
+            "deploymentType": "OnPremises"
+        }),
+        serde_json::json!({
+            "instanceId": "9e3f8106-1d6b-4ff8-9a7e-10e1fd9ab06f",
+            "deploymentId": "880d3b0c-9d90-4c7f-bb08-a2d1e159b4b2",
+            "deploymentType": 2
+        }),
+        serde_json::json!({
+            "instanceId": "9e3f8106-1d6b-4ff8-9a7e-10e1fd9ab06f",
+            "deploymentId": "880d3b0c-9d90-4c7f-bb08-a2d1e159b4b2",
+            "deploymentType": "Unknown"
+        }),
+    ] {
+        let malformed = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/_apis/connectionData"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .expect(1)
+            .mount(&malformed)
+            .await;
+        assert!(matches!(
+            discovered_vendor(&malformed).await,
+            Err(SniffError::UnsupportedProvider { .. })
+        ));
     }
 }
 
@@ -275,53 +338,117 @@ async fn ambiguous_discovery_rejects_conflicting_and_unidentified_signatures() {
 
 #[tokio::test]
 #[serial]
-async fn gitlab_discovery_uses_credentials_without_disclosing_them() {
-    let _github = EnvGuard::remove_safe("GH_TOKEN");
-    let _github_fallback = EnvGuard::remove_safe("GITHUB_TOKEN");
-    let _gitlab_fallback = EnvGuard::remove_safe("GITLAB_PRIVATE_TOKEN");
-    let _gitlab = EnvGuard::set_safe("GITLAB_TOKEN", "valid-discovery-secret");
+async fn ambiguous_discovery_keeps_credentials_host_and_provider_bound() {
+    let global_tokens = [
+        ("GH_TOKEN", "global-github-secret"),
+        ("GITHUB_TOKEN", "global-github-fallback-secret"),
+        ("GITLAB_TOKEN", "global-gitlab-secret"),
+        ("GITLAB_PRIVATE_TOKEN", "global-gitlab-fallback-secret"),
+        ("GITEA_TOKEN", "global-gitea-secret"),
+        ("FORGEJO_TOKEN", "global-forgejo-secret"),
+        ("CODEBERG_TOKEN", "global-codeberg-secret"),
+        ("BITBUCKET_TOKEN", "global-bitbucket-secret"),
+        ("AZURE_DEVOPS_TOKEN", "global-azure-secret"),
+    ];
+    let _global_tokens = global_tokens
+        .iter()
+        .map(|(name, value)| EnvGuard::set_safe(name, value))
+        .collect::<Vec<_>>();
+    let host_variable = "SNIFF_GITLAB_127_2E_0_2E_0_2E_1_TOKEN";
+    let host_token = EnvGuard::set_safe(host_variable, "host-gitlab-secret");
     let valid = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v4/version"))
-        .and(header("PRIVATE-TOKEN", "valid-discovery-secret"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "version": "17.2.0",
-            "revision": "a1b2c3d4"
-        })))
-        .expect(1)
+        .respond_with(|request: &wiremock::Request| {
+            let status = if request.headers.contains_key("private-token") {
+                200
+            } else {
+                401
+            };
+            ResponseTemplate::new(status).set_body_json(serde_json::json!({
+                "version": "17.2.0",
+                "revision": "a1b2c3d4"
+            }))
+        })
+        .expect(2)
         .mount(&valid)
         .await;
     assert_eq!(discovered_vendor(&valid).await.unwrap(), "gitlab");
+    let requests = valid.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 6);
+    let authenticated = requests
+        .iter()
+        .filter(|request| request.headers.contains_key("private-token"))
+        .collect::<Vec<_>>();
+    assert_eq!(authenticated.len(), 1);
+    assert_eq!(authenticated[0].url.path(), "/api/v4/version");
+    assert_eq!(
+        authenticated[0].headers["private-token"].to_str().unwrap(),
+        "host-gitlab-secret"
+    );
+    for request in &requests {
+        assert!(!request.headers.contains_key("authorization"));
+        if request.url.path() != "/api/v4/version"
+            || !request.headers.contains_key("private-token")
+        {
+            assert!(!request.headers.contains_key("private-token"));
+        }
+        let rendered = format!("{:?}", request.headers);
+        for (_, secret) in global_tokens {
+            assert!(!rendered.contains(secret), "global credential reached {}", request.url);
+        }
+    }
 
-    drop(_gitlab);
-    let _gitlab = EnvGuard::set_safe("GITLAB_TOKEN", "invalid-discovery-secret");
+    drop(host_token);
+    let host_token = EnvGuard::set_safe(host_variable, "invalid-host-secret");
     let invalid = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v4/version"))
-        .and(header("PRIVATE-TOKEN", "invalid-discovery-secret"))
-        .respond_with(ResponseTemplate::new(401))
-        .expect(1)
+        .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+            "version": "17.2.0",
+            "revision": "a1b2c3d4"
+        })))
+        .expect(2)
         .mount(&invalid)
         .await;
     let error = discovered_vendor(&invalid).await.unwrap_err();
-    assert!(matches!(error, SniffError::InvalidCredentials { .. }));
+    assert!(matches!(
+        error,
+        SniffError::InvalidCredentials { ref provider, .. } if provider == "GitLab"
+    ));
     let rendered = format!("{error:?}\n{error}");
-    assert!(!rendered.contains("invalid-discovery-secret"));
+    assert!(!rendered.contains("invalid-host-secret"));
 
-    drop(_gitlab);
-    let _gitlab = EnvGuard::remove_safe("GITLAB_TOKEN");
+    drop(host_token);
+    let _host_token = EnvGuard::remove_safe(host_variable);
     let missing = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v4/version"))
-        .respond_with(ResponseTemplate::new(401))
+        .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+            "version": "17.2.0",
+            "revision": "a1b2c3d4"
+        })))
         .expect(1)
         .mount(&missing)
         .await;
     let error = discovered_vendor(&missing).await.unwrap_err();
     assert!(matches!(
         error,
-        SniffError::MissingCredentials { ref env_var, .. } if env_var == "GITLAB_TOKEN"
+        SniffError::MissingCredentials { ref provider, ref env_var }
+            if provider == "GitLab" && env_var == host_variable
     ));
+
+    let generic_proxy = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+            "message": "authentication required"
+        })))
+        .expect(5)
+        .mount(&generic_proxy)
+        .await;
+    let error = discovered_vendor(&generic_proxy).await.unwrap_err();
+    assert!(matches!(error, SniffError::UnsupportedProvider { .. }));
+    assert_eq!(generic_proxy.received_requests().await.unwrap().len(), 5);
 }
 
 #[tokio::test]

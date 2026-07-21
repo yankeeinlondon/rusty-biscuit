@@ -1,13 +1,15 @@
 #![cfg(feature = "remote")]
 
 use biscuit_file::FetchPolicy;
+use serial_test::serial;
 use sniff::SniffError;
 use sniff::filesystem::git::{ApiFlavor, RemoteEndpoint, ResolvedRemote, resolve_remote_at};
 use sniff::remote::{
     CiCdJobQuery, CiCdJobReference, FocusedProviderClient, GitProvider, PullRequestQuery,
     CanonicalPullRequestState, QueryValues,
 };
-use wiremock::matchers::{method, path, path_regex, query_param};
+use test_toolkit::EnvGuard;
+use wiremock::matchers::{header, method, path, path_regex, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// Provider page size the client always requests, so a page of exactly this
@@ -1929,7 +1931,13 @@ fn actions_pr_body() -> serde_json::Value {
 /// hostname, non-default port) must work through the production constructor:
 /// configured remote → resolution → bounded discovery → flavored API base.
 #[tokio::test]
+#[serial]
 async fn neutral_host_self_managed_gitlab_resolves_through_the_production_path() {
+    let _global_token = EnvGuard::set_safe("GITLAB_TOKEN", "global-gitlab-secret");
+    let _host_token = EnvGuard::set_safe(
+        "SNIFF_GITLAB_127_2E_0_2E_0_2E_1_TOKEN",
+        "host-gitlab-secret",
+    );
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v4/version"))
@@ -1941,7 +1949,9 @@ async fn neutral_host_self_managed_gitlab_resolves_through_the_production_path()
         .await;
     Mock::given(method("GET"))
         .and(path("/api/v4/projects/acme%2Fproject/merge_requests/7"))
+        .and(header("authorization", "Bearer host-gitlab-secret"))
         .respond_with(ResponseTemplate::new(200).set_body_json(gitlab_pr_body()))
+        .expect(1)
         .mount(&server)
         .await;
 
@@ -1971,6 +1981,12 @@ async fn neutral_host_self_managed_gitlab_resolves_through_the_production_path()
     assert_eq!(record.identity.provider, GitProvider::GitLab);
     assert_eq!(record.details.title, "Fix");
     assert_eq!(record.details.author, "alice");
+    for request in server.received_requests().await.unwrap() {
+        assert!(
+            !format!("{:?}", request.headers).contains("global-gitlab-secret"),
+            "global provider credential reached the discovered host"
+        );
+    }
 }
 
 #[tokio::test]
