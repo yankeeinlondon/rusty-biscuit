@@ -19,8 +19,31 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 struct Corpus {
+    yaml_test_suite: UpstreamCorpus,
     preserved: Vec<PreservedCase>,
     repaired: Vec<RepairedCase>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpstreamCorpus {
+    repository: String,
+    release: String,
+    commit: String,
+    license: String,
+    notice: String,
+    cases: Vec<UpstreamCase>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpstreamCase {
+    id: String,
+    name: String,
+    category: String,
+    source_path: String,
+    source: String,
+    expect_parse: Option<bool>,
+    #[serde(default)]
+    expect_codes: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -56,10 +79,19 @@ fn corpus() -> Corpus {
 /// Every case in the corpus, as `(name, source)`.
 fn all_cases() -> Vec<(String, String)> {
     let corpus = corpus();
-    corpus
+    let upstream = corpus.yaml_test_suite.cases.into_iter().map(|case| {
+        (
+            format!("yaml-test-suite/{}", case.id),
+            case.source,
+        )
+    });
+    upstream
+        .chain(
+            corpus
         .preserved
         .into_iter()
         .map(|case| (case.name, case.source))
+        )
         .chain(
             corpus
                 .repaired
@@ -97,6 +129,84 @@ fn assert_untouched_bytes_preserved(name: &str, original: &str, outcome: &EditSe
 }
 
 // --- Class expectations ---------------------------------------------------
+
+#[test]
+fn yaml_test_suite_subset_is_release_pinned_and_preserved() {
+    const REPOSITORY: &str = "https://github.com/yaml/yaml-test-suite";
+    const RELEASE: &str = "data-2022-01-17";
+    const COMMIT: &str = "6e6c296ae9c9d2d5c4134b4b64d01b29ac19ff6f";
+
+    let upstream = corpus().yaml_test_suite;
+    assert_eq!(upstream.repository, REPOSITORY);
+    assert_eq!(upstream.release, RELEASE);
+    assert_eq!(upstream.commit, COMMIT);
+    assert_eq!(upstream.license, "MIT");
+    assert_eq!(upstream.notice, "YAML-TEST-SUITE-NOTICE.md");
+
+    let required_categories = [
+        "valid",
+        "expected-failure",
+        "duplicate-key",
+        "anchor-alias",
+        "flow",
+        "scalar",
+        "multi-document",
+    ];
+
+    for category in required_categories {
+        assert!(
+            upstream.cases.iter().any(|case| case.category == category),
+            "pinned subset is missing the {category:?} category"
+        );
+    }
+
+    let mut ids: Vec<&str> = upstream.cases.iter().map(|case| case.id.as_str()).collect();
+    ids.sort_unstable();
+    let total = ids.len();
+    ids.dedup();
+    assert_eq!(total, ids.len(), "upstream case IDs must be unique");
+
+    for case in upstream.cases {
+        assert_eq!(
+            case.source_path,
+            format!("{}/in.yaml", case.id),
+            "[{}] source path must be derivable from the release layout",
+            case.id
+        );
+
+        let analysis = analyze_yaml(&case.source);
+        let outcome = analysis.apply();
+        assert_eq!(
+            outcome.source, case.source,
+            "[{} — {}] upstream bytes must be preserved",
+            case.id, case.name
+        );
+
+        if let Some(expect_parse) = case.expect_parse {
+            assert_eq!(
+                analysis.is_parseable(),
+                expect_parse,
+                "[{} — {}] parse expectation",
+                case.id,
+                case.name
+            );
+        }
+
+        let codes: Vec<&str> = analysis
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect();
+        for expected in case.expect_codes {
+            assert!(
+                codes.contains(&expected.as_str()),
+                "[{} — {}] expected diagnostic {expected:?}, got {codes:?}",
+                case.id,
+                case.name
+            );
+        }
+    }
+}
 
 #[test]
 fn preserved_cases_are_byte_identical() {

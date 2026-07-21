@@ -33,6 +33,72 @@
     "no panic, determinism, idempotency, and untouched-byte reconstruction."
   ],
 
+  "yaml_test_suite": {
+    "repository": "https://github.com/yaml/yaml-test-suite",
+    "release": "data-2022-01-17",
+    "commit": "6e6c296ae9c9d2d5c4134b4b64d01b29ac19ff6f",
+    "license": "MIT",
+    "notice": "YAML-TEST-SUITE-NOTICE.md",
+    "cases": [
+      {
+        "id": "9FMG",
+        "name": "Multi-level Mapping Indent",
+        "category": "valid",
+        "source_path": "9FMG/in.yaml",
+        "source": "a:\n  b:\n    c: d\n  e:\n    f: g\nh: i\n",
+        "expect_parse": true
+      },
+      {
+        "id": "4H7K",
+        "name": "Flow sequence with invalid extra closing bracket",
+        "category": "expected-failure",
+        "source_path": "4H7K/in.yaml",
+        "source": "---\n[ a, b, c ] ]\n",
+        "expect_parse": false
+      },
+      {
+        "id": "2JQS",
+        "name": "Block Mapping with Missing Keys",
+        "category": "duplicate-key",
+        "source_path": "2JQS/in.yaml",
+        "source": ": a\n: b\n",
+        "expect_codes": ["yaml.parse"]
+      },
+      {
+        "id": "3GZX",
+        "name": "Spec Example 7.1. Alias Nodes",
+        "category": "anchor-alias",
+        "source_path": "3GZX/in.yaml",
+        "source": "First occurrence: &anchor Foo\nSecond occurrence: *anchor\nOverride anchor: &anchor Bar\nReuse anchor: *anchor\n",
+        "expect_parse": true
+      },
+      {
+        "id": "7ZZ5",
+        "name": "Empty flow collections",
+        "category": "flow",
+        "source_path": "7ZZ5/in.yaml",
+        "source": "---\nnested sequences:\n- - - []\n- - - {}\nkey1: []\nkey2: {}\n",
+        "expect_parse": true
+      },
+      {
+        "id": "G4RS",
+        "name": "Spec Example 2.17. Quoted Scalars",
+        "category": "scalar",
+        "source_path": "G4RS/in.yaml",
+        "source": "unicode: \"Sosa did fine.\\u263A\"\ncontrol: \"\\b1998\\t1999\\t2000\\n\"\nhex esc: \"\\x0d\\x0a is \\r\\n\"\n\nsingle: '\"Howdy!\" he cried.'\nquoted: ' # Not a ''comment''.'\ntie-fighter: '|\\-*-/|'\n",
+        "expect_parse": true
+      },
+      {
+        "id": "L383",
+        "name": "Two scalar docs with trailing comments",
+        "category": "multi-document",
+        "source_path": "L383/in.yaml",
+        "source": "--- foo  # comment\n--- foo  # comment\n",
+        "expect_codes": ["yaml.multi-document"]
+      }
+    ]
+  },
+
   "preserved": [
     {
       "name": "monorepo/biscuit-icon-skill",
