@@ -4,7 +4,7 @@ status: draft
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-07-16
-review_iterations: 5
+review_iterations: 6
 depends_on:
     - ../2026-07-13-error-propogation/spec.md
 ---

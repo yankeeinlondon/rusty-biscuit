@@ -8,6 +8,7 @@ implemented: true
 description: A **feature** review of `2026-07-13-file-resolution/spec.md`
 feature: 2026-07-13-file-resolution/review-5.md
 previous: 2026-07-13-file-resolution/review-4.md
+next: 2026-07-13-file-resolution/review-6.md
 ---
 
 # Review 5: Unified File-Reference Resolution
