@@ -280,6 +280,34 @@ mod tests {
                     ">   width twenty four.\n"
                 ),
             ),
+            (
+                concat!(
+                    "::shell-block\n",
+                    "- first literal\n",
+                    "::block condition\n",
+                    "+ second literal\n",
+                    "::end-block\n",
+                    "- third source line\n",
+                    "  continuation remains literal\n",
+                    "::end-block\n",
+                    "\n",
+                    "+ Actual item long enough to wrap at width twenty four.\n"
+                ),
+                concat!(
+                    "::shell-block\n",
+                    "- first literal\n",
+                    "::block condition\n",
+                    "+ second literal\n",
+                    "::end-block\n",
+                    "- third source line\n",
+                    "  continuation remains literal\n",
+                    "::end-block\n",
+                    "\n",
+                    "+ Actual item long\n",
+                    "  enough to wrap at\n",
+                    "  width twenty four.\n"
+                ),
+            ),
         ];
         let mut config = DmlsConfig::default();
         config.formatting.fixed_width = Some(24);
