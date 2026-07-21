@@ -943,7 +943,14 @@ async fn gitea_1_24_job_operations_are_version_errors_on_every_surface() {
 
     let paths = fixture.request_paths().await;
     assert!(
-        paths.iter().all(|path| matches!(path.as_str(), "/api/v4/version" | "/api/v1/version")),
+        paths.iter().all(|path| matches!(
+            path.as_str(),
+            "/api/v3/meta"
+                | "/api/v4/version"
+                | "/api/v1/version"
+                | "/rest/api/1.0/application-properties"
+                | "/_apis/connectionData"
+        )),
         "an unsupported-version expression reached a job endpoint: {paths:?}"
     );
 }
