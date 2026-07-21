@@ -7,6 +7,7 @@ spec: 2026-07-13-meta-schema/spec.md
 log: darkmatter/features/2026-07-13-meta-schema/log.md
 implemented: true
 implemented_by: codex/default
+next: 2026-07-13-meta-schema/review-12.md
 description: "A **feature** review of `2026-07-13-meta-schema/spec.md`"
 feature: 2026-07-13-meta-schema/review-11.md
 previous: 2026-07-13-meta-schema/review-10.md
