@@ -157,6 +157,14 @@ do not belong here.
   `git log -1` after concurrent commits; HEAD may already have advanced.
 - If a wrapper hides commit stdout, recover immediately with `git reflog -1`
   and verify that hash. Prefer unwrapped `git commit` so stdout is visible.
+- When `commit.gpgsign` is true, follow `git show --stat <hash>` with
+  `git verify-commit <hash>`. The commit exit status covers the index update
+  but not the signature, so a misconfigured `gpg.program` or an expired
+  signing subkey can ship an unsigned commit silently. `verify-commit`
+  confirms the signature is `G` (good) rather than `B` (bad) or absent,
+  which protects downstream tooling that depends on `git log --pretty=%G?`
+  showing a good signature (e.g. `darkmatter/features/*` review-cycle
+  tooling).
 - Agent or task completion alone does not prove that its commit landed. After
   all groups finish, inspect `git status --short` and recent history for staged
   paths or missing commits. Treat empty or ambiguous agent reports as unknown.
