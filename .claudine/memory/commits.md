@@ -80,6 +80,13 @@ do not belong here.
   and `invalid-frontmatter` fix cycles (see `4c903c586`, `152ea6b84`,
   `690b2ecc3`); follow the most recent sibling commits, not a generic
   "in-place edits are docs" rule.
+- When drafting a cycle-close commit body, the diff's literal wording matters.
+  Paraphrasing too aggressively risks inventing commitments the staged content
+  did not make (e.g. "smoke test failed" vs. "smoke attempt was interrupted by
+  host load before any benchmark case ran" are materially different). Quote or
+  paraphrase only what the diff actually says; if a section is too thin to
+  characterize, summarize the size and the file/line range rather than
+  speculating on its content.
 - `planning` commits may have zero source diff. The fix-review pattern uses
   verification iterations to re-audit a prior cycle's implementation rather than
   redo it, so a cycle-N log/spec/review update can ship with no Rust changes.
@@ -119,6 +126,13 @@ do not belong here.
 - Never disable repository signing or override signing configuration (including
   `gpg.program`) to avoid or preempt signing failures. Let the repository and
   host defaults apply. If signing hangs or fails, stop and report it.
+- In a non-interactive session, gpg-agent pinentry is the most likely commit
+  failure mode. Before committing, sanity-check `git config --get commit.gpgsign`
+  (or repo-local `commit.gpgsign` truth) and `pgrep gpg-agent`; if the agent is
+  alive but the signing-subkey passphrase is not cached, `git commit` will
+  block waiting for a TTY. Verify the agent has the key cached (or commit is
+  deliberately unsigned) before dispatching, and report any signing hang
+  immediately rather than letting the agent time out.
 - Never amend or create follow-up fixup commits after a successful commit in a
   concurrent batch. Report the issue so the orchestrator can decide whether to
   accept, revert, or coordinate a rewrite.
