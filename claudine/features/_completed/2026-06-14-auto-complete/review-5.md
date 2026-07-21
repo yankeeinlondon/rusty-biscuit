@@ -36,17 +36,15 @@ Review 5 confirms the two review-4 blockers have been addressed:
   fallback, and comma continuation: Level 1 subprocess/unit coverage is
   present.
 - Operation-file single-match confirmation and multi-match chooser for Markdown
-  compose: Level 2 real-terminal rendering coverage and Level 3 OS-keyboard
-  coverage are present.
+  compose: Level 2 real-terminal rendering and interaction coverage are
+  present.
 - Operation-file YAML sequence candidate confirmation, chooser, and detail
-  rendering: Level 2 real-terminal coverage and Level 3 OS-keyboard coverage
-  are present
-  ([level2_auto_complete_operation_file.rs](../../cli/tests/level2_auto_complete_operation_file.rs:597),
-  [level2_auto_complete_operation_file.rs](../../cli/tests/level2_auto_complete_operation_file.rs:607),
-  [level3_auto_complete_operation_file.rs](../../cli/tests/level3_auto_complete_operation_file.rs:565),
-  [level3_auto_complete_operation_file.rs](../../cli/tests/level3_auto_complete_operation_file.rs:641)).
+  rendering and interaction: Level 2 real-terminal coverage is present in
+  [level2_auto_complete_operation_file.rs](../../cli/tests/level2_auto_complete_operation_file.rs).
 - Missing `file` and `file[]` frontmatter property chooser behavior: Level 2
-  rendering coverage and Level 3 OS-keyboard coverage are present.
+  rendering and interaction coverage is present. A single focused L3 smoke
+  test verifies real macOS Enter delivery through WezTerm without duplicating
+  the product-behavior matrix.
 - Autocomplete failure modes: non-TTY has Level 1 subprocess coverage; no-match
   and over-cap now have Level 1 PTY CLI-path coverage, which is appropriate
   because these are immediate error surfaces rather than terminal layout or key
