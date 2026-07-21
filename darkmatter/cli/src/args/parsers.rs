@@ -3,10 +3,6 @@ use darkmatter::markdown::highlighting::ThemePair;
 use renderable::layout::Length;
 
 /// Parses and validates list indentation width.
-///
-/// Eight columns is a preferred nesting step. The cleanup normalizer constrains
-/// a child marker to its parent's CommonMark-valid column range when emitting
-/// the full step would change the parsed structure.
 pub fn parse_indent_size(s: &str) -> Result<usize, String> {
     let value = s
         .parse::<usize>()

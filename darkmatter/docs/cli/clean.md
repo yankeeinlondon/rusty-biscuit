@@ -41,7 +41,7 @@ md README.md --save
 
 - `[INPUT]`: Markdown file path (supports `@` file references). Use `-` for stdin. If omitted, reads from stdin.
 - `--save`: Clean in place and print a delta-style change report (same report format used by `md delta`).
-- `--indent <#>`: Prefer a nested-list indentation step of `2`, `4`, or `8` spaces. When the requested step would change the CommonMark structure under a narrow marker, cleanup emits the nearest valid child column instead.
+- `--indent <#>`: Enforce a nested-list indentation step of `2`, `4`, or `8` spaces. For an eight-space step, cleanup uses CommonMark-valid marker padding on parent items when needed to preserve the same list tree.
 - `--fixed-width <#>`: Collapse incidental single newlines, then re-wrap prose, including list-item paragraphs, to the target display width.
 - `--ignore-incidental-newlines`: Preserve source single newlines instead of collapsing fixed-column wrapping.
 
