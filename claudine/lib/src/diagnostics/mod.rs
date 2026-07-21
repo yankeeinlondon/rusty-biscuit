@@ -31,12 +31,20 @@
 //!
 //! The concrete `Diagnostic` projections are live:
 //!
-//! - [`CompositionError`] projects every composition code. Its
-//!   `composition.invalid_file_reference` payload supplies what the current
-//!   resolver knows — `reference`, `kind` as a snake_case slug, `base_dir`, the
-//!   render-time `suggestions`, and the optional `fallback_dir` — and reserves
-//!   the rest of the catalog's declared fields as `null` for the
-//!   file-resolution feature to fill.
+//! - [`CompositionError`] projects every composition code. For
+//!   `composition.invalid_file_reference` it supplies the wrapper context
+//!   (`source_path`, `property`, `event`) and merges whichever resolver path
+//!   reached its `#[source]`. The shared `biscuit-file`/harness resolver
+//!   populates `failure` on both arms; when its probe ran it additionally
+//!   projects `kind`, `repository_root`, and the ordered `candidates` from
+//!   the retained plan (`HarnessError::PathResolutionFailed`), and when no
+//!   probe ran (`HarnessError::FileReferenceUnresolvable`, e.g. a
+//!   syntactically-invalid reference) those three stay `null`. The legacy
+//!   lower-layer path through `FileReferenceDiagnostic` (the
+//!   markdown-interpolation arm) continues to supply the original five
+//!   fields (`reference`, `kind`, `base_dir`, `suggestions`, `fallback_dir`)
+//!   and reserves the six additions as `null`. Values come from typed data,
+//!   never back-derived from `Display` (spec §D3).
 //! - [`ClaudineError`] and [`HarnessError`] project the top-level Claudine,
 //!   provider, io, config, and usage surface, so lifecycle `err.*` exposes
 //!   their facets via [`LifecycleErrorInfo::from_claudine_error`] /

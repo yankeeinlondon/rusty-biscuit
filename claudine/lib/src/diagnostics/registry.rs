@@ -181,10 +181,15 @@ pub const CODES: &[CodeSpec] = &[
         // `failure` is the stable snake_case failure classification —
         // `invalid_syntax`, `missing_context`, `no_match`, `permission_io`, or
         // `unsupported_remote`. It is distinct from `kind`, which names the
-        // reference kind. The current resolver cannot supply `failure`,
-        // `source_path`, `property`, `event`, `repository_root`, or
-        // `candidates`; they project as `null` until the file-resolution
-        // feature replaces them with typed values (spec §D3).
+        // reference kind. The `CompositionError` wrapper supplies
+        // `source_path`/`property`/`event`; the shared `biscuit-file`/harness
+        // resolver supplies `failure` on both arms and additionally projects
+        // `kind`/`repository_root`/`candidates` when a probe ran
+        // (`PathResolutionFailed`). The no-probe arm
+        // (`FileReferenceUnresolvable`) and the legacy
+        // `FileReferenceDiagnostic` path leave those three (and `failure` on
+        // the legacy path) as `null`. Values come from typed data, never
+        // back-derived from `Display` (spec §D3).
         detail: &[
             "reference",
             "kind",

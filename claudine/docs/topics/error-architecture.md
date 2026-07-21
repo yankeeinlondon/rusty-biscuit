@@ -253,22 +253,35 @@ original five fields keep their names, order, and values:
 | `source_path` | wrapper only | the document the reference was authored in |
 | `property` | wrapper only | the authored property path |
 | `event` | wrapper only | the lifecycle event that was running |
-| `repository_root` | `null` | reserved |
-| `candidates` | `null` | reserved: the ordered, provenance-carrying probe record |
-| `failure` | `null` | reserved: failure classification — `invalid_syntax`, `missing_context`, `no_match`, `permission_io`, `unsupported_remote` |
+| `repository_root` | probe only | the resolver's plan root, projected when a probe ran; `null` otherwise |
+| `candidates` | probe only | the ordered, provenance-carrying probe record, projected when a probe ran; `null` otherwise |
+| `failure` | harness path | typed failure classification — `invalid_syntax`, `missing_context`, `no_match`, `permission_io`, `unsupported_remote` |
 
 **`base_dir` and `fallback_dir` are compatibility projections.** They are the two
 anchors the pre-`candidates` payload exposed, retained so an existing `when:`
 clause keeps matching. `candidates` supersedes them.
 
+**Two resolver paths today.** The shared `biscuit-file`/harness resolver reaches
+`composition.invalid_file_reference` through two arms.
+`HarnessError::PathResolutionFailed` ran a probe and retained its plan, so
+`failure`, `kind`, `repository_root`, and the ordered `candidates` all project
+from the typed probe record. `HarnessError::FileReferenceUnresolvable` failed
+before any probe ran (e.g. a syntactically-invalid reference), so only `failure`,
+`reference`, and `source_path` project; `kind`, `repository_root`, and
+`candidates` stay `null` rather than being invented. The lower-layer legacy path
+through `FileReferenceDiagnostic` (the markdown-interpolation arm) continues to
+supply the original five fields and reserves the six additions as `null` —
+exactly the case the additive catalog was designed to tolerate.
+
 **`failure` is not `kind`.** They are different vocabularies, which is why both
-are declared. `failure` stays `null` even though a classification value is
-sitting in the resolver, because Darkmatter's `FileRefFailure::classify` folds
-filesystem I/O, permission denial, and missing context into `NotFound` — so
-mapping `NotFound → no_match` would assert "no candidate matched" for a
-permission error that never probed a candidate. Distinguishing those is precisely
-what the file-resolution feature exists to do; it will populate `failure` from a
-typed result, never from `kind`.
+are declared. The historical reason `failure` was reserved as `null` is that
+Darkmatter's `FileRefFailure::classify` folds filesystem I/O, permission denial,
+and missing context into `NotFound`, so mapping `NotFound → no_match` would
+assert "no candidate matched" for a permission error that never probed a
+candidate. The shared resolver replaces that lossy classifier with a typed
+`PathResolutionFailure` on the probe arm (and a typed `FileReferenceError` →
+slug mapping on the no-probe arm), so `failure` now projects from typed data —
+never back-derived from `kind` or parsed out of `Display`.
 
 ## The lossy-boundary audit
 
