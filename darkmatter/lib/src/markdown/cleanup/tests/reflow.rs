@@ -1,4 +1,5 @@
 use super::*;
+use crate::markdown::compose::directives_api::{BlockKind, scan_darkmatter_blocks};
 use biscuit_terminal::utils::UnicodeWidthStr;
 use pulldown_cmark::TagEnd;
 
@@ -119,6 +120,23 @@ fn assert_structure_preserved(source: &str, output: &str) {
         structural_fingerprint(source),
         "cleanup changed semantic block structure\nsource:\n{source}\noutput:\n{output}"
     );
+}
+
+fn assert_shell_block_payloads_preserved(source: &str, output: &str) {
+    let source_blocks = scan_darkmatter_blocks(source).unwrap();
+    let output_blocks = scan_darkmatter_blocks(output).unwrap();
+    let source_payloads: Vec<_> = source_blocks
+        .iter()
+        .filter(|block| block.kind == BlockKind::Shell)
+        .map(|block| &source[block.body_span.clone()])
+        .collect();
+    let output_payloads: Vec<_> = output_blocks
+        .iter()
+        .filter(|block| block.kind == BlockKind::Shell)
+        .map(|block| &output[block.body_span.clone()])
+        .collect();
+
+    assert_eq!(output_payloads, source_payloads);
 }
 
 /// Reparses `content` and asserts that `label` is still a link-reference
@@ -1478,7 +1496,7 @@ fn assert_lines_within_width(content: &str, width: usize) {
             ),
             (
                 "::shell-block\n* literal shell\n::end-block\n\n- Actual item.\n",
-                "::shell-block\n\n* literal shell\n  ::end-block\n- Actual item.\n",
+                "::shell-block\n* literal shell\n::end-block\n\n- Actual item.\n",
             ),
         ];
 
@@ -1495,6 +1513,82 @@ fn assert_lines_within_width(content: &str, width: usize) {
 
             let fixed = reflow_to_width(&default, 24);
             assert_eq!(fixed, expected);
+            assert_structure_preserved(source, &fixed);
+            assert_eq!(reflow_to_width(&cleanup_content(&fixed), 24), fixed);
+        }
+    }
+
+    #[test]
+    fn full_cleanup_preserves_opaque_shell_payload_bytes_and_structure() {
+        let fixtures = [
+            (
+                concat!(
+                    "::shell-block\n",
+                    "- first literal\n",
+                    "+ second literal\n",
+                    "* third literal\n",
+                    "1. ordered literal\n",
+                    "- [ ] task literal\n",
+                    "::end-block\n",
+                    "\n",
+                    "+ Actual item long enough to wrap at width twenty four.\n"
+                ),
+                concat!(
+                    "::shell-block\n",
+                    "- first literal\n",
+                    "+ second literal\n",
+                    "* third literal\n",
+                    "1. ordered literal\n",
+                    "- [ ] task literal\n",
+                    "::end-block\n",
+                    "\n",
+                    "+ Actual item long\n",
+                    "  enough to wrap at\n",
+                    "  width twenty four.\n"
+                ),
+            ),
+            (
+                concat!(
+                    "> ::shell-block\n",
+                    "> - first literal\n",
+                    "> + second literal\n",
+                    "> * third literal\n",
+                    "> 1. ordered literal\n",
+                    "> - [ ] task literal\n",
+                    "> ::end-block\n",
+                    "> \n",
+                    "> + Actual item long enough to wrap at width twenty four.\n"
+                ),
+                concat!(
+                    "> ::shell-block\n",
+                    "> - first literal\n",
+                    "> + second literal\n",
+                    "> * third literal\n",
+                    "> 1. ordered literal\n",
+                    "> - [ ] task literal\n",
+                    "> ::end-block\n",
+                    "> \n",
+                    "> + Actual item long\n",
+                    ">   enough to wrap at\n",
+                    ">   width twenty four.\n"
+                ),
+            ),
+        ];
+
+        for (source, fixed_expected) in fixtures {
+            let default = cleanup_content(source);
+            assert_eq!(default, source);
+            assert_shell_block_payloads_preserved(source, &default);
+            assert_structure_preserved(source, &default);
+            assert_eq!(cleanup_content(&default), default);
+
+            let configured = cleanup_content_with_indent(source, 4);
+            assert_eq!(configured, source);
+            assert_shell_block_payloads_preserved(source, &configured);
+
+            let fixed = reflow_to_width(&default, 24);
+            assert_eq!(fixed, fixed_expected);
+            assert_shell_block_payloads_preserved(source, &fixed);
             assert_structure_preserved(source, &fixed);
             assert_eq!(reflow_to_width(&cleanup_content(&fixed), 24), fixed);
         }

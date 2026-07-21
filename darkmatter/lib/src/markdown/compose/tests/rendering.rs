@@ -292,32 +292,71 @@ fn test_compose_cleanup_preserves_additional_paragraphs_inside_blockquoted_items
 
 #[test]
 fn test_compose_cleanup_preserves_markers_in_protected_bodies() {
-    use crate::markdown::cleanup::{cleanup_content, reflow_to_width};
+    let fixtures = [
+        (
+            concat!(
+                "::shell-block\n",
+                "- first literal\n",
+                "+ second literal\n",
+                "* third literal\n",
+                "1. ordered literal\n",
+                "- [ ] task literal\n",
+                "::end-block\n",
+                "\n",
+                "+ Actual item long enough to wrap at width twenty four.\n"
+            ),
+            concat!(
+                "::shell-block\n",
+                "- first literal\n",
+                "+ second literal\n",
+                "* third literal\n",
+                "1. ordered literal\n",
+                "- [ ] task literal\n",
+                "::end-block\n",
+                "\n",
+                "+ Actual item long\n",
+                "  enough to wrap at\n",
+                "  width twenty four.\n"
+            ),
+        ),
+        (
+            concat!(
+                "> ::shell-block\n",
+                "> - first literal\n",
+                "> + second literal\n",
+                "> * third literal\n",
+                "> 1. ordered literal\n",
+                "> - [ ] task literal\n",
+                "> ::end-block\n",
+                "> \n",
+                "> + Actual item long enough to wrap at width twenty four.\n"
+            ),
+            concat!(
+                "> ::shell-block\n",
+                "> - first literal\n",
+                "> + second literal\n",
+                "> * third literal\n",
+                "> 1. ordered literal\n",
+                "> - [ ] task literal\n",
+                "> ::end-block\n",
+                "> \n",
+                "> + Actual item long\n",
+                ">   enough to wrap at\n",
+                ">   width twenty four.\n"
+            ),
+        ),
+    ];
 
-    let source = concat!(
-        "<div>\n",
-        "* literal html\n",
-        "</div>\n",
-        "\n",
-        "::shell-block\n",
-        "* literal shell\n",
-        "::end-block\n",
-        "\n",
-        "- Actual item.\n"
-    );
-    let expected = reflow_to_width(&cleanup_content(source), 24);
-    let options = ComposeOptions::new()
-        .only(&[ComposeOperation::Cleanup])
-        .with_fixed_width(24);
+    for (source, expected) in fixtures {
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::Cleanup])
+            .with_fixed_width(24);
+        let (first, _) = Markdown::from(source).compose_with(options.clone()).unwrap();
+        assert_eq!(first.content(), expected);
 
-    let (first, _) = Markdown::from(source).compose_with(options.clone()).unwrap();
-    assert_eq!(first.content(), expected);
-    assert!(first.content().contains("* literal html"));
-    assert!(first.content().contains("* literal shell"));
-    assert!(first.content().contains("- Actual item."));
-
-    let (second, _) = Markdown::from(first.content()).compose_with(options).unwrap();
-    assert_eq!(second.content(), expected);
+        let (second, _) = Markdown::from(first.content()).compose_with(options).unwrap();
+        assert_eq!(second.content(), expected);
+    }
 }
 
 #[test]
