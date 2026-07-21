@@ -1573,6 +1573,34 @@ fn assert_lines_within_width(content: &str, width: usize) {
                     ">   width twenty four.\n"
                 ),
             ),
+            (
+                concat!(
+                    "::shell-block\n",
+                    "- first literal\n",
+                    "::block condition\n",
+                    "+ second literal\n",
+                    "::end-block\n",
+                    "- third source line\n",
+                    "  continuation remains literal\n",
+                    "::end-block\n",
+                    "\n",
+                    "+ Actual item long enough to wrap at width twenty four.\n"
+                ),
+                concat!(
+                    "::shell-block\n",
+                    "- first literal\n",
+                    "::block condition\n",
+                    "+ second literal\n",
+                    "::end-block\n",
+                    "- third source line\n",
+                    "  continuation remains literal\n",
+                    "::end-block\n",
+                    "\n",
+                    "+ Actual item long\n",
+                    "  enough to wrap at\n",
+                    "  width twenty four.\n"
+                ),
+            ),
         ];
 
         for (source, fixed_expected) in fixtures {
@@ -1591,6 +1619,59 @@ fn assert_lines_within_width(content: &str, width: usize) {
             assert_shell_block_payloads_preserved(source, &fixed);
             assert_structure_preserved(source, &fixed);
             assert_eq!(reflow_to_width(&cleanup_content(&fixed), 24), fixed);
+        }
+    }
+
+    #[test]
+    fn opaque_shell_ownership_uses_shared_block_classification_and_safe_fallbacks() {
+        let lookalike = "::shell-blocker\n- Alpha beta\n  gamma delta.\n";
+        let lookalike_expected = "::shell-blocker\n\n- Alpha beta gamma delta.\n";
+        assert_eq!(cleanup_content(lookalike), lookalike_expected);
+        assert_eq!(cleanup_content(lookalike_expected), lookalike_expected);
+
+        let quoted_mismatch = concat!(
+            "::shell-block\n",
+            "- literal\n",
+            "> ::end-block\n",
+            "- still literal\n",
+            "::end-block\n",
+            "\n",
+            "- Actual wrapped\n",
+            "  prose line.\n"
+        );
+        let quoted_expected = concat!(
+            "::shell-block\n",
+            "- literal\n",
+            "> ::end-block\n",
+            "- still literal\n",
+            "::end-block\n",
+            "\n",
+            "- Actual wrapped prose line.\n"
+        );
+        let quoted_cleaned = cleanup_content(quoted_mismatch);
+        assert_eq!(quoted_cleaned, quoted_expected);
+        assert_shell_block_payloads_preserved(quoted_mismatch, &quoted_cleaned);
+        assert_eq!(cleanup_content(&quoted_cleaned), quoted_cleaned);
+
+        let malformed = [
+            concat!(
+                "::shell-block\n",
+                "- literal\n",
+                "::end-block trailing text\n",
+                "\n",
+                "- Actual wrapped\n",
+                "  prose line.\n"
+            ),
+            concat!(
+                "::shell-block\n",
+                "- unterminated literal\n",
+                "  continuation remains literal\n"
+            ),
+        ];
+        for source in malformed {
+            assert_eq!(cleanup_content(source), source);
+            assert_eq!(reflow_to_width(source, 24), source);
+            assert_eq!(cleanup_content(&cleanup_content(source)), source);
         }
     }
 

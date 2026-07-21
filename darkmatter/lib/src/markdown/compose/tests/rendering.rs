@@ -345,6 +345,34 @@ fn test_compose_cleanup_preserves_markers_in_protected_bodies() {
                 ">   width twenty four.\n"
             ),
         ),
+        (
+            concat!(
+                "::shell-block\n",
+                "- first literal\n",
+                "::block condition\n",
+                "+ second literal\n",
+                "::end-block\n",
+                "- third source line\n",
+                "  continuation remains literal\n",
+                "::end-block\n",
+                "\n",
+                "+ Actual item long enough to wrap at width twenty four.\n"
+            ),
+            concat!(
+                "::shell-block\n",
+                "- first literal\n",
+                "::block condition\n",
+                "+ second literal\n",
+                "::end-block\n",
+                "- third source line\n",
+                "  continuation remains literal\n",
+                "::end-block\n",
+                "\n",
+                "+ Actual item long\n",
+                "  enough to wrap at\n",
+                "  width twenty four.\n"
+            ),
+        ),
     ];
 
     for (source, expected) in fixtures {
