@@ -665,6 +665,13 @@ impl StackExecutionContext<'_> {
         globals
     }
 
+    /// Build resolution state for expressions authored by `source_path`.
+    ///
+    /// Implicit references resolve repository-first, then source-relative. The
+    /// launch-area `ctx_base_dir` is retained as `file_ref_fallback_dir`
+    /// diagnostic metadata; it is not a third resolution candidate. Top-level
+    /// CLI references are resolved from launch context before this executor is
+    /// entered.
     fn resolution_context(&self) -> ResolutionContext {
         super::super::document_expression_resolution_context(
             self.source_path,

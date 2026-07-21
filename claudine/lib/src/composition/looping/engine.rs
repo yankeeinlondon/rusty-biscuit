@@ -257,10 +257,11 @@ pub fn execute_loop_with_config(
                 iteration + 1,
                 &last_output,
                 last_exit_code,
-                base_dir,
-                None,
-                None,
-                prompt_path,
+                LoopFileResolution {
+                    source_path: prompt_path,
+                    fallback_dir: None,
+                    context: None,
+                },
             )?
         {
             return Ok(LoopExecutionResult::failure(
@@ -701,10 +702,11 @@ where
                 iteration + 1,
                 &last_output,
                 last_exit_code,
-                base_dir,
-                lifecycle_ctx.launch_area,
-                file_resolution_context,
-                prompt_path,
+                LoopFileResolution {
+                    source_path: prompt_path,
+                    fallback_dir: lifecycle_ctx.launch_area,
+                    context: file_resolution_context,
+                },
             )?
         {
             return Ok(LoopExecutionResult::failure(
@@ -1219,17 +1221,21 @@ fn should_continue_after_cap(
     next_iteration: usize,
     last_output: &str,
     last_exit_code: i32,
-    base_dir: Option<&Path>,
-    file_ref_fallback_dir: Option<&Path>,
-    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
-    prompt_path: &Path,
+    resolution: LoopFileResolution<'_>,
 ) -> Result<bool, CompositionError> {
     let ambient = LoopAmbient::new(next_iteration, false, true, last_output, last_exit_code);
     let lookup = LoopExpressionLookup::new(frontmatter, &ambient)
-        .with_base_dir(base_dir)
-        .with_file_ref_fallback_dir(file_ref_fallback_dir)
-        .with_file_resolution_context(file_resolution_context, prompt_path);
+        .with_base_dir(resolution.source_path.parent())
+        .with_file_ref_fallback_dir(resolution.fallback_dir)
+        .with_file_resolution_context(resolution.context, resolution.source_path);
     evaluate_condition(&config.condition, &lookup)
+}
+
+#[derive(Clone, Copy)]
+struct LoopFileResolution<'a> {
+    source_path: &'a Path,
+    fallback_dir: Option<&'a Path>,
+    context: Option<&'a biscuit_file::FileResolutionContext>,
 }
 
 #[cfg(test)]

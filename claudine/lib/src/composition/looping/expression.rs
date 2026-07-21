@@ -59,15 +59,14 @@ impl LoopAmbient {
 /// When constructed with a base directory ([`with_base_dir`](Self::with_base_dir)),
 /// the lookup exposes a [`ResolutionContext`] rooted at the prompt's parent so
 /// read-side expression functions (`file_exists`, `absolute`, `relative`, …)
-/// resolve against the document directory. The probe re-runs each iteration
-/// while the base directory stays fixed.
+/// resolve implicit document-authored references repository-first, then against
+/// the document directory. The probe re-runs each iteration while the request
+/// snapshot and source remain fixed.
 ///
-/// When a fallback directory is also set
-/// ([`with_file_ref_fallback_dir`](Self::with_file_ref_fallback_dir)),
-/// caller-supplied file references that miss under the document dir resolve
-/// against the captured launch area instead of the ambient process CWD, so
-/// `file_exists` inside `loop.while`/`loop.until` stays correct after the
-/// wrapper's `chdir`.
+/// [`with_file_ref_fallback_dir`](Self::with_file_ref_fallback_dir) retains the
+/// captured launch area as diagnostic metadata only. It is not a candidate for
+/// these document-authored references; genuinely launch-relative top-level CLI
+/// references are resolved before loop evaluation.
 #[derive(Debug, Clone, Copy)]
 pub struct LoopExpressionLookup<'a> {
     frontmatter: &'a Map<String, Value>,
@@ -99,11 +98,11 @@ impl<'a> LoopExpressionLookup<'a> {
         self
     }
 
-    /// Set the explicit fallback directory for caller-supplied file
-    /// references (typically the captured launch area). Resolution still
-    /// tries the document dir ([`with_base_dir`](Self::with_base_dir)) first;
-    /// only when that misses does it consult this directory. `None` disables
-    /// the fallback.
+    /// Retain the captured launch area as `file_ref_fallback_dir` diagnostic
+    /// metadata.
+    ///
+    /// References authored by the loop document resolve repository-first, then
+    /// source-relative; this directory is never an additional candidate.
     #[must_use]
     pub fn with_file_ref_fallback_dir(mut self, fallback: Option<&'a Path>) -> Self {
         self.file_ref_fallback_dir = fallback;
@@ -278,6 +277,8 @@ mod tests {
     use darkmatter::markdown::compose::expression::EvaluationLookup;
     use serde_json::json;
 
+    mod resolution_context;
+
     fn map(value: Value) -> Map<String, Value> {
         value.as_object().unwrap().clone()
     }
@@ -445,45 +446,6 @@ mod tests {
             )
             .unwrap()
         );
-    }
-
-    #[test]
-    fn loop_file_functions_reuse_request_home_magic_and_package_roots() {
-        let request = tempfile::tempdir().unwrap();
-        let source_path = request.path().join("prompt.md");
-        let home = request.path().join("home");
-        let magic = request.path().join("magic");
-        let package = request.path().join("package");
-        for dir in [&home, &magic, &package] {
-            std::fs::create_dir_all(dir).unwrap();
-        }
-        std::fs::write(home.join("home.flag"), "ready").unwrap();
-        std::fs::write(magic.join("magic.flag"), "ready").unwrap();
-        std::fs::write(package.join("package.flag"), "ready").unwrap();
-        let snapshot = biscuit_file::FileResolutionContext::from_snapshot(
-            request.path(),
-            Some(home),
-            std::collections::HashMap::new(),
-        )
-        .with_repository_root(request.path())
-        .with_package_area(package)
-        .add_magic_path(magic, biscuit_file::PathPosition::Start);
-        let fm = map(json!({}));
-        let ambient = ambient();
-        let lookup = LoopExpressionLookup::new(&fm, &ambient)
-            .with_base_dir(Some(request.path()))
-            .with_file_resolution_context(Some(&snapshot), &source_path);
-
-        for expression in [
-            "file_exists('~/home.flag')",
-            "file_exists('@magic.flag')",
-            "file_exists('!package.flag')",
-        ] {
-            assert!(
-                evaluate_condition(&LoopCondition::While(expression.into()), &lookup).unwrap(),
-                "{expression} must use the request snapshot"
-            );
-        }
     }
 
     /// The launch-area fallback (`file_ref_fallback_dir`) is diagnostic-only: a

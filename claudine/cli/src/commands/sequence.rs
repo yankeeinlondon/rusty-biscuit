@@ -329,10 +329,10 @@ fn run_sequence_inner(
     // for missing required values is driven by
     // `wrap::sequence::run_phase_1c_with_schema` against the
     // deduplicated cross-step set.
-    // Runs before the wrapper `chdir`, so the ambient CWD is the launch area;
-    // capture it as the `file`-typed property fallback anchor so area-relative
-    // paths resolve here document-first then launch-area, never via the
-    // soon-to-be-mutated process CWD.
+    // The top-level source was resolved from launch context above. Capture that
+    // directory before `chdir` as stable `file_ref_fallback_dir` diagnostic
+    // metadata; document-authored values resolve repository-first, then
+    // source-relative, never through launch as another candidate.
     let launch_area_fallback = std::env::current_dir().ok();
     let (source, set_overrides, dropped_optionals) =
         composition::drop_invalid_optionals(source, set_overrides, launch_area_fallback.as_deref());
