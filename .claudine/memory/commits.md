@@ -135,6 +135,37 @@ do not belong here.
   only at the end of the batch — recovering from a missed commit is much
   cheaper while the orchestrator still has the intended commit body and
   pathspec in context.
+- A sub-agent given a pathspecs **file** plus an `xargs -I {} git commit ...
+  < paths.txt` command shape will produce **N stacked commits** (one per
+  line) instead of one commit. The shape that says "commit a list of
+  paths" is not `xargs` over a per-line list — it is one
+  `git commit --only -F body -- p1 p2 ... pN` invocation, or
+  `git commit --only -F body --pathspec-from-file=<file>`. Observed in a
+  3-group batch: a 35-path refactor landed as 35 stacked `refactor(claudine):
+  plumb request-scoped FileResolutionContext through composition` commits.
+  The path set, tree, and subject were correct in every one; the batch
+  shape was wrong.
+- **Mitigation in the brief.** When the orchestrator wants one commit, the
+  brief must say, explicitly, "one `git commit --only -F body -- p1 p2 ...
+  pN` invocation with all paths as positional arguments; never `xargs` per
+  path; never per-path loops". For very long path lists use
+  `--pathspec-from-file=<file>` and a single invocation, not a shell loop.
+- **Recovery from N stacked commits when the orphans are yours.** If the
+  wrong-shape commits are entirely the sub-agent's work (not the
+  developer's), `git update-ref HEAD <old> <new>` (note: ref, newvalue,
+  oldvalue — the order differs from `git reset`) is the documented
+  CAS-advance pattern. It is the non-destructive equivalent of
+  `git reset --soft`: HEAD moves, the index is preserved, the working
+  tree is preserved, and the orphaned commits stay reachable from the
+  reflog / object database until GC. After the move, all of the formerly
+  committed paths reappear in `git diff --staged --name-only` (because
+  the index holds their post-commit state, which now differs from the
+  new HEAD) and the orchestrator can recommit them as one commit. Verify
+  the new HEAD before recommitting: `git log --oneline -3` and
+  `git status --short`. The developer's *unstaged* changes are
+  untouched by the move; only the staged snapshot, which is exactly what
+  a soft reset would touch, is at issue, and the soft-reset is what
+  `update-ref` performs.
 
 ## Verification
 

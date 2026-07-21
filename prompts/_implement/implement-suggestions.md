@@ -2,7 +2,7 @@
 $schema:
     spec: file(required; match(**/*spec*.md))
     design: file(match(**/*design*.md))
-    iteration: number(required)
+    iteration: number(required;default(1))
 description: |-
     Implements the findings in a review which was conducted to determine the drift between
     what was actually implemented versus the specification that was being targetted in that
