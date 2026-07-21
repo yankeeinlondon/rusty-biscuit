@@ -161,6 +161,35 @@ mod tests {
     }
 
     #[test]
+    fn test_format_text_preserves_nested_lists_inside_blockquotes() {
+        let fixtures = [
+            concat!(
+                "> - Parent alpha beta gamma delta epsilon.\n",
+                ">   - Child alpha beta gamma delta epsilon.\n"
+            ),
+            concat!(
+                "> 1. Parent alpha beta gamma delta epsilon.\n",
+                ">    1. Child alpha beta gamma delta epsilon.\n"
+            ),
+            concat!(
+                "> - [ ] Parent alpha beta gamma delta epsilon.\n",
+                ">   - [x] Child alpha beta gamma delta epsilon.\n"
+            ),
+        ];
+        let mut config = DmlsConfig::default();
+        config.formatting.fixed_width = Some(24);
+
+        for source in fixtures {
+            let mut md: Markdown = source.into();
+            md.cleanup();
+            let reflowed = reflow_to_width(md.content(), 24);
+            *md.content_mut() = reflowed;
+
+            assert_eq!(format_text(source, &config), md.as_string());
+        }
+    }
+
+    #[test]
     fn test_format_text_preserves_frontmatter_and_directive_lines() {
         let source = "---\ntitle: Doc\n---\n\n# Body\n\n::file ./intro.md\n";
         let config = DmlsConfig::default();
