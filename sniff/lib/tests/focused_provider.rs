@@ -1949,7 +1949,7 @@ async fn neutral_host_self_managed_gitlab_resolves_through_the_production_path()
         .await;
     Mock::given(method("GET"))
         .and(path("/api/v4/projects/acme%2Fproject/merge_requests/7"))
-        .and(header("authorization", "Bearer host-gitlab-secret"))
+        .and(header("private-token", "host-gitlab-secret"))
         .respond_with(ResponseTemplate::new(200).set_body_json(gitlab_pr_body()))
         .expect(1)
         .mount(&server)
@@ -2057,6 +2057,140 @@ async fn neutral_host_gitea_and_forgejo_are_distinguished_by_the_discovery_probe
 
         let record = client.get_pull_request("7").await.unwrap().expect("PR found");
         assert_eq!(record.details.author, "alice");
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn private_gitea_and_forgejo_queries_use_host_bound_api_key_authentication() {
+    let global_tokens = [
+        ("GITEA_TOKEN", "private-global-gitea-secret"),
+        ("FORGEJO_TOKEN", "private-global-forgejo-secret"),
+        ("CODEBERG_TOKEN", "private-global-codeberg-secret"),
+    ];
+    let _global_tokens = global_tokens
+        .iter()
+        .map(|(name, value)| EnvGuard::set_safe(name, value))
+        .collect::<Vec<_>>();
+    let host_variables = [
+        "SNIFF_GITEA_127_2E_0_2E_0_2E_1_TOKEN",
+        "SNIFF_FORGEJO_127_2E_0_2E_0_2E_1_TOKEN",
+    ];
+    let _clean_host_variables = host_variables
+        .iter()
+        .map(|variable| EnvGuard::remove_safe(variable))
+        .collect::<Vec<_>>();
+
+    for (flavor, variable, version) in [
+        (ApiFlavor::Gitea, host_variables[0], "1.25.0"),
+        (ApiFlavor::Forgejo, host_variables[1], "14.0.0+forgejo-1"),
+    ] {
+        let token = format!("private-{}-secret", format!("{flavor:?}").to_lowercase());
+        let _host_token = EnvGuard::set_safe(variable, &token);
+        let expected_authorization = format!("token {token}");
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v4/version"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/version"))
+            .respond_with({
+                let expected_authorization = expected_authorization.clone();
+                move |request: &wiremock::Request| {
+                    ResponseTemplate::new(
+                        if request
+                            .headers
+                            .get("authorization")
+                            .and_then(|value| value.to_str().ok())
+                            == Some(expected_authorization.as_str())
+                        {
+                            200
+                        } else {
+                            401
+                        },
+                    )
+                    .set_body_json(serde_json::json!({"version": version}))
+                }
+            })
+            .expect(2)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/repos/acme/project/pulls/7"))
+            .and(header("authorization", expected_authorization.as_str()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(actions_pr_body()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        if flavor == ApiFlavor::Gitea {
+            Mock::given(method("GET"))
+                .and(path("/api/v1/repos/acme/project/actions/jobs/10"))
+                .and(header("authorization", expected_authorization.as_str()))
+                .respond_with(ResponseTemplate::new(200).set_body_json(job_item(10)))
+                .expect(1)
+                .mount(&server)
+                .await;
+            Mock::given(method("GET"))
+                .and(path("/api/v1/repos/acme/project/actions/jobs"))
+                .and(query_param("page", "1"))
+                .and(query_param("limit", PAGE_SIZE.to_string()))
+                .and(header("authorization", expected_authorization.as_str()))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "jobs": [job_item(10)],
+                    "total_count": 1
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+        }
+
+        let directory = loopback_repository(&format!("{}/acme/project.git", server.uri()));
+        let resolved = resolve_remote_at(directory.path(), None).unwrap().expect("remote resolved");
+        let client = FocusedProviderClient::discover(
+            resolved,
+            FetchPolicy::deny_all().allow_host("127.0.0.1"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(client.remote().api_flavor, flavor);
+        assert!(client.get_pull_request("7").await.unwrap().is_some());
+        if flavor == ApiFlavor::Gitea {
+            assert!(
+                client
+                    .get_cicd_job(&reference(flavor, "10"))
+                    .await
+                    .unwrap()
+                    .is_some()
+            );
+            assert_eq!(
+                client
+                    .query_cicd_jobs(CiCdJobQuery::default())
+                    .await
+                    .unwrap()
+                    .items
+                    .len(),
+                1
+            );
+        }
+
+        let requests = server.received_requests().await.unwrap();
+        for request in requests.iter().filter(|request| {
+            request.url.path() == "/api/v1/version"
+                || request.url.path().starts_with("/api/v1/repos/")
+        }) {
+            if request.headers.contains_key("authorization") {
+                assert_eq!(
+                    request.headers["authorization"].to_str().unwrap(),
+                    expected_authorization
+                );
+            }
+        }
+        let rendered = format!("{requests:?}");
+        for (_, global_token) in global_tokens {
+            assert!(!rendered.contains(global_token));
+        }
     }
 }
 

@@ -480,11 +480,11 @@ pub(crate) fn probe_self_hosted_provider(
             let request = client
                 .get(endpoint.clone())
                 .header(reqwest::header::USER_AGENT, "sniff/provider-discovery");
-            let request = match discovery.flavor {
-                ApiFlavor::GitLab => request.header("PRIVATE-TOKEN", &token),
-                ApiFlavor::AzureDevOps => request.basic_auth("", Some(&token)),
-                _ => request.bearer_auth(&token),
-            };
+            let request = crate::credentials::authenticate_provider_request(
+                request,
+                discovery.flavor,
+                &token,
+            );
             let response = request.send().map_err(|error| unreachable(&endpoint, error))?;
             let retry_status = response.status().as_u16();
             if (300..400).contains(&retry_status) {
@@ -577,11 +577,11 @@ pub(crate) fn probe_self_hosted_provider(
             let request = client
                 .get(endpoint.clone())
                 .header(reqwest::header::USER_AGENT, "sniff/provider-discovery");
-            let request = match selected_flavor {
-                ApiFlavor::GitLab => request.header("PRIVATE-TOKEN", &token),
-                ApiFlavor::AzureDevOps => request.basic_auth("", Some(&token)),
-                _ => request.bearer_auth(&token),
-            };
+            let request = crate::credentials::authenticate_provider_request(
+                request,
+                selected_flavor,
+                &token,
+            );
             let response = request.send().map_err(|error| unreachable(endpoint, error))?;
             let status = response.status().as_u16();
             if (300..400).contains(&status) {

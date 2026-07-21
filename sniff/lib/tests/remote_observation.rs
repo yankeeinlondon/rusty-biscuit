@@ -1,6 +1,7 @@
 #![cfg(feature = "network")]
 
 use biscuit_file::FetchPolicy;
+use base64::Engine;
 use serial_test::serial;
 use sniff::SniffError;
 use sniff::filesystem::git::{branch_exists_on_remote_at, remote_vendor_at};
@@ -609,6 +610,155 @@ async fn unsigned_authentication_challenges_use_only_one_host_bound_provider_cre
         !request.headers.contains_key("authorization")
             && !request.headers.contains_key("private-token")
     }));
+}
+
+#[tokio::test]
+#[serial]
+async fn host_bound_discovery_uses_each_providers_exact_authentication_header() {
+    let token = "host-auth-secret";
+    let basic = format!(
+        "Basic {}",
+        base64::engine::general_purpose::STANDARD.encode(format!(":{token}"))
+    );
+    let cases = [
+        (
+            "SNIFF_GITHUB_127_2E_0_2E_0_2E_1_TOKEN",
+            "/api/v3/meta",
+            serde_json::json!({"installed_version": "3.16.1"}),
+            "authorization",
+            format!("Bearer {token}"),
+            "github",
+        ),
+        (
+            "SNIFF_GITLAB_127_2E_0_2E_0_2E_1_TOKEN",
+            "/api/v4/version",
+            serde_json::json!({"version": "17.2.0", "revision": "a1b2c3d4"}),
+            "private-token",
+            token.to_string(),
+            "gitlab",
+        ),
+        (
+            "SNIFF_GITEA_127_2E_0_2E_0_2E_1_TOKEN",
+            "/api/v1/version",
+            serde_json::json!({"version": "1.25.0"}),
+            "authorization",
+            format!("token {token}"),
+            "gitea",
+        ),
+        (
+            "SNIFF_FORGEJO_127_2E_0_2E_0_2E_1_TOKEN",
+            "/api/v1/version",
+            serde_json::json!({"version": "Forgejo 14.0.0"}),
+            "authorization",
+            format!("token {token}"),
+            "forgejo",
+        ),
+        (
+            "SNIFF_BITBUCKET_127_2E_0_2E_0_2E_1_TOKEN",
+            "/rest/api/1.0/application-properties",
+            serde_json::json!({"displayName": "Bitbucket", "version": "9.4.1"}),
+            "authorization",
+            format!("Bearer {token}"),
+            "bitbucket",
+        ),
+        (
+            "SNIFF_AZURE_DEVOPS_127_2E_0_2E_0_2E_1_TOKEN",
+            "/_apis/connectionData",
+            serde_json::json!({
+                "instanceId": "9e3f8106-1d6b-4ff8-9a7e-10e1fd9ab06f",
+                "deploymentId": "880d3b0c-9d90-4c7f-bb08-a2d1e159b4b2",
+                "deploymentType": "OnPremises"
+            }),
+            "authorization",
+            basic,
+            "azure_devops",
+        ),
+    ];
+    let host_variables = cases.iter().map(|case| case.0).collect::<Vec<_>>();
+    let _clean_host_variables = host_variables
+        .iter()
+        .map(|variable| EnvGuard::remove_safe(variable))
+        .collect::<Vec<_>>();
+    let global_tokens = [
+        ("GH_TOKEN", "matrix-global-github-secret"),
+        ("GITHUB_TOKEN", "matrix-global-github-fallback-secret"),
+        ("GITLAB_TOKEN", "matrix-global-gitlab-secret"),
+        ("GITLAB_PRIVATE_TOKEN", "matrix-global-gitlab-fallback-secret"),
+        ("GITEA_TOKEN", "matrix-global-gitea-secret"),
+        ("FORGEJO_TOKEN", "matrix-global-forgejo-secret"),
+        ("CODEBERG_TOKEN", "matrix-global-codeberg-secret"),
+        ("BITBUCKET_TOKEN", "matrix-global-bitbucket-secret"),
+        ("AZURE_DEVOPS_TOKEN", "matrix-global-azure-secret"),
+    ];
+    let _global_tokens = global_tokens
+        .iter()
+        .map(|(name, value)| EnvGuard::set_safe(name, value))
+        .collect::<Vec<_>>();
+
+    for (variable, signature_path, signature, header_name, header_value, expected) in cases {
+        for signed_challenge in [true, false] {
+            let _host_token = EnvGuard::set_safe(variable, token);
+            let server = MockServer::start().await;
+            let body = signature.clone();
+            let expected_value = header_value.clone();
+            Mock::given(method("GET"))
+                .and(path(signature_path))
+                .respond_with(move |request: &wiremock::Request| {
+                    let authenticated = request
+                        .headers
+                        .get(header_name)
+                        .and_then(|value| value.to_str().ok())
+                        .is_some_and(|value| value == expected_value);
+                    let response_body = if authenticated || signed_challenge {
+                        body.clone()
+                    } else {
+                        serde_json::json!({"message": "authentication required"})
+                    };
+                    ResponseTemplate::new(if authenticated { 200 } else { 401 })
+                        .set_body_json(response_body)
+                })
+                .expect(2)
+                .mount(&server)
+                .await;
+
+            assert_eq!(discovered_vendor(&server).await.unwrap(), expected);
+            let requests = server.received_requests().await.unwrap();
+            let authenticated = requests
+                .iter()
+                .filter(|request| {
+                    request.headers.contains_key("authorization")
+                        || request.headers.contains_key("private-token")
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(authenticated.len(), 1, "{expected} signed={signed_challenge}");
+            assert_eq!(
+                authenticated[0].headers[header_name].to_str().unwrap(),
+                header_value,
+                "{expected} signed={signed_challenge}"
+            );
+            let rendered = format!("{requests:?}");
+            for (_, secret) in global_tokens {
+                assert!(!rendered.contains(secret), "global credential reached {expected}");
+            }
+        }
+
+        let invalid_token = format!("invalid-{expected}-secret");
+        let _host_token = EnvGuard::set_safe(variable, &invalid_token);
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(signature_path))
+            .respond_with(ResponseTemplate::new(401).set_body_json(signature))
+            .expect(2)
+            .mount(&server)
+            .await;
+        let error = discovered_vendor(&server).await.unwrap_err();
+        assert!(matches!(error, SniffError::InvalidCredentials { .. }));
+        assert!(!format!("{error:?}\n{error}").contains(&invalid_token));
+        let rendered = format!("{:?}", server.received_requests().await.unwrap());
+        for (_, secret) in global_tokens {
+            assert!(!rendered.contains(secret), "global credential reached {expected}");
+        }
+    }
 }
 
 #[tokio::test]

@@ -1,5 +1,54 @@
 use crate::filesystem::git::ApiFlavor;
 
+pub(crate) trait ProviderRequestBuilder: Sized {
+    fn header(self, name: &'static str, value: String) -> Self;
+    fn basic_auth(self, token: &str) -> Self;
+    fn bearer_auth(self, token: &str) -> Self;
+}
+
+impl ProviderRequestBuilder for reqwest::RequestBuilder {
+    fn header(self, name: &'static str, value: String) -> Self {
+        self.header(name, value)
+    }
+
+    fn basic_auth(self, token: &str) -> Self {
+        self.basic_auth("", Some(token))
+    }
+
+    fn bearer_auth(self, token: &str) -> Self {
+        self.bearer_auth(token)
+    }
+}
+
+impl ProviderRequestBuilder for reqwest::blocking::RequestBuilder {
+    fn header(self, name: &'static str, value: String) -> Self {
+        self.header(name, value)
+    }
+
+    fn basic_auth(self, token: &str) -> Self {
+        self.basic_auth("", Some(token))
+    }
+
+    fn bearer_auth(self, token: &str) -> Self {
+        self.bearer_auth(token)
+    }
+}
+
+pub(crate) fn authenticate_provider_request<R: ProviderRequestBuilder>(
+    request: R,
+    flavor: ApiFlavor,
+    token: &str,
+) -> R {
+    match flavor {
+        ApiFlavor::GitLab => request.header("PRIVATE-TOKEN", token.to_string()),
+        ApiFlavor::Gitea | ApiFlavor::Forgejo => {
+            request.header("Authorization", format!("token {token}"))
+        }
+        ApiFlavor::AzureDevOps => request.basic_auth(token),
+        _ => request.bearer_auth(token),
+    }
+}
+
 pub(crate) fn provider_token(flavor: ApiFlavor) -> (Option<String>, &'static str) {
     let names: &[&str] = match flavor {
         ApiFlavor::GitHub => &["GH_TOKEN", "GITHUB_TOKEN"],

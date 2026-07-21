@@ -544,7 +544,11 @@ impl FocusedProviderClient {
         };
         let mut request = client.get(endpoint.clone()).header(reqwest::header::USER_AGENT, "sniff/focused-provider");
         if let Some(token) = token.as_ref() {
-            request = request.bearer_auth(token);
+            request = crate::credentials::authenticate_provider_request(
+                request,
+                self.remote.api_flavor,
+                token,
+            );
         }
         let response = request.send().await.map_err(|error| transport(&endpoint, error))?;
         let status = response.status().as_u16();
