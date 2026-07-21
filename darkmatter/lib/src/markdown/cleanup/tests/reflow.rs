@@ -783,24 +783,70 @@ fn assert_lines_within_width(content: &str, width: usize) {
 
     #[test]
     fn configured_indent_8_preserves_structure_through_fixed_width_and_second_pass() {
-        let source = "- Parent alpha beta gamma delta.\n  - Child alpha beta gamma delta epsilon.";
+        let source = concat!(
+            "- Parent first paragraph alpha beta gamma delta.\n",
+            "\n",
+            "  Second paragraph alpha beta gamma delta epsilon.\n",
+            "\n",
+            "  - Child item alpha beta gamma delta epsilon.\n",
+            "\n",
+            "> - Quote parent alpha beta gamma delta.\n",
+            ">   - Quote child alpha beta gamma delta epsilon.\n",
+            "\n",
+            "> - [ ] Task parent alpha beta gamma delta.\n",
+            ">   - [x] Task child alpha beta gamma delta epsilon.\n"
+        );
         let cleaned = cleanup_content_with_indent(source, 8);
 
         assert_eq!(
             cleaned,
-            "- Parent alpha beta gamma delta.\n     - Child alpha beta gamma delta epsilon.\n"
+            concat!(
+                "- Parent first paragraph alpha beta gamma delta.\n",
+                "        \n",
+                "  Second paragraph alpha beta gamma delta epsilon.\n",
+                "\n",
+                "     - Child item alpha beta gamma delta epsilon.\n",
+                "\n",
+                "> - Quote parent alpha beta gamma delta.\n",
+                ">      - Quote child alpha beta gamma delta epsilon.\n",
+                "\n",
+                "> - [ ] Task parent alpha beta gamma delta.\n",
+                ">      - [x] Task child alpha beta gamma delta epsilon.\n"
+            )
         );
         assert_structure_preserved(source, &cleaned);
+        assert_eq!(cleanup_content_with_indent(&cleaned, 8), cleaned);
 
-        let fixed = reflow_to_width(&cleaned, 24);
+        let fixed = reflow_to_width(&cleaned, 30);
         assert_eq!(
             fixed,
-            "- Parent alpha beta\n  gamma delta.\n     - Child alpha beta\n       gamma delta\n       epsilon.\n"
+            concat!(
+                "- Parent first paragraph alpha\n",
+                "  beta gamma delta.\n",
+                "        \n",
+                "  Second paragraph alpha beta\n",
+                "  gamma delta epsilon.\n",
+                "\n",
+                "     - Child item alpha beta\n",
+                "       gamma delta epsilon.\n",
+                "\n",
+                "> - Quote parent alpha beta\n",
+                ">   gamma delta.\n",
+                ">      - Quote child alpha\n",
+                ">        beta gamma delta\n",
+                ">        epsilon.\n",
+                "\n",
+                "> - [ ] Task parent alpha beta\n",
+                ">       gamma delta.\n",
+                ">      - [x] Task child alpha\n",
+                ">            beta gamma delta\n",
+                ">            epsilon.\n"
+            )
         );
         assert_structure_preserved(source, &fixed);
-        assert_lines_within_width(&fixed, 24);
+        assert_lines_within_width(&fixed, 30);
 
-        let second = reflow_to_width(&cleanup_content_with_indent(&fixed, 8), 24);
+        let second = reflow_to_width(&cleanup_content_with_indent(&fixed, 8), 30);
         assert_eq!(second, fixed);
         assert_structure_preserved(source, &second);
     }
@@ -843,6 +889,205 @@ fn assert_lines_within_width(content: &str, width: usize) {
             "- First alpha beta gamma\n  delta.\n\n    Second alpha beta\n    gamma delta epsilon."
         );
         assert_lines_within_width(&reflowed, 24);
+    }
+
+    #[test]
+    fn cleanup_preserves_nested_child_after_additional_item_paragraph() {
+        let source = concat!(
+            "- Parent first paragraph.\n",
+            "\n",
+            "  Second paragraph.\n",
+            "\n",
+            "  - Child item.\n"
+        );
+        let expected_default = concat!(
+            "- Parent first paragraph.\n",
+            "    \n",
+            "  Second paragraph.\n",
+            "\n",
+            "    - Child item.\n"
+        );
+        let expected_configured = concat!(
+            "- Parent first paragraph.\n",
+            "  \n",
+            "  Second paragraph.\n",
+            "\n",
+            "  - Child item.\n"
+        );
+        let expected_fixed = concat!(
+            "- Parent first\n",
+            "  paragraph.\n",
+            "    \n",
+            "  Second paragraph.\n",
+            "\n",
+            "    - Child item.\n"
+        );
+
+        let default = cleanup_content(source);
+        assert_eq!(default, expected_default);
+        assert_structure_preserved(source, &default);
+
+        let configured = cleanup_content_with_indent(source, 2);
+        assert_eq!(configured, expected_configured);
+        assert_structure_preserved(source, &configured);
+
+        let fixed = reflow_to_width(&default, 24);
+        assert_eq!(fixed, expected_fixed);
+        assert_lines_within_width(&fixed, 24);
+        assert_structure_preserved(source, &fixed);
+
+        assert_eq!(cleanup_content(&default), default);
+        assert_eq!(cleanup_content_with_indent(&configured, 2), configured);
+        let fixed_second = reflow_to_width(&cleanup_content(&fixed), 24);
+        assert_eq!(fixed_second, fixed);
+        assert_structure_preserved(source, &fixed_second);
+    }
+
+    #[test]
+    fn cleanup_preserves_nested_lists_inside_blockquotes() {
+        let fixtures = [
+            (
+                concat!(
+                    "> - Parent alpha beta gamma delta epsilon.\n",
+                    ">   - Child alpha beta gamma delta epsilon.\n"
+                ),
+                concat!(
+                    "> - Parent alpha beta gamma delta epsilon.\n",
+                    ">     - Child alpha beta gamma delta epsilon.\n"
+                ),
+                concat!(
+                    "> - Parent alpha beta gamma delta epsilon.\n",
+                    ">   - Child alpha beta gamma delta epsilon.\n"
+                ),
+                concat!(
+                    "> - Parent alpha beta\n",
+                    ">   gamma delta epsilon.\n",
+                    ">     - Child alpha beta\n",
+                    ">       gamma delta\n",
+                    ">       epsilon.\n"
+                ),
+            ),
+            (
+                concat!(
+                    "> 1. Parent alpha beta gamma delta epsilon.\n",
+                    ">    1. Child alpha beta gamma delta epsilon.\n"
+                ),
+                concat!(
+                    "> 1. Parent alpha beta gamma delta epsilon.\n",
+                    ">     1. Child alpha beta gamma delta epsilon.\n"
+                ),
+                concat!(
+                    "> 1. Parent alpha beta gamma delta epsilon.\n",
+                    ">    1. Child alpha beta gamma delta epsilon.\n"
+                ),
+                concat!(
+                    "> 1. Parent alpha beta\n",
+                    ">    gamma delta\n",
+                    ">    epsilon.\n",
+                    ">     1. Child alpha\n",
+                    ">        beta gamma\n",
+                    ">        delta epsilon.\n"
+                ),
+            ),
+            (
+                concat!(
+                    "> - [ ] Parent alpha beta gamma delta epsilon.\n",
+                    ">   - [x] Child alpha beta gamma delta epsilon.\n"
+                ),
+                concat!(
+                    "> - [ ] Parent alpha beta gamma delta epsilon.\n",
+                    ">     - [x] Child alpha beta gamma delta epsilon.\n"
+                ),
+                concat!(
+                    "> - [ ] Parent alpha beta gamma delta epsilon.\n",
+                    ">   - [x] Child alpha beta gamma delta epsilon.\n"
+                ),
+                concat!(
+                    "> - [ ] Parent alpha\n",
+                    ">       beta gamma delta\n",
+                    ">       epsilon.\n",
+                    ">     - [x] Child alpha\n",
+                    ">           beta gamma\n",
+                    ">           delta\n",
+                    ">           epsilon.\n"
+                ),
+            ),
+        ];
+
+        for (source, expected_default, expected_configured, expected_fixed) in fixtures {
+            let default = cleanup_content(source);
+            assert_eq!(default, expected_default);
+            assert_structure_preserved(source, &default);
+
+            let configured = cleanup_content_with_indent(source, 2);
+            assert_eq!(configured, expected_configured);
+            assert_structure_preserved(source, &configured);
+
+            let fixed = reflow_to_width(&default, 24);
+            assert_eq!(fixed, expected_fixed);
+            assert_lines_within_width(&fixed, 24);
+            assert_structure_preserved(source, &fixed);
+
+            assert_eq!(cleanup_content(&default), default);
+            assert_eq!(cleanup_content_with_indent(&configured, 2), configured);
+            assert_eq!(reflow_to_width(&cleanup_content(&fixed), 24), fixed);
+        }
+    }
+
+    #[test]
+    fn cleanup_preserves_marker_looking_indented_code_blocks() {
+        let fixtures = [
+            (
+                concat!(
+                    "- Parent.\n",
+                    "\n",
+                    "      - literal unordered code\n",
+                    "\n",
+                    "+ Later sibling.\n"
+                ),
+                concat!(
+                    "- Parent.\n",
+                    "    \n",
+                    "      - literal unordered code\n",
+                    "\n",
+                    "+ Later sibling.\n"
+                ),
+            ),
+            (
+                concat!(
+                    "- Parent.\n",
+                    "\n",
+                    "      1. literal ordered code\n",
+                    "\n",
+                    "+ Later sibling.\n"
+                ),
+                concat!(
+                    "- Parent.\n",
+                    "    \n",
+                    "      1. literal ordered code\n",
+                    "\n",
+                    "+ Later sibling.\n"
+                ),
+            ),
+        ];
+
+        for (source, expected) in fixtures {
+            let default = cleanup_content(source);
+            assert_eq!(default, expected);
+            assert_structure_preserved(source, &default);
+            assert_eq!(cleanup_content(&default), default);
+
+            let configured = cleanup_content_with_indent(source, 4);
+            assert_eq!(configured, expected);
+            assert_structure_preserved(source, &configured);
+            assert_eq!(cleanup_content_with_indent(&configured, 4), configured);
+
+            let fixed = reflow_to_width(&default, 24);
+            assert_eq!(fixed, expected);
+            assert_structure_preserved(source, &fixed);
+            let fixed_second = reflow_to_width(&cleanup_content(&fixed), 24);
+            assert_eq!(fixed_second, fixed);
+        }
     }
 
     #[test]
@@ -1000,18 +1245,11 @@ fn assert_lines_within_width(content: &str, width: usize) {
         assert_eq!(reflowed, content);
     }
 
-    /// Eight-space nesting reached through the parent marker's own width rather than through
-    /// `--indent 8`. `cleanup_content_with_indent` cannot deliver a *configured* eight-space
-    /// nesting: `fix_list_indentation` derives depth from the actual open-level stack, and
-    /// eight spaces under a one-character marker is lazy paragraph continuation, not a nested
-    /// list. The property under test is unchanged either way — reflow must read the indentation
-    /// actually present after cleanup instead of assuming two or four.
-    ///
-    /// Note: `--indent 8` is now rejected at the CLI (see `parse_indent_size`) because
-    /// eight-space nesting is not CommonMark-portable for narrow markers. This library-level
-    /// test remains the canonical proof that reflow consumes actual indentation without
-    /// hard-coding — it exercises a wide parent marker (`123456. `, content col 8) under
-    /// which eight-column nesting *is* CommonMark-valid.
+    /// Eight-space nesting reached through the parent marker's own width. This complements the
+    /// configured-eight narrow-marker fixture above: reflow consumes the indentation cleanup
+    /// actually emits rather than assuming two or four columns. A wide parent marker
+    /// (`123456. `, content column 8) can represent the full preferred step without the
+    /// CommonMark-validity constraint used for narrow parents.
     #[test]
     fn reflow_to_width_derives_prefixes_from_actual_eight_space_nesting() {
         fn hanging_indent(reflowed: &str) -> usize {

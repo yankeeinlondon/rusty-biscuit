@@ -169,6 +169,51 @@ fn test_compose_cleanup_list_modes_match_direct_library_cleanup() {
 }
 
 #[test]
+fn test_compose_cleanup_preserves_nested_lists_inside_blockquotes() {
+    use crate::markdown::cleanup::{
+        cleanup_content, cleanup_content_with_indent, reflow_to_width,
+    };
+
+    let fixtures = [
+        concat!(
+            "> - Parent alpha beta gamma delta epsilon.\n",
+            ">   - Child alpha beta gamma delta epsilon.\n"
+        ),
+        concat!(
+            "> 1. Parent alpha beta gamma delta epsilon.\n",
+            ">    1. Child alpha beta gamma delta epsilon.\n"
+        ),
+        concat!(
+            "> - [ ] Parent alpha beta gamma delta epsilon.\n",
+            ">   - [x] Child alpha beta gamma delta epsilon.\n"
+        ),
+    ];
+
+    for source in fixtures {
+        let default_options = ComposeOptions::new().only(&[ComposeOperation::Cleanup]);
+        let (default, _) = Markdown::from(source)
+            .compose_with(default_options)
+            .unwrap();
+        let direct_default = cleanup_content(source);
+        assert_eq!(default.content(), direct_default);
+
+        let configured_options = ComposeOptions::new()
+            .only(&[ComposeOperation::Cleanup])
+            .with_indent_size(2);
+        let (configured, _) = Markdown::from(source)
+            .compose_with(configured_options)
+            .unwrap();
+        assert_eq!(configured.content(), cleanup_content_with_indent(source, 2));
+
+        let fixed_options = ComposeOptions::new()
+            .only(&[ComposeOperation::Cleanup])
+            .with_fixed_width(24);
+        let (fixed, _) = Markdown::from(source).compose_with(fixed_options).unwrap();
+        assert_eq!(fixed.content(), reflow_to_width(&direct_default, 24));
+    }
+}
+
+#[test]
 fn test_compose_cleanup_fixed_width_keeps_reference_definitions_intact() {
     use crate::markdown::cleanup::reflow_to_width;
 

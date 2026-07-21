@@ -290,7 +290,7 @@ use super::*;
         // the protection is not observable through `cleanup_content`.
         let input = "> ```\n> * this is code\n> ```\n";
         let mut buffer = input.to_string();
-        restore_list_markers(&mut buffer, &['-']);
+        restore_list_markers(&mut buffer, &['-'], &[]);
 
         assert_eq!(
             buffer, input,
@@ -305,7 +305,7 @@ use super::*;
         // CommonMark accepts and which the cmark pipeline can emit.
         let input = "> ~~~\n> * this is code\n> ~~~\n";
         let mut buffer = input.to_string();
-        restore_list_markers(&mut buffer, &['-']);
+        restore_list_markers(&mut buffer, &['-'], &[]);
 
         assert_eq!(
             buffer, input,
