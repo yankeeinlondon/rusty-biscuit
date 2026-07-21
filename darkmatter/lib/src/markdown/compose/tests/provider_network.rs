@@ -9,9 +9,8 @@
 //! error mapping, and the Markdown projection are all exercised as they
 //! compose.
 //!
-//! The resolved remote is a loopback Gitea-flavored remote, so the traversal
-//! shapes here are the parent-execution ones (`actions/runs` then
-//! `actions/runs/{id}/jobs`) rather than GitLab's direct job listing.
+//! The resolved remote is a loopback Gitea 1.25 server, so job lists use its
+//! repository-scoped `actions/jobs` endpoint.
 
 use std::collections::HashSet;
 
@@ -88,6 +87,10 @@ impl Fixture {
     /// discovery probe. Request-count assertions do not belong on this
     /// fixture — discovery issues its own version requests.
     async fn start_production() -> Self {
+        Self::start_production_at("1.25.0").await
+    }
+
+    async fn start_production_at(version: &str) -> Self {
         let server = MockServer::start().await;
         let directory = tempfile::tempdir().expect("tempdir");
         let repository = git2::Repository::init(directory.path()).expect("git init");
@@ -103,7 +106,9 @@ impl Fixture {
             .await;
         Mock::given(method("GET"))
             .and(path("/api/v1/version"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"version": "1.22.0"})))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"version": version})),
+            )
             .mount(&server)
             .await;
 
@@ -207,8 +212,7 @@ impl Fixture {
 const PR_PATH: &str = "/api/v1/repos/acme/widgets/pulls/123";
 const PR_LIST_PATH: &str = "/api/v1/repos/acme/widgets/pulls";
 const JOB_PATH: &str = "/api/v1/repos/acme/widgets/actions/jobs/456";
-const RUNS_PATH: &str = "/api/v1/repos/acme/widgets/actions/runs";
-const RUN_JOBS_PATH: &str = "/api/v1/repos/acme/widgets/actions/runs/99/jobs";
+const JOBS_PATH: &str = "/api/v1/repos/acme/widgets/actions/jobs";
 
 fn pr_body(number: u64, title: &str) -> Value {
     json!({
@@ -352,10 +356,7 @@ async fn cicd_renders_identically_in_frontmatter_and_body() {
 async fn cicd_list_renders_identically_in_frontmatter_and_body() {
     let fixture = Fixture::start().await;
     fixture
-        .mount_json(RUNS_PATH, json!({"workflow_runs": [{"id": 99}]}))
-        .await;
-    fixture
-        .mount_json(RUN_JOBS_PATH, json!({"jobs": [job_body(456, "build")]}))
+        .mount_json(JOBS_PATH, json!({"jobs": [job_body(456, "build")]}))
         .await;
 
     let composed = fixture
@@ -586,8 +587,7 @@ async fn cross_origin_provider_links_never_reach_the_composed_document() {
     fixture.mount_json(PR_PATH, pr.clone()).await;
     fixture.mount_json(PR_LIST_PATH, json!([pr])).await;
     fixture.mount_json(JOB_PATH, job.clone()).await;
-    fixture.mount_json(RUNS_PATH, json!([{"id": 99, "name": "CI"}])).await;
-    fixture.mount_json(RUN_JOBS_PATH, json!([job])).await;
+    fixture.mount_json(JOBS_PATH, json!({"jobs": [job]})).await;
 
     let composed = fixture
         .compose(
@@ -715,27 +715,19 @@ async fn invalid_credentials_surface_as_an_authorization_error() {
 
 /// A traversal that hits its safety cap is incomplete, not empty.
 ///
-/// The parent-execution bound is the cheapest of the three caps to reach: one
-/// oversized page of workflow runs is enough, and the walk refuses at the run
-/// past the bound rather than returning the jobs it managed to collect.
+/// Twenty full direct-list pages reach the page cap without provider
+/// exhaustion, so the walk refuses rather than returning the jobs it collected.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial_test::serial(provider_transport)]
 async fn incomplete_domain_surfaces_rather_than_a_truncated_list() {
     let fixture = Fixture::start().await;
-    let runs: Vec<Value> = (1..=21).map(|id| json!({"id": id})).collect();
-    fixture.mount_json(RUNS_PATH, json!({"workflow_runs": runs})).await;
-    Mock::given(method("GET"))
-        .and(wiremock::matchers::path_regex(
-            r"^/api/v1/repos/acme/widgets/actions/runs/\d+/jobs$",
-        ))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"jobs": []})))
-        .mount(&fixture.server)
-        .await;
+    let jobs: Vec<Value> = (1..=100).map(|id| job_body(id, "build")).collect();
+    fixture.mount_json(JOBS_PATH, json!({"jobs": jobs})).await;
 
     let message = error_text(fixture.compose(&frontmatter_document("cicd_list(5)")));
     let lowered = message.to_lowercase();
     assert!(
-        lowered.contains("incomplete") || lowered.contains("parent executions"),
+        lowered.contains("incomplete") || lowered.contains("job pages"),
         "a capped traversal must report incompleteness, not a short list: {message}"
     );
 }
@@ -918,23 +910,54 @@ async fn unsupported_capability_is_fatal_on_all_three_surfaces() {
     .await;
 }
 
+/// A discovered Gitea below the source-proven job endpoint threshold must
+/// project exact and list calls as actionable provider errors on every
+/// expression surface, without converting either one to `null` or `[]`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(provider_transport)]
+async fn gitea_1_24_job_operations_are_version_errors_on_every_surface() {
+    let fixture = Fixture::start_production_at("1.24.6").await;
+    for expression in ["cicd(456)", "cicd_list(5)"] {
+        for surface in Surface::ALL {
+            let approved: HashSet<String> = match surface {
+                Surface::ShellTernary => ["echo found".to_string(), "echo missing".to_string()]
+                    .into_iter()
+                    .collect(),
+                _ => HashSet::new(),
+            };
+            let result = fixture.compose_full(
+                &surface.document(expression),
+                vec!["127.0.0.1".to_string()],
+                approved,
+            );
+            let message = error_text(result);
+            for fragment in ["Gitea", "1.24.6", "requires Gitea 1.25.0"] {
+                assert!(
+                    message.contains(fragment),
+                    "{} surface lost `{fragment}` for {expression}: {message}",
+                    surface.name()
+                );
+            }
+        }
+    }
+
+    let paths = fixture.request_paths().await;
+    assert!(
+        paths.iter().all(|path| matches!(path.as_str(), "/api/v4/version" | "/api/v1/version")),
+        "an unsupported-version expression reached a job endpoint: {paths:?}"
+    );
+}
+
 /// A traversal that hits its safety cap is the incomplete-domain kind on
 /// every surface, never a truncated-or-empty list.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial_test::serial(provider_transport)]
 async fn incomplete_domain_is_fatal_on_all_three_surfaces() {
     let fixture = Fixture::start().await;
-    let runs: Vec<Value> = (1..=21).map(|id| json!({"id": id})).collect();
-    fixture.mount_json(RUNS_PATH, json!({"workflow_runs": runs})).await;
-    Mock::given(method("GET"))
-        .and(wiremock::matchers::path_regex(
-            r"^/api/v1/repos/acme/widgets/actions/runs/\d+/jobs$",
-        ))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"jobs": []})))
-        .mount(&fixture.server)
-        .await;
+    let jobs: Vec<Value> = (1..=100).map(|id| job_body(id, "build")).collect();
+    fixture.mount_json(JOBS_PATH, json!({"jobs": jobs})).await;
 
-    assert_fatal_on_every_surface(&fixture, "cicd_list(5)", &["incomplete", "parent executions"], false)
+    assert_fatal_on_every_surface(&fixture, "cicd_list(5)", &["incomplete", "job pages"], false)
         .await;
 }
 

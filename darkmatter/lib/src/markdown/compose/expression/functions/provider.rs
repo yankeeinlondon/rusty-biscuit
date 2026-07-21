@@ -46,6 +46,14 @@ pub(super) async fn connect(
     #[cfg(test)]
     if let Some(transport) = test_transport::current() {
         resolved.api_flavor = transport.flavor;
+        if transport.flavor == sniff::filesystem::git::ApiFlavor::Gitea {
+            return FocusedProviderClient::with_api_base_and_server_version(
+                resolved,
+                policy,
+                &transport.api_base,
+                "1.25.0",
+            );
+        }
         return FocusedProviderClient::with_api_base(resolved, policy, &transport.api_base);
     }
     FocusedProviderClient::discover(resolved, policy).await
@@ -236,6 +244,7 @@ fn classify_provider_failure(error: &sniff::SniffError) -> ProviderFailureKind {
         E::RateLimited { .. } => ProviderFailureKind::RateLimit,
         E::UnsupportedProvider { .. }
         | E::UnsupportedRemoteCapability { .. }
+        | E::UnsupportedServerVersion { .. }
         | E::UnsupportedRemoteFilter { .. } => ProviderFailureKind::UnsupportedCapability,
         E::IncompleteRemoteDomain { .. } => ProviderFailureKind::IncompleteDomain,
         E::ShorthandNotFound { .. } => ProviderFailureKind::NotFound,
@@ -387,6 +396,16 @@ mod tests {
                 E::UnsupportedRemoteCapability {
                     capability: "provider queries",
                     target: "SelfHosted".to_string(),
+                },
+                ProviderFailureKind::UnsupportedCapability,
+            ),
+            (
+                E::UnsupportedServerVersion {
+                    provider: "Gitea".to_string(),
+                    flavor: "Gitea".to_string(),
+                    version: "1.24.6".to_string(),
+                    capability: "CI/CD job query",
+                    requirement: "requires Gitea 1.25.0 or newer",
                 },
                 ProviderFailureKind::UnsupportedCapability,
             ),
