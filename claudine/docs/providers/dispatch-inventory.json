@@ -18,10 +18,10 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 1358,
-    "provider_refs": 1460,
+    "sites": 1359,
+    "provider_refs": 1461,
     "by_form": {
-      "direct-ref": 1311,
+      "direct-ref": 1312,
       "eq-comparison": 18,
       "match-provider": 5,
       "matches-macro": 12,
@@ -30,7 +30,7 @@
     },
     "by_dispatch_class": {
       "conditional": 47,
-      "reference": 1311
+      "reference": 1312
     }
   },
   "sites": [
@@ -1385,11 +1385,21 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs",
-      "line": 35,
+      "line": 63,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
         "Goose"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs",
+      "line": 147,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
       ],
       "exempt_candidate": true
     },
