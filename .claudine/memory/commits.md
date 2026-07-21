@@ -45,6 +45,13 @@ do not belong here.
   open the configured editor and block.
 - Do not place messages containing backticks, dollar signs, or other shell
   metacharacters in a double-quoted `-m` argument.
+- **`--only` + `-F -` argument order.** In a path-restricted commit that reads
+  the message from stdin, place `-F -` BEFORE `--only`, not after:
+  `git commit -F - --only -- <paths>` works; `git commit --only -F - -- <paths>`
+  makes `--only` absorb `-F` as a pathspec and git returns
+  `error: pathspec '-F' did not match any file(s) known to git`. The heredoc
+  payload is then never read. Pair this with the single-quoted `<<'COMMIT_MSG'`
+  delimiter above.
 
 ## Mixed-State Paths
 
