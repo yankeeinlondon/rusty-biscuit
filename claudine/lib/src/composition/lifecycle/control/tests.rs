@@ -278,6 +278,27 @@ fn proxy_handoff_allowed_rejects_self_and_cycles() {
 }
 
 #[test]
+fn request_scoped_proxy_resolution_rejects_lexical_a_b_a_cycle() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompts = dir.path().join("prompts");
+    std::fs::create_dir_all(&prompts).unwrap();
+    let a = prompts.join("a.md");
+    let b = prompts.join("b.md");
+    std::fs::write(&a, "---\n---\n").unwrap();
+    std::fs::write(&b, "---\n---\n").unwrap();
+
+    let context = biscuit_file::FileResolutionContext::new(&prompts)
+        .with_source_path(&a)
+        .with_repository_root(dir.path());
+    let resolved_b = resolve_proxy_target_in_context("./b.md", &a, &context).unwrap();
+    let resolved_a = resolve_proxy_target_in_context("././a.md", &b, &context).unwrap();
+    let authored_a_identity = prompts.join("nested/../a.md");
+    let chain = vec![authored_a_identity, resolved_b];
+
+    assert!(!proxy_handoff_allowed(&chain, &resolved_a));
+}
+
+#[test]
 fn proxy_handoff_allowed_enforces_hop_limit() {
     // A chain at the hop limit rejects any further hand-off, even to a
     // never-seen document.

@@ -67,7 +67,8 @@ pub use lifecycle_context::{
 };
 pub use lifecycle_control::{
     ControlDispatch, MAX_PROXY_HOPS, compute_backoff_delay, control_budget_for, decide_control,
-    parse_delay, proxy_handoff_allowed, resolve_proxy_target, resolve_proxy_target_in_context,
+    parse_delay, proxy_handoff_allowed, proxy_path_identity, resolve_proxy_target,
+    resolve_proxy_target_in_context,
 };
 pub use lifecycle_executor::{
     LifecycleEventOutcome, LifecycleExprError, ShellRunError, ShellRunner, StackControl,
@@ -98,7 +99,7 @@ pub use runtime_state::{
     trim_transport_newline, with_initialized_outputs,
 };
 pub use resolve::{
-    build_prompt_reference, capture_file_resolution_context,
+    build_prompt_reference, capture_file_resolution_context, derive_request_context_for_source,
     enrich_composition_source_load_error, enrich_composition_source_load_error_in_context,
     is_yaml_source,
     load_yaml_document, prompt_magic_roots, reload_composition_source,

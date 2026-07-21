@@ -48,6 +48,15 @@ pub fn resolve_composition_source(
 /// Discovery occurs exactly once here. Every document-backed surface derives
 /// its authoring base from this value without rereading CWD, HOME, environment,
 /// repository metadata, package metadata, or configured roots.
+///
+/// ## Notes
+///
+/// This is the **provisional** snapshot used to resolve the top-level CLI
+/// argument. Once that argument resolves to an absolute source path, callers
+/// MUST re-anchor via [`derive_request_context_for_source`] so a top-level
+/// document selected from a different repository keeps that repository's
+/// nested references (D2/D10, AC12) rather than being hijacked by wherever
+/// the binary was launched from.
 pub fn capture_file_resolution_context() -> Result<FileResolutionContext, CompositionError> {
     let cwd = std::env::current_dir().map_err(|source| CompositionError::InvalidReference {
         reference: "<request working directory>".to_string(),
@@ -75,6 +84,92 @@ pub fn capture_file_resolution_context() -> Result<FileResolutionContext, Compos
         .map(|package| package.path.clone());
 
     let mut context = FileResolutionContext::new(&cwd);
+    if let Some(root) = git_root.as_ref() {
+        context = context.with_repository_root(root);
+    }
+    if let Some(area) = package_area.as_ref() {
+        context = context.with_package_area(area);
+    }
+    for root in prompt_magic_roots(
+        git_root.as_deref(),
+        package_area.as_deref(),
+        package.as_deref(),
+        context.home_dir(),
+    ) {
+        context = context.add_magic_path(root, PathPosition::Start);
+    }
+    Ok(context)
+}
+
+/// Build the definitive request snapshot by anchoring repository discovery
+/// at the resolved top-level source's location rather than the launch CWD.
+///
+/// Used after the top-level CLI argument has been resolved via the provisional
+/// [`capture_file_resolution_context`]. The returned context is what every
+/// downstream document-backed surface (composition, sequence, transclusion,
+/// lifecycle proxy, schema) should derive from.
+///
+/// ## Notes
+///
+/// - Anchors repository-root discovery at `source_path.parent()`, never at
+///   the process CWD: a top-level document selected from a different
+///   repository keeps that repository's nested references rather than being
+///   hijacked by wherever the binary was launched from (D2/D10, AC12).
+/// - When `source_path` lives outside any git repository (e.g. a trusted
+///   `~/.claudine/prompts/foo.md` document), the returned context has no
+///   `repository_root` and `@` magic search falls back to the home directory
+///   — matching the legacy trusted-external behavior.
+/// - Environment and home directory are retained from the provisional
+///   snapshot. Re-anchoring performs no later ambient process-state reads.
+///
+/// ## Errors
+///
+/// Returns [`CompositionError::InvalidReference`] only when `source_path` has
+/// no parent directory — unreachable in practice, since the source arrives here
+/// already resolved to an absolute path.
+pub fn derive_request_context_for_source(
+    provisional_context: &FileResolutionContext,
+    source_path: &Path,
+) -> Result<FileResolutionContext, CompositionError> {
+    // An already-resolved top-level source is always an absolute path to an
+    // existing file, so `parent()` succeeds in every reachable case. The
+    // `InvalidReference` propagation keeps the API honest if a future caller
+    // violates that invariant.
+    let base_dir = source_path.parent().ok_or_else(|| CompositionError::InvalidReference {
+        reference: source_path.display().to_string(),
+        source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
+            "resolved source path has no parent directory: {}",
+            source_path.display()
+        )),
+    })?;
+
+    let git_root = sniff::filesystem::git::GitRepo::discover(base_dir)
+        .ok()
+        .flatten()
+        .map(|repo| repo.repo_root().to_path_buf());
+    let repo_info = git_root
+        .as_deref()
+        .and_then(|root| sniff::filesystem::repo::detect_repo_structure(root).ok().flatten());
+    let package_area = repo_info.as_ref().and_then(|repo| {
+        repo.package_area_label_for_dir(base_dir).map(|area| {
+            if area.as_ref() == "root" {
+                repo.root.clone()
+            } else {
+                repo.root.join(area.as_ref())
+            }
+        })
+    });
+    let package = repo_info
+        .as_ref()
+        .and_then(|repo| repo.package_for_dir(base_dir))
+        .map(|package| package.path.clone());
+
+    let mut context = FileResolutionContext::from_snapshot(
+        base_dir,
+        provisional_context.home_dir().map(Path::to_path_buf),
+        provisional_context.env().clone(),
+    )
+    .with_source_path(source_path);
     if let Some(root) = git_root.as_ref() {
         context = context.with_repository_root(root);
     }

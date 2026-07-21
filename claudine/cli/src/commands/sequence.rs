@@ -260,6 +260,17 @@ fn run_sequence_inner(
         }
     };
 
+    // Re-anchor the request snapshot at the resolved source's location so a
+    // top-level document selected from a different repository keeps that
+    // repository's nested references (D2/D10, AC12). The provisional context
+    // captured above is the right anchor only for resolving the top-level
+    // CLI argument; downstream surfaces (sequence plan resolution, per-step
+    // composition, lifecycle) must derive from this source-anchored snapshot.
+    let file_resolution_context = composition::derive_request_context_for_source(
+        &file_resolution_context,
+        &source.resolved_path,
+    )?;
+
     reject_sequence_interactive(&source)?;
     // A `kind: group`/`group-catalog`/`task` document is never directly
     // executable — it runs only as (or inside) a sequence task. Catching it

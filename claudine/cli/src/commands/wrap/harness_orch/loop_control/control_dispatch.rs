@@ -224,10 +224,13 @@ pub(super) fn dispatch_terminal_control(
             // document whose own `failure` stack proxies again would loop
             // forever. Reject a self-proxy, an A->B->A cycle, or an
             // over-long chain with a typed error rather than hanging.
-            if !proxy.chain.iter().any(|p| p == &prompt_state.source_path) {
-                proxy.chain.push(prompt_state.source_path.clone());
+            let source_identity =
+                claudine::composition::proxy_path_identity(&prompt_state.source_path);
+            let target_identity = claudine::composition::proxy_path_identity(&resolved);
+            if !proxy.chain.iter().any(|path| path == &source_identity) {
+                proxy.chain.push(source_identity);
             }
-            if !claudine::composition::proxy_handoff_allowed(&proxy.chain, &resolved) {
+            if !claudine::composition::proxy_handoff_allowed(&proxy.chain, &target_identity) {
                 return TerminalControlAction::Abort(
                     CompositionError::LifecycleProxyCycle {
                         source_path: prompt_state.source_path.clone(),
@@ -244,7 +247,7 @@ pub(super) fn dispatch_terminal_control(
             }
             // Swap the running document for the target and reset per-iteration
             // guard state so the target runs a fresh `initialize`/pre-flight.
-            prompt_state.source_path = resolved.clone();
+            prompt_state.adopt_resolved_proxy_source(target_identity.clone());
             prompt_state.original_ref = target.clone();
             prompt_state.prompt_tail.clear();
             prompt_state.next_prompt_override = None;
@@ -255,7 +258,7 @@ pub(super) fn dispatch_terminal_control(
             // this the target's events would run against the proxying
             // document's lifecycle (and the original `failure`/`proxy` stack
             // would re-fire, looping forever).
-            proxy.chain.push(resolved.clone());
+            proxy.chain.push(target_identity);
             proxy.pending = true;
             // The loop's pending-adoption point announces the hand-off via
             // `report_proxy_handoff` on re-entry, so no message here.

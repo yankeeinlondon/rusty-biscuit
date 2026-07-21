@@ -54,6 +54,21 @@ pub(crate) struct HarnessPromptState {
     pub(crate) last_final_output: Option<String>,
 }
 
+impl HarnessPromptState {
+    /// Adopt a proxy target that has already passed file-reference policy.
+    ///
+    /// The explicit trusted derivation preserves the immutable request inputs
+    /// while allowing the accepted target's authored path identity to differ
+    /// from the request root (including macOS `/var` → `/private/var` aliases).
+    pub(crate) fn adopt_resolved_proxy_source(&mut self, source_path: PathBuf) {
+        if let Some(context) = self.rematerialize.file_resolution_context.take() {
+            self.rematerialize.file_resolution_context =
+                Some(context.for_trusted_external_source(&source_path));
+        }
+        self.source_path = source_path;
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct MaterializedHarnessPrompt {
     pub(crate) frontmatter: serde_json::Value,

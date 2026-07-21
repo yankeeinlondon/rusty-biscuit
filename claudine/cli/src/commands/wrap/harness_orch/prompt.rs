@@ -213,6 +213,9 @@ pub(crate) fn materialize_harness_prompt(
         }
     })?;
     let mut effective_markdown: darkmatter::markdown::Markdown = source_text.clone().into();
+    effective_markdown = effective_markdown.with_source(
+        darkmatter::markdown::compose::ComposeSource::File(state.source_path.clone()),
+    );
     super::super::overlay::merge_frontmatter_overlay(
         effective_markdown.frontmatter_mut().as_map_mut(),
         &state.overlay,

@@ -207,16 +207,19 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
         );
         let mut proxy_tracking = ProxyTracking::default();
         if let Some(initial_target) = run.initial_proxy_target {
+            let source_identity = claudine::composition::proxy_path_identity(
+                run.lifecycle_guard.context().source_path,
+            );
+            let target_identity = claudine::composition::proxy_path_identity(initial_target);
             if !proxy_tracking
                 .chain
                 .iter()
-                .any(|path| path == run.lifecycle_guard.context().source_path)
+                .any(|path| path == &source_identity)
             {
-                proxy_tracking
-                    .chain
-                    .push(run.lifecycle_guard.context().source_path.to_path_buf());
+                proxy_tracking.chain.push(source_identity);
             }
-            proxy_tracking.chain.push(initial_target.to_path_buf());
+            proxy_tracking.chain.push(target_identity.clone());
+            run.prompt_state.adopt_resolved_proxy_source(target_identity);
             proxy_tracking.pending = true;
         }
         let initial_materialized = run.initial_materialized.take();
@@ -550,13 +553,19 @@ fn adopt_proxy_lifecycle_phase(
         }
         TargetInitializeAction::Abort(error) => return Err(error),
         TargetInitializeAction::Repoint { resolved } => {
-            if !proxy_tracking.chain.contains(&prompt_state.source_path) {
-                proxy_tracking.chain.push(prompt_state.source_path.clone());
+            let source_identity =
+                claudine::composition::proxy_path_identity(&prompt_state.source_path);
+            let target_identity = claudine::composition::proxy_path_identity(&resolved);
+            if !proxy_tracking.chain.contains(&source_identity) {
+                proxy_tracking.chain.push(source_identity);
             }
-            if !claudine::composition::proxy_handoff_allowed(&proxy_tracking.chain, &resolved) {
+            if !claudine::composition::proxy_handoff_allowed(
+                &proxy_tracking.chain,
+                &target_identity,
+            ) {
                 return Err(CompositionError::LifecycleProxyCycle {
                     source_path: prompt_state.source_path.clone(),
-                    target: resolved.display().to_string(),
+                    target: target_identity.display().to_string(),
                     chain: proxy_tracking
                         .chain
                         .iter()
@@ -566,12 +575,12 @@ fn adopt_proxy_lifecycle_phase(
                 }
                 .into());
             }
-            prompt_state.source_path = resolved.clone();
-            prompt_state.original_ref = resolved.display().to_string();
+            prompt_state.adopt_resolved_proxy_source(target_identity.clone());
+            prompt_state.original_ref = target_identity.display().to_string();
             prompt_state.prompt_tail.clear();
             prompt_state.next_prompt_override = None;
             prompt_state.next_resume_session_id = None;
-            proxy_tracking.chain.push(resolved);
+            proxy_tracking.chain.push(target_identity);
             proxy_tracking.pending = true;
             *attempt = 1;
             return Ok(Some(LoopStep::NextAttempt));

@@ -99,12 +99,22 @@ pub(crate) fn run_composition_inner(
     let system_prompt_args = shared.system_prompt_args();
 
     let frontmatter_load_t = std::time::Instant::now();
-    let file_resolution_context = claudine::composition::capture_file_resolution_context()?;
+    let provisional_context = claudine::composition::capture_file_resolution_context()?;
     let source = resolve_composition_source(
         &file,
         kind,
         &shared,
-        &file_resolution_context,
+        &provisional_context,
+    )?;
+    // Re-anchor the request snapshot at the resolved source's location so a
+    // top-level document selected from a different repository keeps that
+    // repository's nested references (D2/D10, AC12). The provisional context
+    // captured above is the right anchor only for resolving the top-level CLI
+    // argument; downstream surfaces (body composition, transclusion,
+    // schema, lifecycle) derive from this source-anchored snapshot.
+    let file_resolution_context = claudine::composition::derive_request_context_for_source(
+        &provisional_context,
+        &source.resolved_path,
     )?;
     record_prep_substage(
         &mut prep_substages,
@@ -254,15 +264,8 @@ pub(crate) fn run_composition_inner(
 
     kind.on_header_emitted(&source, &shared, &file, inline_state)?;
 
-    // ── Pre-flight shell approval ────────────────────────────────────────
-    //
-    // `ComposeContext::capture()` + `env_mut().insert(...)` installs the
-    // resolved `AGENT` (and any other composition env overrides) into
-    // the same Darkmatter compose pipeline that the preflight pass
-    // walks. Without this, frontmatter values that derive from env
-    // (e.g. `runtime_agent: '{{ env.AGENT }}'`) fail Darkmatter's
-    // built-in schema validation during preflight, before reaching
-    // `prepare_direct_with_schema`.
+    // Preflight must see the same resolved environment as the main prepare
+    // pass, including frontmatter values derived from `env.AGENT`.
     let compose_options = {
         let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
         for (key, value) in &env_overrides {
@@ -271,21 +274,12 @@ pub(crate) fn run_composition_inner(
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
             .with_source_file(&source.resolved_path)
             .with_file_resolution_context(file_resolution_context.clone())
-            // Defer the lifecycle event keys (DM1), exactly as the main prepare
-            // passes do. The preflight runs a full compose pipeline purely to
-            // discover template `::shell` directives; without the exclusion it
-            // also resolves the deferred lifecycle subtree at compose time, so a
-            // `success`/`failure` event's read-side file reference (e.g.
-            // `frontmatter(plan, …)` over a plan this very run is about to
-            // create) trips the now-fatal file-ref check before the event that
-            // would make the file exist ever fires. Lifecycle shell commands are
-            // audited separately via `collect_lifecycle_shell_commands`.
+            // Lifecycle subtrees remain deferred because their file references
+            // may target artifacts created before the event fires. Their shell
+            // commands are audited separately by `collect_lifecycle_shell_commands`.
             .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied())
-            // Anchor `file`-typed schema validation on the launch area so a
-            // caller-supplied area-relative path resolves here document-first
-            // then launch-area — exactly as the main prepare pass and the
-            // lifecycle events do. Without it the preflight's built-in schema
-            // validation would fall back to the (already-mutated) process CWD.
+            // Retain the captured launch directory as diagnostic metadata;
+            // document-authored references use the request-scoped resolver.
             .with_file_ref_fallback_dir(prep_context.launch_workspace.launch_cwd.clone());
         if let Some(ref overrides) = set_overrides {
             opts = opts.with_set_overrides(overrides.clone());

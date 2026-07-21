@@ -203,6 +203,38 @@ pub fn compute_backoff_delay(
 /// treated as runaway control flow and stopped with a typed error.
 pub const MAX_PROXY_HOPS: usize = 16;
 
+/// Return the stable lexical identity used for one proxy-chain entry.
+///
+/// This removes `.` and collapses `..` without consulting the filesystem, so
+/// retry/proxy re-materialization cannot change identity through a different
+/// spelling of the same path. Symlinks remain unresolved: authored/worktree
+/// identity is lexical and this function is not a sandbox boundary.
+#[must_use]
+pub fn proxy_path_identity(path: &std::path::Path) -> std::path::PathBuf {
+    use std::path::Component;
+
+    let mut normalized = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => match normalized.components().next_back() {
+                Some(Component::Normal(_)) => {
+                    normalized.pop();
+                }
+                Some(Component::ParentDir) | None if !normalized.has_root() => {
+                    normalized.push(component.as_os_str());
+                }
+                Some(Component::Prefix(_)) if !normalized.has_root() => {
+                    normalized.push(component.as_os_str());
+                }
+                _ => {}
+            },
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
+}
+
 /// Whether a `proxy` hand-off to `target` is permitted given the chain of
 /// documents already proxied to in this run.
 ///
@@ -218,7 +250,10 @@ pub fn proxy_handoff_allowed(chain: &[std::path::PathBuf], target: &std::path::P
     if chain.len() >= MAX_PROXY_HOPS {
         return false;
     }
-    !chain.iter().any(|p| p == target)
+    let target = proxy_path_identity(target);
+    !chain
+        .iter()
+        .any(|path| proxy_path_identity(path) == target)
 }
 
 /// Resolve a `Proxy` target reference to an existing prompt file.
