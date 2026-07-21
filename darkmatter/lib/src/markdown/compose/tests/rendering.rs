@@ -214,6 +214,191 @@ fn test_compose_cleanup_preserves_nested_lists_inside_blockquotes() {
 }
 
 #[test]
+fn test_compose_indent_eight_matches_exact_library_cleanup() {
+    use crate::markdown::cleanup::{cleanup_content_with_indent, reflow_to_width};
+
+    let source = concat!(
+        "- Parent alpha beta gamma delta epsilon.\n",
+        "  - Child alpha beta gamma delta epsilon.\n",
+        "    - Grandchild alpha beta gamma delta epsilon.\n",
+        "\n",
+        "> - [ ] Quote task parent alpha beta gamma delta.\n",
+        ">   - [x] Quote task child alpha beta gamma delta epsilon.\n"
+    );
+    let options = ComposeOptions::new()
+        .only(&[ComposeOperation::Cleanup])
+        .with_indent_size(8)
+        .with_fixed_width(30);
+    let (composed, _) = Markdown::from(source).compose_with(options.clone()).unwrap();
+
+    let cleaned = cleanup_content_with_indent(source, 8);
+    let expected = reflow_to_width(&cleaned, 30);
+    assert_eq!(composed.content(), expected);
+    assert!(expected.contains("\n        -    Child"));
+    assert!(expected.contains("\n                - Grandchild"));
+    assert!(expected.contains("\n>         - [x] Quote task"));
+    for line in expected.lines() {
+        assert!(UnicodeWidthStr::width(line) <= 30, "line exceeded width: {line:?}");
+    }
+
+    let (second, _) = Markdown::from(expected.as_str()).compose_with(options).unwrap();
+    assert_eq!(second.content(), expected);
+}
+
+#[test]
+fn test_compose_cleanup_preserves_additional_paragraphs_inside_blockquoted_items() {
+    use crate::markdown::cleanup::{
+        cleanup_content_with_indent, cleanup_content_with_indent_compact,
+        cleanup_content_with_indent_loose, reflow_to_width, ListSpacingMode,
+    };
+
+    let fixtures = [
+        (
+            "> - Parent first paragraph.\n>\n>   Second paragraph alpha beta gamma delta.\n>\n>   - Child item alpha beta.\n",
+            ListSpacingMode::Normal,
+            4,
+        ),
+        (
+            "> > 1. Parent first paragraph.\n> >\n> >    Second paragraph alpha beta gamma delta.\n> >\n> >    - Child item alpha beta.\n",
+            ListSpacingMode::Compact,
+            2,
+        ),
+        (
+            "> - [ ] Parent first paragraph.\n>\n>   Second café 🙂 alpha beta gamma delta.\n>\n>   1. Child item alpha beta.\n",
+            ListSpacingMode::Loose,
+            4,
+        ),
+    ];
+
+    for (source, spacing, indent) in fixtures {
+        let direct = match spacing {
+            ListSpacingMode::Normal => cleanup_content_with_indent(source, indent),
+            ListSpacingMode::Compact => cleanup_content_with_indent_compact(source, indent),
+            ListSpacingMode::Loose => cleanup_content_with_indent_loose(source, indent),
+        };
+        let expected = reflow_to_width(&direct, 24);
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::Cleanup])
+            .with_list_spacing(spacing)
+            .with_indent_size(indent)
+            .with_fixed_width(24);
+        let (first, _) = Markdown::from(source).compose_with(options.clone()).unwrap();
+        assert_eq!(first.content(), expected);
+
+        let (second, _) = Markdown::from(first.content()).compose_with(options).unwrap();
+        assert_eq!(second.content(), expected);
+    }
+}
+
+#[test]
+fn test_compose_cleanup_preserves_markers_in_protected_bodies() {
+    use crate::markdown::cleanup::{cleanup_content, reflow_to_width};
+
+    let source = concat!(
+        "<div>\n",
+        "* literal html\n",
+        "</div>\n",
+        "\n",
+        "::shell-block\n",
+        "* literal shell\n",
+        "::end-block\n",
+        "\n",
+        "- Actual item.\n"
+    );
+    let expected = reflow_to_width(&cleanup_content(source), 24);
+    let options = ComposeOptions::new()
+        .only(&[ComposeOperation::Cleanup])
+        .with_fixed_width(24);
+
+    let (first, _) = Markdown::from(source).compose_with(options.clone()).unwrap();
+    assert_eq!(first.content(), expected);
+    assert!(first.content().contains("* literal html"));
+    assert!(first.content().contains("* literal shell"));
+    assert!(first.content().contains("- Actual item."));
+
+    let (second, _) = Markdown::from(first.content()).compose_with(options).unwrap();
+    assert_eq!(second.content(), expected);
+}
+
+#[test]
+fn test_compose_cleanup_preserves_ten_digit_prose_boundary() {
+    use crate::markdown::cleanup::{cleanup_content, ListSpacingMode};
+
+    let source = concat!(
+        "123456789. nine-digit item\n",
+        "\n",
+        "- first unordered item\n",
+        "\n",
+        "1) first ordered item\n",
+        "\n",
+        "1234567890) ten-digit prose\n",
+        "\n",
+        "+ second unordered item\n",
+        "\n",
+        "2) second ordered item\n"
+    );
+    let expected = cleanup_content(source);
+    let options = ComposeOptions::new()
+        .only(&[ComposeOperation::Cleanup])
+        .with_list_spacing(ListSpacingMode::Normal);
+
+    let (first, _) = Markdown::from(source).compose_with(options.clone()).unwrap();
+    assert_eq!(first.content(), expected);
+    assert!(first.content().contains("1234567890) ten-digit prose\n\n+ second unordered"));
+
+    let (second, _) = Markdown::from(first.content()).compose_with(options).unwrap();
+    assert_eq!(second.content(), expected);
+}
+
+#[test]
+fn slow_compose_cleanup_preserves_quoted_marker_looking_indented_code() {
+    use crate::markdown::cleanup::{
+        cleanup_content, cleanup_content_with_indent, reflow_to_width,
+    };
+
+    let fixtures = [
+        "> - Parent.\n>\n>       - literal code\n>\n> - Later sibling.\n",
+        "> 1. Parent.\n>\n>       1. literal code\n>\n> 2. Later sibling.\n",
+        "> > - Parent.\n> >\n> >       - literal code\n> >\n> > - Later sibling.\n",
+        "> > 1. Parent.\n> >\n> >       1. literal code\n> >\n> > 2. Later sibling.\n",
+    ];
+
+    for source in fixtures {
+        let direct_default = cleanup_content(source);
+        let (default, _) = Markdown::from(source)
+            .compose_with(ComposeOptions::new().only(&[ComposeOperation::Cleanup]))
+            .unwrap();
+        assert_eq!(default.content(), direct_default);
+
+        let (configured, _) = Markdown::from(source)
+            .compose_with(
+                ComposeOptions::new()
+                    .only(&[ComposeOperation::Cleanup])
+                    .with_indent_size(4),
+            )
+            .unwrap();
+        assert_eq!(configured.content(), cleanup_content_with_indent(source, 4));
+
+        let (fixed, _) = Markdown::from(source)
+            .compose_with(
+                ComposeOptions::new()
+                    .only(&[ComposeOperation::Cleanup])
+                    .with_fixed_width(24),
+            )
+            .unwrap();
+        assert_eq!(fixed.content(), reflow_to_width(&direct_default, 24));
+        let (fixed_second, _) = Markdown::from(fixed.content())
+            .compose_with(
+                ComposeOptions::new()
+                    .only(&[ComposeOperation::Cleanup])
+                    .with_fixed_width(24),
+            )
+            .unwrap();
+        assert_eq!(fixed_second.content(), fixed.content());
+    }
+}
+
+#[test]
 fn test_compose_cleanup_fixed_width_keeps_reference_definitions_intact() {
     use crate::markdown::cleanup::reflow_to_width;
 
