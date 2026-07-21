@@ -333,6 +333,34 @@ fn test_clean_subcommand_preserves_markers_in_protected_bodies() {
                 ">   width twenty four.\n"
             ),
         ),
+        (
+            concat!(
+                "::shell-block\n",
+                "- first literal\n",
+                "::block condition\n",
+                "+ second literal\n",
+                "::end-block\n",
+                "- third source line\n",
+                "  continuation remains literal\n",
+                "::end-block\n",
+                "\n",
+                "+ Actual item long enough to wrap at width twenty four.\n"
+            ),
+            concat!(
+                "::shell-block\n",
+                "- first literal\n",
+                "::block condition\n",
+                "+ second literal\n",
+                "::end-block\n",
+                "- third source line\n",
+                "  continuation remains literal\n",
+                "::end-block\n",
+                "\n",
+                "+ Actual item long\n",
+                "  enough to wrap at\n",
+                "  width twenty four.\n"
+            ),
+        ),
     ];
 
     for (source, expected) in fixtures {
@@ -358,7 +386,7 @@ fn test_clean_subcommand_preserves_markers_in_protected_bodies() {
     }
 
     let mut tmp = tempfile::NamedTempFile::new().unwrap();
-    write!(tmp, "{}", fixtures[1].0).unwrap();
+    write!(tmp, "{}", fixtures[3].0).unwrap();
     tmp.flush().unwrap();
     md_cmd()
         .args(["clean", "--fixed-width", "24"])
@@ -367,7 +395,7 @@ fn test_clean_subcommand_preserves_markers_in_protected_bodies() {
         .assert()
         .success()
         .stdout(predicate::str::contains("changed"));
-    assert_eq!(std::fs::read_to_string(tmp.path()).unwrap(), fixtures[1].1);
+    assert_eq!(std::fs::read_to_string(tmp.path()).unwrap(), fixtures[3].1);
 
     md_cmd()
         .args(["clean", "--fixed-width", "24"])
@@ -375,7 +403,7 @@ fn test_clean_subcommand_preserves_markers_in_protected_bodies() {
         .arg("--save")
         .assert()
         .success();
-    assert_eq!(std::fs::read_to_string(tmp.path()).unwrap(), fixtures[1].1);
+    assert_eq!(std::fs::read_to_string(tmp.path()).unwrap(), fixtures[3].1);
 }
 
 #[test]
