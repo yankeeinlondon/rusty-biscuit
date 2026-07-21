@@ -33,7 +33,14 @@ pub struct FocusedProviderClient {
     discovery: FocusedProviderDiscovery,
     policy: FetchPolicy,
     api_base: url::Url,
+    credential_scope: CredentialScope,
     original_reference: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CredentialScope {
+    Provider,
+    ProviderAndHost,
 }
 
 /// Provider identity and operation capabilities retained by a focused client.
@@ -63,11 +70,11 @@ impl FocusedProviderClient {
     ///
     /// Cloud and GitLab flavors behave exactly like [`Self::new`] with no
     /// network I/O. Unknown, Gitea, and Forgejo remotes run the same allowlisted,
-    /// bounded version probe `remote_vendor` uses (exact-host consent before any
+    /// bounded identity probe `remote_vendor` uses (exact-host consent before any
     /// request, redirect-disabled transport) so the client retains the concrete
-    /// family and version used for capability selection. SSH and SCP remotes
-    /// probe `https://{host}` without carrying their SSH port into the provider
-    /// request.
+    /// family and any documented version used for capability selection. SSH and
+    /// SCP remotes probe `https://{host}` without carrying their SSH port into
+    /// the provider request.
     ///
     /// ## Errors
     ///
@@ -163,6 +170,7 @@ impl FocusedProviderClient {
             discovery,
             policy,
             api_base,
+            credential_scope: CredentialScope::Provider,
             original_reference: None,
         })
     }
@@ -174,7 +182,9 @@ impl FocusedProviderClient {
     ) -> Result<Self, SniffError> {
         remote.api_flavor = discovery.flavor;
         let base = canonical_api_base(&remote)?;
-        Self::with_api_base_and_version(remote, policy, &base, Some(discovery.version))
+        let mut client = Self::with_api_base_and_version(remote, policy, &base, discovery.version)?;
+        client.credential_scope = CredentialScope::ProviderAndHost;
+        Ok(client)
     }
 
     /// Creates a client and repository-scoped identity from a canonical PR/MR URL.
@@ -522,7 +532,16 @@ impl FocusedProviderClient {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|error| transport(&endpoint, error))?;
-        let (token, variable) = credential(self.remote.api_flavor);
+        let (token, variable) = match self.credential_scope {
+            CredentialScope::Provider => {
+                let (token, variable) = credential(self.remote.api_flavor);
+                (token, variable.to_string())
+            }
+            CredentialScope::ProviderAndHost => crate::credentials::host_bound_provider_token(
+                self.remote.api_flavor,
+                remote_host,
+            ),
+        };
         let mut request = client.get(endpoint.clone()).header(reqwest::header::USER_AGENT, "sniff/focused-provider");
         if let Some(token) = token.as_ref() {
             request = request.bearer_auth(token);
@@ -536,7 +555,7 @@ impl FocusedProviderClient {
             }),
             404 => Ok(None),
             401 if token.is_none() => Err(SniffError::MissingCredentials {
-                provider: provider_name(self.remote.api_flavor), env_var: variable.to_string(),
+                provider: provider_name(self.remote.api_flavor), env_var: variable,
             }),
             401 => Err(SniffError::InvalidCredentials {
                 provider: provider_name(self.remote.api_flavor), message: "provider rejected credentials".to_string(),
@@ -1495,7 +1514,7 @@ mod tests {
                     FetchPolicy::deny_all().allow_host("git.example"),
                     crate::filesystem::git::remote_observation::SelfHostedProviderDiscovery {
                         flavor,
-                        version: version.to_string(),
+                        version: Some(version.to_string()),
                     },
                 )
                 .unwrap();

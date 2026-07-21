@@ -282,17 +282,20 @@ fn advertises_branch(body: &[u8], branch: &str) -> bool {
     false
 }
 
-/// Detects a self-managed server family and its reported version.
+/// Detects a self-managed server family and its reported version, when the
+/// provider exposes one through its documented identity response.
 ///
 /// This is the single bounded discovery probe: `remote_vendor_at` projects its
 /// result to a vendor token, and the focused provider client retains both fields
 /// to derive operation capabilities. The exact host must pass `policy` before
-/// any request or credential lookup. Blocking — callers inside an async runtime
-/// must move it to a blocking thread.
+/// any request or credential lookup. Candidate signatures are probed anonymously;
+/// authentication is retried only after one signature establishes the provider,
+/// using a credential scoped to that provider and exact host. Blocking — callers
+/// inside an async runtime must move it to a blocking thread.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SelfHostedProviderDiscovery {
     pub(crate) flavor: ApiFlavor,
-    pub(crate) version: String,
+    pub(crate) version: Option<String>,
 }
 
 #[cfg(test)]
@@ -353,7 +356,7 @@ pub(crate) fn register_test_provider_discovery(
         token,
         discovery: SelfHostedProviderDiscovery {
             flavor,
-            version: version.to_string(),
+            version: Some(version.to_string()),
         },
         origins: Arc::clone(&origins),
     };
@@ -412,6 +415,7 @@ pub(crate) fn probe_self_hosted_provider(
         .build()
         .map_err(|error| unreachable(&remote, error))?;
     let mut discoveries = Vec::new();
+    let mut identified_flavors = Vec::new();
     let mut focused_error = None;
     for (path, flavor) in [
         ("/api/v3/meta", ApiFlavor::GitHub),
@@ -432,17 +436,9 @@ pub(crate) fn probe_self_hosted_provider(
                 host: endpoint.host_str().unwrap_or_default().to_string(),
             });
         }
-        let (token, variable) = crate::credentials::provider_token(flavor);
-        let mut request = client
+        let request = client
             .get(endpoint.clone())
             .header(reqwest::header::USER_AGENT, "sniff/provider-discovery");
-        if let Some(token) = token.as_deref() {
-            request = match flavor {
-                ApiFlavor::GitLab => request.header("PRIVATE-TOKEN", token),
-                ApiFlavor::AzureDevOps => request.basic_auth("", Some(token)),
-                _ => request.bearer_auth(token),
-            };
-        }
         let response = request.send().map_err(|error| unreachable(&endpoint, error))?;
         let status = response.status().as_u16();
         if (300..400).contains(&status) {
@@ -454,63 +450,107 @@ pub(crate) fn probe_self_hosted_provider(
         if status == 404 {
             continue;
         }
+        let body = response
+            .bytes()
+            .map_err(|error| unreachable(&endpoint, error))?;
+        let Some(discovery) = discovery_from_signature(flavor, &body, status)? else {
+            continue;
+        };
+        if !identified_flavors.contains(&discovery.flavor) {
+            identified_flavors.push(discovery.flavor);
+        }
+        if (200..300).contains(&status) {
+            discoveries.push(discovery);
+            continue;
+        }
         if matches!(status, 401 | 403) {
-            focused_error.get_or_insert_with(|| {
-                if token.is_some() {
-                    SniffError::InvalidCredentials {
-                        provider: format!("{flavor:?}"),
+            let (token, variable) =
+                crate::credentials::host_bound_provider_token(discovery.flavor, host);
+            let Some(token) = token else {
+                focused_error.get_or_insert_with(|| SniffError::MissingCredentials {
+                    provider: format!("{:?}", discovery.flavor),
+                    env_var: variable,
+                });
+                continue;
+            };
+            let request = client
+                .get(endpoint.clone())
+                .header(reqwest::header::USER_AGENT, "sniff/provider-discovery");
+            let request = match discovery.flavor {
+                ApiFlavor::GitLab => request.header("PRIVATE-TOKEN", &token),
+                ApiFlavor::AzureDevOps => request.basic_auth("", Some(&token)),
+                _ => request.bearer_auth(&token),
+            };
+            let response = request.send().map_err(|error| unreachable(&endpoint, error))?;
+            let retry_status = response.status().as_u16();
+            if (300..400).contains(&retry_status) {
+                return Err(SniffError::RemoteUnreachable {
+                    url: endpoint.to_string(),
+                    message: "provider discovery redirect was blocked".to_string(),
+                });
+            }
+            match retry_status {
+                200..=299 => discoveries.push(discovery),
+                401 => {
+                    focused_error.get_or_insert_with(|| SniffError::InvalidCredentials {
+                        provider: format!("{:?}", discovery.flavor),
                         message: "provider rejected credentials during discovery".to_string(),
-                    }
-                } else {
-                    SniffError::MissingCredentials {
-                        provider: format!("{flavor:?}"),
-                        env_var: variable.to_string(),
-                    }
+                    });
                 }
-            });
+                403 => {
+                    focused_error.get_or_insert_with(|| SniffError::RemoteForbidden {
+                        provider: format!("{:?}", discovery.flavor),
+                        message: "provider denied authenticated discovery".to_string(),
+                    });
+                }
+                429 => {
+                    focused_error.get_or_insert_with(|| SniffError::RateLimited {
+                        provider: format!("{:?}", discovery.flavor),
+                        retry_after: None,
+                    });
+                }
+                retry_status => {
+                    focused_error.get_or_insert_with(|| SniffError::RemoteApi {
+                        provider: format!("{:?}", discovery.flavor),
+                        status: retry_status,
+                        message: "authenticated provider discovery endpoint failed".to_string(),
+                    });
+                }
+            }
             continue;
         }
         if status == 429 {
             focused_error.get_or_insert_with(|| SniffError::RateLimited {
-                provider: format!("{flavor:?}"),
+                provider: format!("{:?}", discovery.flavor),
                 retry_after: None,
             });
-            continue;
-        }
-        if status >= 500 {
+        } else {
             focused_error.get_or_insert_with(|| SniffError::RemoteApi {
-                provider: format!("{flavor:?}"),
+                provider: format!("{:?}", discovery.flavor),
                 status,
                 message: "provider discovery endpoint failed".to_string(),
             });
-            continue;
         }
-        if !response.status().is_success() {
-            continue;
-        }
-        let body = response
-            .bytes()
-            .map_err(|error| unreachable(&endpoint, error))?;
-        if let Some(discovery) = discovery_from_signature(flavor, &body, status)? {
-            discoveries.push(discovery);
-        }
+    }
+    if identified_flavors.len() > 1 {
+        return Err(SniffError::RemoteApi {
+            provider: "provider discovery".to_string(),
+            status: 200,
+            message: format!(
+                "conflicting provider signatures: {}",
+                identified_flavors
+                    .iter()
+                    .map(|flavor| format!("{flavor:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        });
     }
     match discoveries.as_slice() {
         [discovery] => Ok(discovery.clone()),
         [] => Err(focused_error
             .unwrap_or_else(|| SniffError::UnsupportedProvider { url: remote.to_string() })),
-        _ => Err(SniffError::RemoteApi {
-            provider: "provider discovery".to_string(),
-            status: 200,
-            message: format!(
-                "conflicting provider signatures: {}",
-                discoveries
-                    .iter()
-                    .map(|discovery| format!("{:?}", discovery.flavor))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        }),
+        _ => unreachable!("one discovery per identified provider flavor"),
     }
 }
 
@@ -559,14 +599,24 @@ fn discovery_from_signature(
             (flavor, body.get("version").and_then(serde_json::Value::as_str))
         }
         ApiFlavor::AzureDevOps
-            if body.get("instanceId").and_then(serde_json::Value::as_str).is_some()
-                && body.get("deploymentVersion").and_then(serde_json::Value::as_str)
-                    .is_some_and(|version| version.to_ascii_lowercase().contains("azure devops server")) =>
+            if body
+                .get("instanceId")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|id| !id.trim().is_empty())
+                && body
+                    .get("deploymentId")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|id| !id.trim().is_empty())
+                && body.get("deploymentType").and_then(serde_json::Value::as_str)
+                    == Some("OnPremises") =>
         {
-            (flavor, body.get("deploymentVersion").and_then(serde_json::Value::as_str))
+            (flavor, None)
         }
         _ => return Ok(None),
     };
+    if flavor == ApiFlavor::AzureDevOps {
+        return Ok(Some(SelfHostedProviderDiscovery { flavor, version: None }));
+    }
     let version = version
         .filter(|version| !version.trim().is_empty())
         .ok_or_else(|| SniffError::RemoteApi {
@@ -574,7 +624,10 @@ fn discovery_from_signature(
             status,
             message: "provider signature did not contain a non-empty server version".to_string(),
         })?;
-    Ok(Some(SelfHostedProviderDiscovery { flavor, version: version.to_string() }))
+    Ok(Some(SelfHostedProviderDiscovery {
+        flavor,
+        version: Some(version.to_string()),
+    }))
 }
 
 fn server_version_shape(version: &str) -> bool {
@@ -842,6 +895,39 @@ mod tests {
         body.extend_from_slice(b"0000");
         assert!(advertises_branch(&body, "main"));
         assert!(!advertises_branch(&body, "mai"));
+    }
+
+    #[test]
+    fn azure_connection_data_identifies_only_on_premises_without_a_version() {
+        let on_premises = serde_json::json!({
+            "instanceId": "9e3f8106-1d6b-4ff8-9a7e-10e1fd9ab06f",
+            "deploymentId": "880d3b0c-9d90-4c7f-bb08-a2d1e159b4b2",
+            "deploymentType": "OnPremises"
+        });
+        let discovery = discovery_from_signature(
+            ApiFlavor::AzureDevOps,
+            &serde_json::to_vec(&on_premises).unwrap(),
+            200,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(discovery.flavor, ApiFlavor::AzureDevOps);
+        assert_eq!(discovery.version, None);
+
+        let hosted = serde_json::json!({
+            "instanceId": "9e3f8106-1d6b-4ff8-9a7e-10e1fd9ab06f",
+            "deploymentId": "880d3b0c-9d90-4c7f-bb08-a2d1e159b4b2",
+            "deploymentType": "Hosted"
+        });
+        assert_eq!(
+            discovery_from_signature(
+                ApiFlavor::AzureDevOps,
+                &serde_json::to_vec(&hosted).unwrap(),
+                200,
+            )
+            .unwrap(),
+            None
+        );
     }
 
     #[test]
