@@ -21,10 +21,11 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use std::path::Path;
+use std::time::Duration;
 use tempfile::tempdir;
 mod common;
 use common::wrap::seed_minimal_config;
-use common::{augmented_path, init_git_repo, write_executable};
+use common::{init_git_repo, write_executable};
 
 /// The sentinel the fake provider has to read back out of the delivered file.
 const SENTINEL: &str = "SYSPROMPT-SURVIVED-TO-SPAWN";
@@ -38,10 +39,12 @@ fn write_gemini_reader(bin_dir: &Path, log: &Path) {
         &bin_dir.join("gemini"),
         &format!(
             "#!/bin/sh\ncase \"$1\" in --version|-V|-v|version|models) exit 0;; esac\n\
-             if [ ! -t 0 ]; then cat > /dev/null 2>&1; fi\n\
+             if [ ! -t 0 ]; then while IFS= read -r _; do :; done; fi\n\
              printf 'sysprompt-path=%s\\n' \"${{GEMINI_SYSTEM_MD:-unset}}\" >> {log}\n\
              if [ -f \"$GEMINI_SYSTEM_MD\" ]; then\n  \
-             printf 'sysprompt-read=%s\\n' \"$(tr '\\n' ' ' < \"$GEMINI_SYSTEM_MD\")\" >> {log}\n\
+             printf 'sysprompt-read=' >> {log}\n  \
+             while IFS= read -r line; do printf '%s ' \"$line\" >> {log}; done < \"$GEMINI_SYSTEM_MD\"\n  \
+             printf '\\n' >> {log}\n\
              fi\nexit 0\n",
             log = log.display(),
         ),
@@ -58,12 +61,14 @@ fn write_codex_reader(bin_dir: &Path, log: &Path) {
         &bin_dir.join("codex"),
         &format!(
             "#!/bin/sh\ncase \"$1\" in --version|-V|-v|version|models) exit 0;; esac\n\
-             if [ ! -t 0 ]; then cat > /dev/null 2>&1; fi\n\
+             if [ ! -t 0 ]; then while IFS= read -r _; do :; done; fi\n\
              for a in \"$@\"; do\n  case \"$a\" in\n    \
              model_instructions_file=*)\n      f=\"${{a#model_instructions_file=}}\"\n      \
              printf 'sysprompt-path=%s\\n' \"$f\" >> {log}\n      \
              if [ -f \"$f\" ]; then\n        \
-             printf 'sysprompt-read=%s\\n' \"$(tr '\\n' ' ' < \"$f\")\" >> {log}\n      \
+             printf 'sysprompt-read=' >> {log}\n        \
+             while IFS= read -r line; do printf '%s ' \"$line\" >> {log}; done < \"$f\"\n        \
+             printf '\\n' >> {log}\n      \
              fi\n      ;;\n  esac\ndone\nexit 0\n",
             log = log.display(),
         ),
@@ -108,10 +113,9 @@ fn direct_compose_keeps_its_file_backed_system_prompt_readable_at_spawn() {
             .current_dir(workspace.path())
             .env("NO_COLOR", "1")
             .env("HOME", workspace.path())
-            // The fake providers shell out to `tr` to echo what they read, so
-            // the staged bin directory has to be a *prefix* of the real PATH
-            // rather than a replacement for it.
-            .env("PATH", augmented_path(&bin_dir))
+            // Keep host-program discovery out of this process regression. The
+            // fake providers use only `/bin/sh` built-ins after launch.
+            .env("PATH", &bin_dir)
             .args([
                 "compose",
                 provider_flag,
@@ -119,6 +123,7 @@ fn direct_compose_keeps_its_file_backed_system_prompt_readable_at_spawn() {
                 sysprompt.to_str().unwrap(),
                 md_file.to_str().unwrap(),
             ])
+            .timeout(Duration::from_secs(25))
             .assert()
             .success();
 
