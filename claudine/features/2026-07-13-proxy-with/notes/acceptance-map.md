@@ -6,8 +6,9 @@ test that exists in the tree.
 
 Written 2026-07-17 during Phase 13; updated after review-3 findings 1-5,
 review-5 findings 1-6, review-6 findings 1-5, review-7 findings 1-4,
-review-8 findings 1-5, review-9 findings 1-5, and
-**review-10 findings 1-6 (current)**.
+review-8 findings 1-5, review-9 findings 1-5,
+review-10 findings 1-6, review-11 findings 1-4, and
+**review-15 finding 2 (current)**.
 
 Review-10 finding 6 found this document two reviews behind its own tree: the
 header claimed review-8, the body had absorbed only part of review-9, AC 25 was
@@ -16,14 +17,15 @@ tests that were failing on a clean host. Every row below was re-derived from the
 tests that exist at this HEAD, and every cited name re-matched against the `fn`
 and `mod` names the area defines.
 
-## Status: 30 of 30 complete
+## Status: 30 of 30 mapped; current Level 2 evidence incomplete
 
 The count below is **derived from the rows**, not asserted ahead of them: it is
-the number of ✅ and ⚠️ marks in the [criteria matrix](#criteria). Review-7
-finding 4 found the previous headline overstated, so it is now recomputed
-whenever a row's mark changes.
+the number of ✅ and ⚠️ marks in the [criteria matrix](#criteria). It records
+test mapping coverage, not a current green feature gate. Review-7 finding 4
+found the previous headline overstated, so it is now recomputed whenever a
+row's mark changes.
 
-**Why it is still 30 after review-10.** Finding 6 was right that the headline
+**Historical review-10 closure accounting.** Finding 6 was right that the headline
 was not *earned* at the moment it was written: AC 15 was marked complete against
 two L1 rows that failed on any host without ambient OpenCode model configuration
 (finding 5), so the count rested on evidence that was not passing. That is a
@@ -35,12 +37,19 @@ than reopening one. Two rows changed their strongest level (AC 10 and AC 25 gain
 L2 rows they did not previously cite; AC 15 gains passing L1 evidence and an
 honest latency note). No row moved to ⚠️ or ⛔. The re-derived count is
 therefore **30 of 30** — but it is 30 for the first time since review-8 on
-evidence that is fully passing, and the [gate record](#recorded-gate-results-2026-07-20-macos-host-review-10-finding-6)
-is what it rests on.
+evidence that was fully passing at that revision. That review-10 evidence is
+retained below as historical evidence; it does not cover the Level 2 rows added
+by review 11.
+
+**Current review-15 gate.** Level 1 and lint are green, but the managed host
+could not create either tmux or WezTerm backend resources, so the Level 2 run
+reached no feature assertion. In particular, none of review 11's five new rows
+ran. The mapping remains complete, but production-readiness evidence does not;
+see the [current gate record](#recorded-gate-results-2026-07-20-macos-host-review-15).
 
 | | Count | Which |
 |---|---:|---|
-| ✅ Complete | 30 | every criterion |
+| ✅ Mapped | 30 | every criterion |
 | ⚠️ Partial | 0 | — |
 | ⛔ Blocked | 0 | — |
 
@@ -247,10 +256,10 @@ from.
 
 Review-10's own "Verification-level audit" listed five gaps. Each named a
 required level; each now has a row at that level, verified in the
-[gate record](#recorded-gate-results-2026-07-20-macos-host-review-10-finding-6).
+[historical gate record](#historical-gate-results-2026-07-20-macos-host-review-10-finding-6).
 `review-10.md` is left as written — a review is a record of what was true when
-it was taken, not a live document — so this table, not that one, is the current
-statement:
+it was taken, not a live document — so this table, not that one, was the
+statement after review 10:
 
 | Audit row | Required level | Where it now sits |
 |---|---|---|
@@ -324,7 +333,7 @@ HEAD carrying review-10 findings 1-5. Paths are relative to `claudine/`.
 
 | Mark | Meaning |
 |---|---|
-| ✅ | Mapped to at least one passing test |
+| ✅ | Mapped to at least one test; consult the current gate record for execution evidence |
 | ⚠️ | Partially mapped — the row states exactly which part is proven and which is not |
 | ⛔ | Blocked; no honest test can be written yet |
 
@@ -400,9 +409,11 @@ findings 2-3 closed AC 10 and moved AC 15 from one reachable facet to eight, and
 review-8 findings 2-3 closed AC 15 — finding 2 by making the rebuilt bundle the
 launch the harness actually spawns, finding 3 by ratifying the last two facets
 as immutable invocation inputs on structural evidence. All four are now
-complete (first verified 2026-07-18; re-verified 2026-07-20 against the
-[review-10 gate record](#recorded-gate-results-2026-07-20-macos-host-review-10-finding-6),
-which is the run this map's marks now rest on).
+complete. They were first verified 2026-07-18 and re-verified 2026-07-20 against
+the [historical review-10 gate record](#historical-gate-results-2026-07-20-macos-host-review-10-finding-6).
+The current review-15 Level 2 run did not reach those assertions, so it neither
+supersedes that historical behavior evidence nor establishes it for the current
+revision.
 
 AC 11 was never on this list — it was recorded complete throughout until
 review-7 finding 4 found that mark unsupported, and review-8 finding 1 then
@@ -616,7 +627,42 @@ both. They are kept for the trail, not as live items.
    raises no proxy hand-off at all — see [the two paths](#the-surfaced-coordinator-versus-the-direct-provider-wrappers)); what is
    removed is a constant that contradicted its own flags.
 
-## Recorded gate results (2026-07-20, macOS host, review-10 finding 6)
+## Recorded gate results (2026-07-20, macOS host, review 15)
+
+Run from the `claudine/` package area in the review-15 working tree at
+`2a01dabe74bf`. Level 1 and lint are green. Level 2 is **not** green: the
+managed sandbox prevented the detected terminal backends from creating their
+runtime resources before any feature assertion ran.
+
+| Gate | Exit | Result |
+|---|:-:|---|
+| `just test` | **0** | `claudine-catalog-types` 21/21 · `claudine` 3532/3532 (7 skipped) · `claudine-contract` 47/47 (5 skipped) · `claudine-cli` 2105/2105 (231 skipped) · `claudine-gen` 152/152 (4 skipped) |
+| `just test-l2` | **100** | 204 selected, 2132 skipped by filter; **0 passed**, 6 finalized backend failures, 198 canceled; run ID `dd512f72-ed17-4ed6-aa72-9c68f32f041a` |
+| `just lint` | **0** | clippy + fmt-check + error-transport / lifecycle-doc guards clean for every Claudine crate |
+
+The Level 2 recipe detected tmux and WezTerm and used parallel self-spawn mode
+with `-j 8`. WezTerm was launched with
+`WEZTERM_UNIX_SOCKET=/Users/ken/.local/share/wezterm/gui-sock-78035`. The six
+finalized failures exhausted their retries while creating tmux sessions. Two
+in-flight WezTerm attempts also reported sandbox `Operation not permitted`
+errors while accessing the mux socket or pid file. These are backend/harness
+failures, not proxy-with assertion failures.
+
+None of the 94 selected `level2_lifecycle_*` rows reached an assertion. That
+includes all five review-11 rows:
+
+- `level2_lifecycle_direct_compose_delivers_a_readable_system_prompt_file`;
+- `level2_lifecycle_retry_to_an_unavailable_provider_matches_direct_selection`;
+- `level2_lifecycle_retry_keeps_an_interpolated_mcp_tag_at_child_launch`;
+- `level2_lifecycle_switch_surfaces_unsupported_system_prompt_warning`; and
+- `level2_lifecycle_switch_surfaces_unsupported_sandbox_warning`.
+
+The six backend failures and 198 cancellations therefore provide no current
+Level 2 acceptance evidence. They neither prove nor disprove the implementation,
+and production readiness remains open until an unsandboxed host or the Linux CI
+runner records these rows and the existing proxy-with matrix green.
+
+## Historical gate results (2026-07-20, macOS host, review-10 finding 6)
 
 Run from the `claudine/` package area at the HEAD carrying review-10 findings
 1-5, per-package rather than through the area-wide `just test` (which review-10's
