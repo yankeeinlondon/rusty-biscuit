@@ -456,7 +456,7 @@ mod tests {
             "a launch-area-only file must not resolve; the fallback is diagnostic-only"
         );
 
-        // A file under base_dir DOES resolve (document-first), so the `until`
+        // A file under base_dir resolves as the source-local candidate, so the `until`
         // condition stops (file_exists is truthy).
         assert!(
             !evaluate_condition(

@@ -380,11 +380,6 @@ fn frontmatter_reads_resolve_against_base_dir() {
     std::env::set_current_dir(&original_cwd).unwrap();
 }
 
-// ── Phase 4 regression suite ────────────────────────────────────────────
-//
-// These tests close the remaining verification goals from the spec with
-// explicit regression coverage at the claudine lifecycle layer.
-
 /// A caller-supplied file that exists ONLY under the launch area does NOT
 /// resolve: the launch-area fallback is diagnostic-only and is never a
 /// resolution candidate for a reference authored inside a document (D2). This
@@ -455,16 +450,14 @@ fn regression_path_only_under_launch_area_does_not_resolve() {
     std::env::set_current_dir(&original_cwd).unwrap();
 }
 
-/// An intentionally conflicting filename present in BOTH the prompt dir
-/// and the launch area resolves to the prompt-dir copy — the
-/// document-first contract holds end-to-end at the lifecycle layer
-/// (verification goal #9, re-affirmed).
+/// A same-named launch-area file does not displace the source-local candidate
+/// when the request snapshot has no repository candidate.
 ///
 /// Each copy carries a distinct `title` frontmatter property so the
 /// `frontmatter(spec, 'title')` value identifies which file won.
 #[serial_test::serial]
 #[test]
-fn regression_conflicting_filename_prompt_dir_wins() {
+fn source_local_candidate_ignores_same_named_launch_file() {
     let launch_dir = tempfile::tempdir().unwrap();
     let prompt_dir = tempfile::tempdir().unwrap();
     let repo_root_dir = tempfile::tempdir().unwrap();
@@ -519,7 +512,7 @@ fn regression_conflicting_filename_prompt_dir_wins() {
     assert_eq!(
         resolved,
         Value::String("from-prompt-dir".to_string()),
-        "document-first contract: the prompt-dir copy must win over the launch-area fallback",
+        "the source-local candidate must win because launch metadata is not searched",
     );
 
     std::env::set_current_dir(&original_cwd).unwrap();

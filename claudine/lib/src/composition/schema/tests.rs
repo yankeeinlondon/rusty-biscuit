@@ -1479,24 +1479,7 @@ fn file_property_and_file_exists_agree_across_schema_and_body() {
     );
 }
 
-// ── Finding 2: pre-validation / drop / sequence pre-flight use the ────
-// ── explicit launch-area fallback, not the ambient process CWD. ──────
-//
-// These helpers run BEFORE the wrapper's `chdir`, so on the production
-// paths the launch area is captured and threaded in as
-// `file_ref_fallback_dir`. The regressions below switch the process CWD
-// to an unrelated directory to prove resolution is CWD-independent: a
-// `file`-typed value that exists only under the fallback must be accepted
-// (`pre_validate_schema`) or kept (`drop_invalid_optionals`). Without the
-// fallback, required values surface as validation errors while optional
-// eager file values remain visible for the later schema error path instead
-// of being pre-dropped. A value that exists only under the document dir
-// must win over a same-named fallback file (prompt-dir precedence).
-
-/// RAII guard that captures the process CWD on construction, switches to
-/// the requested directory, and restores the captured CWD on drop —
-/// including on panic. Tests using it are `#[serial_test::serial]` to
-/// avoid racing on process-global CWD with other CWD-mutating tests.
+/// Restores the process CWD on drop. CWD-mutating tests are serialized.
 struct CwdGuard {
     prior: std::path::PathBuf,
 }
@@ -1515,10 +1498,7 @@ impl Drop for CwdGuard {
     }
 }
 
-/// Writes a prompt document to `dir/prompt.md` and resolves it, so the
-/// resulting source's document directory (used as the `file`-typed
-/// validator's first anchor) is `dir`. Lets tests keep the document dir,
-/// the fallback dir, and the ambient CWD all distinct.
+/// Returns a resolved file-backed prompt whose source directory is `dir`.
 fn make_source_in(dir: &std::path::Path, document: &str) -> ResolvedCompositionSource {
     let file = dir.join("prompt.md");
     fs::write(&file, document).unwrap();
@@ -1550,14 +1530,11 @@ fn pre_validate_schema_resolves_file_against_document_dir() {
     assert!(pre.dropped_optionals.is_empty());
 }
 
-/// Same setup as above, but WITHOUT the fallback: with no anchor and an
-/// unrelated ambient CWD, the literal `file(required)` value cannot
-/// resolve and pre-validation surfaces `SchemaValidation`. Confirms the
-/// previous test passes because of the fallback, not because the file is
-/// reachable some other way.
+/// A required eager value present only under the launch directory is not a
+/// document-authored resolution candidate.
 #[test]
 #[serial_test::serial(schema_validation_cwd)]
-fn pre_validate_schema_without_fallback_rejects_when_only_under_launch_area() {
+fn pre_validate_schema_rejects_launch_only_file() {
     let doc_dir = TempDir::new().unwrap();
     let fallback_dir = TempDir::new().unwrap();
     let unrelated = TempDir::new().unwrap();
@@ -1570,25 +1547,21 @@ fn pre_validate_schema_without_fallback_rejects_when_only_under_launch_area() {
 
     let _cwd = CwdGuard::enter(unrelated.path());
     let err = pre_validate_schema(&source, None, None)
-        .expect_err("without the fallback, spec.md is unreachable from the unrelated CWD");
+        .expect_err("launch-only spec.md must be unreachable from the document context");
     assert!(
         matches!(err, CompositionError::SchemaValidation { .. }),
         "expected SchemaValidation for an unresolvable file value, got: {err:?}",
     );
 }
 
-/// Prompt-dir precedence for the pre-validation path: a `file` value that
-/// exists in BOTH the document dir and the launch-area fallback resolves
-/// via the document dir first (document-first contract). The document-dir
-/// copy is the only one guaranteed present; even with the CWD switched to
-/// an unrelated directory, validation succeeds.
+/// Captured launch metadata does not displace the source-local candidate when
+/// no repository candidate exists.
 #[test]
 #[serial_test::serial(schema_validation_cwd)]
-fn pre_validate_schema_prefers_document_dir_over_fallback() {
+fn pre_validate_schema_ignores_launch_copy_when_source_exists() {
     let doc_dir = TempDir::new().unwrap();
     let fallback_dir = TempDir::new().unwrap();
     let unrelated = TempDir::new().unwrap();
-    // spec.md present in both dirs; document-first must win.
     fs::write(doc_dir.path().join("spec.md"), "# doc copy\n").unwrap();
     fs::write(fallback_dir.path().join("spec.md"), "# fallback copy\n").unwrap();
 
@@ -1599,17 +1572,14 @@ fn pre_validate_schema_prefers_document_dir_over_fallback() {
 
     let _cwd = CwdGuard::enter(unrelated.path());
     pre_validate_schema(&source, None, Some(fallback_dir.path()))
-        .expect("a file value present in both dirs must validate via the document dir");
+        .expect("the source-local value must validate independently of the launch copy");
 }
 
-/// `drop_invalid_optionals` with an OPTIONAL `file`-typed value that
-/// exists only under the launch-area fallback must KEEP the value (not
-/// drop it) when the fallback is passed. Without the fallback the value
-/// would look unresolvable and be dropped — this is the exact regression
-/// the launch-area threading prevents. CWD switched to an unrelated dir.
+/// Optional eager-file failures remain visible for the later schema error
+/// path instead of being silently removed during pre-validation.
 #[test]
 #[serial_test::serial(schema_validation_cwd)]
-fn drop_invalid_optionals_keeps_file_under_launch_area_fallback() {
+fn drop_invalid_optionals_keeps_unresolvable_eager_file_for_validation() {
     let doc_dir = TempDir::new().unwrap();
     let fallback_dir = TempDir::new().unwrap();
     let unrelated = TempDir::new().unwrap();
@@ -1630,11 +1600,11 @@ fn drop_invalid_optionals_keeps_file_under_launch_area_fallback() {
             .frontmatter()
             .as_map()
             .contains_key("notes"),
-        "optional `notes` resolves via the launch-area fallback and must be kept",
+        "optional `notes` must remain visible for the schema validation error",
     );
     assert!(
         dropped.iter().all(|d| d.property != "notes"),
-        "no drop diagnostic should be emitted for a value that resolves via the fallback",
+        "pre-validation must not emit a drop diagnostic for the eager-file failure",
     );
 }
 

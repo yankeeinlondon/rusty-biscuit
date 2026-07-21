@@ -36,7 +36,7 @@ pub(super) struct StepComposeContext<'a> {
     pub(super) source_repo_root: Option<&'a Path>,
     /// Working directory `::shell` expansions run in.
     pub(super) child_cwd: &'a Path,
-    /// Launch area, the diagnostic fallback for read-side file references.
+    /// Launch-area metadata retained for file-reference diagnostics.
     pub(super) launch_area: Option<&'a Path>,
     pub(super) shared: &'a SharedComposeArgs,
     /// Shared across steps so "allow once" holds for the whole run.
@@ -228,14 +228,10 @@ pub(super) fn compose_step(
 
 /// Build the Darkmatter `ComposeOptions` for a step's template SHELL preflight.
 ///
-/// The launch-area fallback is anchored on `file`-typed schema validation and
-/// read-side interpolation so an area-relative path resolves document-first then
-/// launch-area — matching this step's `pre_validate_schema` call and the final
-/// `PrepareOptions.file_ref_fallback_dir`. Without it the preflight compose would
-/// fall back to the (already-mutated) process CWD and could discover different
-/// shell commands or pass/fail schema validation inconsistently with the
-/// corrected prepare path. The fallback is applied only when `launch_area` is
-/// present, matching `PrepareOptions`'s `launch_area.map(...)`.
+/// The document path and request snapshot determine file-reference resolution.
+/// `launch_area` is retained as diagnostic metadata and is not a candidate for
+/// references authored by the template. `None` preserves the library-only
+/// compatibility boundary.
 pub(super) fn build_template_preflight_options(
     env_overrides: &BTreeMap<String, String>,
     source_path: &Path,

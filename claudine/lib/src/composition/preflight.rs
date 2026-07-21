@@ -292,12 +292,8 @@ pub fn resolve_lifecycle_shell_commands(
         .build()
         .map_err(|e| CompositionError::PreFlightStateBuildFailed { source: e })?;
 
-    // Read-side functions (`parent_dir`, `dirname`, `file_exists`, …) resolve
-    // against the prompt's parent directory first (document-first contract),
-    // then fall back to the launch-area anchor when supplied — matching the
-    // event-time lifecycle lookup so a launch-relative read-side reference
-    // (`file_exists(spec)`) resolves identically at pre-flight and event-time
-    // instead of depending on the prompt-only anchor.
+    // Preflight and event-time lifecycle evaluation share the document anchor
+    // and captured launch metadata, avoiding ambient-CWD-dependent results.
     let mut resolution_ctx = ResolutionContext::new(
         source_path
             .parent()

@@ -635,22 +635,9 @@ fn approval_request_carries_real_source_provenance() {
     );
 }
 
-// --- Lifecycle shell read-side resolution: launch-area fallback ---------
-//
-// A lifecycle `shell` command whose `{{ }}` span calls a read-side
-// filesystem function (`file_exists`) against a launch-area-relative path
-// must resolve via the threaded `file_ref_fallback_dir`, not the prompt
-// directory alone. The regression below keeps the prompt dir, the
-// launch-area fallback, and the ambient CWD all distinct, with `spec.md`
-// present ONLY under the fallback, and proves the resolved (stamped)
-// command depends on the fallback being supplied — independently of the
-// post-launch process CWD.
-
 use darkmatter::markdown::compose::ComposeContext;
 
-/// RAII guard that switches the process CWD and restores it on drop
-/// (including on panic). Tests using it are `#[serial_test::serial]` to
-/// avoid racing on process-global CWD with other CWD-mutating tests.
+/// Restores the process CWD on drop. CWD-mutating tests are serialized.
 struct CwdGuard {
     prior: std::path::PathBuf,
 }
@@ -669,9 +656,8 @@ impl Drop for CwdGuard {
     }
 }
 
-/// Builds a `start` lifecycle config with a single positional `shell`
-/// action whose command interpolates `file_exists(spec)`, plus the
-/// effective frontmatter that supplies `spec`.
+/// Returns a lifecycle shell fixture whose command interpolates
+/// `file_exists(spec)`.
 fn lifecycle_with_file_exists_shell()
 -> (crate::composition::lifecycle::LifecycleConfig, serde_json::Value) {
     let frontmatter = serde_json::json!({ "spec": "spec.md" });
@@ -689,8 +675,7 @@ fn lifecycle_with_file_exists_shell()
     (config, frontmatter)
 }
 
-/// Reads the resolved (stamped) command string from the first `start`
-/// stack action.
+/// Returns the resolved command from the first `start` action.
 fn resolved_start_shell_command(
     config: &crate::composition::lifecycle::LifecycleConfig,
 ) -> String {
@@ -740,14 +725,11 @@ fn lifecycle_shell_read_side_resolves_against_document_dir() {
     );
 }
 
-/// Same setup WITHOUT the fallback: `file_exists(spec)` cannot find the
-/// launch-only file via the prompt dir or the unrelated CWD, so it resolves
-/// to `false`. This confirms the test above passes because of the fallback,
-/// not because the file is reachable some other way. Before the fix this
-/// was the only code path, so the launch-relative reference resolved wrong.
+/// A launch-only file is not a candidate for a lifecycle expression authored
+/// by the document.
 #[test]
 #[serial_test::serial(preflight_cwd)]
-fn lifecycle_shell_read_side_without_fallback_misses_launch_area_file() {
+fn lifecycle_shell_read_side_does_not_resolve_launch_only_file() {
     let doc_dir = tempfile::TempDir::new().unwrap();
     let launch_dir = tempfile::TempDir::new().unwrap();
     let unrelated = tempfile::TempDir::new().unwrap();
@@ -770,6 +752,6 @@ fn lifecycle_shell_read_side_without_fallback_misses_launch_area_file() {
     assert_eq!(
         resolved_start_shell_command(&config),
         "echo false",
-        "without the fallback the launch-only spec.md is unreachable",
+        "the launch-only spec.md must be unreachable from the document context",
     );
 }

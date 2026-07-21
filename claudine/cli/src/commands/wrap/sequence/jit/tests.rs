@@ -32,8 +32,6 @@ impl Drop for CwdGuard {
     }
 }
 
-/// Regression for the Phase 1c template-preflight resolution.
-///
 /// A sequence step with a `::shell` directive whose `{{ … }}` argument
 /// depends on a read-side `file_exists` against a document-relative file
 /// must see that file during the template SHELL preflight, resolving against
@@ -96,14 +94,11 @@ fn template_preflight_resolves_against_document_dir() {
     );
 }
 
-/// Companion proving the assertion above turns on the fallback specifically.
-/// WITHOUT the fallback (the pre-fix behavior), the launch-only `spec.md` is
-/// unreachable from the prompt dir or the unrelated CWD, so `file_exists`
-/// resolves to `false` and the approved command differs — the exact
-/// preflight/prepare disagreement the fix closes.
+/// A launch-only file is not a candidate for a reference authored by the
+/// template, even when ambient CWD is unrelated.
 #[test]
 #[serial_test::serial(preflight_cwd)]
-fn template_preflight_without_fallback_misses_launch_area_file() {
+fn template_preflight_does_not_resolve_launch_only_file() {
     let doc_dir = tempfile::TempDir::new().unwrap();
     let launch_dir = tempfile::TempDir::new().unwrap();
     let unrelated = tempfile::TempDir::new().unwrap();
@@ -145,13 +140,13 @@ fn template_preflight_without_fallback_misses_launch_area_file() {
 
     assert!(
         result.approved_commands.contains("echo false"),
-        "without the fallback the launch-only spec.md is unreachable, so \
+        "launch-only spec.md is unreachable from the document context, so \
          file_exists(spec) resolves false; approved: {:?}",
         result.approved_commands,
     );
     assert!(
         !result.approved_commands.contains("echo true"),
-        "no-fallback path must NOT see the launch-area file; approved: {:?}",
+        "document-backed resolution must not see the launch-area file; approved: {:?}",
         result.approved_commands,
     );
 }
