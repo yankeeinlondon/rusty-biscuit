@@ -9,7 +9,7 @@
 mod common;
 
 use common::md_cmd;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -30,12 +30,16 @@ fn envelope(path: &Path, extra: &[&str]) -> Value {
         .args(extra)
         .assert()
         .success();
+    assert!(
+        assert.get_output().stderr.is_empty(),
+        "JSON mode must not emit human diagnostics on stderr"
+    );
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     serde_json::from_str(&stdout)
         .unwrap_or_else(|e| panic!("stdout was not a JSON envelope ({e}):\n{stdout}"))
 }
 
-/// The envelope's four documented top-level fields, and nothing else.
+/// Golden contract for the flagship repair, including every v1 field.
 #[test]
 fn test_json_envelope_has_exactly_the_documented_top_level_fields() {
     let (_dir, path) = doc("---\ntitle: @daily-report\n---\n\n# Body\n");
@@ -46,14 +50,55 @@ fn test_json_envelope_has_exactly_the_documented_top_level_fields() {
     keys.sort_unstable();
     assert_eq!(
         keys,
-        ["diagnostics", "frontmatter_offset", "path", "repaired"],
+        [
+            "applied",
+            "changed",
+            "diagnostics",
+            "frontmatter",
+            "source",
+            "version"
+        ],
         "envelope field set is a wire contract"
     );
 
-    assert_eq!(report["path"], Value::String(path.display().to_string()));
-    assert_eq!(report["repaired"], Value::Bool(true));
-    assert!(report["frontmatter_offset"].is_number());
-    assert!(report["diagnostics"].is_array());
+    assert_eq!(
+        report,
+        json!({
+            "version": 1,
+            "source": {
+                "kind": "file",
+                "path": path,
+            },
+            "frontmatter": {
+                "present": true,
+                "span": { "start": 4, "end": 25 },
+            },
+            "diagnostics": [{
+                "code": "yaml.reserved-indicator",
+                "classification": "deterministic",
+                "message": "plain scalar begins with the reserved YAML indicator `@` and does not parse",
+                "span": {
+                    "start": 11,
+                    "end": 24,
+                    "start_line": 2,
+                    "start_column": 8,
+                    "end_line": 2,
+                    "end_column": 21,
+                },
+                "repairs": [{
+                    "span": { "start": 11, "end": 24 },
+                    "replacement": "\"@daily-report\"",
+                    "explanation": "quote the scalar so the indicator is treated as string content",
+                }],
+            }],
+            "applied": [{
+                "span": { "start": 11, "end": 24 },
+                "replacement": "\"@daily-report\"",
+                "explanation": "quote the scalar so the indicator is treated as string content",
+            }],
+            "changed": true,
+        })
+    );
 }
 
 /// Each diagnostic carries the spec's shape: a stable code, a byte span, a
@@ -71,11 +116,10 @@ fn test_json_diagnostic_shape_is_fully_pinned() {
     keys.sort_unstable();
     assert_eq!(
         keys,
-        ["classification", "code", "message", "repairs", "span", "stage"],
+        ["classification", "code", "message", "repairs", "span"],
         "diagnostic field set is a wire contract"
     );
 
-    assert_eq!(diagnostic["stage"], Value::String("syntax".into()));
     assert_eq!(
         diagnostic["code"],
         Value::String("yaml.reserved-indicator".into())
@@ -88,6 +132,10 @@ fn test_json_diagnostic_shape_is_fully_pinned() {
 
     assert!(diagnostic["span"]["start"].is_u64());
     assert!(diagnostic["span"]["end"].is_u64());
+    assert!(diagnostic["span"]["start_line"].is_u64());
+    assert!(diagnostic["span"]["start_column"].is_u64());
+    assert!(diagnostic["span"]["end_line"].is_u64());
+    assert!(diagnostic["span"]["end_column"].is_u64());
 
     let repairs = diagnostic["repairs"].as_array().unwrap();
     assert_eq!(repairs.len(), 1);
@@ -105,24 +153,67 @@ fn test_json_diagnostic_shape_is_fully_pinned() {
     assert!(repair["explanation"].is_string());
 }
 
-/// `frontmatter_offset` is documented as the projection term that turns a
-/// `syntax` span into document coordinates. Prove it actually does.
+/// Diagnostic and repair spans directly index the whole authored document.
 #[test]
-fn test_json_frontmatter_offset_projects_spans_into_document_coordinates() {
+fn test_json_spans_are_projected_into_document_coordinates() {
     let source = "---\ntitle: @daily-report\n---\n\n# Body\n";
     let (_dir, path) = doc(source);
     let report = envelope(&path, &[]);
 
-    let offset = report["frontmatter_offset"].as_u64().unwrap() as usize;
     let diagnostic = &report["diagnostics"][0];
     let start = diagnostic["span"]["start"].as_u64().unwrap() as usize;
     let end = diagnostic["span"]["end"].as_u64().unwrap() as usize;
 
     assert_eq!(
-        &source[offset + start..offset + end],
+        &source[start..end],
         "@daily-report",
-        "offset + syntax span must index the authored lexeme"
+        "the diagnostic span must index the authored lexeme"
     );
+    assert_eq!(
+        diagnostic["repairs"][0]["span"],
+        json!({ "start": 11, "end": 24 })
+    );
+    assert_eq!(report["applied"][0]["span"], json!({ "start": 11, "end": 24 }));
+}
+
+/// A stream BOM participates in the applied audit with document coordinates.
+#[test]
+fn test_json_bom_repair_is_audited_in_document_coordinates() {
+    let (_dir, path) = doc("\u{feff}---\ntitle: @daily-report\n---\n\n# Body\n");
+    let report = envelope(&path, &[]);
+
+    assert_eq!(
+        report["frontmatter"],
+        json!({ "present": true, "span": { "start": 7, "end": 28 } })
+    );
+    assert_eq!(report["diagnostics"][0]["span"]["start"], json!(14));
+    assert_eq!(
+        report["applied"],
+        json!([
+            {
+                "span": { "start": 0, "end": 3 },
+                "replacement": "",
+                "explanation": "remove the UTF-8 byte-order mark at document start",
+            },
+            {
+                "span": { "start": 14, "end": 27 },
+                "replacement": "\"@daily-report\"",
+                "explanation": "quote the scalar so the indicator is treated as string content",
+            }
+        ])
+    );
+}
+
+/// Columns are 1-indexed byte columns, not Unicode scalar columns.
+#[test]
+fn test_json_span_columns_are_byte_indexed() {
+    let (_dir, path) = doc("---\n\"\u{1f4a1}\": @daily-report\n---\n\n# Body\n");
+    let report = envelope(&path, &[]);
+    let diagnostic = &report["diagnostics"][0];
+
+    assert_eq!(diagnostic["span"]["start_line"], json!(2));
+    assert_eq!(diagnostic["span"]["start_column"], json!(9));
+    assert_eq!(diagnostic["span"]["end_column"], json!(22));
 }
 
 /// A report-only finding serializes with its own classification and an empty
@@ -145,33 +236,30 @@ fn test_json_report_only_diagnostic_has_empty_repairs_array() {
         "certainty-tier spelling is a wire contract"
     );
     assert_eq!(diagnostic["repairs"], Value::Array(vec![]));
-    assert_eq!(report["repaired"], Value::Bool(false));
+    assert_eq!(
+        report["changed"],
+        Value::Bool(true),
+        "document cleanup may change independently of the report-only finding"
+    );
+    assert_eq!(report["applied"], Value::Array(vec![]));
 }
 
-/// Both tiers appear in one envelope, discriminated by `stage`.
+/// Both tiers share one v1 diagnostic shape and retain their code ownership.
 #[test]
-fn test_json_stage_discriminates_syntax_from_schema_diagnostics() {
+fn test_json_combines_syntax_and_schema_diagnostics() {
     // `ctx` is a Darkmatter baseline key, so the undeclared child raises a
     // schema-tier finding; the empty value raises a syntax-tier one.
     let (_dir, path) = doc("---\nempty:\nctx:\n  nope: 1\n---\n\n# Body\n");
     let report = envelope(&path, &[]);
 
     let diagnostics = report["diagnostics"].as_array().unwrap();
-    let stages: Vec<&str> = diagnostics
+    let codes: Vec<&str> = diagnostics
         .iter()
-        .map(|d| d["stage"].as_str().unwrap())
+        .map(|d| d["code"].as_str().unwrap())
         .collect();
 
-    assert!(stages.contains(&"syntax"), "expected a syntax finding: {stages:?}");
-    assert!(stages.contains(&"schema"), "expected a schema finding: {stages:?}");
-
-    for diagnostic in diagnostics {
-        assert!(
-            matches!(diagnostic["stage"].as_str(), Some("syntax" | "schema")),
-            "stage is a closed two-variant enum, got {}",
-            diagnostic["stage"]
-        );
-    }
+    assert!(codes.iter().any(|code| code.starts_with("yaml.")), "{codes:?}");
+    assert!(codes.iter().any(|code| code.starts_with("schema.")), "{codes:?}");
 }
 
 /// Multi-diagnostic ordering is deterministic and repeatable.
@@ -184,7 +272,7 @@ fn test_json_multi_diagnostic_ordering_is_deterministic() {
         .as_array()
         .unwrap()
         .iter()
-        .map(|d| format!("{}:{}", d["stage"], d["code"]))
+        .map(|d| d["code"].as_str().unwrap().to_string())
         .collect();
 
     assert!(first.len() > 1, "expected several diagnostics, got {first:?}");
@@ -194,38 +282,40 @@ fn test_json_multi_diagnostic_ordering_is_deterministic() {
         .as_array()
         .unwrap()
         .iter()
-        .map(|d| format!("{}:{}", d["stage"], d["code"]))
+        .map(|d| d["code"].as_str().unwrap().to_string())
         .collect();
 
     assert_eq!(first, second, "diagnostic ordering must be stable");
 }
 
 /// D-5 + D-8: a document with no frontmatter still emits a well-formed
-/// envelope, with the nulls that prove the analysis was bypassed.
+/// envelope whose structured source/frontmatter fields prove the bypass.
 #[test]
 fn test_json_no_frontmatter_envelope_is_null_and_empty() {
     let (_dir, path) = doc("# Just A Body\n\nNo frontmatter here.\n");
     let report = envelope(&path, &[]);
 
-    assert_eq!(report["frontmatter_offset"], Value::Null);
-    assert_eq!(report["repaired"], Value::Bool(false));
+    assert_eq!(report["version"], json!(1));
+    assert_eq!(report["source"]["kind"], json!("file"));
+    assert_eq!(report["source"]["path"], json!(path));
+    assert_eq!(report["frontmatter"], json!({ "present": false }));
     assert_eq!(report["diagnostics"], Value::Array(vec![]));
+    assert_eq!(report["applied"], Value::Array(vec![]));
+    assert_eq!(report["changed"], Value::Bool(false));
 }
 
-/// D-8: an *empty* frontmatter block is the sharper case — the block exists,
-/// so a null `frontmatter_offset` can only mean the bypass fired before any
-/// YAML analysis ran.
+/// D-8: an empty frontmatter block remains present even though analysis is bypassed.
 #[test]
-fn test_json_empty_frontmatter_offset_is_null_proving_bypass() {
+fn test_json_empty_frontmatter_is_present_with_empty_span() {
     let (_dir, path) = doc("---\n---\n\n# Body\n");
     let report = envelope(&path, &[]);
 
     assert_eq!(
-        report["frontmatter_offset"],
-        Value::Null,
-        "an analyzed block would have reported its offset"
+        report["frontmatter"],
+        json!({ "present": true, "span": { "start": 4, "end": 4 } })
     );
     assert_eq!(report["diagnostics"], Value::Array(vec![]));
+    assert_eq!(report["applied"], Value::Array(vec![]));
 }
 
 /// The envelope is the *sole* stdout payload: no document, no delta report,
@@ -264,13 +354,24 @@ fn test_json_with_save_writes_file_and_prints_envelope() {
     let (_dir, path) = doc("---\ntitle: @daily-report\n---\n\n# Body\n");
 
     let report = envelope(&path, &["--save"]);
-    assert_eq!(report["repaired"], Value::Bool(true));
+    assert_eq!(report["changed"], Value::Bool(true));
+    assert_eq!(report["applied"].as_array().unwrap().len(), 1);
 
     let saved = fs::read_to_string(&path).unwrap();
     assert!(
         saved.contains("title: \"@daily-report\""),
         "the file must be repaired on disk, got:\n{saved}"
     );
+}
+
+/// `changed` covers the whole document, not only frontmatter repairs.
+#[test]
+fn test_json_changed_reports_body_only_cleanup() {
+    let (_dir, path) = doc("---\ntitle: Fine\n---\n\n# Body  \n");
+    let report = envelope(&path, &[]);
+
+    assert_eq!(report["applied"], Value::Array(vec![]));
+    assert_eq!(report["changed"], Value::Bool(true));
 }
 
 /// `--save --json` prints the envelope instead of the delta report.
@@ -286,11 +387,12 @@ fn test_json_with_save_suppresses_delta_report() {
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
 
-    assert!(!stdout.contains("changed"), "delta report leaked:\n{stdout}");
-    let _: Value = serde_json::from_str(&stdout).unwrap();
+    assert!(!stdout.contains("Frontmatter:"), "delta report leaked:\n{stdout}");
+    let report: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(report["changed"], Value::Bool(true));
 }
 
-/// Stdin input has no path, so `path` is null rather than absent or `"-"`.
+/// Stdin input has a structured source with a null path.
 #[test]
 fn test_json_stdin_reports_null_path() {
     let assert = md_cmd()
@@ -301,14 +403,13 @@ fn test_json_stdin_reports_null_path() {
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let report: Value = serde_json::from_str(&stdout).unwrap();
 
-    assert_eq!(report["path"], Value::Null);
-    assert_eq!(report["repaired"], Value::Bool(true));
+    assert_eq!(report["source"], json!({ "kind": "stdin", "path": null }));
+    assert_eq!(report["changed"], Value::Bool(true));
 }
 
-/// D-5 + D-7: unrepairable frontmatter fails before any envelope is printed,
-/// so `--json` never emits a half-truthful success payload.
+/// Unrepairable YAML still returns the v1 envelope as the sole machine payload.
 #[test]
-fn test_json_unrepairable_frontmatter_exits_one_without_envelope() {
+fn test_json_unrepairable_frontmatter_exits_one_with_envelope() {
     let (_dir, path) = doc("---\ntitle: [unclosed\n---\n\n# Body\n");
 
     let assert = md_cmd()
@@ -318,8 +419,34 @@ fn test_json_unrepairable_frontmatter_exits_one_without_envelope() {
         .assert()
         .failure();
 
+    let output = assert.get_output();
+    assert!(output.stderr.is_empty(), "human error leaked to stderr");
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["version"], json!(1));
+    assert_eq!(report["source"], json!({ "kind": "file", "path": path }));
+    assert_eq!(report["frontmatter"], json!({
+        "present": true,
+        "span": { "start": 4, "end": 21 },
+    }));
+    assert_eq!(report["applied"], Value::Array(vec![]));
+    assert_eq!(report["changed"], Value::Bool(false));
+    let diagnostics = report["diagnostics"].as_array().unwrap();
     assert!(
-        assert.get_output().stdout.is_empty(),
-        "no envelope on the failure path"
+        diagnostics.iter().any(|diagnostic| diagnostic["code"] == "yaml.parse"),
+        "parse failure missing from envelope: {report}"
     );
+    for diagnostic in diagnostics {
+        let keys: std::collections::BTreeSet<&str> = diagnostic
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            ["classification", "code", "message", "repairs", "span"]
+                .into_iter()
+                .collect()
+        );
+    }
 }

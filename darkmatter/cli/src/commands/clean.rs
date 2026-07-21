@@ -21,7 +21,7 @@ use darkmatter::markdown::cleanup::{
 use darkmatter::markdown::delta::DeltaReport;
 use darkmatter::markdown::extract_frontmatter_block;
 use darkmatter::markdown::Markdown;
-use std::io::{self, IsTerminal, Read};
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::PathBuf;
 use tracing::instrument;
 
@@ -87,10 +87,19 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions) -> Result<()> 
 
     let repair = repair_frontmatter(&raw, resolved.as_deref(), &options.schema)?;
 
-    // Building the document is what enforces the unrepairable-YAML contract:
-    // if the frontmatter still does not parse we fail here, before any write,
-    // so the file is left untouched and the exit code stays 1.
-    let original = Markdown::try_from_content(repair.source.clone())?;
+    // Building the document is what enforces the unrepairable-YAML contract.
+    // JSON mode reports that domain failure through its machine channel before
+    // preserving the existing exit code; human mode keeps the normal renderer.
+    let original = match Markdown::try_from_content(repair.source.clone()) {
+        Ok(markdown) => markdown,
+        Err(_error) if options.json => {
+            let report = repair.json_report(resolved, &raw, false);
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            io::stdout().flush()?;
+            std::process::exit(1);
+        }
+        Err(error) => return Err(error.into()),
+    };
     let mut cleaned = original.clone();
     apply_cleanup(
         &mut cleaned,
@@ -100,10 +109,11 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions) -> Result<()> 
         options.ignore_incidental_newlines,
     );
     let output = assemble(&repair.source, &cleaned);
+    let changed = output != raw;
 
     let Some(path) = save_path else {
         if options.json {
-            let report = repair.json_report(resolved);
+            let report = repair.json_report(resolved, &raw, changed);
             println!("{}", serde_json::to_string_pretty(&report)?);
         } else {
             report_suggestions(&repair.diagnostics, &Terminal::new());
@@ -118,7 +128,7 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions) -> Result<()> 
     }
 
     if options.json {
-        let report = repair.json_report(resolved);
+        let report = repair.json_report(resolved, &raw, changed);
         println!("{}", serde_json::to_string_pretty(&report)?);
         return Ok(());
     }

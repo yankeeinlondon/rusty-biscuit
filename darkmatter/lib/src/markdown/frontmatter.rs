@@ -258,11 +258,20 @@ fn is_dash_only_fence(text: &str) -> bool {
 /// Parses frontmatter from markdown content.
 ///
 /// Frontmatter must be at the start of the document between `---` delimiters.
+/// A single leading UTF-8 BOM is accepted, and LF, CRLF, and lone-CR line
+/// endings are recognized without changing the delimiter grammar.
 pub(super) fn parse_frontmatter(
     content: &str,
     ctx: SourceContext,
 ) -> MarkdownResult<(Frontmatter, String)> {
-    let lines: Vec<&str> = content.lines().collect();
+    let line_spans = source_line_spans(content);
+    let mut lines: Vec<&str> = line_spans
+        .iter()
+        .map(|line| &content[line.start..line.content_end])
+        .collect();
+    if let Some(first) = lines.first_mut() {
+        *first = first.strip_prefix('\u{feff}').unwrap_or(first);
+    }
 
     // Check if document starts with frontmatter delimiter
     if lines.is_empty() || lines[0].trim() != "---" {
@@ -330,7 +339,8 @@ pub struct FrontmatterExtraction<'a> {
     pub yaml_span: SourceSpan,
     /// Byte span of the whole frontmatter block, from the start of the
     /// opening `---` line through the closing `---` line's terminator (or end
-    /// of input when the closing delimiter is the final line).
+    /// of input when the closing delimiter is the final line). A recognized
+    /// UTF-8 BOM immediately before the opening delimiter is included.
     pub block_span: SourceSpan,
     /// Byte span of the document body following the block: everything from
     /// `block_span.end` to the end of the source. Empty for body-less
@@ -350,9 +360,10 @@ pub struct FrontmatterExtraction<'a> {
 ///
 /// This is the span-aware companion to the internal `parse_frontmatter`: it
 /// applies the same delimiter rules (frontmatter must start at line 1 with a
-/// trimmed `---`; the closing delimiter is the next trimmed `---`; a missing
-/// closing delimiter means the document has no frontmatter) but reports byte
-/// spans against the original source instead of parsed values.
+/// trimmed `---`, optionally preceded by one UTF-8 BOM; the closing delimiter
+/// is the next trimmed `---`; a missing closing delimiter means the document
+/// has no frontmatter) but reports byte spans against the original source
+/// instead of parsed values. LF, CRLF, and lone-CR terminators are preserved.
 ///
 /// ## Examples
 ///
@@ -379,28 +390,23 @@ pub struct FrontmatterExtraction<'a> {
 pub fn extract_frontmatter_block(
     source: &str,
 ) -> MarkdownResult<Option<FrontmatterExtraction<'_>>> {
-    // (start, end) byte spans per line, `end` including the `\n` terminator.
-    let mut line_spans: Vec<(usize, usize)> = Vec::new();
-    let mut pos = 0;
-    for segment in source.split_inclusive('\n') {
-        line_spans.push((pos, pos + segment.len()));
-        pos += segment.len();
-    }
-
-    // Line content with terminator stripped, mirroring `str::lines`.
+    let line_spans = source_line_spans(source);
     let line_content = |idx: usize| -> &str {
-        let (start, end) = line_spans[idx];
-        let raw = &source[start..end];
-        match raw.strip_suffix('\n') {
-            Some(without_newline) => without_newline
-                .strip_suffix('\r')
-                .unwrap_or(without_newline),
-            None => raw,
-        }
+        let line = line_spans[idx];
+        &source[line.start..line.content_end]
     };
+    let opening = line_spans
+        .first()
+        .map(|_| line_content(0).strip_prefix('\u{feff}').unwrap_or(line_content(0)));
 
-    if line_spans.is_empty() || line_content(0).trim() != "---" {
-        let lines: Vec<&str> = source.lines().collect();
+    if opening.is_none_or(|line| line.trim() != "---") {
+        let mut lines: Vec<&str> = line_spans
+            .iter()
+            .map(|line| &source[line.start..line.content_end])
+            .collect();
+        if let Some(first) = lines.first_mut() {
+            *first = first.strip_prefix('\u{feff}').unwrap_or(first);
+        }
         if let Some(fence) = detect_near_miss_frontmatter_fence(&lines) {
             let ctx = SourceContext::new(
                 std::path::PathBuf::from("unknown"),
@@ -421,8 +427,8 @@ pub fn extract_frontmatter_block(
         return Ok(None);
     };
 
-    let yaml_span = line_spans[1].0..line_spans[closing_idx].0;
-    let block_span = 0..line_spans[closing_idx].1;
+    let yaml_span = line_spans[1].start..line_spans[closing_idx].start;
+    let block_span = 0..line_spans[closing_idx].end;
     let body_span = block_span.end..source.len();
 
     Ok(Some(FrontmatterExtraction {
@@ -434,6 +440,50 @@ pub fn extract_frontmatter_block(
         closing_line: closing_idx + 1,
         yaml_base_line: 2,
     }))
+}
+
+#[derive(Clone, Copy)]
+struct SourceLineSpan {
+    start: usize,
+    content_end: usize,
+    end: usize,
+}
+
+/// Recognizes every Markdown line-ending form without losing source byte spans.
+fn source_line_spans(source: &str) -> Vec<SourceLineSpan> {
+    let bytes = source.as_bytes();
+    let mut lines = Vec::new();
+    let mut start = 0;
+    let mut idx = 0;
+
+    while idx < bytes.len() {
+        let terminator_len = match bytes[idx] {
+            b'\n' => 1,
+            b'\r' if bytes.get(idx + 1) == Some(&b'\n') => 2,
+            b'\r' => 1,
+            _ => {
+                idx += 1;
+                continue;
+            }
+        };
+        lines.push(SourceLineSpan {
+            start,
+            content_end: idx,
+            end: idx + terminator_len,
+        });
+        idx += terminator_len;
+        start = idx;
+    }
+
+    if start < source.len() {
+        lines.push(SourceLineSpan {
+            start,
+            content_end: source.len(),
+            end: source.len(),
+        });
+    }
+
+    lines
 }
 
 // UTF-8-boundary audit (2026-04-24): the byte-indexed scanners in this file
@@ -844,6 +894,37 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_block_with_utf8_bom() {
+        let source = "\u{feff}---\ntitle: X\n---\nbody";
+        let extraction = extract_frontmatter_block(source).unwrap().unwrap();
+
+        assert_eq!(extraction.yaml, "title: X\n");
+        assert_eq!(extraction.yaml_span, 7..16);
+        assert_eq!(extraction.block_span, 0..20);
+        assert_eq!(&source[extraction.body_span.clone()], "body");
+    }
+
+    #[test]
+    fn test_extract_block_with_lone_cr_delimiters() {
+        let source = "---\rtitle: X\r---\rbody";
+        let extraction = extract_frontmatter_block(source).unwrap().unwrap();
+
+        assert_eq!(extraction.yaml, "title: X\r");
+        assert_eq!(extraction.yaml_span, 4..13);
+        assert_eq!(extraction.block_span, 0..17);
+        assert_eq!(&source[extraction.body_span.clone()], "body");
+        assert_eq!(extraction.closing_line, 3);
+    }
+
+    #[test]
+    fn test_extract_block_bom_does_not_weaken_delimiter_rules() {
+        assert_eq!(
+            extract_frontmatter_block("\u{feff}---x\ntitle: X\n---\nbody").unwrap(),
+            None
+        );
+    }
+
+    #[test]
     fn test_extract_block_near_miss_fence() {
         let source = "----\na: 1\n----\nbody";
         let err = extract_frontmatter_block(source).unwrap_err();
@@ -880,16 +961,18 @@ mod tests {
     #[test]
     fn test_extract_block_agrees_with_parse_frontmatter_presence() {
         // Both APIs must classify frontmatter presence identically.
-        let with_frontmatter = "---\ntitle: X\n---\nbody\n";
+        let with_frontmatter = [
+            "---\ntitle: X\n---\nbody\n",
+            "\u{feff}---\ntitle: X\n---\nbody\n",
+            "---\rtitle: X\r---\rbody\r",
+        ];
         let without = ["# Hi\n", "---\nunclosed\n", "text\n---\nx\n---\n"];
 
-        assert!(
-            extract_frontmatter_block(with_frontmatter)
-                .unwrap()
-                .is_some()
-        );
-        let (fm, _) = parse_frontmatter(with_frontmatter).unwrap();
-        assert!(!fm.is_empty());
+        for source in with_frontmatter {
+            assert!(extract_frontmatter_block(source).unwrap().is_some());
+            let (fm, _) = parse_frontmatter(source).unwrap();
+            assert!(!fm.is_empty());
+        }
 
         for source in without {
             assert_eq!(extract_frontmatter_block(source).unwrap(), None);

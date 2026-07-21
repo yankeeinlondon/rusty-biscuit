@@ -15,7 +15,10 @@
 //! See `darkmatter/features/2026-07-14-invalid-frontmatter/spec.md`.
 
 use biscuit_file::serde_yaml_ng;
-use biscuit_file::{YamlDiagnostic, YamlRepair, analyze_yaml, apply_edit_set};
+use biscuit_file::{
+    SourceSpan, YamlCertainty, YamlDiagnostic, YamlDiagnosticCode, YamlRepair, analyze_yaml,
+    apply_edit_set,
+};
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
@@ -25,6 +28,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::extract_frontmatter_block;
 use darkmatter::markdown::schemas::{CleanSchemaConfig, CleanSchemaContext};
+use darkmatter::markdown::span::line_col_of_offset;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
@@ -72,37 +76,88 @@ pub struct CleanDiagnostic {
     pub diagnostic: YamlDiagnostic,
 }
 
-/// The `md clean --json` STDOUT envelope.
-///
-/// The per-diagnostic shape (`code`, `span`, `classification`, `message`,
-/// `repairs[]`) is `biscuit_file::YamlDiagnostic`'s own `Serialize`, so the
-/// wire format stays pinned to the shared diagnostic vocabulary rather than a
-/// CLI-local copy of it. Spans serialize as `{"start": N, "end": M}` byte
-/// offsets.
+/// The version-1 `md clean --json` STDOUT envelope.
 #[derive(Debug, Serialize)]
 pub struct CleanJsonReport {
-    /// Document analyzed, or `null` when the input came from stdin.
+    pub version: u8,
+    pub source: CleanJsonSource,
+    pub frontmatter: CleanJsonFrontmatter,
+    pub diagnostics: Vec<CleanJsonDiagnostic>,
+    pub applied: Vec<CleanJsonRepair>,
+    /// Whether either frontmatter repair or Markdown cleanup changed the
+    /// document emitted by this invocation.
+    pub changed: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CleanJsonSource {
+    pub kind: CleanJsonSourceKind,
     pub path: Option<PathBuf>,
-    /// Byte offset of the frontmatter YAML block within the document. Add it
-    /// to a `syntax`-stage span to project that span into document
-    /// coordinates. `null` when the document has no frontmatter.
-    pub frontmatter_offset: Option<usize>,
-    /// Whether any repair changed the frontmatter text.
-    pub repaired: bool,
-    /// Every finding from both tiers, in the order they were produced.
-    pub diagnostics: Vec<CleanDiagnostic>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CleanJsonSourceKind {
+    File,
+    Stdin,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CleanJsonFrontmatter {
+    pub present: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub span: Option<CleanJsonSpan>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CleanJsonSpan {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CleanJsonPositionedSpan {
+    pub start: usize,
+    pub end: usize,
+    pub start_line: usize,
+    pub start_column: usize,
+    pub end_line: usize,
+    pub end_column: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CleanJsonDiagnostic {
+    pub code: YamlDiagnosticCode,
+    pub classification: YamlCertainty,
+    pub message: String,
+    pub span: CleanJsonPositionedSpan,
+    pub repairs: Vec<CleanJsonRepair>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CleanJsonRepair {
+    pub span: CleanJsonSpan,
+    pub replacement: String,
+    pub explanation: String,
 }
 
 /// Outcome of the raw-source frontmatter pass.
 pub struct FrontmatterRepair {
     /// The document with deterministic frontmatter repairs spliced in.
     pub source: String,
-    /// Byte offset of the frontmatter YAML block within [`Self::source`].
-    pub frontmatter_offset: Option<usize>,
+    /// YAML span in the exact document supplied by the caller.
+    pub frontmatter_span: Option<SourceSpan>,
     /// Whether any repair changed the frontmatter text.
     pub repaired: bool,
     /// Every finding from both tiers.
     pub diagnostics: Vec<CleanDiagnostic>,
+    /// Every repair actually accepted by the edit-set utility.
+    applied: Vec<AppliedRepair>,
+}
+
+struct AppliedRepair {
+    repair: YamlRepair,
+    document_relative: bool,
 }
 
 impl FrontmatterRepair {
@@ -112,20 +167,111 @@ impl FrontmatterRepair {
     fn untouched(source: &str) -> Self {
         Self {
             source: source.to_string(),
-            frontmatter_offset: None,
+            frontmatter_span: None,
             repaired: false,
             diagnostics: Vec::new(),
+            applied: Vec::new(),
         }
     }
 
     /// Builds the `--json` envelope for this outcome.
-    pub fn json_report(self, path: Option<PathBuf>) -> CleanJsonReport {
-        CleanJsonReport {
+    pub fn json_report(
+        &self,
+        path: Option<PathBuf>,
+        document_source: &str,
+        changed: bool,
+    ) -> CleanJsonReport {
+        let source = CleanJsonSource {
+            kind: if path.is_some() {
+                CleanJsonSourceKind::File
+            } else {
+                CleanJsonSourceKind::Stdin
+            },
             path,
-            frontmatter_offset: self.frontmatter_offset,
-            repaired: self.repaired,
-            diagnostics: self.diagnostics,
+        };
+        let frontmatter = CleanJsonFrontmatter {
+            present: self.frontmatter_span.is_some(),
+            span: self.frontmatter_span.as_ref().map(json_span),
+        };
+        let yaml_offset = self
+            .frontmatter_span
+            .as_ref()
+            .map_or(0, |span| span.start);
+
+        CleanJsonReport {
+            version: 1,
+            source,
+            frontmatter,
+            diagnostics: self
+                .diagnostics
+                .iter()
+                .map(|entry| json_diagnostic(entry, yaml_offset, document_source))
+                .collect(),
+            applied: self
+                .applied
+                .iter()
+                .map(|applied| {
+                    json_repair(
+                        &applied.repair,
+                        if applied.document_relative {
+                            0
+                        } else {
+                            yaml_offset
+                        },
+                    )
+                })
+                .collect(),
+            changed,
         }
+    }
+}
+
+fn json_diagnostic(
+    entry: &CleanDiagnostic,
+    yaml_offset: usize,
+    document_source: &str,
+) -> CleanJsonDiagnostic {
+    let start = yaml_offset + entry.diagnostic.span.start;
+    let end = yaml_offset + entry.diagnostic.span.end;
+    let (start_line, start_column) = line_col_of_offset(document_source, start);
+    let (end_line, end_column) = line_col_of_offset(document_source, end);
+
+    CleanJsonDiagnostic {
+        code: entry.diagnostic.code,
+        classification: entry.diagnostic.classification,
+        message: entry.diagnostic.message.clone(),
+        span: CleanJsonPositionedSpan {
+            start,
+            end,
+            start_line,
+            start_column,
+            end_line,
+            end_column,
+        },
+        repairs: entry
+            .diagnostic
+            .repairs
+            .iter()
+            .map(|repair| json_repair(repair, yaml_offset))
+            .collect(),
+    }
+}
+
+fn json_repair(repair: &YamlRepair, yaml_offset: usize) -> CleanJsonRepair {
+    CleanJsonRepair {
+        span: CleanJsonSpan {
+            start: yaml_offset + repair.span.start,
+            end: yaml_offset + repair.span.end,
+        },
+        replacement: repair.replacement.clone(),
+        explanation: repair.explanation.clone(),
+    }
+}
+
+fn json_span(span: &SourceSpan) -> CleanJsonSpan {
+    CleanJsonSpan {
+        start: span.start,
+        end: span.end,
     }
 }
 
@@ -148,14 +294,33 @@ pub fn repair_frontmatter(
     document_path: Option<&Path>,
     flags: &CleanSchemaFlags,
 ) -> Result<FrontmatterRepair> {
-    let Some(extraction) = extract_frontmatter_block(source)? else {
+    let original_source = source;
+    let Some(original_extraction) = extract_frontmatter_block(source)? else {
         return Ok(FrontmatterRepair::untouched(source));
     };
+    let frontmatter_span = original_extraction.yaml_span;
+    let bom_repair = source.starts_with('\u{feff}').then(|| AppliedRepair {
+        repair: YamlRepair {
+            span: 0..'\u{feff}'.len_utf8(),
+            replacement: String::new(),
+            explanation: "remove the UTF-8 byte-order mark at document start".to_string(),
+        },
+        document_relative: true,
+    });
+    let source = source.strip_prefix('\u{feff}').unwrap_or(source);
+    let extraction = extract_frontmatter_block(source)?
+        .expect("removing a recognized BOM must preserve the frontmatter block");
     if extraction.yaml.trim().is_empty() {
-        return Ok(FrontmatterRepair::untouched(source));
+        let repaired_source = splice_frontmatter(source, &extraction, extraction.yaml);
+        return Ok(FrontmatterRepair {
+            repaired: repaired_source != original_source,
+            source: repaired_source,
+            frontmatter_span: Some(frontmatter_span),
+            diagnostics: Vec::new(),
+            applied: bom_repair.into_iter().collect(),
+        });
     }
 
-    let yaml_span = extraction.yaml_span.clone();
     let authored = extraction.yaml.to_string();
 
     // One analysis serves both the diagnostic and the repair view; calling
@@ -165,7 +330,15 @@ pub fn repair_frontmatter(
     // candidates, so it is never reparsed.
     let analysis = analyze_yaml(&authored);
     let mut diagnostics: Vec<CleanDiagnostic> = syntax_diagnostics(&analysis);
-    let mut yaml = analysis.apply().source;
+    let outcome = analysis.apply();
+    let mut applied: Vec<AppliedRepair> = bom_repair
+        .into_iter()
+        .chain(outcome.audit.applied.into_iter().map(|repair| AppliedRepair {
+            repair,
+            document_relative: false,
+        }))
+        .collect();
+    let mut yaml = outcome.source;
 
     // Parse-equivalence-gated repairs (whitespace, normalization) cannot be
     // proven while the block is unparseable, because there is no original
@@ -182,14 +355,19 @@ pub fn repair_frontmatter(
         // to tell which of two `syntax` spans is in authored coordinates. Only
         // findings the rescan genuinely unlocked are kept.
         diagnostics.extend(new_findings(&rescan, &diagnostics));
-        yaml = rescan.apply().source;
+        let outcome = rescan.apply();
+        applied.extend(outcome.audit.applied.into_iter().map(|repair| AppliedRepair {
+            repair,
+            document_relative: false,
+        }));
+        yaml = outcome.source;
     }
 
     // The schema tier needs a parsed document, so it is unreachable until the
     // syntax tier has restored parseability. This ordering is also what keeps
     // schema resolution off the hot path for unparseable input.
     if parses(&yaml) {
-        let after_syntax = splice(source, &yaml_span, &yaml);
+        let after_syntax = splice_frontmatter(source, &extraction, &yaml);
         if let Ok(markdown) = build_markdown(after_syntax, document_path) {
             let context = resolve_schema_context(flags, document_path)?;
             let schema_analysis = context.analyze(&markdown, &yaml)?;
@@ -211,17 +389,27 @@ pub fn repair_frontmatter(
             if !auto_apply.is_empty() {
                 let outcome = apply_edit_set(&yaml, &auto_apply);
                 if outcome.changed() {
+                    applied.extend(outcome.audit.applied.iter().cloned().map(|repair| {
+                        AppliedRepair {
+                            repair,
+                            document_relative: false,
+                        }
+                    }));
                     yaml = outcome.source;
                 }
             }
         }
     }
 
+    let repaired_source = splice_frontmatter(source, &extraction, &yaml);
+    extract_frontmatter_block(&repaired_source)?
+        .expect("reconstructing frontmatter must preserve its delimiters");
     Ok(FrontmatterRepair {
-        repaired: yaml != authored,
-        source: splice(source, &yaml_span, &yaml),
-        frontmatter_offset: Some(yaml_span.start),
+        repaired: repaired_source != original_source,
+        frontmatter_span: Some(frontmatter_span),
+        source: repaired_source,
         diagnostics,
+        applied,
     })
 }
 
@@ -291,12 +479,16 @@ fn syntax_diagnostics(analysis: &biscuit_file::YamlAnalysis) -> Vec<CleanDiagnos
         .collect()
 }
 
-/// Replaces `span` in `source` with `replacement`.
-fn splice(source: &str, span: &std::ops::Range<usize>, replacement: &str) -> String {
+fn splice_frontmatter(
+    source: &str,
+    extraction: &darkmatter::markdown::FrontmatterExtraction<'_>,
+    yaml: &str,
+) -> String {
     let mut out = String::with_capacity(source.len());
-    out.push_str(&source[..span.start]);
-    out.push_str(replacement);
-    out.push_str(&source[span.end..]);
+    out.push_str("---\n");
+    out.push_str(yaml);
+    out.push_str("---\n");
+    out.push_str(&source[extraction.body_span.clone()]);
     out
 }
 
