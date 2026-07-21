@@ -4,9 +4,10 @@ ready: false
 agent: codex/default
 created: 2026-07-20T17:21:59-07:00
 spec: 2026-07-13-error-propogation/spec.md
-implemented: false
+implemented: true
 description: A **feature** review of `2026-07-13-error-propogation/spec.md`
 feature: 2026-07-13-error-propogation/review-7.md
+next: 2026-07-13-error-propogation/review-8.md
 previous: 2026-07-13-error-propogation/review-6.md
 ---
 
