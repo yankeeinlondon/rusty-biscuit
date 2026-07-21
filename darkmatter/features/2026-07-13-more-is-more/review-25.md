@@ -7,6 +7,7 @@ spec: 2026-07-13-more-is-more/spec.md
 log: darkmatter/features/2026-07-13-more-is-more/log.md
 implemented: true
 implemented_by: codex/default
+next: 2026-07-13-more-is-more/review-26.md
 description: "A **feature** review of `2026-07-13-more-is-more/spec.md`"
 feature: 2026-07-13-more-is-more/review-25.md
 previous: 2026-07-13-more-is-more/review-24.md
