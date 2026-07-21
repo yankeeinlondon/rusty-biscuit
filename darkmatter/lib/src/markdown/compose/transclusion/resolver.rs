@@ -1,7 +1,9 @@
 //! Path and URL resolution for transclusion references.
 
 use super::types::{DirectiveKind, ResolvedTarget, TransclusionError};
-use crate::markdown::compose::util::{document_resolution_context, find_git_root_from};
+use crate::markdown::compose::util::{
+    document_resolution_context, find_git_root_from, find_package_area_from,
+};
 use crate::markdown::compose::{ComposeSource, TransclusionOptions};
 use biscuit_file::{FileReference, FileReferenceKind};
 use biscuit_terminal::errors::SourceContext;
@@ -65,6 +67,10 @@ fn resolve_url_target(
 /// home, and `@` (magic), `!` (package), `vault:`, `%` (recursive), absolute,
 /// and `{{ENV}}` references by their existing `FileReference` semantics. There
 /// is no ambient-CWD read (D2).
+///
+/// A file-backed `source` has already been accepted as the top-level document
+/// or by a parent transclusion, so deriving its context uses the explicit
+/// trusted-external boundary while retaining validation of the request root.
 pub(crate) fn resolve_path(
     raw_target: &str,
     kind: DirectiveKind,
@@ -122,13 +128,23 @@ pub(crate) fn resolve_path(
         // context without reading the ambient CWD for candidate construction.
         None => PathBuf::from("."),
     };
-    let repo_root = find_git_root_from(&base_dir);
-    let resolution_ctx = document_resolution_context(
-        &base_dir,
-        source_file_path(source).as_deref(),
-        &options.magic_paths,
-        repo_root.as_deref(),
-    );
+    let resolution_ctx = match options.file_resolution_context.as_ref() {
+        Some(snapshot) => match source_file_path(source) {
+            Some(path) => snapshot.for_trusted_external_source(path),
+            None => snapshot.for_base(&base_dir),
+        },
+        None => {
+            let repo_root = find_git_root_from(&base_dir);
+            let package_area = find_package_area_from(&base_dir, repo_root.as_deref());
+            document_resolution_context(
+                &base_dir,
+                source_file_path(source).as_deref(),
+                &options.magic_paths,
+                repo_root.as_deref(),
+                package_area.as_deref(),
+            )
+        }
+    };
 
     let path = file_ref.resolve_in_context(&resolution_ctx)?.ok_or_else(|| {
         TransclusionError::Io(std::io::Error::new(
@@ -293,6 +309,83 @@ mod tests {
         .unwrap();
 
         assert_eq!(resolved, std::fs::canonicalize(&child_path).unwrap());
+    }
+
+    #[test]
+    #[serial]
+    fn transclusion_reuses_snapshot_environment_for_nested_source() {
+        let request = tempdir().unwrap();
+        let nested = request.path().join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        let target = request.path().join("captured.md");
+        std::fs::write(&target, "# captured").unwrap();
+        let ambient = tempdir().unwrap();
+        let prior = std::env::var_os("DARKMATTER_TRANSCLUSION_ROOT");
+
+        let mut env = std::collections::HashMap::new();
+        env.insert(
+            "DARKMATTER_TRANSCLUSION_ROOT".to_string(),
+            request.path().display().to_string(),
+        );
+        let mut options = default_options();
+        options.file_resolution_context = Some(
+            biscuit_file::FileResolutionContext::new(request.path()).with_env(env),
+        );
+        // SAFETY: this test is serialized while mutating process-global state.
+        unsafe { std::env::set_var("DARKMATTER_TRANSCLUSION_ROOT", ambient.path()) };
+        let resolved = resolve_path(
+            "{{DARKMATTER_TRANSCLUSION_ROOT}}/captured.md",
+            DirectiveKind::File,
+            &options,
+            &ComposeSource::File(nested.join("child.md")),
+            1,
+            dummy_ctx("# child"),
+        );
+        match prior {
+            Some(value) => unsafe { std::env::set_var("DARKMATTER_TRANSCLUSION_ROOT", value) },
+            None => unsafe { std::env::remove_var("DARKMATTER_TRANSCLUSION_ROOT") },
+        }
+
+        assert_eq!(resolved.unwrap(), std::fs::canonicalize(target).unwrap());
+    }
+
+    #[test]
+    fn package_reference_transclusion_prefers_package_area_over_repository() {
+        let dir = tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        gix::init(&root).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"darkmatter/lib\"]\nresolver = \"2\"\n",
+        )
+        .unwrap();
+        let package_area = root.join("darkmatter");
+        let member = package_area.join("lib");
+        std::fs::create_dir_all(member.join("docs")).unwrap();
+        std::fs::write(
+            member.join("Cargo.toml"),
+            "[package]\nname = \"fixture-darkmatter\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(member.join("src")).unwrap();
+        std::fs::write(member.join("src/lib.rs"), "").unwrap();
+        let source_path = member.join("docs/root.md");
+        std::fs::write(&source_path, "# root").unwrap();
+        std::fs::write(root.join("shared.md"), "# repository decoy").unwrap();
+        let package_target = package_area.join("shared.md");
+        std::fs::write(&package_target, "# package").unwrap();
+
+        let resolved = resolve_path(
+            "!shared.md",
+            DirectiveKind::File,
+            &default_options(),
+            &ComposeSource::File(source_path),
+            1,
+            dummy_ctx("# root"),
+        )
+        .unwrap();
+
+        assert_eq!(resolved, std::fs::canonicalize(package_target).unwrap());
     }
 
     #[test]

@@ -313,8 +313,12 @@ pub(crate) fn validate(
 ) -> Result<ReferenceValidationReport, ReferenceError> {
     info!("validate: starting reference validation");
     let ref_set = {
-        let graph = super::graph::build_reference_graph(md, &options.graph)
-            .map_err(|e| ReferenceError::Validation(e.to_string()))?;
+        let graph = super::graph::build_reference_graph(md, &options.graph).map_err(|error| {
+            match error {
+                crate::markdown::MarkdownError::Reference(inner) => *inner,
+                other => ReferenceError::Compose(Box::new(other)),
+            }
+        })?;
         super::graph::flatten_graph(&graph)
     };
 
@@ -355,19 +359,20 @@ pub(crate) fn validate(
                 // Check for fragment in local path (e.g., "./other.md#section")
                 let raw_str = raw.to_string_lossy();
                 let (path_part, fragment) = split_path_fragment(&raw_str);
-                validate_local_path(
+                let resolved_path = validate_local_path(
                     &path_part,
                     ref_source,
                     record,
                     &mut report,
-                    &options.graph.compose.magic_paths,
-                );
+                    &options.graph,
+                )?;
 
                 // Validate fragment if enabled and path exists
                 if options.validate_fragments
                     && let Some(ref frag) = fragment
                 {
                     validate_cross_doc_fragment(
+                        resolved_path.as_deref(),
                         &path_part,
                         frag,
                         ref_source,
@@ -501,47 +506,29 @@ fn validate_local_path(
     source: &ComposeSource,
     record: &ReferenceRecord,
     report: &mut ReferenceValidationReport,
-    magic_paths: &[(std::path::PathBuf, biscuit_file::PathPosition)],
-) {
+    graph_options: &ReferenceGraphOptions,
+) -> Result<Option<std::path::PathBuf>, ReferenceError> {
     trace!(raw = %raw, "validate: checking local path");
     match source {
-        ComposeSource::File(base_path) => {
-            let base_dir = base_path.parent();
-
-            // Try biscuit_file::FileReference first for @repo-root support
-            if let Ok(file_ref) = biscuit_file::FileReference::new(raw) {
-                let mut file_ref = file_ref;
-                for (path, position) in magic_paths {
-                    file_ref = file_ref.add_magic_path(path, *position);
-                }
-                if let Ok(Some(_resolved)) = file_ref.resolve_relative(base_dir) {
-                    // resolve_relative() internally calls resolve(), which only returns
-                    // Some after confirming the candidate is_file(). No need to re-check
-                    // with .exists() — that would resolve against CWD, not base_dir.
-                    report.references_valid += 1;
-                    return;
-                }
-            }
-
-            // Fallback to simple path join
-            if let Some(base_dir) = base_dir {
-                let resolved = base_dir.join(raw);
-                if resolved.exists() {
-                    report.references_valid += 1;
-                } else {
-                    report.issues.push(ReferenceIssue {
-                        code: ReferenceIssueCode::MissingLocalTarget,
-                        message: format!("Missing local target: {raw}"),
-                        severity: ReferenceSeverity::Error,
-                        kind: record.kind,
-                        reference_display: raw.to_string(),
-                        reference_id: record.id.clone(),
-                        origin: record.origin.clone(),
-                    });
-                }
-            } else {
+        ComposeSource::File(_) => {
+            if let Some(resolved) = super::resolve_transclusion_target(
+                raw,
+                source,
+                &graph_options.compose,
+            )? {
                 report.references_valid += 1;
+                return Ok(Some(resolved));
             }
+            report.issues.push(ReferenceIssue {
+                code: ReferenceIssueCode::MissingLocalTarget,
+                message: format!("Missing local target: {raw}"),
+                severity: ReferenceSeverity::Error,
+                kind: record.kind,
+                reference_display: raw.to_string(),
+                reference_id: record.id.clone(),
+                origin: record.origin.clone(),
+            });
+            Ok(None)
         }
         ComposeSource::Unknown => {
             report.issues.push(ReferenceIssue {
@@ -553,12 +540,14 @@ fn validate_local_path(
                 reference_id: record.id.clone(),
                 origin: record.origin.clone(),
             });
+            Ok(None)
         }
         ComposeSource::Url(_) => {
             report
                 .warnings
                 .push(format!("Local path in URL-sourced document: {raw}"));
             report.references_valid += 1;
+            Ok(None)
         }
     }
 }
@@ -634,6 +623,7 @@ fn collect_composed_heading_slugs(
 /// relative to the reference's own origin source (rec #5). Validates
 /// against prepared headings (after InlinePre) rather than raw headings.
 fn validate_cross_doc_fragment(
+    target_path: Option<&std::path::Path>,
     path: &str,
     fragment: &str,
     source: &ComposeSource,
@@ -641,39 +631,12 @@ fn validate_cross_doc_fragment(
     report: &mut ReferenceValidationReport,
     graph_options: &super::types::ReferenceGraphOptions,
 ) {
-    let ComposeSource::File(base_path) = source else {
+    let ComposeSource::File(_) = source else {
         return;
     };
-    let base_dir = base_path.parent();
-
-    // Resolve via FileReference for @repo-root support, fallback to simple join.
-    // resolve_relative() returns a path relative to base_dir, so join it back
-    // with base_dir to get a CWD-independent absolute path for existence checks.
-    let target_path = if let Ok(file_ref) = biscuit_file::FileReference::new(path) {
-        let mut file_ref = file_ref;
-        for (mp, position) in &graph_options.compose.magic_paths {
-            file_ref = file_ref.add_magic_path(mp, *position);
-        }
-        file_ref
-            .resolve_relative(base_dir)
-            .ok()
-            .flatten()
-            .map(|rel| match base_dir {
-                Some(bd) => bd.join(&rel),
-                None => rel,
-            })
-    } else {
-        None
-    }
-    .unwrap_or_else(|| {
-        base_dir
-            .map(|d| d.join(path))
-            .unwrap_or_else(|| std::path::PathBuf::from(path))
-    });
-
-    if !target_path.exists() {
+    let Some(target_path) = target_path else {
         return; // Missing file is already reported by validate_local_path
-    }
+    };
 
     // Only validate fragments in markdown files
     let ext = target_path
@@ -684,8 +647,8 @@ fn validate_cross_doc_fragment(
         return;
     }
 
-    if let Ok(target_md) = Markdown::try_from(target_path.as_path()) {
-        let target_source = ComposeSource::File(target_path);
+    if let Ok(target_md) = Markdown::try_from(target_path) {
+        let target_source = ComposeSource::File(target_path.to_path_buf());
         let headings = collect_prepared_heading_slugs(&target_md, &target_source, graph_options);
         let frag_lower = fragment.to_lowercase();
         if !headings.contains(&frag_lower) {
@@ -1089,9 +1052,8 @@ mod tests {
     }
 
     /// Regression test: magic-path (`@`) references must validate correctly
-    /// regardless of CWD. Previously, `validate_local_path` called `.exists()`
-    /// on a relative path returned by `resolve_relative()`, which resolved
-    /// against CWD instead of the document's base directory.
+    /// regardless of CWD. The request-scoped context must anchor resolution to
+    /// the document instead of ambient process state.
     #[test]
     #[serial]
     fn validate_magic_path_independent_of_cwd() {

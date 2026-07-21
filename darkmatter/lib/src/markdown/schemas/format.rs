@@ -184,9 +184,23 @@ pub fn register_darkmatter_formats(
     base_dir: Option<PathBuf>,
     fallback: Option<PathBuf>,
 ) -> ValidationOptions {
+    register_darkmatter_formats_in_context(options, base_dir, fallback, None)
+}
+
+pub(crate) fn register_darkmatter_formats_in_context(
+    options: ValidationOptions,
+    base_dir: Option<PathBuf>,
+    fallback: Option<PathBuf>,
+    file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+) -> ValidationOptions {
     options
         .with_format(DARKMATTER_FILE_FORMAT, move |value: &str| {
-            validate_file_reference(value, base_dir.as_deref(), fallback.as_deref())
+            validate_file_reference(
+                value,
+                base_dir.as_deref(),
+                fallback.as_deref(),
+                file_resolution_context.as_ref(),
+            )
         })
         .with_format(DARKMATTER_FILE_REFERENCE_FORMAT, |value: &str| {
             // Lazy contract: syntax only. `FileReference::new` is
@@ -242,8 +256,13 @@ pub fn register_darkmatter_formats(
 /// [`resolve_file_reference`]). Failures (parse, resolution, missing file)
 /// all return `false` so the JSON Schema layer surfaces a uniform
 /// `format: darkmatter-file` error message.
-fn validate_file_reference(value: &str, base_dir: Option<&Path>, fallback: Option<&Path>) -> bool {
-    resolve_file_reference(value, base_dir, fallback).is_ok()
+fn validate_file_reference(
+    value: &str,
+    base_dir: Option<&Path>,
+    fallback: Option<&Path>,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+) -> bool {
+    resolve_file_reference_in_context(value, base_dir, fallback, file_resolution_context).is_ok()
 }
 
 /// Outcome of a [`resolve_file_reference`] call.
@@ -331,7 +350,16 @@ impl fmt::Display for FileReferenceFailure {
 pub(crate) fn resolve_file_reference(
     value: &str,
     base_dir: Option<&Path>,
+    fallback: Option<&Path>,
+) -> Result<PathBuf, FileReferenceFailure> {
+    resolve_file_reference_in_context(value, base_dir, fallback, None)
+}
+
+fn resolve_file_reference_in_context(
+    value: &str,
+    base_dir: Option<&Path>,
     _fallback: Option<&Path>,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Result<PathBuf, FileReferenceFailure> {
     let reference = FileReference::new(value).map_err(|err| FileReferenceFailure::InvalidSyntax {
         raw: value.to_string(),
@@ -340,7 +368,30 @@ pub(crate) fn resolve_file_reference(
     let resolved = match base_dir {
         // Document-backed: repository-first then source-relative, no launch-area
         // fallback (D2) and no ambient CWD.
-        Some(base_dir) => resolve_document_file_ref(&reference, base_dir, None, &[]),
+        Some(base_dir) => {
+            let (repository_root, package_area) = match file_resolution_context {
+                Some(snapshot) => (
+                    snapshot.repository_root().map(Path::to_path_buf),
+                    snapshot.package_area().map(Path::to_path_buf),
+                ),
+                None => {
+                    let repository_root = crate::markdown::compose::find_git_root_from(base_dir);
+                    let package_area = crate::markdown::compose::find_package_area_from(
+                        base_dir,
+                        repository_root.as_deref(),
+                    );
+                    (repository_root, package_area)
+                }
+            };
+            resolve_document_file_ref(
+                &reference,
+                base_dir,
+                repository_root.as_deref(),
+                package_area.as_deref(),
+                &[],
+                file_resolution_context,
+            )
+        }
         // Bare validator API with no document anchor: resolve against the
         // ambient process CWD. Unreachable from a real compose run.
         None => reference.resolve(),
@@ -472,6 +523,29 @@ mod tests {
     }
 
     #[test]
+    fn eager_file_validation_reuses_request_repository() {
+        let request_repo = temp_dir();
+        let nested_repo = temp_dir();
+        std::fs::create_dir_all(request_repo.path().join(".git")).unwrap();
+        std::fs::create_dir_all(nested_repo.path().join(".git/docs")).unwrap();
+        let request_target = request_repo.path().join("spec.md");
+        std::fs::write(&request_target, "request").unwrap();
+        let context = biscuit_file::FileResolutionContext::new(request_repo.path())
+            .with_repository_root(request_repo.path())
+            .for_trusted_external_base(nested_repo.path().join("docs"));
+
+        let resolved = resolve_file_reference_in_context(
+            "spec.md",
+            Some(&nested_repo.path().join("docs")),
+            None,
+            Some(&context),
+        )
+        .unwrap();
+
+        assert_eq!(resolved, request_target);
+    }
+
+    #[test]
     fn iso8601_datetime_accepts_offset_optional_and_rejects_garbage() {
         // Offset-less local datetime — valid ISO 8601, rejected by RFC 3339.
         assert!(valid_iso8601_datetime("2026-07-10T15:05:34"));
@@ -503,7 +577,7 @@ mod tests {
         let path = dir.path().join("README.md");
         std::fs::write(&path, b"x").unwrap();
         let _cwd = CwdGuard::enter(dir.path());
-        assert!(validate_file_reference("./README.md", None, None));
+        assert!(validate_file_reference("./README.md", None, None, None));
     }
 
     #[test]
@@ -511,7 +585,42 @@ mod tests {
     fn file_format_rejects_missing_file() {
         let dir = temp_dir();
         let _cwd = CwdGuard::enter(dir.path());
-        assert!(!validate_file_reference("./does-not-exist.md", None, None));
+        assert!(!validate_file_reference(
+            "./does-not-exist.md",
+            None,
+            None,
+            None,
+        ));
+    }
+
+    #[test]
+    fn file_format_package_reference_prefers_package_area_over_repository() {
+        let dir = temp_dir();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        gix::init(&root).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"darkmatter/lib\"]\nresolver = \"2\"\n",
+        )
+        .unwrap();
+        let package_area = root.join("darkmatter");
+        let member = package_area.join("lib");
+        std::fs::create_dir_all(member.join("src")).unwrap();
+        std::fs::create_dir_all(member.join("docs")).unwrap();
+        std::fs::write(
+            member.join("Cargo.toml"),
+            "[package]\nname = \"fixture-darkmatter\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        std::fs::write(member.join("src/lib.rs"), "").unwrap();
+        std::fs::write(root.join("shared.md"), "repository decoy").unwrap();
+        let package_target = package_area.join("shared.md");
+        std::fs::write(&package_target, "package").unwrap();
+
+        assert_eq!(
+            resolve_file_reference("!shared.md", Some(&member.join("docs")), None).unwrap(),
+            package_target,
+        );
     }
 
     #[test]

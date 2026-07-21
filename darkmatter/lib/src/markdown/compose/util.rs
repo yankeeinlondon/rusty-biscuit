@@ -60,6 +60,24 @@ pub fn find_git_root_from(start: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Resolve the package-area root containing `base_dir` within a previously
+/// captured repository boundary.
+pub(crate) fn find_package_area_from(
+    base_dir: &Path,
+    repository_root: Option<&Path>,
+) -> Option<PathBuf> {
+    let root = repository_root?;
+    let repo = sniff::filesystem::repo::detect_repo_structure(root)
+        .ok()
+        .flatten()?;
+    let area = repo.package_area_label_for_dir(base_dir)?;
+    Some(if area.as_ref() == "root" {
+        root.to_path_buf()
+    } else {
+        root.join(area.as_ref())
+    })
+}
+
 /// Build an explicit, request-scoped [`FileResolutionContext`] for a
 /// document-backed reference.
 ///
@@ -84,6 +102,7 @@ pub(crate) fn document_resolution_context(
     source_path: Option<&Path>,
     magic_paths: &[(PathBuf, PathPosition)],
     repository_root: Option<&Path>,
+    package_area: Option<&Path>,
 ) -> FileResolutionContext {
     let mut ctx = FileResolutionContext::new(base_dir);
     if let Some(source) = source_path {
@@ -95,6 +114,9 @@ pub(crate) fn document_resolution_context(
         .or_else(|| find_git_root_from(base_dir));
     if let Some(root) = root {
         ctx = ctx.with_repository_root(root);
+    }
+    if let Some(package_area) = package_area {
+        ctx = ctx.with_package_area(package_area);
     }
     for (path, position) in magic_paths {
         ctx = ctx.add_magic_path(path.clone(), *position);
@@ -299,7 +321,13 @@ mod resolution_context_tests {
         fs::write(base.join("notes.md"), b"source decoy").unwrap();
 
         let ctx: FileResolutionContext =
-            document_resolution_context(&base, Some(&base.join("router.md")), &[], Some(root));
+            document_resolution_context(
+                &base,
+                Some(&base.join("router.md")),
+                &[],
+                Some(root),
+                None,
+            );
 
         // Implicit bare reference: repository candidate wins over the source
         // twin. Canonicalize both sides so an explicit `.` path component or a
@@ -327,5 +355,30 @@ mod resolution_context_tests {
             Some(base.join("notes.md").canonicalize().unwrap()),
             "the explicit form stays source-relative across every surface",
         );
+    }
+
+    #[test]
+    fn seam_resolves_package_reference_from_captured_area_before_repository() {
+        let repo = tempfile::TempDir::new().unwrap();
+        let root = repo.path();
+        let package_area = root.join("darkmatter");
+        let base = package_area.join("docs");
+        fs::create_dir_all(&base).unwrap();
+        fs::write(root.join("shared.md"), b"repository decoy").unwrap();
+        fs::write(package_area.join("shared.md"), b"package").unwrap();
+
+        let ctx = document_resolution_context(
+            &base,
+            Some(&base.join("guide.md")),
+            &[],
+            Some(root),
+            Some(&package_area),
+        );
+        let resolved = FileReference::new("!shared.md")
+            .unwrap()
+            .resolve_in_context(&ctx)
+            .unwrap();
+
+        assert_eq!(resolved, Some(package_area.join("shared.md")));
     }
 }

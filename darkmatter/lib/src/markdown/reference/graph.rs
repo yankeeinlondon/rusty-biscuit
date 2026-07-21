@@ -19,9 +19,8 @@ use biscuit_terminal::errors::SourceContext;
 use crate::markdown::compose::transclusion::{
     DirectiveKind, TransclusionRuntime, parse_directives, parse_frontmatter_refs,
 };
-use crate::markdown::compose::expression::ResolutionContext;
 use crate::markdown::compose::{
-    ComposeOperation, ComposeSource, EffectiveStateBuilder, ResolvingLookup,
+    ComposeOperation, ComposeOptions, ComposeSource, EffectiveStateBuilder, ResolvingLookup,
 };
 use crate::markdown::normalize::HeadingLevel;
 use crate::markdown::types::MarkdownResult;
@@ -75,12 +74,15 @@ fn build_graph_inner(
     options: &ReferenceGraphOptions,
     extract_references: bool,
 ) -> MarkdownResult<ReferenceGraph> {
+    let source = md.source().clone().unwrap_or(ComposeSource::Unknown);
+    let options = ReferenceGraphOptions::with_compose(
+        super::options_with_reference_resolution_context(&source, &options.compose),
+    );
+    let options = &options;
     let mut runtime = ReferenceAnalysisRuntime {
         transclusion: TransclusionRuntime::new(options.compose.max_transclusion_depth),
         cache: make_cache(options),
     };
-
-    let source = md.source().clone().unwrap_or(ComposeSource::Unknown);
 
     // Seed the runtime with the root node so child documents that
     // transclude the root are detected as cycles immediately.
@@ -292,19 +294,15 @@ fn build_node(
         })
     };
 
-    // Wrap the effective state with a document-rooted resolution context so
-    // `when=` conditions can use the read-side functions (`file_exists`, …) and
-    // `doc.*`. Reference-graph analysis is local-only (no remote runtime in
-    // scope), so `ResolutionContext::new` supplies just the base directory.
-    let when_base_dir = match source {
-        ComposeSource::File(path) => path
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| std::path::PathBuf::from(".")),
-        _ => std::path::PathBuf::from("."),
+    let when_options = match source {
+        ComposeSource::File(path) => options.compose.clone().with_source_file(path),
+        ComposeSource::Url(url) => options.compose.clone().with_source_url(url.clone()),
+        ComposeSource::Unknown => options.compose.clone(),
     };
-    let when_lookup =
-        ResolvingLookup::new(&effective_state, ResolutionContext::new(when_base_dir));
+    let when_lookup = ResolvingLookup::new(
+        &effective_state,
+        when_options.local_expression_resolution_context(),
+    );
 
     // Block directives
     if let Ok(directives) = parse_directives(&prepared_content, ctx.clone()) {
@@ -349,8 +347,8 @@ fn build_node(
                 if let Some(child_path) = resolve_local_target(
                     &directive.raw_target,
                     source,
-                    &options.compose.magic_paths,
-                ) {
+                    &options.compose,
+                )? {
                     let child_source = ComposeSource::File(child_path.clone());
                     let child_id = source_to_id(&child_source);
 
@@ -602,7 +600,7 @@ fn build_node(
 
             if !is_literal
                 && let Some(child_path) =
-                    resolve_local_target(prologue, source, &options.compose.magic_paths)
+                    resolve_local_target(prologue, source, &options.compose)?
             {
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
@@ -677,7 +675,7 @@ fn build_node(
 
             if !is_literal
                 && let Some(child_path) =
-                    resolve_local_target(epilogue, source, &options.compose.magic_paths)
+                    resolve_local_target(epilogue, source, &options.compose)?
             {
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
@@ -833,40 +831,13 @@ fn is_literal_content(value: &str) -> bool {
     value.contains('\n') || value.starts_with("---")
 }
 
-/// Resolve a local path target relative to a source.
-///
-/// Uses `biscuit_file::FileReference` for full resolution including
-/// repo-root `@` paths (rec #6), with fallback to simple path join.
+/// Resolve a local path target through the request-scoped detailed resolver.
 fn resolve_local_target(
     raw_target: &str,
     source: &ComposeSource,
-    magic_paths: &[(std::path::PathBuf, biscuit_file::PathPosition)],
-) -> Option<std::path::PathBuf> {
-    match source {
-        ComposeSource::File(base_path) => {
-            let base_dir = base_path.parent();
-
-            // Try biscuit_file::FileReference for full resolution (supports @repo-root, etc.)
-            // Canonicalize so node IDs match source_to_id().
-            if let Ok(mut file_ref) = biscuit_file::FileReference::new(raw_target) {
-                for (path, position) in magic_paths {
-                    file_ref = file_ref.add_magic_path(path, *position);
-                }
-                if let Ok(Some(resolved)) = file_ref.resolve_relative(base_dir) {
-                    // resolve_relative() returns a path relative to base_dir;
-                    // join it back so canonicalize() doesn't resolve against CWD.
-                    let abs = base_dir.map(|bd| bd.join(&resolved)).unwrap_or(resolved);
-                    return Some(abs.canonicalize().unwrap_or(abs));
-                }
-            }
-
-            // Fallback to simple path join; canonicalize to match source_to_id().
-            let base_dir = base_dir?;
-            let resolved = base_dir.join(raw_target);
-            Some(resolved.canonicalize().unwrap_or(resolved))
-        }
-        ComposeSource::Unknown | ComposeSource::Url(_) => None,
-    }
+    options: &ComposeOptions,
+) -> Result<Option<std::path::PathBuf>, super::ReferenceError> {
+    super::resolve_transclusion_target(raw_target, source, options)
 }
 
 /// Convert a compose source to a stable, canonicalized node ID.
@@ -1010,6 +981,74 @@ mod tests {
         let root_md = Markdown::try_from(root_path.as_path()).unwrap();
         let graph = build_reference_graph(&root_md, &ReferenceGraphOptions::default()).unwrap();
         assert_eq!(graph.node_count(), 2);
+    }
+
+    #[test]
+    #[serial_test::serial(reference_graph_snapshot)]
+    fn when_condition_reuses_request_env_home_magic_and_package_roots() {
+        let request = tempfile::tempdir().unwrap();
+        let home = request.path().join("home");
+        let magic = request.path().join("magic");
+        let package = request.path().join("package");
+        for dir in [&home, &magic, &package] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        for path in [
+            request.path().join("env.flag"),
+            home.join("home.flag"),
+            magic.join("magic.flag"),
+            package.join("package.flag"),
+        ] {
+            std::fs::write(path, "ready").unwrap();
+        }
+        for index in 1..=4 {
+            std::fs::write(request.path().join(format!("child-{index}.md")), "# Child\n").unwrap();
+        }
+        let root_path = request.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            "::file child-1.md when=\"file_exists('{{{DARKMATTER_GRAPH_ROOT}}}/env.flag')\"\n\
+             ::file child-2.md when=\"file_exists('~/home.flag')\"\n\
+             ::file child-3.md when=\"file_exists('@magic.flag')\"\n\
+             ::file child-4.md when=\"file_exists('!package.flag')\"\n",
+        )
+        .unwrap();
+        let mut env = std::collections::HashMap::new();
+        env.insert(
+            "DARKMATTER_GRAPH_ROOT".to_string(),
+            request.path().display().to_string(),
+        );
+        let snapshot = biscuit_file::FileResolutionContext::from_snapshot(
+            request.path(),
+            Some(home),
+            env,
+        )
+        .with_repository_root(request.path())
+        .with_package_area(package)
+        .add_magic_path(magic, biscuit_file::PathPosition::Start);
+        let prior = std::env::var_os("DARKMATTER_GRAPH_ROOT");
+        // SAFETY: the test is serialized while process-global state is changed.
+        unsafe { std::env::set_var("DARKMATTER_GRAPH_ROOT", request.path()) };
+        let options = ReferenceGraphOptions::with_compose(
+            ComposeOptions::new().with_file_resolution_context(snapshot),
+        );
+        let ambient = tempfile::tempdir().unwrap();
+        // SAFETY: the test is serialized while process-global state is changed.
+        unsafe { std::env::set_var("DARKMATTER_GRAPH_ROOT", ambient.path()) };
+
+        let root_md = Markdown::try_from(root_path.as_path()).unwrap();
+        let graph = build_reference_graph(&root_md, &options).unwrap();
+        assert_eq!(
+            graph.node_count(),
+            5,
+            "resolved nodes: {:?}",
+            graph.nodes.iter().map(|node| &node.source).collect::<Vec<_>>()
+        );
+
+        match prior {
+            Some(value) => unsafe { std::env::set_var("DARKMATTER_GRAPH_ROOT", value) },
+            None => unsafe { std::env::remove_var("DARKMATTER_GRAPH_ROOT") },
+        }
     }
 
     #[test]

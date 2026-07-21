@@ -27,7 +27,7 @@
 //! `$(...)` shell expression or an unresolved `{{ ... }}` template — are left
 //! untouched here; their real type is resolved at post-shell re-validation.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeOptions;
@@ -35,6 +35,13 @@ use crate::markdown::compose::{ComposeOperation, ComposeSource};
 use crate::markdown::schemas::DarkmatterSchemas;
 use crate::markdown::schemas::coerce::coerce_frontmatter_with_pending;
 use crate::markdown::types::{MarkdownError, MarkdownResult};
+
+fn trigger_discovery_boundary(options: &ComposeOptions, document_path: &Path) -> Option<PathBuf> {
+    match options.file_resolution_context.as_ref() {
+        Some(context) => context.repository_root().map(Path::to_path_buf),
+        None => crate::markdown::compose::find_git_root_from(document_path),
+    }
+}
 
 /// Runs schema validation against the document's effective frontmatter,
 /// coercing schema-recognized scalar values to their declared types and
@@ -77,6 +84,9 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
         if let Some(fallback) = options.file_ref_fallback_dir.clone() {
             builder = builder.with_file_ref_fallback_dir(fallback);
         }
+        if let Some(context) = options.file_resolution_context.clone() {
+            builder = builder.with_file_resolution_context(context);
+        }
         if let Some(baseline) = options.baseline_schema.clone() {
             builder = builder.with_baseline(baseline).map_err(|err| {
                 MarkdownError::SchemaValidationFailed {
@@ -90,7 +100,7 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
         }
         if options.trigger_schemas
             && let Some(ComposeSource::File(document_path)) = markdown.source()
-            && let Some(boundary) = crate::markdown::compose::find_git_root_from(document_path)
+            && let Some(boundary) = trigger_discovery_boundary(options, document_path)
         {
             builder = builder
                 .with_trigger_discovery(document_path, boundary)
@@ -373,6 +383,27 @@ mod tests {
         let mut md = md_with_schema("name: alice\n");
         let options = ComposeOptions::new();
         assert!(run(&mut md, &options).is_ok());
+    }
+
+    #[test]
+    fn trigger_discovery_reuses_request_repository_boundary() {
+        let request_repo = tempfile::tempdir().unwrap();
+        let nested_repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(request_repo.path().join(".git")).unwrap();
+        std::fs::create_dir_all(nested_repo.path().join(".git")).unwrap();
+        let document_path = nested_repo.path().join("prompt.md");
+        let snapshot = biscuit_file::FileResolutionContext::new(request_repo.path())
+            .with_repository_root(request_repo.path());
+        let options = ComposeOptions::new().with_file_resolution_context(snapshot);
+
+        assert_eq!(
+            trigger_discovery_boundary(&options, &document_path).as_deref(),
+            Some(request_repo.path()),
+        );
+        assert_eq!(
+            trigger_discovery_boundary(&ComposeOptions::new(), &document_path).as_deref(),
+            Some(nested_repo.path()),
+        );
     }
 
     #[test]
@@ -1037,7 +1068,7 @@ mod tests {
         // path this run is about to create. With the review file present and
         // `plan` naming a not-yet-existing path, schema validation must pass —
         // lazy `file` never checks existence, while eager `review` resolves
-        // document-first to the present review file.
+        // explicitly source-relative to the present review file.
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("design-review.md"), b"# review\n").unwrap();
         let doc_path = dir.path().join("prompt.md");
@@ -1212,8 +1243,8 @@ mod tests {
 
     /// Idempotence at the compose level (Decision #6): running the stage on
     /// an already-rewritten value is a fixpoint — the stored value does not
-    /// drift across runs. The fallback (launch area) is the repo root, so the
-    /// git-root-relative rewritten value re-resolves on the second pass.
+    /// drift across runs. The request-scoped repository root lets the
+    /// git-root-relative rewritten value re-resolve on the second pass.
     #[test]
     fn eager_file_rewrite_is_idempotent_across_runs() {
         let repo = tempfile::tempdir().unwrap();
@@ -1286,15 +1317,10 @@ mod tests {
         );
     }
 
-    // ── Phase 4: CWD-independence of the eager-`file` rewrite ──────────
-    //
     // The rewrite consumes the `ResolutionContext` carried by `EffectiveSchema`
-    // (base_dir + launch-area fallback) and must not introduce an ambient-CWD
-    // anchor (spec: "Implementation constraints"). With the process CWD
-    // mutated to an unrelated directory, compose must still produce the
-    // git-root-relative rewritten value. Mirrors the
-    // `#[serial_test::serial("darkmatter-file-cwd")]` convention already used
-    // in `schemas/format.rs` and `schemas/validate.rs`.
+    // and must not introduce an ambient-CWD anchor. With process CWD mutated to
+    // an unrelated directory, compose still produces the repository-relative
+    // value.
 
     /// RAII guard that restores the process CWD on drop, even on panic.
     struct CwdGuard {

@@ -520,13 +520,13 @@ fn scan_one_frontmatter(
         // Preflight only: shell-command discovery enumerates the reachable
         // pipelines for the approval workflow. It must use the same local
         // read-side resolution context as the real frontmatter pass so
-        // launch-relative inputs supplied via set overrides (for example
+        // request-scoped inputs supplied via set overrides (for example
         // `spec=reviews/x/spec.md`) resolve during derived-key interpolation.
         //
         // Best-effort: a key that still cannot resolve is left for the real
         // compose pass. This keeps command discovery resilient while avoiding a
         // false schema failure when a required property is derived through
-        // `file_exists()`/`frontmatter()` and the launch-area fallback.
+        // `file_exists()` or `frontmatter()`.
         let _ = interpolate_frontmatter_best_effort(
             fm_clone.frontmatter_mut(),
             options.context(),
@@ -908,7 +908,7 @@ spec: \"{{ file_exists(plan) ? dirname(plan) + '/spec.md' : null }}\"
             }));
 
         md.compose_preflight(&options)
-            .expect("preflight should resolve derived plan through the launch-area fallback");
+            .expect("preflight should resolve the derived plan through the request context");
     }
 
     /// Regression for the review-4 "approves the WRONG command" bug.

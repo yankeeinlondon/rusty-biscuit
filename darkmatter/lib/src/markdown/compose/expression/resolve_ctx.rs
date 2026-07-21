@@ -31,6 +31,8 @@ pub struct ResolutionContext {
     ///
     /// [`document_resolution_context`]: crate::markdown::compose::util::document_resolution_context
     pub repository_root: Option<PathBuf>,
+    /// Package-area root captured for package (`!`) references.
+    pub package_area: Option<PathBuf>,
     /// The captured launch-area directory, retained for diagnostics only.
     ///
     /// Per D2, the launch directory is a base for **top-level** references only
@@ -51,6 +53,9 @@ pub struct ResolutionContext {
     /// Injectable home directory for skill-root discovery. When `None`,
     /// skill lookups fall back to `dirs::home_dir()`.
     pub(crate) home_dir: Option<PathBuf>,
+    /// Host-captured request snapshot. When present, all local references
+    /// derive from it and never rediscover ambient process state.
+    pub(crate) file_resolution_context: Option<biscuit_file::FileResolutionContext>,
 }
 
 impl ResolutionContext {
@@ -61,10 +66,12 @@ impl ResolutionContext {
             base_dir,
             magic_paths: Vec::new(),
             repository_root: None,
+            package_area: None,
             file_ref_fallback_dir: None,
             remote_fetch: None,
             ctx_values: Map::new(),
             home_dir: None,
+            file_resolution_context: None,
         }
     }
 
@@ -72,6 +79,13 @@ impl ResolutionContext {
     #[must_use]
     pub fn with_repository_root(mut self, root: impl Into<PathBuf>) -> Self {
         self.repository_root = Some(root.into());
+        self
+    }
+
+    /// Sets the package-area root for package (`!`) references.
+    #[must_use]
+    pub fn with_package_area(mut self, root: impl Into<PathBuf>) -> Self {
+        self.package_area = Some(root.into());
         self
     }
 
@@ -123,7 +137,11 @@ impl ResolutionContext {
 
     /// Returns the home directory to use for skill-root discovery.
     pub(crate) fn home_dir(&self) -> Option<PathBuf> {
-        self.home_dir.clone().or_else(dirs::home_dir)
+        if self.file_resolution_context.is_some() {
+            self.home_dir.clone()
+        } else {
+            self.home_dir.clone().or_else(dirs::home_dir)
+        }
     }
 
     /// Fetches the text body for an HTTP(S) URL argument.
@@ -230,14 +248,21 @@ pub(crate) fn resolve_document_file_ref(
     file_ref: &FileReference,
     base_dir: &Path,
     repository_root: Option<&Path>,
+    package_area: Option<&Path>,
     magic_paths: &[(PathBuf, PathPosition)],
+    request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Result<Option<PathBuf>, FileReferenceError> {
-    let ctx = crate::markdown::compose::util::document_resolution_context(
-        base_dir,
-        None,
-        magic_paths,
-        repository_root,
-    );
+    let ctx = match request_context {
+        Some(snapshot) if snapshot.base_dir() == base_dir => snapshot.clone(),
+        Some(snapshot) => snapshot.for_base(base_dir),
+        None => crate::markdown::compose::util::document_resolution_context(
+            base_dir,
+            None,
+            magic_paths,
+            repository_root,
+            package_area,
+        ),
+    };
     file_ref.resolve_in_context(&ctx)
 }
 
@@ -267,14 +292,20 @@ pub(crate) fn resolve_document_file_ref_shape(
     file_ref: &FileReference,
     base_dir: &Path,
     repository_root: Option<&Path>,
+    package_area: Option<&Path>,
     magic_paths: &[(PathBuf, PathPosition)],
+    request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Result<PathBuf, FileReferenceError> {
-    let ctx = crate::markdown::compose::util::document_resolution_context(
-        base_dir,
-        None,
-        magic_paths,
-        repository_root,
-    );
+    let ctx = match request_context {
+        Some(snapshot) => snapshot.for_base(base_dir),
+        None => crate::markdown::compose::util::document_resolution_context(
+            base_dir,
+            None,
+            magic_paths,
+            repository_root,
+            package_area,
+        ),
+    };
     if let Some(path) = file_ref.resolve_in_context(&ctx)? {
         return Ok(path);
     }
@@ -361,7 +392,7 @@ mod tests {
         std::fs::write(base_dir.join("shared.md"), "# Source\n").unwrap();
 
         let file_ref = FileReference::new("shared.md").unwrap();
-        let resolved = resolve_document_file_ref(&file_ref, &base_dir, None, &[])
+        let resolved = resolve_document_file_ref(&file_ref, &base_dir, None, None, &[], None)
             .unwrap()
             .expect("should resolve");
 
@@ -380,11 +411,34 @@ mod tests {
         std::fs::write(base_dir.join("shared.md"), "# Source\n").unwrap();
 
         let file_ref = FileReference::new("./shared.md").unwrap();
-        let resolved = resolve_document_file_ref(&file_ref, &base_dir, None, &[])
+        let resolved = resolve_document_file_ref(&file_ref, &base_dir, None, None, &[], None)
             .unwrap()
             .expect("should resolve from base");
 
         assert_eq!(resolved, base_dir.join("shared.md"));
+    }
+
+    #[test]
+    fn package_reference_prefers_package_area_over_repository_root() {
+        let repo = repo_fixture();
+        let package_area = repo.path().join("darkmatter");
+        let base_dir = package_area.join("docs");
+        std::fs::create_dir_all(&base_dir).unwrap();
+        std::fs::write(repo.path().join("shared.md"), "repository decoy").unwrap();
+        std::fs::write(package_area.join("shared.md"), "package").unwrap();
+
+        let file_ref = FileReference::new("!shared.md").unwrap();
+        let resolved = resolve_document_file_ref(
+            &file_ref,
+            &base_dir,
+            Some(repo.path()),
+            Some(&package_area),
+            &[],
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(resolved, Some(package_area.join("shared.md")));
     }
 
     /// A missing file resolves to nothing — there is no launch-area fallback for
@@ -396,7 +450,8 @@ mod tests {
         std::fs::create_dir_all(&base_dir).unwrap();
 
         let file_ref = FileReference::new("absent.md").unwrap();
-        let resolved = resolve_document_file_ref(&file_ref, &base_dir, None, &[]).unwrap();
+        let resolved =
+            resolve_document_file_ref(&file_ref, &base_dir, None, None, &[], None).unwrap();
 
         assert!(resolved.is_none());
     }
@@ -427,10 +482,12 @@ mod tests {
             base_dir: PathBuf::from("/tmp"),
             magic_paths: Vec::new(),
             repository_root: None,
+            package_area: None,
             file_ref_fallback_dir: None,
             remote_fetch: Some(rt),
             ctx_values: Map::new(),
             home_dir: None,
+            file_resolution_context: None,
         };
 
         // The URL was never registered by discovery; the read-side function
@@ -455,10 +512,12 @@ mod tests {
             base_dir: PathBuf::from("/tmp"),
             magic_paths: Vec::new(),
             repository_root: None,
+            package_area: None,
             file_ref_fallback_dir: None,
             remote_fetch: Some(rt),
             ctx_values: Map::new(),
             home_dir: None,
+            file_resolution_context: None,
         };
 
         let result = tokio::task::spawn_blocking(move || {

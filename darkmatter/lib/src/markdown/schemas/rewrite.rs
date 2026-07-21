@@ -35,8 +35,8 @@ use serde_json::{Map, Value};
 
 use super::coerce::unwrap_nullable_arm;
 use super::format::DARKMATTER_FILE_FORMAT;
-use super::validate::{self, build_validator, error_top_level_key};
-use crate::markdown::compose::expression::path_projection::make_portable_relative;
+use super::validate::{self, error_top_level_key};
+use crate::markdown::compose::expression::path_projection::make_portable_relative_in_context;
 use crate::markdown::compose::expression::resolve_ctx::{
     is_remote_url, normalize_path_arg, resolve_document_file_ref,
 };
@@ -79,8 +79,33 @@ pub fn rewrite_eager_file_values(
     fallback: Option<&Path>,
     composition_pending: &HashSet<String>,
 ) -> NormalizationOutcome {
+    rewrite_eager_file_values_in_context(
+        json_schema,
+        instance,
+        base_dir,
+        fallback,
+        composition_pending,
+        None,
+    )
+}
+
+pub(super) fn rewrite_eager_file_values_in_context(
+    json_schema: &Value,
+    instance: &Value,
+    base_dir: &Path,
+    fallback: Option<&Path>,
+    composition_pending: &HashSet<String>,
+    request_context: Option<&biscuit_file::FileResolutionContext>,
+) -> NormalizationOutcome {
     if let Some(arms) = json_schema.get("anyOf").and_then(Value::as_array) {
-        return rewrite_root_union(arms, instance, base_dir, fallback, composition_pending);
+        return rewrite_root_union(
+            arms,
+            instance,
+            base_dir,
+            fallback,
+            composition_pending,
+            request_context,
+        );
     }
     rewrite_object(
         json_schema,
@@ -88,6 +113,7 @@ pub fn rewrite_eager_file_values(
         base_dir,
         fallback,
         composition_pending,
+        request_context,
     )
 }
 
@@ -105,19 +131,31 @@ fn rewrite_root_union(
     base_dir: &Path,
     fallback: Option<&Path>,
     composition_pending: &HashSet<String>,
+    request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> NormalizationOutcome {
     for arm in arms {
         let wrapped = validate::wrap_arm_as_root_schema(arm);
         // A schema that fails to build cannot be a valid arm; skip it. The
         // surrounding validator already surfaces build failures elsewhere.
-        // Anchors are threaded so the eager-file format validator resolves
-        // document-first against `base_dir` — matching the production
-        // validator's arm selection, not an ambient-CWD build.
-        let Ok(validator) = build_validator(&wrapped, Some(base_dir), fallback) else {
+        // Preserve the production validator's request-scoped candidate plan
+        // during arm selection; do not rebuild from ambient CWD.
+        let Ok(validator) = validate::build_validator_in_context(
+            &wrapped,
+            Some(base_dir),
+            fallback,
+            request_context,
+        ) else {
             continue;
         };
         if arm_accepts(&validator, instance, composition_pending) {
-            return rewrite_object(arm, instance, base_dir, fallback, composition_pending);
+            return rewrite_object(
+                arm,
+                instance,
+                base_dir,
+                fallback,
+                composition_pending,
+                request_context,
+            );
         }
     }
     NormalizationOutcome {
@@ -165,6 +203,7 @@ fn rewrite_object(
     base_dir: &Path,
     fallback: Option<&Path>,
     composition_pending: &HashSet<String>,
+    request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> NormalizationOutcome {
     let (Some(props), Some(obj)) = (
         schema.get("properties").and_then(Value::as_object),
@@ -188,7 +227,9 @@ fn rewrite_object(
         let Some(prop_schema) = props.get(name) else {
             continue;
         };
-        if let Some(rewritten) = rewrite_property(prop_schema, value, base_dir, fallback) {
+        if let Some(rewritten) =
+            rewrite_property(prop_schema, value, base_dir, fallback, request_context)
+        {
             out.insert(name.clone(), rewritten);
             changed = true;
         }
@@ -212,6 +253,7 @@ fn rewrite_property(
     value: &Value,
     base_dir: &Path,
     fallback: Option<&Path>,
+    request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Option<Value> {
     if value.is_null() {
         return None;
@@ -226,19 +268,19 @@ fn rewrite_property(
     // only when exactly one validating arm carries the eager-file marker
     // (Decision #9: "no guessing").
     if let Some(arms) = effective.get("anyOf").and_then(Value::as_array) {
-        return rewrite_property_union(arms, value, base_dir, fallback);
+        return rewrite_property_union(arms, value, base_dir, fallback, request_context);
     }
 
     // Direct eager-file marker on the effective schema.
     if is_eager_file_fragment(effective) {
-        return rewrite_file_value(value, base_dir, fallback);
+        return rewrite_file_value(value, base_dir, fallback, request_context);
     }
 
     // Array of eager-file elements: descend through `items`.
     if effective.get("type").and_then(Value::as_str) == Some("array")
         && let Some(items_schema) = effective.get("items")
     {
-        return rewrite_array_items(items_schema, value, base_dir, fallback);
+        return rewrite_array_items(items_schema, value, base_dir, fallback, request_context);
     }
 
     // Inline object with declared sub-properties: descend into each present
@@ -246,7 +288,7 @@ fn rewrite_property(
     if effective.get("type").and_then(Value::as_str) == Some("object")
         && let Some(sub_props) = effective.get("properties").and_then(Value::as_object)
     {
-        return rewrite_inline_object(sub_props, value, base_dir, fallback);
+        return rewrite_inline_object(sub_props, value, base_dir, fallback, request_context);
     }
 
     None
@@ -265,6 +307,7 @@ fn rewrite_property_union(
     value: &Value,
     base_dir: &Path,
     fallback: Option<&Path>,
+    request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Option<Value> {
     let mut eager_matches = 0;
     let mut rewritten: Option<Value> = None;
@@ -273,15 +316,20 @@ fn rewrite_property_union(
             continue;
         }
         // Anchor the validator so the eager-file format validator resolves
-        // document-first against `base_dir` — matching the production
-        // validator's arm acceptance, not an ambient-CWD build.
-        let Ok(validator) = build_validator(arm, Some(base_dir), fallback) else {
+        // Preserve the production validator's request-scoped candidate plan
+        // during arm acceptance; do not rebuild from ambient CWD.
+        let Ok(validator) = validate::build_validator_in_context(
+            arm,
+            Some(base_dir),
+            fallback,
+            request_context,
+        ) else {
             continue;
         };
         if validator.is_valid(value) {
             eager_matches += 1;
             if eager_matches == 1 {
-                rewritten = rewrite_file_value(value, base_dir, fallback);
+                rewritten = rewrite_file_value(value, base_dir, fallback, request_context);
             } else {
                 // Ambiguous: more than one validating eager-file arm. Leave
                 // the value verbatim (Decision #9).
@@ -306,7 +354,12 @@ fn rewrite_property_union(
 ///   Decision #7),
 /// - rewriting produces a byte-identical string (idempotence fast path,
 ///   Decision #6).
-fn rewrite_file_value(value: &Value, base_dir: &Path, _fallback: Option<&Path>) -> Option<Value> {
+fn rewrite_file_value(
+    value: &Value,
+    base_dir: &Path,
+    _fallback: Option<&Path>,
+    request_context: Option<&biscuit_file::FileResolutionContext>,
+) -> Option<Value> {
     let Value::String(raw) = value else {
         return None;
     };
@@ -333,7 +386,28 @@ fn rewrite_file_value(value: &Value, base_dir: &Path, _fallback: Option<&Path>) 
         // the value), but degrade gracefully rather than panic.
         Err(_) => return None,
     };
-    let resolved = match resolve_document_file_ref(&file_ref, base_dir, None, &[]) {
+    let (repository_root, package_area) = match request_context {
+        Some(snapshot) => (
+            snapshot.repository_root().map(Path::to_path_buf),
+            snapshot.package_area().map(Path::to_path_buf),
+        ),
+        None => {
+            let repository_root = crate::markdown::compose::find_git_root_from(base_dir);
+            let package_area = crate::markdown::compose::find_package_area_from(
+                base_dir,
+                repository_root.as_deref(),
+            );
+            (repository_root, package_area)
+        }
+    };
+    let resolved = match resolve_document_file_ref(
+        &file_ref,
+        base_dir,
+        repository_root.as_deref(),
+        package_area.as_deref(),
+        &[],
+        request_context,
+    ) {
         Ok(Some(abs)) => abs,
         // `None`: the reference is well-formed but resolves to nothing local
         // (e.g. a remote-resolving value validation accepted). Leave verbatim
@@ -343,7 +417,7 @@ fn rewrite_file_value(value: &Value, base_dir: &Path, _fallback: Option<&Path>) 
         // degrade gracefully.
         Err(_) => return None,
     };
-    let portable = make_portable_relative(&resolved, base_dir);
+    let portable = make_portable_relative_in_context(&resolved, base_dir, request_context);
     // Idempotence fast path: if the rewritten value equals the input, no
     // mutation is needed (Decision #6).
     if &portable == raw {
@@ -360,6 +434,7 @@ fn rewrite_array_items(
     value: &Value,
     base_dir: &Path,
     fallback: Option<&Path>,
+    request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Option<Value> {
     let Value::Array(items) = value else {
         return None;
@@ -367,7 +442,7 @@ fn rewrite_array_items(
     let mut out = Vec::with_capacity(items.len());
     let mut changed = false;
     for item in items {
-        match rewrite_property(items_schema, item, base_dir, fallback) {
+        match rewrite_property(items_schema, item, base_dir, fallback, request_context) {
             Some(rewritten) => {
                 out.push(rewritten);
                 changed = true;
@@ -386,6 +461,7 @@ fn rewrite_inline_object(
     value: &Value,
     base_dir: &Path,
     fallback: Option<&Path>,
+    request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Option<Value> {
     let Value::Object(obj) = value else {
         return None;
@@ -396,7 +472,9 @@ fn rewrite_inline_object(
         let Some(sub_schema) = sub_props.get(name) else {
             continue;
         };
-        if let Some(rewritten) = rewrite_property(sub_schema, sub_value, base_dir, fallback) {
+        if let Some(rewritten) =
+            rewrite_property(sub_schema, sub_value, base_dir, fallback, request_context)
+        {
             out.insert(name.clone(), rewritten);
             changed = true;
         }
@@ -418,6 +496,41 @@ mod tests {
     use crate::markdown::compose::expression::resolve_ctx::ResolutionContext;
     use serde_json::json;
     use tempfile::TempDir;
+
+    #[test]
+    fn eager_rewrite_uses_request_repository_instead_of_rediscovering_from_child() {
+        let request_repo = TempDir::new().unwrap();
+        let child_repo = TempDir::new().unwrap();
+        std::fs::create_dir_all(request_repo.path().join(".git")).unwrap();
+        std::fs::create_dir_all(child_repo.path().join(".git")).unwrap();
+        let child_base = child_repo.path().join("docs");
+        std::fs::create_dir_all(&child_base).unwrap();
+        let request_target = request_repo.path().join("spec.md");
+        std::fs::write(&request_target, "request").unwrap();
+        std::fs::write(child_repo.path().join("spec.md"), "child decoy").unwrap();
+        let context = biscuit_file::FileResolutionContext::new(request_repo.path())
+            .with_repository_root(request_repo.path())
+            .for_trusted_external_base(&child_base);
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "spec": {"type": "string", "format": DARKMATTER_FILE_FORMAT}
+            }
+        });
+        let input = json!({"spec": "@spec.md"});
+
+        let outcome = rewrite_eager_file_values_in_context(
+            &schema,
+            &input,
+            &child_base,
+            None,
+            &HashSet::new(),
+            Some(&context),
+        );
+
+        assert!(outcome.changed);
+        assert_eq!(outcome.value["spec"], json!("spec.md"));
+    }
 
     /// Creates a temp directory that looks like a git repository root, with
     /// an optional subdirectory the "document" lives in.

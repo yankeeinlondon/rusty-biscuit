@@ -6,7 +6,9 @@
 //! back to portable forms in the Finalization stage.
 
 use crate::markdown::Markdown;
-use crate::markdown::compose::util::{document_resolution_context, find_git_root_from};
+use crate::markdown::compose::util::{
+    document_resolution_context, find_git_root_from, find_package_area_from,
+};
 use crate::markdown::compose::{ComposeOptions, ComposeReport, ComposeSource};
 use crate::markdown::reference::{
     ReferenceKind, ReferenceTarget,
@@ -141,9 +143,20 @@ fn resolve_absolute(
     // resolve_relative here — link resolve's job is to produce absolute paths,
     // not make them relative again.
     let resolved = if let Some(dir) = base_dir {
-        let repo_root = find_git_root_from(dir);
-        let resolution_ctx =
-            document_resolution_context(dir, None, &options.magic_paths, repo_root.as_deref());
+        let resolution_ctx = match options.file_resolution_context.as_ref() {
+            Some(snapshot) => snapshot.for_base(dir),
+            None => {
+                let repo_root = find_git_root_from(dir);
+                let package_area = find_package_area_from(dir, repo_root.as_deref());
+                document_resolution_context(
+                    dir,
+                    None,
+                    &options.magic_paths,
+                    repo_root.as_deref(),
+                    package_area.as_deref(),
+                )
+            }
+        };
         // An existing target resolves to its matched path; a clean miss (a link
         // to a not-yet-created file) is absolutized to the FIRST shared
         // candidate — repository-first for an implicit bare path — via the same
@@ -202,6 +215,84 @@ mod tests {
         assert!(md.content().contains(&format!("({})", resolved_path)));
         assert!(md.content().contains(&format!("({})", resolved_path)));
         assert_eq!(report.link_resolves_applied, 2);
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn link_resolution_reuses_snapshot_home_for_nested_source() {
+        let request = tempdir().unwrap();
+        let nested = request.path().join("nested");
+        let home = request.path().join("home");
+        fs::create_dir_all(&nested).unwrap();
+        fs::create_dir_all(&home).unwrap();
+        let target = home.join("captured.md");
+        fs::write(&target, "captured").unwrap();
+        let ambient = tempdir().unwrap();
+        let prior_home = std::env::var_os("HOME");
+
+        let snapshot = biscuit_file::FileResolutionContext::new(request.path())
+            .with_home_dir(&home);
+        let options = ComposeOptions::new()
+            .with_source_file(nested.join("child.md"))
+            .with_file_resolution_context(snapshot);
+        let mut markdown = Markdown::new("[captured](~/captured.md)");
+        let mut report = ComposeReport::new();
+        // SAFETY: this test is serialized while mutating process-global state.
+        unsafe { std::env::set_var("HOME", ambient.path()) };
+        let result = link_resolve(&mut markdown, &options, &mut report);
+        match prior_home {
+            Some(value) => unsafe { std::env::set_var("HOME", value) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+
+        result.unwrap();
+        assert!(
+            markdown
+                .content()
+                .contains(&std::fs::canonicalize(target).unwrap().to_string_lossy().to_string()),
+            "{}",
+            markdown.content(),
+        );
+        assert_eq!(report.link_resolves_applied, 1);
+    }
+
+    #[test]
+    fn package_link_resolves_from_package_area_not_repository() {
+        let dir = tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        gix::init(&root).unwrap();
+        fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"darkmatter/lib\"]\nresolver = \"2\"\n",
+        )
+        .unwrap();
+        let package_area = root.join("darkmatter");
+        let member = package_area.join("lib");
+        fs::create_dir_all(member.join("src")).unwrap();
+        fs::create_dir_all(member.join("docs")).unwrap();
+        fs::write(
+            member.join("Cargo.toml"),
+            "[package]\nname = \"fixture-darkmatter\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        fs::write(member.join("src/lib.rs"), "").unwrap();
+        fs::write(root.join("shared.md"), "repository decoy").unwrap();
+        let package_target = package_area.join("shared.md");
+        fs::write(&package_target, "package").unwrap();
+        let source = member.join("docs/guide.md");
+        let mut md = Markdown::new("[package](!shared.md)");
+        let options = ComposeOptions::new().with_source_file(source);
+        let mut report = ComposeReport::new();
+
+        link_resolve(&mut md, &options, &mut report).unwrap();
+
+        assert!(
+            md.content()
+                .contains(&std::fs::canonicalize(package_target).unwrap().to_string_lossy().to_string()),
+            "{}",
+            md.content(),
+        );
+        assert_eq!(report.link_resolves_applied, 1);
     }
 
     #[test]

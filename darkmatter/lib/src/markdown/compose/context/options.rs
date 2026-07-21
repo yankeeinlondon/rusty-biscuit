@@ -133,6 +133,9 @@ pub struct ComposeOptions {
     /// default roots (git repo root, HOME).
     pub(crate) magic_paths: Vec<(PathBuf, biscuit_file::PathPosition)>,
 
+    /// Immutable request-scoped file-resolution inputs supplied by the host.
+    pub(crate) file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+
     // ── Shell expansion ────────────────────────────────────────────
     /// Maximum execution time for a single `::shell` command.
     /// Default: 10 seconds.
@@ -452,6 +455,7 @@ impl ComposeOptions {
             ignore_invalid_references: None,
             resolve_repo_root: true,
             magic_paths: Vec::new(),
+            file_resolution_context: None,
             shell_timeout: std::time::Duration::from_secs(10),
             shell_timeout_behavior: ShellTimeoutBehavior::Error,
             shell_policy_root: None,
@@ -822,6 +826,22 @@ impl ComposeOptions {
         self
     }
 
+    /// Supplies the immutable request snapshot used by every document-backed
+    /// file-reference surface in this compose run.
+    #[must_use]
+    pub fn with_file_resolution_context(
+        mut self,
+        context: biscuit_file::FileResolutionContext,
+    ) -> Self {
+        self.file_resolution_context = Some(context);
+        self
+    }
+
+    /// Returns the host-supplied request snapshot, when present.
+    pub fn file_resolution_context(&self) -> Option<&biscuit_file::FileResolutionContext> {
+        self.file_resolution_context.as_ref()
+    }
+
     /// Sets the fallback language for code transclusion.
     #[must_use]
     pub fn with_code_fallback_language(mut self, language: impl Into<String>) -> Self {
@@ -844,6 +864,7 @@ impl ComposeOptions {
             ignore_invalid: self.ignore_invalid_references,
             resolve_repo_root: self.resolve_repo_root,
             magic_paths: self.magic_paths.clone(),
+            file_resolution_context: self.file_resolution_context.clone(),
         }
     }
 
@@ -875,14 +896,38 @@ impl ComposeOptions {
         remote_fetch: &super::super::remote_fetch::RemoteFetchRuntime,
     ) -> super::super::expression::ResolutionContext {
         let base_dir = self.resolution_base_dir();
+        let file_resolution_context = self.file_resolution_context.as_ref().map(|snapshot| {
+            match &self.source {
+                ComposeSource::File(path) => snapshot.for_source(path),
+                _ => snapshot.for_base(&base_dir),
+            }
+        });
+        let (repository_root, package_area, home_dir) = match &file_resolution_context {
+            Some(ctx) => (
+                ctx.repository_root().map(Path::to_path_buf),
+                ctx.package_area().map(Path::to_path_buf),
+                ctx.home_dir().map(Path::to_path_buf),
+            ),
+            None => {
+                let repository_root =
+                    crate::markdown::compose::util::find_git_root_from(&base_dir);
+                let package_area = crate::markdown::compose::util::find_package_area_from(
+                    &base_dir,
+                    repository_root.as_deref(),
+                );
+                (repository_root, package_area, dirs::home_dir())
+            }
+        };
         super::super::expression::ResolutionContext {
-            repository_root: crate::markdown::compose::util::find_git_root_from(&base_dir),
+            repository_root,
+            package_area,
             base_dir,
             magic_paths: self.magic_paths.clone(),
             file_ref_fallback_dir: self.file_ref_fallback_dir.clone(),
             remote_fetch: self.remote_reads_enabled().then(|| remote_fetch.clone()),
             ctx_values: self.context_values_for_resolution(),
-            home_dir: dirs::home_dir(),
+            home_dir,
+            file_resolution_context,
         }
     }
 
@@ -899,15 +944,48 @@ impl ComposeOptions {
     /// [`expression_resolution_context`]: Self::expression_resolution_context
     /// [`ResolutionContext`]: super::super::expression::ResolutionContext
     pub(crate) fn frontmatter_resolution_context(&self) -> super::super::expression::ResolutionContext {
+        self.local_expression_resolution_context()
+    }
+
+    /// Builds the local-only expression context for the configured source.
+    ///
+    /// Hosts that evaluate document-authored expressions outside the main
+    /// compose pipeline use this adapter so they retain the same immutable
+    /// file-resolution snapshot, source derivation, and magic roots.
+    pub fn local_expression_resolution_context(&self) -> super::super::expression::ResolutionContext {
         let base_dir = self.resolution_base_dir();
+        let file_resolution_context = self.file_resolution_context.as_ref().map(|snapshot| {
+            match &self.source {
+                ComposeSource::File(path) => snapshot.for_source(path),
+                _ => snapshot.for_base(&base_dir),
+            }
+        });
+        let (repository_root, package_area, home_dir) = match &file_resolution_context {
+            Some(ctx) => (
+                ctx.repository_root().map(Path::to_path_buf),
+                ctx.package_area().map(Path::to_path_buf),
+                ctx.home_dir().map(Path::to_path_buf),
+            ),
+            None => {
+                let repository_root =
+                    crate::markdown::compose::util::find_git_root_from(&base_dir);
+                let package_area = crate::markdown::compose::util::find_package_area_from(
+                    &base_dir,
+                    repository_root.as_deref(),
+                );
+                (repository_root, package_area, dirs::home_dir())
+            }
+        };
         super::super::expression::ResolutionContext {
-            repository_root: crate::markdown::compose::util::find_git_root_from(&base_dir),
+            repository_root,
+            package_area,
             base_dir,
             magic_paths: self.magic_paths.clone(),
             file_ref_fallback_dir: self.file_ref_fallback_dir.clone(),
             remote_fetch: None,
             ctx_values: self.context_values_for_resolution(),
-            home_dir: dirs::home_dir(),
+            home_dir,
+            file_resolution_context,
         }
     }
 
@@ -1318,6 +1396,9 @@ pub(crate) struct TransclusionOptions {
 
     /// Custom search roots for `@`-prefixed (magic) file references.
     pub magic_paths: Vec<(PathBuf, biscuit_file::PathPosition)>,
+
+    /// Immutable request snapshot inherited by every nested document.
+    pub file_resolution_context: Option<biscuit_file::FileResolutionContext>,
 }
 
 impl Default for TransclusionOptions {
@@ -1332,6 +1413,7 @@ impl Default for TransclusionOptions {
             ignore_invalid: None,
             resolve_repo_root: true,
             magic_paths: Vec::new(),
+            file_resolution_context: None,
         }
     }
 }
@@ -1376,6 +1458,61 @@ mod tests {
         let options = ComposeOptions::new();
         let ctx = options.frontmatter_resolution_context();
         assert!(ctx.file_ref_fallback_dir.is_none());
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn expression_and_frontmatter_adapters_reuse_the_request_snapshot() {
+        use biscuit_file::file_reference::fetch::FetchPolicy;
+        use biscuit_file::FileReference;
+
+        let request_root = tempfile::tempdir().unwrap();
+        let nested = request_root.path().join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        let target = request_root.path().join("captured.md");
+        std::fs::write(&target, "captured").unwrap();
+        let ambient = tempfile::tempdir().unwrap();
+        let prior = std::env::var_os("DARKMATTER_SNAPSHOT_ROOT");
+
+        let mut env = std::collections::HashMap::new();
+        env.insert(
+            "DARKMATTER_SNAPSHOT_ROOT".to_string(),
+            request_root.path().display().to_string(),
+        );
+        let snapshot = biscuit_file::FileResolutionContext::new(request_root.path()).with_env(env);
+        let options = ComposeOptions::new()
+            .with_source_file(nested.join("child.md"))
+            .with_file_resolution_context(snapshot);
+
+        // SAFETY: this test is serialized while mutating process-global state.
+        unsafe { std::env::set_var("DARKMATTER_SNAPSHOT_ROOT", ambient.path()) };
+        let remote_fetch = crate::markdown::compose::remote_fetch::RemoteFetchRuntime::with_policy(
+            FetchPolicy::deny_all(),
+        );
+        let expression = options.expression_resolution_context(&remote_fetch);
+        let frontmatter = options.frontmatter_resolution_context();
+        let file_ref = FileReference::new("{{DARKMATTER_SNAPSHOT_ROOT}}/captured.md").unwrap();
+        let resolved = [&expression, &frontmatter].map(|ctx| {
+            crate::markdown::compose::expression::resolve_ctx::resolve_document_file_ref(
+                &file_ref,
+                &ctx.base_dir,
+                ctx.repository_root.as_deref(),
+                ctx.package_area.as_deref(),
+                &ctx.magic_paths,
+                ctx.file_resolution_context.as_ref(),
+            )
+            .unwrap()
+        });
+        match prior {
+            Some(value) => unsafe { std::env::set_var("DARKMATTER_SNAPSHOT_ROOT", value) },
+            None => unsafe { std::env::remove_var("DARKMATTER_SNAPSHOT_ROOT") },
+        }
+
+        assert_eq!(expression.base_dir, nested);
+        assert_eq!(frontmatter.base_dir, nested);
+        for path in resolved {
+            assert_eq!(path.as_deref(), Some(target.as_path()));
+        }
     }
 
     /// The fallback appears in the `Debug` output so diagnostics surface it.

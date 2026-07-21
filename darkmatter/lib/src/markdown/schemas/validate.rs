@@ -59,23 +59,21 @@ pub const DEFAULT_CACHE_SIZE: usize = 64;
 ///
 /// ## File-reference resolution invariant
 ///
-/// A single cache carries one [`Self::file_ref_fallback_dir`] (the launch-area
-/// fallback), set at construction via [`Self::with_file_ref_fallback_dir`].
 /// The prompt document directory (`base_dir`) is supplied per call to
-/// [`Self::validator_for`] because it varies per document, and is folded into
-/// the cache key alongside the schema JSON: two documents sharing the same
-/// schema JSON but living in different directories get distinct cached
-/// validators, each resolving `format: darkmatter-file` values document-first
-/// against its own directory. Mixing fallbacks still requires separate caches
-/// (i.e. separate `DarkmatterSchemas` instances).
+/// [`Self::validator_for`] because it varies per document. It participates in
+/// the cache key alongside the schema JSON so validators preserve the
+/// repository-first, then source-relative candidate plan of their document.
+/// [`Self::file_ref_fallback_dir`] is also part of cache identity for
+/// diagnostic parity, but is not a resolution candidate for document-authored
+/// references.
 #[derive(Clone)]
 pub struct ValidatorCache {
     inner: Arc<Mutex<CacheInner>>,
-    /// Launch-area fallback for `format: darkmatter-file` value resolution,
-    /// tried after the per-document `base_dir`. `None` (the default) leaves
-    /// the fallback unset; with no `base_dir` either, resolution preserves the
-    /// legacy ambient-process-CWD behavior.
+    /// Launch-area metadata retained for file-reference diagnostics.
+    ///
+    /// This is not a resolution candidate for document-authored references.
     file_ref_fallback_dir: Option<PathBuf>,
+    file_resolution_context: Option<biscuit_file::FileResolutionContext>,
 }
 
 impl Default for ValidatorCache {
@@ -114,6 +112,7 @@ impl ValidatorCache {
                 capacity: cap,
             })),
             file_ref_fallback_dir: None,
+            file_resolution_context: None,
         }
     }
 
@@ -129,11 +128,22 @@ impl ValidatorCache {
         self
     }
 
+    /// Supplies the request-scoped file-resolution snapshot used by custom
+    /// `file` format validators.
+    #[must_use]
+    pub fn with_file_resolution_context(
+        mut self,
+        context: biscuit_file::FileResolutionContext,
+    ) -> Self {
+        self.file_resolution_context = Some(context);
+        self
+    }
+
     /// Returns a compiled validator for the given JSON Schema, building it on
     /// first use and reusing the cached one thereafter.
     ///
-    /// `base_dir`, when `Some`, is the prompt document directory used as the
-    /// document-first anchor for `format: darkmatter-file` value resolution.
+    /// `base_dir`, when `Some`, is the prompt document directory used to build
+    /// the request-scoped candidate plan for `format: darkmatter-file` values.
     /// It is folded into the cache key so two documents that share a schema
     /// but live in different directories do not share a validator.
     ///
@@ -152,10 +162,11 @@ impl ValidatorCache {
             return Ok(hit);
         }
         // Miss: build outside the lock to keep contention low.
-        let validator = Arc::new(build_validator(
+        let validator = Arc::new(build_validator_in_context(
             schema,
             base_dir,
             self.file_ref_fallback_dir.as_deref(),
+            self.file_resolution_context.as_ref(),
         )?);
         self.insert(key, validator.clone());
         Ok(validator)
@@ -196,10 +207,8 @@ impl ValidatorCache {
         }
     }
 
-    /// Returns the launch-area fallback directory this cache was configured
-    /// with, if any. Used by [`super::EffectiveSchema`] to mirror the
-    /// validator's anchors when re-resolving a `format: darkmatter-file`
-    /// diagnostic.
+    /// Returns the launch-area metadata configured for file-reference
+    /// diagnostics, if any.
     pub(super) fn file_ref_fallback_dir(&self) -> Option<&Path> {
         self.file_ref_fallback_dir.as_deref()
     }
@@ -256,6 +265,15 @@ pub(super) fn build_validator(
     base_dir: Option<&Path>,
     file_ref_fallback_dir: Option<&Path>,
 ) -> Result<Validator, SchemaError> {
+    build_validator_in_context(schema, base_dir, file_ref_fallback_dir, None)
+}
+
+pub(super) fn build_validator_in_context(
+    schema: &Value,
+    base_dir: Option<&Path>,
+    file_ref_fallback_dir: Option<&Path>,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+) -> Result<Validator, SchemaError> {
     // Feature C literal-precedence emits negative-lookahead `patternProperties`
     // keys, which the linear `regex` engine rejects. Opt such schemas into the
     // backtracking `fancy-regex` engine while keeping every lookaround-free
@@ -268,10 +286,11 @@ pub(super) fn build_validator(
     } else {
         base.with_pattern_options(PatternOptions::regex())
     };
-    let opts = format::register_darkmatter_formats(
+    let opts = format::register_darkmatter_formats_in_context(
         opts,
         base_dir.map(PathBuf::from),
         file_ref_fallback_dir.map(PathBuf::from),
+        file_resolution_context.cloned(),
     )
         .should_validate_formats(true)
         .with_keyword(
@@ -296,9 +315,8 @@ pub fn collect_problems(
     collect_problems_with_anchors(validator, instance, positions, FileRefAnchors::default())
 }
 
-/// Like [`collect_problems`] but carries the document-first / launch-area
-/// anchors so a substituted `format: darkmatter-file` diagnostic re-resolves
-/// against the same directories the validator was built with.
+/// Like [`collect_problems`] but carries the request-scoped document anchor and
+/// diagnostic launch metadata used by the validator.
 pub(super) fn collect_problems_with_anchors(
     validator: &Validator,
     instance: &Value,
@@ -331,8 +349,8 @@ pub fn collect_root_union_problems(
     )
 }
 
-/// Like [`collect_root_union_problems`] but carries the document-first /
-/// launch-area anchors for `format: darkmatter-file` diagnostic re-resolution.
+/// Like [`collect_root_union_problems`] but carries the request-scoped document
+/// anchor and diagnostic launch metadata used by the validators.
 pub(super) fn collect_root_union_problems_with_anchors(
     arm_validators: &[Arc<Validator>],
     instance: &Value,

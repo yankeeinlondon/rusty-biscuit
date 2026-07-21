@@ -143,7 +143,7 @@ pub(crate) use context::options::TransclusionOptions;
 // Shared helpers, re-exported so in-crate callers reach them as `compose::<name>`.
 pub use util::find_git_root_from;
 pub(crate) use util::{
-    abbreviate_path, document_resolution_context, find_target_range,
+    abbreviate_path, document_resolution_context, find_package_area_from, find_target_range,
     prepare_frontmatter_for_compose,
 };
 

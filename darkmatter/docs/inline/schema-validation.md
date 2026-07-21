@@ -101,7 +101,7 @@ A few behaviours worth knowing:
 
 - `additionalProperties` is `true` — documents may carry extra tooling-specific frontmatter without tripping the schema.
 - Unrecognized constraints are a **hard error at compile time**, so typos surface immediately rather than being silently ignored.
-- `file` is **lazy by default**: a bare `file` value is only checked for syntactic validity (it must parse as a biscuit-file reference) and is never resolved against the filesystem. Add `eager` (`file(eager)`) to require the referenced file to exist; eager values resolve **document-first** — the prompt document's directory is tried first, then the captured launch area as a fallback — matching how `$schema` *file references* and the expression path (`file_exists`/`frontmatter`) resolve. Only legacy callers that configure no anchor fall back to the ambient current working directory. `match(...)` shapes path *suggestions* only and never rejects a value.
+- `file` is **lazy by default**: a bare `file` value is only checked for syntactic validity (it must parse as a biscuit-file reference) and is never resolved against the filesystem. Add `eager` (`file(eager)`) to require the referenced file to exist. For document-backed validation, an implicit reference such as `spec.md` searches the containing repository before the prompt document's directory; an explicit `./spec.md` or `../spec.md` is source-relative only. The captured launch area is retained for diagnostics, not searched. Only legacy callers that configure no document anchor resolve from the ambient current working directory. `match(...)` shapes path *suggestions* only and never rejects a value.
 
 ## Baseline Schemas
 
