@@ -58,3 +58,36 @@ one.**
 
 These hold identically on a loaded host, so they are the durable guarantee. They do **not**, however,
 discharge the relative no-regression acceptance, which still requires the timed comparison above.
+
+## Review implementation follow-up — 2026-07-20
+
+- **Maps back to:** the same review finding, *"High — Safety, corpus, performance, and platform
+  acceptance evidence is incomplete"*, in [`review-1.md`](./review-1.md).
+- **Evaluated during:** review implementation cycle 1, started at
+  `2026-07-20T23:38:36-07:00`.
+
+### Benchmark vehicle correction
+
+The audit found that `clean_hot_paths/full_pipeline` still timed only
+`Markdown::try_from_content → cleanup → as_string`. The shipped feature now performs raw
+frontmatter extraction, YAML analysis, schema analysis, and raw-preserving assembly around that
+legacy sequence, so the unchanged harness could not observe the feature's added work.
+
+`darkmatter/lib/benches/clean_hot_paths.rs` now includes those actual feature stages in the two
+`full_pipeline` cases. The no-frontmatter fixture takes the real extraction-and-bypass branch. The
+already-clean-frontmatter fixture performs one source-first YAML analysis, resolves and applies the
+default schema context, cleans the parsed Markdown, and assembles the original frontmatter block
+without reserialization. The existing `phase1-before` Criterion baseline therefore remains the
+pre-feature comparator while the candidate now measures the shipped path.
+
+### Why the timed comparison remains deferred
+
+No timing was reported in this follow-up. A legitimate result still requires the quiet-host
+main/branch/main drift bracket described above. This session used a shared dirty worktree with
+concurrent agent activity, so it could neither produce an isolated `main` build nor establish a
+quiet, repeatable scheduler baseline. Running Criterion once here would create a precise-looking but
+untrustworthy number.
+
+The corrected harness passed `cargo check -p darkmatter --bench clean_hot_paths --color never`, and
+the load-independent counter suites passed. These verify that the comparison vehicle compiles and
+that the structural cost invariants hold; they do not replace the deferred timing measurement.

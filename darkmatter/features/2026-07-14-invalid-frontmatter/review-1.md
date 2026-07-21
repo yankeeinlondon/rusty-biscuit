@@ -5,7 +5,7 @@ agent: codex/default
 created: 2026-07-18T18:10:47-07:00
 spec: 2026-07-14-invalid-frontmatter/spec.md
 implemented: true
-implemented_by: claude/default
+implemented_by: codex/default
 log: darkmatter/features/2026-07-14-invalid-frontmatter/log.md
 description: "A **feature** review of `2026-07-14-invalid-frontmatter/spec.md`"
 feature: 2026-07-14-invalid-frontmatter/review-1.md

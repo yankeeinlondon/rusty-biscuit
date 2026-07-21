@@ -2,7 +2,7 @@
 $schema: feature-log.yaml
 feature: 2026-07-14-invalid-frontmatter
 deferred_perf_measurement: true
-implementation_1: "2026-07-18T18:33:32-07:00"
+implementation_1: "2026-07-20T23:38:36-07:00"
 ---
 
 # Log — Invalid Frontmatter
@@ -174,3 +174,125 @@ The implementation of review cycle 1 has completed successfully in 2 hours and 9
 Two implementation defects were found and fixed *by* the new test suites rather than by inspection — the BOM repair failure and the doubled report-only diagnostics — along with two further user-visible reporting bugs in `md clean`. Three items are recorded above as needing Ken's ruling: the `--schema` flag's layer semantics, the reserved-indicator-plus-duplicate-keys exit-code asymmetry, and the now-unreachable `schema_result_set_identical` helper.
 
 The files changed across this cycle span the `biscuit-file` and `darkmatter` package areas: the YAML analyzer engine and its convenience API in `biscuit-file/lib/src/yaml/`, the `md clean` command and its new `frontmatter_repair` module plus schema flags in `darkmatter/cli/src/`, the schema-aware clean layer in `darkmatter/lib/src/markdown/schemas/`, and eight new or extended test targets across both areas.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-07-20T23:38:36-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-14-invalid-frontmatter/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- the review contains **5** findings:
+        - **Critical** — `md clean` never invokes the invalid-frontmatter pipeline
+        - **High** — the focused schema-aware Level-1 gate has six failures
+        - **High** — every new user-facing CLI requirement lacks its required Level-1 proof
+        - **High** — safety, corpus, performance, and platform acceptance evidence is incomplete
+        - **Medium** — the convenience API can accidentally analyze the same source twice
+- affected package areas established from the specification, review, and `sniff`: `biscuit-file` and `darkmatter`
+- the worktree already contains unrelated user changes; each subagent was instructed to preserve them and limit edits to its assigned finding
+
+### Finding 1 — Critical: `md clean` never invokes the invalid-frontmatter pipeline
+
+- starting the work on 'critical-md-clean-invalid-frontmatter-pipeline' at 23:41:22
+        - the review finding is stale against the current branch: `run_clean` reads raw source, runs `repair_frontmatter`, constructs `Markdown` only after repair, cleans the body, and reassembles repaired frontmatter with the cleaned body
+        - `CleanOptions` and `CleanSchemaFlags` already expose `--json`, `--schema`, `--baseline-schema`, `--no-baseline-schema`, and `--no-trigger-schemas`
+        - the raw-source pipeline structurally limits analysis to `yaml_span`, bypasses absent or empty frontmatter before YAML/schema work, retains one `YamlAnalysis`, and runs schema resolution only after syntax repair restores parseability
+        - existing Level-1 targets `clean_frontmatter.rs`, `clean_json.rs`, and `clean_schema.rs` cover the flagship repair, file/stdin/save paths, idempotency, fenced-body isolation, diagnostics, JSON, schema precedence, and lazy bypass contracts
+        - GitNexus reports LOW risk for `run_clean`: 2 direct callers, 3 total upstream symbols, 2 affected process groups, and no package-area fan-out beyond Darkmatter
+        - the full Darkmatter `just test` gate exceeded the non-interactive command ceiling and was stopped after 2,530 of 5,905 library tests passed with no failures; the interruption is a bounded gate limitation, not a test failure
+        - focused Level-1 verification passed: `cargo nextest run -p darkmatter-cli --test clean_frontmatter --test clean_json --test clean_schema` completed 51 of 51 tests successfully
+        - the full Darkmatter `just lint` gate likewise exceeded the command ceiling; the directly affected `darkmatter-cli` target passed `cargo clippy -p darkmatter-cli --all-targets -- -D warnings`
+        - GitNexus `detect_changes` reports HIGH aggregate worktree risk from unrelated fixed-width cleanup edits; this finding changed no Rust symbol and only adds this log entry
+- work completed for 'critical-md-clean-invalid-frontmatter-pipeline' at 23:46:27
+
+### Finding 2 — High: focused schema-aware Level-1 gate has six failures
+
+- starting the work on 'high-focused-schema-aware-level-1-gate' at 23:48:44
+        - the review finding is stale against the current branch: all four fixtures already use the supported SimplifiedSchema spelling `number(integer)`, the unused `std::path::Path` import is absent, and the S1 helper compares both raw and coercing validation result sets
+        - the existing 37-test Level-1 target fully covers multiple-problem suppression, coercion, root unions, determinism, type-changing S1 rejection, the intentional S2 transition, and unparseable candidates; no Rust or test edit was necessary
+        - GitNexus reports LOW risk for `schema_result_set_identical`: 0 direct callers, 0 affected processes, and 0 affected modules
+        - the exact focused gate passed: `cargo nextest run -p darkmatter -E 'test(/clean_quoting/)' --color never` completed 37 of 37 tests successfully
+        - the full Darkmatter `just test` gate exceeded the non-interactive command ceiling and was stopped after 1,917 of 5,905 library tests passed with no failures; the interruption is a bounded gate limitation, not a test failure
+        - the Darkmatter `just lint` gate passed for `darkmatter`, `darkmatter-cli`, and `dmls` with no warnings
+        - GitNexus `detect_changes` reports HIGH aggregate worktree risk from unrelated fixed-width cleanup edits; this finding changed no Rust symbol and only adds this log entry
+- work completed for 'high-focused-schema-aware-level-1-gate' at 23:51:26
+
+### Finding 3 — High: user-facing CLI requirements lack Level-1 proof
+
+- starting the work on 'high-user-facing-cli-level-1-proof' at 23:52:59
+        - the review finding is mostly stale against the current branch: dedicated Level-1 targets `clean_frontmatter.rs`, `clean_json.rs`, and `clean_schema.rs` now exercise the spawned `md` process across D-1 through D-11
+        - the audit found one narrow D-2 omission: stdin repair and explicit schema flags were covered, but no process test placed stdin below a Git root with a matching trigger schema to prove repository trigger discovery remains inert without a document path
+        - added `test_stdin_does_not_discover_repository_trigger_schemas`, with a file-input positive control proving the trigger fixture is active and a stdin assertion proving the same source remains unquoted even when the process working directory is inside that repository
+        - GitNexus reports LOW risk for the exercised `run_clean` path: 2 direct callers, 3 total upstream symbols, 2 affected process groups, and 2 affected modules
+        - Sniff confirms the directly affected package is `darkmatter-cli` in the `darkmatter` package area; no downstream production package is affected by the test-only addition
+        - focused Level-1 verification passed: `cargo nextest run -p darkmatter-cli --test clean_frontmatter --test clean_json --test clean_schema --color never` completed 52 of 52 tests successfully
+        - the full Darkmatter `just test` gate exceeded the non-interactive command ceiling and was interrupted after 2,586 of 5,905 tests passed and 140 were skipped, with no failures before the interruption; the interruption is a bounded gate limitation, not a test failure
+        - package-specific lint passed: `cargo clippy -p darkmatter-cli --all-targets --color never -- -D warnings`
+        - the full Darkmatter `just lint` gate passed for `darkmatter`, `darkmatter-cli`, and `dmls` with no warnings
+        - GitNexus `detect_changes` reports HIGH aggregate worktree risk from unrelated fixed-width cleanup edits; this finding adds only one Level-1 `darkmatter-cli` test and these log entries, with no production-symbol or execution-flow change
+- work completed for 'high-user-facing-cli-level-1-proof' at 23:56:28
+
+### Finding 4 — High: safety, corpus, performance, and platform acceptance evidence is incomplete
+
+- starting the work on 'high-safety-corpus-performance-platform-evidence' at 23:58:04
+        - the six targets named by the review now exist: `yaml_corpus.rs`, `yaml_mutation.rs`, `yaml_safety.rs`, `parse_count.rs`, `schema_quoting_safety.rs`, and `clean_counters.rs`; the review predates their addition
+        - the safety, mutation, schema, parse-count, and clean-counter suites already cover no-panic behavior, deterministic and idempotent repair, untouched-byte reconstruction, S1/S2/S3 safety proofs, parse-count bounds, zero no-frontmatter work, and per-run schema caching
+        - the corpus still had a genuine acceptance gap: its `yaml-spec` cases were locally authored analogues with no upstream IDs or commit, despite the acceptance matrix requiring a vendored, SHA-pinned YAML Test Suite subset
+        - added seven exact inputs from the official YAML Test Suite `data-2022-01-17` release at commit `6e6c296ae9c9d2d5c4134b4b64d01b29ac19ff6f`, covering valid, expected-failure, duplicate-key, anchor/alias, flow, scalar, and multi-document categories
+        - added `YAML-TEST-SUITE-NOTICE.md` with release paths and the upstream MIT license; the corpus test pins repository, release, commit, license, IDs, paths, categories, parse/diagnostic expectations, byte preservation, and all existing universal invariants
+        - the released upstream suite contains no BOM case; BOM coverage remains explicit in the corpus's separately attributed regression and real-monorepo cases, including BOM plus CRLF and multi-key frontmatter
+        - upstream case `2JQS` is syntactically accepted by the event-oriented YAML Test Suite, while `serde_yaml_ng::Value` rejects its duplicate empty key and the analyzer reports `yaml.parse`; the corpus records that real loader boundary without relabeling the upstream duplicate-key category
+        - GitNexus reports LOW risk for the benchmark-only `clean_pipeline` helper: 1 direct caller, 0 affected processes, and 1 test module; the corpus test struct has 0 upstream dependents
+        - corrected `clean_hot_paths/full_pipeline` so the candidate benchmark exercises the shipped raw-frontmatter extraction, source-first YAML analysis, default schema analysis, Markdown cleanup, and raw-preserving assembly path; previously it measured only the legacy Markdown cleanup sequence and could not observe feature overhead
+        - no Phase 7 timing was reported: a valid result still requires a quiet-host `main`/branch/`main` drift bracket, while this shared dirty worktree had concurrent agent activity and cannot provide an isolated or legitimate comparison; `deferred_perf_measurement: true` remains set and full follow-up detail was appended to `deferred-performance.md`
+        - platform evidence is partial and explicitly labeled: these focused gates ran successfully on the macOS host, and the changed corpus/benchmark code uses `Path::join`, escaped fixture bytes, and no platform-specific APIs; no Linux or Windows execution was available in this session
+        - existing CI configuration gives Darkmatter full Level-1 Linux/Windows jobs and a macOS all-targets check, but no run result was inspected and Windows is currently soft-fail; biscuit-file has no equivalent three-OS area workflow, so neither configuration nor static review is claimed as Linux/Windows acceptance evidence
+        - Sniff confirmed the affected package-area scope remains `biscuit-file` and `darkmatter`; no L2/L3 behavior is involved
+        - focused biscuit-file Level-1 verification passed: `cargo nextest run -p biscuit-file --test yaml_corpus --test yaml_mutation --test yaml_safety --test parse_count --color never` completed 30 of 30 tests successfully
+        - focused Darkmatter Level-1 verification passed: `cargo nextest run -p darkmatter --test schema_quoting_safety --test clean_counters --color never` completed 23 of 23 tests successfully
+        - the corrected benchmark harness passed `cargo check -p darkmatter --bench clean_hot_paths --color never`
+        - focused warnings-denying lint passed for all changed targets: biscuit-file's four named tests and Darkmatter's two named tests plus `clean_hot_paths`
+        - GitNexus `detect_changes` reports HIGH aggregate worktree risk from unrelated fixed-width cleanup production edits; this finding changes only acceptance tests, corpus data/notice, the benchmark-only helper, and feature records, and adds no affected production execution process
+- work completed for 'high-safety-corpus-performance-platform-evidence' at 00:07:55
+
+### Finding 5 — Medium: convenience API can analyze the same source twice
+
+- starting the work on 'medium-single-analysis-convenience-api' at 00:09:48
+        - the review finding is stale against the current branch: `Yaml::analyze()` already returns one retained `YamlAnalysis`, and its rustdoc identifies that method as the preferred entry point whenever diagnostics, candidate repairs, or patched source are needed together
+        - module-level docs and `YamlAnalysis::repairs` rustdoc reinforce the single-analysis contract; `Yaml::diagnose()` and `Yaml::repair_candidates()` remain convenient single-view shorthands and explicitly document that pairing them scans the same source twice
+        - the production `md clean` integration already follows the intended path: it retains one `YamlAnalysis`, derives syntax diagnostics and the repaired source from it, and only rescans when a changed, newly parseable source unlocks additional repairs rather than reanalyzing the same source
+        - existing Level-1 parse-count coverage proves the retained analysis serves diagnostics, repairs, and apply from one scan, while the shorthand pair performs twice the analyzer parse work; the unit suite also proves the retained and shorthand views are result-equivalent
+        - no Rust or test edit was necessary because commit `24949be46` already implemented the documented single-analysis API and its focused coverage; this finding adds only these log entries
+        - GitNexus reports MEDIUM risk for `Yaml::analyze` with 5 direct and 8 total upstream symbols, 0 affected execution processes, and 1 affected module; `Yaml::diagnose` and `Yaml::repair_candidates` are LOW risk with 3 and 2 direct upstream symbols respectively
+        - Sniff confirmed `biscuit-file` as a package area in the repository catalog; its downstream dependency command could not complete because Sniff attempted to open the stale non-repository path `/private/tmp/dmbench/after`, so the zero-process GitNexus result was used to keep verification scoped to the unchanged biscuit-file API
+        - focused Level-1 parse-count verification passed: `cargo nextest run -p biscuit-file --test parse_count --color never` completed 6 of 6 tests successfully
+        - focused Level-1 convenience API verification passed: `cargo nextest run -p biscuit-file -E 'test(/yaml::tests::diagnose/)' --color never` completed 7 of 7 tests successfully
+        - the full biscuit-file area `just test` gate passed: 624 biscuit-file tests and 61 biscuit-file-cli tests succeeded, with 4 library tests skipped by their existing gates
+        - the full biscuit-file area `just lint` gate passed for both `biscuit-file` and `biscuit-file-cli` with no warnings
+        - GitNexus `detect_changes` reports HIGH aggregate worktree risk from unrelated fixed-width cleanup and earlier review-finding edits; this finding changed no Rust symbol or execution flow and adds only this log entry
+- work completed for 'medium-single-analysis-convenience-api' at 00:12:34
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in 36 minutes and 30 seconds. During this implementation all 5 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 5 were fixed, 0 findings were deferred. Three acceptance-evidence items within finding 4 remain deferred (see reasons below):
+
+- **Phase 7 benchmark comparison**
+        - deferred because a trustworthy result requires a quiet-host `main`/branch/`main` drift bracket, while this session used a shared dirty worktree with concurrent agent activity
+        - the benchmark vehicle was corrected to exercise the shipped raw-frontmatter analysis, schema analysis, Markdown cleanup, and raw-preserving assembly path
+        - `deferred_perf_measurement: true` remains set, and full follow-up detail is recorded in [`deferred-performance.md`](./deferred-performance.md)
+- **Linux runtime evidence**
+        - deferred because no Linux host or completed Linux CI result was available in this session
+        - static portability review and CI configuration were treated only as partial evidence, not as a runtime substitute
+- **Windows runtime evidence**
+        - deferred because no Windows host or completed Windows CI result was available in this session
+        - the existing soft-fail Windows CI configuration was not treated as acceptance evidence
+- final scoped Level-1 verification passed:
+        - biscuit-file safety, corpus, mutation, and parse-count targets: 30 of 30 tests
+        - Darkmatter schema-quoting and clean-counter targets: 23 of 23 tests
+        - Darkmatter focused schema-cleaning target: 37 of 37 tests
+        - `darkmatter-cli` invalid-frontmatter, JSON, and schema targets: 52 of 52 tests
+        - biscuit-file `just test`: 624 library and 61 CLI tests passed, with 4 existing gated skips
+        - biscuit-file `just lint` passed for both crates; Darkmatter `just lint` passed for `darkmatter`, `darkmatter-cli`, and `dmls`
+        - the full Darkmatter `just test` recipe could not finish inside the non-interactive per-command ceiling; repeated bounded runs observed up to 2,586 of 5,905 tests passing with no failure before interruption
+- GitNexus `detect_changes` reports HIGH aggregate worktree risk from unrelated fixed-width cleanup production edits already present in the shared worktree; this review implementation changes no production execution process
+
+The files changed by this implementation are the pinned corpus and its tests/notice under `biscuit-file/lib/tests/`, the stdin trigger-schema Level-1 proof in `darkmatter/cli/tests/clean_schema.rs`, the feature-path benchmark in `darkmatter/lib/benches/clean_hot_paths.rs`, this log and its deferred-performance record, and the review metadata.
