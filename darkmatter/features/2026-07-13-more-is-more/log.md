@@ -6,6 +6,7 @@ implementation_20: "2026-07-19T18:43:08-07:00"
 implementation_21: "2026-07-20T22:31:43-07:00"
 implementation_22: "2026-07-21T08:34:57-07:00"
 implementation_23: "2026-07-21T09:24:12-07:00"
+implementation_24: "2026-07-21T10:40:11-07:00"
 deferred_perf_measurement: false
 ---
 
@@ -1238,3 +1239,89 @@ The implementation of review cycle 23 has completed successfully in 44 minutes. 
 - no findings were deferred; `deferred_perf_measurement` remains `false`
 
 The files changed specifically for review cycle 23 are `sniff/lib/src/credentials.rs`, `sniff/lib/src/lib.rs`, `sniff/lib/src/filesystem/git/{open,remote_observation,remote_resolver,remote_refresh,worktree}.rs`, `sniff/lib/src/remote/focused.rs`, `sniff/lib/tests/{focused_provider,git_parity,remote_observation}.rs`, `darkmatter/lib/src/markdown/compose/tests/provider_network.rs`, `darkmatter/features/2026-07-13-more-is-more/review-23.md`, and this log file.
+
+## Implementation of Review Findings #24
+
+> **started at:** 2026-07-21T10:40:11-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-13-more-is-more/review-24.md'
+- this is iteration 24 of the review-to-implement cycle
+- starting the work on 'credential-safe-ambiguous-discovery' at 10:42:03-07:00
+        - required skills read before implementation: `darkmatter`, `rust`, `rust-testing`, and `sniff`; the requested provider-header matrix is hermetic Level 1 coverage
+        - Sniff discovery with `sniff repo packages`, `sniff repo package-areas`, and `sniff repo package-dependencies` confirmed `sniff` as the implementation area and `darkmatter` as the direct provider-expression consumer named by the specification
+        - pre-edit GitNexus impact analysis reported **HIGH** risk for `probe_self_hosted_provider`: nine affected symbols, two direct callers (`remote_vendor_at` and `FocusedProviderClient::discover`), three modules, and no indexed execution flow
+                - `provider_token` independently reported **HIGH** risk: 15 affected symbols, two direct callers, four modules, and no indexed execution flow
+                - the orchestrator was warned before edits; the bounded credential-boundary fix proceeded under the explicit finding assignment
+        - replaced candidate-specific authenticated probing with anonymous requests to all five signature routes covering the six supported server flavors
+                - a response must carry a validated provider signature before any authentication or provider-attributed HTTP error is accepted
+                - generic `401`/`403` responses from an authenticating reverse proxy no longer become a false missing-GitHub-credential diagnosis
+                - conflicting authenticated or anonymous signatures are tracked by identified provider flavor, so authentication challenges cannot hide ambiguity
+        - added collision-free exact-host credential names of the form `SNIFF_{PROVIDER}_{ENCODED_HOST}_TOKEN`; non-alphanumeric hostname bytes are encoded as `_XX_`, so similarly spelled hosts cannot alias one credential
+                - an identified authentication challenge retries only its provider route and attaches only the exact-host/provider token, using GitLab `PRIVATE-TOKEN`, Azure PAT basic authentication, or the matching bearer scheme
+                - clients created by ambiguous-host discovery retain the host-bound credential scope for subsequent pull-request and CI/CD requests; explicit known-provider clients retain the established global-provider-token contract
+        - final credential-flow impact audit reported **HIGH** risk for `with_api_base_and_version` (51 affected symbols, three direct callers) and MEDIUM for `get_json` (41 affected symbols, five direct callers), with no indexed execution flows; the orchestrator was warned before the private credential-scope field was added
+        - Level-1 coverage now includes:
+                - a Wiremock matrix with all nine global provider-token variables populated, proving five anonymous candidate routes receive none of them
+                - one signed GitLab authentication challenge followed by exactly one host-bound authenticated retry
+                - invalid and missing host-bound credentials attributed to GitLab, with the supplied secret absent from rendered/debug errors
+                - five generic proxy authentication responses producing `UnsupportedProvider` rather than a fabricated provider credential error
+                - a discovered focused client using the host-bound credential for its subsequent provider query while never transmitting the configured global GitLab token
+                - collision-resistant host-variable encoding for provider and host distinctions
+        - documentation was synchronized in `sniff/lib/README.md` and the authoritative Sniff skill; `md hash --save` refreshed the skill's Markdown-aware hash and update date
+        - focused verification passed: four of four ambiguous-discovery tests, three of three credential-scope regressions, and 29 of 29 Darkmatter provider-network tests
+        - `cd sniff && just lint` passed after the final changes; `git diff --check` passed; no formatting command was run
+        - canonical `cd sniff && just test` remains blocked by review finding 3's independent host-state gap: it reached 1,334 passes before two cwd-dependent tests surfaced corrupt registered worktrees under `/private/tmp/dmbench`; no host Git metadata was changed and the corruption contract was not weakened
+        - canonical `cd darkmatter && just test` was interrupted under the session's 60-second non-interactive command limit after 2,506 of 2,506 executed tests passed; the focused downstream provider suite then passed 29 of 29
+        - `cd darkmatter && just lint` was likewise stopped at the non-interactive limit after reaching the final Darkmatter check; the already-completed Sniff lint gate checks the changed Sniff library plus its Darkmatter dependency successfully, and final full-area aggregation remains for the orchestrator after the other findings
+        - post-change GitNexus `detect_changes(scope: unstaged)` reported LOW aggregate risk, 25 changed symbols across nine shared-worktree files, and no affected execution flows; the report includes the orchestrator's concurrent `CLAUDE.md` and shared log changes
+        - files touched specifically for this finding are `.claude/skills/sniff/SKILL.md`, `sniff/lib/README.md`, `sniff/lib/src/credentials.rs`, `sniff/lib/src/filesystem/git/remote_observation.rs`, `sniff/lib/src/remote/focused.rs`, `sniff/lib/tests/focused_provider.rs`, `sniff/lib/tests/remote_observation.rs`, and this log file
+- work completed for 'credential-safe-ambiguous-discovery' at 10:56:26-07:00
+- starting the work on 'azure-devops-contract-discovery' at 10:58:33-07:00
+        - required skills read before implementation: `darkmatter`, `rust`, `rust-testing`, and `sniff`; the planned regression coverage is hermetic Level 1 against the published Azure DevOps `ConnectionData` shape
+        - Sniff discovery with `sniff repo packages`, `sniff repo package-areas`, and `sniff repo package-dependencies` identified `sniff` as the changed implementation area and `darkmatter` as the direct provider-expression consumer named by the specification
+        - pre-edit GitNexus impact analysis reported **HIGH** risk for `discovery_from_signature`: eight affected symbols, one direct caller (`probe_self_hosted_provider`), four modules, and no indexed execution flow
+                - the two public paths in the affected graph are `remote_vendor_at` and `FocusedProviderClient::discover`; the orchestrator was warned before edits and the bounded contract correction proceeded under the explicit finding assignment
+        - the required optional-version model also reported **HIGH** impact for the crate-private `SelfHostedProviderDiscovery`: seven affected symbols, three direct users, three modules, and no indexed execution flow
+                - `FocusedProviderClient::from_discovered_flavor` and the test-only registration seam independently reported LOW risk; the orchestrator was warned before the type correction
+        - Microsoft documents `instanceId`, `deploymentId`, and `deploymentType` (`Hosted` or `OnPremises`) on `ConnectionData`, but no installed-product version field, response header, or discovery endpoint was found in the published contract
+                - the documented REST API-to-product/build mapping cannot identify the installed server without another authoritative version signal, so discovery retains no Azure version instead of inferring one
+        - Azure DevOps Server is now identified only from non-empty documented deployment identities with `deploymentType: OnPremises`; `Hosted`, missing, empty, incorrectly typed, and unknown identity values remain unidentified
+                - the crate-private discovery version is now optional; Azure retains `None`, while providers with documented version signatures preserve their verbatim versions and existing version-sensitive capability rules
+        - replaced the fabricated `deploymentVersion` fixture with the published `ConnectionData` shape and added Level-1 coverage for on-premises success, hosted rejection, missing/malformed identity rejection, and explicit absence of a discovered Azure version
+        - focused Level-1 verification passed three of three tests across the direct signature contract, six-provider discovery matrix, and hosted/malformed Azure cases
+        - the broader Sniff remote-observation Level-1 slice passed 18 of 18 tests, including the credential-boundary regressions from the preceding finding
+        - the focused Darkmatter provider-network consumer suite passed 29 of 29 tests
+        - `cd sniff && just lint` passed for `sniff`, its `darkmatter` dependency, and `sniff-cli`; `git diff --check` passed; no formatting command was run
+        - canonical `cd sniff && just test` remains blocked by review finding 3's independent host-state gap
+                - the run completed with 1,353 passed, one failed, three skipped, and 277 not run after fail-fast; `test_detect_with_base_dir` surfaced gix `NotARepository(MissingHead)` for the existing corrupt `/private/tmp/dmbench/after` registered checkout
+                - other cwd-dependent smoke tests showed the same `/private/tmp/dmbench/before` or `/private/tmp/dmbench/after` condition during retries; no registered worktree or host Git metadata was changed, and the corrected corruption contract was not weakened
+        - post-change GitNexus `detect_changes(scope: unstaged)` reported LOW aggregate risk, 32 changed symbols across nine shared-worktree files, and no affected execution flows; the report includes changes from the preceding finding and concurrent orchestrator work
+        - files touched specifically for this finding are `.claude/skills/sniff/SKILL.md`, `sniff/lib/README.md`, `sniff/lib/src/filesystem/git/remote_observation.rs`, `sniff/lib/src/remote/focused.rs`, `sniff/lib/tests/remote_observation.rs`, and this log file
+- work completed for 'azure-devops-contract-discovery' at 11:07:53-07:00
+- starting the work on 'canonical-sniff-level-1-gate' at 11:10:16-07:00
+        - required skills read before verification: `darkmatter`, `rust`, `rust-testing`, and `sniff`; the finding is an environmental acceptance-gate gap and does not warrant new implementation or test code
+        - Sniff discovery with `sniff repo packages`, `sniff repo package-areas`, and `sniff repo package-dependencies` confirmed `sniff` and `sniff-cli` as the canonical Level-1 gate scope
+        - created an isolated local clone with clean Git metadata, overlaid the current shared working tree while explicitly excluding `.git` and `target`, and confirmed the clone had exactly one registered worktree
+                - the first overlay attempt used a directory-only `.git/` exclusion that did not match this linked worktree's `.git` file; it failed safely inside the disposable directory before testing, and that exact directory was moved to Trash
+                - the successful retry used an exact `.git` exclusion and reproduced all nine current modified files without carrying the host's linked-worktree registrations
+        - the first isolated gate attempt proved the complete Sniff library tier green with 1,631 of 1,631 tests passing and three configured skips, then stopped while compiling `sniff-cli` because reused shared Cargo-cache artifacts were read-only
+                - cloned the existing Cargo target cache with macOS copy-on-write and made only the disposable clone writable; the shared target directory was not modified
+        - canonical `cd sniff && just test` then completed successfully in the clean environment
+                - `sniff`: 1,631 of 1,631 tests passed, three configured skips, and one handle-leak retry passed on its second attempt
+                - `sniff-cli`: 769 of 769 tests passed with three configured skips
+                - total: 2,400 of 2,400 selected tests passed; the corrupt `/private/tmp/dmbench/before` and `/private/tmp/dmbench/after` host registrations did not enter the isolated repository
+        - no source or test change was made for this environmental finding, the corrected corrupt-worktree contract was not weakened, and no host registration or `/private/tmp/dmbench` content was pruned, repaired, moved, deleted, or otherwise mutated
+        - moved the complete isolated repository and target-cache clone to Trash after the gate; no `/private/tmp/sniff-l1-review24.*` directory remains
+        - the preceding review findings already completed `cd sniff && just lint` successfully after their final source changes, so no redundant lint run was required for this log-only verification finding
+- work completed for 'canonical-sniff-level-1-gate' at 11:17:09-07:00
+        - final `cd darkmatter && just test` passed: 5,937 Darkmatter library tests, 561 CLI tests, and 633 DMLS tests
+        - final `cd darkmatter && just lint` passed for all three packages; `git diff --check` passed; no formatting command was run
+        - final GitNexus `detect_changes(scope: unstaged)` reported LOW risk, 30 changed symbols across 10 shared-worktree files, and no affected execution flows; the count includes the pre-existing `CLAUDE.md` change that was preserved and is not part of review cycle 24
+
+### Successful Completion
+
+The implementation of review cycle 24 has completed successfully in 45 minutes. During this implementation all 3 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 3 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred; `deferred_perf_measurement` remains `false`
+
+The files changed specifically for review cycle 24 are `.claude/skills/sniff/SKILL.md`, `sniff/lib/README.md`, `sniff/lib/src/credentials.rs`, `sniff/lib/src/filesystem/git/remote_observation.rs`, `sniff/lib/src/remote/focused.rs`, `sniff/lib/tests/focused_provider.rs`, `sniff/lib/tests/remote_observation.rs`, `darkmatter/features/2026-07-13-more-is-more/review-24.md`, and this log file.
