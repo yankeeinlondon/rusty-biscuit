@@ -111,16 +111,21 @@ fn profile_fixture(harness: &Harness, label: &str, raw: &str) {
         Parser::new_ext(&content, cleanup_parser_options())
             .into_offset_iter()
             .collect();
+    let opaque_body_lines = opaque_directive_body_lines(&content);
 
     harness.single(&format!("f25-{label}-stage1-extract-list-markers"), || {
-        black_box(extract_list_markers(&content, &events_with_ranges));
+        black_box(extract_list_markers(
+            &content,
+            &events_with_ranges,
+            &opaque_body_lines,
+        ));
     });
-    let list_markers = extract_list_markers(&content, &events_with_ranges);
-    let list_item_contexts = extract_list_item_contexts(&events_with_ranges);
-    let additional_paragraph_indents =
-        extract_unquoted_additional_paragraph_indents(&content, &events_with_ranges);
-    let indented_code_marker_ordinals =
-        extract_unquoted_indented_code_marker_ordinals(&events_with_ranges);
+    let list_markers = extract_list_markers(&content, &events_with_ranges, &opaque_body_lines);
+    let list_item_contexts = extract_list_item_contexts(&events_with_ranges, &opaque_body_lines);
+    let additional_paragraph_contexts =
+        extract_additional_paragraph_contexts(&content, &events_with_ranges, &opaque_body_lines);
+    let protected_markers =
+        extract_indented_code_markers(&events_with_ranges, &opaque_body_lines);
     let preferred_style = get_preferred_emphasis_style();
     harness.single(&format!("f25-{label}-stage1-preserve-emphasis"), || {
         black_box(preserve_original_emphasis(
@@ -159,23 +164,23 @@ fn profile_fixture(harness: &Harness, label: &str, raw: &str) {
     normalize_list_spacing(
         &mut after_normalize_spacing,
         ListSpacingMode::Normal,
-        &indented_code_marker_ordinals,
+        &protected_markers,
     );
     let mut after_blockquote = after_normalize_spacing.clone();
-    fix_blockquote_formatting(&mut after_blockquote);
+    fix_blockquote_formatting(&mut after_blockquote, &protected_markers);
     let mut after_restore_markers = after_blockquote.clone();
     restore_list_markers(
         &mut after_restore_markers,
         &list_markers,
-        &indented_code_marker_ordinals,
+        &protected_markers,
     );
     let mut after_fix_indentation = after_restore_markers.clone();
     fix_list_indentation(
         &mut after_fix_indentation,
         DEFAULT_INDENT,
         &list_item_contexts,
-        &additional_paragraph_indents,
-        &indented_code_marker_ordinals,
+        &additional_paragraph_contexts,
+        &protected_markers,
     );
 
     harness.single(&format!("f25-{label}-stage2-string-clone"), || {
@@ -201,7 +206,7 @@ fn profile_fixture(harness: &Harness, label: &str, raw: &str) {
             normalize_list_spacing(
                 working,
                 ListSpacingMode::Normal,
-                &indented_code_marker_ordinals,
+                &protected_markers,
             )
         },
     );
@@ -209,14 +214,14 @@ fn profile_fixture(harness: &Harness, label: &str, raw: &str) {
         harness,
         &format!("f25-{label}-stage2-fix-blockquote-formatting"),
         &after_normalize_spacing,
-        fix_blockquote_formatting,
+        |working| fix_blockquote_formatting(working, &protected_markers),
     );
     profile_line_pass(
         harness,
         &format!("f25-{label}-stage2-restore-list-markers"),
         &after_blockquote,
         |working| {
-            restore_list_markers(working, &list_markers, &indented_code_marker_ordinals)
+            restore_list_markers(working, &list_markers, &protected_markers)
         },
     );
     profile_line_pass(
@@ -228,8 +233,8 @@ fn profile_fixture(harness: &Harness, label: &str, raw: &str) {
                 working,
                 DEFAULT_INDENT,
                 &list_item_contexts,
-                &additional_paragraph_indents,
-                &indented_code_marker_ordinals,
+                &additional_paragraph_contexts,
+                &protected_markers,
             )
         },
     );

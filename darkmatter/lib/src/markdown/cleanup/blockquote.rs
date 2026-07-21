@@ -1,11 +1,31 @@
-pub(super) fn fix_blockquote_formatting(output: &mut String) {
+use super::lists::{ProtectedMarker, protected_marker_lines};
+
+pub(super) fn fix_blockquote_formatting(
+    output: &mut String,
+    protected_markers: &[ProtectedMarker],
+) {
     // Process line by line for clarity
     let mut result = String::with_capacity(output.len());
     let mut lines = output.lines().peekable();
+    let source_lines: Vec<&str> = output.lines().collect();
+    let protected_lines = protected_marker_lines(&source_lines, protected_markers);
+    let mut line_idx = 0usize;
     let mut in_code_block = false;
     let mut prev_was_blockquote = false;
 
     while let Some(line) = lines.next() {
+        let protected = protected_lines[line_idx];
+        line_idx += 1;
+
+        if protected {
+            result.push_str(&fix_protected_blockquote_line(line));
+            if lines.peek().is_some() {
+                result.push('\n');
+            }
+            prev_was_blockquote = true;
+            continue;
+        }
+
         // Track code blocks to avoid modifying content inside them
         if line.trim_start().starts_with("```") {
             in_code_block = !in_code_block;
@@ -69,6 +89,32 @@ pub(super) fn fix_blockquote_formatting(output: &mut String) {
     }
 
     *output = result;
+}
+
+/// Canonicalizes enclosing quote markers without consuming code indentation.
+fn fix_protected_blockquote_line(line: &str) -> String {
+    let line = if line.starts_with(" >") { &line[1..] } else { line };
+    let bytes = line.as_bytes();
+    let mut result = String::with_capacity(line.len());
+    let mut idx = 0usize;
+
+    while bytes.get(idx) == Some(&b'>') {
+        result.push('>');
+        idx += 1;
+        let whitespace_start = idx;
+        while bytes.get(idx) == Some(&b' ') {
+            idx += 1;
+        }
+        if bytes.get(idx) == Some(&b'>') {
+            result.push(' ');
+        } else {
+            result.push_str(&line[whitespace_start..]);
+            return result;
+        }
+    }
+
+    result.push_str(&line[idx..]);
+    result
 }
 
 /// Fixes a single blockquote line's prefix formatting.

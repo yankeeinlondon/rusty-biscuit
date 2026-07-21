@@ -3,6 +3,8 @@ use pulldown_cmark::{CowStr, Event};
 use std::ops::Range;
 use unicode_script::{Script, UnicodeScript};
 
+use super::lists::list_marker_byte_width;
+
 mod semantic;
 
 pub(super) fn collapse_incidental_soft_break_events<'a>(
@@ -352,9 +354,7 @@ impl LineMetadata {
             let starts_html = html_block.is_none().then(|| html_block_end(trimmed)).flatten();
             let starts_shell_block = directive_trimmed.starts_with("::shell-block");
             let ends_shell_block = directive_trimmed.starts_with("::end-block");
-            // Uses this module's marker parser rather than `lists::is_list_item_start` so the
-            // nine-digit ordinal cap applies to soft-break boundaries as well as reflow prefixes.
-            let list_item = list_marker_prefix_len(trimmed).is_some();
+            let list_item = list_marker_byte_width(trimmed).is_some();
             let line_span = line_offset..line_offset + line.len();
             let parsed_protected = parsed_protected_spans.is_some_and(|spans| {
                 spans.iter().any(|span| {
@@ -775,7 +775,7 @@ fn line_reflow_prefix(line: &str) -> ReflowPrefix {
     let outer_len = blockquote_prefix_len(line)
         .unwrap_or_else(|| line.len() - line.trim_start().len());
     let outer = &line[..outer_len];
-    if let Some(marker_len) = list_marker_prefix_len(&line[outer_len..]) {
+    if let Some(marker_len) = list_marker_byte_width(&line[outer_len..]) {
         let first_len = outer_len + marker_len;
         let first = line[..first_len].to_string();
         return ReflowPrefix {
@@ -792,65 +792,6 @@ fn line_reflow_prefix(line: &str) -> ReflowPrefix {
         first: outer.to_string(),
         continuation: outer.to_string(),
         first_len: outer_len,
-    }
-}
-
-fn list_marker_prefix_len(trimmed: &str) -> Option<usize> {
-    let marker_len = unordered_marker_prefix_len(trimmed).or_else(|| ordered_marker_prefix_len(trimmed))?;
-    let rest = &trimmed[marker_len..];
-    task_marker_prefix_len(rest).map_or(Some(marker_len), |task_len| Some(marker_len + task_len))
-}
-
-fn unordered_marker_prefix_len(trimmed: &str) -> Option<usize> {
-    let mut chars = trimmed.char_indices();
-    let (_, marker) = chars.next()?;
-    if !matches!(marker, '*' | '-' | '+') {
-        return None;
-    }
-    let (space_idx, space) = chars.next()?;
-    (space == ' ').then_some(space_idx + space.len_utf8())
-}
-
-/// Ordinal digit runs longer than this are not CommonMark list markers.
-///
-/// See <https://spec.commonmark.org/0.31.2/#ordered-list-marker>. A wider run such as
-/// `1234567890.` parses as ordinary paragraph text, so treating it as a marker would give prose a
-/// synthesized hanging indent during fixed-width reflow.
-const MAX_ORDERED_MARKER_DIGITS: usize = 9;
-
-fn ordered_marker_prefix_len(trimmed: &str) -> Option<usize> {
-    let bytes = trimmed.as_bytes();
-    if bytes.is_empty() || !bytes[0].is_ascii_digit() {
-        return None;
-    }
-
-    for (idx, &byte) in bytes.iter().enumerate().skip(1) {
-        // `idx` is also the length of the digit run scanned so far.
-        if idx > MAX_ORDERED_MARKER_DIGITS {
-            return None;
-        }
-        if byte == b'.' || byte == b')' {
-            return (bytes.get(idx + 1) == Some(&b' ')).then_some(idx + 2);
-        }
-        if !byte.is_ascii_digit() {
-            return None;
-        }
-    }
-
-    None
-}
-
-fn task_marker_prefix_len(rest: &str) -> Option<usize> {
-    let bytes = rest.as_bytes();
-    if bytes.len() >= 4
-        && bytes[0] == b'['
-        && matches!(bytes[1], b' ' | b'x' | b'X')
-        && bytes[2] == b']'
-        && bytes[3] == b' '
-    {
-        Some(4)
-    } else {
-        None
     }
 }
 

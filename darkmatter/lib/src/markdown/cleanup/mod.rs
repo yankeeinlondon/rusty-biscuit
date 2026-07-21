@@ -27,10 +27,10 @@ use emphasis::{
     unescape_emphasis_chars,
 };
 use lists::{
-    detect_list_indentation, extract_list_markers,
-    extract_list_item_contexts, extract_unquoted_additional_paragraph_indents,
-    extract_unquoted_indented_code_marker_ordinals, fix_list_indentation,
-    normalize_list_spacing, restore_list_markers,
+    detect_list_indentation, extract_additional_paragraph_contexts,
+    extract_indented_code_markers, extract_list_item_contexts, extract_list_markers,
+    fix_list_indentation, normalize_list_spacing, opaque_directive_body_lines,
+    restore_list_markers,
 };
 pub use reflow::{reflow_to_width, strip_incidental_newlines};
 use tables::align_tables_in_stream;
@@ -192,9 +192,11 @@ pub fn cleanup_content_loose(content: &str) -> String {
 
 /// Cleans up markdown content and enforces a consistent list indentation width.
 ///
-/// `indent_size` is the preferred column step between nested levels. When that
-/// column would not represent the same list structure in CommonMark, cleanup
-/// uses the nearest valid child column instead.
+/// `indent_size` is the configured column step between nested levels. An
+/// eight-column step uses legal marker padding on parent items when needed so
+/// narrow unordered, ordered, and task markers retain their parsed structure.
+/// Programmatic values outside the CLI-supported `2`, `4`, and `8` remain
+/// constrained to columns that CommonMark can parse as the same list tree.
 ///
 /// ## Examples
 ///
@@ -307,12 +309,13 @@ fn cleanup_content_internal(
     let events_with_ranges: Vec<(Event, Range<usize>)> = parser.into_offset_iter().collect();
 
     // Extract list markers from source for each list
-    let list_markers = extract_list_markers(content, &events_with_ranges);
-    let list_item_contexts = extract_list_item_contexts(&events_with_ranges);
-    let additional_paragraph_indents =
-        extract_unquoted_additional_paragraph_indents(content, &events_with_ranges);
-    let indented_code_marker_ordinals =
-        extract_unquoted_indented_code_marker_ordinals(&events_with_ranges);
+    let opaque_body_lines = opaque_directive_body_lines(content);
+    let list_markers = extract_list_markers(content, &events_with_ranges, &opaque_body_lines);
+    let list_item_contexts = extract_list_item_contexts(&events_with_ranges, &opaque_body_lines);
+    let additional_paragraph_contexts =
+        extract_additional_paragraph_contexts(content, &events_with_ranges, &opaque_body_lines);
+    let protected_markers =
+        extract_indented_code_markers(&events_with_ranges, &opaque_body_lines);
 
     // Determine emphasis style:
     // 1. If PREFER_ITALICS env var is set, use that style (standardize all emphasis)
@@ -372,17 +375,17 @@ fn cleanup_content_internal(
     normalize_list_spacing(
         &mut output,
         list_spacing,
-        &indented_code_marker_ordinals,
+        &protected_markers,
     );
 
     // Post-process to fix blockquote formatting issues from pulldown-cmark-to-cmark
-    fix_blockquote_formatting(&mut output);
+    fix_blockquote_formatting(&mut output, &protected_markers);
 
     // Restore original list markers (the library normalizes to '*')
     restore_list_markers(
         &mut output,
         &list_markers,
-        &indented_code_marker_ordinals,
+        &protected_markers,
     );
 
     // Normalize nested list indentation.
@@ -393,8 +396,8 @@ fn cleanup_content_internal(
             &mut output,
             indent_size,
             &list_item_contexts,
-            &additional_paragraph_indents,
-            &indented_code_marker_ordinals,
+            &additional_paragraph_contexts,
+            &protected_markers,
         );
     } else {
         let original_indent = detect_list_indentation(content, &events_with_ranges);
@@ -402,8 +405,8 @@ fn cleanup_content_internal(
             &mut output,
             original_indent,
             &list_item_contexts,
-            &additional_paragraph_indents,
-            &indented_code_marker_ordinals,
+            &additional_paragraph_contexts,
+            &protected_markers,
         );
     }
 
