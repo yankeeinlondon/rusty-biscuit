@@ -116,6 +116,11 @@ fn profile_fixture(harness: &Harness, label: &str, raw: &str) {
         black_box(extract_list_markers(&content, &events_with_ranges));
     });
     let list_markers = extract_list_markers(&content, &events_with_ranges);
+    let list_item_contexts = extract_list_item_contexts(&events_with_ranges);
+    let additional_paragraph_indents =
+        extract_unquoted_additional_paragraph_indents(&content, &events_with_ranges);
+    let indented_code_marker_ordinals =
+        extract_unquoted_indented_code_marker_ordinals(&events_with_ranges);
     let preferred_style = get_preferred_emphasis_style();
     harness.single(&format!("f25-{label}-stage1-preserve-emphasis"), || {
         black_box(preserve_original_emphasis(
@@ -151,13 +156,27 @@ fn profile_fixture(harness: &Harness, label: &str, raw: &str) {
     let mut after_unescape_emphasis = after_restore_emphasis.clone();
     unescape_emphasis_chars(&mut after_unescape_emphasis);
     let mut after_normalize_spacing = after_unescape_emphasis.clone();
-    normalize_list_spacing(&mut after_normalize_spacing, ListSpacingMode::Normal);
+    normalize_list_spacing(
+        &mut after_normalize_spacing,
+        ListSpacingMode::Normal,
+        &indented_code_marker_ordinals,
+    );
     let mut after_blockquote = after_normalize_spacing.clone();
     fix_blockquote_formatting(&mut after_blockquote);
     let mut after_restore_markers = after_blockquote.clone();
-    restore_list_markers(&mut after_restore_markers, &list_markers);
+    restore_list_markers(
+        &mut after_restore_markers,
+        &list_markers,
+        &indented_code_marker_ordinals,
+    );
     let mut after_fix_indentation = after_restore_markers.clone();
-    fix_list_indentation(&mut after_fix_indentation, DEFAULT_INDENT);
+    fix_list_indentation(
+        &mut after_fix_indentation,
+        DEFAULT_INDENT,
+        &list_item_contexts,
+        &additional_paragraph_indents,
+        &indented_code_marker_ordinals,
+    );
 
     harness.single(&format!("f25-{label}-stage2-string-clone"), || {
         black_box(after_unescape_emphasis.clone());
@@ -178,7 +197,13 @@ fn profile_fixture(harness: &Harness, label: &str, raw: &str) {
         harness,
         &format!("f25-{label}-stage2-normalize-list-spacing"),
         &after_unescape_emphasis,
-        |working| normalize_list_spacing(working, ListSpacingMode::Normal),
+        |working| {
+            normalize_list_spacing(
+                working,
+                ListSpacingMode::Normal,
+                &indented_code_marker_ordinals,
+            )
+        },
     );
     profile_line_pass(
         harness,
@@ -190,13 +215,23 @@ fn profile_fixture(harness: &Harness, label: &str, raw: &str) {
         harness,
         &format!("f25-{label}-stage2-restore-list-markers"),
         &after_blockquote,
-        |working| restore_list_markers(working, &list_markers),
+        |working| {
+            restore_list_markers(working, &list_markers, &indented_code_marker_ordinals)
+        },
     );
     profile_line_pass(
         harness,
         &format!("f25-{label}-stage2-fix-list-indentation"),
         &after_restore_markers,
-        |working| fix_list_indentation(working, DEFAULT_INDENT),
+        |working| {
+            fix_list_indentation(
+                working,
+                DEFAULT_INDENT,
+                &list_item_contexts,
+                &additional_paragraph_indents,
+                &indented_code_marker_ordinals,
+            )
+        },
     );
     profile_line_pass(
         harness,

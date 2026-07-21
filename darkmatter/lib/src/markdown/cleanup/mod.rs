@@ -27,8 +27,10 @@ use emphasis::{
     unescape_emphasis_chars,
 };
 use lists::{
-    detect_list_indentation, extract_list_markers, fix_list_indentation, normalize_list_spacing,
-    restore_list_markers,
+    detect_list_indentation, extract_list_markers,
+    extract_list_item_contexts, extract_unquoted_additional_paragraph_indents,
+    extract_unquoted_indented_code_marker_ordinals, fix_list_indentation,
+    normalize_list_spacing, restore_list_markers,
 };
 pub use reflow::{reflow_to_width, strip_incidental_newlines};
 use tables::align_tables_in_stream;
@@ -306,6 +308,11 @@ fn cleanup_content_internal(
 
     // Extract list markers from source for each list
     let list_markers = extract_list_markers(content, &events_with_ranges);
+    let list_item_contexts = extract_list_item_contexts(&events_with_ranges);
+    let additional_paragraph_indents =
+        extract_unquoted_additional_paragraph_indents(content, &events_with_ranges);
+    let indented_code_marker_ordinals =
+        extract_unquoted_indented_code_marker_ordinals(&events_with_ranges);
 
     // Determine emphasis style:
     // 1. If PREFER_ITALICS env var is set, use that style (standardize all emphasis)
@@ -362,26 +369,42 @@ fn cleanup_content_internal(
     //   Normal:  blank lines at level transitions, none between same-level items
     //   Compact: no blank lines between any list items
     //   Loose:   blank lines between all list items
-    normalize_list_spacing(&mut output, list_spacing);
+    normalize_list_spacing(
+        &mut output,
+        list_spacing,
+        &indented_code_marker_ordinals,
+    );
 
     // Post-process to fix blockquote formatting issues from pulldown-cmark-to-cmark
     fix_blockquote_formatting(&mut output);
 
     // Restore original list markers (the library normalizes to '*')
-    restore_list_markers(&mut output, &list_markers);
+    restore_list_markers(
+        &mut output,
+        &list_markers,
+        &indented_code_marker_ordinals,
+    );
 
     // Normalize nested list indentation.
     // When forced indentation is provided, use it for consistent nesting.
     // Otherwise preserve the source style when it differs from cmark's 2-space output.
     if let Some(indent_size) = forced_indent {
-        if indent_size != 2 {
-            fix_list_indentation(&mut output, indent_size);
-        }
+        fix_list_indentation(
+            &mut output,
+            indent_size,
+            &list_item_contexts,
+            &additional_paragraph_indents,
+            &indented_code_marker_ordinals,
+        );
     } else {
-        let original_indent = detect_list_indentation(content);
-        if original_indent > 2 {
-            fix_list_indentation(&mut output, original_indent);
-        }
+        let original_indent = detect_list_indentation(content, &events_with_ranges);
+        fix_list_indentation(
+            &mut output,
+            original_indent,
+            &list_item_contexts,
+            &additional_paragraph_indents,
+            &indented_code_marker_ordinals,
+        );
     }
 
     // Unescape unnecessarily escaped brackets (e.g., \[0%\] -> [0%])
