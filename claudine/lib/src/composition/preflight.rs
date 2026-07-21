@@ -276,6 +276,7 @@ pub fn resolve_lifecycle_shell_commands(
     effective_frontmatter: &serde_json::Value,
     context: &ComposeContext,
     source_path: &Path,
+    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
     file_ref_fallback_dir: Option<&Path>,
 ) -> Result<(), CompositionError> {
     let frontmatter: HashMap<String, serde_json::Value> = effective_frontmatter
@@ -292,17 +293,12 @@ pub fn resolve_lifecycle_shell_commands(
         .build()
         .map_err(|e| CompositionError::PreFlightStateBuildFailed { source: e })?;
 
-    // Preflight and event-time lifecycle evaluation share the document anchor
-    // and captured launch metadata, avoiding ambient-CWD-dependent results.
-    let mut resolution_ctx = ResolutionContext::new(
-        source_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| std::path::PathBuf::from(".")),
+    let resolution_ctx = super::document_expression_resolution_context(
+        source_path,
+        Some(context),
+        file_resolution_context,
+        file_ref_fallback_dir,
     );
-    if let Some(fallback) = file_ref_fallback_dir {
-        resolution_ctx = resolution_ctx.with_file_ref_fallback_dir(fallback.to_path_buf());
-    }
 
     for signal in LifecycleSignal::ALL {
         let event_name = signal.property_name();

@@ -714,6 +714,7 @@ fn lifecycle_shell_read_side_resolves_against_document_dir() {
         &frontmatter,
         &ComposeContext::capture(),
         &source_path,
+        None,
         Some(launch_dir.path()),
     )
     .expect("resolution against the document dir must succeed");
@@ -746,6 +747,7 @@ fn lifecycle_shell_read_side_does_not_resolve_launch_only_file() {
         &ComposeContext::capture(),
         &source_path,
         None,
+        None,
     )
     .expect("resolution still succeeds; file just resolves to absent");
 
@@ -753,5 +755,85 @@ fn lifecycle_shell_read_side_does_not_resolve_launch_only_file() {
         resolved_start_shell_command(&config),
         "echo false",
         "the launch-only spec.md must be unreachable from the document context",
+    );
+}
+
+#[test]
+#[serial_test::serial(file_resolution_snapshot)]
+fn lifecycle_shell_read_side_reuses_all_request_resolution_inputs() {
+    let request = tempfile::TempDir::new().unwrap();
+    let source_dir = request.path().join("prompts");
+    let home = request.path().join("home");
+    let magic = request.path().join("magic");
+    let package = request.path().join("package");
+    for dir in [&source_dir, &home, &magic, &package] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    for path in [
+        request.path().join("env.flag"),
+        home.join("home.flag"),
+        magic.join("magic.flag"),
+        package.join("package.flag"),
+    ] {
+        std::fs::write(path, "ready").unwrap();
+    }
+
+    let env_ref = "{{CLAUDINE_PREFLIGHT_SNAPSHOT_ROOT}}/env.flag";
+    let frontmatter = serde_json::json!({
+        "env_ref": env_ref,
+        "home_ref": "~/home.flag",
+        "magic_ref": "@magic.flag",
+        "package_ref": "!package.flag",
+    });
+    let fm_with_event = serde_json::json!({
+        "env_ref": env_ref,
+        "home_ref": "~/home.flag",
+        "magic_ref": "@magic.flag",
+        "package_ref": "!package.flag",
+        "start": {
+            "stack": [{"action": {"shell": concat!(
+                "echo {{ file_exists(env_ref) }} ",
+                "{{ file_exists(home_ref) }} ",
+                "{{ file_exists(magic_ref) }} ",
+                "{{ file_exists(package_ref) }}"
+            )}}]
+        }
+    });
+    let mut lifecycle = crate::composition::lifecycle::parse_lifecycle_config(
+        &fm_with_event,
+        Path::new("<test>"),
+    )
+    .unwrap();
+    let snapshot = biscuit_file::FileResolutionContext::from_snapshot(
+        request.path(),
+        Some(home),
+        std::collections::HashMap::from([(
+            "CLAUDINE_PREFLIGHT_SNAPSHOT_ROOT".to_string(),
+            request.path().display().to_string(),
+        )]),
+    )
+    .with_repository_root(request.path())
+    .with_package_area(package)
+    .add_magic_path(magic, biscuit_file::PathPosition::Start);
+
+    let ambient = tempfile::TempDir::new().unwrap();
+    let _home = test_toolkit::EnvGuard::set_safe("HOME", ambient.path());
+    let _env = test_toolkit::EnvGuard::set_safe(
+        "CLAUDINE_PREFLIGHT_SNAPSHOT_ROOT",
+        ambient.path(),
+    );
+    resolve_lifecycle_shell_commands(
+        &mut lifecycle,
+        &frontmatter,
+        &ComposeContext::capture(),
+        &source_dir.join("prompt.md"),
+        Some(&snapshot),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(
+        resolved_start_shell_command(&lifecycle),
+        "echo true true true true",
     );
 }

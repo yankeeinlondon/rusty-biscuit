@@ -781,7 +781,15 @@ impl<'a> Loader<'a> {
         reference: &str,
         origin: &Path,
     ) -> Result<PathBuf, CompositionError> {
-        source_resolution::resolve_sequence_reference(reference, origin).map(|p| canonical(&p))
+        match self.file_resolution_context.as_ref() {
+            Some(context) => source_resolution::resolve_sequence_reference_in_context(
+                reference,
+                origin,
+                context,
+            ),
+            None => source_resolution::resolve_sequence_reference(reference, origin),
+        }
+        .map(|p| canonical(&p))
     }
 
     /// Load and cache a data document (`kind: task`/`group`/`group-catalog`).

@@ -57,6 +57,123 @@ fn err_for(path: &str) -> CompositionError {
 mod loading {
     use super::*;
 
+    #[test]
+    #[serial_test::serial(file_resolution_snapshot)]
+    fn nested_references_reuse_all_request_resolution_inputs() {
+        let request = TempDir::new().unwrap();
+        let request_root = fs::canonicalize(request.path()).unwrap();
+        let source_dir = request_root.join("sequences");
+        let home = request_root.join("home");
+        let env_root = request_root.join("env");
+        let magic = request_root.join("magic");
+        let package = request_root.join("package");
+        for dir in [&source_dir, &home, &env_root, &magic, &package] {
+            fs::create_dir_all(dir).unwrap();
+        }
+
+        write_source(&home, "home.md", &[], "home\n");
+        write_yaml(
+            &home,
+            "home-task.yaml",
+            &json!({ "kind": "task", "prompt": "./home.md" }),
+        );
+        write_source(&env_root, "env.md", &[], "env\n");
+        write_yaml(
+            &env_root,
+            "env-task.yaml",
+            &json!({ "kind": "task", "prompt": "./env.md" }),
+        );
+        write_source(&package, "package.md", &[], "package\n");
+        write_yaml(
+            &package,
+            "package-task.yaml",
+            &json!({ "kind": "task", "prompt": "./package.md" }),
+        );
+
+        let nested = magic.join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        write_source(&nested, "magic.md", &[], "magic\n");
+        write_yaml(
+            &nested,
+            "magic-task.yaml",
+            &json!({ "kind": "task", "prompt": "./magic.md" }),
+        );
+        write_yaml(
+            &magic,
+            "group.yaml",
+            &json!({
+                "kind": "group",
+                "tasks": [
+                    { "task": "nested/magic-task.yaml" },
+                    { "task": "!package-task.yaml" },
+                ],
+            }),
+        );
+
+        let source = write_source(
+            &source_dir,
+            "seq.md",
+            &[(
+                "sequence",
+                json!([
+                    { "name": "home", "task": "~/home-task.yaml" },
+                    { "name": "env", "task": "{{CLAUDINE_SEQUENCE_SNAPSHOT_ROOT}}/env-task.yaml" },
+                    { "name": "magic-and-package", "group": "@group.yaml" },
+                ]),
+            )],
+            "Body.\n",
+        );
+        let resolved = crate::composition::resolve_composition_source(&source).unwrap();
+        let plan = resolve_sequence_plan(&resolved)
+            .unwrap()
+            .expect("fixture declares a sequence");
+        let snapshot = biscuit_file::FileResolutionContext::from_snapshot(
+            &request_root,
+            Some(home),
+            std::collections::HashMap::from([(
+                "CLAUDINE_SEQUENCE_SNAPSHOT_ROOT".to_string(),
+                env_root.display().to_string(),
+            )]),
+        )
+        .with_repository_root(request_root)
+        .with_package_area(package)
+        .add_magic_path(magic, biscuit_file::PathPosition::Start);
+
+        let ambient = TempDir::new().unwrap();
+        let _home = test_toolkit::EnvGuard::set_safe("HOME", ambient.path());
+        let _env = test_toolkit::EnvGuard::set_safe(
+            "CLAUDINE_SEQUENCE_SNAPSHOT_ROOT",
+            ambient.path(),
+        );
+        let graph = build_preflight_graph_with_context_and_resolution(
+            &plan,
+            &resolved,
+            darkmatter::markdown::compose::ComposeContext::capture(),
+            Some(&snapshot),
+        )
+        .unwrap();
+
+        let mut prompts: Vec<_> = graph
+            .prompt_documents
+            .iter()
+            .map(|document| document.path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        prompts.sort();
+        assert_eq!(prompts, ["env.md", "home.md", "magic.md", "package.md"]);
+
+        let PreflightAction::Group(group) = &graph.steps[2].task.as_ref().unwrap().action else {
+            panic!("the magic reference must load the external group");
+        };
+        assert_eq!(group.tasks.len(), 2);
+        assert!(
+            graph
+                .prompt_documents
+                .iter()
+                .any(|document| document.path == fs::canonicalize(nested.join("magic.md")).unwrap()),
+            "the nested task's prompt must resolve from the external group/task authoring base",
+        );
+    }
+
     /// A `task:` file, a `group:` file, and every `prompt:` under them are all
     /// loaded transitively — one preflight walk sees work three hops down.
     #[test]
