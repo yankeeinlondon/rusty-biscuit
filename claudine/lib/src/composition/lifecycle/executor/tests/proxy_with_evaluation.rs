@@ -496,26 +496,43 @@ fn a_handoff_assembles_into_an_evaluated_request_losslessly() {
 
 #[test]
 fn nested_ctx_refs_resolve_against_one_captured_snapshot() {
-    // A snapshot-less handoff (prepared_context: None) captures the fallback
-    // context ONCE for the whole overlay. Two `ctx.today` reads at different
-    // nesting depths must resolve to the same non-empty value.
+    take_proxy_with_fallback_capture_hints();
     let outcome = run_failure(
         proxy_stack(json!({
-            "top": "{{ ctx.today }}",
-            "nested": {"deep": ["{{ ctx.today }}"]}
+            "host_os": "{{ ctx.os }}",
+            "nested": {"deep": ["{{ ctx.agent }}"]}
         })),
         json!({}),
         None,
     );
     let (_, overlay, _) = proxy_of(&outcome);
-    let top = overlay
-        .get("top")
+    let host_os = overlay
+        .get("host_os")
         .and_then(Value::as_str)
-        .expect("top resolves to a string");
-    assert!(!top.is_empty(), "ctx.today must resolve; overlay: {overlay:?}");
+        .expect("ctx.os resolves to a string");
+    let agent = overlay
+        .get("nested")
+        .and_then(|nested| nested.pointer("/deep/0"))
+        .and_then(Value::as_str)
+        .expect("ctx.agent resolves to a string");
+    assert!(!host_os.is_empty(), "ctx.os must be populated: {overlay:?}");
+    assert!(!agent.is_empty(), "ctx.agent must be populated: {overlay:?}");
+
+    let capture_hints = take_proxy_with_fallback_capture_hints();
     assert_eq!(
-        overlay.get("nested"),
-        Some(&json!({ "deep": [top] })),
-        "nested ctx.today must equal the top-level capture; overlay: {overlay:?}"
+        capture_hints.len(),
+        1,
+        "the whole proxy.with overlay must use one fallback capture"
+    );
+    let combined_hint = &capture_hints[0];
+    assert!(
+        combined_hint.split_whitespace().any(|path| path == "ctx.os"),
+        "the combined scan must include the top-level OS context group: {combined_hint:?}"
+    );
+    assert!(
+        combined_hint
+            .split_whitespace()
+            .any(|path| path == "ctx.agent"),
+        "the combined scan must include the nested agent context group: {combined_hint:?}"
     );
 }

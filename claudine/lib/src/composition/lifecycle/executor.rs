@@ -1271,7 +1271,7 @@ impl StackExecutionContext<'_> {
                     .or(self.base_dir)
                     .unwrap_or_else(|| Path::new("."));
                 let content = proxy_with_scan_content(with);
-                let fallback = ComposeContext::capture_for_content(base, &content);
+                let fallback = capture_proxy_with_fallback(base, &content);
                 let walker = self.with_prepared_context(&fallback);
                 self.walk_proxy_with(&walker, with, target, location, fm)
             }
@@ -1399,6 +1399,24 @@ impl StackExecutionContext<'_> {
         }
         Ok(Some(n as u32))
     }
+}
+
+fn capture_proxy_with_fallback(base: &Path, content: &str) -> ComposeContext {
+    #[cfg(test)]
+    PROXY_WITH_FALLBACK_CAPTURE_HINTS.with(|hints| hints.borrow_mut().push(content.to_string()));
+
+    ComposeContext::capture_for_content(base, content)
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static PROXY_WITH_FALLBACK_CAPTURE_HINTS: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(test)]
+fn take_proxy_with_fallback_capture_hints() -> Vec<String> {
+    PROXY_WITH_FALLBACK_CAPTURE_HINTS.with(|hints| std::mem::take(&mut *hints.borrow_mut()))
 }
 
 /// Combined `ctx.*` scan content across a whole `with:` overlay, so a single
