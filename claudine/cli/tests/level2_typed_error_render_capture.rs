@@ -395,13 +395,54 @@ const TTY_COLOR: [(&str, &str); 2] = [("FORCE_COLOR", "1"), ("COLUMNS", "100")];
 /// The plain contract: a real TTY with colour suppressed.
 const TTY_NO_COLOR: [(&str, &str); 2] = [("NO_COLOR", "1"), ("COLUMNS", "100")];
 
-/// The auto-detect contract: a real TTY with neither override exported, so the
-/// wrapper's `Terminal::new()` probe — not `Terminal::new_optimistic()` — decides
-/// depth. `FORCE_COLOR=1` short-circuits `cli/src/log.rs::compute_terminal` into
-/// its forced-styling arm and never reaches that probe; only this const
-/// exercises the third arm, which is what an unforced `claudine` process
-/// actually runs in a real pane.
+/// The auto-detect contract: a real TTY with `NO_COLOR`, `FORCE_COLOR`, and
+/// `CLICOLOR_FORCE` absent, so the wrapper's `Terminal::new()` probe — not
+/// `Terminal::new_optimistic()` — decides depth. `FORCE_COLOR=1` short-circuits
+/// `cli/src/log.rs::compute_terminal` into its forced-styling arm and never
+/// reaches that probe; only this const exercises the third arm, which is what
+/// an unforced `claudine` process actually runs in a real pane.
 const TTY_AUTO: [(&str, &str); 1] = [("COLUMNS", "100")];
+
+const COLOR_OVERRIDES_ABSENT_MARKER: &str = "claudine_color_overrides_absent";
+
+/// Remove the color overrides installed by `TmuxHarness::spawn_shell`, then
+/// verify the interactive shell will not export any of them to Claudine.
+fn unset_and_prove_color_overrides_absent(harness: &mut TmuxHarness) {
+    harness
+        .send_text(b"unset NO_COLOR FORCE_COLOR CLICOLOR_FORCE\n")
+        .expect("unset color overrides");
+    let _ = biscuit_test_harness::wait_for_prompt(harness);
+
+    let probe = format!(
+        "if [ -z \"${{NO_COLOR+x}}\" ] && [ -z \"${{FORCE_COLOR+x}}\" ] && \
+         [ -z \"${{CLICOLOR_FORCE+x}}\" ]; then echo \
+         {COLOR_OVERRIDES_ABSENT_MARKER}; fi\n"
+    );
+    harness
+        .send_text(probe.as_bytes())
+        .expect("probe color overrides");
+
+    let stop = Instant::now() + Duration::from_secs(5);
+    loop {
+        let frame = harness.capture().expect("capture color override probe");
+        if frame
+            .plain
+            .lines()
+            .any(|line| line.trim() == COLOR_OVERRIDES_ABSENT_MARKER)
+        {
+            let _ = biscuit_test_harness::wait_for_prompt(harness);
+            return;
+        }
+        if Instant::now() >= stop {
+            panic!(
+                "NO_COLOR, FORCE_COLOR, or CLICOLOR_FORCE remained set in the \
+                 automatic-TTY pane.\nplain:\n{}",
+                frame.plain
+            );
+        }
+        harness.settle();
+    }
+}
 
 // --- Route 1: `initialize` proxy resolution -------------------------------
 
@@ -533,8 +574,8 @@ fn level2_initialize_proxy_block_is_plain_under_no_color_in_tmux() {
 /// `NO_COLOR`, `FORCE_COLOR`, and piped stderr variants ... where their output
 /// contracts differ"; the auto-detect arm (`Terminal::new()`) is the TTY case
 /// proper, and it is the code path an unforced `claudine` process actually
-/// runs in a real pane. Removing both overrides — rather than reusing
-/// `TTY_COLOR` — is what makes this distinct from the forced-colour test: a
+/// runs in a real pane. Unsetting all three overrides — rather than reusing
+/// `TTY_COLOR` — is what makes this distinct from the forced-color test: a
 /// regression that breaks `is_tty`/depth detection while leaving
 /// `FORCE_COLOR=1` working would pass the existing suite and fail this case.
 #[test]
@@ -543,6 +584,7 @@ fn level2_initialize_proxy_block_auto_detects_tty_color_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    unset_and_prove_color_overrides_absent(&mut harness);
     let staged = stage("claudine-l2-init-proxy-auto", INITIALIZE_PROXY_DOC, 0);
     let capture = run_in_pane(&mut harness, &staged, &TTY_AUTO, &[]);
 
@@ -645,11 +687,9 @@ fn level2_terminal_proxy_renders_status_block_in_tmux() {
 /// "Unresolvable file reference" headline, and the same `PROXY_TARGET_HINT`
 /// (identical by construction: both routes build the block from one constant).
 ///
-/// This test is the promotion the pin demanded: it asserts full AC5 identity
-/// across both routes, and keeps the one route-specific difference — the
-/// `initialize` route names its authoring event, the terminal route does not
-/// (its `event` is `None`) — as a separate, intentional assertion so that
-/// structured context is not mistaken for identity drift.
+/// Identity is asserted across both routes, while event and property context
+/// remain separate: the event-label assertion must not pass on the event name
+/// embedded in the property path.
 #[test]
 #[serial(level2_terminal)]
 fn level2_proxy_routes_share_identity_across_routes_in_tmux() {
@@ -734,13 +774,19 @@ fn level2_proxy_routes_share_identity_across_routes_in_tmux() {
         );
     }
 
-    // The one intentional route-specific difference, kept separate from identity:
-    // the initialize route names its authoring event; the terminal route does
-    // not (its `FileReferenceContext.event` is `None`).
+    // Match the event label rather than the event name embedded in the
+    // independently asserted property path.
     assert!(
-        init.frame.plain.contains("initialize"),
-        "the initialize route must name its authoring event in the surface.\nplain:\n{}",
+        init.frame.plain.contains("`initialize` event of"),
+        "the initialize route must render its structured event label separately \
+         from the property path.\nplain:\n{}",
         init.frame.plain
+    );
+    assert!(
+        term.frame.plain.contains("`failure` event of"),
+        "the terminal route must render its structured event label separately \
+         from the property path.\nplain:\n{}",
+        term.frame.plain
     );
 }
 
