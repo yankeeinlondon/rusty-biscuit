@@ -463,12 +463,12 @@ fn a_rebuild_that_keeps_the_provider_emits_no_credential_patch() {
     );
 }
 
-/// A moved session mode moves the structured-output shape with it, because both
-/// are read off one facet set rather than derived twice.
+/// OpenCode's stream protocol exposes whether a moved session mode moves the
+/// structured-output shape; Goose would hide that flip.
 #[test]
 fn moving_the_session_mode_moves_structured_streaming() {
-    // OpenCode speaks a stream protocol; Goose does not, and would hide the flip.
     let mut inputs = inputs();
+    inputs.invocation.facets.model = Some("fixture/opencode-model".to_string());
     inputs.invocation.facets.provider = Provider::OpenCode;
     inputs.invocation.args = replay(&inputs, &inputs.invocation.facets.clone())
         .unwrap()
@@ -494,7 +494,7 @@ fn moving_the_session_mode_moves_structured_streaming() {
 #[test]
 fn the_plan_and_its_yolo_env_agree_on_the_achieved_permission_mode() {
     let mut inputs = inputs();
-    // OpenCode's bypass is non-interactive only.
+    inputs.invocation.facets.model = Some("fixture/opencode-model".to_string());
     inputs.invocation.facets.provider = Provider::OpenCode;
     inputs.invocation.facets.yolo_requested = true;
     inputs.invocation.args = replay(&inputs, &inputs.invocation.facets.clone())
