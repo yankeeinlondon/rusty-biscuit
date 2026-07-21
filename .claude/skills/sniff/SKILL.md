@@ -1,7 +1,7 @@
 ---
 name: sniff
 description: Expert knowledge for sniff-lib and sniff-cli, a cross-platform system detection library and CLI for Rust. Use when detecting OS/hardware/network/filesystem info, program detection, service detection, adding new detection capabilities, or optimizing detection performance.
-hash: 3cd50ffff2b8b5db-4046c57a47c4c558
+hash: 3cd50ffff2b8b5db-3f3998a4deb9df25
 last_updated: 2026-07-21
 ---
 
@@ -159,7 +159,10 @@ or network I/O. Its production discovery path retains a self-hosted server's
 reported version when its documented identity response supplies one, derives
 version-sensitive capabilities conservatively when it does not, probes every
 ambiguous-host candidate anonymously, and retries authentication only after a
-response signature identifies the provider. Such retries use only
+response signature identifies the provider. If every authentication challenge
+is unsigned, exactly one configured exact-host provider credential may identify
+one candidate for retry; multiple configured candidates are rejected as
+ambiguous. Such retries use only
 `SNIFF_{PROVIDER}_{ENCODED_HOST}_TOKEN`; they
 never send global provider tokens to an unidentified self-hosted server. Discovery
 also retains this host-bound credential scope for the resulting client's provider

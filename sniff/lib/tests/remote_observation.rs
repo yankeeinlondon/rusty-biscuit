@@ -452,6 +452,166 @@ async fn ambiguous_discovery_keeps_credentials_host_and_provider_bound() {
 }
 
 #[tokio::test]
+#[serial]
+async fn unsigned_authentication_challenges_use_only_one_host_bound_provider_credential() {
+    let host_variables = [
+        "SNIFF_GITHUB_127_2E_0_2E_0_2E_1_TOKEN",
+        "SNIFF_GITLAB_127_2E_0_2E_0_2E_1_TOKEN",
+        "SNIFF_GITEA_127_2E_0_2E_0_2E_1_TOKEN",
+        "SNIFF_FORGEJO_127_2E_0_2E_0_2E_1_TOKEN",
+        "SNIFF_BITBUCKET_127_2E_0_2E_0_2E_1_TOKEN",
+        "SNIFF_AZURE_DEVOPS_127_2E_0_2E_0_2E_1_TOKEN",
+    ];
+    let _clean_host_variables = host_variables
+        .iter()
+        .map(|variable| EnvGuard::remove_safe(variable))
+        .collect::<Vec<_>>();
+    let global_tokens = [
+        ("GH_TOKEN", "unsigned-global-github-secret"),
+        ("GITHUB_TOKEN", "unsigned-global-github-fallback-secret"),
+        ("GITLAB_TOKEN", "unsigned-global-gitlab-secret"),
+        ("GITLAB_PRIVATE_TOKEN", "unsigned-global-gitlab-fallback-secret"),
+        ("GITEA_TOKEN", "unsigned-global-gitea-secret"),
+        ("FORGEJO_TOKEN", "unsigned-global-forgejo-secret"),
+        ("CODEBERG_TOKEN", "unsigned-global-codeberg-secret"),
+        ("BITBUCKET_TOKEN", "unsigned-global-bitbucket-secret"),
+        ("AZURE_DEVOPS_TOKEN", "unsigned-global-azure-secret"),
+    ];
+    let _global_tokens = global_tokens
+        .iter()
+        .map(|(name, value)| EnvGuard::set_safe(name, value))
+        .collect::<Vec<_>>();
+    let gitlab_variable = host_variables[1];
+
+    let host_token = EnvGuard::set_safe(gitlab_variable, "unsigned-host-gitlab-secret");
+    let success = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(|request: &wiremock::Request| {
+            if request.url.path() == "/api/v4/version"
+                && request.headers.contains_key("private-token")
+            {
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "version": "17.2.0",
+                    "revision": "a1b2c3d4"
+                }))
+            } else {
+                ResponseTemplate::new(401).set_body_json(serde_json::json!({
+                    "message": "authentication required"
+                }))
+            }
+        })
+        .expect(6)
+        .mount(&success)
+        .await;
+    assert_eq!(discovered_vendor(&success).await.unwrap(), "gitlab");
+    let requests = success.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 6);
+    let authenticated = requests
+        .iter()
+        .filter(|request| {
+            request.headers.contains_key("authorization")
+                || request.headers.contains_key("private-token")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(authenticated.len(), 1);
+    assert_eq!(authenticated[0].url.path(), "/api/v4/version");
+    assert_eq!(
+        authenticated[0].headers["private-token"].to_str().unwrap(),
+        "unsigned-host-gitlab-secret"
+    );
+    let rendered_requests = format!("{requests:?}");
+    for (_, secret) in global_tokens {
+        assert!(!rendered_requests.contains(secret));
+    }
+
+    drop(host_token);
+    let host_token = EnvGuard::set_safe(gitlab_variable, "unsigned-invalid-host-secret");
+    let invalid = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+            "message": "authentication required"
+        })))
+        .expect(6)
+        .mount(&invalid)
+        .await;
+    let error = discovered_vendor(&invalid).await.unwrap_err();
+    assert!(matches!(
+        error,
+        SniffError::InvalidCredentials { ref provider, .. } if provider == "GitLab"
+    ));
+    assert!(!format!("{error:?}\n{error}").contains("unsigned-invalid-host-secret"));
+
+    drop(host_token);
+    let host_token = EnvGuard::set_safe(gitlab_variable, "unsigned-forbidden-host-secret");
+    let forbidden = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(|request: &wiremock::Request| {
+            let status = if request.headers.contains_key("private-token") {
+                403
+            } else {
+                401
+            };
+            ResponseTemplate::new(status).set_body_json(serde_json::json!({
+                "message": "authentication required"
+            }))
+        })
+        .expect(6)
+        .mount(&forbidden)
+        .await;
+    let error = discovered_vendor(&forbidden).await.unwrap_err();
+    assert!(matches!(
+        error,
+        SniffError::RemoteForbidden { ref provider, .. } if provider == "GitLab"
+    ));
+    assert!(!format!("{error:?}\n{error}").contains("unsigned-forbidden-host-secret"));
+
+    drop(host_token);
+    let _missing_host_token = EnvGuard::remove_safe(gitlab_variable);
+    let missing = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+            "message": "authentication required"
+        })))
+        .expect(5)
+        .mount(&missing)
+        .await;
+    let error = discovered_vendor(&missing).await.unwrap_err();
+    assert!(matches!(error, SniffError::UnsupportedProvider { .. }));
+    let requests = missing.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 5);
+    let rendered_requests = format!("{requests:?}");
+    for (_, secret) in global_tokens {
+        assert!(!rendered_requests.contains(secret));
+    }
+
+    let _github_token = EnvGuard::set_safe(host_variables[0], "unsigned-host-github-secret");
+    let _gitlab_token = EnvGuard::set_safe(gitlab_variable, "unsigned-host-gitlab-secret");
+    let multiple = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+            "message": "authentication required"
+        })))
+        .expect(5)
+        .mount(&multiple)
+        .await;
+    let error = discovered_vendor(&multiple).await.unwrap_err();
+    assert!(matches!(
+        error,
+        SniffError::RemoteApi { ref message, .. }
+            if message.contains("multiple host-bound provider credentials")
+    ));
+    let rendered = format!("{error:?}\n{error}");
+    assert!(!rendered.contains("unsigned-host-github-secret"));
+    assert!(!rendered.contains("unsigned-host-gitlab-secret"));
+    let requests = multiple.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 5);
+    assert!(requests.iter().all(|request| {
+        !request.headers.contains_key("authorization")
+            && !request.headers.contains_key("private-token")
+    }));
+}
+
+#[tokio::test]
 async fn ambiguous_ssh_and_scp_vendor_discovery_reaches_the_https_host_policy() {
     for remote_url in [
         "ssh://git@git.example:2222/acme/project.git",

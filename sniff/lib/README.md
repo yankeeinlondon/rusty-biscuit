@@ -504,7 +504,11 @@ unidentified host. When an anonymous response establishes provider identity but
 requires authentication, discovery retries only that route and reads only the
 exact-host credential `SNIFF_{PROVIDER}_{ENCODED_HOST}_TOKEN`. The host encoding
 uppercases ASCII letters and renders every non-alphanumeric byte as `_XX_`
-(for example, `git.example` becomes `GIT_2E_EXAMPLE`). A client produced by
+(for example, `git.example` becomes `GIT_2E_EXAMPLE`). If anonymous probing
+returns only unsigned authentication challenges, exactly one configured
+exact-host provider credential identifies the sole route eligible for retry;
+multiple configured candidates are rejected as ambiguous, and global tokens
+are never considered. A client produced by
 ambiguous-host discovery retains that exact-host credential scope for subsequent
 provider queries; explicit known-provider clients keep the ordinary global-token
 contract. The client retains a reported server version when the provider's

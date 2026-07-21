@@ -416,6 +416,7 @@ pub(crate) fn probe_self_hosted_provider(
         .map_err(|error| unreachable(&remote, error))?;
     let mut discoveries = Vec::new();
     let mut identified_flavors = Vec::new();
+    let mut unsigned_auth_challenges = Vec::new();
     let mut focused_error = None;
     for (path, flavor) in [
         ("/api/v3/meta", ApiFlavor::GitHub),
@@ -454,6 +455,9 @@ pub(crate) fn probe_self_hosted_provider(
             .bytes()
             .map_err(|error| unreachable(&endpoint, error))?;
         let Some(discovery) = discovery_from_signature(flavor, &body, status)? else {
+            if matches!(status, 401 | 403) {
+                unsigned_auth_challenges.push((endpoint, flavor));
+            }
             continue;
         };
         if !identified_flavors.contains(&discovery.flavor) {
@@ -545,6 +549,89 @@ pub(crate) fn probe_self_hosted_provider(
                     .join(", ")
             ),
         });
+    }
+    if identified_flavors.is_empty() && !unsigned_auth_challenges.is_empty() {
+        let mut candidates = Vec::new();
+        for (endpoint, probe_flavor) in &unsigned_auth_challenges {
+            let flavors: &[ApiFlavor] = if *probe_flavor == ApiFlavor::Gitea {
+                &[ApiFlavor::Gitea, ApiFlavor::Forgejo]
+            } else {
+                std::slice::from_ref(probe_flavor)
+            };
+            for flavor in flavors {
+                let (token, _) = crate::credentials::host_bound_provider_token(*flavor, host);
+                if let Some(token) = token {
+                    candidates.push((endpoint, *probe_flavor, *flavor, token));
+                }
+            }
+        }
+        if candidates.len() > 1 {
+            return Err(SniffError::RemoteApi {
+                provider: "provider discovery".to_string(),
+                status: 401,
+                message: "multiple host-bound provider credentials match unsigned authentication challenges"
+                    .to_string(),
+            });
+        }
+        if let Some((endpoint, probe_flavor, selected_flavor, token)) = candidates.pop() {
+            let request = client
+                .get(endpoint.clone())
+                .header(reqwest::header::USER_AGENT, "sniff/provider-discovery");
+            let request = match selected_flavor {
+                ApiFlavor::GitLab => request.header("PRIVATE-TOKEN", &token),
+                ApiFlavor::AzureDevOps => request.basic_auth("", Some(&token)),
+                _ => request.bearer_auth(&token),
+            };
+            let response = request.send().map_err(|error| unreachable(endpoint, error))?;
+            let status = response.status().as_u16();
+            if (300..400).contains(&status) {
+                return Err(SniffError::RemoteUnreachable {
+                    url: endpoint.to_string(),
+                    message: "provider discovery redirect was blocked".to_string(),
+                });
+            }
+            let body = response
+                .bytes()
+                .map_err(|error| unreachable(endpoint, error))?;
+            return match status {
+                200..=299 => {
+                    let signed = discovery_from_signature(probe_flavor, &body, status)?;
+                    if signed
+                        .as_ref()
+                        .is_some_and(|discovery| discovery.flavor != selected_flavor)
+                    {
+                        Err(SniffError::RemoteApi {
+                            provider: "provider discovery".to_string(),
+                            status,
+                            message: "authenticated provider signature conflicts with the selected host-bound credential"
+                                .to_string(),
+                        })
+                    } else {
+                        Ok(signed.unwrap_or(SelfHostedProviderDiscovery {
+                            flavor: selected_flavor,
+                            version: None,
+                        }))
+                    }
+                }
+                401 => Err(SniffError::InvalidCredentials {
+                    provider: format!("{selected_flavor:?}"),
+                    message: "provider rejected credentials during discovery".to_string(),
+                }),
+                403 => Err(SniffError::RemoteForbidden {
+                    provider: format!("{selected_flavor:?}"),
+                    message: "provider denied authenticated discovery".to_string(),
+                }),
+                429 => Err(SniffError::RateLimited {
+                    provider: format!("{selected_flavor:?}"),
+                    retry_after: None,
+                }),
+                status => Err(SniffError::RemoteApi {
+                    provider: format!("{selected_flavor:?}"),
+                    status,
+                    message: "authenticated provider discovery endpoint failed".to_string(),
+                }),
+            };
+        }
     }
     match discoveries.as_slice() {
         [discovery] => Ok(discovery.clone()),
