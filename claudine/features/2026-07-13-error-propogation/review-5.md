@@ -8,6 +8,7 @@ implemented: true
 description: A **feature** review of `2026-07-13-error-propogation/spec.md`
 feature: 2026-07-13-error-propogation/review-5.md
 previous: 2026-07-13-error-propogation/review-4.md
+next: 2026-07-13-error-propogation/review-6.md
 ---
 
 # Review 5: End-to-End Typed Error Propagation
