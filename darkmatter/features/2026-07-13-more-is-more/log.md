@@ -3,6 +3,7 @@ implementation_15: "2026-07-18T01:11:14-07:00"
 implementation_17: "2026-07-19T08:49:09-07:00"
 implementation_18: "2026-07-19T10:23:12-07:00"
 implementation_20: "2026-07-19T18:43:08-07:00"
+implementation_21: "2026-07-20T22:31:43-07:00"
 deferred_perf_measurement: false
 ---
 
@@ -887,3 +888,144 @@ The five fixed findings are:
 Closing macOS gates across all five stacked findings, with real exit codes from unpiped runs: `sniff just test` **0** (1608 + 769), `sniff just lint` **0**, `darkmatter just test` **0** (5915 + 561 + 605), `darkmatter just lint` **0**.
 
 The files changed in this cycle are `sniff/lib/src/remote/{focused,types,provider,mod}.rs`, new `sniff/lib/src/remote/{provider_url,web_link}.rs`, `sniff/lib/src/filesystem/git/{remote_resolver,remote_observation,mod}.rs`, `sniff/lib/README.md`, `sniff/lib/tests/{focused_provider,remote_resolution}.rs`, `darkmatter/lib/src/markdown/compose/expression/functions/{provider,pull_requests,cicd,escape}.rs`, `darkmatter/lib/src/markdown/compose/tests/provider_network.rs`, new `darkmatter/dmls/src/overlay/doc_links.rs`, `darkmatter/dmls/src/overlay/expressions.rs`, `darkmatter/dmls/tests/lsp_session.rs`, and `darkmatter/docs/topics/darkmatter-expressions.md`.
+
+## Implementation of Review Findings #21
+
+> **started at:** 2026-07-20T22:31:43-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-13-more-is-more/review-21.md'
+- this is iteration 21 of the review-to-implement cycle
+- review 21 contains four High findings
+- verification scope established from the specification and `sniff` package discovery: `sniff` and `darkmatter` are directly affected; `claudine` is a downstream consumer to include when symbol impact requires it
+
+### Finding 1 (High) — neutral-host SSH/SCP provider discovery
+
+- starting the work on 'neutral-host-ssh-scp-provider-discovery' at 22:32:48-07:00
+        - GitNexus reports CRITICAL risk around the shared `ResolvedRemote` boundary (58 impacted symbols and four direct dependents); implementation is proceeding under the review's explicit request with changes constrained to provider discovery and production-path tests
+        - required skills read in full: `darkmatter`, `rust`, `rust-testing`, and `sniff`; the testing contract classifies the new hermetic discovery checks as Level 1
+        - `sniff repo packages`, `sniff repo package-areas`, and `sniff repo package-dependencies` confirm Sniff as the implementation area; Darkmatter is an indirect behavioral consumer through its provider-expression construction path, but this finding requires no Darkmatter source or API change
+        - focused GitNexus impact checks refine the blast radius: `FocusedProviderClient::discover` is LOW risk with no indexed upstream callers, while `probe_self_hosted_flavor` is LOW risk with two direct callers (`discover` and `remote_vendor_at`) and one indirect Darkmatter expression function
+        - the CRITICAL `ResolvedRemote` boundary does not need modification: the existing `endpoint.host` already retains the required authority, so the change can remain private to focused provider discovery
+        - implementation completed in `sniff/lib/src/remote/focused.rs`: unknown SSH/SCP remotes now synthesize `https://{endpoint.host}/` for the existing policy-checked bounded flavor probe; HTTP(S) remotes retain their configured scheme and non-default HTTP port, while SSH ports are deliberately discarded
+        - production completion remains shared across all detected flavors through `from_discovered_flavor`, so GitLab selects `/api/v4/` and Gitea/Forgejo select `/api/v1/` after the same discovery boundary
+        - Level-1 coverage added:
+                - two focused unit tests exercise both SSH URL and SCP syntax, assert the synthesized HTTPS origin excludes port `2222`, and cover GitLab, Gitea, and Forgejo production client construction
+                - `neutral_host_ssh_and_scp_discovery_checks_the_synthesized_https_host_policy` resolves real configured Git remotes and calls public `FocusedProviderClient::discover`, proving the production path now reaches exact-host policy instead of returning the former non-HTTP-transport capability error
+                - the focused filter ran 3 tests: **3 passed**, 1,611 skipped
+        - public documentation updated in `sniff/lib/README.md`; the `sniff` skill's formerly HTTP(S)-only description was updated for SSH/SCP discovery and its Darkmatter hash was refreshed with `md hash --save` (`md hash --diff`: no semantic changes detected)
+        - verification scope remained Sniff-only: the implementation changes only a private discovery input and introduces no public signature or Darkmatter source change
+        - final gates:
+                - `cd sniff && just test` — **passed**: 1,611 Sniff library tests and 769 Sniff CLI tests, with three expected skips in each package
+                - `cd sniff && just lint` — **passed** for `sniff` with `remote` enabled and `sniff-cli`
+                - `git diff --check` — **passed**
+                - GitNexus `detect_changes(scope: unstaged)` reports LOW risk, no affected execution process, and the intended `FocusedProviderClient::discover` change; its extra `JobProjection`/adjacent-symbol hits are line-range over-attribution from the inserted helper, not changed fields
+- work completed for 'neutral-host-ssh-scp-provider-discovery' at 22:43:03-07:00
+
+### Finding 2 (High) — version-aware Gitea/Forgejo capabilities
+
+- starting the work on 'gitea-forgejo-version-capabilities' at 22:43:39-07:00
+        - required skills read in full before implementation: `darkmatter`, `rust`, `rust-testing`, and `sniff`; the new hermetic provider checks are Level 1
+        - `sniff repo packages`, `sniff repo package-areas`, and `sniff repo package-dependencies` established `sniff` and `darkmatter` as the directly affected package areas
+        - pre-edit GitNexus impact analysis was completed for every indexed symbol changed by this finding
+                - `FocusedProviderClient::new` and `with_api_base` reported HIGH risk because their construction contract reaches 39 and 49 transitive dependents respectively; the orchestrator was warned before edits
+                - `query_cicd_jobs` reported MEDIUM risk with 13 impacted symbols; discovery, capability, exact-job, remote-vendor, error-classification, and fixture symbols were LOW risk
+                - the implementation preserved existing cloud-provider and pull-request behavior and constrained the version-sensitive change to self-hosted Gitea/Forgejo CI/CD job capabilities
+        - source inspection of the official upstream routers established operation-specific thresholds rather than assuming a shared Actions version
+                - Gitea 1.24.6 lacks repository job lookup/listing, while stable Gitea 1.25.0 adds `GET /repos/{owner}/{repo}/actions/jobs/{job_id}` and `GET /repos/{owner}/{repo}/actions/jobs` with `page`/`limit` pagination
+                - Forgejo releases through 14.0 expose repository run routes but not the exact/list job endpoint pair required by the normalized contract, so Forgejo does not inherit Gitea's threshold merely because both use `/api/v1`
+        - Sniff discovery now retains a structured self-hosted result containing concrete API flavor plus the verbatim server-reported version
+                - `FocusedProviderClient` retains `FocusedProviderDiscovery { api_flavor, server_version, capabilities }`; `capabilities()` is derived from the flavor/version pair rather than the flavor alone
+                - stable Gitea 1.25.0 and newer enable exact and direct-list job operations; a prerelease such as `1.25.0-rc1`, older Gitea, unversioned Gitea, and Forgejo through 14.0 keep them disabled
+                - supported Gitea listing uses `/actions/jobs` and the provider's `limit` query key; existing Gitea Darkmatter fixtures were migrated from the obsolete parent-run traversal to the 1.25 direct endpoint
+                - exact and list operations call the capability guard before validation, credentials, or network I/O; unsupported errors preserve Git provider family, concrete API flavor, detected version, operation, and the actionable version requirement
+        - Darkmatter classifies `UnsupportedServerVersion` as an unsupported-capability provider failure, preserving fatal focused-error parity across frontmatter interpolation, body interpolation, and `$()` ternary conditions
+        - Level-1 coverage added and updated
+                - Sniff crosses the Gitea 1.24.6/1.25.0 boundary, distinguishes stable releases from prereleases, verifies exact/list endpoint shapes and pagination, confirms discovery retention, and proves unsupported Gitea/Forgejo operations make no post-discovery request
+                - Darkmatter's production-path Gitea 1.24.6 fixture verifies exact and list failures on all three expression surfaces and asserts that only bounded version probes reached the server
+                - the focused Sniff threshold/discovery filter passed 4/4; the focused Darkmatter boundary test passed; the migrated Darkmatter provider cluster passed 5/5
+        - public documentation now records the version-aware capability contract in `sniff/lib/README.md` and `.claude/skills/sniff/SKILL.md`; the skill hash was refreshed with `md hash --save` and verified with `md hash --diff`
+        - final package-area gates passed
+                - `cd sniff && just test` — 1,614/1,614 Sniff library tests and 769/769 Sniff CLI tests passed, with three expected skips in each package
+                - `cd sniff && just lint` — clean for `sniff` with `remote` enabled and `sniff-cli`
+                - `cd darkmatter && just test` — 5,937/5,937 Darkmatter library tests, 561/561 Darkmatter CLI tests, and 633/633 DMLS tests passed, with expected skips
+                - `cd darkmatter && just lint` — clean for `darkmatter`, `darkmatter-cli`, and `dmls`
+                - `git diff --check` — passed
+        - final GitNexus `detect_changes(scope: unstaged)` reports LOW aggregate risk and no affected execution processes; its broader changed-symbol list includes Finding 1 and line-range over-attribution in the shared worktree
+        - no part of this finding was deferred: Forgejo job operations are deliberately rejected through the source-proven released-version range rather than represented as implemented
+- work completed for 'gitea-forgejo-version-capabilities' at 23:22:55-07:00
+
+### Finding 3 (High) — encoded provider identity delimiters
+
+- starting the work on 'encoded-provider-identity-delimiters' at 23:24:28-07:00
+        - required skills loaded before edits: `darkmatter`, `rust`, `rust-testing`, and `sniff`
+        - scope discovery with `sniff repo packages`, `sniff repo package-areas`, and `sniff repo package-dependencies` identified `sniff` as the directly changed package area; Darkmatter remains an error-projection consumer and will be included only if its focused boundary tests require a source or test change
+        - pre-edit GitNexus upstream impact analysis found no High or Critical symbol on this change path
+                - `provider_url::identity`: LOW risk, 6 impacted symbols, 4 direct callers, no affected execution processes
+                - `focused::repo_path`: MEDIUM risk, 32 impacted symbols, 6 direct callers, no affected execution processes
+                - `FocusedProviderClient::{pr_exact_path,job_exact_path,parent_jobs_path}`: LOW risk, 8/5/15 impacted symbols respectively, one direct caller each, no affected execution processes
+                - `provider_url::{flat,step_route,project_path,encoded_project}` and `focused::encoded_project`: LOW risk, at most 3 impacted symbols each, no affected execution processes
+        - implementation strategy: reject decoded repository coordinates containing reserved URL delimiters, backslashes, controls, or exact dot segments, and independently percent-encode every repository/item segment at the provider request-path boundary so even an internally constructed `ResolvedRemote` cannot retarget a request
+        - implementation completed in the Sniff provider boundary
+                - flat GitHub/Gitea/Forgejo/Bitbucket coordinates and GitLab web/API project paths now validate each decoded repository segment with a Unicode-preserving grammar that excludes ASCII URL syntax, backslashes, controls, whitespace, and exact `.`/`..` segments
+                - opaque item identifiers retain provider-native forms such as brace-wrapped Bitbucket UUIDs while rejecting decoded URL delimiters, percent ambiguity, controls, whitespace, and dot segments
+                - exact PR/job, list PR/job, parent-run, and Bitbucket composite request paths now encode repository, item, parent, and step identities segment-by-segment; internally constructed exact dot identities are double-escaped because WHATWG URL joining recognizes singly percent-encoded dot segments as traversal
+                - `SniffError::InvalidRemoteQuery { field: "id", ... }` remains the typed pre-I/O malformed-reference result; its existing Darkmatter projection remains an actionable authoring error, so no Darkmatter source change was required
+        - Level-1 coverage added in `sniff/lib/tests/focused_provider.rs`
+                - malformed canonical PR/job tables cover `%3F`, `%23`, `%5C`, encoded controls, encoded `.`/`..`, GitLab's encoded project path, and Bitbucket composite identity segments
+                - canonical-reference positives retain accented Latin and CJK repository identities
+                - one Wiremock test drives Unicode, delimiter/control-bearing internally constructed identities, and exact dot segments through all four Gitea request surfaces: exact PR, PR list, exact job, and job list; every expected path is encoded and recorded requests prove identity bytes did not become a query, fragment, or traversal
+                - focused selector passed 3/3 after correcting the assertion to distinguish the legitimate PR `state=open` query from the hostile identity's `state=closed`; the complete focused-provider integration binary then passed 48/48
+        - public behavior documentation in `sniff/lib/README.md` now records decoded-identity validation and the independent request-segment encoding boundary
+        - final package-area gates passed
+                - `cd sniff && just test` — 1,617/1,617 Sniff library tests and 769/769 Sniff CLI tests passed, with three expected skips in each package
+                - `cd sniff && just lint` — clean for `sniff` with `remote` enabled and `sniff-cli`; a second cached run confirmed exit code 0
+                - `git diff --check` — passed
+        - final GitNexus `detect_changes(scope: unstaged)` reports LOW aggregate risk and no affected execution processes; the 11-file/70-symbol report includes completed Findings 1–2 and line-range over-attribution in shared source files as well as this finding's intended provider URL/path symbols
+        - verification remained Sniff-only because no public signature or Darkmatter error-projection behavior changed; malformed canonical references still become pre-I/O typed `InvalidRemoteQuery` values and Darkmatter retains the actionable error text
+        - no part of this finding was deferred
+- work completed for 'encoded-provider-identity-delimiters' at 23:37:57-07:00
+
+### Finding 4 (High) — required Linux and Windows passing evidence
+
+- starting the work on 'linux-windows-passing-evidence' at 23:38:44-07:00
+        - review decision: use Docker to obtain Linux results and defer Windows for this cycle
+        - `sniff repo packages`, package-area discovery, and the specification's AC16/AC29 established Sniff and Darkmatter as the directly affected verification scope
+        - Linux evidence was collected in a native AArch64 Docker container running Debian 13 (trixie), LinuxKit 6.12.76, glibc 2.41, Rust 1.97.1, just 1.56.0, nextest 0.9.136, and protoc 3.21.12
+        - the container used a committed throwaway Git fixture owned by an unprivileged user, an executable tmpfs, and a host-backed target directory; network access remained enabled because two existing Sniff enrichment tests query the public Cargo and npm registries, while provider-query suites remained hermetic through Wiremock
+        - real Linux gates exposed and fixed portability defects before the final passing run
+                - the Linux integration test was updated for the current `detect_linux_package_managers` signature
+                - the OS JSON snapshot now normalizes distribution-specific fields rather than recording macOS-only values
+                - shell-expansion parser fixtures use `rustc`, which is guaranteed on the Rust test runner's `PATH`, instead of assuming the macOS-provided `uuidgen` executable exists on Linux
+                - Rust 1.97 Clippy findings were corrected in Sniff's property, duration, Linux route, and SSH URL parsers and in Darkmatter CLI approval-error matching; these are mechanical equivalents with no behavior change
+        - Linux `just build` passed for the Sniff library and CLI and for the Darkmatter library, CLI, and DMLS; the subsequent final-source test and lint gates recompiled all changed production paths
+        - Linux `cd sniff && just test` passed on the final source
+                - Sniff library: 1,598 passed, 3 tier-gated tests skipped
+                - Sniff CLI: 769 passed, 3 tier-gated tests skipped
+        - Linux Sniff lint passed; the final changed Sniff library also passed the warnings-denied Darkmatter lint graph after the Rust 1.97 mechanical corrections
+        - Linux `cd darkmatter && just test` passed on the final source
+                - Darkmatter library: 5,937 passed, 136 tier-gated tests skipped
+                - Darkmatter CLI: 561 passed, 71 tier-gated tests skipped
+                - DMLS: 633 passed, 3 tier-gated tests skipped
+        - Linux `cd darkmatter && just lint` passed for the Darkmatter library, CLI, and DMLS with warnings denied
+        - practical macOS confirmation after the portability corrections passed
+                - 73 focused Sniff parser tests, the Sniff CLI OS JSON snapshot, and the three adjusted Darkmatter shell-suffix tests passed
+                - `cd sniff && just lint` and `cd darkmatter && just lint` passed in full
+                - an additional full Sniff test attempt was not used as evidence because unrelated host-discovery tests race over the process current directory and encountered another test's removed `/private/tmp/dmbench/after` fixture; the focused tests and both final lint gates were unaffected, and the required full final-source behavioral evidence is the passing Linux run above
+        - GitNexus `detect_changes(scope: all)` reports LOW aggregate risk, zero affected execution flows, and the expected portability symbols among the shared cycle's changes; `git diff --check` passed for every file changed by this finding
+        - Windows evidence was intentionally not attempted because Review 21 explicitly selected Docker Linux evidence and deferment of Windows for this cycle
+        - this is a platform-evidence deferment, not a performance deferment; `deferred_perf_measurement` remains `false`
+- work DEFERRED for 'linux-windows-passing-evidence' at 01:39:48-07:00 — reason: Linux build, test, and lint evidence passed in Docker, while Windows evidence was explicitly deferred by the Review 21 decision
+
+### Successful Completion
+
+The implementation of review cycle 21 has completed successfully in 3 hours 10 minutes. During this implementation all 4 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 3 were fixed, 1 was deferred (see reason below):
+
+- **Finding 4 (High) — required Linux and Windows passing evidence** — partially deferred. Native Linux AArch64 build, test, and lint evidence passed in Docker for every directly affected package, closing the Linux half of the finding. Windows evidence was explicitly deferred by Review 21's decision and was not attempted in this cycle. This is a platform-evidence deferment, not a performance deferment, so `deferred_perf_measurement` remains `false`
+
+The three fixed findings are:
+
+- **Finding 1 (High)** — neutral-host SSH/SCP remotes now enter policy-checked production provider discovery through a host-only HTTPS origin without reinterpreting SSH ports
+- **Finding 2 (High)** — self-hosted discovery retains provider family and server version, derives operation-specific Gitea/Forgejo job capabilities, and returns actionable pre-I/O unsupported-version errors
+- **Finding 3 (High)** — canonical provider identities reject encoded structural delimiters, controls, backslashes, and dot segments, while request paths independently encode every identity segment and preserve valid Unicode
+
+The files changed in this cycle are `.claude/skills/sniff/SKILL.md`, `sniff/lib/README.md`, `sniff/lib/src/{error,network/mod}.rs`, `sniff/lib/src/filesystem/{formatting,git/recent_commits,git/remote_observation}.rs`, `sniff/lib/src/remote/{focused,provider_url,url_parser}.rs`, `sniff/lib/tests/{focused_provider,integration}.rs`, `sniff/cli/tests/snapshots.rs`, `sniff/cli/tests/snapshots/snapshots__os_json_summary.snap`, `darkmatter/lib/src/markdown/compose/expression/functions/provider.rs`, `darkmatter/lib/src/markdown/compose/tests/provider_network.rs`, `darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs`, `darkmatter/cli/src/commands/compose.rs`, `darkmatter/features/2026-07-13-more-is-more/review-21.md`, and this log file.
