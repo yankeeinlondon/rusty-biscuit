@@ -34,18 +34,8 @@ use super::normalize::normalize_plan;
 /// document's directory is the base and the launch directory is never a
 /// fallback here.
 pub fn resolve_sequence_reference(raw: &str, source_path: &Path) -> Result<PathBuf, CompositionError> {
-    // A leading `@/` is the magic-root search for `x`, identical to `@x`;
-    // normalize it as explicit `FileReference` input rather than string surgery.
-    let normalized;
-    let ref_input = if let Some(rest) = raw.strip_prefix("@/") {
-        normalized = format!("@{rest}");
-        &normalized
-    } else {
-        raw
-    };
-
     let file_ref =
-        FileReference::new(ref_input).map_err(|e| CompositionError::SequenceExternalLoad {
+        FileReference::new(raw).map_err(|e| CompositionError::SequenceExternalLoad {
             context: format!("`{raw}`"),
             source: e.into(),
         })?;
@@ -71,14 +61,7 @@ pub fn resolve_sequence_reference_in_context(
     source_path: &Path,
     request_context: &FileResolutionContext,
 ) -> Result<PathBuf, CompositionError> {
-    let normalized;
-    let ref_input = if let Some(rest) = raw.strip_prefix("@/") {
-        normalized = format!("@{rest}");
-        &normalized
-    } else {
-        raw
-    };
-    let file_ref = FileReference::new(ref_input).map_err(|e| {
+    let file_ref = FileReference::new(raw).map_err(|e| {
         CompositionError::SequenceExternalLoad {
             context: format!("`{raw}`"),
             source: e.into(),

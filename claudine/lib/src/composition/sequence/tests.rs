@@ -1,10 +1,12 @@
 use super::*;
 use super::expr::{SourceExpressionLookup, render_interpolated};
 use super::grammar::{SequenceSourceSpec, SourceOperator, classify_source};
-use super::source::resolve_sequence_reference;
+use super::source::{resolve_sequence_reference, resolve_sequence_reference_in_context};
+use biscuit_file::{FileReference, FileReferenceError, FileResolutionContext};
 use serde_json::Value;
 use crate::composition::error::SequenceLoadCause;
-use darkmatter::markdown::{Frontmatter, Markdown};
+use darkmatter::markdown::compose::{ComposeOptions, TransclusionError};
+use darkmatter::markdown::{Frontmatter, Markdown, MarkdownError};
 use serde_json::json;
 use serial_test::serial;
 use std::fs;
@@ -698,8 +700,7 @@ fn explicit_dot_slash_is_source_relative_only() {
     );
 }
 
-/// `@/x` normalizes to `@x` (magic-root search) — the normalization is
-/// preserved as explicit `FileReference` input, resolving identically to `@x`.
+/// `@/x` and `@x` are equivalent spellings in the shared grammar.
 #[test]
 fn at_slash_normalizes_to_magic_search() {
     let dir = TempDir::new().unwrap();
@@ -719,6 +720,53 @@ fn at_slash_normalizes_to_magic_search() {
         via_at_slash.canonicalize().unwrap(),
         "`@/prompts/...` must resolve identically to `@prompts/...`",
     );
+}
+
+#[test]
+fn rooted_magic_payload_is_rejected_across_file_sequence_and_transclusion_surfaces() {
+    let dir = TempDir::new().unwrap();
+    let source_path = dir.path().join("guide.md");
+    fs::write(&source_path, "# Guide\n").unwrap();
+    let request_context = FileResolutionContext::new(dir.path());
+
+    for raw in ["@//escape.md", "%@//escape.md"] {
+        assert!(matches!(
+            FileReference::new(raw),
+            Err(FileReferenceError::InvalidSyntax(_))
+        ));
+
+        let sequence_error = resolve_sequence_reference(raw, &source_path).unwrap_err();
+        assert!(matches!(
+            sequence_error,
+            CompositionError::SequenceExternalLoad {
+                source: SequenceLoadCause::Reference(FileReferenceError::InvalidSyntax(_)),
+                ..
+            }
+        ));
+
+        let contextual_sequence_error =
+            resolve_sequence_reference_in_context(raw, &source_path, &request_context).unwrap_err();
+        assert!(matches!(
+            contextual_sequence_error,
+            CompositionError::SequenceExternalLoad {
+                source: SequenceLoadCause::Reference(FileReferenceError::InvalidSyntax(_)),
+                ..
+            }
+        ));
+
+        let markdown: Markdown = format!("::file {raw}\n").into();
+        let transclusion_error = markdown
+            .compose_with(ComposeOptions::new().with_source_file(&source_path))
+            .unwrap_err();
+        assert!(matches!(
+            transclusion_error,
+            MarkdownError::Transclusion(inner)
+                if matches!(
+                    inner.as_ref(),
+                    TransclusionError::FileReference(FileReferenceError::InvalidSyntax(_))
+                )
+        ));
+    }
 }
 
 #[test]
