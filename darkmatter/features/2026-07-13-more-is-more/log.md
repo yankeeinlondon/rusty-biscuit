@@ -5,6 +5,7 @@ implementation_18: "2026-07-19T10:23:12-07:00"
 implementation_20: "2026-07-19T18:43:08-07:00"
 implementation_21: "2026-07-20T22:31:43-07:00"
 implementation_22: "2026-07-21T08:34:57-07:00"
+implementation_23: "2026-07-21T09:24:12-07:00"
 deferred_perf_measurement: false
 ---
 
@@ -1137,3 +1138,103 @@ The two fixed findings are:
 - **Finding 2 (High)** — full Git detection and public worktree listing now tolerate only genuinely stale absolute linked-worktree registrations while preserving malformed metadata, trust, permission, I/O, and analysis errors; the canonical Sniff Level-1 suite is green with the host's stale registrations left untouched
 
 The files changed in this cycle are `sniff/lib/src/filesystem/git/{open,remote_observation,remote_refresh,worktree}.rs`, `sniff/lib/src/remote/focused.rs`, `sniff/lib/tests/{focused_provider,git_parity,remote_observation}.rs`, `darkmatter/features/2026-07-13-more-is-more/review-22.md`, and this log file.
+
+## Implementation of Review Findings #23
+
+> **started at:** 2026-07-21T09:24:12-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'darkmatter/features/2026-07-13-more-is-more/review-23.md'
+- this is iteration 23 of the review-to-implement cycle
+- review 23 contains three findings:
+        - **High** — ambiguous-provider discovery omits required server flavors and credentials
+        - **High** — existing corrupt linked worktrees are silently discarded as stale
+        - **High** — successful public ambiguous SSH/SCP discovery is still unverified
+- impacted package areas from the specification and review are `sniff` and `darkmatter`; all required verification is Level 1
+
+### Finding 1 (High) — ambiguous-provider discovery omits required server flavors and credentials
+
+- starting the work on 'authenticated-six-flavor-provider-discovery' at 09:25:28-07:00
+        - required skills read before implementation: `darkmatter`, `rust`, `rust-testing`, and `sniff`; the requested Wiremock coverage is hermetic Level 1 because it uses only disposable repositories, process-local environment guards, and loopback HTTP fixtures
+        - scope discovery with `sniff repo packages`, `sniff repo package-areas`, and `sniff repo package-dependencies` established the `sniff` package area as the directly changed implementation and gate scope; Darkmatter consumes the unchanged `remote_vendor_at` string contract and required no source change for this finding
+        - pre-edit GitNexus impact analysis reported **HIGH** risk for `probe_self_hosted_provider`: five affected symbols, two direct callers (`remote_vendor_at` and `FocusedProviderClient::discover`), three modules including Darkmatter's expression consumer, and no indexed execution flow
+                - the orchestrator was warned before any edit, work paused, and the bounded change proceeded only after explicit authorization
+                - the shared focused-provider `credential` authority was MEDIUM risk with one direct caller and 30 transitive test/query symbols; the public `ApiFlavor` enum and `remote_vendor_at` were LOW risk
+        - implemented one all-candidate provider-signature table for GitHub Enterprise, GitLab self-managed, Gitea, Forgejo, Bitbucket Data Center, and Azure DevOps Server
+                - every candidate is probed before classification, so two or more valid signatures produce an explicit conflicting-signatures error instead of first-success guessing
+                - structurally provider-specific JSON is required: GitHub's installed version, GitLab's version plus revision, Gitea/Forgejo version semantics, Bitbucket's branded application properties, and Azure's instance identity plus server-branded deployment version; a generic successful JSON service remains unidentified
+                - `BitbucketDataCenter` is a distinct `ApiFlavor`, preventing a discovered server installation from being routed to the Bitbucket Cloud adapter while preserving the public `bitbucket` vendor token
+        - discovery now shares Sniff's focused-provider credential lookup instead of maintaining a second environment-variable table
+                - credentials are resolved only after exact-host policy approval and attached only to the matching candidate request: GitLab uses `PRIVATE-TOKEN`, Azure uses PAT basic authentication, and the remaining candidates use their configured bearer tokens
+                - the authority now includes existing fallback variables such as `GITLAB_PRIVATE_TOKEN`, `FORGEJO_TOKEN`, and `CODEBERG_TOKEN`; focused provider calls continue through the same lookup
+                - missing and rejected credentials remain typed errors, and neither rendered nor debug error output contains the supplied secret
+        - the bounded network boundary is explicit: each candidate has a three-second connect timeout and five-second total timeout, generated endpoints are rechecked against the exact authorized host, redirects are disabled and surfaced as blocked, and the existing reqwest Rustls transport remains in use
+        - added/strengthened public Level-1 Wiremock coverage for all six flavors, conflicting signatures, generic-JSON unidentified services, anonymous success, required authentication, valid and invalid GitLab credentials, secret non-disclosure, and successful focused GitHub Enterprise discovery with retained server version and final API base
+        - focused verification passed 7 of 7 tests after one test-driven correction: a successful generic JSON response without a provider signature is now ignored rather than misclassified as a malformed provider response
+        - `cd sniff && just test` passed: 1,625 of 1,625 Sniff tests and 769 of 769 Sniff CLI tests passed; six tier-excluded tests were skipped across the two packages
+        - `cd sniff && just lint` passed for `sniff` and `sniff-cli`; `git diff --check` passed; no formatting command was run
+        - post-change GitNexus `detect_changes` reported LOW aggregate risk and no affected execution flows; its 112-symbol/25-file result includes pre-existing and concurrent review-cycle changes in the shared dirty worktree, not only this finding
+        - files touched specifically for this finding are `sniff/lib/src/credentials.rs`, `sniff/lib/src/lib.rs`, `sniff/lib/src/filesystem/git/{remote_observation,remote_resolver}.rs`, `sniff/lib/src/remote/focused.rs`, and `sniff/lib/tests/{focused_provider,remote_observation}.rs`
+- work completed for 'authenticated-six-flavor-provider-discovery' at 09:36:21-07:00
+
+### Finding 2 (High) — existing corrupt linked worktrees are silently discarded as stale
+
+- starting the work on 'corrupt-linked-worktree-classification' at 09:37:28-07:00
+        - required skills read before implementation: `darkmatter`, `rust`, `rust-testing`, `sniff`, and the Sniff-required `rust-devops`; the regressions are disposable, process-local Level 1 coverage
+        - Sniff discovery with `sniff repo packages`, `sniff repo package-areas`, and `sniff repo package-dependencies` confirmed that the implementation and gates are confined to the `sniff` package area
+        - pre-edit GitNexus impact analysis reported **HIGH** risk for `trusted_open_registered_worktree`: 34 impacted symbols, two direct callers (`get_worktrees` and `list_worktrees`), three modules, and one CLI execution flow
+                - `get_worktrees` independently reported **HIGH** risk with 20 impacted symbols and six direct callers; public `list_worktrees` reported MEDIUM risk with 13 direct callers and one CLI flow
+                - the orchestrator was warned and implementation paused before edits; the bounded contract-restoration change proceeded only after explicit authorization
+        - restored the narrow stale/corrupt boundary: only a definitely absent registered checkout target is omitted; filesystem metadata errors and every repository-open failure for an existing target, including gix `NotARepository`, propagate as corruption
+                - classification uses cross-platform `Path::try_exists`, so macOS, Linux, and Windows share the same path behavior without platform-specific metadata APIs
+                - updated the helper and both caller contracts to remove the drifted claim that every target-local `NotARepository` proves staleness
+        - restored Level-1 coverage for an existing linked checkout whose `.git` file is missing, proving both `GitRepo::worktrees` and full Git detection report the corruption
+        - added the matching public `list_worktrees` Level-1 regression while retaining the absent-target and malformed registry-metadata fixtures
+        - focused regression and preservation run passed 6 of 6 tests across full detection, `GitRepo::worktrees`, public `list_worktrees`, absent targets, and malformed proxy metadata
+        - the non-cwd-dependent Sniff library remainder passed 1,358 of 1,358 tests after excluding only five smoke tests whose requested base is this intentionally corrupt host repository
+        - canonical `cd sniff && just test` is blocked by the restored contract correctly surfacing three pre-existing corrupt linked-worktree registrations: `/private/tmp/dmbench/base`, `/private/tmp/dmbench/before`, and `/private/tmp/dmbench/after` each exist as directories but have no `.git` file
+                - the canonical fail-fast run stopped after `tests::test_detect_with_base_dir` and `tests::test_skip_os_with_filesystem_only` exhausted four retries with gix `NotARepository(MissingHead)`; the complete library audit found the same host-state error in `tests::test_detect_returns_result`, `tests::test_os_present_by_default`, and `integration::test_detect_with_custom_base_dir`
+                - the complete Sniff CLI audit passed 748 tests and failed 24 cwd/real-monorepo repository, filesystem, Git-status, and aggregate-output tests because commands such as `sniff repo git-status --json` now honestly exit with `Git error during open` for those corrupt registrations
+                - these cwd and real-monorepo tests were not rewritten around disposable fixtures because doing so would stop testing their declared host-repository behavior; no registration was pruned, no checkout was moved, and no host Git metadata or `/private/tmp/dmbench` content was changed
+        - `cd sniff && just lint` passed for `sniff`, `darkmatter`, and `sniff-cli`; `git diff --check` passed; no formatting command was run
+        - post-change GitNexus `detect_changes(scope: unstaged)` reported LOW aggregate risk, 114 changed symbols across 25 shared-worktree files, and no affected execution flows; the report includes prior and concurrent review-cycle changes, not only this finding
+        - files touched specifically for this finding are `sniff/lib/src/filesystem/git/{open,remote_refresh,worktree}.rs`, `sniff/lib/tests/git_parity.rs`, and this log file
+- work completed for 'corrupt-linked-worktree-classification' at 09:46:14-07:00
+
+### Finding 3 (High) — successful public ambiguous SSH/SCP discovery is still unverified
+
+- starting the work on 'public-ambiguous-ssh-scp-discovery' at 09:47:46-07:00
+        - required skills read before implementation: `darkmatter`, `rust`, `rust-testing`, and `sniff`; the added coverage is hermetic Level 1 using disposable repositories and a process-local test resolver
+        - Sniff scope discovery with `sniff repo packages`, `sniff repo package-areas`, and `sniff repo package-dependencies` confirmed the `sniff` package area as the directly changed implementation and gate scope; Darkmatter consumes the unchanged public provider contract and required no source change for this finding
+        - pre-edit GitNexus impact analysis reported **HIGH** risk for `probe_self_hosted_provider`: five affected symbols, two direct callers (`remote_vendor_at` and `FocusedProviderClient::discover`), three modules, and no indexed execution flow
+                - `remote_vendor_at` and `FocusedProviderClient::discover` independently reported LOW risk
+                - the orchestrator was warned and implementation paused before edits; the bounded test-only seam proceeded only after explicit authorization
+        - added a `cfg(test)`-only resolver beneath the shared provider-discovery authority without changing the production build or public API
+                - registrations are exact-host keyed, reject collisions, carry monotonic identity tokens, and clean up through a scoped RAII guard only when the registered token still matches
+                - the resolver records the exact discovery origins it receives, allowing the public-path test to prove SSH-port omission without disabling HTTPS, TLS verification, redirects, or host policy in production
+                - exact-host policy remains ahead of resolver lookup, so a denied operation cannot consult the fixture
+        - added one public-path Level-1 matrix covering GitLab, Gitea, and Forgejo over both real SSH URL and SCP remotes configured in six disposable Git repositories
+                - every case enters both `remote_vendor_at` and `FocusedProviderClient::discover`, beginning from an `ApiFlavor::Unknown` resolved remote on a neutral hostname
+                - the denied-policy calls fail before resolver use; allowed calls record `https://{host}/` for both public APIs, proving an explicit SSH port `2222` is not reused as an HTTPS port
+                - assertions cover vendor and API flavor, verbatim server-version retention, pull-request and pagination capabilities, GitLab/Gitea/Forgejo-specific CI/CD capability derivation, and final `/api/v4/` or `/api/v1/` base selection
+        - the new public-path test passed 1 of 1; a related preservation run passed 4 of 4 tests across the new matrix, origin normalization, and existing public host-policy boundaries
+        - canonical `cd sniff && just test` reached and passed the new test but remains blocked by Finding 2's expected environmental condition
+                - the fail-fast run completed 1,386 of 1,628 Sniff tests: 1,384 passed, two failed, three skipped, and 242 were canceled after retries
+                - `tests::test_detect_with_base_dir` and `tests::test_skip_os_with_filesystem_only` correctly surfaced gix `NotARepository(MissingHead)` for the existing corrupt `/private/tmp/dmbench/after` registered checkout; the same host state also produced pending retries in the known cwd-dependent smoke tests
+                - no registered worktree, host Git metadata, or `/private/tmp/dmbench` content was changed, and the restored corruption contract was not weakened
+        - `cd sniff && just lint` passed for `sniff`, `darkmatter`, and `sniff-cli`; `git diff --check` passed; no formatting command was run
+        - post-change GitNexus `detect_changes(scope: unstaged)` reported LOW aggregate risk, 123 changed symbols across 25 shared-worktree files, and no affected execution flows; the report includes prior and concurrent review-cycle changes, not only this finding
+        - files touched specifically for this finding are `sniff/lib/src/filesystem/git/remote_observation.rs`, `sniff/lib/src/remote/focused.rs`, and this log file
+- work completed for 'public-ambiguous-ssh-scp-discovery' at 09:56:21-07:00
+        - final integration review found one Darkmatter provider-network assertion whose old two-route allowlist drifted from the new six-flavor discovery table; pre-edit GitNexus impact was LOW with no callers or affected flows
+        - the assertion now permits only the five bounded provider-signature endpoints and therefore still fails if an unsupported Gitea version reaches a job API; focused verification passed 1 of 1
+        - final `cd darkmatter && just test` passed: 5,937 Darkmatter library tests, 561 CLI tests, and 633 DMLS tests; `cd darkmatter && just lint` passed for all three packages
+        - final `git diff --check` passed; no formatting command was run
+        - final GitNexus `detect_changes(scope: compare, base_ref: main)` reported LOW aggregate risk, 122 changed symbols across 26 shared-worktree files, and no affected execution flows; this includes pre-existing changes from earlier review cycles
+
+### Successful Completion
+
+The implementation of review cycle 23 has completed successfully in 44 minutes. During this implementation all 3 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 3 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred; `deferred_perf_measurement` remains `false`
+
+The files changed specifically for review cycle 23 are `sniff/lib/src/credentials.rs`, `sniff/lib/src/lib.rs`, `sniff/lib/src/filesystem/git/{open,remote_observation,remote_resolver,remote_refresh,worktree}.rs`, `sniff/lib/src/remote/focused.rs`, `sniff/lib/tests/{focused_provider,git_parity,remote_observation}.rs`, `darkmatter/lib/src/markdown/compose/tests/provider_network.rs`, `darkmatter/features/2026-07-13-more-is-more/review-23.md`, and this log file.
